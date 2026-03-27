@@ -1,0 +1,19 @@
+@import url("https://fonts.googleapis.com/css2?family=Merriweather:ital,wght@0,400;0,700;1,400&display=swap");
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --reader-font: "Merriweather", Georgia, serif;
+  --reader-line-height: 1.9;
+  --reader-size: 18px;
+}
+.reader-text {
+  font-family: var(--reader-font);
+  font-size: var(--reader-size);
+  line-height: var(--reader-line-height);
+  color: #1a1a1a;
+  max-width: 65ch;
+}
+.reader-text mark { background: #fef08a; border-radius: 2px; padding: 0 1px; }
+@media (prefers-color-scheme: dark) { .reader-text { color: #e5e5e5; } }

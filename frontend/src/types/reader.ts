@@ -1,0 +1,53 @@
+export type VisualMode = "off" | "minimal" | "full"
+export type SummaryMode = "short" | "detailed" | "key_points"
+
+export interface ChapterData {
+  chapter_number: number
+  chapter_title: string | null
+  text_url: string | null
+  text_content?: string | null
+  characters: ChapterCharacter[]
+}
+
+export interface ChapterCharacter {
+  id: string
+  name: string
+  aliases: string[]
+  role: string | null
+  first_chapter: number
+  trait_state: Record<string, any>
+  personality_tags: string[]
+  motivations: string[]
+}
+
+export interface ContextResult {
+  type: "character" | "search"
+  character?: any
+  relationships?: any[]
+  results?: SearchResult[]
+}
+
+export interface SearchResult {
+  text: string
+  chapter_num: number
+  chapter_title: string | null
+  relevance: number
+}
+
+export interface PlotThread {
+  id: string
+  title: string
+  type: string | null
+  status: string
+  description: string | null
+  introduced_at: number | null
+  resolved_at: number | null
+  importance: number
+}
+
+export interface ChapterSummary {
+  content: string
+  key_events: Array<{ event: string; importance: number }> | null
+  char_changes: Array<{ character: string; change: string }> | null
+  clues: Array<{ clue: string; foreshadows: string }> | null
+}
