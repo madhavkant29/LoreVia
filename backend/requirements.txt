@@ -44,3 +44,6 @@ resend==2.3.0
 
 # Monitoring
 sentry-sdk[fastapi]==2.14.0
+
+# Security
+bleach==6.1.0

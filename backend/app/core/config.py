@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     # AI — two models, cost discipline
     OPENAI_API_KEY: str
     OPENAI_EXTRACT_MODEL: str = "gpt-4o-mini"    # extraction, summaries
-    OPENAI_INTEL_MODEL: str = "gpt-4o"           # chat, predictions
+    OPENAI_INTEL_MODEL: str = "gpt-4o-mini"           # chat, predictions #revert to gpt-4o-mini for now, gpt-4o is too costly and not significantly better for our use case
     OPENAI_EMBED_MODEL: str = "text-embedding-3-small"
     OPENAI_EMBED_DIM: int = 1536
     ANTHROPIC_API_KEY: str | None = None         # fallback
@@ -55,11 +55,15 @@ class Settings(BaseSettings):
     LAZY_PROCESS_INITIAL_CHAPTERS: int = 3
     CHUNK_MAX_TOKENS: int = 1500
     CHUNK_OVERLAP_TOKENS: int = 100
+    EXTRACTION_BATCH_MAX_TOKENS: int = 5000
+    EXTRACTION_BATCH_MAX_CHUNKS: int = 4
     DEDUP_SIMILARITY_THRESHOLD: float = 0.88
     SEARCH_SIMILARITY_THRESHOLD: float = 0.65
+    SEARCH_MAX_CONTEXT_CHUNKS: int = 3
 
     # Tier limits
     FREE_MAX_BOOKS: int = 2
+    FREE_TOTAL_TOKEN_BUDGET: int = 400000 
     FREE_SEARCH_PER_HOUR: int = 20
     FREE_SUMMARY_PER_HOUR: int = 30
     FREE_CHAT_PER_DAY: int = 10

@@ -15,6 +15,7 @@ class ReadingProgress(Base):
     current_chapter: Mapped[int] = mapped_column(Integer, default=1)
     scroll_pct: Mapped[float] = mapped_column(Float, default=0.0)
     session_seconds: Mapped[int] = mapped_column(Integer, default=0)
+    chapters_read: Mapped[list[int] | None] = mapped_column(ARRAY(Integer))
     last_read: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     user = relationship("User", back_populates="reading_progress")

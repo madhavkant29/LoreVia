@@ -20,7 +20,9 @@ class Book(Base):
     language: Mapped[str] = mapped_column(String, default="en")
     status: Mapped[str] = mapped_column(String, default="pending", index=True)
     total_chapters: Mapped[int | None] = mapped_column(Integer)
+    total_tokens: Mapped[int | None] = mapped_column(Integer)
     total_chunks: Mapped[int | None] = mapped_column(Integer)
+    is_truncated: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     user = relationship("User", back_populates="books")

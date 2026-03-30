@@ -2,6 +2,19 @@ import asyncio
 from app.workers.celery_app import celery_app
 
 
+def _run_coro(coro):
+    async def _wrapped():
+        from app.core.database import engine
+
+        await engine.dispose()
+        try:
+            return await coro
+        finally:
+            await engine.dispose()
+
+    return asyncio.run(_wrapped())
+
+
 @celery_app.task(bind=True, name="embedding_tasks.update_character_embedding",
                  queue="embedding", max_retries=3)
 def update_character_embedding_task(self, character_id: str):
@@ -23,6 +36,6 @@ def update_character_embedding_task(self, character_id: str):
             await db.execute(update(Character).where(Character.id == char.id).values(embedding=emb))
             await db.commit()
     try:
-        asyncio.run(_run())
+        _run_coro(_run())
     except Exception as exc:
         raise self.retry(exc=exc)

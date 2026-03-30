@@ -1,9 +1,9 @@
 """
 Confidence-weighted character profile builder.
-Merges new trait info without overwriting — handles subjective narration.
+Merges new trait info without overwriting and handles subjective narration.
 """
 import uuid
-import random
+from collections.abc import Iterable
 
 PROMPT_CONFIDENCE_THRESHOLD = 0.45
 SUBJECTIVE_MAX_CONFIDENCE = 0.50
@@ -76,6 +76,27 @@ def flat(trait_state: dict, key: str) -> str | None:
     return None
 
 
+def merge_list_values(*groups: Iterable[str] | None) -> list[str]:
+    seen: set[str] = set()
+    merged: list[str] = []
+    for group in groups:
+        for item in group or []:
+            cleaned = " ".join(item.split()).strip()
+            key = cleaned.lower()
+            if not cleaned or key in seen:
+                continue
+            seen.add(key)
+            merged.append(cleaned)
+    return merged
+
+
+def choose_richer_text(*values: str | None) -> str | None:
+    cleaned = [" ".join(value.split()).strip() for value in values if value and value.strip()]
+    if not cleaned:
+        return None
+    return max(cleaned, key=len)
+
+
 def build_character_profile(extracted: dict, book_id: uuid.UUID, first_chapter: int) -> dict:
     raw_traits = extracted.get("traits", {})
     archetype = extracted.get("archetype")
@@ -85,7 +106,7 @@ def build_character_profile(extracted: dict, book_id: uuid.UUID, first_chapter: 
         "book_id": book_id,
         "name": extracted["name"],
         "aliases": extracted.get("aliases", []),
-        "role": None,
+        "role": extracted.get("role"),
         "first_chapter": first_chapter,
         "trait_state": trait_state,
         "hair": flat(trait_state, "hair"),
@@ -96,18 +117,58 @@ def build_character_profile(extracted: dict, book_id: uuid.UUID, first_chapter: 
         "personality_tags": extracted.get("personality_tags", []),
         "motivations": extracted.get("motivations", []),
         "fears": extracted.get("fears", []),
+        "arc_summary": extracted.get("arc_summary"),
         "archetype": archetype,
     }
 
 
-def update_profile(existing_trait_state: dict, new_traits: dict, archetype: str | None) -> dict:
-    updated = merge_trait_states(existing_trait_state, new_traits)
+def merge_profile_fields(existing, incoming) -> dict:
+    existing_trait_state = existing.trait_state or {}
+    incoming_trait_state = incoming.get("trait_state") if isinstance(incoming, dict) else incoming.trait_state or {}
+    merged_traits = merge_trait_states(existing_trait_state, incoming_trait_state)
+
+    existing_aliases = existing.aliases or []
+    incoming_aliases = incoming.get("aliases", []) if isinstance(incoming, dict) else incoming.aliases or []
+    incoming_name = incoming.get("name") if isinstance(incoming, dict) else incoming.name
+    incoming_role = incoming.get("role") if isinstance(incoming, dict) else incoming.role
+    incoming_first_chapter = incoming.get("first_chapter", existing.first_chapter) if isinstance(incoming, dict) else incoming.first_chapter
+    incoming_personality = incoming.get("personality_tags") if isinstance(incoming, dict) else incoming.personality_tags
+    incoming_motivations = incoming.get("motivations") if isinstance(incoming, dict) else incoming.motivations
+    incoming_fears = incoming.get("fears") if isinstance(incoming, dict) else incoming.fears
+    incoming_arc = incoming.get("arc_summary") if isinstance(incoming, dict) else incoming.arc_summary
+    incoming_archetype = incoming.get("archetype") if isinstance(incoming, dict) else incoming.archetype
+
+    aliases = merge_list_values(existing_aliases, incoming_aliases, [incoming_name] if incoming_name else [])
+    aliases = [alias for alias in aliases if alias.lower() != existing.name.lower()]
+
     return {
-        "trait_state": updated,
-        "description": build_description(updated, archetype),
-        "hair": flat(updated, "hair"),
-        "eyes": flat(updated, "eyes"),
-        "build": flat(updated, "build"),
-        "age_descriptor": flat(updated, "age"),
-        "distinguishing": flat(updated, "distinguishing"),
+        "aliases": aliases,
+        "role": existing.role or incoming_role,
+        "first_chapter": min(existing.first_chapter, incoming_first_chapter),
+        "trait_state": merged_traits,
+        "hair": flat(merged_traits, "hair"),
+        "eyes": flat(merged_traits, "eyes"),
+        "build": flat(merged_traits, "build"),
+        "age_descriptor": flat(merged_traits, "age"),
+        "distinguishing": flat(merged_traits, "distinguishing"),
+        "personality_tags": merge_list_values(existing.personality_tags, incoming_personality),
+        "motivations": merge_list_values(existing.motivations, incoming_motivations),
+        "fears": merge_list_values(existing.fears, incoming_fears),
+        "arc_summary": choose_richer_text(existing.arc_summary, incoming_arc),
+        "archetype": choose_richer_text(existing.archetype, incoming_archetype),
     }
+
+
+def update_profile(existing, extracted: dict) -> dict:
+    return merge_profile_fields(existing, {
+        "name": extracted.get("name"),
+        "aliases": extracted.get("aliases", []),
+        "role": extracted.get("role"),
+        "first_chapter": extracted.get("first_chapter", existing.first_chapter),
+        "trait_state": extracted.get("traits", {}),
+        "personality_tags": extracted.get("personality_tags", []),
+        "motivations": extracted.get("motivations", []),
+        "fears": extracted.get("fears", []),
+        "arc_summary": extracted.get("arc_summary"),
+        "archetype": extracted.get("archetype"),
+    })

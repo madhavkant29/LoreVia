@@ -18,11 +18,13 @@ export interface Character {
   role: "mc" | "sc" | "background" | null
   first_chapter: number
   trait_state: TraitState
+  description: string | null
   personality_tags: string[]
   motivations: string[]
   fears: string[]
   archetype: string | null
   arc_summary: string | null
+  relationship_summaries?: string[]
 }
 
 export interface CharacterRelationship {

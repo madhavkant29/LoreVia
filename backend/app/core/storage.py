@@ -38,7 +38,8 @@ def _get_s3_client():
 
 
 def upload_book(file: BinaryIO, user_id: str, filename: str) -> str:
-    key = f"books/{user_id}/{uuid.uuid4()}/{filename}"
+    safe_name = Path(filename).name
+    key = f"books/{user_id}/{uuid.uuid4()}/{safe_name}"
     if is_local_storage():
         path = _local_path(key)
         path.parent.mkdir(parents=True, exist_ok=True)

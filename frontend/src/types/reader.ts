@@ -16,6 +16,7 @@ export interface ChapterCharacter {
   role: string | null
   first_chapter: number
   trait_state: Record<string, any>
+  description?: string | null
   personality_tags: string[]
   motivations: string[]
 }
@@ -34,6 +35,33 @@ export interface SearchResult {
   relevance: number
 }
 
+export interface ChapterListItem {
+  number: number
+  title: string | null
+  processed: boolean
+  read: boolean
+}
+
+export interface ChapterListResponse {
+  read_upto: number
+  current_chapter?: number
+  chapters: ChapterListItem[]
+}
+
+export interface SummaryCollectionItem {
+  chapter_number: number
+  chapter_title: string | null
+  read: boolean
+  available: boolean
+  content: string | null
+  key_events: Array<{ event: string; importance: number }>
+}
+
+export interface SummaryCollectionResponse {
+  read_upto: number
+  summaries: SummaryCollectionItem[]
+}
+
 export interface PlotThread {
   id: string
   title: string
@@ -50,4 +78,5 @@ export interface ChapterSummary {
   key_events: Array<{ event: string; importance: number }> | null
   char_changes: Array<{ character: string; change: string }> | null
   clues: Array<{ clue: string; foreshadows: string }> | null
+  pending?: boolean
 }

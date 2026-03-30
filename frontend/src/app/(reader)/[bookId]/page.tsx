@@ -1,11 +1,12 @@
 "use client"
 import { useEffect, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
+
 import { booksApi } from "@/lib/api/books"
 import { readerApi } from "@/lib/api/reader"
-import type { Book } from "@/types/book"
 import { RecallCard } from "@/components/intelligence/RecallCard"
 import { useRecall } from "@/lib/hooks/useRecall"
+import type { Book } from "@/types/book"
 
 export default function BookOverviewPage() {
   const { bookId } = useParams<{ bookId: string }>()
@@ -24,25 +25,40 @@ export default function BookOverviewPage() {
     router.push(`/${bookId}/chapter/${ch}`)
   }
 
+  const openRelationships = () => {
+    const proceed = window.confirm("The relationship graph may contain spoilers for unread chapters. Continue?")
+    if (proceed) {
+      router.push(`/${bookId}/graph`)
+    }
+  }
+
   if (!book) return <div className="flex justify-center py-20 text-gray-400">Loading...</div>
 
   return (
-    <div className="max-w-2xl mx-auto px-4 py-12">
+    <div className="max-w-4xl mx-auto px-4 py-12">
       {show && recall && (
         <RecallCard recall={recall} lastChapter={lastChapter!} onDismiss={dismiss} onContinue={continueReading} />
       )}
       <h1 className="text-3xl font-bold mb-1">{book.title}</h1>
       {book.author && <p className="text-gray-500 mb-6">by {book.author}</p>}
-      <div className="flex gap-3">
+      <div className="flex flex-wrap gap-3">
         <button onClick={continueReading}
           className="px-6 py-3 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700 transition-colors">
-          {progress?.current_chapter && progress.current_chapter > 1 ? `Continue — Chapter ${progress.current_chapter}` : "Start Reading"}
+          {progress?.current_chapter && progress.current_chapter > 1 ? `Continue - Chapter ${progress.current_chapter}` : "Start Reading"}
+        </button>
+        <button onClick={() => router.push(`/${bookId}/chapters`)}
+          className="px-6 py-3 border border-gray-300 rounded-xl font-medium hover:bg-gray-50 transition-colors">
+          Chapter List
+        </button>
+        <button onClick={() => router.push(`/${bookId}/summaries`)}
+          className="px-6 py-3 border border-gray-300 rounded-xl font-medium hover:bg-gray-50 transition-colors">
+          Summaries
         </button>
         <button onClick={() => router.push(`/${bookId}/characters`)}
           className="px-6 py-3 border border-gray-300 rounded-xl font-medium hover:bg-gray-50 transition-colors">
           Characters
         </button>
-        <button onClick={() => router.push(`/${bookId}/graph`)}
+        <button onClick={openRelationships}
           className="px-6 py-3 border border-gray-300 rounded-xl font-medium hover:bg-gray-50 transition-colors">
           Relationships
         </button>

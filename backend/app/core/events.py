@@ -13,6 +13,11 @@ async def on_startup() -> None:
         # Ensure pgvector extension exists
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
+        # Lightweight local-schema reconciliation for environments without migrations.
+        await conn.execute(text("ALTER TABLE books ADD COLUMN IF NOT EXISTS total_tokens INTEGER"))
+        await conn.execute(text("ALTER TABLE books ADD COLUMN IF NOT EXISTS total_chunks INTEGER"))
+        await conn.execute(text("ALTER TABLE books ADD COLUMN IF NOT EXISTS is_truncated BOOLEAN DEFAULT FALSE NOT NULL"))
+        await conn.execute(text("ALTER TABLE reading_progress ADD COLUMN IF NOT EXISTS chapters_read INTEGER[] DEFAULT ARRAY[]::INTEGER[]"))
         await conn.commit()
     r = await get_redis()
     await r.ping()

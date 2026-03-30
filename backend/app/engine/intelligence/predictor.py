@@ -11,7 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.engine.search.semantic import semantic_search
 
-client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+
+def get_client() -> AsyncOpenAI:
+    return AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 
 PREDICT_SYSTEM = """You are analysing a novel. The user asks a prediction question.
 Based ONLY on the evidence provided (story context up to the current chapter),
@@ -39,24 +41,34 @@ async def predict(
     question: str,
     current_chapter: int,
 ) -> list[dict]:
-    context_chunks = await semantic_search(db, book_id, question, current_chapter, limit=10)
-    context = "\n\n".join(c["text"] for c in context_chunks)
-
-    r = await client.chat.completions.create(
-        model=settings.OPENAI_INTEL_MODEL,
-        messages=[
-            {"role": "system", "content": PREDICT_SYSTEM},
-            {
-                "role": "user",
-                "content": f"Question: {question}\n\nStory context:\n{context}",
-            },
-        ],
-        temperature=0.3,
-        max_tokens=1000,
-        response_format={"type": "json_object"},
-    )
+    client = get_client()
     try:
-        data = json.loads(r.choices[0].message.content)
-        return data.get("theories", [])
-    except Exception:
-        return []
+        context_chunks = await semantic_search(
+            db,
+            book_id,
+            question,
+            current_chapter,
+            limit=settings.SEARCH_MAX_CONTEXT_CHUNKS,
+        )
+        context = "\n\n".join(c["text"] for c in context_chunks)
+
+        r = await client.chat.completions.create(
+            model=settings.OPENAI_INTEL_MODEL,
+            messages=[
+                {"role": "system", "content": PREDICT_SYSTEM},
+                {
+                    "role": "user",
+                    "content": f"Question: {question}\n\nStory context:\n{context}",
+                },
+            ],
+            temperature=0.3,
+            max_tokens=1000,
+            response_format={"type": "json_object"},
+        )
+        try:
+            data = json.loads(r.choices[0].message.content)
+            return data.get("theories", [])
+        except Exception:
+            return []
+    finally:
+        await client.close()

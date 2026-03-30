@@ -6,11 +6,14 @@ import json
 from openai import AsyncOpenAI
 from app.core.config import settings
 
-client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 
-CHARACTER_SYSTEM = """You are a character and relationship extraction engine.
+def get_client() -> AsyncOpenAI:
+    return AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 
-Extract ALL named characters from the text chunk and ALL relationships between them.
+CHARACTER_SYSTEM = """You are a careful literary extraction engine.
+
+Extract named characters actually present in the passage and relationships that are explicit or strongly implied.
+Prefer precision over recall. Do not invent people, aliases, or relationships.
 
 TRAIT CONFIDENCE RULES:
 - Explicit direct description → 0.85–1.0
@@ -51,26 +54,31 @@ Return ONLY valid JSON, no markdown, no commentary:
 }
 
 If nothing found, return {"characters": [], "relationships": []}.
-Omit null trait fields entirely."""
+Omit null trait fields entirely.
+Return raw JSON only."""
 
 
 async def extract_characters_and_relationships(chunk_text: str) -> dict:
-    response = await client.chat.completions.create(
-        model=settings.OPENAI_EXTRACT_MODEL,
-        messages=[
-            {"role": "system", "content": CHARACTER_SYSTEM},
-            {"role": "user", "content": chunk_text[:4000]},
-        ],
-        temperature=0.1,
-        max_tokens=3000,
-        response_format={"type": "json_object"},
-    )
-    raw = response.choices[0].message.content.strip()
+    client = get_client()
     try:
-        parsed = json.loads(raw)
-        return {
-            "characters": parsed.get("characters", []),
-            "relationships": parsed.get("relationships", []),
-        }
-    except json.JSONDecodeError:
-        return {"characters": [], "relationships": []}
+        response = await client.chat.completions.create(
+            model=settings.OPENAI_EXTRACT_MODEL,
+            messages=[
+                {"role": "system", "content": CHARACTER_SYSTEM},
+                {"role": "user", "content": chunk_text[:12000]},
+            ],
+            temperature=0.1,
+            max_tokens=3000,
+            response_format={"type": "json_object"},
+        )
+        raw = response.choices[0].message.content.strip()
+        try:
+            parsed = json.loads(raw)
+            return {
+                "characters": parsed.get("characters", []),
+                "relationships": parsed.get("relationships", []),
+            }
+        except json.JSONDecodeError:
+            return {"characters": [], "relationships": []}
+    finally:
+        await client.close()

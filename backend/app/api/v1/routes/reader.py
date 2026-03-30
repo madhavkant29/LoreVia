@@ -4,20 +4,23 @@ Smart tap, summaries, relationship graph, memory recall, progress.
 """
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from app.core.database import get_db
 from app.core.redis import cache_get, cache_set, key_chapter_summary, key_relationship_graph, key_memory_recall, key_search_results
 from app.core.config import settings
-from app.core.storage import get_presigned_url
+from app.core.storage import download_book, get_presigned_url
 from app.models.book import Book, Chapter
 from app.models.character import Character, CharacterState
-from app.models.intelligence import ChapterSummary, CharacterRelationship, PlotThread
+from app.models.intelligence import BookChunk, ChapterSummary, CharacterRelationship, PlotThread
 from app.models.progress import ReadingProgress, ReadingSession
 from app.engine.search.semantic import find_context_for_tap, semantic_search
 from app.engine.analysis.recall import generate_recall
+from app.engine.character.consolidator import consolidate_characters
+from app.engine.character.profile_builder import build_description
 from app.api.deps.auth import get_current_user
 from app.api.deps.rate_limit import rate_limit_search, rate_limit_summary
 from datetime import datetime, timezone
+import json
 import uuid
 
 router = APIRouter()
@@ -34,6 +37,7 @@ async def get_chapter(
     book = await db.get(Book, book_id)
     if not book or book.user_id != current_user.id:
         raise HTTPException(404, "Book not found")
+    await consolidate_characters(db, book_id, up_to_chapter=chapter_num)
 
     chapter = (await db.execute(
         select(Chapter).where(Chapter.book_id == book_id, Chapter.number == chapter_num)
@@ -62,6 +66,7 @@ async def get_chapter(
             "role": char.role,
             "first_chapter": char.first_chapter,
             "trait_state": state.trait_snapshot if state else char.trait_state,
+            "description": build_description(state.trait_snapshot if state else (char.trait_state or {}), char.archetype),
             "personality_tags": char.personality_tags or [],
             "motivations": char.motivations or [],
         })
@@ -91,6 +96,7 @@ async def smart_tap(
     book = await db.get(Book, book_id)
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
+    await consolidate_characters(db, book_id, up_to_chapter=chapter)
 
     # 1. Exact character name match
     char = (await db.execute(
@@ -120,6 +126,7 @@ async def smart_tap(
                 "aliases": char.aliases or [],
                 "role": char.role,
                 "trait_state": state.trait_snapshot if state else char.trait_state,
+                "description": build_description(state.trait_snapshot if state else (char.trait_state or {}), char.archetype),
                 "personality_tags": char.personality_tags or [],
                 "motivations": char.motivations or [],
                 "fears": char.fears or [],
@@ -139,6 +146,29 @@ async def smart_tap(
 
     # 2. Semantic search fallback
     results = await find_context_for_tap(db, book_id, q, chapter)
+    if not results:
+        lowered = q.strip().lower()
+        lexical_rows = (await db.execute(
+            select(BookChunk.text, BookChunk.chunk_index, Chapter.number, Chapter.title)
+            .join(Chapter, Chapter.id == BookChunk.chapter_id)
+            .where(
+                BookChunk.book_id == book_id,
+                Chapter.number <= chapter,
+                BookChunk.text.ilike(f"%{lowered}%"),
+            )
+            .limit(settings.SEARCH_MAX_CONTEXT_CHUNKS)
+        )).all()
+
+        results = [
+            {
+                "text": row[0][:300] + ("..." if len(row[0]) > 300 else ""),
+                "chunk_index": row[1],
+                "chapter_num": row[2],
+                "chapter_title": row[3],
+                "relevance": 0.5,
+            }
+            for row in lexical_rows
+        ]
     return {"type": "search", "results": results}
 
 
@@ -175,10 +205,27 @@ async def get_summary(
     )).scalar()
 
     if summary:
-        data = {"content": summary.content, "key_events": summary.key_events,
-                "char_changes": summary.char_changes, "clues": summary.clues}
+        data = _normalize_summary_response(summary.content, summary.key_events, summary.char_changes, summary.clues)
         await cache_set(key_chapter_summary(str(chapter.id), mode), data, settings.REDIS_TTL_SUMMARY)
         return data
+
+    from app.workers.tasks.analysis_tasks import analyse_chapter_task
+    try:
+        chapter_text = download_book(chapter.s3_key).decode("utf-8", errors="ignore")
+        analyse_chapter_task.apply_async(
+            args=[str(chapter.id), chapter_text, chapter.title or ""],
+            queue="analysis",
+        )
+    except Exception:
+        pass
+
+    return {
+        "content": "Summary is being prepared. Please retry in a few moments.",
+        "key_events": [],
+        "char_changes": [],
+        "clues": [],
+        "pending": True,
+    }
 
     # Generate on demand (fallback — normally pre-generated by worker)
     from app.engine.analysis.summariser import generate_summary
@@ -209,6 +256,7 @@ async def get_relationships(
     book = await db.get(Book, book_id)
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
+    await consolidate_characters(db, book_id, up_to_chapter=chapter)
 
     cached = await cache_get(key_relationship_graph(str(book_id), chapter))
     if cached:
@@ -231,7 +279,8 @@ async def get_relationships(
         "edges": [{"source": str(r.character_a_id), "target": str(r.character_b_id),
                    "type": r.rel_type, "sentiment": r.sentiment, "description": r.description} for r in rels],
     }
-    await cache_set(key_relationship_graph(str(book_id), chapter), graph, settings.REDIS_TTL_GRAPH)
+    if graph["nodes"] or graph["edges"]:
+        await cache_set(key_relationship_graph(str(book_id), chapter), graph, settings.REDIS_TTL_GRAPH)
     return graph
 
 
@@ -254,8 +303,152 @@ async def search(
         return cached
 
     results = await semantic_search(db, book_id, q, chapter)
+    if not results:
+        lowered = q.strip().lower()
+        lexical_rows = (await db.execute(
+            select(BookChunk.text, BookChunk.chunk_index, Chapter.number, Chapter.title)
+            .join(Chapter, Chapter.id == BookChunk.chapter_id)
+            .where(
+                BookChunk.book_id == book_id,
+                Chapter.number <= chapter,
+                BookChunk.text.ilike(f"%{lowered}%"),
+            )
+            .limit(settings.SEARCH_MAX_CONTEXT_CHUNKS)
+        )).all()
+
+        results = [
+            {
+                "text": row[0][:300] + ("..." if len(row[0]) > 300 else ""),
+                "chunk_index": row[1],
+                "chapter_num": row[2],
+                "chapter_title": row[3],
+                "relevance": 0.5,
+            }
+            for row in lexical_rows
+        ]
+    if not results:
+        terms = [term for term in q.strip().split() if len(term) >= 3]
+        if terms:
+            token_filters = [BookChunk.text.ilike(f"%{term}%") for term in terms]
+            token_rows = (await db.execute(
+                select(BookChunk.text, BookChunk.chunk_index, Chapter.number, Chapter.title)
+                .join(Chapter, Chapter.id == BookChunk.chapter_id)
+                .where(
+                    BookChunk.book_id == book_id,
+                    Chapter.number <= chapter,
+                    or_(*token_filters),
+                )
+                .limit(settings.SEARCH_MAX_CONTEXT_CHUNKS)
+            )).all()
+
+            results = [
+                {
+                    "text": row[0][:300] + ("..." if len(row[0]) > 300 else ""),
+                    "chunk_index": row[1],
+                    "chapter_num": row[2],
+                    "chapter_title": row[3],
+                    "relevance": 0.35,
+                }
+                for row in token_rows
+            ]
     await cache_set(cache_key, results, settings.REDIS_TTL_SEARCH)
     return results
+
+
+@router.get("/{book_id}/chapters")
+async def get_chapter_list(
+    book_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await db.get(Book, book_id)
+    if not book or book.user_id != current_user.id:
+        raise HTTPException(404)
+
+    progress = (await db.execute(
+        select(ReadingProgress).where(
+            ReadingProgress.user_id == current_user.id,
+            ReadingProgress.book_id == book_id,
+        )
+    )).scalar()
+    read_upto = progress.current_chapter if progress else 0
+    read_set = set(progress.chapters_read or []) if progress else set()
+
+    chapters = (await db.execute(
+        select(Chapter).where(Chapter.book_id == book_id).order_by(Chapter.number)
+    )).scalars().all()
+
+    return {
+        "read_upto": read_upto,
+        "current_chapter": read_upto,
+        "chapters": [
+            {
+                "number": chapter.number,
+                "title": chapter.title,
+                "processed": chapter.processed,
+                "read": chapter.number in read_set,
+            }
+            for chapter in chapters
+        ],
+    }
+
+
+@router.get("/{book_id}/summary-collection")
+async def get_summary_collection(
+    book_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await db.get(Book, book_id)
+    if not book or book.user_id != current_user.id:
+        raise HTTPException(404)
+
+    progress = (await db.execute(
+        select(ReadingProgress).where(
+            ReadingProgress.user_id == current_user.id,
+            ReadingProgress.book_id == book_id,
+        )
+    )).scalar()
+    read_upto = progress.current_chapter if progress else 0
+    read_set = set(progress.chapters_read or []) if progress else set()
+
+    if not read_set:
+        return {"read_upto": 0, "summaries": []}
+
+    chapter_rows = (await db.execute(
+        select(Chapter.number, Chapter.title, Chapter.id)
+        .where(Chapter.book_id == book_id, Chapter.number.in_(sorted(read_set)))
+        .order_by(Chapter.number)
+    )).all()
+
+    summary_rows = (await db.execute(
+        select(ChapterSummary.chapter_id, ChapterSummary.content, ChapterSummary.key_events)
+        .join(Chapter, Chapter.id == ChapterSummary.chapter_id)
+        .where(
+            Chapter.book_id == book_id,
+            Chapter.number.in_(sorted(read_set)),
+            ChapterSummary.mode == "short",
+        )
+    )).all()
+    summary_by_chapter_id = {
+        str(row[0]): {"content": row[1], "key_events": row[2] or []}
+        for row in summary_rows
+    }
+
+    return {
+        "read_upto": read_upto,
+        "summaries": [
+            {
+                "chapter_number": row[0],
+                "chapter_title": row[1],
+                "read": True,
+                "available": str(row[2]) in summary_by_chapter_id,
+                "content": summary_by_chapter_id.get(str(row[2]), {}).get("content"),
+                "key_events": summary_by_chapter_id.get(str(row[2]), {}).get("key_events", []),
+            }
+            for row in chapter_rows
+        ],
+    }
 
 
 @router.get("/{book_id}/plot-threads")
@@ -366,12 +559,15 @@ async def update_progress(
         select(ReadingProgress).where(ReadingProgress.user_id == current_user.id, ReadingProgress.book_id == book_id)
     )).scalar()
     if p:
+        read_set = set(p.chapters_read or [])
+        read_set.add(current_chapter)
         p.current_chapter = current_chapter
         p.scroll_pct = scroll_pct
+        p.chapters_read = sorted(read_set)
         p.last_read = datetime.now(timezone.utc)
     else:
         db.add(ReadingProgress(user_id=current_user.id, book_id=book_id,
-                                current_chapter=current_chapter, scroll_pct=scroll_pct))
+                                current_chapter=current_chapter, scroll_pct=scroll_pct, chapters_read=[current_chapter]))
     await db.commit()
 
     # Trigger lazy processing ahead
@@ -384,3 +580,78 @@ async def update_progress(
             countdown=n * 3, queue="extraction",
         )
     return {"ok": True}
+
+
+@router.put("/{book_id}/progress/chapter-status")
+async def update_chapter_read_status(
+    book_id: uuid.UUID,
+    chapter: int,
+    read: bool,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    progress = (await db.execute(
+        select(ReadingProgress).where(
+            ReadingProgress.user_id == current_user.id,
+            ReadingProgress.book_id == book_id,
+        )
+    )).scalar()
+
+    if progress is None:
+        chapters_read = [chapter] if read else []
+        progress = ReadingProgress(
+            user_id=current_user.id,
+            book_id=book_id,
+            current_chapter=max(chapter, 1),
+            scroll_pct=0.0,
+            chapters_read=chapters_read,
+        )
+        db.add(progress)
+    else:
+        read_set = set(progress.chapters_read or [])
+        if read:
+            read_set.add(chapter)
+            progress.current_chapter = max(progress.current_chapter, chapter)
+        else:
+            read_set.discard(chapter)
+        progress.chapters_read = sorted(read_set)
+        progress.last_read = datetime.now(timezone.utc)
+
+    await db.commit()
+    return {"ok": True, "chapter": chapter, "read": read}
+
+
+def _normalize_summary_response(content, key_events, char_changes, clues):
+    if isinstance(content, str):
+        stripped = content.strip()
+        if stripped.startswith("```"):
+            stripped = _strip_json_fence(stripped)
+        try:
+            parsed = json.loads(stripped)
+            if isinstance(parsed, dict) and "summary" in parsed:
+                return {
+                    "content": parsed.get("summary", content),
+                    "key_events": parsed.get("key_events") or key_events or [],
+                    "char_changes": parsed.get("char_changes") or char_changes or [],
+                    "clues": parsed.get("clues") or clues or [],
+                }
+        except Exception:
+            pass
+
+    return {
+        "content": content,
+        "key_events": key_events or [],
+        "char_changes": char_changes or [],
+        "clues": clues or [],
+    }
+
+
+def _strip_json_fence(content: str) -> str:
+    stripped = content.strip()
+    if stripped.startswith("```json"):
+        stripped = stripped[7:]
+    elif stripped.startswith("```"):
+        stripped = stripped[3:]
+    if stripped.endswith("```"):
+        stripped = stripped[:-3]
+    return stripped.strip()

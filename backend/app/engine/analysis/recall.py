@@ -5,7 +5,9 @@ from openai import AsyncOpenAI
 
 from app.core.config import settings
 
-client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+
+def get_client() -> AsyncOpenAI:
+    return AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 
 RECALL_PROMPT = """The user is returning to read after a break.
 They last read up to chapter {last_chapter} of "{title}".
@@ -28,20 +30,24 @@ async def generate_recall(
     active_characters: list[str],
     open_threads: list[str],
 ) -> str:
-    context = (
-        f"Recent events: {recent_summary}\n"
-        f"Active characters: {', '.join(active_characters[:5])}\n"
-        f"Open threads: {', '.join(open_threads[:3])}"
-    )
-    prompt = RECALL_PROMPT.format(title=title, last_chapter=last_chapter)
+    client = get_client()
+    try:
+        context = (
+            f"Recent events: {recent_summary}\n"
+            f"Active characters: {', '.join(active_characters[:5])}\n"
+            f"Open threads: {', '.join(open_threads[:3])}"
+        )
+        prompt = RECALL_PROMPT.format(title=title, last_chapter=last_chapter)
 
-    r = await client.chat.completions.create(
-        model=settings.OPENAI_EXTRACT_MODEL,
-        messages=[
-            {"role": "system", "content": prompt},
-            {"role": "user", "content": context},
-        ],
-        temperature=0.4,
-        max_tokens=300,
-    )
-    return r.choices[0].message.content.strip()
+        r = await client.chat.completions.create(
+            model=settings.OPENAI_EXTRACT_MODEL,
+            messages=[
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": context},
+            ],
+            temperature=0.4,
+            max_tokens=300,
+        )
+        return r.choices[0].message.content.strip()
+    finally:
+        await client.close()

@@ -14,7 +14,7 @@ async def semantic_search(
     book_id: uuid.UUID,
     query: str,
     max_chapter: int,
-    limit: int = 8,
+    limit: int = settings.SEARCH_MAX_CONTEXT_CHUNKS,
 ) -> list[dict]:
     """
     Embed query → cosine similarity search over book_chunks.
@@ -29,13 +29,13 @@ async def semantic_search(
                 bc.chunk_index,
                 ch.number  AS chapter_num,
                 ch.title   AS chapter_title,
-                1 - (bc.embedding <=> :emb::vector) AS relevance
+                1 - (bc.embedding <=> CAST(:emb AS vector)) AS relevance
             FROM book_chunks bc
             JOIN chapters ch ON ch.id = bc.chapter_id
             WHERE bc.book_id = :bid
               AND ch.number <= :max_ch
               AND bc.embedding IS NOT NULL
-              AND 1 - (bc.embedding <=> :emb::vector) > :thr
+              AND 1 - (bc.embedding <=> CAST(:emb AS vector)) > :thr
             ORDER BY relevance DESC
             LIMIT :lim
         """),
@@ -67,4 +67,4 @@ async def find_context_for_tap(
     max_chapter: int,
 ) -> list[dict]:
     """Used for Smart Tap — returns top 3 most relevant context snippets."""
-    return await semantic_search(db, book_id, query, max_chapter, limit=3)
+    return await semantic_search(db, book_id, query, max_chapter, limit=settings.SEARCH_MAX_CONTEXT_CHUNKS)

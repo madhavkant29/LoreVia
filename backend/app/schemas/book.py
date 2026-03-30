@@ -1,12 +1,12 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from datetime import datetime
 import uuid
 
 
 class BookUpload(BaseModel):
-    title: str
-    genre: str | None = None
-    author: str | None = None
+    title: str = Field(..., min_length=1, max_length=255)
+    genre: str | None = Field(None, max_length=100)
+    author: str | None = Field(None, max_length=255)
 
 
 class BookOut(BaseModel):

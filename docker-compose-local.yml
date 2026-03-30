@@ -11,7 +11,7 @@ services:
     build: { context: ./backend, dockerfile: Dockerfile.worker }
     env_file: ./backend/.env.local
     depends_on: [redis, postgres]
-    command: celery -A app.workers.celery_app worker -Q extraction -c 4 --loglevel=info
+    command: celery -A app.workers.celery_app worker -Q extraction -c 1 --loglevel=info
     volumes:
       - local_storage:/app/storage
 
@@ -19,7 +19,7 @@ services:
     build: { context: ./backend, dockerfile: Dockerfile.worker }
     env_file: ./backend/.env.local
     depends_on: [redis, postgres]
-    command: celery -A app.workers.celery_app worker -Q analysis,embedding -c 2 --loglevel=info
+    command: celery -A app.workers.celery_app worker -Q analysis,embedding -c 1 --loglevel=info
     volumes:
       - local_storage:/app/storage
 

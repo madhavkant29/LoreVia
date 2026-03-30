@@ -10,12 +10,13 @@ from app.core.config import settings
 from app.models.book import Book, Chapter
 from app.models.character import Character, CharacterState
 from app.models.intelligence import BookChunk, CharacterRelationship
+from app.engine.character.consolidator import consolidate_characters
 from app.engine.character.extractor import extract_characters_and_relationships
-from app.engine.character.deduplicator import embed_for_dedup, find_similar, merge_alias
-from app.engine.character.profile_builder import build_character_profile, update_profile, merge_trait_states
+from app.engine.character.deduplicator import embed_for_dedup, find_by_name_or_alias, find_similar, merge_alias
+from app.engine.character.profile_builder import build_character_profile, update_profile
 from app.engine.embeddings.embedder import embed_batch, embed_character
-from app.parsers.chunker import chunk_text
-from sqlalchemy import update as sa_update, select
+from app.parsers.chunker import chunk_text, count_tokens
+from sqlalchemy import delete, update as sa_update, select
 import logging
 
 log = logging.getLogger("lorevia.extraction")
@@ -38,7 +39,63 @@ async def process_book(book_id: str) -> dict:
             from app.parsers.epub_parser import parse_epub
             chapters = parse_epub(raw)
 
-        await db.execute(sa_update(Book).where(Book.id == book.id).values(total_chapters=len(chapters)))
+        # Retrieve user and usage
+        from app.models.user import User
+        from sqlalchemy import func
+        user = await db.get(User, book.user_id)
+        is_free_tier = user and user.tier not in ("pro", "power", "admin", "premium")
+
+        # Initial total tokens in original file
+        full_tokens = sum(count_tokens(ch["text"]) for ch in chapters)
+        processed_tokens = full_tokens
+        was_truncated = False
+
+        if is_free_tier:
+            # How many tokens has the user already used in other books?
+            result = await db.execute(
+                select(func.sum(Book.total_tokens))
+                .where(Book.user_id == user.id, Book.id != book.id, Book.status != "error")
+            )
+            used_so_far = result.scalar() or 0
+            remaining_budget = max(0, settings.FREE_TOTAL_TOKEN_BUDGET - used_so_far)
+
+            if remaining_budget == 0:
+                log.warning(f"User {book.user_id} has exhausted free token budget: {used_so_far} used.")
+                await db.execute(sa_update(Book).where(Book.id == book.id).values(status="error", total_tokens=0))
+                await db.commit()
+                return {"error": "budget_exhausted"}
+
+            # Partially process as many chapters as fit in remaining balance
+            partial_chapters: list[dict] = []
+            current_sum = 0
+            for ch in chapters:
+                ch_toks = count_tokens(ch["text"])
+                if current_sum + ch_toks <= remaining_budget:
+                    partial_chapters.append(ch)
+                    current_sum += ch_toks
+                else:
+                    was_truncated = True
+                    break
+
+            if not partial_chapters:
+                log.warning(f"Remaining budget ({remaining_budget}) too small for even first chapter.")
+                await db.execute(sa_update(Book).where(Book.id == book.id).values(status="error", total_tokens=0))
+                await db.commit()
+                return {"error": "insufficient_remaining_budget"}
+
+            chapters = partial_chapters
+            processed_tokens = current_sum
+
+        # Update book with final stats
+        await db.execute(
+            sa_update(Book)
+            .where(Book.id == book.id)
+            .values(
+                total_chapters=len(chapters),
+                total_tokens=processed_tokens,
+                is_truncated=was_truncated
+            )
+        )
         await db.commit()
 
         # Process first N chapters immediately
@@ -57,18 +114,6 @@ async def process_book(book_id: str) -> dict:
         await db.execute(sa_update(Book).where(Book.id == book.id).values(status="ready"))
         await db.commit()
 
-        # Queue analysis for processed chapters
-        from app.workers.tasks.analysis_tasks import analyse_chapter_task
-        for ch_data in chapters[:settings.LAZY_PROCESS_INITIAL_CHAPTERS]:
-            ch_obj = (await db.execute(
-                select(Chapter).where(Chapter.book_id == book.id, Chapter.number == ch_data["number"])
-            )).scalar()
-            if ch_obj:
-                analyse_chapter_task.apply_async(
-                    args=[str(ch_obj.id), ch_data["text"], ch_data["title"]],
-                    queue="analysis",
-                )
-
         log.info(f"Book {book_id} processed: {len(chapters)} chapters")
         return {"book_id": book_id, "chapters": len(chapters)}
 
@@ -84,15 +129,38 @@ async def _process_chapter(db, book, ch_data: dict):
     except Exception:
         s3_key = ""
 
-    chapter = Chapter(
-        book_id=book.id,
-        number=ch_data["number"],
-        title=ch_data.get("title"),
-        s3_key=s3_key,
-        processed=True,
-    )
-    db.add(chapter)
-    await db.flush()
+    chapter = (
+        await db.execute(
+            select(Chapter).where(Chapter.book_id == book.id, Chapter.number == ch_data["number"])
+        )
+    ).scalar()
+    if chapter is None:
+        chapter = Chapter(
+            book_id=book.id,
+            number=ch_data["number"],
+            title=ch_data.get("title"),
+            s3_key=s3_key,
+            processed=True,
+        )
+        db.add(chapter)
+        await db.commit()
+        await db.refresh(chapter)
+    else:
+        chapter_changed = False
+        if ch_data.get("title") and (not chapter.title or not chapter.title.strip()):
+            chapter.title = ch_data["title"]
+            chapter_changed = True
+        if s3_key and (not chapter.s3_key or not chapter.s3_key.strip()):
+            chapter.s3_key = s3_key
+            chapter_changed = True
+        if not chapter.processed:
+            chapter.processed = True
+            chapter_changed = True
+        if chapter_changed:
+            await db.commit()
+            await db.refresh(chapter)
+
+    await db.execute(delete(BookChunk).where(BookChunk.chapter_id == chapter.id))
 
     # Chunk + extract
     chunks = chunk_text(ch_data["text"], settings.CHUNK_MAX_TOKENS, settings.CHUNK_OVERLAP_TOKENS)
@@ -111,20 +179,27 @@ async def _process_chapter(db, book, ch_data: dict):
         )
         db.add(chunk_row)
 
-    # Extract entities
-    for chunk_text_val in chunks:
-        result = await extract_characters_and_relationships(chunk_text_val)
+    # Batch adjacent chunks together so extraction uses fewer LLM calls per chapter.
+    for chunk_batch in _group_chunks_for_extraction(chunks):
+        result = await extract_characters_and_relationships("\n\n".join(chunk_batch))
 
-        for entity in result["characters"]:
+        for entity in result.get("characters", []):
+            if not isinstance(entity, dict):
+                continue
             if not entity.get("name"):
                 continue
             emb = await embed_for_dedup(entity["name"], entity.get("traits", {}))
-            existing_id = await find_similar(db, book.id, emb, settings.DEDUP_SIMILARITY_THRESHOLD)
+            existing_id = await find_by_name_or_alias(db, book.id, entity["name"], entity.get("aliases", []))
+            if not existing_id:
+                existing_id = await find_similar(db, book.id, emb, settings.DEDUP_SIMILARITY_THRESHOLD)
 
             if existing_id:
                 char = await db.get(Character, existing_id)
                 if char:
-                    updated = update_profile(char.trait_state or {}, entity.get("traits", {}), entity.get("archetype"))
+                    updated = update_profile(char, {
+                        **entity,
+                        "first_chapter": ch_data["number"],
+                    })
                     changed = _changed(char.trait_state or {}, updated["trait_state"])
                     await db.execute(
                         sa_update(Character).where(Character.id == existing_id).values(**updated)
@@ -145,7 +220,11 @@ async def _process_chapter(db, book, ch_data: dict):
                 await db.flush()
 
         # Store relationships
-        for rel in result["relationships"]:
+        for rel in result.get("relationships", []):
+            if not isinstance(rel, dict):
+                continue
+            if not rel.get("character_a") or not rel.get("character_b"):
+                continue
             char_a = await _find_char_by_name(db, book.id, rel["character_a"])
             char_b = await _find_char_by_name(db, book.id, rel["character_b"])
             if char_a and char_b:
@@ -160,10 +239,21 @@ async def _process_chapter(db, book, ch_data: dict):
                 )
                 db.add(r_row)
 
+    await consolidate_characters(db, book.id, up_to_chapter=ch_data["number"])
     await db.commit()
+
+    from app.workers.tasks.analysis_tasks import analyse_chapter_task
+
+    analyse_chapter_task.apply_async(
+        args=[str(chapter.id), ch_data["text"], ch_data.get("title") or ""],
+        queue="analysis",
+    )
 
 
 async def _find_char_by_name(db, book_id, name: str):
+    match_id = await find_by_name_or_alias(db, book_id, name, [])
+    if match_id:
+        return await db.get(Character, match_id)
     result = await db.execute(
         select(Character).where(Character.book_id == book_id, Character.name == name)
     )
@@ -192,3 +282,27 @@ def _diff(old: dict, new: dict) -> str:
         elif not old_v and new_v:
             changes.append(f"+{k}: {new_v}")
     return "; ".join(changes[:5]) or "minor update"
+
+
+def _group_chunks_for_extraction(chunks: list[str]) -> list[list[str]]:
+    batches: list[list[str]] = []
+    current_batch: list[str] = []
+    current_tokens = 0
+
+    for chunk in chunks:
+        chunk_tokens = count_tokens(chunk)
+        exceeds_token_budget = current_tokens + chunk_tokens > settings.EXTRACTION_BATCH_MAX_TOKENS
+        exceeds_chunk_budget = len(current_batch) >= settings.EXTRACTION_BATCH_MAX_CHUNKS
+
+        if current_batch and (exceeds_token_budget or exceeds_chunk_budget):
+            batches.append(current_batch)
+            current_batch = []
+            current_tokens = 0
+
+        current_batch.append(chunk)
+        current_tokens += chunk_tokens
+
+    if current_batch:
+        batches.append(current_batch)
+
+    return batches
