@@ -1,6 +1,6 @@
 from fastapi import Depends, HTTPException, Request
 from app.core.redis import get_redis, key_ratelimit
-from app.core.config import settings
+from app.core.config import effective_tier, settings
 from app.api.deps.auth import get_current_user
 from app.models.user import User
 import time
@@ -19,25 +19,26 @@ async def _window(key: str, limit: int, window: int = 60) -> bool:
 
 
 async def rate_limit_search(current_user: User = Depends(get_current_user)):
-    if current_user.tier == "free":
+    if effective_tier(current_user.tier) == "free":
         ok = await _window(key_ratelimit(str(current_user.id), "search"), settings.FREE_SEARCH_PER_HOUR, 3600)
         if not ok:
             raise HTTPException(429, "Search limit reached. Upgrade to Pro for unlimited search.")
 
 
 async def rate_limit_summary(current_user: User = Depends(get_current_user)):
-    if current_user.tier == "free":
+    if effective_tier(current_user.tier) == "free":
         ok = await _window(key_ratelimit(str(current_user.id), "summary"), settings.FREE_SUMMARY_PER_HOUR, 3600)
         if not ok:
             raise HTTPException(429, "Summary limit reached. Upgrade to Pro.")
 
 
 async def rate_limit_chat(current_user: User = Depends(get_current_user)):
+    tier = effective_tier(current_user.tier)
     daily_limit = {
         "free": settings.FREE_CHAT_PER_DAY,
         "pro": settings.PRO_CHAT_PER_DAY,
         "power": 999999,
-    }.get(current_user.tier, settings.FREE_CHAT_PER_DAY)
+    }.get(tier, settings.FREE_CHAT_PER_DAY)
     ok = await _window(key_ratelimit(str(current_user.id), "chat"), daily_limit, 86400)
     if not ok:
         raise HTTPException(429, "Chat turn limit reached for today.")

@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     # Stripe
     STRIPE_SECRET_KEY: str
     STRIPE_WEBHOOK_SECRET: str
+    STRIPE_PRO_MONTHLY_PRICE_ID: str | None = None
+    STRIPE_PRO_ANNUAL_PRICE_ID: str | None = None
+    STRIPE_POWER_MONTHLY_PRICE_ID: str | None = None
+    APP_URL: str = "http://localhost:3000"
 
     # Email
     RESEND_API_KEY: str
@@ -76,3 +80,14 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def is_local_mode() -> bool:
+    app_url = (settings.APP_URL or "").lower()
+    return settings.DEBUG or "localhost" in app_url or "127.0.0.1" in app_url
+
+
+def effective_tier(tier: str) -> str:
+    if is_local_mode() and tier != "admin":
+        return "power"
+    return tier

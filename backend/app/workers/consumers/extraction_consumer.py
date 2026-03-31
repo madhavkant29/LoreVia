@@ -6,7 +6,7 @@ import asyncio
 import uuid
 from app.core.database import AsyncSessionLocal
 from app.core.storage import download_book
-from app.core.config import settings
+from app.core.config import effective_tier, settings
 from app.models.book import Book, Chapter
 from app.models.character import Character, CharacterState
 from app.models.intelligence import BookChunk, CharacterRelationship
@@ -38,17 +38,19 @@ async def process_book(book_id: str) -> dict:
         else:
             from app.parsers.epub_parser import parse_epub
             chapters = parse_epub(raw)
+        all_chapters = chapters
 
         # Retrieve user and usage
         from app.models.user import User
         from sqlalchemy import func
         user = await db.get(User, book.user_id)
-        is_free_tier = user and user.tier not in ("pro", "power", "admin", "premium")
+        is_free_tier = user and effective_tier(user.tier) not in ("pro", "power", "admin", "premium")
 
         # Initial total tokens in original file
-        full_tokens = sum(count_tokens(ch["text"]) for ch in chapters)
+        full_tokens = sum(count_tokens(ch["text"]) for ch in all_chapters)
         processed_tokens = full_tokens
         was_truncated = False
+        ai_chapters = all_chapters
 
         if is_free_tier:
             # How many tokens has the user already used in other books?
@@ -68,7 +70,7 @@ async def process_book(book_id: str) -> dict:
             # Partially process as many chapters as fit in remaining balance
             partial_chapters: list[dict] = []
             current_sum = 0
-            for ch in chapters:
+            for ch in all_chapters:
                 ch_toks = count_tokens(ch["text"])
                 if current_sum + ch_toks <= remaining_budget:
                     partial_chapters.append(ch)
@@ -83,7 +85,7 @@ async def process_book(book_id: str) -> dict:
                 await db.commit()
                 return {"error": "insufficient_remaining_budget"}
 
-            chapters = partial_chapters
+            ai_chapters = partial_chapters
             processed_tokens = current_sum
 
         # Update book with final stats
@@ -91,31 +93,28 @@ async def process_book(book_id: str) -> dict:
             sa_update(Book)
             .where(Book.id == book.id)
             .values(
-                total_chapters=len(chapters),
+                total_chapters=len(all_chapters),
                 total_tokens=processed_tokens,
                 is_truncated=was_truncated
             )
         )
         await db.commit()
 
-        # Process first N chapters immediately
-        for ch_data in chapters[:settings.LAZY_PROCESS_INITIAL_CHAPTERS]:
-            await _process_chapter(db, book, ch_data)
+        # Create lightweight chapter stubs for the full parsed book so later chapters
+        # can be processed incrementally as the reader advances.
+        for ch_data in all_chapters:
+            await _ensure_chapter_stub(db, book, ch_data)
+        await db.commit()
 
-        # Queue the rest
-        from app.workers.tasks.extraction_tasks import process_chapter_task
-        for ch_data in chapters[settings.LAZY_PROCESS_INITIAL_CHAPTERS:]:
-            process_chapter_task.apply_async(
-                args=[book_id, ch_data["number"], ch_data["title"], ch_data["text"]],
-                countdown=ch_data["number"] * 5,
-                queue="extraction",
-            )
+        # Process first N chapters immediately
+        for ch_data in ai_chapters[:settings.LAZY_PROCESS_INITIAL_CHAPTERS]:
+            await _process_chapter(db, book, ch_data)
 
         await db.execute(sa_update(Book).where(Book.id == book.id).values(status="ready"))
         await db.commit()
 
-        log.info(f"Book {book_id} processed: {len(chapters)} chapters")
-        return {"book_id": book_id, "chapters": len(chapters)}
+        log.info(f"Book {book_id} processed: {len(all_chapters)} chapters")
+        return {"book_id": book_id, "chapters": len(all_chapters)}
 
 
 async def _process_chapter(db, book, ch_data: dict):
@@ -242,12 +241,58 @@ async def _process_chapter(db, book, ch_data: dict):
     await consolidate_characters(db, book.id, up_to_chapter=ch_data["number"])
     await db.commit()
 
-    from app.workers.tasks.analysis_tasks import analyse_chapter_task
+    if ch_data["number"] <= settings.LAZY_PROCESS_INITIAL_CHAPTERS:
+        from app.workers.tasks.analysis_tasks import analyse_chapter_task
 
-    analyse_chapter_task.apply_async(
-        args=[str(chapter.id), ch_data["text"], ch_data.get("title") or ""],
-        queue="analysis",
-    )
+        analyse_chapter_task.apply_async(
+            args=[str(chapter.id), ch_data["text"], ch_data.get("title") or ""],
+            queue="analysis",
+        )
+
+
+async def _ensure_chapter_stub(db, book, ch_data: dict):
+    from app.core.storage import upload_text
+
+    existing = (
+        await db.execute(
+            select(Chapter).where(Chapter.book_id == book.id, Chapter.number == ch_data["number"])
+        )
+    ).scalar()
+    s3_key = f"chapters/{book.id}/{ch_data['number']}.txt"
+
+    if existing is None:
+        try:
+            upload_text(s3_key, ch_data["text"])
+        except Exception:
+            s3_key = ""
+        db.add(
+            Chapter(
+                book_id=book.id,
+                number=ch_data["number"],
+                title=ch_data.get("title"),
+                s3_key=s3_key,
+                token_count=count_tokens(ch_data["text"]),
+                processed=False,
+            )
+        )
+        return
+
+    changed = False
+    if ch_data.get("title") and (not existing.title or not existing.title.strip()):
+        existing.title = ch_data["title"]
+        changed = True
+    if ch_data.get("text") and not existing.s3_key:
+        try:
+            upload_text(s3_key, ch_data["text"])
+            existing.s3_key = s3_key
+            changed = True
+        except Exception:
+            pass
+    if ch_data.get("text") and not existing.token_count:
+        existing.token_count = count_tokens(ch_data["text"])
+        changed = True
+    if changed:
+        await db.flush()
 
 
 async def _find_char_by_name(db, book_id, name: str):

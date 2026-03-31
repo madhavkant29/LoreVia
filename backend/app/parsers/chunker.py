@@ -66,7 +66,7 @@ def _paragraph_overlap(paragraphs: list[str], overlap_tokens: int) -> tuple[list
 def _split_large_paragraph(paragraph: str, max_tokens: int) -> list[str]:
     sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", paragraph) if s.strip()]
     if len(sentences) <= 1:
-        return _split_hard(paragraph, max_tokens)
+        return [paragraph.strip()]
 
     parts: list[str] = []
     current: list[str] = []
@@ -79,7 +79,8 @@ def _split_large_paragraph(paragraph: str, max_tokens: int) -> list[str]:
                 parts.append(" ".join(current))
                 current = []
                 current_tokens = 0
-            parts.extend(_split_hard(sentence, max_tokens))
+            # Keep an oversized sentence intact rather than cutting it mid-sentence.
+            parts.append(sentence)
             continue
 
         if current and current_tokens + sentence_tokens > max_tokens:
@@ -89,30 +90,6 @@ def _split_large_paragraph(paragraph: str, max_tokens: int) -> list[str]:
 
         current.append(sentence)
         current_tokens += sentence_tokens
-
-    if current:
-        parts.append(" ".join(current))
-
-    return parts
-
-
-def _split_hard(text: str, max_tokens: int) -> list[str]:
-    words = text.split()
-    if not words:
-        return []
-
-    parts: list[str] = []
-    current: list[str] = []
-    current_tokens = 0
-
-    for word in words:
-        word_tokens = count_tokens(word)
-        if current and current_tokens + word_tokens > max_tokens:
-            parts.append(" ".join(current))
-            current = []
-            current_tokens = 0
-        current.append(word)
-        current_tokens += word_tokens
 
     if current:
         parts.append(" ".join(current))

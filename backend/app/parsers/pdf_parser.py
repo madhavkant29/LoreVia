@@ -156,7 +156,8 @@ def _lines_to_paragraphs(lines: list[str]) -> list[str]:
     paragraphs: list[str] = []
     current = ""
 
-    for line in lines:
+    for index, line in enumerate(lines):
+        next_line = lines[index + 1] if index + 1 < len(lines) else None
         if not line:
             if current:
                 paragraphs.append(current.strip())
@@ -175,6 +176,10 @@ def _lines_to_paragraphs(lines: list[str]) -> list[str]:
         else:
             current = line
 
+        if current and _looks_like_paragraph_boundary(current, next_line):
+            paragraphs.append(current.strip())
+            current = ""
+
     if current:
         paragraphs.append(current.strip())
 
@@ -185,6 +190,22 @@ def _join_line(current: str, line: str) -> str:
     if current.endswith("-") and not current.endswith("--"):
         return current[:-1] + line.lstrip()
     return f"{current.rstrip()} {line.lstrip()}"
+
+
+def _looks_like_paragraph_boundary(current: str, next_line: str | None) -> bool:
+    if next_line is None:
+        return False
+    current_text = current.strip()
+    next_text = next_line.strip()
+    if not current_text or not next_text:
+        return False
+    if not re.search(r'[.!?]["\']?$', current_text):
+        return False
+    if CHAPTER_RE.match(next_text):
+        return True
+    if len(current_text) < 60:
+        return False
+    return next_text[:1].isupper()
 
 
 def _extract_heading(paragraph: str) -> str | None:

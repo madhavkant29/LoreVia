@@ -17,7 +17,21 @@ async def on_startup() -> None:
         await conn.execute(text("ALTER TABLE books ADD COLUMN IF NOT EXISTS total_tokens INTEGER"))
         await conn.execute(text("ALTER TABLE books ADD COLUMN IF NOT EXISTS total_chunks INTEGER"))
         await conn.execute(text("ALTER TABLE books ADD COLUMN IF NOT EXISTS is_truncated BOOLEAN DEFAULT FALSE NOT NULL"))
+        await conn.execute(text("ALTER TABLE books ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ"))
+        await conn.execute(text("ALTER TABLE books ADD COLUMN IF NOT EXISTS hidden_at TIMESTAMPTZ"))
         await conn.execute(text("ALTER TABLE reading_progress ADD COLUMN IF NOT EXISTS chapters_read INTEGER[] DEFAULT ARRAY[]::INTEGER[]"))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS quote_entries (
+                id UUID PRIMARY KEY,
+                user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                book_id UUID NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+                chapter_number INTEGER,
+                character_name VARCHAR,
+                quote_text TEXT NOT NULL,
+                note VARCHAR,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """))
         await conn.commit()
     r = await get_redis()
     await r.ping()

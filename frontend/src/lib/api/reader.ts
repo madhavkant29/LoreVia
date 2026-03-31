@@ -1,5 +1,5 @@
 import { apiClient } from "./client"
-import type { ChapterData, ChapterListResponse, ContextResult, ChapterSummary, PlotThread, RelationshipGraph, SummaryCollectionResponse, SummaryMode } from "@/types/reader"
+import type { ChapterData, ChapterListResponse, ContextResult, ChapterSummary, ForeshadowingItem, PlotThread, RelationshipEvolutionPair, RelationshipGraph, SummaryCollectionResponse, SummaryMode, ThematicSearchResult, TimelineEvent } from "@/types/reader"
 
 export const readerApi = {
   getChapter: (bookId: string, chapter: number) =>
@@ -16,6 +16,14 @@ export const readerApi = {
     apiClient.get<ChapterListResponse>(`/reader/${bookId}/chapters`).then(r => r.data),
   getSummaryCollection: (bookId: string) =>
     apiClient.get<SummaryCollectionResponse>(`/reader/${bookId}/summary-collection`).then(r => r.data),
+  getForeshadowing: (bookId: string) =>
+    apiClient.get<{ items: ForeshadowingItem[] }>(`/reader/${bookId}/foreshadowing`).then(r => r.data),
+  getTimeline: (bookId: string) =>
+    apiClient.get<{ events: TimelineEvent[] }>(`/reader/${bookId}/timeline`).then(r => r.data),
+  thematicSearch: (bookId: string, q: string) =>
+    apiClient.get<{ results: ThematicSearchResult[] }>(`/reader/${bookId}/thematic-search`, { params: { q } }).then(r => r.data),
+  getRelationshipEvolution: (bookId: string, chapter: number) =>
+    apiClient.get<{ pairs: RelationshipEvolutionPair[] }>(`/reader/${bookId}/relationship-evolution`, { params: { chapter } }).then(r => r.data),
   getPlotThreads: (bookId: string, chapter: number) =>
     apiClient.get<PlotThread[]>(`/reader/${bookId}/plot-threads`, { params: { chapter } }).then(r => r.data),
   getRecall: (bookId: string) =>
@@ -26,4 +34,6 @@ export const readerApi = {
     apiClient.put(`/reader/${bookId}/progress`, null, { params: { current_chapter: chapter, scroll_pct: scrollPct } }),
   updateChapterReadStatus: (bookId: string, chapter: number, read: boolean) =>
     apiClient.put(`/reader/${bookId}/progress/chapter-status`, null, { params: { chapter, read } }).then(r => r.data),
+  saveQuote: (bookId: string, payload: { quote_text: string; chapter_number?: number; character_name?: string | null; note?: string | null }) =>
+    apiClient.post(`/reader/${bookId}/quotes`, payload).then(r => r.data),
 }

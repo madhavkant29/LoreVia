@@ -23,6 +23,8 @@ class Book(Base):
     total_tokens: Mapped[int | None] = mapped_column(Integer)
     total_chunks: Mapped[int | None] = mapped_column(Integer)
     is_truncated: Mapped[bool] = mapped_column(Boolean, default=False)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    hidden_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     user = relationship("User", back_populates="books")

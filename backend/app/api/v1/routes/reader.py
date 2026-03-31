@@ -5,13 +5,14 @@ Smart tap, summaries, relationship graph, memory recall, progress.
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import or_, select
+from pydantic import BaseModel
 from app.core.database import get_db
 from app.core.redis import cache_get, cache_set, key_chapter_summary, key_relationship_graph, key_memory_recall, key_search_results
-from app.core.config import settings
+from app.core.config import effective_tier, settings
 from app.core.storage import download_book, get_presigned_url
 from app.models.book import Book, Chapter
 from app.models.character import Character, CharacterState
-from app.models.intelligence import BookChunk, ChapterSummary, CharacterRelationship, PlotThread
+from app.models.intelligence import BookChunk, ChapterSummary, CharacterRelationship, PlotThread, QuoteEntry
 from app.models.progress import ReadingProgress, ReadingSession
 from app.engine.search.semantic import find_context_for_tap, semantic_search
 from app.engine.analysis.recall import generate_recall
@@ -24,6 +25,13 @@ import json
 import uuid
 
 router = APIRouter()
+
+
+class SaveQuoteBody(BaseModel):
+    quote_text: str
+    chapter_number: int | None = None
+    character_name: str | None = None
+    note: str | None = None
 
 
 @router.get("/{book_id}/chapter/{chapter_num}")
@@ -44,6 +52,8 @@ async def get_chapter(
     )).scalar()
     if not chapter:
         raise HTTPException(404, "Chapter not found")
+    if not await _chapter_intelligence_available(db, book, current_user, chapter_num):
+        raise HTTPException(402, "Chapter intelligence is unavailable on the Starter plan beyond your processed reading capacity. You can still open the chapter, but summaries and advanced tools stop here.")
 
     chars = (await db.execute(
         select(Character)
@@ -184,6 +194,7 @@ async def get_summary(
     book = await db.get(Book, book_id)
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
+    _require_summary_access(book, current_user, chapter_num)
 
     if mode not in ("short", "detailed", "key_points"):
         raise HTTPException(400, "Invalid mode")
@@ -209,15 +220,7 @@ async def get_summary(
         await cache_set(key_chapter_summary(str(chapter.id), mode), data, settings.REDIS_TTL_SUMMARY)
         return data
 
-    from app.workers.tasks.analysis_tasks import analyse_chapter_task
-    try:
-        chapter_text = download_book(chapter.s3_key).decode("utf-8", errors="ignore")
-        analyse_chapter_task.apply_async(
-            args=[str(chapter.id), chapter_text, chapter.title or ""],
-            queue="analysis",
-        )
-    except Exception:
-        pass
+    await _queue_analysis_if_missing(db, chapter)
 
     return {
         "content": "Summary is being prepared. Please retry in a few moments.",
@@ -377,6 +380,7 @@ async def get_chapter_list(
     chapters = (await db.execute(
         select(Chapter).where(Chapter.book_id == book_id).order_by(Chapter.number)
     )).scalars().all()
+    intelligence_map = await _chapter_intelligence_map(db, book, current_user)
 
     return {
         "read_upto": read_upto,
@@ -386,6 +390,7 @@ async def get_chapter_list(
                 "number": chapter.number,
                 "title": chapter.title,
                 "processed": chapter.processed,
+                "intelligence_available": intelligence_map.get(chapter.number, True),
                 "read": chapter.number in read_set,
             }
             for chapter in chapters
@@ -411,13 +416,14 @@ async def get_summary_collection(
     )).scalar()
     read_upto = progress.current_chapter if progress else 0
     read_set = set(progress.chapters_read or []) if progress else set()
+    available_set = await _read_available_chapter_set(db, book, current_user, read_set)
 
-    if not read_set:
+    if not available_set:
         return {"read_upto": 0, "summaries": []}
 
     chapter_rows = (await db.execute(
         select(Chapter.number, Chapter.title, Chapter.id)
-        .where(Chapter.book_id == book_id, Chapter.number.in_(sorted(read_set)))
+        .where(Chapter.book_id == book_id, Chapter.number.in_(sorted(available_set)))
         .order_by(Chapter.number)
     )).all()
 
@@ -426,7 +432,7 @@ async def get_summary_collection(
         .join(Chapter, Chapter.id == ChapterSummary.chapter_id)
         .where(
             Chapter.book_id == book_id,
-            Chapter.number.in_(sorted(read_set)),
+            Chapter.number.in_(sorted(available_set)),
             ChapterSummary.mode == "short",
         )
     )).all()
@@ -449,6 +455,239 @@ async def get_summary_collection(
             for row in chapter_rows
         ],
     }
+
+
+@router.get("/{book_id}/foreshadowing")
+async def get_foreshadowing_highlights(
+    book_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await db.get(Book, book_id)
+    if not book or book.user_id != current_user.id:
+        raise HTTPException(404)
+
+    read_set = await _read_available_chapter_set(db, book, current_user, await _read_chapter_set(db, current_user.id, book_id))
+    if not read_set:
+        return {"items": []}
+
+    rows = (await db.execute(
+        select(Chapter.number, Chapter.title, ChapterSummary.clues)
+        .join(ChapterSummary, ChapterSummary.chapter_id == Chapter.id)
+        .where(
+            Chapter.book_id == book_id,
+            Chapter.number.in_(sorted(read_set)),
+            ChapterSummary.mode == "detailed",
+        )
+        .order_by(Chapter.number)
+    )).all()
+
+    items = []
+    for number, title, clues in rows:
+        for clue in clues or []:
+            if isinstance(clue, dict) and clue.get("clue"):
+                items.append({
+                    "chapter_number": number,
+                    "chapter_title": title,
+                    "clue": clue.get("clue"),
+                    "foreshadows": clue.get("foreshadows"),
+                })
+    return {"items": items}
+
+
+@router.get("/{book_id}/timeline")
+async def get_timeline(
+    book_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await db.get(Book, book_id)
+    if not book or book.user_id != current_user.id:
+        raise HTTPException(404)
+
+    read_set = await _read_available_chapter_set(db, book, current_user, await _read_chapter_set(db, current_user.id, book_id))
+    if not read_set:
+        return {"events": []}
+
+    summary_rows = (await db.execute(
+        select(Chapter.number, Chapter.title, ChapterSummary.key_events)
+        .join(ChapterSummary, ChapterSummary.chapter_id == Chapter.id)
+        .where(
+            Chapter.book_id == book_id,
+            Chapter.number.in_(sorted(read_set)),
+            ChapterSummary.mode == "short",
+        )
+        .order_by(Chapter.number)
+    )).all()
+    character_rows = (await db.execute(
+        select(Character.name, Character.first_chapter)
+        .where(Character.book_id == book_id, Character.first_chapter.in_(sorted(read_set)))
+        .order_by(Character.first_chapter, Character.name)
+    )).all()
+    thread_rows = (await db.execute(
+        select(PlotThread.title, PlotThread.introduced_at, PlotThread.resolved_at, PlotThread.status)
+        .where(PlotThread.book_id == book_id)
+        .order_by(PlotThread.introduced_at, PlotThread.importance.desc())
+    )).all()
+
+    events = []
+    for chapter_num, chapter_title, key_events in summary_rows:
+        for event in key_events or []:
+            if isinstance(event, dict) and event.get("event"):
+                events.append({
+                    "chapter_number": chapter_num,
+                    "chapter_title": chapter_title,
+                    "kind": "event",
+                    "title": event.get("event"),
+                    "detail": None,
+                })
+    for name, first_chapter in character_rows:
+        events.append({
+            "chapter_number": first_chapter,
+            "chapter_title": None,
+            "kind": "character_entry",
+            "title": name,
+            "detail": "Character enters the story",
+        })
+    for title, introduced_at, resolved_at, status in thread_rows:
+        if introduced_at and introduced_at in read_set:
+            events.append({
+                "chapter_number": introduced_at,
+                "chapter_title": None,
+                "kind": "thread_start",
+                "title": title,
+                "detail": status,
+            })
+        if resolved_at and resolved_at in read_set:
+            events.append({
+                "chapter_number": resolved_at,
+                "chapter_title": None,
+                "kind": "thread_end",
+                "title": title,
+                "detail": "Resolved",
+            })
+
+    events.sort(key=lambda item: (item["chapter_number"], item["kind"], item["title"]))
+    return {"events": events}
+
+
+@router.get("/{book_id}/thematic-search")
+async def thematic_search(
+    book_id: uuid.UUID,
+    q: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await db.get(Book, book_id)
+    if not book or book.user_id != current_user.id:
+        raise HTTPException(404)
+
+    read_set = await _read_available_chapter_set(db, book, current_user, await _read_chapter_set(db, current_user.id, book_id))
+    if not read_set:
+        return {"results": []}
+
+    terms = [term for term in q.lower().split() if len(term) >= 3]
+    rows = (await db.execute(
+        select(Chapter.number, Chapter.title, ChapterSummary.content, ChapterSummary.key_events, ChapterSummary.clues)
+        .join(ChapterSummary, ChapterSummary.chapter_id == Chapter.id)
+        .where(
+            Chapter.book_id == book_id,
+            Chapter.number.in_(sorted(read_set)),
+            ChapterSummary.mode.in_(["short", "detailed"]),
+        )
+        .order_by(Chapter.number)
+    )).all()
+
+    results = []
+    for chapter_num, chapter_title, content, key_events, clues in rows:
+        haystacks = [content or ""]
+        haystacks.extend(event.get("event", "") for event in (key_events or []) if isinstance(event, dict))
+        haystacks.extend(clue.get("clue", "") for clue in (clues or []) if isinstance(clue, dict))
+        haystack_text = " ".join(haystacks).lower()
+        score = sum(1 for term in terms if term in haystack_text)
+        if score:
+            results.append({
+                "chapter_number": chapter_num,
+                "chapter_title": chapter_title,
+                "score": score,
+                "summary": content,
+            })
+    results.sort(key=lambda item: (-item["score"], item["chapter_number"]))
+    return {"results": results[:20]}
+
+
+@router.get("/{book_id}/relationship-evolution")
+async def get_relationship_evolution(
+    book_id: uuid.UUID,
+    chapter: int = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await db.get(Book, book_id)
+    if not book or book.user_id != current_user.id:
+        raise HTTPException(404)
+
+    rels = (await db.execute(
+        select(CharacterRelationship).where(
+            CharacterRelationship.book_id == book_id,
+            CharacterRelationship.from_chapter <= chapter,
+        ).order_by(CharacterRelationship.from_chapter, CharacterRelationship.character_a_id, CharacterRelationship.character_b_id)
+    )).scalars().all()
+
+    chars = (await db.execute(select(Character).where(Character.book_id == book_id))).scalars().all()
+    name_by_id = {char.id: char.name for char in chars}
+
+    grouped: dict[tuple[str, str], list[dict]] = {}
+    for rel in rels:
+        a_name = name_by_id.get(rel.character_a_id)
+        b_name = name_by_id.get(rel.character_b_id)
+        if not a_name or not b_name:
+            continue
+        key = tuple(sorted([a_name, b_name]))
+        grouped.setdefault(key, []).append({
+            "chapter": rel.from_chapter,
+            "type": rel.rel_type,
+            "description": rel.description,
+            "sentiment": rel.sentiment,
+        })
+
+    return {
+        "pairs": [
+            {
+                "characters": list(key),
+                "events": value,
+            }
+            for key, value in grouped.items()
+        ]
+    }
+
+
+@router.post("/{book_id}/quotes")
+async def save_quote(
+    book_id: uuid.UUID,
+    body: SaveQuoteBody,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await db.get(Book, book_id)
+    if not book or book.user_id != current_user.id:
+        raise HTTPException(404)
+    quote_text = " ".join((body.quote_text or "").split())
+    if not quote_text:
+        raise HTTPException(400, "Quote text is required")
+
+    quote = QuoteEntry(
+        user_id=current_user.id,
+        book_id=book_id,
+        chapter_number=body.chapter_number,
+        character_name=body.character_name,
+        quote_text=quote_text,
+        note=body.note,
+    )
+    db.add(quote)
+    await db.commit()
+    await db.refresh(quote)
+    return {"id": str(quote.id), "saved": True}
 
 
 @router.get("/{book_id}/plot-threads")
@@ -575,10 +814,26 @@ async def update_progress(
     book = await db.get(Book, book_id)
     total = book.total_chapters or 1
     for n in range(current_chapter + 1, min(current_chapter + 4, total + 1)):
+        next_chapter = (
+            await db.execute(
+                select(Chapter).where(Chapter.book_id == book_id, Chapter.number == n)
+            )
+        ).scalar()
+        if next_chapter and next_chapter.processed:
+            continue
+        if not await _chapter_intelligence_available(db, book, current_user, n):
+            continue
         process_chapter_task.apply_async(
             args=[str(book_id), n, "", ""],  # text fetched from S3 in consumer
             countdown=n * 3, queue="extraction",
         )
+    current_row = (
+        await db.execute(
+            select(Chapter).where(Chapter.book_id == book_id, Chapter.number == current_chapter)
+        )
+    ).scalar()
+    if current_row and await _chapter_intelligence_available(db, book, current_user, current_chapter):
+        await _queue_analysis_if_missing(db, current_row)
     return {"ok": True}
 
 
@@ -618,6 +873,14 @@ async def update_chapter_read_status(
         progress.last_read = datetime.now(timezone.utc)
 
     await db.commit()
+    if read:
+        chapter_row = (
+            await db.execute(
+                select(Chapter).where(Chapter.book_id == book_id, Chapter.number == chapter)
+            )
+        ).scalar()
+        if chapter_row and await _chapter_intelligence_available(db, book, current_user, chapter):
+            await _queue_analysis_if_missing(db, chapter_row)
     return {"ok": True, "chapter": chapter, "read": read}
 
 
@@ -655,3 +918,91 @@ def _strip_json_fence(content: str) -> str:
     if stripped.endswith("```"):
         stripped = stripped[:-3]
     return stripped.strip()
+
+
+def _require_summary_access(book: Book, current_user, chapter_num: int | None = None) -> None:
+    if effective_tier(current_user.tier) in ("pro", "power", "admin"):
+        return
+    if chapter_num is not None and book.is_truncated:
+        detail = "This book has reached the Starter plan reading capacity. Upgrade to Pro to unlock more summaries and intelligence views."
+        detail = f"Chapter {chapter_num} summary is unavailable because this book has reached the Starter plan reading capacity. Upgrade to Pro to continue."
+        raise HTTPException(402, detail)
+
+
+async def _read_chapter_set(db: AsyncSession, user_id: uuid.UUID, book_id: uuid.UUID) -> set[int]:
+    progress = (await db.execute(
+        select(ReadingProgress).where(
+            ReadingProgress.user_id == user_id,
+            ReadingProgress.book_id == book_id,
+        )
+    )).scalar()
+    return set(progress.chapters_read or []) if progress else set()
+
+
+async def _read_available_chapter_set(
+    db: AsyncSession,
+    book: Book,
+    current_user,
+    read_set: set[int],
+) -> set[int]:
+    availability = await _chapter_intelligence_map(db, book, current_user)
+    return {chapter for chapter in read_set if availability.get(chapter, False)}
+
+
+async def _queue_analysis_if_missing(db: AsyncSession, chapter: Chapter) -> None:
+    summary_exists = await _chapter_has_any_summary(db, chapter.id)
+    if summary_exists:
+        return
+    from app.workers.tasks.analysis_tasks import analyse_chapter_task
+
+    try:
+        chapter_text = download_book(chapter.s3_key).decode("utf-8", errors="ignore")
+    except Exception:
+        return
+
+    analyse_chapter_task.apply_async(
+        args=[str(chapter.id), chapter_text, chapter.title or ""],
+        queue="analysis",
+    )
+
+
+async def _chapter_has_any_summary(db: AsyncSession, chapter_id: uuid.UUID) -> bool:
+    row = (
+        await db.execute(
+            select(ChapterSummary.id).where(ChapterSummary.chapter_id == chapter_id).limit(1)
+        )
+    ).first()
+    return row is not None
+
+
+async def _chapter_intelligence_available(db: AsyncSession, book: Book, current_user, chapter_num: int) -> bool:
+    availability = await _chapter_intelligence_map(db, book, current_user)
+    return availability.get(chapter_num, False)
+
+
+async def _chapter_intelligence_map(db: AsyncSession, book: Book, current_user) -> dict[int, bool]:
+    if effective_tier(current_user.tier) in ("pro", "power", "admin"):
+        rows = (await db.execute(
+            select(Chapter.number)
+            .where(Chapter.book_id == book.id)
+            .order_by(Chapter.number)
+        )).all()
+        return {number: True for (number,) in rows}
+    if not book.is_truncated:
+        rows = (await db.execute(
+            select(Chapter.number)
+            .where(Chapter.book_id == book.id)
+            .order_by(Chapter.number)
+        )).all()
+        return {number: True for (number,) in rows}
+    rows = (await db.execute(
+        select(Chapter.number, Chapter.token_count)
+        .where(Chapter.book_id == book.id)
+        .order_by(Chapter.number)
+    )).all()
+    running_total = 0
+    availability: dict[int, bool] = {}
+    for number, token_count in rows:
+        running_total += token_count or 0
+        availability[number] = running_total <= (book.total_tokens or 0)
+    return availability

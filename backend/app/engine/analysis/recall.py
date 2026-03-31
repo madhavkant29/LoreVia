@@ -46,7 +46,7 @@ async def generate_recall(
                 {"role": "user", "content": context},
             ],
             temperature=0.4,
-            max_tokens=300,
+            max_tokens=220,
         )
         return r.choices[0].message.content.strip()
     finally:

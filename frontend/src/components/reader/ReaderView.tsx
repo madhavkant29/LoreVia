@@ -5,14 +5,16 @@ import { ReaderToolbar } from "./ReaderToolbar"
 import { ChapterText } from "./ChapterText"
 import { ContextPanel } from "./ContextPanel"
 import { SummaryPanel } from "./SummaryPanel"
+import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 
 interface Props { bookId: string; chapterNum: number }
 type ReaderTheme = "light" | "dark"
 
 export function ReaderView({ bookId, chapterNum }: Props) {
   const { data, loading, error, tap, contextResult, contextLoading, clearContext, saveProgress } = useReader(bookId, chapterNum)
+  const { theme: appTheme, setTheme: setAppTheme } = usePreferencesStore()
   const [showSummary, setShowSummary] = useState(false)
-  const [theme, setTheme] = useState<ReaderTheme>("light")
+  const [theme, setTheme] = useState<ReaderTheme>(appTheme)
   const [fontSize, setFontSize] = useState(18)
   const [fontFamily, setFontFamily] = useState<"serif" | "sans" | "mono">("serif")
 
@@ -21,7 +23,7 @@ export function ReaderView({ bookId, chapterNum }: Props) {
   }, [data])
 
   useEffect(() => {
-    const storedTheme = window.localStorage.getItem("reader-theme")
+    const storedTheme = window.localStorage.getItem("reader-theme") || window.localStorage.getItem("app-theme")
     if (storedTheme === "light" || storedTheme === "dark") setTheme(storedTheme)
 
     const storedSize = window.localStorage.getItem("reader-font-size")
@@ -36,9 +38,15 @@ export function ReaderView({ bookId, chapterNum }: Props) {
   }, [])
 
   useEffect(() => {
+    setTheme(appTheme)
+  }, [appTheme])
+
+  useEffect(() => {
     window.localStorage.setItem("reader-theme", theme)
+    window.localStorage.setItem("app-theme", theme)
     window.localStorage.setItem("reader-font-size", fontSize.toString())
     window.localStorage.setItem("reader-font-family", fontFamily)
+    setAppTheme(theme)
   }, [theme, fontSize, fontFamily])
 
   const toggleTheme = () => setTheme(current => current === "dark" ? "light" : "dark")

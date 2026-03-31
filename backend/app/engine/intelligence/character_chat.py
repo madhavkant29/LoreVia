@@ -50,7 +50,7 @@ async def chat_as_character(
             arc_summary=character.arc_summary or "story ongoing",
             description=build_description(character.trait_state or {}, character.archetype),
             chapter=current_chapter,
-            context=context_summary,
+            context=(context_summary or "")[:900],
         )
 
         # Keep last 10 turns to manage context window
@@ -60,7 +60,7 @@ async def chat_as_character(
             model=settings.OPENAI_INTEL_MODEL,
             messages=[{"role": "system", "content": system}] + recent,
             temperature=0.7,
-            max_tokens=400,
+            max_tokens=220,
         )
         return r.choices[0].message.content.strip()
     finally:

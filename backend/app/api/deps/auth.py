@@ -3,6 +3,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.security import decode_token
+from app.core.redis import get_token_version
 from app.models.user import User
 import uuid
 
@@ -16,6 +17,12 @@ async def get_current_user(
     payload = decode_token(credentials.credentials)
     if not payload or payload.get("type") != "access":
         raise HTTPException(401, "Invalid or expired token")
+    claimed_version = payload.get("ver")
+    if claimed_version is None:
+        raise HTTPException(401, "Invalid or expired token")
+    current_version = await get_token_version(payload["sub"])
+    if int(claimed_version) != current_version:
+        raise HTTPException(401, "Session expired. Please sign in again.")
     user = await db.get(User, uuid.UUID(payload["sub"]))
     if not user:
         raise HTTPException(401, "User not found")

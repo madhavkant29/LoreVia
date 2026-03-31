@@ -31,9 +31,10 @@ def process_chapter_task(self, book_id: str, chapter_num: int, title: str, text:
     async def _run():
         from app.core.database import AsyncSessionLocal
         from app.core.storage import download_book
-        from app.models.book import Book
+        from app.models.book import Book, Chapter
         from app.parsers.epub_parser import parse_epub
         from app.parsers.pdf_parser import parse_pdf
+        from sqlalchemy import select
         import uuid
         async with AsyncSessionLocal() as db:
             book = await db.get(Book, uuid.UUID(book_id))
@@ -42,6 +43,19 @@ def process_chapter_task(self, book_id: str, chapter_num: int, title: str, text:
 
             chapter_title = title
             chapter_text = text
+
+            if not chapter_text.strip():
+                chapter_row = (
+                    await db.execute(
+                        select(Chapter).where(Chapter.book_id == book.id, Chapter.number == chapter_num)
+                    )
+                ).scalar()
+                if chapter_row and chapter_row.s3_key:
+                    try:
+                        chapter_text = download_book(chapter_row.s3_key).decode("utf-8", errors="ignore")
+                        chapter_title = chapter_row.title or title
+                    except Exception:
+                        chapter_text = ""
 
             if not chapter_text.strip():
                 raw = download_book(book.s3_key)

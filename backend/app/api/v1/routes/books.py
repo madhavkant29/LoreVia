@@ -1,11 +1,11 @@
-from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.core.database import get_db
 from app.core.storage import upload_book
 from app.models.book import Book
 from app.models.character import Character
-from app.models.intelligence import CharacterRelationship
+from app.models.intelligence import CharacterRelationship, QuoteEntry
 from app.engine.character.consolidator import consolidate_characters
 from app.engine.character.profile_builder import build_description
 from app.api.deps.auth import get_current_user
@@ -14,7 +14,7 @@ from app.utils.external.isbn_lookup import extract_isbn_from_pdf
 from app.utils.compliance.copyright_check import check_isbn
 from app.workers.tasks.extraction_tasks import process_book_task
 from pydantic import BaseModel, ConfigDict
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 import bleach
 
@@ -32,6 +32,8 @@ class BookOut(BaseModel):
     total_chapters: int | None
     total_tokens: int | None
     is_truncated: bool
+    archived_at: datetime | None
+    hidden_at: datetime | None
     created_at: datetime
 
 
@@ -72,11 +74,39 @@ async def upload_book_endpoint(
 
 
 @router.get("", response_model=list[BookOut])
-async def list_books(db: AsyncSession = Depends(get_db), current_user=Depends(get_current_user)):
-    result = await db.execute(
-        select(Book).where(Book.user_id == current_user.id).order_by(Book.created_at.desc())
-    )
+async def list_books(
+    include_hidden: bool = Query(False),
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    stmt = select(Book).where(Book.user_id == current_user.id)
+    if not include_hidden:
+        stmt = stmt.where(Book.hidden_at.is_(None))
+    result = await db.execute(stmt.order_by(Book.created_at.desc()))
     return result.scalars().all()
+
+
+@router.get("/quotes")
+async def list_saved_quotes(db: AsyncSession = Depends(get_db), current_user=Depends(get_current_user)):
+    rows = (await db.execute(
+        select(QuoteEntry, Book.title)
+        .join(Book, Book.id == QuoteEntry.book_id)
+        .where(QuoteEntry.user_id == current_user.id)
+        .order_by(QuoteEntry.created_at.desc())
+    )).all()
+    return [
+        {
+            "id": str(quote.id),
+            "book_id": str(quote.book_id),
+            "book_title": book_title,
+            "chapter_number": quote.chapter_number,
+            "character_name": quote.character_name,
+            "quote_text": quote.quote_text,
+            "note": quote.note,
+            "created_at": quote.created_at,
+        }
+        for quote, book_title in rows
+    ]
 
 
 @router.get("/{book_id}", response_model=BookOut)
@@ -84,6 +114,42 @@ async def get_book(book_id: uuid.UUID, db: AsyncSession = Depends(get_db), curre
     book = await db.get(Book, book_id)
     if not book or book.user_id != current_user.id:
         raise HTTPException(404, "Book not found")
+    return book
+
+
+@router.put("/{book_id}/archive", response_model=BookOut)
+async def archive_book(
+    book_id: uuid.UUID,
+    archived: bool = Query(True),
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await db.get(Book, book_id)
+    if not book or book.user_id != current_user.id:
+        raise HTTPException(404)
+    book.archived_at = datetime.now(timezone.utc) if archived else None
+    if archived:
+        book.hidden_at = None
+    await db.commit()
+    await db.refresh(book)
+    return book
+
+
+@router.put("/{book_id}/hide", response_model=BookOut)
+async def hide_book(
+    book_id: uuid.UUID,
+    hidden: bool = Query(True),
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await db.get(Book, book_id)
+    if not book or book.user_id != current_user.id:
+        raise HTTPException(404)
+    book.hidden_at = datetime.now(timezone.utc) if hidden else None
+    if hidden:
+        book.archived_at = None
+    await db.commit()
+    await db.refresh(book)
     return book
 
 
@@ -102,6 +168,7 @@ async def get_book_characters(book_id: uuid.UUID, db: AsyncSession = Depends(get
 
     char_by_id = {char.id: char for char in characters}
     rel_summaries: dict[str, list[str]] = {}
+    rel_keys: dict[str, set[str]] = {}
 
     for rel in relationships:
         a = char_by_id.get(rel.character_a_id)
@@ -109,10 +176,12 @@ async def get_book_characters(book_id: uuid.UUID, db: AsyncSession = Depends(get
         if not a or not b:
             continue
 
-        summary = _relationship_summary(rel.description, rel.rel_type, a.name, b.name)
-        if summary:
-            rel_summaries.setdefault(str(a.id), []).append(summary)
-            rel_summaries.setdefault(str(b.id), []).append(summary)
+        summary_a = _relationship_summary_for_character(rel, a.name, b.name, a.name)
+        summary_b = _relationship_summary_for_character(rel, a.name, b.name, b.name)
+        if summary_a:
+            _append_unique_summary(rel_summaries, rel_keys, str(a.id), f"{rel.rel_type}:{b.name}".lower(), summary_a)
+        if summary_b:
+            _append_unique_summary(rel_summaries, rel_keys, str(b.id), f"{rel.rel_type}:{a.name}".lower(), summary_b)
 
     return [
         {
@@ -136,6 +205,28 @@ async def get_book_characters(book_id: uuid.UUID, db: AsyncSession = Depends(get
         }
         for char in characters
     ]
+
+
+def _relationship_summary_for_character(rel: CharacterRelationship, name_a: str, name_b: str, perspective_name: str) -> str | None:
+    counterpart = name_b if perspective_name == name_a else name_a
+    rel_type = (rel.rel_type or "connection").replace("_", " ").strip()
+    if not rel_type:
+        rel_type = "connection"
+    return f"{rel_type.capitalize()} connection with {counterpart}."
+
+
+def _append_unique_summary(
+    rel_summaries: dict[str, list[str]],
+    rel_keys: dict[str, set[str]],
+    char_id: str,
+    signature: str,
+    summary: str,
+) -> None:
+    bucket = rel_keys.setdefault(char_id, set())
+    if signature in bucket:
+        return
+    bucket.add(signature)
+    rel_summaries.setdefault(char_id, []).append(summary)
 
 
 def _relationship_summary(description: str | None, rel_type: str | None, name_a: str, name_b: str) -> str | None:
@@ -166,10 +257,13 @@ def _merge_description_with_relationships(description: str, relationship_summari
     return f"{description}. {' '.join(preview)}"
 
 
-@router.delete("/{book_id}", status_code=204)
+@router.delete("/{book_id}", response_model=BookOut)
 async def delete_book(book_id: uuid.UUID, db: AsyncSession = Depends(get_db), current_user=Depends(get_current_user)):
     book = await db.get(Book, book_id)
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
-    await db.delete(book)
+    book.hidden_at = datetime.now(timezone.utc)
+    book.archived_at = None
     await db.commit()
+    await db.refresh(book)
+    return book

@@ -39,6 +39,7 @@ export interface ChapterListItem {
   number: number
   title: string | null
   processed: boolean
+  intelligence_available?: boolean
   read: boolean
 }
 
@@ -71,6 +72,38 @@ export interface PlotThread {
   introduced_at: number | null
   resolved_at: number | null
   importance: number
+}
+
+export interface ForeshadowingItem {
+  chapter_number: number
+  chapter_title: string | null
+  clue: string
+  foreshadows: string | null
+}
+
+export interface TimelineEvent {
+  chapter_number: number
+  chapter_title: string | null
+  kind: string
+  title: string
+  detail: string | null
+}
+
+export interface ThematicSearchResult {
+  chapter_number: number
+  chapter_title: string | null
+  score: number
+  summary: string | null
+}
+
+export interface RelationshipEvolutionPair {
+  characters: string[]
+  events: Array<{
+    chapter: number
+    type: string
+    description: string | null
+    sentiment: number | null
+  }>
 }
 
 export interface ChapterSummary {

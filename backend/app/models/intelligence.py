@@ -99,3 +99,17 @@ class WikiEntry(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     book = relationship("Book", back_populates="wiki_entries")
+
+
+class QuoteEntry(Base):
+    """Saved reader quotes with lightweight provenance metadata."""
+    __tablename__ = "quote_entries"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    book_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
+    chapter_number: Mapped[int | None] = mapped_column(Integer)
+    character_name: Mapped[str | None] = mapped_column(String)
+    quote_text: Mapped[str] = mapped_column(Text, nullable=False)
+    note: Mapped[str | None] = mapped_column(String)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

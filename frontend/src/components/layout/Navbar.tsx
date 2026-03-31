@@ -1,16 +1,77 @@
 "use client"
 import Link from "next/link"
+import { authApi } from "@/lib/api/auth"
 import { useAuthStore } from "@/lib/stores/authStore"
+import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 
 export function Navbar() {
   const { user, logout } = useAuthStore()
+  const { theme, toggleTheme } = usePreferencesStore()
+  const isDark = theme === "dark"
+
+  const handleLogout = async () => {
+    try {
+      await authApi.logout()
+    } catch {}
+    logout()
+  }
+
   return (
-    <nav className="border-b border-gray-200 bg-white px-4 py-3 flex items-center justify-between">
-      <Link href="/library" className="font-semibold text-gray-900">LoreVia</Link>
-      <div className="flex items-center gap-4">
-        <Link href="/library" className="text-sm text-gray-600 hover:text-gray-900">Library</Link>
-        <Link href="/settings" className="text-sm text-gray-600 hover:text-gray-900">Settings</Link>
-        {user && <button onClick={logout} className="text-sm text-gray-400 hover:text-gray-600">Sign out</button>}
+    <nav className={`sticky top-0 z-20 border-b px-4 py-4 backdrop-blur-xl transition-colors ${
+      isDark
+        ? "border-white/10 bg-black/70 text-white"
+        : "border-white/60 bg-white/70 text-stone-900"
+    }`}>
+      <div className="mx-auto flex max-w-6xl items-center justify-between gap-4">
+        <Link href="/library" className="flex items-center gap-3">
+          <div className={`flex h-10 w-10 items-center justify-center rounded-2xl text-sm font-semibold ${
+            isDark ? "bg-white/10 text-amber-200" : "bg-stone-900 text-white"
+          }`}>
+            LV
+          </div>
+          <div>
+            <p className={`font-serif text-xl tracking-tight ${isDark ? "text-white" : "text-stone-950"}`}>LoreVia</p>
+            <p className={`text-xs ${isDark ? "text-gray-400" : "text-stone-500"}`}>Reading workspace</p>
+          </div>
+        </Link>
+
+        <div className="flex items-center gap-2 md:gap-3">
+          {[
+            { href: "/library", label: "Library" },
+            { href: "/pricing", label: "Pricing" },
+            { href: "/quotes", label: "Quotes" },
+            { href: "/series", label: "Series" },
+            { href: "/settings", label: "Settings" },
+          ].map((item) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={`rounded-full px-3 py-2 text-sm transition-colors ${
+                isDark ? "text-gray-300 hover:bg-white/10 hover:text-white" : "text-stone-600 hover:bg-white hover:text-stone-950"
+              }`}
+            >
+              {item.label}
+            </Link>
+          ))}
+          <button
+            onClick={toggleTheme}
+            className={`rounded-full px-3 py-2 text-sm transition-colors ${
+              isDark ? "border border-white/10 text-gray-300 hover:bg-white/10 hover:text-white" : "border border-stone-200 text-stone-600 hover:bg-white hover:text-stone-950"
+            }`}
+          >
+            {isDark ? "Light" : "Dark"}
+          </button>
+          {user && (
+            <button
+              onClick={handleLogout}
+              className={`rounded-full px-3 py-2 text-sm transition-colors ${
+                isDark ? "text-gray-400 hover:bg-white/10 hover:text-white" : "text-stone-500 hover:bg-white hover:text-stone-900"
+              }`}
+            >
+              Sign out
+            </button>
+          )}
+        </div>
       </div>
     </nav>
   )

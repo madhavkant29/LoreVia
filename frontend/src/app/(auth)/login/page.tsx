@@ -1,5 +1,5 @@
 "use client"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { authApi } from "@/lib/api/auth"
@@ -11,7 +11,13 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const router = useRouter()
+  const user = useAuthStore(s => s.user)
   const setAuth = useAuthStore(s => s.setAuth)
+  const setUser = useAuthStore(s => s.setUser)
+
+  useEffect(() => {
+    if (user) router.replace("/library")
+  }, [user, router])
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -19,6 +25,8 @@ export default function LoginPage() {
     try {
       const res = await authApi.login(email, password)
       setAuth(res.access_token, res.refresh_token)
+      const me = await authApi.me()
+      setUser(me)
       router.push("/library")
     } catch { setError("Invalid email or password") }
     finally { setLoading(false) }

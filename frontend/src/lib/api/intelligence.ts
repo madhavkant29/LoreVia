@@ -1,9 +1,9 @@
 import { apiClient } from "./client"
-import type { Theory, ChatMessage } from "@/types/intelligence"
+import type { ChatMessage, GroundedAnswer } from "@/types/intelligence"
 
 export const intelligenceApi = {
-  predict: (bookId: string, question: string, currentChapter: number) =>
-    apiClient.post<{ theories: Theory[] }>(`/intelligence/${bookId}/predict`, {
+  answer: (bookId: string, question: string, currentChapter: number) =>
+    apiClient.post<GroundedAnswer>(`/intelligence/${bookId}/qa`, {
       question, current_chapter: currentChapter,
     }).then(r => r.data),
   chat: (bookId: string, characterId: string, messages: ChatMessage[], currentChapter: number, contextSummary = "") =>
