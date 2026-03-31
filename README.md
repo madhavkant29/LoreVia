@@ -226,16 +226,3 @@ LoreVia/
 ## Why This Project Matters
 
 LoreVia was built to solve a real reading problem: long books are hard to hold in working memory. Readers often forget who a character is, when an event happened, or why a relationship matters. This project turns that pain point into a full product experience by combining retrieval, summarization, entity extraction, asynchronous processing, and a focused reading UI.
-
-From an engineering perspective, it demonstrates:
-
-- full-stack product development
-- AI feature integration
-- background job orchestration
-- vector search and retrieval
-- auth and billing foundations
-- spoiler-aware UX design
-
-## Resume Positioning
-
-This is a strong resume project because it is not just a CRUD app or a single-model wrapper. It shows product thinking, architecture, asynchronous systems, and applied AI across a complete user-facing experience.
