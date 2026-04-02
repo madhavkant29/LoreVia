@@ -29,18 +29,18 @@ export function SummaryPanel({ bookId, chapterNum, onClose, theme }: Props) {
   const normalized = summary ? normalizeSummary(summary) : null
 
   return (
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-      <div className={`rounded-2xl w-full max-w-lg max-h-[80vh] flex flex-col transition-colors ${shellClass}`}>
-        <div className={theme === "dark" ? "flex items-center justify-between px-5 py-4 border-b border-white/10" : "flex items-center justify-between px-5 py-4 border-b border-gray-100"}>
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4">
+      <div className={`flex max-h-[86dvh] w-full flex-col rounded-t-3xl sm:max-h-[80vh] sm:max-w-lg sm:rounded-2xl transition-colors ${shellClass}`}>
+        <div className={theme === "dark" ? "flex items-center justify-between border-b border-white/10 px-5 py-4" : "flex items-center justify-between border-b border-gray-100 px-5 py-4"}>
           <h2 className="font-semibold">Chapter {chapterNum} Summary</h2>
-          <button onClick={onClose} className={theme === "dark" ? "text-gray-500 hover:text-white text-xl" : "text-gray-400 hover:text-gray-600 text-xl"}>×</button>
+          <button onClick={onClose} className={theme === "dark" ? "text-xl text-gray-500 hover:text-white" : "text-xl text-gray-400 hover:text-gray-600"}>x</button>
         </div>
-        <div className="flex gap-1 px-5 pt-4">
+        <div className="app-scroll flex gap-1 overflow-x-auto px-5 pt-4">
           {(Object.entries(SUMMARY_MODE_LABELS) as [SummaryMode, string][]).map(([m, label]) => (
             <button
               key={m}
               onClick={() => setMode(m)}
-              className={`text-xs px-3 py-1.5 rounded-full transition-colors ${
+              className={`shrink-0 rounded-full px-3 py-1.5 text-xs transition-colors ${
                 mode === m ? tabActiveClass : tabIdleClass
               }`}
             >
@@ -48,22 +48,22 @@ export function SummaryPanel({ bookId, chapterNum, onClose, theme }: Props) {
             </button>
           ))}
         </div>
-        <div className="flex-1 overflow-y-auto px-5 py-4">
+        <div className="app-scroll flex-1 overflow-y-auto px-5 py-4">
           {loading ? (
-            <div className="flex justify-center py-8"><div className="w-5 h-5 rounded-full border-2 border-indigo-400 border-t-transparent animate-spin" /></div>
+            <div className="flex justify-center py-8"><div className="h-5 w-5 animate-spin rounded-full border-2 border-indigo-400 border-t-transparent" /></div>
           ) : normalized ? (
             <div>
-              <p className={theme === "dark" ? "text-sm text-gray-100 leading-relaxed whitespace-pre-wrap" : "text-sm text-gray-700 leading-relaxed whitespace-pre-wrap"}>
+              <p className={theme === "dark" ? "whitespace-pre-wrap text-sm leading-relaxed text-gray-100" : "whitespace-pre-wrap text-sm leading-relaxed text-gray-700"}>
                 {normalized.content}
               </p>
 
               {normalized.key_events && normalized.key_events.length > 0 && (
                 <div className="mt-4">
-                  <p className={theme === "dark" ? "text-xs font-medium text-gray-400 uppercase tracking-wide mb-2" : "text-xs font-medium text-gray-500 uppercase tracking-wide mb-2"}>
+                  <p className={theme === "dark" ? "mb-2 text-xs font-medium uppercase tracking-wide text-gray-400" : "mb-2 text-xs font-medium uppercase tracking-wide text-gray-500"}>
                     Key Events
                   </p>
                   {normalized.key_events.map((e, i) => (
-                    <p key={i} className={theme === "dark" ? "text-sm text-gray-300 mb-1" : "text-sm text-gray-600 mb-1"}>
+                    <p key={i} className={theme === "dark" ? "mb-1 text-sm text-gray-300" : "mb-1 text-sm text-gray-600"}>
                       - {e.event}
                     </p>
                   ))}
@@ -72,11 +72,11 @@ export function SummaryPanel({ bookId, chapterNum, onClose, theme }: Props) {
 
               {normalized.char_changes && normalized.char_changes.length > 0 && (
                 <div className="mt-4">
-                  <p className={theme === "dark" ? "text-xs font-medium text-gray-400 uppercase tracking-wide mb-2" : "text-xs font-medium text-gray-500 uppercase tracking-wide mb-2"}>
+                  <p className={theme === "dark" ? "mb-2 text-xs font-medium uppercase tracking-wide text-gray-400" : "mb-2 text-xs font-medium uppercase tracking-wide text-gray-500"}>
                     Character Changes
                   </p>
                   {normalized.char_changes.map((e, i) => (
-                    <p key={i} className={theme === "dark" ? "text-sm text-gray-300 mb-1" : "text-sm text-gray-600 mb-1"}>
+                    <p key={i} className={theme === "dark" ? "mb-1 text-sm text-gray-300" : "mb-1 text-sm text-gray-600"}>
                       - {e.character}: {e.change}
                     </p>
                   ))}
@@ -85,11 +85,11 @@ export function SummaryPanel({ bookId, chapterNum, onClose, theme }: Props) {
 
               {normalized.clues && normalized.clues.length > 0 && (
                 <div className="mt-4">
-                  <p className={theme === "dark" ? "text-xs font-medium text-gray-400 uppercase tracking-wide mb-2" : "text-xs font-medium text-gray-500 uppercase tracking-wide mb-2"}>
+                  <p className={theme === "dark" ? "mb-2 text-xs font-medium uppercase tracking-wide text-gray-400" : "mb-2 text-xs font-medium uppercase tracking-wide text-gray-500"}>
                     Clues
                   </p>
                   {normalized.clues.map((e, i) => (
-                    <p key={i} className={theme === "dark" ? "text-sm text-gray-300 mb-1" : "text-sm text-gray-600 mb-1"}>
+                    <p key={i} className={theme === "dark" ? "mb-1 text-sm text-gray-300" : "mb-1 text-sm text-gray-600"}>
                       - {e.clue}
                     </p>
                   ))}
@@ -97,7 +97,7 @@ export function SummaryPanel({ bookId, chapterNum, onClose, theme }: Props) {
               )}
             </div>
           ) : (
-            <p className={theme === "dark" ? "text-sm text-gray-500 text-center py-8" : "text-sm text-gray-400 text-center py-8"}>
+            <p className={theme === "dark" ? "py-8 text-center text-sm text-gray-500" : "py-8 text-center text-sm text-gray-400"}>
               Summary not available yet
             </p>
           )}

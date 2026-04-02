@@ -29,6 +29,7 @@ export const useAuthStore = create<AuthStore>()(
         if (typeof window !== "undefined") {
           localStorage.removeItem("access_token")
           localStorage.removeItem("refresh_token")
+          localStorage.removeItem("lorevia-auth")
         }
         set({ user: null, accessToken: null, refreshToken: null })
       },

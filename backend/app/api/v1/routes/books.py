@@ -1,17 +1,15 @@
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, and_
 from app.core.database import get_db
-from app.core.storage import upload_book
-from app.models.book import Book
+from app.core.storage import upload_book_bytes
+from app.models.book import Book, Chapter
 from app.models.character import Character
 from app.models.intelligence import CharacterRelationship, QuoteEntry
 from app.engine.character.consolidator import consolidate_characters
 from app.engine.character.profile_builder import build_description
 from app.api.deps.auth import get_current_user
 from app.api.deps.subscription import check_upload_limit
-from app.utils.external.isbn_lookup import extract_isbn_from_pdf
-from app.utils.compliance.copyright_check import check_isbn
 from app.workers.tasks.extraction_tasks import process_book_task
 from pydantic import BaseModel, ConfigDict
 from datetime import datetime, timezone
@@ -32,9 +30,19 @@ class BookOut(BaseModel):
     total_chapters: int | None
     total_tokens: int | None
     is_truncated: bool
+    series_name: str | None
+    series_order: int | None
+    is_public: bool
+    public_description: str | None
+    copyright_warning: bool
     archived_at: datetime | None
     hidden_at: datetime | None
     created_at: datetime
+
+
+class SeriesBody(BaseModel):
+    series_name: str | None = None
+    series_order: int | None = None
 
 
 @router.post("/upload", status_code=202)
@@ -43,6 +51,8 @@ async def upload_book_endpoint(
     title: str = Form(...),
     genre: str | None = Form(None),
     author: str | None = Form(None),
+    visibility: str = Form("private"),
+    description: str | None = Form(None),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
     _=Depends(check_upload_limit),
@@ -53,24 +63,59 @@ async def upload_book_endpoint(
         author = bleach.clean(author, tags=[], strip=True)
     if genre:
         genre = bleach.clean(genre, tags=[], strip=True)
+    if description:
+        description = bleach.clean(description, tags=[], strip=True)
     if not file.filename:
         raise HTTPException(400, "No file")
-    fmt = "pdf" if file.filename.endswith(".pdf") else "epub"
-    raw = await file.read()
-    isbn = extract_isbn_from_pdf(raw) if fmt == "pdf" else None
-    copyright_info = await check_isbn(isbn) if isbn else {"found": False}
+    if visibility not in {"private", "public"}:
+        raise HTTPException(400, "Invalid visibility")
+    if not title.strip():
+        raise HTTPException(400, "Title is required")
 
-    import io
-    s3_key = upload_book(io.BytesIO(raw), str(current_user.id), file.filename)
+    filename = file.filename.lower()
+    if filename.endswith(".pdf"):
+        fmt = "pdf"
+    elif filename.endswith(".epub"):
+        fmt = "epub"
+    else:
+        raise HTTPException(400, "Only PDF and EPUB files are supported")
+
+    is_public = visibility == "public"
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(400, "Uploaded file is empty")
+    s3_key = upload_book_bytes(raw, str(current_user.id), file.filename)
     book = Book(user_id=current_user.id, title=title, genre=genre, author=author,
-                format=fmt, s3_key=s3_key, isbn=isbn, status="pending")
+                format=fmt, s3_key=s3_key, status="pending", is_public=is_public, public_description=description)
     db.add(book)
     await db.commit()
     await db.refresh(book)
 
     process_book_task.apply_async(args=[str(book.id)], queue="extraction")
     return {"book_id": str(book.id), "status": "processing",
-            "copyright_warning": copyright_info.get("found", False)}
+            "copyright_warning": False, "visibility": visibility}
+
+
+@router.put("/{book_id}/series", response_model=BookOut)
+async def update_book_series(
+    book_id: uuid.UUID,
+    body: SeriesBody,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await db.get(Book, book_id)
+    if not book or book.user_id != current_user.id:
+        raise HTTPException(404, "Book not found")
+
+    series_name = bleach.clean((body.series_name or "").strip(), tags=[], strip=True)
+    if body.series_order is not None and body.series_order < 1:
+        raise HTTPException(400, "Series order must be at least 1")
+
+    book.series_name = series_name or None
+    book.series_order = body.series_order if series_name else None
+    await db.commit()
+    await db.refresh(book)
+    return book
 
 
 @router.get("", response_model=list[BookOut])
@@ -89,8 +134,15 @@ async def list_books(
 @router.get("/quotes")
 async def list_saved_quotes(db: AsyncSession = Depends(get_db), current_user=Depends(get_current_user)):
     rows = (await db.execute(
-        select(QuoteEntry, Book.title)
+        select(QuoteEntry, Book.title, Chapter.title)
         .join(Book, Book.id == QuoteEntry.book_id)
+        .outerjoin(
+            Chapter,
+            and_(
+                Chapter.book_id == QuoteEntry.book_id,
+                Chapter.number == QuoteEntry.chapter_number,
+            ),
+        )
         .where(QuoteEntry.user_id == current_user.id)
         .order_by(QuoteEntry.created_at.desc())
     )).all()
@@ -100,12 +152,13 @@ async def list_saved_quotes(db: AsyncSession = Depends(get_db), current_user=Dep
             "book_id": str(quote.book_id),
             "book_title": book_title,
             "chapter_number": quote.chapter_number,
+            "chapter_title": chapter_title,
             "character_name": quote.character_name,
             "quote_text": quote.quote_text,
             "note": quote.note,
             "created_at": quote.created_at,
         }
-        for quote, book_title in rows
+        for quote, book_title, chapter_title in rows
     ]
 
 

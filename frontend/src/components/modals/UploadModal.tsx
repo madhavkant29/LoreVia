@@ -8,8 +8,13 @@ const GENRES = ["anime", "light novel", "fantasy", "sci-fi", "romance", "thrille
 export function UploadModal({ onClose }: { onClose: () => void }) {
   const [title, setTitle] = useState("")
   const [genre, setGenre] = useState("")
+  const [author, setAuthor] = useState("")
+  const [visibility, setVisibility] = useState<"private" | "public">("private")
+  const [description, setDescription] = useState("")
   const [file, setFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState(0)
+  const [uploadStage, setUploadStage] = useState<"idle" | "uploading" | "processing">("idle")
   const [error, setError] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const { theme } = usePreferencesStore()
@@ -23,14 +28,25 @@ export function UploadModal({ onClose }: { onClose: () => void }) {
     }
 
     setUploading(true)
+    setUploadProgress(0)
+    setUploadStage("uploading")
     setError(null)
     try {
-      await booksApi.upload(file, title, genre || undefined)
+      await booksApi.upload(file, title, genre || undefined, author || undefined, {
+        visibility,
+        description: visibility === "public" ? description || undefined : undefined,
+        onProgress: (percent) => {
+          setUploadProgress(percent)
+        },
+      })
+      setUploadStage("processing")
+      setUploadProgress(100)
       onClose()
     } catch {
       setError("Upload failed. Please try again.")
     } finally {
       setUploading(false)
+      setUploadStage("idle")
     }
   }
 
@@ -75,6 +91,18 @@ export function UploadModal({ onClose }: { onClose: () => void }) {
             }`}
           />
 
+          <input
+            type="text"
+            placeholder="Author (optional)"
+            value={author}
+            onChange={e => setAuthor(e.target.value)}
+            className={`rounded-lg border px-3 py-2.5 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
+              isDark
+                ? "border-white/10 bg-white/5 text-slate-100 placeholder:text-slate-500"
+                : "border-gray-300 bg-white text-slate-950 placeholder:text-slate-400"
+            }`}
+          />
+
           <select
             value={genre}
             onChange={e => setGenre(e.target.value)}
@@ -91,6 +119,39 @@ export function UploadModal({ onClose }: { onClose: () => void }) {
               </option>
             ))}
           </select>
+
+          <div className={`grid grid-cols-2 gap-2 rounded-xl border p-1 ${
+            isDark ? "border-white/10 bg-white/[0.03]" : "border-gray-200 bg-gray-50"
+          }`}>
+            {(["private", "public"] as const).map((option) => (
+              <button
+                key={option}
+                type="button"
+                onClick={() => setVisibility(option)}
+                className={`rounded-lg px-3 py-2 text-sm font-medium transition ${
+                  visibility === option
+                    ? isDark ? "bg-white text-slate-950" : "bg-slate-950 text-white"
+                    : isDark ? "text-slate-300 hover:bg-white/5" : "text-slate-600 hover:bg-white"
+                }`}
+              >
+                {option === "private" ? "Private upload" : "Public upload"}
+              </button>
+            ))}
+          </div>
+
+          {visibility === "public" ? (
+            <textarea
+              placeholder="Public description (shown in the public library)"
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+              rows={3}
+              className={`rounded-lg border px-3 py-2.5 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
+                isDark
+                  ? "border-white/10 bg-white/5 text-slate-100 placeholder:text-slate-500"
+                  : "border-gray-300 bg-white text-slate-950 placeholder:text-slate-400"
+              }`}
+            />
+          ) : null}
 
           <div
             onClick={() => inputRef.current?.click()}
@@ -116,12 +177,46 @@ export function UploadModal({ onClose }: { onClose: () => void }) {
 
           {error && <p className="text-sm text-red-500">{error}</p>}
 
+          {uploading ? (
+            <div
+              className={`rounded-xl border p-3 ${
+                isDark ? "border-white/10 bg-white/[0.03]" : "border-gray-200 bg-gray-50"
+              }`}
+            >
+              <div className="mb-2 flex items-center justify-between text-xs font-medium">
+                <span className={isDark ? "text-slate-300" : "text-slate-600"}>
+                  {uploadStage === "uploading" ? "Uploading file" : "Handing off for processing"}
+                </span>
+                <span className={isDark ? "text-slate-200" : "text-slate-700"}>
+                  {uploadStage === "uploading" ? `${uploadProgress}%` : "Queued"}
+                </span>
+              </div>
+              <div className={`h-2 overflow-hidden rounded-full ${isDark ? "bg-white/10" : "bg-gray-200"}`}>
+                <div
+                  className="h-full rounded-full bg-indigo-600 transition-all duration-200"
+                  style={{ width: `${uploadStage === "processing" ? 100 : uploadProgress}%` }}
+                />
+              </div>
+              <p className={`mt-2 text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                {uploadStage === "uploading"
+                  ? "Large PDFs can take a bit depending on your network speed."
+                  : "Your book upload finished. Parsing and AI extraction continue in the background."}
+              </p>
+            </div>
+          ) : null}
+
           <button
             type="submit"
             disabled={uploading}
             className="rounded-lg bg-indigo-600 py-2.5 text-sm font-medium text-white transition-colors hover:bg-indigo-700 disabled:opacity-50"
           >
-            {uploading ? "Uploading..." : "Upload & Process"}
+            {uploading
+              ? uploadStage === "uploading"
+                ? "Uploading..."
+                : "Starting processing..."
+              : visibility === "public"
+                ? "Publish & Process"
+                : "Upload & Process"}
           </button>
         </form>
       </div>

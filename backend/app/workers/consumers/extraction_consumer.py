@@ -16,6 +16,8 @@ from app.engine.character.deduplicator import embed_for_dedup, find_by_name_or_a
 from app.engine.character.profile_builder import build_character_profile, update_profile
 from app.engine.embeddings.embedder import embed_batch, embed_character
 from app.parsers.chunker import chunk_text, count_tokens
+from app.utils.compliance.copyright_check import check_isbn
+from app.utils.external.isbn_lookup import extract_isbn_from_pdf
 from sqlalchemy import delete, update as sa_update, select
 import logging
 
@@ -32,6 +34,14 @@ async def process_book(book_id: str) -> dict:
         await db.commit()
 
         raw = download_book(book.s3_key)
+        if book.is_public and book.format == "pdf" and not book.isbn:
+            detected_isbn = extract_isbn_from_pdf(raw)
+            if detected_isbn:
+                book.isbn = detected_isbn
+        if book.is_public and book.isbn:
+            copyright_info = await check_isbn(book.isbn)
+            book.copyright_warning = bool(copyright_info.get("found", False))
+        await db.commit()
         if book.format == "pdf":
             from app.parsers.pdf_parser import parse_pdf
             chapters = parse_pdf(raw)
@@ -106,9 +116,13 @@ async def process_book(book_id: str) -> dict:
             await _ensure_chapter_stub(db, book, ch_data)
         await db.commit()
 
-        # Process first N chapters immediately
+        # Queue first N chapters immediately so book upload completes faster.
+        from app.workers.tasks.extraction_tasks import process_chapter_task
         for ch_data in ai_chapters[:settings.LAZY_PROCESS_INITIAL_CHAPTERS]:
-            await _process_chapter(db, book, ch_data)
+            process_chapter_task.apply_async(
+                args=[str(book.id), ch_data["number"], "", ""],
+                queue="extraction",
+            )
 
         await db.execute(sa_update(Book).where(Book.id == book.id).values(status="ready"))
         await db.commit()
@@ -270,6 +284,7 @@ async def _ensure_chapter_stub(db, book, ch_data: dict):
                 book_id=book.id,
                 number=ch_data["number"],
                 title=ch_data.get("title"),
+                description=ch_data.get("description"),
                 s3_key=s3_key,
                 token_count=count_tokens(ch_data["text"]),
                 processed=False,
@@ -280,6 +295,9 @@ async def _ensure_chapter_stub(db, book, ch_data: dict):
     changed = False
     if ch_data.get("title") and (not existing.title or not existing.title.strip()):
         existing.title = ch_data["title"]
+        changed = True
+    if ch_data.get("description") and (not existing.description or not existing.description.strip()):
+        existing.description = ch_data["description"]
         changed = True
     if ch_data.get("text") and not existing.s3_key:
         try:

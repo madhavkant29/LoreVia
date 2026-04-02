@@ -106,3 +106,15 @@ def key_webhook_event(event_id: str) -> str:
 def key_grounded_answer(book_id: str, chapter: int, question: str) -> str:
     q_hash = hashlib.md5(question.strip().lower().encode()).hexdigest()[:10]
     return f"grounded_answer:{book_id}:{chapter}:{q_hash}"
+
+
+def key_public_books() -> str:
+    return "public:books"
+
+
+def key_public_book_detail(book_id: str) -> str:
+    return f"public:book:{book_id}"
+
+
+def key_public_chapter(book_id: str, chapter_num: int) -> str:
+    return f"public:chapter:{book_id}:{chapter_num}"

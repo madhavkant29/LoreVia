@@ -50,6 +50,24 @@ def upload_book(file: BinaryIO, user_id: str, filename: str) -> str:
     return key
 
 
+def upload_book_bytes(raw: bytes, user_id: str, filename: str) -> str:
+    safe_name = Path(filename).name
+    key = f"books/{user_id}/{uuid.uuid4()}/{safe_name}"
+    if is_local_storage():
+        path = _local_path(key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(raw)
+    else:
+        s3 = _get_s3_client()
+        s3.put_object(
+            Bucket=settings.S3_BUCKET,
+            Key=key,
+            Body=raw,
+            ACL="private",
+        )
+    return key
+
+
 def upload_text(key: str, content: str) -> str:
     if is_local_storage():
         path = _local_path(key)

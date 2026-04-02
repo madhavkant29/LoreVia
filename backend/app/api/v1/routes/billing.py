@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps.auth import get_current_user
 from app.core.database import get_db
 from app.models.user import Subscription, User
-from app.services.stripe_service import create_checkout_session, create_portal_session, stripe_is_configured
+from app.services.paddle_service import create_checkout_url, create_portal_url, paddle_is_configured
 
 router = APIRouter()
 
@@ -21,14 +21,14 @@ async def start_checkout(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if body.plan not in {"pro_monthly", "pro_annual", "power_monthly"}:
+    if body.plan not in {"pro_monthly", "pro_annual", "power_monthly", "power_annual"}:
         raise HTTPException(400, "Invalid plan")
 
-    if not stripe_is_configured():
+    if not paddle_is_configured():
         return {
             "checkout_url": None,
             "billing_enabled": False,
-            "message": "Stripe is not configured in this environment.",
+            "message": "Paddle is not configured in this environment.",
         }
 
     existing = (
@@ -52,12 +52,18 @@ async def start_checkout(
 
     await db.commit()
 
-    checkout_url = create_checkout_session(
-        str(current_user.id),
-        current_user.email,
-        body.plan,
-        idempotency_key=f"checkout:{current_user.id}:{existing.id}:{body.plan}",
-    )
+    try:
+        checkout_url, customer_id = await create_checkout_url(
+            str(current_user.id),
+            current_user.email,
+            body.plan,
+            existing_customer_id=existing.paddle_customer_id,
+        )
+    except Exception as exc:
+        raise HTTPException(502, f"Unable to start Paddle checkout: {exc}")
+
+    existing.paddle_customer_id = customer_id
+    await db.commit()
     return {"checkout_url": checkout_url, "billing_enabled": True}
 
 
@@ -66,26 +72,29 @@ async def open_portal(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if not stripe_is_configured():
+    if not paddle_is_configured():
         return {
             "portal_url": None,
             "billing_enabled": False,
-            "message": "Stripe is not configured in this environment.",
+            "message": "Paddle is not configured in this environment.",
         }
 
     subscription = (
         await db.execute(
             select(Subscription)
-            .where(Subscription.user_id == current_user.id, Subscription.stripe_customer_id.is_not(None))
+            .where(Subscription.user_id == current_user.id, Subscription.paddle_customer_id.is_not(None))
             .order_by(Subscription.created_at.desc())
         )
     ).scalars().first()
 
-    if not subscription or not subscription.stripe_customer_id:
+    if not subscription or not subscription.paddle_customer_id:
         raise HTTPException(404, "No billing account found")
 
-    portal_url = create_portal_session(
-        subscription.stripe_customer_id,
-        idempotency_key=f"portal:{current_user.id}:{subscription.id}",
-    )
+    try:
+        portal_url = await create_portal_url(
+            subscription.paddle_customer_id,
+            [subscription.paddle_sub_id] if subscription.paddle_sub_id else None,
+        )
+    except Exception as exc:
+        raise HTTPException(502, f"Unable to open Paddle portal: {exc}")
     return {"portal_url": portal_url, "billing_enabled": True}

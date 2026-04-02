@@ -40,12 +40,14 @@ class Settings(BaseSettings):
     JWT_EXPIRE_MINUTES: int = 1440
     JWT_REFRESH_EXPIRE_DAYS: int = 30
 
-    # Stripe
-    STRIPE_SECRET_KEY: str
-    STRIPE_WEBHOOK_SECRET: str
-    STRIPE_PRO_MONTHLY_PRICE_ID: str | None = None
-    STRIPE_PRO_ANNUAL_PRICE_ID: str | None = None
-    STRIPE_POWER_MONTHLY_PRICE_ID: str | None = None
+    # Paddle
+    PADDLE_API_KEY: str | None = None
+    PADDLE_WEBHOOK_SECRET: str | None = None
+    PADDLE_DEFAULT_CHECKOUT_URL: str | None = None
+    PADDLE_PRO_MONTHLY_PRICE_ID: str | None = None
+    PADDLE_PRO_ANNUAL_PRICE_ID: str | None = None
+    PADDLE_POWER_MONTHLY_PRICE_ID: str | None = None
+    PADDLE_POWER_ANNUAL_PRICE_ID: str | None = None
     APP_URL: str = "http://localhost:3000"
 
     # Email
@@ -55,8 +57,12 @@ class Settings(BaseSettings):
     # Monitoring
     SENTRY_DSN: str | None = None
 
+    # Supabase OAuth
+    SUPABASE_URL: str | None = None
+    SUPABASE_SERVICE_KEY: str | None = None
+
     # Processing
-    LAZY_PROCESS_INITIAL_CHAPTERS: int = 3
+    LAZY_PROCESS_INITIAL_CHAPTERS: int = 1
     CHUNK_MAX_TOKENS: int = 1500
     CHUNK_OVERLAP_TOKENS: int = 100
     EXTRACTION_BATCH_MAX_TOKENS: int = 5000

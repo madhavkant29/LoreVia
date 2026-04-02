@@ -20,6 +20,7 @@ class User(Base):
     subscriptions = relationship("Subscription", back_populates="user", cascade="all, delete-orphan")
     reading_progress = relationship("ReadingProgress", back_populates="user", cascade="all, delete-orphan")
     reading_sessions = relationship("ReadingSession", back_populates="user", cascade="all, delete-orphan")
+    rate_limit_override = relationship("UserRateLimitOverride", back_populates="user", cascade="all, delete-orphan", uselist=False)
 
 
 class Subscription(Base):
@@ -27,6 +28,9 @@ class Subscription(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), __import__("sqlalchemy").ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    paddle_customer_id: Mapped[str | None] = mapped_column(String)
+    paddle_sub_id: Mapped[str | None] = mapped_column(String)
+    paddle_transaction_id: Mapped[str | None] = mapped_column(String)
     stripe_customer_id: Mapped[str | None] = mapped_column(String)
     stripe_sub_id: Mapped[str | None] = mapped_column(String)
     plan: Mapped[str] = mapped_column(String)
@@ -35,3 +39,18 @@ class Subscription(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     user = relationship("User", back_populates="subscriptions")
+
+
+class UserRateLimitOverride(Base):
+    __tablename__ = "user_rate_limit_overrides"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), __import__("sqlalchemy").ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    search_per_hour: Mapped[int | None] = mapped_column(__import__("sqlalchemy").Integer)
+    summary_per_hour: Mapped[int | None] = mapped_column(__import__("sqlalchemy").Integer)
+    chat_per_day: Mapped[int | None] = mapped_column(__import__("sqlalchemy").Integer)
+    api_per_minute: Mapped[int | None] = mapped_column(__import__("sqlalchemy").Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    user = relationship("User", back_populates="rate_limit_override")

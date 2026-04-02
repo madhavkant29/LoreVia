@@ -4,6 +4,8 @@ export type SummaryMode = "short" | "detailed" | "key_points"
 export interface ChapterData {
   chapter_number: number
   chapter_title: string | null
+  total_chapters?: number | null
+  intelligence_available?: boolean
   text_url: string | null
   text_content?: string | null
   characters: ChapterCharacter[]

@@ -21,7 +21,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       }`}
     >
       <Navbar />
-      <main className="mx-auto max-w-6xl px-4 py-8 md:px-6">{children}</main>
+      <main className="mx-auto max-w-6xl px-4 py-5 md:px-6 md:py-8">{children}</main>
     </div>
   )
 }

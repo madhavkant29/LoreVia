@@ -10,6 +10,7 @@ from app.api.deps.auth import get_current_user
 from pydantic import BaseModel, ConfigDict, EmailStr
 from datetime import datetime
 import uuid
+import httpx
 
 router = APIRouter()
 
@@ -34,6 +35,10 @@ class UserOut(BaseModel):
     tier: str
     reading_mode: str
     created_at: datetime
+
+
+class SupabaseOAuthBody(BaseModel):
+    token: str
 
 
 async def _mint_token_pair(user_id: str) -> TokenOut:
@@ -64,9 +69,56 @@ async def register(body: RegisterBody, db: AsyncSession = Depends(get_db)):
 @router.post("/login", response_model=TokenOut)
 async def login(body: LoginBody, db: AsyncSession = Depends(get_db)):
     user = (await db.execute(select(User).where(User.email == body.email))).scalar()
-    if not user or not verify_password(body.password, user.password_hash):
+    if not user:
+        raise HTTPException(401, "Invalid credentials")
+    try:
+        valid = verify_password(body.password, user.password_hash)
+    except Exception:
+        valid = False
+    if not valid:
         raise HTTPException(401, "Invalid credentials")
     return await _mint_token_pair(str(user.id))
+
+
+@router.post("/oauth/supabase", response_model=TokenOut)
+async def oauth_supabase(body: SupabaseOAuthBody, db: AsyncSession = Depends(get_db)):
+    if not settings.SUPABASE_URL or not settings.SUPABASE_SERVICE_KEY:
+        raise HTTPException(503, "Supabase OAuth is not configured")
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.get(
+                f"{settings.SUPABASE_URL.rstrip('/')}/auth/v1/user",
+                headers={
+                    "apikey": settings.SUPABASE_SERVICE_KEY,
+                    "Authorization": f"Bearer {body.token}",
+                },
+            )
+    except httpx.HTTPError:
+        raise HTTPException(503, "Supabase OAuth verification is unavailable")
+
+    if response.status_code != 200:
+        raise HTTPException(401, "Invalid Supabase token")
+
+    try:
+        sb_user = response.json()
+    except ValueError:
+        raise HTTPException(503, "Supabase OAuth verification returned invalid data")
+
+    email = sb_user.get("email")
+    if not email:
+        raise HTTPException(401, "Invalid Supabase token")
+
+    existing = (await db.execute(select(User).where(User.email == email))).scalar()
+    if not existing:
+        existing = User(
+            email=email,
+            password_hash=hash_password(str(uuid.uuid4())),
+        )
+        db.add(existing)
+        await db.commit()
+        await db.refresh(existing)
+
+    return await _mint_token_pair(str(existing.id))
 
 
 @router.post("/refresh", response_model=TokenOut)

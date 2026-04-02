@@ -6,6 +6,8 @@ export const authApi = {
     apiClient.post<TokenResponse>("/auth/register", { email, password }).then(r => r.data),
   login: (email: string, password: string) =>
     apiClient.post<TokenResponse>("/auth/login", { email, password }).then(r => r.data),
+  loginWithSupabaseToken: (token: string) =>
+    apiClient.post<TokenResponse>("/auth/oauth/supabase", { token }).then(r => r.data),
   refresh: (refresh_token: string) =>
     apiClient.post<TokenResponse>("/auth/refresh", null, { params: { refresh_token } }).then(r => r.data),
   logout: () => apiClient.post("/auth/logout").then(r => r.data),

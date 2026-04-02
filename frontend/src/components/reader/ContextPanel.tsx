@@ -1,67 +1,127 @@
 "use client"
+import { useMemo, useState } from "react"
 import { useParams } from "next/navigation"
-import { useState } from "react"
-import type { ContextResult } from "@/types/reader"
+import type { ChapterCharacter, ContextResult } from "@/types/reader"
 import { CharacterCard } from "@/components/characters/CharacterCard"
 import { readerApi } from "@/lib/api/reader"
 
 interface Props {
-  result: ContextResult
+  result: ContextResult | null
   loading: boolean
   onClose: () => void
   theme: "light" | "dark"
+  selectedQuote: string | null
+  chapterNumber: number
+  chapterTitle: string | null
+  characters: ChapterCharacter[]
 }
 
-export function ContextPanel({ result, loading, onClose, theme }: Props) {
+export function ContextPanel({
+  result,
+  loading,
+  onClose,
+  theme,
+  selectedQuote,
+  chapterNumber,
+  chapterTitle,
+  characters,
+}: Props) {
   const { bookId } = useParams<{ bookId: string }>()
-  const [savingIndex, setSavingIndex] = useState<number | null>(null)
+  const [savingQuote, setSavingQuote] = useState(false)
+  const [quoteCharacter, setQuoteCharacter] = useState("")
+  const [quoteNote, setQuoteNote] = useState("")
+
   const shellClass = theme === "dark"
-    ? "border-l border-white/10 bg-black text-white"
-    : "border-l border-gray-100 bg-white text-black"
+    ? "border border-white/10 bg-black text-white"
+    : "border border-gray-100 bg-white text-black"
   const borderClass = theme === "dark" ? "border-b border-white/10" : "border-b border-gray-100"
   const cardClass = theme === "dark" ? "bg-white/5" : "bg-gray-50"
   const textClass = theme === "dark" ? "text-gray-300" : "text-gray-700"
 
-  const saveQuote = async (quoteText: string, chapterNumber?: number, characterName?: string | null, index = 0) => {
-    setSavingIndex(index)
+  const characterOptions = useMemo(
+    () => Array.from(new Set((characters ?? []).map((character) => character.name).filter(Boolean))).sort(),
+    [characters],
+  )
+
+  const saveSelectedQuote = async () => {
+    if (!selectedQuote?.trim()) return
+    setSavingQuote(true)
     try {
       await readerApi.saveQuote(bookId, {
-        quote_text: quoteText,
+        quote_text: selectedQuote,
         chapter_number: chapterNumber,
-        character_name: characterName,
+        character_name: quoteCharacter || null,
+        note: quoteNote || null,
       })
+      setQuoteCharacter("")
+      setQuoteNote("")
     } finally {
-      setSavingIndex(null)
+      setSavingQuote(false)
     }
   }
 
   return (
-    <aside className={`w-80 flex flex-col overflow-hidden shrink-0 transition-colors ${shellClass}`}>
+    <aside className={`fixed inset-x-0 bottom-0 top-auto z-30 max-h-[78dvh] overflow-hidden rounded-t-3xl shadow-2xl transition-colors md:static md:inset-auto md:max-h-none md:w-80 md:rounded-none md:shadow-none ${shellClass}`}>
       <div className={`flex items-center justify-between px-4 py-3 ${borderClass}`}>
         <span className={theme === "dark" ? "text-sm font-medium text-white" : "text-sm font-medium text-gray-700"}>Context</span>
-        <button onClick={onClose} className={theme === "dark" ? "text-gray-500 hover:text-white text-lg" : "text-gray-400 hover:text-gray-600 text-lg"}>×</button>
+        <button onClick={onClose} className={theme === "dark" ? "text-lg text-gray-500 hover:text-white" : "text-lg text-gray-400 hover:text-gray-600"}>x</button>
       </div>
-      <div className="flex-1 overflow-y-auto p-4">
-        {loading && <div className={theme === "dark" ? "text-center py-8 text-gray-500 text-sm" : "text-center py-8 text-gray-400 text-sm"}>Loading...</div>}
-        {!loading && result.type === "character" && result.character && (
+
+      <div className="app-scroll flex h-full flex-col overflow-y-auto p-4">
+        {selectedQuote?.trim() ? (
+          <div className={`mb-4 rounded-xl border p-3 ${theme === "dark" ? "border-white/10 bg-white/5" : "border-gray-200 bg-gray-50"}`}>
+            <p className={theme === "dark" ? "text-xs font-medium uppercase tracking-wide text-gray-400" : "text-xs font-medium uppercase tracking-wide text-gray-500"}>
+              Bookmark selected line
+            </p>
+            <p className={`mt-2 whitespace-pre-wrap text-sm leading-relaxed ${textClass}`}>{selectedQuote.trim()}</p>
+            <div className="mt-3 space-y-3">
+              <div className={`rounded-lg border px-3 py-2 text-xs ${theme === "dark" ? "border-white/10 text-gray-400" : "border-gray-200 text-gray-500"}`}>
+                <span className="font-medium">Chapter:</span> {chapterTitle ? `${chapterNumber} - ${chapterTitle}` : `Chapter ${chapterNumber}`}
+              </div>
+              <select
+                value={quoteCharacter}
+                onChange={(e) => setQuoteCharacter(e.target.value)}
+                className={`w-full rounded-lg border px-3 py-2 text-sm ${theme === "dark" ? "border-white/10 bg-white/5 text-white" : "border-gray-300 bg-white text-gray-900"}`}
+              >
+                <option value="">Who said it? (optional)</option>
+                {characterOptions.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+              <textarea
+                value={quoteNote}
+                onChange={(e) => setQuoteNote(e.target.value)}
+                placeholder="Why does this line matter? (optional)"
+                rows={3}
+                className={`w-full rounded-lg border px-3 py-2 text-sm ${theme === "dark" ? "border-white/10 bg-white/5 text-white placeholder:text-gray-500" : "border-gray-300 bg-white text-gray-900 placeholder:text-gray-400"}`}
+              />
+              <button
+                onClick={saveSelectedQuote}
+                className={theme === "dark" ? "w-full rounded-full bg-indigo-500 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-400" : "w-full rounded-full bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-500"}
+              >
+                {savingQuote ? "Saving..." : "Save line bookmark"}
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        {loading && <div className={theme === "dark" ? "py-8 text-center text-sm text-gray-500" : "py-8 text-center text-sm text-gray-400"}>Loading...</div>}
+
+        {!loading && result?.type === "character" && result.character && (
           <div>
             <CharacterCard character={result.character} theme={theme} />
-            <button
-              onClick={() => saveQuote(result.character.description ?? result.character.name, result.character.first_chapter, result.character.name, -1)}
-              className={theme === "dark" ? "mt-3 rounded-full border border-white/15 px-3 py-1 text-xs text-gray-300 hover:bg-white/5" : "mt-3 rounded-full border border-gray-300 px-3 py-1 text-xs text-gray-600 hover:bg-gray-100"}
-            >
-              {savingIndex === -1 ? "Saving..." : "Save note"}
-            </button>
             {result.relationships && result.relationships.length > 0 && (
               <div className="mt-4">
-                <p className={theme === "dark" ? "text-xs font-medium text-gray-400 mb-2 uppercase tracking-wide" : "text-xs font-medium text-gray-500 mb-2 uppercase tracking-wide"}>
+                <p className={theme === "dark" ? "mb-2 text-xs font-medium uppercase tracking-wide text-gray-400" : "mb-2 text-xs font-medium uppercase tracking-wide text-gray-500"}>
                   Relationships
                 </p>
                 <div className="flex flex-col gap-2">
-                  {result.relationships.map((r, i) => (
-                    <div key={i} className={`text-sm rounded-lg p-2 ${cardClass}`}>
-                      <span className="capitalize font-medium text-indigo-500">{r.type}</span>
-                      {r.description && <p className={`text-xs mt-0.5 ${textClass}`}>{r.description}</p>}
+                  {result.relationships.map((relationship, index) => (
+                    <div key={index} className={`rounded-lg p-2 text-sm ${cardClass}`}>
+                      <span className="font-medium capitalize text-indigo-500">{relationship.type}</span>
+                      {relationship.description && <p className={`mt-0.5 text-xs ${textClass}`}>{relationship.description}</p>}
                     </div>
                   ))}
                 </div>
@@ -69,23 +129,18 @@ export function ContextPanel({ result, loading, onClose, theme }: Props) {
             )}
           </div>
         )}
-        {!loading && result.type === "search" && (
+
+        {!loading && result?.type === "search" && (
           <div className="flex flex-col gap-3">
             {(result.results ?? []).length === 0 && (
               <p className={theme === "dark" ? "text-sm text-gray-500" : "text-sm text-gray-400"}>No relevant passages found.</p>
             )}
-            {(result.results ?? []).map((r, i) => (
-              <div key={i} className={`rounded-lg p-3 ${cardClass}`}>
+            {(result.results ?? []).map((searchResult, index) => (
+              <div key={index} className={`rounded-lg p-3 ${cardClass}`}>
                 <div className="mb-1 flex items-center justify-between gap-3">
-                  <p className="text-xs text-indigo-500">Ch. {r.chapter_num}</p>
-                  <button
-                    onClick={() => saveQuote(r.text, r.chapter_num, null, i)}
-                    className={theme === "dark" ? "rounded-full border border-white/15 px-2 py-0.5 text-[11px] text-gray-300 hover:bg-white/5" : "rounded-full border border-gray-300 px-2 py-0.5 text-[11px] text-gray-600 hover:bg-gray-100"}
-                  >
-                    {savingIndex === i ? "Saving..." : "Save quote"}
-                  </button>
+                  <p className="text-xs text-indigo-500">Ch. {searchResult.chapter_num}</p>
                 </div>
-                <p className={`text-sm leading-relaxed ${textClass}`}>{r.text}</p>
+                <p className={`text-sm leading-relaxed ${textClass}`}>{searchResult.text}</p>
               </div>
             ))}
           </div>

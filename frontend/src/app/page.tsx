@@ -5,6 +5,9 @@ import { useMemo, useState } from "react"
 import { billingApi } from "@/lib/api/billing"
 import { useAuthStore } from "@/lib/stores/authStore"
 
+type BillingCycle = "monthly" | "yearly"
+type PaidPlanCode = "pro_monthly" | "pro_annual" | "power_monthly" | "power_annual"
+
 const productPillars = [
   {
     title: "Character Engine",
@@ -52,27 +55,47 @@ const differentiators = [
 const plans = [
   {
     name: "Starter",
-    price: "$0",
+    monthly: "$0",
+    yearly: "$0",
     note: "for exploration",
-    planCode: null,
+    monthlyCode: null,
+    yearlyCode: null,
+    comingSoon: false,
     highlight: "Best for trying the experience",
     bullets: ["Core spoiler-safe reading workspace", "Chapter memory and smart retrieval", "A polished first step into LoreVia"],
   },
   {
     name: "Pro",
-    price: "$14",
-    note: "per month",
-    planCode: "pro_monthly" as const,
+    monthly: "$9",
+    yearly: "$90",
+    note: "for serious readers",
+    monthlyCode: "pro_monthly" as PaidPlanCode,
+    yearlyCode: "pro_annual" as PaidPlanCode,
+    comingSoon: false,
     highlight: "Best for serious readers",
     bullets: ["Expanded reading workspace", "More summaries, search, and grounded Q&A", "Premium character detail and richer continuity"],
   },
   {
     name: "Power",
-    price: "$29",
-    note: "per month",
-    planCode: "power_monthly" as const,
+    monthly: "$17",
+    yearly: "$170",
+    note: "for dense books and long libraries",
+    monthlyCode: "power_monthly" as PaidPlanCode,
+    yearlyCode: "power_annual" as PaidPlanCode,
+    comingSoon: false,
     highlight: "Best for dense books and long libraries",
     bullets: ["Highest depth and capacity", "Maximum continuity headroom", "Best fit for classics, series, and research-heavy reading"],
+  },
+  {
+    name: "Studio",
+    monthly: "$34",
+    yearly: "$340",
+    note: "for future advanced workflows",
+    monthlyCode: null,
+    yearlyCode: null,
+    comingSoon: true,
+    highlight: "Reserved for richer premium workflows",
+    bullets: ["High-touch future tier", "Best home for advanced series workflows", "Coming soon"],
   },
 ]
 
@@ -83,15 +106,22 @@ const faqs = [
   ["Why upgrade?", "Paid plans open a larger, deeper workspace for readers who want more continuity, more interaction, and more room for long projects."],
 ]
 
+const workflow = [
+  ["Upload the book", "Bring in a PDF or EPUB and turn it into a structured reading workspace."],
+  ["Read with context", "Track characters, summaries, events, and recall without losing your place."],
+  ["Explore what matters", "Use timelines, thematic search, grounded Q&A, and saved quotes to revisit the book intelligently."],
+]
+
 export default function HomePage() {
   const user = useAuthStore((state) => state.user)
   const [busyPlan, setBusyPlan] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [hovered, setHovered] = useState("Pro")
+  const [billingCycle, setBillingCycle] = useState<BillingCycle>("monthly")
 
   const pricingHref = useMemo(() => (user ? "/pricing" : "#pricing"), [user])
 
-  async function handlePlanClick(planCode: "pro_monthly" | "power_monthly" | null) {
+  async function handlePlanClick(planCode: PaidPlanCode | null) {
     if (!planCode) {
       window.location.href = user ? "/library" : "/register"
       return
@@ -222,20 +252,53 @@ export default function HomePage() {
         </div>
       </section>
 
+      <section className="mx-auto max-w-7xl px-6 py-18 lg:px-10">
+        <div className="max-w-3xl">
+          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-sky-800">How it works</p>
+          <h2 className="mt-3 font-serif text-4xl text-slate-950">A cleaner path from raw book file to usable reading memory.</h2>
+        </div>
+        <div className="mt-8 grid gap-5 md:grid-cols-3">
+          {workflow.map(([title, body], index) => (
+            <article key={title} className="rounded-[1.8rem] border border-slate-200 bg-white/95 p-6 shadow-[0_18px_60px_-48px_rgba(15,23,42,0.16)]">
+              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Step {index + 1}</p>
+              <h3 className="mt-3 text-xl font-semibold text-slate-950">{title}</h3>
+              <p className="mt-3 text-sm leading-7 text-slate-600">{body}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
       <section id="pricing" className="mx-auto max-w-7xl px-6 py-18 lg:px-10">
         <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div className="max-w-2xl">
             <p className="text-xs font-semibold uppercase tracking-[0.3em] text-amber-700">Pricing</p>
             <h2 className="mt-3 font-serif text-4xl text-slate-950">Start free, expand your reading workspace when you want more depth.</h2>
           </div>
-          <p className="max-w-xl text-sm leading-7 text-slate-600">
-            Starter gives the core experience. Pro and Power are for readers who want more continuity, more interaction, and more room for long projects.
-          </p>
+          <div className="flex flex-col items-start gap-4 md:items-end">
+            <p className="max-w-xl text-sm leading-7 text-slate-600">
+              Starter gives the core experience. Pro and Power are for readers who want more continuity, more interaction, and more room for long projects.
+            </p>
+            <div className="inline-flex rounded-full border border-slate-200 bg-slate-100 p-1">
+              {(["monthly", "yearly"] as BillingCycle[]).map((cycle) => (
+                <button
+                  key={cycle}
+                  onClick={() => setBillingCycle(cycle)}
+                  className={`rounded-full px-4 py-2 text-sm font-medium transition ${
+                    billingCycle === cycle ? "bg-white text-slate-950 shadow-sm" : "text-slate-600"
+                  }`}
+                >
+                  {cycle === "monthly" ? "Monthly" : "Yearly"}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
         {message ? <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">{message}</div> : null}
-        <div className="mt-8 grid gap-5 lg:grid-cols-3">
+        <div className="mt-8 grid gap-5 lg:grid-cols-4">
           {plans.map((plan) => {
             const active = hovered === plan.name
+            const selectedPrice = billingCycle === "yearly" ? plan.yearly : plan.monthly
+            const selectedPlanCode = billingCycle === "yearly" ? plan.yearlyCode : plan.monthlyCode
             return (
               <article
                 key={plan.name}
@@ -249,9 +312,11 @@ export default function HomePage() {
                 <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${active ? "text-amber-200" : "text-slate-500"}`}>{plan.highlight}</p>
                 <div className="mt-4 flex items-end gap-3">
                   <h3 className="font-serif text-4xl">{plan.name}</h3>
-                  <p className={`pb-1 text-sm ${active ? "text-slate-300" : "text-slate-500"}`}>{plan.price}</p>
+                  <p className={`pb-1 text-sm ${active ? "text-slate-300" : "text-slate-500"}`}>{selectedPrice}</p>
                 </div>
-                <p className={`mt-1 text-xs uppercase tracking-[0.18em] ${active ? "text-slate-400" : "text-slate-400"}`}>{plan.note}</p>
+                <p className={`mt-1 text-xs uppercase tracking-[0.18em] ${active ? "text-slate-400" : "text-slate-400"}`}>
+                  {billingCycle === "yearly" ? "per year" : "per month"} - {plan.note}
+                </p>
                 <ul className="mt-6 space-y-3">
                   {plan.bullets.map((bullet) => (
                     <li key={bullet} className={`rounded-2xl px-4 py-3 text-sm ${active ? "bg-white/8 text-slate-100" : "bg-slate-100 text-slate-700"}`}>
@@ -259,15 +324,23 @@ export default function HomePage() {
                     </li>
                   ))}
                 </ul>
-                <button
-                  onClick={() => handlePlanClick(plan.planCode)}
-                  disabled={busyPlan === plan.planCode}
-                  className={`mt-7 w-full rounded-full px-5 py-3 text-sm font-semibold transition ${
-                    active ? "bg-amber-300 text-slate-950 hover:bg-amber-200" : "border border-slate-300 bg-white text-slate-900 hover:bg-slate-50"
-                  } disabled:opacity-60`}
-                >
-                  {plan.planCode ? (busyPlan === plan.planCode ? "Opening checkout..." : `Choose ${plan.name}`) : "Start with Starter"}
-                </button>
+                {selectedPlanCode ? (
+                  <button
+                    onClick={() => handlePlanClick(selectedPlanCode)}
+                    disabled={busyPlan === selectedPlanCode}
+                    className={`mt-7 w-full rounded-full px-5 py-3 text-sm font-semibold transition ${
+                      active ? "bg-amber-300 text-slate-950 hover:bg-amber-200" : "border border-slate-300 bg-white text-slate-900 hover:bg-slate-50"
+                    } disabled:opacity-60`}
+                  >
+                    {busyPlan === selectedPlanCode ? "Opening checkout..." : `Choose ${plan.name}`}
+                  </button>
+                ) : (
+                  <div className={`mt-7 rounded-full border px-5 py-3 text-center text-sm font-semibold ${
+                    active ? "border-white/10 text-slate-200" : "border-slate-300 text-slate-600"
+                  }`}>
+                    {plan.comingSoon ? "Coming soon" : "Start with Starter"}
+                  </div>
+                )}
               </article>
             )
           })}

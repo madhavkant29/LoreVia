@@ -82,6 +82,14 @@ export default function LibraryPage() {
           >
             Upload a book
           </button>
+          <Link
+            href="/public-studio"
+            className={`rounded-full px-5 py-3 text-sm font-semibold transition ${
+              isDark ? "border border-white/10 text-white hover:bg-white/10" : "border border-stone-300 text-stone-800 hover:bg-white"
+            }`}
+          >
+            Public studio
+          </Link>
         </div>
         <div className="mt-6 grid gap-4 md:grid-cols-3">
           <MetricCard label="Visible books" value={String(visibleBooks.length)} note="Active plus archived" isDark={isDark} />
@@ -195,6 +203,12 @@ function ShelfSection({
               </div>
 
               <div className={`mt-4 flex flex-wrap gap-2 text-xs ${isDark ? "text-gray-400" : "text-stone-500"}`}>
+                {book.is_public ? <span className="rounded-full bg-sky-100 px-3 py-1 text-sky-800">Public</span> : null}
+                {book.series_name ? (
+                  <span className={isDark ? "rounded-full bg-indigo-400/15 px-3 py-1 text-indigo-100" : "rounded-full bg-indigo-100 px-3 py-1 text-indigo-800"}>
+                    {book.series_name}{book.series_order ? ` · Vol ${book.series_order}` : ""}
+                  </span>
+                ) : null}
                 {book.genre && <span className={isDark ? "rounded-full bg-white/10 px-3 py-1 capitalize" : "rounded-full bg-stone-100 px-3 py-1 capitalize"}>{book.genre}</span>}
                 {book.total_chapters && <span className={isDark ? "rounded-full bg-white/10 px-3 py-1" : "rounded-full bg-stone-100 px-3 py-1"}>{book.total_chapters} chapters</span>}
                 {book.total_tokens ? <span className={isDark ? "rounded-full bg-white/10 px-3 py-1" : "rounded-full bg-stone-100 px-3 py-1"}>{book.total_tokens.toLocaleString()} tokens</span> : null}

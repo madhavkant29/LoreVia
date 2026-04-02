@@ -14,13 +14,23 @@ const MODES = [
 export default function SettingsPage() {
   const { user, setUser, logout } = useAuthStore()
   const { theme, setTheme } = usePreferencesStore()
-  const [billingMessage, setBillingMessage] = useState<string | null>(null)
-  const [billingBusy, setBillingBusy] = useState(false)
   const isDark = theme === "dark"
+  const [billingBusy, setBillingBusy] = useState(false)
+  const [billingMessage, setBillingMessage] = useState<string | null>(null)
 
   const changeMode = async (mode: string) => {
     await authApi.setReadingMode(mode)
     if (user) setUser({ ...user, reading_mode: mode as any })
+  }
+
+  const handleLogout = async () => {
+    try {
+      await authApi.logout()
+    } catch {}
+    logout()
+    if (typeof window !== "undefined") {
+      window.location.href = "/login"
+    }
   }
 
   const openBillingPortal = async () => {
@@ -29,22 +39,15 @@ export default function SettingsPage() {
     try {
       const result = await billingApi.portal()
       if (!result.billing_enabled || !result.portal_url) {
-        setBillingMessage(result.message ?? "Billing is not configured in this environment.")
+        setBillingMessage(result.message ?? "Billing is not configured in this environment yet.")
         return
       }
       window.location.href = result.portal_url
     } catch {
-      setBillingMessage("We could not open billing right now.")
+      setBillingMessage("We could not open the billing portal right now. Please try again in a moment.")
     } finally {
       setBillingBusy(false)
     }
-  }
-
-  const handleLogout = async () => {
-    try {
-      await authApi.logout()
-    } catch {}
-    logout()
   }
 
   return (
@@ -68,18 +71,23 @@ export default function SettingsPage() {
             <p className={isDark ? "text-sm text-gray-300" : "text-sm text-stone-600"}>Email: <span className="font-medium">{user?.email}</span></p>
             <p className={isDark ? "text-sm text-gray-300" : "text-sm text-stone-600"}>Plan: <span className="font-medium capitalize">{user?.tier ?? "free"}</span></p>
           </div>
-          {user?.tier && user.tier !== "free" ? (
+          <p className={`mt-5 text-sm ${isDark ? "text-gray-300" : "text-stone-600"}`}>
+            Manage your subscription in Paddle. Upgrades still happen from the pricing page, while payment method changes and cancellations live in the portal.
+          </p>
+          <div className="mt-5 flex flex-wrap gap-3">
             <button
               onClick={openBillingPortal}
               disabled={billingBusy}
-              className={`mt-5 rounded-full px-4 py-2 text-sm font-medium transition ${
-                isDark ? "border border-white/15 text-gray-200 hover:bg-white/10" : "border border-stone-300 text-stone-700 hover:bg-stone-50"
-              } disabled:opacity-60`}
+              className={`rounded-full px-4 py-2 text-sm font-medium transition ${isDark ? "border border-white/10 bg-white/10 text-white hover:bg-white/15" : "border border-stone-300 bg-white text-stone-900 hover:bg-stone-50"} disabled:opacity-60`}
             >
-              {billingBusy ? "Opening billing..." : "Manage billing"}
+              {billingBusy ? "Opening billing..." : "Open billing portal"}
             </button>
+          </div>
+          {billingMessage ? (
+            <div className={`mt-4 rounded-2xl border px-4 py-3 text-sm ${isDark ? "border-amber-300/30 bg-amber-300/10 text-amber-100" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
+              {billingMessage}
+            </div>
           ) : null}
-          {billingMessage ? <p className="mt-3 text-sm text-amber-600">{billingMessage}</p> : null}
         </section>
 
         <section className={`rounded-[1.75rem] border p-6 ${
