@@ -1,5 +1,5 @@
 "use client"
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useMemo } from "react"
 import { useReader } from "@/lib/hooks/useReader"
 import { ReaderToolbar } from "./ReaderToolbar"
 import { ChapterText } from "./ChapterText"
@@ -28,11 +28,10 @@ export function ReaderView({ bookId, chapterNum }: Props) {
   const [fontFamily, setFontFamily] = useState<"serif" | "sans" | "mono">("serif")
   const [quoteModeEnabled, setQuoteModeEnabled] = useState(false)
   const [canUseQuoteMode, setCanUseQuoteMode] = useState(false)
-  const [bookmarked, setBookmarked] = useState(false)
   const [scrollPct, setScrollPct] = useState(0)
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const restoreBookmarkRef = useRef<ReaderBookmark | null>(null)
-  const progressTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
+  const progressTimeoutRef = useRef<number | null>(null)
 
   useEffect(() => {
     return () => {
@@ -63,7 +62,6 @@ export function ReaderView({ bookId, chapterNum }: Props) {
     if (bookmark) {
       try {
         const parsed = JSON.parse(bookmark) as ReaderBookmark
-        setBookmarked(parsed?.chapter === chapterNum)
         restoreBookmarkRef.current = parsed?.chapter === chapterNum ? parsed : null
       } catch {}
     }
@@ -90,6 +88,8 @@ export function ReaderView({ bookId, chapterNum }: Props) {
     window.localStorage.setItem("reader-font-family", fontFamily)
     setAppTheme(theme)
   }, [theme, fontSize, fontFamily])
+
+  const chapterText = useMemo(() => data?.text_content ?? "", [data?.text_content])
 
   useEffect(() => {
     const container = scrollRef.current
@@ -141,6 +141,21 @@ export function ReaderView({ bookId, chapterNum }: Props) {
     window.setTimeout(restoreScroll, 80)
   }, [chapterNum, data])
 
+  useEffect(() => {
+    if (typeof window === "undefined" || !data) return
+    const bookmarkKey = `reader-bookmark:${bookId}`
+    const bookmark: ReaderBookmark = {
+      bookId,
+      chapter: chapterNum,
+      chapterTitle: data.chapter_title ?? null,
+      scrollPct,
+      selectedText: selectedQuote?.trim() ? selectedQuote.trim() : null,
+      savedAt: new Date().toISOString(),
+    }
+    window.localStorage.setItem(bookmarkKey, JSON.stringify(bookmark))
+    restoreBookmarkRef.current = bookmark
+  }, [bookId, chapterNum, data, scrollPct, selectedQuote])
+
   const toggleTheme = () => setTheme(current => current === "dark" ? "light" : "dark")
   const clearPanel = () => {
     clearContext()
@@ -152,40 +167,28 @@ export function ReaderView({ bookId, chapterNum }: Props) {
     if (quoteModeEnabled) setSelectedQuote(null)
     setQuoteModeEnabled((current) => !current)
   }
-  const handleBookmark = () => {
-    if (typeof window === "undefined") return
-    const bookmarkKey = `reader-bookmark:${bookId}`
-    const nextValue = !bookmarked
-    if (nextValue) {
-      const bookmark: ReaderBookmark = {
-        bookId,
-        chapter: chapterNum,
-        chapterTitle: data?.chapter_title ?? null,
-        scrollPct,
-        selectedText: selectedQuote?.trim() ? selectedQuote.trim() : null,
-        savedAt: new Date().toISOString(),
-      }
-      window.localStorage.setItem(bookmarkKey, JSON.stringify(bookmark))
-      restoreBookmarkRef.current = bookmark
-    } else {
-      window.localStorage.removeItem(bookmarkKey)
-      restoreBookmarkRef.current = null
-    }
-    setBookmarked(nextValue)
-  }
+
+  const totalWords = countWords(chapterText)
+  const wordsRead = totalWords > 0 ? Math.min(totalWords, Math.max(0, Math.round(totalWords * scrollPct))) : 0
+  const hasActiveContext = Boolean(contextResult || selectedQuote)
 
   if (loading) return <div className="flex justify-center py-20 text-gray-400">Loading chapter...</div>
   if (error || !data) return <div className="flex justify-center py-20 text-gray-400">{error ?? "Chapter not found"}</div>
 
   return (
-    <div className={`flex h-screen overflow-hidden transition-colors ${
-      theme === "dark" ? "bg-[#111315] text-stone-100" : "bg-white text-black"
+    <div className={`flex h-[100dvh] min-h-[100dvh] overflow-hidden transition-colors ${
+      theme === "dark"
+        ? "bg-[radial-gradient(circle_at_top,#20253f,#0b1020_58%,#090b12)] text-stone-100"
+        : "bg-[linear-gradient(180deg,#fcf7ef_0%,#f7f2eb_45%,#f3efe9_100%)] text-slate-950"
     }`}>
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <ReaderToolbar
           bookId={bookId}
           chapterNum={chapterNum}
+          chapterTitle={data.chapter_title}
           totalChapters={data.total_chapters ?? null}
+          wordsRead={wordsRead}
+          totalWords={totalWords}
           onSummary={() => setShowSummary(true)}
           theme={theme}
           onToggleTheme={toggleTheme}
@@ -193,19 +196,19 @@ export function ReaderView({ bookId, chapterNum }: Props) {
           onSetFontSize={setFontSize}
           fontFamily={fontFamily}
           onSetFontFamily={setFontFamily}
-          onBookmark={handleBookmark}
-          bookmarked={bookmarked}
           quoteModeEnabled={quoteModeEnabled}
           canUseQuoteMode={canUseQuoteMode}
           onToggleQuoteMode={toggleQuoteMode}
         />
-        <div ref={scrollRef} className="flex-1 overflow-y-auto">
+        <div ref={scrollRef} className="reader-scrollbar min-h-0 flex-1 overflow-y-auto overscroll-y-contain">
           <ChapterText
             bookId={bookId}
             chapterNum={chapterNum}
+            chapterTitle={data.chapter_title}
             totalChapters={data.total_chapters ?? null}
             textUrl={data.text_url}
             textContent={data.text_content ?? null}
+            media={data.media ?? []}
             characters={data.characters}
             onTap={tap}
             onQuoteSelect={(text) => setSelectedQuote(text)}
@@ -218,7 +221,7 @@ export function ReaderView({ bookId, chapterNum }: Props) {
         </div>
       </div>
 
-      {(contextResult || selectedQuote) && (
+      {(hasActiveContext || contextLoading) && (
         <ContextPanel
           result={contextResult}
           loading={contextLoading}
@@ -236,4 +239,10 @@ export function ReaderView({ bookId, chapterNum }: Props) {
       )}
     </div>
   )
+}
+
+function countWords(text: string): number {
+  const normalized = text.replace(/\[\[IMAGE:[^\]]+\]\]/g, " ")
+  const matches = normalized.match(/\b[\p{L}\p{N}']+\b/gu)
+  return matches?.length ?? 0
 }

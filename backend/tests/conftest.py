@@ -6,7 +6,7 @@ from app.core.database import get_db, Base
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from app.core.config import settings
 
-TEST_DB = settings.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://").replace("/postgres", "/test_lorevia")
+TEST_DB = settings.DATABASE_URL.replace("postgresql://", "postgresql+psycopg://").replace("/postgres", "/test_lorevia")
 engine_test = create_async_engine(TEST_DB, echo=False)
 TestSession = async_sessionmaker(engine_test, class_=AsyncSession, expire_on_commit=False)
 

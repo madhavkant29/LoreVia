@@ -2,6 +2,7 @@
 
 import { useEffect } from "react"
 import { useRouter } from "next/navigation"
+import axios from "axios"
 
 import { authApi } from "@/lib/api/auth"
 import { supabase } from "@/lib/supabase"
@@ -14,15 +15,22 @@ export default function AuthCallbackPage() {
 
   useEffect(() => {
     let active = true
+    const fail = (reason: string) => {
+      router.replace(`/login?error=${encodeURIComponent(reason)}`)
+    }
 
     const finishSignIn = async () => {
       try {
+        if (!supabase) {
+          fail("Google sign-in is not configured.")
+          return
+        }
         const url = new URL(window.location.href)
         const oauthError = url.searchParams.get("error_description") || url.searchParams.get("error")
         const code = url.searchParams.get("code")
 
         if (oauthError) {
-          router.replace("/login?error=oauth_failed")
+          fail(oauthError)
           return
         }
 
@@ -31,18 +39,20 @@ export default function AuthCallbackPage() {
         if (!session && code) {
           const { data, error } = await supabase.auth.exchangeCodeForSession(code)
           if (error) {
-            router.replace("/login?error=oauth_failed")
+            fail(error.message || "Could not complete Google sign-in.")
             return
           }
           session = data.session
         }
 
         if (!session) {
-          router.replace("/login?error=oauth_failed")
+          fail("No OAuth session was returned by Supabase.")
           return
         }
 
-        const tokens = await authApi.loginWithSupabaseToken(session.access_token)
+        const acceptedTerms = window.sessionStorage.getItem("lorevia-oauth-accepted-terms") === "true"
+        window.sessionStorage.removeItem("lorevia-oauth-accepted-terms")
+        const tokens = await authApi.loginWithSupabaseToken(session.access_token, acceptedTerms)
         if (!active) return
 
         setAuth(tokens.access_token, tokens.refresh_token)
@@ -50,8 +60,20 @@ export default function AuthCallbackPage() {
         if (!active) return
         setUser(me)
         router.replace("/library")
-      } catch {
-        router.replace("/login?error=oauth_failed")
+      } catch (error) {
+        if (axios.isAxiosError(error)) {
+          const message =
+            typeof error.response?.data?.detail === "string"
+              ? error.response.data.detail
+              : error.message
+          fail(message || "OAuth sign-in failed.")
+          return
+        }
+        if (error instanceof Error) {
+          fail(error.message || "OAuth sign-in failed.")
+          return
+        }
+        fail("OAuth sign-in failed.")
       }
     }
 

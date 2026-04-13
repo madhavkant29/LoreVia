@@ -17,15 +17,6 @@
 | Payments | Stripe | Subscriptions |
 | Email | Resend | Transactional |
 
-### What was removed vs old stack
-- ❌ Stable Diffusion XL + LoRA
-- ❌ Replicate / Modal GPU API
-- ❌ CLIP scorer, face checker, aesthetic scorer
-- ❌ Image selection pipeline
-- ❌ `creator_art` table and service
-- ❌ `character_images` table and service
-- ❌ LoRA registry, style router, prompt builder (image)
-
 ---
 
 ## Full Request Flow

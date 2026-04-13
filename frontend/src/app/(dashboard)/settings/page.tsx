@@ -1,5 +1,6 @@
 "use client"
 import { useState } from "react"
+import { useRouter } from "next/navigation"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { authApi } from "@/lib/api/auth"
@@ -17,6 +18,7 @@ export default function SettingsPage() {
   const isDark = theme === "dark"
   const [billingBusy, setBillingBusy] = useState(false)
   const [billingMessage, setBillingMessage] = useState<string | null>(null)
+  const router = useRouter()
 
   const changeMode = async (mode: string) => {
     await authApi.setReadingMode(mode)
@@ -28,9 +30,7 @@ export default function SettingsPage() {
       await authApi.logout()
     } catch {}
     logout()
-    if (typeof window !== "undefined") {
-      window.location.href = "/login"
-    }
+    router.replace("/login")
   }
 
   const openBillingPortal = async () => {

@@ -14,7 +14,7 @@ async function refreshAccessToken(): Promise<string | null> {
 
   if (!refreshPromise) {
     refreshPromise = axios
-      .post(`${API_BASE}/auth/refresh`, null, { params: { refresh_token: refreshToken } })
+      .post(`${API_BASE}/auth/refresh`, { refresh_token: refreshToken })
       .then((response) => {
         const nextAccess = response.data?.access_token as string | undefined
         const nextRefresh = response.data?.refresh_token as string | undefined
@@ -55,7 +55,10 @@ apiClient.interceptors.response.use(
         return apiClient(originalRequest)
       }
       if (typeof window !== "undefined") {
-        window.location.href = "/login"
+        localStorage.removeItem("access_token")
+        localStorage.removeItem("refresh_token")
+        localStorage.removeItem("lorevia-auth")
+        window.location.replace("/login")
       }
     }
     return Promise.reject(error)

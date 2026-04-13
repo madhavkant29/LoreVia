@@ -15,9 +15,10 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.redis import cache_get, cache_set, key_grounded_answer
 from app.engine.intelligence.character_chat import chat_as_character
-from app.models.book import Book, Chapter
+from app.engine.search.semantic import semantic_search
+from app.models.book import Book, Chapter, SeriesBook
 from app.models.character import Character
-from app.models.intelligence import BookChunk, ChapterSummary
+from app.models.intelligence import BookChunk, ChapterSummary, WikiEntry
 
 router = APIRouter()
 
@@ -136,11 +137,121 @@ async def character_chat(
     if not char or char.book_id != book_id:
         raise HTTPException(404)
 
+    last_user_message = next((msg["content"] for msg in reversed(body.messages) if msg.get("role") == "user"), "")
+    semantic_hits = await semantic_search(
+        db,
+        book_id,
+        last_user_message or char.name,
+        body.current_chapter,
+        limit=2,
+    )
+    search_context = "\n\n".join(hit["text"][:280] for hit in semantic_hits)
+
     reply = await chat_as_character(
         character=char,
         book_title=book.title,
         current_chapter=body.current_chapter,
         context_summary=body.context_summary,
+        search_context=search_context,
         messages=body.messages,
     )
-    return {"reply": reply, "character": char.name}
+    grounded_hint = None
+    if semantic_hits:
+        grounded_hint = f"Grounded in chapter {semantic_hits[0]['chapter_num']} evidence."
+    return {"reply": reply, "character": char.name, "grounded_hint": grounded_hint}
+
+
+@router.get("/{book_id}/cross-book-intelligence")
+async def cross_book_intelligence(
+    book_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await db.get(Book, book_id)
+    if not book or book.user_id != current_user.id:
+        raise HTTPException(404)
+
+    comparison_books = [book]
+    if book.primary_series_id:
+        series_book_rows = (
+            await db.execute(
+                select(Book)
+                .join(SeriesBook, SeriesBook.book_id == Book.id)
+                .where(
+                    SeriesBook.series_id == book.primary_series_id,
+                    Book.user_id == current_user.id,
+                )
+            )
+        ).scalars().all()
+        comparison_books = series_book_rows or [book]
+
+    book_ids = [item.id for item in comparison_books]
+    characters = (
+        await db.execute(
+            select(Character).where(
+                Character.book_id.in_(book_ids),
+                Character.embedding.is_not(None),
+            )
+        )
+    ).scalars().all()
+    wikis = (
+        await db.execute(
+            select(WikiEntry).where(
+                WikiEntry.book_id.in_(book_ids),
+                WikiEntry.embedding.is_not(None),
+            )
+        )
+    ).scalars().all()
+
+    character_matches = []
+    for idx, left in enumerate(characters):
+        for right in characters[idx + 1:]:
+            if left.book_id == right.book_id:
+                continue
+            similarity = _cosine_similarity(left.embedding, right.embedding)
+            if similarity < 0.9:
+                continue
+            character_matches.append({
+                "left_book_id": str(left.book_id),
+                "left_name": left.name,
+                "right_book_id": str(right.book_id),
+                "right_name": right.name,
+                "similarity": round(similarity, 3),
+            })
+
+    wiki_matches = []
+    for idx, left in enumerate(wikis):
+        for right in wikis[idx + 1:]:
+            if left.book_id == right.book_id:
+                continue
+            similarity = _cosine_similarity(left.embedding, right.embedding)
+            if similarity < 0.9:
+                continue
+            wiki_matches.append({
+                "left_book_id": str(left.book_id),
+                "left_name": left.name,
+                "right_book_id": str(right.book_id),
+                "right_name": right.name,
+                "similarity": round(similarity, 3),
+                "entry_type": left.entry_type or right.entry_type,
+            })
+
+    character_matches.sort(key=lambda item: item["similarity"], reverse=True)
+    wiki_matches.sort(key=lambda item: item["similarity"], reverse=True)
+    return {
+        "series_name": book.series_name,
+        "comparison_book_ids": [str(item.id) for item in comparison_books],
+        "character_matches": character_matches[:20],
+        "wiki_matches": wiki_matches[:20],
+    }
+
+
+def _cosine_similarity(left: list[float] | None, right: list[float] | None) -> float:
+    if not left or not right or len(left) != len(right):
+        return 0.0
+    dot = sum(a * b for a, b in zip(left, right))
+    left_mag = sum(a * a for a in left) ** 0.5
+    right_mag = sum(b * b for b in right) ** 0.5
+    if not left_mag or not right_mag:
+        return 0.0
+    return dot / (left_mag * right_mag)

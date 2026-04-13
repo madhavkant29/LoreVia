@@ -17,6 +17,7 @@ const plans = [
     monthlyCode: null,
     yearlyCode: null,
     highlight: "Best for trying LoreVia",
+    comingSoon: "Lore Score, streaks, and limited unlockables",
     bullets: ["Spoiler-safe reading workspace", "Chapter memory, summaries, and recall", "A strong baseline for trying LoreVia"],
   },
   {
@@ -27,6 +28,7 @@ const plans = [
     monthlyCode: "pro_monthly" as PaidPlanCode,
     yearlyCode: "pro_annual" as PaidPlanCode,
     highlight: "Best for serious readers",
+    comingSoon: "Deeper series intelligence and richer assistive reading",
     bullets: ["More summaries, search, and grounded Q&A", "Expanded continuity across longer books", "Better headroom for regular reading"],
   },
   {
@@ -37,6 +39,7 @@ const plans = [
     monthlyCode: "power_monthly" as PaidPlanCode,
     yearlyCode: "power_annual" as PaidPlanCode,
     highlight: "Best for dense books and long libraries",
+    comingSoon: "Cross-book mastery, alerts, and advanced character systems",
     bullets: ["Deepest workspace for long books", "Highest interaction capacity", "Best fit for classics, fantasy, and rereads"],
   },
 ]
@@ -98,9 +101,6 @@ export default function PricingPage() {
             ))}
           </div>
         </div>
-        <div className={`mt-5 rounded-xl border px-4 py-3 text-sm ${isDark ? "border-white/10 bg-black/20 text-slate-300" : "border-sky-200 bg-sky-50 text-sky-900"}`}>
-          {user ? "Checkout opens in Paddle and returns you to LoreVia after payment." : "Sign in first, then choose a plan to continue in Paddle checkout."}
-        </div>
         {message ? (
           <div className={`mt-4 rounded-xl border px-4 py-3 text-sm ${isDark ? "border-amber-300/30 bg-amber-300/10 text-amber-100" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
             {message}
@@ -131,6 +131,12 @@ export default function PricingPage() {
                   </li>
                 ))}
               </ul>
+              <div className={`mt-5 rounded-2xl border px-4 py-3 text-sm ${active ? "border-white/10 bg-white/6 text-slate-200" : isDark ? "border-white/10 bg-black/20 text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600"}`}>
+                <span className={`mr-2 inline-flex rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] ${active ? "bg-amber-300 text-slate-950" : isDark ? "bg-white text-slate-950" : "bg-slate-950 text-white"}`}>
+                  Coming soon
+                </span>
+                {plan.comingSoon}
+              </div>
               {selectedPlanCode ? (
                 <button
                   onClick={() => handlePlanClick(selectedPlanCode)}

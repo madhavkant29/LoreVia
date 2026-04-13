@@ -3,10 +3,12 @@ import re
 import tiktoken
 
 _enc = tiktoken.encoding_for_model("gpt-4o")
+MEDIA_MARKER_RE = re.compile(r"\[\[IMAGE:[^\]]+\]\]")
 
 
 def count_tokens(text: str) -> int:
-    return len(_enc.encode(text))
+    sanitized = MEDIA_MARKER_RE.sub(" ", text)
+    return len(_enc.encode(sanitized))
 
 
 def chunk_text(text: str, max_tokens: int = 1500, overlap: int = 100) -> list[str]:
@@ -66,7 +68,7 @@ def _paragraph_overlap(paragraphs: list[str], overlap_tokens: int) -> tuple[list
 def _split_large_paragraph(paragraph: str, max_tokens: int) -> list[str]:
     sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", paragraph) if s.strip()]
     if len(sentences) <= 1:
-        return [paragraph.strip()]
+        return _split_oversized_sentence(paragraph.strip(), max_tokens)
 
     parts: list[str] = []
     current: list[str] = []
@@ -79,8 +81,7 @@ def _split_large_paragraph(paragraph: str, max_tokens: int) -> list[str]:
                 parts.append(" ".join(current))
                 current = []
                 current_tokens = 0
-            # Keep an oversized sentence intact rather than cutting it mid-sentence.
-            parts.append(sentence)
+            parts.extend(_split_oversized_sentence(sentence, max_tokens))
             continue
 
         if current and current_tokens + sentence_tokens > max_tokens:
@@ -95,3 +96,25 @@ def _split_large_paragraph(paragraph: str, max_tokens: int) -> list[str]:
         parts.append(" ".join(current))
 
     return parts
+
+
+def _split_oversized_sentence(sentence: str, max_tokens: int) -> list[str]:
+    words = sentence.split()
+    if not words:
+        return [sentence]
+
+    parts: list[str] = []
+    current: list[str] = []
+
+    for word in words:
+        candidate = " ".join([*current, word]).strip()
+        if current and count_tokens(candidate) > max_tokens:
+            parts.append(" ".join(current).strip())
+            current = [word]
+            continue
+        current.append(word)
+
+    if current:
+        parts.append(" ".join(current).strip())
+
+    return [part for part in parts if part]

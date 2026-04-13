@@ -60,6 +60,9 @@ export default function SearchPage() {
           {results.map((r, i) => (
             <div key={i} className={theme === "dark" ? "bg-white/5 rounded-xl border border-white/10 p-4" : "bg-white rounded-xl border border-gray-200 p-4"}>
               <p className="text-xs text-indigo-500 mb-1">Chapter {r.chapter_num}{r.chapter_title ? ` - ${r.chapter_title}` : ""}</p>
+              <p className={theme === "dark" ? "text-sm font-medium text-white leading-relaxed" : "text-sm font-medium text-gray-900 leading-relaxed"}>
+                {r.summary}
+              </p>
               <p className={theme === "dark" ? "text-sm text-gray-100 leading-relaxed" : "text-sm text-gray-700 leading-relaxed"}>{r.text}</p>
               <p className={theme === "dark" ? "text-xs text-gray-400 mt-2" : "text-xs text-gray-400 mt-2"}>Relevance: {Math.round(r.relevance * 100)}%</p>
             </div>

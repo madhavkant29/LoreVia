@@ -56,6 +56,38 @@ async def rate_limit_api(request: Request, current_user: User = Depends(get_curr
         raise HTTPException(429, "Rate limit exceeded")
 
 
+def _client_identifier(request: Request) -> str:
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if forwarded_for:
+        first = forwarded_for.split(",")[0].strip()
+        if first:
+            return first
+    return request.client.host if request.client else "unknown"
+
+
+async def _auth_window(request: Request, bucket: str, limit: int, window: int) -> None:
+    identifier = _client_identifier(request)
+    ok = await _window(key_ratelimit(f"auth:{identifier}", bucket), limit, window)
+    if not ok:
+        raise HTTPException(429, "Too many authentication attempts. Please wait and try again.")
+
+
+async def rate_limit_auth_register(request: Request):
+    await _auth_window(request, "register", 8, 3600)
+
+
+async def rate_limit_auth_login(request: Request):
+    await _auth_window(request, "login", 20, 900)
+
+
+async def rate_limit_auth_password(request: Request):
+    await _auth_window(request, "password", 8, 3600)
+
+
+async def rate_limit_auth_refresh(request: Request):
+    await _auth_window(request, "refresh", 30, 300)
+
+
 async def _limit_for_user(user_id, field: str, default: int) -> int:
     async with AsyncSessionLocal() as db:
         override = (

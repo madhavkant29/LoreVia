@@ -1,490 +1,395 @@
+from __future__ import annotations
+
 import re
+import uuid
 from collections import Counter
 
 import fitz
 
-MAX_WORDS_PER_CHAPTER = 5000
-CHAPTER_WORD_TOLERANCE = 100
 
 CHAPTER_RE = re.compile(
-    r"^(chapter\s+(?:\d+|[ivxlcdm]+)|ch\.\s*(?:\d+|[ivxlcdm]+)|prologue|epilogue|part\s+(?:\d+|[ivxlcdm]+))[\s:\-.]*",
+    r"^(?:(?:chapter|ch\.?|part|volume|vol\.?|book|act|episode|section|scene)\s+"
+    r"(?:\d+|[ivxlcdm]+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|"
+    r"thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|"
+    r"first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|"
+    r"eleventh|twelfth|thirteenth|fourteenth|fifteenth|sixteenth|seventeenth|eighteenth|nineteenth|twentieth)"
+    r"(?:\s*[:.\-]\s*.+)?|prologue|epilogue|interlude|afterword|appendix(?:\s+[a-z0-9]+)?)$",
     re.IGNORECASE,
 )
-ROMAN_HEADING_RE = re.compile(r"^(?:[ivxlcdm]{1,8})$", re.IGNORECASE)
+UPPER_HEADING_RE = re.compile(r"^[A-Z0-9][A-Z0-9\s'\",:;.!?\-]{2,60}$")
+FRONT_MATTER_RE = re.compile(
+    r"(translated by|illustrations? by|compiled/formatted by|edited by|proofread by|typeset by|"
+    r"cover (?:art|design) by|project gutenberg|all rights reserved|table of contents|copyright|isbn|"
+    r"contents|dedication|acknowledg(?:e)?ments?)",
+    re.IGNORECASE,
+)
+ORNAMENT_RE = re.compile(r"[\u2600-\u27ff\u3000-\u303f\uFF00-\uFFEF]+")
+MEDIA_MARKER_TEMPLATE = "[[IMAGE:{marker}]]"
+MEDIA_MARKER_RE = re.compile(r"\[\[IMAGE:[^\]]+\]\]")
+PARAGRAPH_SPLIT_MAX_WORDS = 4000
 
 
 def parse_pdf(raw_bytes: bytes) -> list[dict]:
     doc = fitz.open(stream=raw_bytes, filetype="pdf")
-    page_lines = [_page_lines(page.get_text("text")) for page in doc]
-    repeated_headers = _detect_repeated_headers(page_lines)
+    try:
+        repeated_noise = _detect_repeated_headers(doc)
+        stream = []
 
-    chapters: list[dict] = []
-    current: dict | None = None
-    pending_paragraph: str | None = None
+        for page_number, page in enumerate(doc, start=1):
+            for item in _page_blocks(page):
+                if item["type"] == "text":
+                    paragraphs = _blocks_to_paragraphs(item["text"])
+                    for paragraph in paragraphs:
+                        cleaned = _clean_text(paragraph)
+                        if not cleaned:
+                            continue
+                        if _is_repeated_noise(cleaned, repeated_noise):
+                            continue
+                        stream.append(
+                            {
+                                "type": "text",
+                                "text": cleaned,
+                                "page": page_number,
+                                "bbox": item["bbox"],
+                            }
+                        )
+                else:
+                    stream.append(
+                        {
+                            "type": "image",
+                            "bytes": item["bytes"],
+                            "content_type": item["content_type"],
+                            "filename": item["filename"],
+                            "page": page_number,
+                            "bbox": item["bbox"],
+                        }
+                    )
 
-    for lines in page_lines:
-        cleaned_lines = [line for line in lines if line not in repeated_headers and not _is_page_number(line)]
-        cleaned_lines = _trim_edge_noise(cleaned_lines)
-        paragraphs = _lines_to_paragraphs(cleaned_lines)
-        paragraphs, pending_paragraph = _merge_page_boundary_paragraphs(paragraphs, pending_paragraph)
-
-        for paragraph in paragraphs:
-            heading = _extract_heading(paragraph)
-            if heading:
-                if current and current["text"].strip():
-                    chapters.append(current)
-                current = {"number": len(chapters) + 1, "title": heading, "text": ""}
-                remainder = paragraph[len(heading):].strip(" :-.\n")
-                if remainder and current is not None:
-                    current["text"] += remainder + "\n\n"
-            elif current is not None:
-                current["text"] += paragraph + "\n\n"
-
-    if pending_paragraph and current is not None:
-        current["text"] += pending_paragraph + "\n\n"
-
-    if current and current["text"].strip():
-        chapters.append(current)
-
-    doc.close()
-    normalized = _normalize_chapters(chapters)
-    if normalized:
-        return normalized
-
-    fallback_text = _all(raw_bytes)
-    fallback_chapters = _normalize_chapters(
-        [{"number": 1, "title": "Full Text", "text": fallback_text}]
-    )
-    return fallback_chapters or [{"number": 1, "title": "Full Text", "text": fallback_text}]
+        chapters = _build_chapters(stream)
+        chapters = _normalize_chapters(chapters)
+        return chapters or [{"number": 1, "title": "Full Text", "text": "", "images": []}]
+    finally:
+        doc.close()
 
 
-def _all(raw_bytes: bytes) -> str:
+def extract_first_page_cover(raw_bytes: bytes) -> tuple[bytes, str] | None:
     doc = fitz.open(stream=raw_bytes, filetype="pdf")
-    page_lines = [_page_lines(doc[i].get_text("text")) for i in range(len(doc))]
-    repeated_headers = _detect_repeated_headers(page_lines)
-    paragraphs: list[str] = []
-    pending_paragraph: str | None = None
-
-    for lines in page_lines:
-        cleaned_lines = [line for line in lines if line not in repeated_headers and not _is_page_number(line)]
-        cleaned_lines = _trim_edge_noise(cleaned_lines)
-        page_paragraphs = _lines_to_paragraphs(cleaned_lines)
-        page_paragraphs, pending_paragraph = _merge_page_boundary_paragraphs(page_paragraphs, pending_paragraph)
-        paragraphs.extend(page_paragraphs)
-
-    if pending_paragraph:
-        paragraphs.append(pending_paragraph)
-
-    doc.close()
-    return "\n\n".join(paragraphs)
+    try:
+        if doc.page_count == 0:
+            return None
+        page = doc.load_page(0)
+        pix = page.get_pixmap(dpi=200, alpha=False, annots=True)
+        return pix.tobytes("png"), "image/png"
+    finally:
+        doc.close()
 
 
-def _normalize_chapters(chapters: list[dict]) -> list[dict]:
-    normalized: list[dict] = []
-    for chapter in chapters:
-        text = _clean_text(chapter["text"])
-        if len(text) < 200:
+def _page_blocks(page: fitz.Page) -> list[dict]:
+    items: list[dict] = []
+
+    for block in page.get_text("blocks"):
+        if len(block) < 5:
             continue
-        title = (chapter.get("title") or "").strip() or f"Chapter {len(normalized) + 1}"
-        if normalized and normalized[-1]["title"].strip().lower() == title.lower():
-            normalized[-1]["text"] += "\n\n" + text
+        x0, y0, x1, y1, text = block[:5]
+        if not isinstance(text, str):
             continue
-        normalized.append({"number": len(normalized) + 1, "title": title, "text": text})
-
-    final_chapters: list[dict] = []
-    for chapter in normalized:
-        if _word_count(chapter["text"]) > MAX_WORDS_PER_CHAPTER:
-            final_chapters.extend(_split_overlong_chapter(chapter["title"], chapter["text"]))
-        else:
-            final_chapters.append(
-                {
-                    "number": len(final_chapters) + 1,
-                    "title": chapter["title"],
-                    "text": chapter["text"],
-                }
-            )
-
-    if len(final_chapters) == 1 and _word_count(final_chapters[0]["text"]) > MAX_WORDS_PER_CHAPTER:
-        return _split_virtual_chapters(final_chapters[0]["text"])
-    return final_chapters
-
-
-def _page_lines(page_text: str) -> list[str]:
-    return [line.strip() for line in page_text.splitlines() if line.strip()]
-
-
-def _detect_repeated_headers(page_lines: list[list[str]]) -> set[str]:
-    counter: Counter[str] = Counter()
-    total_pages = len(page_lines)
-
-    for lines in page_lines:
-        candidates = lines[:2] + lines[-2:]
-        seen_on_page = set()
-        for line in candidates:
-            normalized = " ".join(line.split())
-            if not normalized or _is_page_number(normalized) or len(normalized) > 80:
-                continue
-            if normalized in seen_on_page:
-                continue
-            seen_on_page.add(normalized)
-            counter[normalized] += 1
-
-    threshold = max(3, total_pages // 8) if total_pages >= 8 else 3
-    return {
-        line
-        for line, count in counter.items()
-        if count >= threshold and not CHAPTER_RE.match(line)
-    }
-
-
-def _is_page_number(line: str) -> bool:
-    return bool(re.fullmatch(r"[\[\(]?\d{1,4}[\]\)]?", line.strip()))
-
-
-def _trim_edge_noise(lines: list[str]) -> list[str]:
-    trimmed = list(lines)
-
-    while trimmed and _looks_like_edge_header_fragment(trimmed[0], trimmed[1] if len(trimmed) > 1 else None):
-        trimmed.pop(0)
-
-    while trimmed and _looks_like_edge_footer_fragment(trimmed[-1]):
-        trimmed.pop()
-
-    return trimmed
-
-
-def _looks_like_edge_header_fragment(line: str, next_line: str | None) -> bool:
-    normalized = " ".join(line.split())
-    if not normalized or CHAPTER_RE.match(normalized) or _is_page_number(normalized):
-        return False
-    if len(normalized) > 40 or normalized.endswith((".", "!", "?", ":", ";")):
-        return False
-
-    words = normalized.split()
-    if len(words) > 5:
-        return False
-
-    if next_line and next_line[:1].isupper():
-        lowercase_words = {"and", "of", "the", "to", "in", "a", "an"}
-        if all(word[:1].isupper() or word.lower() in lowercase_words for word in words):
-            return True
-    return False
-
-
-def _looks_like_edge_footer_fragment(line: str) -> bool:
-    normalized = " ".join(line.split())
-    if not normalized or CHAPTER_RE.match(normalized) or _is_page_number(normalized):
-        return False
-    lowered = normalized.lower()
-    if "prepared and published by" in lowered or "project gutenberg" in lowered:
-        return True
-    if len(normalized) > 30:
-        return False
-    if normalized.endswith((".", "!", "?", ":", ";")):
-        return False
-    words = normalized.split()
-    lowercase_words = {"and", "of", "the", "to", "in", "a", "an"}
-    return len(words) <= 4 and all(word[:1].isupper() or word.lower() in lowercase_words for word in words)
-
-
-def _lines_to_paragraphs(lines: list[str]) -> list[str]:
-    paragraphs: list[str] = []
-    current = ""
-
-    for index, line in enumerate(lines):
-        next_line = lines[index + 1] if index + 1 < len(lines) else None
-        if not line:
-            if current:
-                paragraphs.append(current.strip())
-                current = ""
+        if not text.strip():
             continue
+        items.append(
+            {
+                "type": "text",
+                "bbox": (float(x0), float(y0), float(x1), float(y1)),
+                "text": text,
+            }
+        )
 
-        if CHAPTER_RE.match(line) and len(line) < 120:
-            if current:
-                paragraphs.append(current.strip())
-                current = ""
-            paragraphs.append(line.strip())
+    raw_dict = page.get_text("dict")
+    for block in raw_dict.get("blocks", []):
+        if block.get("type") != 1:
             continue
+        raw = block.get("image")
+        if not raw:
+            continue
+        ext = block.get("ext") or "png"
+        items.append(
+            {
+                "type": "image",
+                "bbox": tuple(block.get("bbox") or (0, 0, 0, 0)),
+                "bytes": raw,
+                "content_type": f"image/{ext.lower()}",
+                "filename": f"{uuid.uuid4().hex}.{ext.lower()}",
+            }
+        )
 
-        if current:
-            current = _join_line(current, line)
-        else:
-            current = line
-
-        if current and _looks_like_paragraph_boundary(current, next_line):
-            paragraphs.append(current.strip())
-            current = ""
-
-    if current:
-        paragraphs.append(current.strip())
-
-    return paragraphs
-
-
-def _join_line(current: str, line: str) -> str:
-    if current.endswith("-") and not current.endswith("--"):
-        return current[:-1] + line.lstrip()
-    return f"{current.rstrip()} {line.lstrip()}"
+    return sorted(items, key=lambda item: (item["bbox"][1], item["bbox"][0]))
 
 
-def _looks_like_paragraph_boundary(current: str, next_line: str | None) -> bool:
-    if next_line is None:
-        return False
-    current_text = current.strip()
-    next_text = next_line.strip()
-    if not current_text or not next_text:
-        return False
-    if not re.search(r'[.!?]["\']?$', current_text):
-        return False
-    if CHAPTER_RE.match(next_text):
-        return True
-    if len(current_text) < 60:
-        return False
-    return next_text[:1].isupper()
+def _blocks_to_paragraphs(text: str) -> list[str]:
+    normalized = text.replace("\r", "\n")
+    normalized = re.sub(r"[ \t]+", " ", normalized)
+    normalized = re.sub(r"\n{3,}", "\n\n", normalized).strip()
+    if not normalized:
+        return []
+    parts = [part.strip() for part in re.split(r"\n\s*\n", normalized) if part.strip()]
+    if parts:
+        return parts
+    return [normalized]
 
 
-def _extract_heading(paragraph: str) -> str | None:
-    stripped = paragraph.strip()
-    if CHAPTER_RE.match(stripped) and len(stripped) < 160:
-        return stripped
-    if ROMAN_HEADING_RE.fullmatch(stripped):
-        return f"Chapter {stripped.upper()}"
-    if re.fullmatch(r"(?:book|part)\s+[ivxlcdm]+", stripped, re.IGNORECASE):
-        return stripped
-    if re.fullmatch(r"(?:one|two|three|four|five|six|seven|eight|nine|ten)", stripped, re.IGNORECASE):
-        return f"Chapter {stripped.title()}"
-    return None
-
-
-def _clean_text(text: str) -> str:
-    cleaned = re.sub(r"[ \t]+", " ", text)
-    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
-    cleaned = re.sub(r"(?i)\n{2,}prepared and published by:.*$", "", cleaned, flags=re.DOTALL)
-    return cleaned.strip()
-
-
-def _word_count(text: str) -> int:
-    return len(re.findall(r"\b\w+\b", text))
-
-
-def _split_virtual_chapters(text: str, target_words: int = 2200, max_words: int = 3200) -> list[dict]:
-    paragraphs = [part.strip() for part in re.split(r"\n\s*\n+", text) if part.strip()]
+def _build_chapters(stream: list[dict]) -> list[dict]:
     chapters: list[dict] = []
-    current_parts: list[str] = []
-    current_words = 0
+    current = _blank_chapter(1)
 
-    for paragraph in paragraphs:
-        paragraph_words = _word_count(paragraph)
-        if paragraph_words > max_words:
-            sentence_parts = _split_paragraph_to_sections(paragraph, target_words, max_words)
-            for sentence_part in sentence_parts:
-                part_words = _word_count(sentence_part)
-                if current_parts and current_words + part_words > max_words:
-                    chapters.append(_build_virtual_chapter(len(chapters) + 1, current_parts))
-                    current_parts = []
-                    current_words = 0
-                current_parts.append(sentence_part)
-                current_words += part_words
+    for item in stream:
+        if item["type"] == "text":
+            heading = _extract_heading(item["text"])
+            if heading:
+                remainder = _heading_remainder(item["text"], heading)
+                if _chapter_has_content(current):
+                    chapters.append(current)
+                    current = _blank_chapter(len(chapters) + 1, heading)
+                else:
+                    current["title"] = heading
+                if remainder:
+                    current["text_parts"].append(remainder)
+                continue
+
+            if not _chapter_has_content(current) and _is_probable_front_matter(item["text"]):
+                continue
+
+            current["text_parts"].append(item["text"])
             continue
 
-        if current_parts and current_words + paragraph_words > max_words:
-            chapters.append(_build_virtual_chapter(len(chapters) + 1, current_parts))
-            current_parts = []
-            current_words = 0
+        if not current["title"] and not _chapter_has_content(current):
+            current["title"] = "Opening"
 
-        current_parts.append(paragraph)
-        current_words += paragraph_words
+        marker = MEDIA_MARKER_TEMPLATE.format(marker=uuid.uuid4().hex)
+        current["text_parts"].append(marker)
+        current["images"].append(
+            {
+                "marker": marker,
+                "bytes": item["bytes"],
+                "content_type": item["content_type"],
+                "filename": item["filename"],
+            }
+        )
 
-        if current_words >= target_words:
-            chapters.append(_build_virtual_chapter(len(chapters) + 1, current_parts))
-            current_parts = []
-            current_words = 0
-
-    if current_parts:
-        chapters.append(_build_virtual_chapter(len(chapters) + 1, current_parts))
+    if _chapter_has_content(current) or current["images"]:
+        chapters.append(current)
 
     return chapters
 
 
-def _split_overlong_chapter(title: str, text: str) -> list[dict]:
-    parts = _split_text_near_limit(
-        text,
-        target_words=MAX_WORDS_PER_CHAPTER,
-        min_words=MAX_WORDS_PER_CHAPTER - CHAPTER_WORD_TOLERANCE,
-        max_words=MAX_WORDS_PER_CHAPTER + CHAPTER_WORD_TOLERANCE,
-    )
-    if len(parts) == 1:
-        return [
-            {
-                "number": 1,
-                "title": title,
-                "text": text,
-            }
-        ]
-
-    split_parts: list[dict] = []
-    for index, part in enumerate(parts, start=1):
-        split_parts.append(
-            {
-                "number": index,
-                "title": f"{title} ({index})",
-                "text": part,
-            }
-        )
-    return split_parts
-
-
-def _split_text_near_limit(text: str, target_words: int, min_words: int, max_words: int) -> list[str]:
-    paragraphs = [part.strip() for part in re.split(r"\n\s*\n+", text) if part.strip()]
-    parts: list[str] = []
-    current_parts: list[str] = []
-    current_words = 0
-
-    for paragraph in paragraphs:
-        paragraph_words = _word_count(paragraph)
-
-        if paragraph_words > max_words:
-            sentence_sections = _split_paragraph_near_limit(paragraph, target_words, min_words, max_words)
-            for section in sentence_sections:
-                section_words = _word_count(section)
-                if current_parts and current_words + section_words > max_words:
-                    parts.append(_clean_text("\n\n".join(current_parts)))
-                    current_parts = []
-                    current_words = 0
-                current_parts.append(section)
-                current_words += section_words
-                if min_words <= current_words <= max_words:
-                    parts.append(_clean_text("\n\n".join(current_parts)))
-                    current_parts = []
-                    current_words = 0
+def _normalize_chapters(chapters: list[dict]) -> list[dict]:
+    normalized: list[dict] = []
+    next_number = 1
+    for chapter in chapters:
+        text_parts = _drop_front_matter_text_parts(chapter["text_parts"])
+        if not any(part.strip() for part in text_parts) and not chapter["images"]:
             continue
-
-        if current_parts and current_words + paragraph_words > max_words:
-            parts.append(_clean_text("\n\n".join(current_parts)))
-            current_parts = []
-            current_words = 0
-
-        current_parts.append(paragraph)
-        current_words += paragraph_words
-
-        if min_words <= current_words <= max_words:
-            parts.append(_clean_text("\n\n".join(current_parts)))
-            current_parts = []
-            current_words = 0
-
-    if current_parts:
-        if parts and _word_count("\n\n".join(current_parts)) < min_words:
-            parts[-1] = _clean_text(parts[-1] + "\n\n" + "\n\n".join(current_parts))
-        else:
-            parts.append(_clean_text("\n\n".join(current_parts)))
-
-    return parts
+        split_parts = _split_large_chapter_parts(text_parts)
+        for part_index, text_parts_part in enumerate(split_parts, start=1):
+            text = _assemble_text_parts(text_parts_part)
+            if not text and not chapter["images"]:
+                continue
+            title = chapter["title"] or f"Chapter {next_number}"
+            if len(split_parts) > 1:
+                title = f"{title} - Part {part_index}"
+            normalized.append(
+                {
+                    "number": next_number,
+                    "title": title,
+                    "text": text,
+                    "images": _images_for_text_parts(text_parts_part, chapter["images"]),
+                }
+            )
+            next_number += 1
+    return normalized
 
 
-def _split_paragraph_near_limit(paragraph: str, target_words: int, min_words: int, max_words: int) -> list[str]:
-    sentences = [sentence.strip() for sentence in re.split(r"(?<=[.!?])\s+", paragraph) if sentence.strip()]
-    if len(sentences) <= 1:
-        return [paragraph]
-
-    sections: list[str] = []
-    current: list[str] = []
-    current_words = 0
-
-    for sentence in sentences:
-        sentence_words = _word_count(sentence)
-        if current and current_words + sentence_words > max_words:
-            sections.append(" ".join(current).strip())
-            current = []
-            current_words = 0
-
-        current.append(sentence)
-        current_words += sentence_words
-
-        if min_words <= current_words <= max_words:
-            sections.append(" ".join(current).strip())
-            current = []
-            current_words = 0
-
-    if current:
-        if sections and _word_count(current[0]) + _word_count(sections[-1]) <= max_words and _word_count(" ".join(current)) < min_words:
-            sections[-1] = f"{sections[-1]} {' '.join(current).strip()}".strip()
-        else:
-            sections.append(" ".join(current).strip())
-
-    return sections
-
-
-def _split_paragraph_to_sections(paragraph: str, target_words: int, max_words: int) -> list[str]:
-    sentences = [sentence.strip() for sentence in re.split(r"(?<=[.!?])\s+", paragraph) if sentence.strip()]
-    if len(sentences) <= 1:
-        return [paragraph]
-
-    sections: list[str] = []
-    current: list[str] = []
-    current_words = 0
-
-    for sentence in sentences:
-        sentence_words = _word_count(sentence)
-        if current and current_words + sentence_words > max_words:
-            sections.append(" ".join(current).strip())
-            current = []
-            current_words = 0
-        current.append(sentence)
-        current_words += sentence_words
-        if current_words >= target_words:
-            sections.append(" ".join(current).strip())
-            current = []
-            current_words = 0
-
-    if current:
-        sections.append(" ".join(current).strip())
-
-    return sections
-
-
-def _build_virtual_chapter(number: int, parts: list[str]) -> dict:
+def _blank_chapter(number: int, title: str | None = None) -> dict:
     return {
         "number": number,
-        "title": f"Section {number}",
-        "text": _clean_text("\n\n".join(parts)),
+        "title": title,
+        "text_parts": [],
+        "images": [],
     }
 
 
-def _merge_page_boundary_paragraphs(
-    paragraphs: list[str],
-    pending_paragraph: str | None,
-) -> tuple[list[str], str | None]:
-    merged = list(paragraphs)
-
-    if pending_paragraph:
-        if merged and _should_merge_across_pages(pending_paragraph, merged[0]):
-            merged[0] = _join_line(pending_paragraph, merged[0])
-        else:
-            merged.insert(0, pending_paragraph)
-
-    if not merged:
-        return merged, None
-
-    if _is_open_paragraph(merged[-1]):
-        return merged[:-1], merged[-1]
-
-    return merged, None
+def _chapter_has_content(chapter: dict) -> bool:
+    return any(part.strip() for part in chapter["text_parts"])
 
 
-def _is_open_paragraph(paragraph: str) -> bool:
-    text = paragraph.strip()
-    if not text:
+def _detect_repeated_headers(doc: fitz.Document) -> set[str]:
+    seen: list[str] = []
+    for page in doc:
+        height = float(page.rect.height or 0)
+        for block in page.get_text("blocks"):
+            if len(block) < 5:
+                continue
+            x0, y0, x1, y1, text = block[:5]
+            if not isinstance(text, str):
+                continue
+            cleaned = _clean_text(text)
+            if not cleaned or len(cleaned) > 120:
+                continue
+            near_top = float(y0) <= min(80.0, height * 0.12)
+            near_bottom = float(y1) >= max(0.0, height * 0.88)
+            if near_top or near_bottom:
+                seen.append(cleaned.lower())
+    counts = Counter(seen)
+    return {text for text, count in counts.items() if count >= 3}
+
+
+def _is_repeated_noise(text: str, repeated_noise: set[str]) -> bool:
+    lowered = text.lower()
+    return lowered in repeated_noise or lowered.isdigit()
+
+
+def _extract_heading(text: str) -> str | None:
+    lines = [line.strip() for line in text.replace("\r", "\n").splitlines() if line.strip()]
+    if not lines:
+        return None
+    first_line = _normalize_heading_candidate(lines[0]).strip(" .:-")
+    if not first_line:
+        return None
+    if CHAPTER_RE.match(first_line):
+        return first_line
+    if UPPER_HEADING_RE.match(first_line) and len(first_line.split()) <= 8:
+        return first_line.title()
+    return None
+
+
+def _normalize_heading_candidate(text: str) -> str:
+    cleaned = text.strip()
+    cleaned = ORNAMENT_RE.sub(" ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    cleaned = cleaned.replace(" .", ".").strip(" .:-")
+    return cleaned
+
+
+def _heading_remainder(text: str, heading: str) -> str:
+    raw = text.replace("\r", "\n").strip()
+    lines = [line.strip() for line in raw.splitlines() if line.strip()]
+    if not lines:
+        return ""
+    normalized_first = _normalize_heading_candidate(lines[0])
+    if normalized_first.lower() == heading.lower():
+        return _clean_text("\n".join(lines[1:]))
+    flattened = _normalize_heading_candidate(raw)
+    match = re.match(re.escape(heading) + r"[\s:.\-]*", flattened, flags=re.IGNORECASE)
+    if not match:
+        return ""
+    remainder = flattened[match.end():].strip()
+    return _clean_text(remainder)
+
+
+def _clean_text(text: str) -> str:
+    normalized = text.replace("\r", "\n")
+    normalized = normalized.replace("\u00ad", "")
+    normalized = re.sub(r"[ \t]+", " ", normalized)
+    normalized = re.sub(r"\n{3,}", "\n\n", normalized)
+    normalized = re.sub(r"[^\S\n]+([,.;:!?])", r"\1", normalized)
+    normalized = re.sub(r"([A-Za-z0-9])-\n([A-Za-z0-9])", r"\1\2", normalized)
+    normalized = re.sub(r"(?<!\n)\n(?!\n)", " ", normalized)
+    normalized = re.sub(r" {2,}", " ", normalized)
+    return normalized.strip()
+
+
+def _assemble_text_parts(text_parts: list[str]) -> str:
+    parts = [part.strip() for part in text_parts if part and part.strip()]
+    return "\n\n".join(parts)
+
+
+def _drop_front_matter_paragraphs(text: str) -> str:
+    paragraphs = [part.strip() for part in re.split(r"\n\s*\n", text) if part.strip()]
+    while paragraphs and _is_probable_front_matter(paragraphs[0]):
+        paragraphs.pop(0)
+    return "\n\n".join(paragraphs)
+
+
+def _drop_front_matter_text_parts(text_parts: list[str]) -> list[str]:
+    parts = [part.strip() for part in text_parts if part and part.strip()]
+    while parts:
+        normalized = MEDIA_MARKER_RE.sub(" ", parts[0]).strip()
+        if not normalized:
+            parts.pop(0)
+            continue
+        if _is_probable_front_matter(normalized):
+            parts.pop(0)
+            continue
+        break
+    return parts
+
+
+def _split_large_chapter_parts(text_parts: list[str]) -> list[list[str]]:
+    if not text_parts:
+        return []
+
+    sections: list[list[str]] = []
+    current: list[str] = []
+    current_words = 0
+
+    for part in text_parts:
+        part_words = _count_words(part)
+        projected_words = current_words + part_words
+        should_split = (
+            current
+            and projected_words > PARAGRAPH_SPLIT_MAX_WORDS
+            and _can_close_section(current)
+        )
+        if should_split:
+            sections.append(current)
+            current = []
+            current_words = 0
+        current.append(part)
+        current_words += part_words
+
+    if current:
+        sections.append(current)
+    return sections
+
+
+def _count_words(text: str) -> int:
+    return len(re.findall(r"\b\w+\b", MEDIA_MARKER_RE.sub(" ", text)))
+
+
+def _can_close_section(parts: list[str]) -> bool:
+    for part in reversed(parts):
+        stripped = MEDIA_MARKER_RE.sub(" ", part).strip()
+        if not stripped:
+            continue
+        return bool(re.search(r"[.!?][\"')\]]*\s*$", stripped))
+    return False
+
+
+def _images_for_text_parts(text_parts: list[str], images: list[dict]) -> list[dict]:
+    markers = {
+        match.group(0)
+        for part in text_parts
+        for match in MEDIA_MARKER_RE.finditer(part)
+    }
+    return [image for image in images if image.get("marker") in markers]
+
+
+def _is_probable_front_matter(text: str) -> bool:
+    cleaned = _clean_text(text)
+    if not cleaned:
         return False
-    return not bool(re.search(r'[.!?]["\')\]]?$', text))
+    if FRONT_MATTER_RE.search(cleaned):
+        return True
+    if cleaned.lower().startswith("volume ") and len(cleaned.split()) <= 16:
+        return True
+    if len(cleaned) <= 80 and cleaned.lower().startswith("by "):
+        return True
+    return False
 
 
-def _should_merge_across_pages(previous: str, following: str) -> bool:
-    prev = previous.strip()
-    nxt = following.strip()
-    if not prev or not nxt:
+def _should_merge_across_pages(previous: str, current: str) -> bool:
+    previous = _clean_text(previous)
+    current = _clean_text(current)
+    if not previous or not current:
         return False
-    if _extract_heading(nxt):
+    if _extract_heading(current):
         return False
-    if re.search(r'[.!?]["\')\]]?$', prev):
-        return False
-    return True
+    return previous[-1] not in ".!?\"'"

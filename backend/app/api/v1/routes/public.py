@@ -12,6 +12,12 @@ from app.models.book import Book, Chapter
 from app.parsers.chunker import count_tokens
 
 router = APIRouter()
+PUBLIC_MODE_ENABLED = False
+
+
+def _ensure_public_mode_enabled() -> None:
+    if not PUBLIC_MODE_ENABLED:
+        raise HTTPException(503, "Public mode is temporarily disabled")
 
 
 class PublicChapterIn(BaseModel):
@@ -30,6 +36,7 @@ class PublicBookManualIn(BaseModel):
 
 @router.get("/books")
 async def list_public_books(db: AsyncSession = Depends(get_db)):
+    _ensure_public_mode_enabled()
     cached = await cache_get(key_public_books())
     if cached:
         return cached
@@ -60,6 +67,7 @@ async def list_public_books(db: AsyncSession = Depends(get_db)):
 
 @router.get("/books/{book_id}")
 async def get_public_book(book_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    _ensure_public_mode_enabled()
     cached = await cache_get(key_public_book_detail(str(book_id)))
     if cached:
         return cached
@@ -95,6 +103,7 @@ async def get_public_book(book_id: uuid.UUID, db: AsyncSession = Depends(get_db)
 
 @router.get("/books/{book_id}/chapter/{chapter_num}")
 async def get_public_chapter(book_id: uuid.UUID, chapter_num: int, db: AsyncSession = Depends(get_db)):
+    _ensure_public_mode_enabled()
     cached = await cache_get(key_public_chapter(str(book_id), chapter_num))
     if cached:
         return cached
@@ -129,6 +138,7 @@ async def create_public_book_manual(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    _ensure_public_mode_enabled()
     if not body.chapters:
         raise HTTPException(400, "At least one chapter is required")
 
@@ -178,6 +188,7 @@ async def append_public_chapter(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    _ensure_public_mode_enabled()
     book = await db.get(Book, book_id)
     if not book or book.user_id != current_user.id or not book.is_public:
         raise HTTPException(404, "Public book not found")

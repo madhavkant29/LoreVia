@@ -5,11 +5,15 @@ class Settings(BaseSettings):
     APP_NAME: str = "LoreVia"
     DEBUG: bool = False
     API_V1_PREFIX: str = "/api/v1"
+    BACKEND_CORS_ORIGINS: str = "https://getlorevia.com,https://www.getlorevia.com,https://api.getlorevia.com,http://localhost:3000"
+    ALLOWED_HOSTS: str = "getlorevia.com,www.getlorevia.com,api.getlorevia.com,localhost,127.0.0.1"
 
     # Database
     DATABASE_URL: str
     DATABASE_POOL_SIZE: int = 10
     DATABASE_MAX_OVERFLOW: int = 20
+    DATABASE_POOL_RECYCLE_SECONDS: int = 1800
+    DATABASE_SQL_ECHO: bool = False
 
     # Redis
     REDIS_URL: str
@@ -52,7 +56,9 @@ class Settings(BaseSettings):
 
     # Email
     RESEND_API_KEY: str
-    EMAIL_FROM: str = "noreply@lorevia.app"
+    EMAIL_FROM: str = "support@mail.getlorevia.com"
+    SUPPORT_EMAIL: str = "support@getlorevia.com"
+    LEGAL_EMAIL: str = "legal@getlorevia.com"
 
     # Monitoring
     SENTRY_DSN: str | None = None
@@ -63,17 +69,18 @@ class Settings(BaseSettings):
 
     # Processing
     LAZY_PROCESS_INITIAL_CHAPTERS: int = 1
-    CHUNK_MAX_TOKENS: int = 1500
-    CHUNK_OVERLAP_TOKENS: int = 100
+    CHUNK_MAX_TOKENS: int = 1200
+    CHUNK_OVERLAP_TOKENS: int = 80
     EXTRACTION_BATCH_MAX_TOKENS: int = 5000
     EXTRACTION_BATCH_MAX_CHUNKS: int = 4
     DEDUP_SIMILARITY_THRESHOLD: float = 0.88
     SEARCH_SIMILARITY_THRESHOLD: float = 0.65
     SEARCH_MAX_CONTEXT_CHUNKS: int = 3
+    PASSWORD_RESET_TOKEN_TTL_SECONDS: int = 1800
 
     # Tier limits
     FREE_MAX_BOOKS: int = 2
-    FREE_TOTAL_TOKEN_BUDGET: int = 400000 
+    FREE_TOTAL_TOKEN_BUDGET: int = 250000
     FREE_SEARCH_PER_HOUR: int = 20
     FREE_SUMMARY_PER_HOUR: int = 30
     FREE_CHAT_PER_DAY: int = 10
@@ -88,12 +95,18 @@ class Settings(BaseSettings):
 settings = Settings()
 
 
+def cors_origins() -> list[str]:
+    return [origin.strip() for origin in settings.BACKEND_CORS_ORIGINS.split(",") if origin.strip()]
+
+
+def allowed_hosts() -> list[str]:
+    return [host.strip() for host in settings.ALLOWED_HOSTS.split(",") if host.strip()]
+
+
 def is_local_mode() -> bool:
     app_url = (settings.APP_URL or "").lower()
     return settings.DEBUG or "localhost" in app_url or "127.0.0.1" in app_url
 
 
 def effective_tier(tier: str) -> str:
-    if is_local_mode() and tier != "admin":
-        return "power"
     return tier

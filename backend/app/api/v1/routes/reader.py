@@ -2,29 +2,59 @@
 Reader routes — the core intelligence surface.
 Smart tap, summaries, relationship graph, memory recall, progress.
 """
+import base64
+import json
+import re
+import uuid
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import or_, select
 from pydantic import BaseModel
+from sqlalchemy import desc, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.deps.auth import get_current_user
+from app.api.deps.rate_limit import rate_limit_search, rate_limit_summary
+from app.core.config import effective_tier, settings
 from app.core.database import get_db
 from app.core.redis import cache_get, cache_set, key_chapter_summary, key_relationship_graph, key_memory_recall, key_search_results
-from app.core.config import effective_tier, settings
 from app.core.storage import download_book, get_presigned_url
-from app.models.book import Book, Chapter
+from app.models.book import Book, Chapter, ChapterMedia
 from app.models.character import Character, CharacterState
 from app.models.intelligence import BookChunk, ChapterSummary, CharacterRelationship, PlotThread, QuoteEntry
 from app.models.progress import ReadingProgress, ReadingSession
-from app.engine.search.semantic import find_context_for_tap, semantic_search
+from app.engine.search.semantic import build_search_result, find_context_for_tap, semantic_search
 from app.engine.analysis.recall import generate_recall
 from app.engine.character.consolidator import consolidate_characters
+from app.engine.character.deduplicator import names_equivalent
 from app.engine.character.profile_builder import build_description
-from app.api.deps.auth import get_current_user
-from app.api.deps.rate_limit import rate_limit_search, rate_limit_summary
-from datetime import datetime, timezone
-import json
-import uuid
 
 router = APIRouter()
+
+TIMELINE_CHARACTER_STOPWORDS = {
+    "after", "and", "but", "faculty", "goodbye", "indeed", "just", "lady",
+    "leaving", "maybe", "miss", "now", "once", "regardless", "seeing", "she",
+    "that", "the narrator", "this", "though", "using", "very", "well", "what",
+    "when", "with", "yes", "you", "my brother", "recalling", "considering",
+    "looking", "taking", "matching", "hearing", "creation",
+}
+TIMELINE_CHARACTER_PREFIXES = (
+    "the ",
+)
+TIMELINE_CHARACTER_EXACT_BLOCKLIST = {
+    "Clock Tower", "Far East", "Fourth Holy Grail", "Great Ritual", "Mage's Association",
+    "Magic Circles", "Magic Circuits", "Magic Crest", "Milky Way", "Modern Magecraft",
+    "Mystic Codes", "New Age", "Nuclear Energy", "Seven Wonders", "Source Crest",
+    "The Twin Towers", "United States",
+}
+TIMELINE_CHARACTER_SUFFIXES = (
+    " Association",
+    " Convention",
+    " Fundamentals",
+    " Energy",
+    " Sequence",
+)
+GRAPH_CHARACTER_STOPWORDS = TIMELINE_CHARACTER_STOPWORDS | {"lord", "lords", "war", "are", "around", "however"}
 
 
 class SaveQuoteBody(BaseModel):
@@ -32,6 +62,185 @@ class SaveQuoteBody(BaseModel):
     chapter_number: int | None = None
     character_name: str | None = None
     note: str | None = None
+
+
+def _normalize_timeline_label(value: str | None) -> str:
+    return re.sub(r"\s+", " ", (value or "").strip()).casefold()
+
+
+def _is_valid_timeline_character(name: str | None, role: str | None, aliases: list[str] | None, arc_summary: str | None) -> bool:
+    normalized = _normalize_timeline_label(name)
+    if not normalized:
+        return False
+    if normalized in TIMELINE_CHARACTER_STOPWORDS:
+        return False
+    if any(normalized.endswith(suffix) for suffix in ("ing", "ed", "ly", "tion")) and len(normalized) > 5:
+        return False
+    if any(normalized.startswith(prefix) for prefix in TIMELINE_CHARACTER_PREFIXES):
+        return False
+
+    title = re.sub(r"\s+", " ", (name or "").strip())
+    if title in TIMELINE_CHARACTER_EXACT_BLOCKLIST:
+        return False
+    if any(title.endswith(suffix) for suffix in TIMELINE_CHARACTER_SUFFIXES):
+        return False
+
+    words = re.findall(r"[A-Za-z][A-Za-z'-]*", title)
+    if not words:
+        return False
+    if len(words) == 1 and len(words[0]) <= 3:
+        return False
+    if len(words) == 1 and words[0][0].islower():
+        return False
+
+    has_supporting_profile = bool(role or aliases or arc_summary)
+    looks_person_like = len(words) >= 2 or any("'" in word or "-" in word for word in words)
+    if not has_supporting_profile and not looks_person_like:
+        return False
+    return True
+
+
+def _timeline_character_detail(name: str | None, role: str | None, aliases: list[str] | None, arc_summary: str | None) -> str:
+    if arc_summary:
+        return arc_summary
+    if role == "mc":
+        return "Major character becomes part of the story."
+    if role == "sc":
+        return "Supporting character enters the story."
+    if aliases:
+        alias_preview = ", ".join(alias for alias in aliases[:2] if alias and alias != name)
+        if alias_preview:
+            return f"Also referred to as {alias_preview}."
+    return "Character enters the story."
+
+
+def _dedupe_timeline_events(events: list[dict]) -> list[dict]:
+    seen: set[tuple[int, str, str]] = set()
+    deduped = []
+    for event in events:
+        key = (
+            int(event["chapter_number"]),
+            str(event["kind"]),
+            _normalize_timeline_label(str(event["title"])),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(event)
+    return deduped
+
+
+def _relationship_node_description(char: Character, trait_snapshot: dict, relationship_summaries: list[str]) -> str:
+    segments: list[str] = []
+    base = build_description(trait_snapshot, char.archetype)
+    if base and base != "appearance not yet described":
+        segments.append(base)
+    if char.arc_summary:
+        segments.append(char.arc_summary)
+    if char.personality_tags:
+        segments.append(f"Disposition: {', '.join(char.personality_tags[:3])}.")
+    if char.motivations:
+        segments.append(f"Wants: {', '.join(char.motivations[:2])}.")
+    if relationship_summaries:
+        segments.append(" ".join(relationship_summaries[:2]))
+    return " ".join(segment.strip() for segment in segments if segment).strip() or "No narrative details discovered yet."
+
+
+def _is_graph_character_visible(char: Character) -> bool:
+    name = " ".join((char.name or "").split())
+    normalized = _normalize_timeline_label(name)
+    if not normalized or normalized in GRAPH_CHARACTER_STOPWORDS:
+        return False
+    if any(normalized.endswith(suffix) for suffix in ("ing", "ed", "ly", "tion")) and len(normalized) > 5:
+        return False
+    if name in TIMELINE_CHARACTER_EXACT_BLOCKLIST:
+        return False
+    if any(name.endswith(suffix) for suffix in TIMELINE_CHARACTER_SUFFIXES):
+        return False
+    if name.endswith("'s"):
+        return False
+    words = re.findall(r"[A-Za-z][A-Za-z'-]*", name)
+    if not words:
+        return False
+    if len(words) == 1 and len(words[0]) <= 3:
+        return False
+    evidence = any([
+        char.role,
+        char.aliases,
+        char.personality_tags,
+        char.motivations,
+        char.fears,
+        char.arc_summary,
+        char.archetype,
+        char.trait_state,
+    ])
+    return len(words) > 1 or bool(evidence)
+
+
+def _character_evidence_score(char: Character) -> tuple[int, int]:
+    score = sum(
+        1
+        for value in [
+            char.role,
+            char.aliases,
+            char.personality_tags,
+            char.motivations,
+            char.fears,
+            char.arc_summary,
+            char.archetype,
+            char.trait_state,
+        ]
+        if value
+    )
+    return score, len((char.name or "").strip())
+
+
+def _collapse_graph_characters(chars: list[Character]) -> tuple[list[Character], dict[str, str]]:
+    canonical: list[Character] = []
+    id_map: dict[str, str] = {}
+
+    for char in chars:
+        match = next(
+            (
+                existing
+                for existing in canonical
+                if names_equivalent(char.name, char.aliases or [], existing.name, existing.aliases or [])
+            ),
+            None,
+        )
+        if match is None:
+            canonical.append(char)
+            id_map[str(char.id)] = str(char.id)
+            continue
+
+        primary, duplicate = (match, char)
+        if _character_evidence_score(char) > _character_evidence_score(match):
+            primary, duplicate = char, match
+            canonical = [item for item in canonical if item.id != match.id]
+            canonical.append(primary)
+            for source_id, target_id in list(id_map.items()):
+                if target_id == str(match.id):
+                    id_map[source_id] = str(primary.id)
+
+        merged_aliases = {
+            alias.strip()
+            for alias in [*(primary.aliases or []), *(duplicate.aliases or []), primary.name, duplicate.name]
+            if alias and alias.strip() and alias.strip().lower() != primary.name.strip().lower()
+        }
+        primary.aliases = sorted(merged_aliases)
+        primary.personality_tags = list(dict.fromkeys([*(primary.personality_tags or []), *(duplicate.personality_tags or [])]))
+        primary.motivations = list(dict.fromkeys([*(primary.motivations or []), *(duplicate.motivations or [])]))
+        primary.fears = list(dict.fromkeys([*(primary.fears or []), *(duplicate.fears or [])]))
+        primary.role = primary.role or duplicate.role
+        primary.arc_summary = primary.arc_summary or duplicate.arc_summary
+        primary.archetype = primary.archetype or duplicate.archetype
+        primary.trait_state = primary.trait_state or duplicate.trait_state
+        primary.first_chapter = min(primary.first_chapter, duplicate.first_chapter)
+
+        id_map[str(char.id)] = str(primary.id)
+        id_map[str(duplicate.id)] = str(primary.id)
+
+    return sorted(canonical, key=lambda item: (item.first_chapter, item.name)), id_map
 
 
 @router.get("/{book_id}/chapter/{chapter_num}")
@@ -52,23 +261,71 @@ async def get_chapter(
     )).scalar()
     fallback_text = None
     fallback_title = None
+    fallback_media = []
+    stored_text_content = None
+    stored_media = []
     if not chapter:
-        fallback_title, fallback_text = _parse_chapter_from_source(book, chapter_num)
+        fallback = _parse_chapter_from_source(book, chapter_num)
+        if fallback:
+            fallback_title = fallback.get("title")
+            fallback_text = fallback.get("text")
+            fallback_media = _serialize_inline_images(fallback.get("images", []))
         if fallback_text is None:
             raise HTTPException(404, "Chapter not found")
+    else:
+        if chapter.s3_key and not get_presigned_url(chapter.s3_key):
+            try:
+                stored_text_content = download_book(chapter.s3_key).decode("utf-8", errors="ignore")
+            except Exception:
+                stored_text_content = None
+        stored_media = await _serialize_chapter_media(db, chapter.id)
+
+        stored_markers = _extract_media_markers(stored_text_content)
+        needs_source_recovery = (
+            book.format == "pdf"
+            and (
+                not stored_text_content
+                or ("[[IMAGE:" in stored_text_content and not stored_media)
+                or (stored_media and not stored_markers)
+                or (stored_markers and len(stored_markers) != len(stored_media))
+            )
+        )
+        if needs_source_recovery:
+            fallback = _parse_chapter_from_source(book, chapter_num)
+            if fallback:
+                fallback_title = fallback.get("title")
+                fallback_text = fallback.get("text")
+                fallback_media = _serialize_inline_images(fallback.get("images", []))
+                fallback_markers = _extract_media_markers(fallback_text)
+                if fallback_text and fallback_markers and len(fallback_markers) == len(fallback_media):
+                    stored_text_content = fallback_text
+                    stored_media = fallback_media
+                else:
+                    if not stored_text_content and fallback_text:
+                        stored_text_content = fallback_text
+                    if fallback_media:
+                        stored_media = _merge_media_items(stored_media, fallback_media)
     chars = (await db.execute(
         select(Character)
         .where(Character.book_id == book_id, Character.first_chapter <= chapter_num)
         .order_by(Character.first_chapter)
     )).scalars().all()
 
+    char_ids = [char.id for char in chars]
+    states_by_character: dict[uuid.UUID, CharacterState] = {}
+    if char_ids:
+        states = (await db.execute(
+            select(CharacterState)
+            .where(CharacterState.character_id.in_(char_ids), CharacterState.at_chapter <= chapter_num)
+            .order_by(CharacterState.character_id, desc(CharacterState.at_chapter))
+        )).scalars().all()
+        for state in states:
+            states_by_character.setdefault(state.character_id, state)
+
     char_data = []
     for char in chars:
-        state = (await db.execute(
-            select(CharacterState)
-            .where(CharacterState.character_id == char.id, CharacterState.at_chapter <= chapter_num)
-            .order_by(CharacterState.at_chapter.desc()).limit(1)
-        )).scalar()
+        state = states_by_character.get(char.id)
+        trait_snapshot = state.trait_snapshot if state else (char.trait_state or {})
 
         char_data.append({
             "id": str(char.id),
@@ -76,10 +333,8 @@ async def get_chapter(
             "aliases": char.aliases or [],
             "role": char.role,
             "first_chapter": char.first_chapter,
-            "trait_state": state.trait_snapshot if state else char.trait_state,
-            "description": build_description(state.trait_snapshot if state else (char.trait_state or {}), char.archetype),
+            "description": build_description(trait_snapshot, char.archetype),
             "personality_tags": char.personality_tags or [],
-            "motivations": char.motivations or [],
         })
 
     return {
@@ -88,11 +343,8 @@ async def get_chapter(
         "total_chapters": book.total_chapters,
         "intelligence_available": await _chapter_intelligence_available(db, book, current_user, chapter_num),
         "text_url": get_presigned_url(chapter.s3_key) if chapter and chapter.s3_key else None,
-        "text_content": (
-            download_book(chapter.s3_key).decode("utf-8", errors="ignore")
-            if chapter and chapter.s3_key and not get_presigned_url(chapter.s3_key)
-            else fallback_text
-        ),
+        "text_content": stored_text_content if chapter else fallback_text,
+        "media": stored_media if chapter else fallback_media,
         "characters": char_data,
     }
 
@@ -177,13 +429,13 @@ async def smart_tap(
         )).all()
 
         results = [
-            {
-                "text": row[0][:300] + ("..." if len(row[0]) > 300 else ""),
-                "chunk_index": row[1],
-                "chapter_num": row[2],
-                "chapter_title": row[3],
-                "relevance": 0.5,
-            }
+            build_search_result(
+                text=row[0],
+                chunk_index=row[1],
+                chapter_num=row[2],
+                chapter_title=row[3],
+                relevance=0.5,
+            )
             for row in lexical_rows
         ]
     return {"type": "search", "results": results}
@@ -205,6 +457,10 @@ async def get_summary(
 
     if mode not in ("short", "detailed", "key_points"):
         raise HTTPException(400, "Invalid mode")
+
+    read_set = await _read_chapter_set(db, current_user.id, book_id)
+    if chapter_num not in read_set:
+        raise HTTPException(403, "Read the chapter first to unlock its summary.")
 
     chapter = (await db.execute(
         select(Chapter).where(Chapter.book_id == book_id, Chapter.number == chapter_num)
@@ -259,13 +515,19 @@ async def get_relationships(
         raise HTTPException(404)
     await consolidate_characters(db, book_id, up_to_chapter=chapter)
 
-    cached = await cache_get(key_relationship_graph(str(book_id), chapter))
+    cache_key = f"{key_relationship_graph(str(book_id), chapter)}:v2"
+    cached = await cache_get(cache_key)
     if cached:
         return cached
 
     chars = (await db.execute(
         select(Character).where(Character.book_id == book_id, Character.first_chapter <= chapter)
     )).scalars().all()
+    chars = [char for char in chars if _is_graph_character_visible(char)]
+    visible_ids = {str(char.id) for char in chars}
+    chars, id_map = _collapse_graph_characters(chars)
+    canonical_ids = {str(char.id) for char in chars}
+    char_names = {str(char.id): char.name for char in chars}
 
     rels = (await db.execute(
         select(CharacterRelationship).where(
@@ -274,14 +536,86 @@ async def get_relationships(
             (CharacterRelationship.to_chapter == None) | (CharacterRelationship.to_chapter >= chapter),
         )
     )).scalars().all()
+    rels = [
+        rel for rel in rels
+        if str(rel.character_a_id) in visible_ids and str(rel.character_b_id) in visible_ids
+    ]
+
+    rel_summaries: dict[str, list[str]] = {}
+    edge_map: dict[tuple[str, str, str], dict] = {}
+    for rel in rels:
+        source = id_map.get(str(rel.character_a_id), str(rel.character_a_id))
+        target = id_map.get(str(rel.character_b_id), str(rel.character_b_id))
+        if source == target or source not in canonical_ids or target not in canonical_ids:
+            continue
+        key = tuple(sorted([source, target])) + (rel.rel_type or "neutral",)
+        bucket = edge_map.setdefault(key, {
+            "source": key[0],
+            "target": key[1],
+            "type": rel.rel_type or "neutral",
+            "sentiment_values": [],
+            "descriptions": [],
+            "chapters": [],
+        })
+        if rel.sentiment is not None:
+            bucket["sentiment_values"].append(rel.sentiment)
+        if rel.description:
+            bucket["descriptions"].append(rel.description.strip())
+        if rel.from_chapter is not None:
+            bucket["chapters"].append(rel.from_chapter)
+
+    for item in edge_map.values():
+        for char_id, other_id in ((item["source"], item["target"]), (item["target"], item["source"])):
+            rel_summaries.setdefault(char_id, []).append(
+                f"{item['type'].replace('_', ' ').capitalize()} connection with {char_names.get(other_id, other_id)}."
+            )
+
+    latest_states: dict[str, CharacterState] = {}
+    if chars:
+        state_rows = (await db.execute(
+            select(CharacterState)
+            .where(CharacterState.character_id.in_([char.id for char in chars]), CharacterState.at_chapter <= chapter)
+            .order_by(CharacterState.character_id, desc(CharacterState.at_chapter))
+        )).scalars().all()
+        for state in state_rows:
+            char_id = str(state.character_id)
+            latest_states.setdefault(char_id, state)
+
+    chars_with_details = []
+    for c in chars:
+        state = latest_states.get(str(c.id))
+        trait_snapshot = state.trait_snapshot if state else (c.trait_state or {})
+        chars_with_details.append({
+            "id": str(c.id),
+            "name": c.name,
+            "role": c.role,
+            "first_chapter": c.first_chapter,
+            "description": _relationship_node_description(c, trait_snapshot, rel_summaries.get(str(c.id), [])),
+            "trait_state": trait_snapshot,
+            "personality_tags": c.personality_tags or [],
+            "aliases": c.aliases or [],
+            "motivations": c.motivations or [],
+            "fears": c.fears or [],
+            "archetype": c.archetype,
+            "arc_summary": c.arc_summary,
+        })
 
     graph = {
-        "nodes": [{"id": str(c.id), "name": c.name, "role": c.role, "first_chapter": c.first_chapter} for c in chars],
-        "edges": [{"source": str(r.character_a_id), "target": str(r.character_b_id),
-                   "type": r.rel_type, "sentiment": r.sentiment, "description": r.description} for r in rels],
+        "nodes": chars_with_details,
+        "edges": [
+            {
+                "source": item["source"],
+                "target": item["target"],
+                "type": item["type"],
+                "sentiment": round(sum(item["sentiment_values"]) / len(item["sentiment_values"]), 3) if item["sentiment_values"] else None,
+                "description": " ".join(dict.fromkeys(item["descriptions"])) or None,
+                "from_chapter": min(item["chapters"]) if item["chapters"] else None,
+            }
+            for item in edge_map.values()
+        ],
     }
     if graph["nodes"] or graph["edges"]:
-        await cache_set(key_relationship_graph(str(book_id), chapter), graph, settings.REDIS_TTL_GRAPH)
+        await cache_set(cache_key, graph, settings.REDIS_TTL_GRAPH)
     return graph
 
 
@@ -318,13 +652,13 @@ async def search(
         )).all()
 
         results = [
-            {
-                "text": row[0][:300] + ("..." if len(row[0]) > 300 else ""),
-                "chunk_index": row[1],
-                "chapter_num": row[2],
-                "chapter_title": row[3],
-                "relevance": 0.5,
-            }
+            build_search_result(
+                text=row[0],
+                chunk_index=row[1],
+                chapter_num=row[2],
+                chapter_title=row[3],
+                relevance=0.5,
+            )
             for row in lexical_rows
         ]
     if not results:
@@ -343,13 +677,13 @@ async def search(
             )).all()
 
             results = [
-                {
-                    "text": row[0][:300] + ("..." if len(row[0]) > 300 else ""),
-                    "chunk_index": row[1],
-                    "chapter_num": row[2],
-                    "chapter_title": row[3],
-                    "relevance": 0.35,
-                }
+                build_search_result(
+                    text=row[0],
+                    chunk_index=row[1],
+                    chapter_num=row[2],
+                    chapter_title=row[3],
+                    relevance=0.35,
+                )
                 for row in token_rows
             ]
     await cache_set(cache_key, results, settings.REDIS_TTL_SEARCH)
@@ -588,7 +922,7 @@ async def get_timeline(
         .order_by(Chapter.number)
     )).all()
     character_rows = (await db.execute(
-        select(Character.name, Character.first_chapter)
+        select(Character.name, Character.first_chapter, Character.role, Character.aliases, Character.arc_summary)
         .where(Character.book_id == book_id, Character.first_chapter.in_(sorted(read_set)))
         .order_by(Character.first_chapter, Character.name)
     )).all()
@@ -609,13 +943,15 @@ async def get_timeline(
                     "title": event.get("event"),
                     "detail": None,
                 })
-    for name, first_chapter in character_rows:
+    for name, first_chapter, role, aliases, arc_summary in character_rows:
+        if not _is_valid_timeline_character(name, role, aliases, arc_summary):
+            continue
         events.append({
             "chapter_number": first_chapter,
             "chapter_title": None,
             "kind": "character_entry",
             "title": name,
-            "detail": "Character enters the story",
+            "detail": _timeline_character_detail(name, role, aliases, arc_summary),
         })
     for title, introduced_at, resolved_at, status in thread_rows:
         if introduced_at and introduced_at in read_set:
@@ -635,6 +971,7 @@ async def get_timeline(
                 "detail": "Resolved",
             })
 
+    events = _dedupe_timeline_events(events)
     events.sort(key=lambda item: (item["chapter_number"], item["kind"], item["title"]))
     return {"events": events}
 
@@ -884,10 +1221,25 @@ async def memory_recall(
 
 @router.get("/{book_id}/progress")
 async def get_progress(book_id: uuid.UUID, db: AsyncSession = Depends(get_db), current_user=Depends(get_current_user)):
+    book = await db.get(Book, book_id)
+    if not book or book.user_id != current_user.id:
+        raise HTTPException(404)
     p = (await db.execute(
         select(ReadingProgress).where(ReadingProgress.user_id == current_user.id, ReadingProgress.book_id == book_id)
     )).scalar()
-    return p or {"current_chapter": 1, "scroll_pct": 0.0}
+    total = book.total_chapters or 0
+    chapters_read = sorted(set((p.chapters_read or []) if p else []))
+    if not chapters_read and p and p.current_chapter:
+        chapters_read = list(range(1, p.current_chapter + 1))
+    chapters_read_count = len(chapters_read)
+    percent_complete = round((chapters_read_count / total) * 100, 1) if total else 0.0
+    return {
+        "current_chapter": p.current_chapter if p else 1,
+        "scroll_pct": p.scroll_pct if p else 0.0,
+        "chapters_read_count": chapters_read_count,
+        "percent_complete": percent_complete,
+        "chapters_left": max(total - chapters_read_count, 0) if total else 0,
+    }
 
 
 @router.put("/{book_id}/progress")
@@ -898,6 +1250,10 @@ async def update_progress(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    book = await db.get(Book, book_id)
+    if not book or book.user_id != current_user.id:
+        raise HTTPException(404)
+
     p = (await db.execute(
         select(ReadingProgress).where(ReadingProgress.user_id == current_user.id, ReadingProgress.book_id == book_id)
     )).scalar()
@@ -915,7 +1271,6 @@ async def update_progress(
 
     # Trigger lazy processing ahead
     from app.workers.tasks.extraction_tasks import process_chapter_task
-    book = await db.get(Book, book_id)
     total = book.total_chapters or 1
     for n in range(current_chapter + 1, min(current_chapter + 4, total + 1)):
         next_chapter = (
@@ -941,6 +1296,53 @@ async def update_progress(
     return {"ok": True}
 
 
+@router.put("/{book_id}/progress/mark-book-read")
+async def mark_book_read(
+    book_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await db.get(Book, book_id)
+    if not book or book.user_id != current_user.id:
+        raise HTTPException(404)
+
+    total = book.total_chapters or 0
+    if total <= 0:
+        raise HTTPException(400, "Book has no chapters to mark as read")
+
+    chapters_read = list(range(1, total + 1))
+    progress = (await db.execute(
+        select(ReadingProgress).where(
+            ReadingProgress.user_id == current_user.id,
+            ReadingProgress.book_id == book_id,
+        )
+    )).scalar()
+
+    if progress is None:
+        progress = ReadingProgress(
+            user_id=current_user.id,
+            book_id=book_id,
+            current_chapter=total,
+            scroll_pct=1.0,
+            chapters_read=chapters_read,
+        )
+        db.add(progress)
+    else:
+        progress.current_chapter = total
+        progress.scroll_pct = 1.0
+        progress.chapters_read = chapters_read
+        progress.last_read = datetime.now(timezone.utc)
+
+    await db.commit()
+    return {
+        "ok": True,
+        "current_chapter": total,
+        "chapters_read_count": total,
+        "percent_complete": 100.0,
+        "chapters_left": 0,
+    }
+
+
 @router.put("/{book_id}/progress/chapter-status")
 async def update_chapter_read_status(
     book_id: uuid.UUID,
@@ -949,6 +1351,10 @@ async def update_chapter_read_status(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    book = await db.get(Book, book_id)
+    if not book or book.user_id != current_user.id:
+        raise HTTPException(404)
+
     progress = (await db.execute(
         select(ReadingProgress).where(
             ReadingProgress.user_id == current_user.id,
@@ -1119,11 +1525,75 @@ async def _chapter_intelligence_map(db: AsyncSession, book: Book, current_user) 
     return availability
 
 
-def _parse_chapter_from_source(book: Book, chapter_num: int) -> tuple[str | None, str | None]:
+async def _serialize_chapter_media(db: AsyncSession, chapter_id: uuid.UUID) -> list[dict]:
+    rows = (await db.execute(
+        select(ChapterMedia)
+        .where(ChapterMedia.chapter_id == chapter_id)
+        .order_by(ChapterMedia.sort_order, ChapterMedia.created_at)
+    )).scalars().all()
+    items: list[dict] = []
+    for row in rows:
+        item = {
+            "marker": row.marker,
+            "asset_type": row.asset_type,
+            "content_type": row.content_type,
+            "caption": row.caption,
+            "sort_order": row.sort_order,
+            "url": get_presigned_url(row.storage_key),
+            "content_base64": None,
+        }
+        if item["url"] is None:
+            try:
+                item["content_base64"] = base64.b64encode(download_book(row.storage_key)).decode("ascii")
+            except Exception:
+                continue
+        items.append(item)
+    return items
+
+
+def _serialize_inline_images(images: list[dict]) -> list[dict]:
+    serialized: list[dict] = []
+    for index, image in enumerate(images):
+        raw = image.get("bytes")
+        marker = image.get("marker")
+        if not raw or not marker:
+            continue
+        serialized.append(
+            {
+                "marker": marker,
+                "asset_type": "image",
+                "content_type": image.get("content_type"),
+                "caption": None,
+                "sort_order": index,
+                "url": None,
+                "content_base64": base64.b64encode(raw).decode("ascii"),
+            }
+        )
+    return serialized
+
+
+def _extract_media_markers(text: str | None) -> list[str]:
+    if not text:
+        return []
+    return re.findall(r"\[\[IMAGE:[^\]]+\]\]", text)
+
+
+def _merge_media_items(primary: list[dict], fallback: list[dict]) -> list[dict]:
+    if not primary:
+        return fallback
+    merged = {item["marker"]: item for item in primary if item.get("marker")}
+    for item in fallback:
+        marker = item.get("marker")
+        if marker and marker not in merged:
+            merged[marker] = item
+    return sorted(merged.values(), key=lambda item: item.get("sort_order", 0))
+
+
+def _parse_chapter_from_source(book: Book, chapter_num: int) -> dict | None:
     try:
         raw = download_book(book.s3_key)
     except Exception:
-        return None, None
+        return None
 
     try:
         if book.format == "pdf":
@@ -1135,9 +1605,9 @@ def _parse_chapter_from_source(book: Book, chapter_num: int) -> tuple[str | None
 
             chapters = parse_epub(raw)
     except Exception:
-        return None, None
+        return None
 
     chapter = next((item for item in chapters if item.get("number") == chapter_num), None)
     if not chapter:
-        return None, None
-    return chapter.get("title"), chapter.get("text")
+        return None
+    return chapter

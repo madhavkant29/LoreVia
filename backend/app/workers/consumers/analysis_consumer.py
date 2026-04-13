@@ -22,19 +22,23 @@ async def analyse_chapter(chapter_id: str, chapter_text: str, chapter_title: str
         if not chapter:
             return {"error": "chapter not found"}
 
-        results = {}
-        for mode in ["short", "detailed", "key_points"]:
-            # Check if summary already exists
-            existing = (await db.execute(
-                select(ChapterSummary).where(
-                    ChapterSummary.chapter_id == chapter.id,
-                    ChapterSummary.mode == mode,
+        existing_modes = set(
+            (
+                await db.execute(
+                    select(ChapterSummary.mode).where(ChapterSummary.chapter_id == chapter.id)
                 )
-            )).scalar()
-            if existing:
-                continue
+            ).scalars().all()
+        )
+        pending_modes = [mode for mode in ["short", "detailed", "key_points"] if mode not in existing_modes]
 
-            summary_data = await generate_summary(chapter_text, mode, chapter_title)
+        summary_payloads = await asyncio.gather(
+            *(generate_summary(chapter_text, mode, chapter_title) for mode in pending_modes),
+            return_exceptions=True,
+        )
+        results = {}
+        for mode, summary_data in zip(pending_modes, summary_payloads):
+            if isinstance(summary_data, Exception):
+                continue
             row = ChapterSummary(
                 chapter_id=chapter.id,
                 mode=mode,
@@ -44,9 +48,6 @@ async def analyse_chapter(chapter_id: str, chapter_text: str, chapter_title: str
                 clues=summary_data.get("clues"),
             )
             db.add(row)
-            await db.flush()
-
-            # Cache it
             await cache_set(
                 key_chapter_summary(chapter_id, mode),
                 summary_data,
@@ -54,7 +55,6 @@ async def analyse_chapter(chapter_id: str, chapter_text: str, chapter_title: str
             )
             results[mode] = "generated"
 
-        # Extract plot threads
         threads = await extract_plot_threads(chapter_text, chapter.number)
         for t in threads:
             thread = PlotThread(
@@ -70,5 +70,6 @@ async def analyse_chapter(chapter_id: str, chapter_text: str, chapter_title: str
             db.add(thread)
 
         await db.commit()
-        log.info(f"Analysed chapter {chapter_id}: {results}")
+        if settings.DEBUG:
+            log.info("analysed_chapter %s %s", chapter_id, results)
         return {"chapter_id": chapter_id, "summaries": results}

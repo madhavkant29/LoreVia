@@ -1,5 +1,5 @@
 "use client"
-import { useState } from "react"
+import { useState, type KeyboardEvent } from "react"
 import type { Character } from "@/types/character"
 import { CONFIDENCE_THRESHOLDS, TRAIT_TYPE_LABELS } from "@/lib/constants"
 import { useAuthStore } from "@/lib/stores/authStore"
@@ -18,11 +18,20 @@ export function CharacterCard({ character, compact = false, theme = "light" }: P
   const relationshipSummaries = character.relationship_summaries ?? []
   const isPaid = user?.tier === "pro" || user?.tier === "power" || user?.tier === "admin"
   const advancedTraits = visible.filter(([key]) => !["hair", "eyes", "face", "build", "age", "distinguishing"].includes(key))
+  const toggleExpanded = () => setExpanded(v => !v)
+  const handleCardKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault()
+      toggleExpanded()
+    }
+  }
 
   return (
-    <button
-      type="button"
-      onClick={() => setExpanded(v => !v)}
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={toggleExpanded}
+      onKeyDown={handleCardKeyDown}
       className={`w-full text-left rounded-xl border p-4 ${compact ? "" : "transition-shadow"} ${
       isDark ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200"
     }`}>
@@ -163,6 +172,6 @@ export function CharacterCard({ character, compact = false, theme = "light" }: P
           </div>
         </div>
       )}
-    </button>
+    </div>
   )
 }

@@ -8,4 +8,6 @@ if [ -n "$CLOUDFLARE_TUNNEL_TOKEN" ]; then
   sleep 2
 fi
 
-exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
+WEB_CONCURRENCY="${WEB_CONCURRENCY:-1}"
+
+exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers "$WEB_CONCURRENCY"

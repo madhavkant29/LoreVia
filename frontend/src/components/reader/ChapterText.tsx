@@ -1,14 +1,16 @@
 "use client"
 import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
-import type { ChapterCharacter } from "@/types/reader"
+import type { ChapterCharacter, ChapterMedia } from "@/types/reader"
 
 interface Props {
   bookId: string
   chapterNum: number
+  chapterTitle: string | null
   totalChapters: number | null
   textUrl: string | null
   textContent: string | null
+  media: ChapterMedia[]
   characters: ChapterCharacter[]
   onTap: (word: string) => void
   onQuoteSelect: (text: string) => void
@@ -22,9 +24,11 @@ interface Props {
 export function ChapterText({
   bookId,
   chapterNum,
+  chapterTitle,
   totalChapters,
   textUrl,
   textContent,
+  media,
   characters,
   onTap,
   onQuoteSelect,
@@ -43,118 +47,197 @@ export function ChapterText({
       return
     }
     if (!textUrl) return
-    fetch(textUrl).then(r => r.text()).then(setText).catch(() => setText(""))
+    fetch(textUrl).then((r) => r.text()).then(setText).catch(() => setText(""))
   }, [textUrl, textContent])
 
   const handleMouseUp = useCallback(() => {
     if (!canUseQuoteMode || !quoteModeEnabled) return
     const rawSelection = window.getSelection()?.toString() ?? ""
-    const sel = rawSelection.trim()
-    if (sel && sel.length > 1) {
-      setSelected(sel)
+    const next = rawSelection.trim()
+    if (next && next.length > 1) {
+      setSelected(next)
       onQuoteSelect(rawSelection)
     }
-  }, [canUseQuoteMode, quoteModeEnabled, onQuoteSelect])
+  }, [canUseQuoteMode, onQuoteSelect, quoteModeEnabled])
 
-  if (!text) return (
-    <div className="mx-auto max-w-2xl px-6 py-12">
-      <div className="flex justify-center"><div className="h-5 w-5 animate-spin rounded-full border-2 border-indigo-400 border-t-transparent" /></div>
-    </div>
-  )
+  if (!text) {
+    return (
+      <div className="mx-auto max-w-2xl px-6 py-12">
+        <div className="flex justify-center">
+          <div className="h-5 w-5 animate-spin rounded-full border-2 border-violet-500 border-t-transparent" />
+        </div>
+      </div>
+    )
+  }
 
-  const segments = annotate(text, characters)
-  const surfaceClass = theme === "dark" ? "bg-[#111315] text-stone-100" : "bg-white text-black"
+  const blocks = annotateWithMedia(text, characters, media)
   const mentionClass = theme === "dark"
-    ? "cursor-pointer rounded border-b border-dashed border-stone-300/45 px-0.5 transition-colors hover:bg-white/10"
-    : "cursor-pointer rounded border-b border-dashed border-black/40 px-0.5 transition-colors hover:bg-black/5"
-  const helperClass = theme === "dark" ? "text-stone-400" : "text-gray-500"
-  const navShellClass = theme === "dark"
-    ? "border-white/10 bg-white/[0.04]"
-    : "border-slate-200 bg-slate-50"
-  const navLinkClass = theme === "dark"
-    ? "border-white/10 bg-white/5 text-stone-100 hover:bg-white/10"
-    : "border-slate-200 bg-white text-slate-900 hover:bg-slate-100"
-  const navMetaClass = theme === "dark" ? "text-stone-400" : "text-slate-500"
+    ? "cursor-pointer rounded border-b border-dashed border-indigo-200/45 px-0.5 transition-colors hover:bg-indigo-200/10"
+    : "cursor-pointer rounded border-b border-dashed border-violet-500/55 px-0.5 text-stone-900 transition-colors hover:bg-violet-50"
+
+  const cardTone = theme === "dark"
+    ? {
+        shell: "border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.02))] text-stone-100",
+        helper: "text-stone-400",
+        prose: "text-stone-100",
+        media: "border-white/10 bg-white/5",
+        aside: "border-white/10 bg-white/[0.04]",
+        asideBox: "bg-black/20 text-stone-300",
+        nav: "border-white/10 bg-white/5 text-stone-100 hover:bg-white/10",
+        divider: "bg-white/10",
+      }
+    : {
+        shell: "border-white/75 bg-[radial-gradient(circle_at_top,#f8f4ff,transparent_30%),linear-gradient(180deg,rgba(255,255,255,0.97),rgba(255,255,255,0.84))] text-stone-950",
+        helper: "text-stone-500",
+        prose: "text-stone-900",
+        media: "border-stone-200 bg-[#f7f3ee]",
+        aside: "border-stone-200 bg-white/78 backdrop-blur",
+        asideBox: "bg-[#f6f1ff] text-stone-600",
+        nav: "border-stone-200 bg-white text-stone-700 hover:bg-stone-50",
+        divider: "bg-violet-400",
+      }
 
   const fontStack =
     fontFamily === "serif"
-      ? '"Merriweather", Georgia, serif'
+      ? '"Newsreader", "Merriweather", Georgia, serif'
       : fontFamily === "mono"
         ? '"SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace'
-        : 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
+        : '"Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
 
   return (
-    <div
-      className={`mx-auto px-6 py-12 transition-colors ${surfaceClass}`}
-      onMouseUp={handleMouseUp}
-      style={{
-        maxWidth: `${Math.min(1120, 760 + Math.max(0, fontSize - 18) * 18)}px`,
-      }}
-    >
-      <div
-        className="reader-text select-text whitespace-pre-wrap"
-        style={{
-          fontFamily: fontStack,
-          fontSize: `${fontSize}px`,
-          lineHeight: "1.75",
-          maxWidth: "100%",
-          wordBreak: "normal",
-          overflowWrap: "normal",
-          hyphens: "none",
-        }}
-      >
-        {segments.map((seg, i) =>
-          seg.type === "text" ? (
-            <span key={i}>{seg.content}</span>
-          ) : (
-            <span
-              key={i}
-              className={mentionClass}
-              onClick={() => onTap(seg.content)}
-              title={`Tap for context: ${seg.content}`}
+    <div className="mx-auto w-full px-4 pb-28 pt-8 sm:px-8 lg:px-10" onMouseUp={handleMouseUp} style={{ maxWidth: "1500px" }}>
+      <div className="grid gap-8 xl:grid-cols-[minmax(0,1fr)_19rem] xl:items-start">
+        <section className={`overflow-hidden rounded-[2rem] border shadow-[0_28px_100px_-68px_rgba(79,70,229,0.38)] ${cardTone.shell}`}>
+          <div className="mx-auto max-w-[72ch] px-6 py-10 sm:px-10 sm:py-14">
+            <p className={`text-center text-[12px] italic tracking-[0.02em] ${cardTone.helper}`} style={{ fontFamily: "var(--reader-label)" }}>
+              Tap any word or select text for instant context
+            </p>
+
+            <header className="mb-14 mt-8">
+              <p className="text-[11px] uppercase tracking-[0.36em] text-stone-400" style={{ fontFamily: "var(--reader-label)" }}>
+                Chapter {chapterNum}{totalChapters ? ` of ${totalChapters}` : ""}
+              </p>
+              <h1 className="mt-4 text-5xl font-light leading-tight text-stone-950 sm:text-6xl" style={{ fontFamily: "var(--reader-display)" }}>
+                {chapterTitle || `Chapter ${chapterNum}`}
+              </h1>
+              <div className={`mt-6 h-[2px] w-16 ${cardTone.divider}`} />
+            </header>
+
+            <div
+              className={`reader-text whitespace-pre-wrap ${cardTone.prose}`}
+              style={{
+                fontFamily: fontStack,
+                fontSize: `${fontSize}px`,
+                lineHeight: fontFamily === "sans" ? "1.88" : "1.96",
+                maxWidth: "100%",
+                wordBreak: "normal",
+                overflowWrap: "normal",
+                hyphens: "none",
+              }}
             >
-              {seg.content}
-            </span>
-          )
-        )}
+              {blocks.map((block, index) =>
+                block.type === "media" ? (
+                  mediaSrc(block.item) ? (
+                    <figure key={`media-${index}`} className={`my-10 overflow-hidden rounded-[1.5rem] border p-3 ${cardTone.media}`}>
+                      <div className="flex justify-center py-4">
+                        <img
+                          src={mediaSrc(block.item)}
+                          alt={block.item.caption ?? `Inline chapter image ${block.item.sort_order + 1}`}
+                          className="max-h-[28rem] w-auto rounded-[1rem] object-contain"
+                        />
+                      </div>
+                      <figcaption className={`px-3 pb-3 text-center text-xs italic ${cardTone.helper}`} style={{ fontFamily: "var(--reader-label)" }}>
+                        {block.item.caption ?? "Image from the source material, preserved in the reading flow."}
+                      </figcaption>
+                    </figure>
+                  ) : null
+                ) : (
+                  <p key={`block-${index}`} className="mb-8">
+                    {block.segments.map((segment, segmentIndex) =>
+                      segment.type === "text" ? (
+                        <span key={`text-${index}-${segmentIndex}`}>{segment.content}</span>
+                      ) : (
+                        <span
+                          key={`mention-${index}-${segmentIndex}`}
+                          className={mentionClass}
+                          onClick={() => onTap(segment.content)}
+                          title={`Tap for context: ${segment.content}`}
+                        >
+                          {segment.content}
+                        </span>
+                      )
+                    )}
+                  </p>
+                )
+              )}
+            </div>
+
+            <footer
+              className={`mt-20 flex flex-col gap-3 border-t pt-8 text-sm italic sm:flex-row sm:items-center sm:justify-between ${theme === "dark" ? "border-white/10 text-stone-400" : "border-stone-200 text-stone-500"}`}
+              style={{ fontFamily: "var(--reader-label)" }}
+            >
+              <span>{chapterTitle || `Chapter ${chapterNum}`}</span>
+              <span>{countWords(text).toLocaleString()} words in this chapter</span>
+            </footer>
+          </div>
+        </section>
+
+        <aside className="hidden xl:block">
+          <div className={`sticky top-40 rounded-[1.75rem] border p-5 ${cardTone.aside}`}>
+            <p className="text-[11px] uppercase tracking-[0.32em] text-stone-400" style={{ fontFamily: "var(--reader-label)" }}>
+              Reading note
+            </p>
+            <p className="mt-3 text-2xl leading-9 text-stone-900" style={{ fontFamily: "var(--reader-display)" }}>
+              {quoteModeEnabled && canUseQuoteMode
+                ? selected
+                  ? "Your selected passage is ready for the context rail."
+                  : "Quote mode is on. Select a passage to send it into the character panel."
+                : "Character names remain lightly marked so context can open without pulling you out of the chapter."}
+            </p>
+            <div className={`mt-5 rounded-[1.25rem] px-4 py-4 ${cardTone.asideBox}`}>
+              <p className="text-xs uppercase tracking-[0.22em]" style={{ fontFamily: "var(--reader-label)" }}>
+                Navigation
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Link prefetch={false} href={`/${bookId}`} className={`rounded-full border px-4 py-2 text-sm font-medium transition ${cardTone.nav}`}>
+                  Book overview
+                </Link>
+                {chapterNum > 1 ? (
+                  <Link prefetch={false} href={`/${bookId}/chapter/${chapterNum - 1}`} className={`rounded-full border px-4 py-2 text-sm font-medium transition ${cardTone.nav}`}>
+                    Previous
+                  </Link>
+                ) : null}
+                {totalChapters === null || chapterNum < totalChapters ? (
+                  <Link prefetch={false} href={`/${bookId}/chapter/${chapterNum + 1}`} className={`rounded-full border px-4 py-2 text-sm font-medium transition ${cardTone.nav}`}>
+                    Next
+                  </Link>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        </aside>
       </div>
-      <p className={`mt-12 text-center text-xs italic ${helperClass}`} style={{ fontSize: "12px", opacity: theme === "dark" ? 0.72 : 0.48 }}>
-        {quoteModeEnabled && canUseQuoteMode
-          ? (selected ? "Selected text is ready for the side context panel." : "Quote mode is on. Select a passage to save it.")
-          : "Tap any character name for instant details."}
-      </p>
-      <div className={`mt-10 rounded-3xl border p-4 ${navShellClass}`}>
+
+      <div className={`mx-auto mt-8 max-w-[72ch] rounded-[1.5rem] border p-4 xl:hidden ${cardTone.aside}`}>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${navMetaClass}`}>Chapter navigation</p>
-            <p className={`mt-1 text-sm ${navMetaClass}`}>
+            <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${cardTone.helper}`}>Chapter navigation</p>
+            <p className={`mt-1 text-sm ${cardTone.helper}`}>
               {totalChapters ? `Chapter ${chapterNum} of ${totalChapters}` : `Chapter ${chapterNum}`}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Link
-              prefetch={false}
-              href={`/${bookId}`}
-              className={`rounded-full border px-4 py-2 text-sm font-medium transition ${navLinkClass}`}
-            >
+            <Link prefetch={false} href={`/${bookId}`} className={`rounded-full border px-4 py-2 text-sm font-medium transition ${cardTone.nav}`}>
               Back to book
             </Link>
             {chapterNum > 1 ? (
-              <Link
-                prefetch={false}
-                href={`/${bookId}/chapter/${chapterNum - 1}`}
-                className={`rounded-full border px-4 py-2 text-sm font-medium transition ${navLinkClass}`}
-              >
-                Previous chapter
+              <Link prefetch={false} href={`/${bookId}/chapter/${chapterNum - 1}`} className={`rounded-full border px-4 py-2 text-sm font-medium transition ${cardTone.nav}`}>
+                Previous
               </Link>
             ) : null}
             {totalChapters === null || chapterNum < totalChapters ? (
-              <Link
-                prefetch={false}
-                href={`/${bookId}/chapter/${chapterNum + 1}`}
-                className={`rounded-full border px-4 py-2 text-sm font-medium transition ${navLinkClass}`}
-              >
-                Next chapter
+              <Link prefetch={false} href={`/${bookId}/chapter/${chapterNum + 1}`} className={`rounded-full border px-4 py-2 text-sm font-medium transition ${cardTone.nav}`}>
+                Next
               </Link>
             ) : null}
           </div>
@@ -165,10 +248,37 @@ export function ChapterText({
 }
 
 type Segment = { type: "text" | "mention"; content: string }
+type RenderBlock = { type: "text"; segments: Segment[] } | { type: "media"; item: ChapterMedia }
+
+function annotateWithMedia(text: string, characters: ChapterCharacter[], media: ChapterMedia[]): RenderBlock[] {
+  const mediaMap = new Map(media.map((item) => [item.marker, item]))
+  const parts = text.split(/(\[\[IMAGE:[^\]]+\]\])/g)
+  const blocks: RenderBlock[] = []
+  const usedMarkers = new Set<string>()
+
+  for (const part of parts) {
+    if (!part) continue
+    const mediaItem = mediaMap.get(part)
+    if (mediaItem) {
+      blocks.push({ type: "media", item: mediaItem })
+      usedMarkers.add(mediaItem.marker)
+      continue
+    }
+    if (/^\[\[IMAGE:[^\]]+\]\]$/.test(part)) continue
+    blocks.push({ type: "text", segments: annotate(part, characters) })
+  }
+
+  for (const item of media) {
+    if (usedMarkers.has(item.marker)) continue
+    blocks.push({ type: "media", item })
+  }
+
+  return blocks
+}
 
 function annotate(text: string, characters: ChapterCharacter[]): Segment[] {
   const names = characters
-    .flatMap(c => [c.name, ...(c.aliases ?? [])])
+    .flatMap((character) => [character.name, ...(character.aliases ?? [])])
     .filter(Boolean)
     .sort((a, b) => b.length - a.length)
 
@@ -179,19 +289,34 @@ function annotate(text: string, characters: ChapterCharacter[]): Segment[] {
     let earliest = -1
     let matchedName = ""
     for (const name of names) {
-      const idx = remaining.indexOf(name)
-      if (idx !== -1 && (earliest === -1 || idx < earliest)) {
-        earliest = idx
+      const index = remaining.indexOf(name)
+      if (index !== -1 && (earliest === -1 || index < earliest)) {
+        earliest = index
         matchedName = name
       }
     }
+
     if (earliest === -1) {
       segments.push({ type: "text", content: remaining })
       break
     }
+
     if (earliest > 0) segments.push({ type: "text", content: remaining.slice(0, earliest) })
     segments.push({ type: "mention", content: matchedName })
     remaining = remaining.slice(earliest + matchedName.length)
   }
+
   return segments
+}
+
+function mediaSrc(item: ChapterMedia): string {
+  if (item.url) return item.url
+  if (item.content_base64 && item.content_type) return `data:${item.content_type};base64,${item.content_base64}`
+  return ""
+}
+
+function countWords(text: string): number {
+  const normalized = text.replace(/\[\[IMAGE:[^\]]+\]\]/g, " ")
+  const matches = normalized.match(/\b[\p{L}\p{N}']+\b/gu)
+  return matches?.length ?? 0
 }

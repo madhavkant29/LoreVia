@@ -7,9 +7,11 @@ export interface Book {
   genre: string | null
   format: "pdf" | "epub" | "manual"
   status: BookStatus
+  cover_url?: string | null
   total_chapters: number | null
   total_tokens?: number | null
   is_truncated?: boolean
+  primary_series_id?: string | null
   series_name?: string | null
   series_order?: number | null
   is_public?: boolean
@@ -18,6 +20,18 @@ export interface Book {
   archived_at?: string | null
   hidden_at?: string | null
   created_at: string
+  progress_pct?: number | null
+  chapters_read_count?: number | null
+  chapters_left?: number | null
+  marked_complete_in_series?: boolean | null
+}
+
+export interface BookSeries {
+  id: string
+  name: string
+  description: string | null
+  created_at: string
+  books: Book[]
 }
 
 export interface PublicChapterMeta {
@@ -34,6 +48,7 @@ export interface PublicBook {
   description: string | null
   format: "pdf" | "epub" | "manual"
   status: BookStatus
+  cover_url?: string | null
   total_chapters: number | null
   copyright_warning?: boolean
   created_at?: string
@@ -64,4 +79,17 @@ export interface SavedQuote {
   quote_text: string
   note: string | null
   created_at: string
+}
+
+export interface UserStats {
+  public: {
+    total_books_read: number
+    total_words_read: number
+  }
+  private: {
+    total_uploads: number
+    total_token_consumption: number
+    total_chapters_tracked: number
+    saved_quotes: number
+  }
 }

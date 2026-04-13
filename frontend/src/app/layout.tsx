@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next"
 import "./globals.css"
 import { AuthBootstrap } from "@/components/auth/AuthBootstrap"
 import { PWARegister } from "@/components/app/PWARegister"
+import { SiteFooter } from "@/components/layout/SiteFooter"
 
 export const metadata: Metadata = {
   title: "LoreVia - AI Reading Companion",
@@ -28,6 +29,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <AuthBootstrap />
         <PWARegister />
         {children}
+        <SiteFooter />
       </body>
     </html>
   )

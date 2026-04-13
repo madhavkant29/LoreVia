@@ -2,6 +2,10 @@ import ebooklib
 from ebooklib import epub
 from bs4 import BeautifulSoup
 import tempfile, os
+import re
+
+
+PARAGRAPH_SPLIT_MAX_WORDS = 4000
 
 
 def parse_epub(raw_bytes: bytes) -> list[dict]:
@@ -29,6 +33,53 @@ def parse_epub(raw_bytes: bytes) -> list[dict]:
                 "text": text,
             })
             n += 1
-        return chapters
+        return _split_large_chapters(chapters)
     finally:
         os.unlink(path)
+
+
+def _split_large_chapters(chapters: list[dict]) -> list[dict]:
+    normalized: list[dict] = []
+    next_number = 1
+    for chapter in chapters:
+        parts = [part.strip() for part in re.split(r"\n\s*\n+", chapter["text"]) if part.strip()]
+        split_parts = _split_parts(parts)
+        for index, split_part in enumerate(split_parts, start=1):
+            title = chapter["title"]
+            if len(split_parts) > 1:
+                title = f"{title} · Part {index}"
+            normalized.append({
+                "number": next_number,
+                "title": title,
+                "text": "\n\n".join(split_part),
+            })
+            next_number += 1
+    return normalized
+
+
+def _split_parts(parts: list[str]) -> list[list[str]]:
+    if not parts:
+        return []
+    sections: list[list[str]] = []
+    current: list[str] = []
+    current_words = 0
+    for part in parts:
+        part_words = len(re.findall(r"\b\w+\b", part))
+        if current and current_words + part_words > PARAGRAPH_SPLIT_MAX_WORDS and _can_close_section(current):
+            sections.append(current)
+            current = []
+            current_words = 0
+        current.append(part)
+        current_words += part_words
+    if current:
+        sections.append(current)
+    return sections
+
+
+def _can_close_section(parts: list[str]) -> bool:
+    for part in reversed(parts):
+        stripped = part.strip()
+        if not stripped:
+            continue
+        return bool(re.search(r"[.!?][\"')\]]*\s*$", stripped))
+    return False

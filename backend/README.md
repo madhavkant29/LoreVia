@@ -18,7 +18,7 @@ celery -A app.workers.celery_app worker -Q analysis,embedding -c 2
 celery -A app.workers.celery_app worker -Q intelligence -c 1
 
 # Monitor
-celery -A app.workers.celery_app flower
+celery -A app.workers.celery_app flower --port=5555
 ```
 
 ## Cloudflare Tunnel (production origin security)

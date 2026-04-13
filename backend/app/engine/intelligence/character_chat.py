@@ -35,6 +35,7 @@ async def chat_as_character(
     book_title: str,
     current_chapter: int,
     context_summary: str,
+    search_context: str,
     messages: list[dict],  # conversation history: [{"role": "user"/"assistant", "content": "..."}]
 ) -> str:
     client = get_client()
@@ -50,7 +51,7 @@ async def chat_as_character(
             arc_summary=character.arc_summary or "story ongoing",
             description=build_description(character.trait_state or {}, character.archetype),
             chapter=current_chapter,
-            context=(context_summary or "")[:900],
+            context=("\n".join(filter(None, [context_summary or "", search_context or ""])))[:1300],
         )
 
         # Keep last 10 turns to manage context window

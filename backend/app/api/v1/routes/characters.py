@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.core.database import get_db
+from app.models.book import Book
 from app.models.character import Character, CharacterState
 from app.api.deps.auth import get_current_user
 import uuid
@@ -17,6 +18,9 @@ async def get_character(
 ):
     char = await db.get(Character, character_id)
     if not char:
+        raise HTTPException(404)
+    book = await db.get(Book, char.book_id)
+    if not book or book.user_id != current_user.id:
         raise HTTPException(404)
     return char
 
@@ -36,10 +40,19 @@ async def get_character_state(
     )).scalar()
 
     if state:
+        char = await db.get(Character, character_id)
+        if not char:
+            raise HTTPException(404)
+        book = await db.get(Book, char.book_id)
+        if not book or book.user_id != current_user.id:
+            raise HTTPException(404)
         return {"trait_state": state.trait_snapshot, "at_chapter": state.at_chapter,
                 "arc_note": state.arc_note, "prompt_delta": state.prompt_delta}
 
     char = await db.get(Character, character_id)
     if not char:
+        raise HTTPException(404)
+    book = await db.get(Book, char.book_id)
+    if not book or book.user_id != current_user.id:
         raise HTTPException(404)
     return {"trait_state": char.trait_state, "at_chapter": 0}

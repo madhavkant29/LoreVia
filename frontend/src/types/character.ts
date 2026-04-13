@@ -35,6 +35,18 @@ export interface CharacterRelationship {
 }
 
 export interface RelationshipGraph {
-  nodes: Array<{ id: string; name: string; role: string | null; first_chapter: number }>
-  edges: Array<{ source: string; target: string; type: string; sentiment: number | null; description: string | null }>
+  nodes: Array<{ 
+    id: string; 
+    name: string; 
+    role: string | null; 
+    first_chapter: number;
+    description?: string | null;
+    personality_tags?: string[];
+    aliases?: string[];
+    motivations?: string[];
+    fears?: string[];
+    archetype?: string | null;
+    arc_summary?: string | null;
+  }>
+  edges: Array<{ source: string; target: string; type: string; sentiment: number | null; description: string | null; from_chapter?: number | null }>
 }

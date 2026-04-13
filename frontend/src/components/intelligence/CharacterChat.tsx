@@ -10,8 +10,10 @@ interface Props {
   currentChapter: number
 }
 
+type ChatBubble = ChatMessage & { groundedHint?: string | null }
+
 export function CharacterChat({ character, bookId, currentChapter }: Props) {
-  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [messages, setMessages] = useState<ChatBubble[]>([])
   const [input, setInput] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -35,7 +37,7 @@ export function CharacterChat({ character, bookId, currentChapter }: Props) {
         [...messages, userMsg],
         currentChapter,
       )
-      setMessages(prev => [...prev, { role: "assistant", content: res.reply }])
+      setMessages(prev => [...prev, { role: "assistant", content: res.reply, groundedHint: res.grounded_hint }])
     } catch (e: any) {
       setError(e.response?.data?.detail ?? "Chat failed")
       setMessages(prev => prev.slice(0, -1))
@@ -69,6 +71,9 @@ export function CharacterChat({ character, bookId, currentChapter }: Props) {
                 : "bg-gray-100 text-gray-800"
             }`}>
               {msg.content}
+              {msg.role === "assistant" && msg.groundedHint ? (
+                <p className="mt-2 text-[11px] font-medium text-gray-500">{msg.groundedHint}</p>
+              ) : null}
             </div>
           </div>
         ))}

@@ -8,6 +8,29 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.engine.embeddings.embedder import embed_character
 from app.models.character import Character
 
+ALIAS_STOPWORDS = {
+    "after", "and", "are", "around", "association", "but", "considering", "creation",
+    "faculty", "for", "from", "having", "his", "however", "just", "lady", "leaving",
+    "let", "looking", "lord", "lords", "maybe", "miss", "now", "once", "regardless",
+    "seeing", "she", "sure", "taking", "thanks", "that", "the", "they", "thinking",
+    "this", "though", "unfortunately", "using", "very", "war", "well", "what", "when",
+    "with", "yes", "you",
+}
+ALIAS_EXACT_BLOCKLIST = {
+    "Clock Tower", "Far East", "Fourth Holy Grail", "Great Ritual", "Mage's Association",
+    "Magic Circuits", "Magic Crest", "Modern Magecraft", "Mystic Codes", "Source Crest",
+    "The Twin Towers", "United States",
+}
+ALIAS_SUFFIX_BLOCKLIST = (
+    " Association",
+    " Crest",
+    " Energy",
+    " Fundamentals",
+    " Magecraft",
+    " Ritual",
+    " Towers",
+)
+
 
 async def embed_for_dedup(name: str, traits: dict) -> list[float]:
     return await embed_character(name, traits)
@@ -18,6 +41,34 @@ def normalize_character_name(name: str | None) -> str:
         return ""
     normalized = re.sub(r"[^a-z0-9\s]", " ", name.lower())
     return re.sub(r"\s+", " ", normalized).strip()
+
+
+def is_valid_alias(alias: str | None) -> bool:
+    candidate = re.sub(r"\s+", " ", (alias or "").strip())
+    if not candidate:
+        return False
+    if candidate in ALIAS_EXACT_BLOCKLIST:
+        return False
+    if any(candidate.endswith(suffix) for suffix in ALIAS_SUFFIX_BLOCKLIST):
+        return False
+
+    normalized = normalize_character_name(candidate)
+    if not normalized or normalized in ALIAS_STOPWORDS:
+        return False
+
+    words = re.findall(r"[A-Za-z][A-Za-z'-]*", candidate)
+    if not words:
+        return False
+    if len(words) == 1 and (len(words[0]) <= 3 or normalized in ALIAS_STOPWORDS):
+        return False
+    if len(words) == 1 and candidate[0].islower():
+        return False
+    return True
+
+
+def _meaningful_tokens(name: str | None) -> list[str]:
+    stopwords = {"mr", "mrs", "ms", "miss", "dr", "sir", "lady", "lord", "the"}
+    return [token for token in normalize_character_name(name).split() if token and token not in stopwords]
 
 
 def character_name_keys(name: str | None, aliases: Iterable[str] | None = None) -> set[str]:
@@ -60,6 +111,8 @@ def names_equivalent(
 
     left_tokens = left_norm.split()
     right_tokens = right_norm.split()
+    left_meaningful = _meaningful_tokens(left_name)
+    right_meaningful = _meaningful_tokens(right_name)
 
     if (left_norm.startswith(right_norm) or right_norm.startswith(left_norm)) and min(len(left_tokens), len(right_tokens)) >= 2:
         return True
@@ -68,6 +121,15 @@ def names_equivalent(
         if len(left_tokens) >= 2 and len(right_tokens) >= 2 and left_tokens[1] == right_tokens[1]:
             return True
         if left_tokens[-1] == right_tokens[-1]:
+            return True
+
+    if left_meaningful and right_meaningful:
+        left_set = set(left_meaningful)
+        right_set = set(right_meaningful)
+        overlap = left_set & right_set
+        if overlap and (left_set <= right_set or right_set <= left_set):
+            return True
+        if len(overlap) >= 2:
             return True
 
     return False
@@ -114,6 +176,8 @@ async def find_by_name_or_alias(
 
 
 async def merge_alias(db: AsyncSession, character_id: uuid.UUID, alias: str) -> None:
+    if not is_valid_alias(alias):
+        return
     await db.execute(
         text("""
             UPDATE characters
@@ -124,4 +188,3 @@ async def merge_alias(db: AsyncSession, character_id: uuid.UUID, alias: str) -> 
         """),
         {"cid": str(character_id), "alias": alias},
     )
-    await db.commit()

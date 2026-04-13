@@ -26,7 +26,7 @@ export function RecallCard({ recall, lastChapter, onDismiss, onContinue }: Props
         <div className="flex items-start justify-between gap-4">
           <div>
             <p className={`text-xs font-semibold uppercase tracking-[0.28em] ${isDark ? "text-indigo-200" : "text-indigo-600"}`}>
-              Previously On
+              Story So Far
             </p>
             <p className={`mt-2 text-sm ${isDark ? "text-slate-200" : "text-stone-500"}`}>
               Resume with a clean recap through chapter {lastChapter}.

@@ -52,14 +52,14 @@ def process_chapter_task(self, book_id: str, chapter_num: int, title: str, text:
                 ).scalar()
                 if chapter_row and chapter_row.s3_key:
                     try:
-                        chapter_text = download_book(chapter_row.s3_key).decode("utf-8", errors="ignore")
+                        chapter_text = (await asyncio.to_thread(download_book, chapter_row.s3_key)).decode("utf-8", errors="ignore")
                         chapter_title = chapter_row.title or title
                     except Exception:
                         chapter_text = ""
 
             if not chapter_text.strip():
-                raw = download_book(book.s3_key)
-                chapters = parse_pdf(raw) if book.format == "pdf" else parse_epub(raw)
+                raw = await asyncio.to_thread(download_book, book.s3_key)
+                chapters = await asyncio.to_thread(parse_pdf if book.format == "pdf" else parse_epub, raw)
                 chapter_data = next((ch for ch in chapters if ch["number"] == chapter_num), None)
                 if not chapter_data:
                     return

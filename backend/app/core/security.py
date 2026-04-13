@@ -39,6 +39,15 @@ def create_refresh_token(user_id: str, version: int = 1, session_id: str | None 
     )
 
 
+def create_asset_token(user_id: str, resource: str, expires_minutes: int = 60) -> str:
+    expire = datetime.now(timezone.utc) + timedelta(minutes=expires_minutes)
+    return jwt.encode(
+        {"sub": user_id, "exp": expire, "type": "asset", "res": resource},
+        settings.JWT_SECRET,
+        algorithm=settings.JWT_ALGORITHM,
+    )
+
+
 def decode_token(token: str) -> dict | None:
     try:
         return jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])

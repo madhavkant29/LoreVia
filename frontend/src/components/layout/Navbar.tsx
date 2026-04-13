@@ -1,6 +1,7 @@
 "use client"
 import { useState } from "react"
 import Link from "next/link"
+import { usePathname, useRouter } from "next/navigation"
 import { authApi } from "@/lib/api/auth"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
@@ -10,20 +11,21 @@ export function Navbar() {
   const { theme, toggleTheme } = usePreferencesStore()
   const isDark = theme === "dark"
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const router = useRouter()
+  const pathname = usePathname()
 
   const handleLogout = async () => {
     try {
       await authApi.logout()
     } catch {}
     logout()
-    if (typeof window !== "undefined") {
-      window.location.href = "/login"
-    }
+    setMobileMenuOpen(false)
+    router.replace("/login")
   }
 
   const navItems = [
     { href: "/library", label: "Library" },
-    { href: "/public", label: "Public" },
+    { href: "/stats", label: "Stats" },
     { href: "/quotes", label: "Quotes" },
     { href: "/series", label: "Series" },
     { href: "/pricing", label: "Pricing" },
@@ -92,7 +94,13 @@ export function Navbar() {
                 href={item.href}
                 onClick={() => setMobileMenuOpen(false)}
                 className={`shrink-0 rounded-full px-3 py-2 text-sm transition-colors ${
-                  isDark ? "text-gray-300 hover:bg-white/10 hover:text-white" : "text-stone-600 hover:bg-white hover:text-stone-950"
+                  pathname === item.href
+                    ? isDark
+                      ? "bg-white/12 text-white"
+                      : "bg-white text-stone-950 shadow-sm"
+                    : isDark
+                      ? "text-gray-300 hover:bg-white/10 hover:text-white"
+                      : "text-stone-600 hover:bg-white hover:text-stone-950"
                 }`}
               >
                 {item.label}

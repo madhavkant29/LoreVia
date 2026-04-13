@@ -19,15 +19,17 @@ PROMPTS = {
     ),
     "detailed": """Analyse this chapter and return JSON only:
 {
-  "summary": "2-3 paragraph summary",
-  "key_events": [{"event": "...", "importance": 1-10}],
-  "char_changes": [{"character": "...", "change": "..."}],
-  "clues": [{"clue": "...", "foreshadows": "..."}],
+  "summary": "4-6 paragraph summary with concrete detail and cause-effect continuity",
+  "key_events": [{"event": "...", "importance": 1-10, "impact": "..."}],
+  "char_changes": [{"character": "...", "change": "...", "evidence": "..."}],
+  "clues": [{"clue": "...", "foreshadows": "...", "why_it_matters": "..."}],
   "open_questions": ["..."]
 }
 Rules:
 - Return raw JSON only. No markdown fences.
-- Use concrete names from the text.
+- Use concrete names, motivations, and turning points from the text.
+- The summary should feel rich enough for a reader who forgot the chapter, not like a compressed blurb.
+- Preserve chronology and explain why the chapter matters.
 - If there are no character changes or clues, return empty arrays.
 - Do not include any text before or after the JSON.""",
     "key_points": (
@@ -45,10 +47,10 @@ async def generate_summary(chapter_text: str, mode: str, title: str = "") -> dic
             "model": settings.OPENAI_EXTRACT_MODEL,
             "messages": [
                 {"role": "system", "content": system},
-                {"role": "user", "content": chapter_text[:6000]},
+                {"role": "user", "content": chapter_text[:9000]},
             ],
             "temperature": 0.2,
-            "max_tokens": 1500,
+            "max_tokens": 2200,
         }
         if mode == "detailed":
             request_kwargs["response_format"] = {"type": "json_object"}

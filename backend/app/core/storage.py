@@ -46,7 +46,7 @@ def upload_book(file: BinaryIO, user_id: str, filename: str) -> str:
         path.write_bytes(file.read())
     else:
         s3 = _get_s3_client()
-        s3.upload_fileobj(file, settings.S3_BUCKET, key, ExtraArgs={"ACL": "private"})
+        s3.upload_fileobj(file, settings.S3_BUCKET, key)
     return key
 
 
@@ -63,8 +63,21 @@ def upload_book_bytes(raw: bytes, user_id: str, filename: str) -> str:
             Bucket=settings.S3_BUCKET,
             Key=key,
             Body=raw,
-            ACL="private",
         )
+    return key
+
+
+def upload_binary(key: str, raw: bytes, content_type: str | None = None) -> str:
+    if is_local_storage():
+        path = _local_path(key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(raw)
+    else:
+        s3 = _get_s3_client()
+        extra_args = {"Bucket": settings.S3_BUCKET, "Key": key, "Body": raw}
+        if content_type:
+            extra_args["ContentType"] = content_type
+        s3.put_object(**extra_args)
     return key
 
 

@@ -1,5 +1,5 @@
 import { apiClient } from "./client"
-import type { ChapterData, ChapterListResponse, ContextResult, ChapterSummary, ForeshadowingItem, PlotThread, RelationshipEvolutionPair, RelationshipGraph, SummaryCollectionResponse, SummaryMode, ThematicSearchResult, TimelineEvent } from "@/types/reader"
+import type { ChapterData, ChapterListResponse, ContextResult, ChapterSummary, ForeshadowingItem, PlotThread, ReadingProgress, RelationshipEvolutionPair, RelationshipGraph, SummaryCollectionResponse, SummaryMode, ThematicSearchResult, TimelineEvent } from "@/types/reader"
 
 export const readerApi = {
   getChapter: (bookId: string, chapter: number) =>
@@ -29,11 +29,13 @@ export const readerApi = {
   getRecall: (bookId: string) =>
     apiClient.get(`/reader/${bookId}/recall`).then(r => r.data),
   getProgress: (bookId: string) =>
-    apiClient.get(`/reader/${bookId}/progress`).then(r => r.data),
+    apiClient.get<ReadingProgress>(`/reader/${bookId}/progress`).then(r => r.data),
   updateProgress: (bookId: string, chapter: number, scrollPct: number) =>
     apiClient.put(`/reader/${bookId}/progress`, null, { params: { current_chapter: chapter, scroll_pct: scrollPct } }),
   updateChapterReadStatus: (bookId: string, chapter: number, read: boolean) =>
     apiClient.put(`/reader/${bookId}/progress/chapter-status`, null, { params: { chapter, read } }).then(r => r.data),
+  markBookRead: (bookId: string) =>
+    apiClient.put(`/reader/${bookId}/progress/mark-book-read`).then(r => r.data),
   saveQuote: (bookId: string, payload: { quote_text: string; chapter_number?: number; character_name?: string | null; note?: string | null }) =>
     apiClient.post(`/reader/${bookId}/quotes`, payload).then(r => r.data),
 }

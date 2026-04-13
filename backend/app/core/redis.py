@@ -1,4 +1,6 @@
 import redis.asyncio as aioredis
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
 from app.core.config import settings
 import json
 import hashlib
@@ -6,10 +8,22 @@ import hashlib
 _redis: aioredis.Redis | None = None
 
 
+def _normalize_redis_url(raw_url: str) -> tuple[str, dict]:
+    if not raw_url.startswith("rediss://"):
+        return raw_url, {}
+
+    parts = urlsplit(raw_url)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    query["ssl_cert_reqs"] = (query.get("ssl_cert_reqs") or "required").lower()
+    normalized_url = urlunsplit(parts._replace(query=urlencode(query)))
+    return normalized_url, {}
+
+
 async def get_redis() -> aioredis.Redis:
     global _redis
     if _redis is None:
-        _redis = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+        redis_url, redis_kwargs = _normalize_redis_url(settings.REDIS_URL)
+        _redis = aioredis.from_url(redis_url, decode_responses=True, **redis_kwargs)
     return _redis
 
 
@@ -67,6 +81,30 @@ async def remember_webhook_event(event_id: str, ttl_seconds: int = 7 * 24 * 3600
     return bool(await r.set(key_webhook_event(event_id), "1", ex=ttl_seconds, nx=True))
 
 
+async def store_password_reset_token(token: str, user_id: str, ttl_seconds: int) -> None:
+    r = await get_redis()
+    previous_token = await r.get(key_password_reset_user(user_id))
+    async with r.pipeline(transaction=True) as pipe:
+        if previous_token:
+            pipe.delete(key_password_reset(previous_token))
+        pipe.setex(key_password_reset(token), ttl_seconds, user_id)
+        pipe.setex(key_password_reset_user(user_id), ttl_seconds, token)
+        await pipe.execute()
+
+
+async def consume_password_reset_token(token: str) -> str | None:
+    r = await get_redis()
+    key = key_password_reset(token)
+    value = await r.get(key)
+    if not value:
+        return None
+    async with r.pipeline(transaction=True) as pipe:
+        pipe.delete(key)
+        pipe.delete(key_password_reset_user(value))
+        await pipe.execute()
+    return value
+
+
 # ── Key builders — single source of truth ────────────────────────────────────
 def key_character_profile(character_id: str) -> str:
     return f"character:profile:{character_id}"
@@ -101,6 +139,14 @@ def key_refresh_session(user_id: str, session_id: str) -> str:
 
 def key_webhook_event(event_id: str) -> str:
     return f"webhook:event:{event_id}"
+
+
+def key_password_reset(token: str) -> str:
+    return f"password_reset:{token}"
+
+
+def key_password_reset_user(user_id: str) -> str:
+    return f"password_reset_user:{user_id}"
 
 
 def key_grounded_answer(book_id: str, chapter: int, question: str) -> str:

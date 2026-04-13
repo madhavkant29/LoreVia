@@ -2,23 +2,48 @@
 import { useRef, useState } from "react"
 import { booksApi } from "@/lib/api/books"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
+import { GENRE_TAGS } from "@/lib/constants/genreTags"
 
-const GENRES = ["anime", "light novel", "fantasy", "sci-fi", "romance", "thriller", "realistic", "horror", "other"]
+const MAX_TAGS = 8
 
 export function UploadModal({ onClose }: { onClose: () => void }) {
   const [title, setTitle] = useState("")
-  const [genre, setGenre] = useState("")
   const [author, setAuthor] = useState("")
   const [visibility, setVisibility] = useState<"private" | "public">("private")
   const [description, setDescription] = useState("")
+  const [selectedTags, setSelectedTags] = useState<string[]>([])
+  const [customTag, setCustomTag] = useState("")
   const [file, setFile] = useState<File | null>(null)
+  const [autoExtractCover, setAutoExtractCover] = useState(true)
+  const [coverFile, setCoverFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [uploadStage, setUploadStage] = useState<"idle" | "uploading" | "processing">("idle")
   const [error, setError] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const coverInputRef = useRef<HTMLInputElement>(null)
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
+  const genre = selectedTags.join(", ")
+  const suggestedTags = GENRE_TAGS.filter((tag) => !selectedTags.includes(tag)).slice(0, 18)
+
+  const addTag = (rawTag: string) => {
+    const tag = normalizeTag(rawTag)
+    if (!tag) return
+    setSelectedTags((current) => {
+      if (current.includes(tag) || current.length >= MAX_TAGS) return current
+      return [...current, tag]
+    })
+  }
+
+  const removeTag = (tag: string) => {
+    setSelectedTags((current) => current.filter((item) => item !== tag))
+  }
+
+  const addCustomTag = () => {
+    addTag(customTag)
+    setCustomTag("")
+  }
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -35,6 +60,8 @@ export function UploadModal({ onClose }: { onClose: () => void }) {
       await booksApi.upload(file, title, genre || undefined, author || undefined, {
         visibility,
         description: visibility === "public" ? description || undefined : undefined,
+        autoExtractCover,
+        coverFile: autoExtractCover ? null : coverFile,
         onProgress: (percent) => {
           setUploadProgress(percent)
         },
@@ -103,22 +130,64 @@ export function UploadModal({ onClose }: { onClose: () => void }) {
             }`}
           />
 
-          <select
-            value={genre}
-            onChange={e => setGenre(e.target.value)}
-            className={`rounded-lg border px-3 py-2.5 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
-              isDark
-                ? "border-white/10 bg-white/5 text-slate-100"
-                : "border-gray-300 bg-white text-slate-950"
-            }`}
-          >
-            <option value="">Genre (optional)</option>
-            {GENRES.map(g => (
-              <option key={g} value={g}>
-                {g}
-              </option>
-            ))}
-          </select>
+          <div className={`rounded-xl border p-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-gray-300 bg-gray-50"}`}>
+            <div className="flex items-center justify-between gap-3">
+              <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>Genres and tags</p>
+              <span className={`text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>{selectedTags.length}/{MAX_TAGS}</span>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {selectedTags.length > 0 ? selectedTags.map((tag) => (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={() => removeTag(tag)}
+                  className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${isDark ? "bg-indigo-400/15 text-indigo-100 hover:bg-indigo-400/25" : "bg-indigo-100 text-indigo-800 hover:bg-indigo-200"}`}
+                >
+                  {tag} ×
+                </button>
+              )) : (
+                <p className={`text-sm ${isDark ? "text-slate-500" : "text-slate-400"}`}>Pick suggested tags or add your own.</p>
+              )}
+            </div>
+            <div className="mt-4 flex gap-2">
+              <input
+                type="text"
+                list="genre-tags"
+                value={customTag}
+                onChange={e => setCustomTag(e.target.value)}
+                placeholder="Add custom genre or mood"
+                className={`flex-1 rounded-lg border px-3 py-2.5 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
+                  isDark
+                    ? "border-white/10 bg-white/5 text-slate-100 placeholder:text-slate-500"
+                    : "border-gray-300 bg-white text-slate-950 placeholder:text-slate-400"
+                }`}
+              />
+              <button
+                type="button"
+                onClick={addCustomTag}
+                className={`rounded-lg px-3 py-2 text-sm font-medium transition ${isDark ? "bg-white/10 text-white hover:bg-white/15" : "bg-slate-900 text-white hover:bg-slate-800"}`}
+              >
+                Add
+              </button>
+            </div>
+            <datalist id="genre-tags">
+              {GENRE_TAGS.map((tag) => (
+                <option key={tag} value={tag} />
+              ))}
+            </datalist>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {suggestedTags.map((tag) => (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={() => addTag(tag)}
+                  className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${isDark ? "border-white/10 text-slate-300 hover:bg-white/5" : "border-slate-300 text-slate-700 hover:bg-white"}`}
+                >
+                  + {tag}
+                </button>
+              ))}
+            </div>
+          </div>
 
           <div className={`grid grid-cols-2 gap-2 rounded-xl border p-1 ${
             isDark ? "border-white/10 bg-white/[0.03]" : "border-gray-200 bg-gray-50"
@@ -175,6 +244,44 @@ export function UploadModal({ onClose }: { onClose: () => void }) {
             )}
           </div>
 
+          <div className={`rounded-xl border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-gray-200 bg-gray-50"}`}>
+            <label className="flex items-start gap-3">
+              <input
+                type="checkbox"
+                checked={autoExtractCover}
+                onChange={(e) => setAutoExtractCover(e.target.checked)}
+                className="mt-1 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+              />
+              <div>
+                <p className={`text-sm font-medium ${isDark ? "text-slate-100" : "text-slate-900"}`}>Use the first PDF page as the book cover</p>
+                <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                  Enabled by default for PDFs. Turn this off if you want to upload a separate cover image instead.
+                </p>
+              </div>
+            </label>
+
+            {!autoExtractCover ? (
+              <div className="mt-4">
+                <input
+                  ref={coverInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  className="hidden"
+                  onChange={(e) => setCoverFile(e.target.files?.[0] ?? null)}
+                />
+                <button
+                  type="button"
+                  onClick={() => coverInputRef.current?.click()}
+                  className={`w-full rounded-lg border px-3 py-2.5 text-sm transition ${
+                    isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-gray-300 bg-white text-slate-700 hover:bg-gray-50"
+                  }`}
+                >
+                  {coverFile ? `Cover selected: ${coverFile.name}` : "Upload separate cover image"}
+                </button>
+              </div>
+            ) : null}
+          </div>
+
           {error && <p className="text-sm text-red-500">{error}</p>}
 
           {uploading ? (
@@ -222,4 +329,11 @@ export function UploadModal({ onClose }: { onClose: () => void }) {
       </div>
     </div>
   )
+}
+
+function normalizeTag(rawTag: string): string {
+  return rawTag
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ")
 }

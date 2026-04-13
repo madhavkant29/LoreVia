@@ -8,7 +8,18 @@ export interface ChapterData {
   intelligence_available?: boolean
   text_url: string | null
   text_content?: string | null
+  media?: ChapterMedia[]
   characters: ChapterCharacter[]
+}
+
+export interface ChapterMedia {
+  marker: string
+  asset_type: string
+  content_type: string | null
+  caption: string | null
+  sort_order: number
+  url: string | null
+  content_base64: string | null
 }
 
 export interface ChapterCharacter {
@@ -17,10 +28,8 @@ export interface ChapterCharacter {
   aliases: string[]
   role: string | null
   first_chapter: number
-  trait_state: Record<string, any>
   description?: string | null
   personality_tags: string[]
-  motivations: string[]
 }
 
 export interface ContextResult {
@@ -32,6 +41,7 @@ export interface ContextResult {
 
 export interface SearchResult {
   text: string
+  summary: string
   chapter_num: number
   chapter_title: string | null
   relevance: number
@@ -49,6 +59,14 @@ export interface ChapterListResponse {
   read_upto: number
   current_chapter?: number
   chapters: ChapterListItem[]
+}
+
+export interface ReadingProgress {
+  current_chapter: number
+  scroll_pct: number
+  chapters_read_count: number
+  percent_complete: number
+  chapters_left: number
 }
 
 export interface SummaryCollectionItem {

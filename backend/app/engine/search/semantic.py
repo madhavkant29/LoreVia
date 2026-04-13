@@ -9,6 +9,36 @@ from app.core.config import settings
 import uuid
 
 
+def summarize_search_text(text: str, max_length: int = 180) -> str:
+    cleaned = " ".join((text or "").split())
+    if not cleaned:
+        return ""
+    sentences = [part.strip() for part in text.replace("\n", " ").split(".") if part.strip()]
+    candidate = sentences[0] if sentences else cleaned
+    if len(candidate) <= max_length:
+        return candidate
+    shortened = candidate[:max_length].rsplit(" ", 1)[0].strip()
+    return f"{shortened}..."
+
+
+def build_search_result(
+    text: str,
+    chunk_index: int,
+    chapter_num: int,
+    chapter_title: str | None,
+    relevance: float,
+) -> dict:
+    excerpt = text[:300] + ("..." if len(text) > 300 else "")
+    return {
+        "text": excerpt,
+        "summary": summarize_search_text(text),
+        "chunk_index": chunk_index,
+        "chapter_num": chapter_num,
+        "chapter_title": chapter_title,
+        "relevance": round(float(relevance), 3),
+    }
+
+
 async def semantic_search(
     db: AsyncSession,
     book_id: uuid.UUID,
@@ -50,13 +80,15 @@ async def semantic_search(
 
     results = []
     for row in rows.fetchall():
-        results.append({
-            "text": row.text[:300] + ("..." if len(row.text) > 300 else ""),
-            "chunk_index": row.chunk_index,
-            "chapter_num": row.chapter_num,
-            "chapter_title": row.chapter_title,
-            "relevance": round(float(row.relevance), 3),
-        })
+        results.append(
+            build_search_result(
+                text=row.text,
+                chunk_index=row.chunk_index,
+                chapter_num=row.chapter_num,
+                chapter_title=row.chapter_title,
+                relevance=row.relevance,
+            )
+        )
     return results
 
 

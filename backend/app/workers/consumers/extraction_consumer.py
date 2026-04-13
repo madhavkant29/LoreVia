@@ -3,22 +3,29 @@ Full book processing: parse → chunk → extract characters + relationships →
 Lazy: first N chapters immediately, rest queued.
 """
 import asyncio
+import re
 import uuid
 from app.core.database import AsyncSessionLocal
-from app.core.storage import download_book
+from app.core.storage import download_book, upload_binary
 from app.core.config import effective_tier, settings
-from app.models.book import Book, Chapter
+from app.models.book import Book, Chapter, ChapterMedia
 from app.models.character import Character, CharacterState
 from app.models.intelligence import BookChunk, CharacterRelationship
 from app.engine.character.consolidator import consolidate_characters
 from app.engine.character.extractor import extract_characters_and_relationships
-from app.engine.character.deduplicator import embed_for_dedup, find_by_name_or_alias, find_similar, merge_alias
+from app.engine.character.deduplicator import (
+    character_name_keys,
+    embed_for_dedup,
+    find_similar,
+    merge_alias,
+    names_equivalent,
+)
 from app.engine.character.profile_builder import build_character_profile, update_profile
-from app.engine.embeddings.embedder import embed_batch, embed_character
+from app.engine.embeddings.embedder import embed_batch
 from app.parsers.chunker import chunk_text, count_tokens
 from app.utils.compliance.copyright_check import check_isbn
 from app.utils.external.isbn_lookup import extract_isbn_from_pdf
-from sqlalchemy import delete, update as sa_update, select
+from sqlalchemy import delete, func, update as sa_update, select
 import logging
 
 log = logging.getLogger("lorevia.extraction")
@@ -33,7 +40,19 @@ async def process_book(book_id: str) -> dict:
         await db.execute(sa_update(Book).where(Book.id == book.id).values(status="processing"))
         await db.commit()
 
-        raw = download_book(book.s3_key)
+        raw = await asyncio.to_thread(download_book, book.s3_key)
+        if book.format == "pdf" and not book.cover_s3_key:
+            from app.parsers.pdf_parser import extract_first_page_cover
+
+            cover = await asyncio.to_thread(extract_first_page_cover, raw)
+            if cover:
+                cover_bytes, content_type = cover
+                book.cover_s3_key = await asyncio.to_thread(
+                    upload_binary,
+                    f"covers/{book.user_id}/{uuid.uuid4()}.png",
+                    cover_bytes,
+                    content_type,
+                )
         if book.is_public and book.format == "pdf" and not book.isbn:
             detected_isbn = extract_isbn_from_pdf(raw)
             if detected_isbn:
@@ -44,15 +63,14 @@ async def process_book(book_id: str) -> dict:
         await db.commit()
         if book.format == "pdf":
             from app.parsers.pdf_parser import parse_pdf
-            chapters = parse_pdf(raw)
+            chapters = await asyncio.to_thread(parse_pdf, raw)
         else:
             from app.parsers.epub_parser import parse_epub
-            chapters = parse_epub(raw)
+            chapters = await asyncio.to_thread(parse_epub, raw)
         all_chapters = chapters
 
         # Retrieve user and usage
         from app.models.user import User
-        from sqlalchemy import func
         user = await db.get(User, book.user_id)
         is_free_tier = user and effective_tier(user.tier) not in ("pro", "power", "admin", "premium")
 
@@ -110,24 +128,36 @@ async def process_book(book_id: str) -> dict:
         )
         await db.commit()
 
-        # Create lightweight chapter stubs for the full parsed book so later chapters
-        # can be processed incrementally as the reader advances.
+        # Create lightweight chapter stubs so the library/reader know the chapter map
+        # without uploading every parsed chapter body up front.
         for ch_data in all_chapters:
             await _ensure_chapter_stub(db, book, ch_data)
         await db.commit()
 
-        # Queue first N chapters immediately so book upload completes faster.
+        # Queue chapters with their already-parsed text so workers don't need to
+        # re-download and re-parse the full book for every chapter.
         from app.workers.tasks.extraction_tasks import process_chapter_task
-        for ch_data in ai_chapters[:settings.LAZY_PROCESS_INITIAL_CHAPTERS]:
+        initial_chapters = ai_chapters[:settings.LAZY_PROCESS_INITIAL_CHAPTERS]
+        remaining_chapters = ai_chapters[settings.LAZY_PROCESS_INITIAL_CHAPTERS:]
+
+        for ch_data in initial_chapters:
             process_chapter_task.apply_async(
-                args=[str(book.id), ch_data["number"], "", ""],
+                args=[str(book.id), ch_data["number"], ch_data.get("title") or "", ch_data.get("text") or ""],
                 queue="extraction",
             )
 
-        await db.execute(sa_update(Book).where(Book.id == book.id).values(status="ready"))
-        await db.commit()
+        for ch_data in remaining_chapters:
+            process_chapter_task.apply_async(
+                args=[str(book.id), ch_data["number"], ch_data.get("title") or "", ch_data.get("text") or ""],
+                queue="extraction",
+            )
 
-        log.info(f"Book {book_id} processed: {len(all_chapters)} chapters")
+        if was_truncated:
+            await db.execute(sa_update(Book).where(Book.id == book.id).values(status="ready"))
+            await db.commit()
+
+        if settings.DEBUG:
+            log.info("book_processed %s chapters=%s", book_id, len(all_chapters))
         return {"book_id": book_id, "chapters": len(all_chapters)}
 
 
@@ -138,7 +168,7 @@ async def _process_chapter(db, book, ch_data: dict):
 
     s3_key = f"chapters/{book.id}/{ch_data['number']}.txt"
     try:
-        upload_text(s3_key, ch_data["text"])
+        await asyncio.to_thread(upload_text, s3_key, ch_data["text"])
     except Exception:
         s3_key = ""
 
@@ -153,25 +183,30 @@ async def _process_chapter(db, book, ch_data: dict):
             number=ch_data["number"],
             title=ch_data.get("title"),
             s3_key=s3_key,
+            word_count=_count_words(ch_data.get("text", "")),
             processed=True,
         )
         db.add(chapter)
-        await db.commit()
-        await db.refresh(chapter)
+        await db.flush()
+        await _sync_chapter_media(db, book, chapter, ch_data)
     else:
         chapter_changed = False
-        if ch_data.get("title") and (not chapter.title or not chapter.title.strip()):
+        if ch_data.get("title") and chapter.title != ch_data["title"]:
             chapter.title = ch_data["title"]
             chapter_changed = True
-        if s3_key and (not chapter.s3_key or not chapter.s3_key.strip()):
+        if s3_key and chapter.s3_key != s3_key:
             chapter.s3_key = s3_key
             chapter_changed = True
         if not chapter.processed:
             chapter.processed = True
             chapter_changed = True
+        next_word_count = _count_words(ch_data.get("text", ""))
+        if next_word_count and chapter.word_count != next_word_count:
+            chapter.word_count = next_word_count
+            chapter_changed = True
         if chapter_changed:
-            await db.commit()
-            await db.refresh(chapter)
+            await db.flush()
+        await _sync_chapter_media(db, book, chapter, ch_data)
 
     await db.execute(delete(BookChunk).where(BookChunk.chapter_id == chapter.id))
 
@@ -192,17 +227,35 @@ async def _process_chapter(db, book, ch_data: dict):
         )
         db.add(chunk_row)
 
-    # Batch adjacent chunks together so extraction uses fewer LLM calls per chapter.
-    for chunk_batch in _group_chunks_for_extraction(chunks):
-        result = await extract_characters_and_relationships("\n\n".join(chunk_batch))
+    existing_characters = (
+        await db.execute(
+            select(Character).where(Character.book_id == book.id).order_by(Character.first_chapter, Character.created_at)
+        )
+    ).scalars().all()
 
-        for entity in result.get("characters", []):
+    # Batch adjacent chunks together so extraction uses fewer LLM calls per chapter.
+    extraction_batches = _group_chunks_for_extraction(chunks)
+    extraction_results = await asyncio.gather(
+        *(extract_characters_and_relationships("\n\n".join(chunk_batch)) for chunk_batch in extraction_batches),
+        return_exceptions=True,
+    )
+
+    for result in extraction_results:
+        if isinstance(result, Exception):
+            continue
+
+        character_entities = [entity for entity in result.get("characters", []) if isinstance(entity, dict) and entity.get("name")]
+        dedup_embeddings = await asyncio.gather(
+            *(embed_for_dedup(entity["name"], entity.get("traits", {})) for entity in character_entities),
+            return_exceptions=True,
+        )
+
+        for entity, emb in zip(character_entities, dedup_embeddings):
             if not isinstance(entity, dict):
                 continue
-            if not entity.get("name"):
+            if not entity.get("name") or isinstance(emb, Exception):
                 continue
-            emb = await embed_for_dedup(entity["name"], entity.get("traits", {}))
-            existing_id = await find_by_name_or_alias(db, book.id, entity["name"], entity.get("aliases", []))
+            existing_id = _find_character_id_in_cache(existing_characters, entity["name"], entity.get("aliases", []))
             if not existing_id:
                 existing_id = await find_similar(db, book.id, emb, settings.DEDUP_SIMILARITY_THRESHOLD)
 
@@ -231,6 +284,7 @@ async def _process_chapter(db, book, ch_data: dict):
                 char = Character(**profile, embedding=emb)
                 db.add(char)
                 await db.flush()
+                existing_characters.append(char)
 
         # Store relationships
         for rel in result.get("relationships", []):
@@ -238,8 +292,8 @@ async def _process_chapter(db, book, ch_data: dict):
                 continue
             if not rel.get("character_a") or not rel.get("character_b"):
                 continue
-            char_a = await _find_char_by_name(db, book.id, rel["character_a"])
-            char_b = await _find_char_by_name(db, book.id, rel["character_b"])
+            char_a = _find_character_in_cache(existing_characters, rel["character_a"])
+            char_b = _find_character_in_cache(existing_characters, rel["character_b"])
             if char_a and char_b:
                 r_row = CharacterRelationship(
                     book_id=book.id,
@@ -252,8 +306,15 @@ async def _process_chapter(db, book, ch_data: dict):
                 )
                 db.add(r_row)
 
-    await consolidate_characters(db, book.id, up_to_chapter=ch_data["number"])
     await db.commit()
+
+    if await _should_consolidate_after_chapter(db, book, chapter.number):
+        await consolidate_characters(db, book.id, up_to_chapter=ch_data["number"])
+        await db.commit()
+
+    if await _book_processing_complete(db, book.id):
+        await db.execute(sa_update(Book).where(Book.id == book.id).values(status="ready"))
+        await db.commit()
 
     if ch_data["number"] <= settings.LAZY_PROCESS_INITIAL_CHAPTERS:
         from app.workers.tasks.analysis_tasks import analyse_chapter_task
@@ -265,31 +326,25 @@ async def _process_chapter(db, book, ch_data: dict):
 
 
 async def _ensure_chapter_stub(db, book, ch_data: dict):
-    from app.core.storage import upload_text
-
     existing = (
         await db.execute(
             select(Chapter).where(Chapter.book_id == book.id, Chapter.number == ch_data["number"])
         )
     ).scalar()
-    s3_key = f"chapters/{book.id}/{ch_data['number']}.txt"
 
     if existing is None:
-        try:
-            upload_text(s3_key, ch_data["text"])
-        except Exception:
-            s3_key = ""
-        db.add(
-            Chapter(
-                book_id=book.id,
-                number=ch_data["number"],
-                title=ch_data.get("title"),
-                description=ch_data.get("description"),
-                s3_key=s3_key,
-                token_count=count_tokens(ch_data["text"]),
-                processed=False,
-            )
+        chapter = Chapter(
+            book_id=book.id,
+            number=ch_data["number"],
+            title=ch_data.get("title"),
+            description=ch_data.get("description"),
+            s3_key="",
+            token_count=count_tokens(ch_data["text"]),
+            word_count=_count_words(ch_data.get("text", "")),
+            processed=False,
         )
+        db.add(chapter)
+        await db.flush()
         return
 
     changed = False
@@ -299,28 +354,48 @@ async def _ensure_chapter_stub(db, book, ch_data: dict):
     if ch_data.get("description") and (not existing.description or not existing.description.strip()):
         existing.description = ch_data["description"]
         changed = True
-    if ch_data.get("text") and not existing.s3_key:
-        try:
-            upload_text(s3_key, ch_data["text"])
-            existing.s3_key = s3_key
-            changed = True
-        except Exception:
-            pass
     if ch_data.get("text") and not existing.token_count:
         existing.token_count = count_tokens(ch_data["text"])
+        changed = True
+    next_word_count = _count_words(ch_data.get("text", ""))
+    if next_word_count and existing.word_count != next_word_count:
+        existing.word_count = next_word_count
         changed = True
     if changed:
         await db.flush()
 
 
-async def _find_char_by_name(db, book_id, name: str):
-    match_id = await find_by_name_or_alias(db, book_id, name, [])
-    if match_id:
-        return await db.get(Character, match_id)
-    result = await db.execute(
-        select(Character).where(Character.book_id == book_id, Character.name == name)
+def _find_character_id_in_cache(chars: list[Character], name: str, aliases: list[str] | None) -> uuid.UUID | None:
+    candidate_keys = character_name_keys(name, aliases or [])
+    if not candidate_keys:
+        return None
+
+    for char in chars:
+        if candidate_keys & character_name_keys(char.name, char.aliases or []):
+            return char.id
+        if names_equivalent(name, aliases or [], char.name, char.aliases or []):
+            return char.id
+    return None
+
+
+def _find_character_in_cache(chars: list[Character], name: str) -> Character | None:
+    match_id = _find_character_id_in_cache(chars, name, [])
+    if not match_id:
+        return None
+    return next((char for char in chars if char.id == match_id), None)
+
+
+async def _book_processing_complete(db, book_id: uuid.UUID) -> bool:
+    remaining = await db.scalar(
+        select(func.count()).select_from(Chapter).where(Chapter.book_id == book_id, Chapter.processed.is_(False))
     )
-    return result.scalar()
+    return not bool(remaining)
+
+
+async def _should_consolidate_after_chapter(db, book: Book, chapter_number: int) -> bool:
+    if chapter_number <= settings.LAZY_PROCESS_INITIAL_CHAPTERS:
+        return True
+    return await _book_processing_complete(db, book.id)
 
 
 def _changed(old: dict, new: dict, delta: float = 0.15) -> bool:
@@ -369,3 +444,36 @@ def _group_chunks_for_extraction(chunks: list[str]) -> list[list[str]]:
         batches.append(current_batch)
 
     return batches
+
+
+def _count_words(text: str) -> int:
+    cleaned = re.sub(r"\[\[IMAGE:[^\]]+\]\]", " ", text or "")
+    return len(re.findall(r"\b[\w']+\b", cleaned))
+
+
+async def _sync_chapter_media(db, book: Book, chapter: Chapter, ch_data: dict) -> None:
+    images = ch_data.get("images") or []
+    await db.execute(delete(ChapterMedia).where(ChapterMedia.chapter_id == chapter.id))
+    if not images:
+        return
+
+    for index, image in enumerate(images):
+        raw = image.get("bytes")
+        marker = image.get("marker")
+        if not raw or not marker:
+            continue
+        filename = image.get("filename") or f"{uuid.uuid4().hex}.bin"
+        storage_key = f"chapter-media/{book.id}/{chapter.number}/{index}-{filename}"
+        await asyncio.to_thread(upload_binary, storage_key, raw, image.get("content_type"))
+        db.add(
+            ChapterMedia(
+                book_id=book.id,
+                chapter_id=chapter.id,
+                marker=marker,
+                asset_type="image",
+                content_type=image.get("content_type"),
+                storage_key=storage_key,
+                caption=None,
+                sort_order=index,
+            )
+        )
