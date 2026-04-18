@@ -50,23 +50,64 @@ def merge_trait_states(existing: dict, new_traits: dict) -> dict:
 
 
 def build_description(trait_state: dict, archetype: str | None) -> str:
-    """Builds a plain-text description of the character for display and context."""
-    parts = []
+    """Builds a natural-sounding description of the character for display and context."""
+    # Extract traits with confidence threshold
+    traits = {}
     for key in ["age", "build", "hair", "eyes", "face", "distinguishing"]:
         t = trait_state.get(key, {})
         if isinstance(t, dict) and t.get("confidence", 0) >= PROMPT_CONFIDENCE_THRESHOLD:
             v = t["value"]
             if t.get("type") == "subjective":
                 v = SUBJECTIVE_TRANSLATIONS.get(v.lower(), v)
-            if key == "hair":
-                parts.append(f"{v} hair")
-            elif key == "eyes":
-                parts.append(f"{v} eyes")
-            else:
-                parts.append(v)
-    if not parts and archetype:
+            traits[key] = v
+    
+    # If no traits found, use archetype fallback
+    if not traits and archetype:
         return ARCHETYPE_PROMPTS.get(archetype.lower(), archetype)
-    return ", ".join(parts) if parts else "appearance not yet described"
+    elif not traits:
+        return "appearance not yet described"
+    
+    # Build natural sentences
+    sentences = []
+    
+    # Age description
+    if "age" in traits:
+        age = traits["age"]
+        if "build" in traits:
+            sentences.append(f"A {age} with a {traits['build']} build")
+        else:
+            sentences.append(f"A {age}")
+    elif "build" in traits:
+        sentences.append(f"Has a {traits['build']} build")
+    
+    # Hair and eyes description
+    hair_eyes_parts = []
+    if "hair" in traits:
+        hair_eyes_parts.append(f"{traits['hair']} hair")
+    if "eyes" in traits:
+        hair_eyes_parts.append(f"{traits['eyes']} eyes")
+    
+    if hair_eyes_parts:
+        if len(hair_eyes_parts) == 1:
+            sentences.append(f"Has {hair_eyes_parts[0]}")
+        else:
+            sentences.append(f"Has {hair_eyes_parts[0]} and {hair_eyes_parts[1]}")
+    
+    # Face description
+    if "face" in traits:
+        sentences.append(f"Features {traits['face']}")
+    
+    # Distinguishing features
+    if "distinguishing" in traits:
+        sentences.append(f"Notable for {traits['distinguishing']}")
+    
+    # Combine sentences into natural paragraph
+    if len(sentences) == 1:
+        return sentences[0]
+    elif len(sentences) == 2:
+        return f"{sentences[0]} and {sentences[1]}."
+    else:
+        return f"{'. '.join(sentences[:-1])}. {sentences[-1]}."
 
 
 def flat(trait_state: dict, key: str) -> str | None:
@@ -90,8 +131,17 @@ def merge_list_values(*groups: Iterable[str] | None) -> list[str]:
     return merged
 
 
+def _clean_line(value: str | None) -> str:
+    if not value:
+        return ""
+    # Remove special characters including Unicode symbols
+    cleaned = re.sub(r"[\u2726\u2318\u2600-\u26FF\u2700-\u27BF]", "", value)  # Remove misc symbols and dingbats
+    cleaned = re.sub(r"[^\w\s.,!?;:'\"-]", " ", cleaned)  # Replace other special chars with space
+    return " ".join(cleaned.split()).strip()
+
+
 def choose_richer_text(*values: str | None) -> str | None:
-    cleaned = [" ".join(value.split()).strip() for value in values if value and value.strip()]
+    cleaned = [_clean_line(value) for value in values if value and value.strip()]
     if not cleaned:
         return None
     return max(cleaned, key=len)

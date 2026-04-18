@@ -22,7 +22,7 @@ from app.engine.character.deduplicator import (
 )
 from app.engine.character.profile_builder import build_character_profile, update_profile
 from app.engine.embeddings.embedder import embed_batch
-from app.parsers.chunker import chunk_text, count_tokens
+from app.parsers.chunker import ChunkingConfig, chunk_text, count_tokens
 from app.utils.compliance.copyright_check import check_isbn
 from app.utils.external.isbn_lookup import extract_isbn_from_pdf
 from sqlalchemy import delete, func, update as sa_update, select
@@ -211,7 +211,16 @@ async def _process_chapter(db, book, ch_data: dict):
     await db.execute(delete(BookChunk).where(BookChunk.chapter_id == chapter.id))
 
     # Chunk + extract
-    chunks = chunk_text(ch_data["text"], settings.CHUNK_MAX_TOKENS, settings.CHUNK_OVERLAP_TOKENS)
+    chunks = chunk_text(
+        ch_data["text"],
+        config=ChunkingConfig(
+            target_tokens=settings.CHUNK_TARGET_TOKENS,
+            max_tokens=settings.CHUNK_MAX_TOKENS,
+            min_tokens=settings.CHUNK_MIN_TOKENS,
+            overlap_tokens=settings.CHUNK_OVERLAP_TOKENS,
+            overlap_ratio=settings.CHUNK_OVERLAP_RATIO,
+        ),
+    )
 
     # Batch embed all chunks at once — cheaper
     chunk_embeddings = await embed_batch(chunks)

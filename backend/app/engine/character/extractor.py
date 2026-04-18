@@ -98,6 +98,8 @@ NAME_STOPWORDS = {
     "Chapter", "Prologue", "Epilogue", "Interlude", "Afterword", "Appendix", "Volume", "Part",
     "Section", "Scene", "Page", "Book", "Story", "Note",
     "The", "This", "That", "These", "Those",
+    # Common sentence-start words that are frequent false positives
+    "From", "When", "Then", "Now", "Once", "After", "Before", "Because", "While", "Until",
 }
 CHARACTER_CONTEXT_HINTS = {
     "said", "asked", "replied", "called", "told", "whispered", "shouted", "muttered",
@@ -164,8 +166,9 @@ def _candidate_names(text: str) -> list[str]:
     ]
     single_counts = Counter(singles)
     candidates.extend(
-        name for name, count in single_counts.items()
-        if count >= 2 or _has_character_context(text, name)
+        name
+        for name, count in single_counts.items()
+        if _has_character_context(text, name) or count >= 3
     )
 
     deduped: list[str] = []
@@ -185,7 +188,10 @@ def _candidate_names(text: str) -> list[str]:
 def _normalize_name(name: str | None) -> str:
     if not name:
         return ""
-    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9\s]", " ", name.lower())).strip()
+    # Remove special characters including Unicode symbols like \u2726 (black diamond) and \u2318 (place of interest)
+    cleaned = re.sub(r"[^\w\s]", " ", name.lower())
+    cleaned = re.sub(r"[\u2726\u2318\u2600-\u26FF\u2700-\u27BF]", "", cleaned)  # Remove misc symbols and dingbats
+    return re.sub(r"\s+", " ", cleaned).strip()
 
 
 def _looks_like_character_name(name: str, source_text: str) -> bool:
@@ -292,7 +298,10 @@ def _has_name_support(text: str, name: str) -> bool:
             return strong_mentions >= 1 or non_sentence_start_mentions >= 1 or len(mentions) >= 2
         return strong_mentions >= 1 or len(mentions) >= 2
 
-    return strong_mentions >= 1 or non_sentence_start_mentions >= 2
+    # Single-token names are the noisiest failure mode (random capitalized words).
+    # Require at least one "person-context" mention (said/asked, honorific, possessive, etc),
+    # OR a higher bar of repeated mid-sentence usage.
+    return strong_mentions >= 1 or (len(mentions) >= 4 and non_sentence_start_mentions >= 3)
 
 
 def _find_name_mentions(text: str, name: str) -> list[tuple[int, int]]:

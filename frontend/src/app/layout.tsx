@@ -31,6 +31,10 @@ export const metadata: Metadata = {
   title: "LoreVia - AI Reading Companion",
   description: "Your books, deeply understood.",
   manifest: "/manifest.webmanifest",
+  icons: {
+    icon: "/image.png",
+    apple: "/image.png",
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",

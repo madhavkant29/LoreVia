@@ -1,6 +1,7 @@
 import re
 
 import tiktoken
+from dataclasses import dataclass
 
 _enc = tiktoken.encoding_for_model("gpt-4o")
 MEDIA_MARKER_RE = re.compile(r"\[\[IMAGE:[^\]]+\]\]")
@@ -11,7 +12,44 @@ def count_tokens(text: str) -> int:
     return len(_enc.encode(sanitized))
 
 
-def chunk_text(text: str, max_tokens: int = 1500, overlap: int = 100) -> list[str]:
+@dataclass(frozen=True)
+class ChunkingConfig:
+    """
+    Production-friendly chunking knobs.
+
+    - target_tokens: preferred chunk size (soft target)
+    - max_tokens: hard cap (never exceed, except rare last-chunk edge cases)
+    - min_tokens: avoid tiny chunks that hurt embedding/extraction quality
+    - overlap_tokens: explicit overlap; if None we derive from overlap_ratio
+    - overlap_ratio: derived overlap proportion of target_tokens when overlap_tokens is None
+    """
+
+    target_tokens: int = 900
+    max_tokens: int = 1200
+    min_tokens: int = 260
+    overlap_tokens: int | None = None
+    overlap_ratio: float = 0.07
+
+    def effective_overlap(self) -> int:
+        if self.overlap_tokens is not None:
+            return max(0, int(self.overlap_tokens))
+        derived = int(round(max(0.0, self.overlap_ratio) * max(1, self.target_tokens)))
+        return max(0, derived)
+
+
+def chunk_text(
+    text: str,
+    max_tokens: int = 1500,
+    overlap: int = 100,
+    *,
+    config: ChunkingConfig | None = None,
+) -> list[str]:
+    cfg = config or ChunkingConfig(target_tokens=max_tokens, max_tokens=max_tokens, min_tokens=0, overlap_tokens=overlap, overlap_ratio=0.0)
+    target_tokens = max(1, int(cfg.target_tokens))
+    max_tokens = max(1, int(cfg.max_tokens))
+    min_tokens = max(0, int(cfg.min_tokens))
+    overlap = int(cfg.effective_overlap())
+
     paragraphs = _split_paragraphs(text)
     chunks: list[str] = []
     current: list[str] = []
@@ -31,7 +69,14 @@ def chunk_text(text: str, max_tokens: int = 1500, overlap: int = 100) -> list[st
                 current_tokens += part_tokens
             continue
 
+        # Hard cap: if adding would exceed max, flush now.
         if current and current_tokens + paragraph_tokens > max_tokens:
+            chunks.append("\n\n".join(current))
+            current, current_tokens = _paragraph_overlap(current, overlap)
+
+        # Soft target: once we have reached the target and we have a reasonably sized chunk,
+        # we prefer to flush before adding the next paragraph (so chunk sizes stay consistent).
+        if current and current_tokens >= target_tokens and current_tokens >= min_tokens:
             chunks.append("\n\n".join(current))
             current, current_tokens = _paragraph_overlap(current, overlap)
 

@@ -104,6 +104,7 @@ export default function HomePage() {
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
   const [billingCycle, setBillingCycle] = useState<BillingCycle>("monthly")
+  const [audienceTab, setAudienceTab] = useState<"readers" | "authors">("readers")
   const pricingHref = useMemo(() => (user ? "/pricing" : "#pricing"), [user])
 
   return (
@@ -135,8 +136,11 @@ export default function HomePage() {
           <h1 className={`font-serif text-[4.9rem] leading-none tracking-[-0.04em] sm:text-[6.5rem] md:text-[7rem] ${isDark ? "text-white" : "text-stone-950"}`}>
             LoreVia
           </h1>
-          <p className={`mt-9 max-w-2xl font-serif text-[1.85rem] italic leading-relaxed sm:text-[2rem] md:text-[2.25rem] ${isDark ? "text-slate-300" : "text-stone-500"}`}>
-            Your books, deeply understood.
+          <p className={`mt-9 max-w-2xl font-serif text-[2.1rem] leading-[1.2] tracking-[-0.02em] sm:text-[2.4rem] md:text-[2.6rem] ${isDark ? "text-slate-200" : "text-stone-800"}`}>
+            Never lose the thread.
+          </p>
+          <p className={`mt-5 max-w-3xl text-base leading-8 sm:text-lg ${isDark ? "text-slate-300" : "text-stone-600"}`}>
+            LoreVia extracts every character, relationship, and plot thread from your novel. Tap any name while reading. Track every arc while writing.
           </p>
 
           <div className={`mt-9 max-w-4xl text-center text-[0.86rem] font-medium uppercase tracking-[0.34em] sm:text-[0.92rem] ${isDark ? "text-slate-400" : "text-stone-400"}`}>
@@ -175,14 +179,14 @@ export default function HomePage() {
       <Section className="pt-4">
         <div className="grid gap-14 lg:grid-cols-[1.02fr_0.98fr] lg:items-center">
           <div className="max-w-3xl">
-            <p className={`text-xs font-semibold uppercase tracking-[0.34em] ${isDark ? "text-sky-300" : "text-sky-800"}`}>A serious reading workspace</p>
+            <p className={`text-xs font-semibold uppercase tracking-[0.34em] ${isDark ? "text-sky-300" : "text-sky-800"}`}>The intelligence layer for long-form fiction</p>
             <h2 className={`mt-6 font-serif text-[3.15rem] leading-[0.98] sm:text-5xl md:text-[5rem] ${isDark ? "text-white" : "text-stone-950"}`}>
               Stay with the story.
               <br />
               Keep every thread.
             </h2>
             <p className={`mt-7 max-w-2xl text-lg leading-8 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
-              LoreVia helps readers navigate complex books through spoiler-aware summaries, evolving character intelligence, relationship mapping, recall, thematic exploration, and grounded Q&A shaped around reading progress.
+              For readers who get lost. For authors who need to remember. LoreVia turns a single upload into a navigable continuity layer: characters, relationships, arcs, and plot threads — always anchored to the text.
             </p>
 
             <div className="mt-8 flex flex-wrap gap-4">
@@ -192,6 +196,76 @@ export default function HomePage() {
               <Link href={pricingHref} className={`rounded-full border px-7 py-3.5 text-sm font-semibold transition ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-stone-300 bg-white text-stone-700 hover:bg-stone-50"}`}>
                 View pricing
               </Link>
+            </div>
+
+            <div className={`mt-10 overflow-hidden rounded-[2rem] border shadow-[0_28px_80px_-60px_rgba(79,70,229,0.28)] ${isDark ? "border-white/10 bg-white/5" : "border-white/80 bg-white/92"}`}>
+              <div className={`flex items-center gap-2 p-2 ${isDark ? "bg-white/[0.04]" : "bg-stone-50"}`}>
+                <button
+                  onClick={() => setAudienceTab("readers")}
+                  className={`flex-1 rounded-[1.2rem] px-5 py-3 text-left text-sm font-semibold transition ${
+                    audienceTab === "readers"
+                      ? isDark ? "bg-white text-slate-950" : "bg-white text-stone-950 shadow-sm"
+                      : isDark ? "text-slate-300 hover:bg-white/10" : "text-stone-600 hover:bg-white"
+                  }`}
+                >
+                  For Readers
+                </button>
+                <button
+                  onClick={() => setAudienceTab("authors")}
+                  className={`flex-1 rounded-[1.2rem] px-5 py-3 text-left text-sm font-semibold transition ${
+                    audienceTab === "authors"
+                      ? isDark ? "bg-white text-slate-950" : "bg-white text-stone-950 shadow-sm"
+                      : isDark ? "text-slate-300 hover:bg-white/10" : "text-stone-600 hover:bg-white"
+                  }`}
+                >
+                  For Authors
+                </button>
+              </div>
+              <div className="p-7">
+                {audienceTab === "readers" ? (
+                  <>
+                    <p className={`text-xs font-semibold uppercase tracking-[0.28em] ${isDark ? "text-indigo-300" : "text-violet-600"}`}>Reader workflow</p>
+                    <h3 className={`mt-4 font-serif text-3xl leading-tight ${isDark ? "text-white" : "text-stone-950"}`}>Tap any name. Recover context instantly.</h3>
+                    <p className={`mt-4 text-base leading-8 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
+                      Smart character cards, spoiler-aware summaries, relationship recall, and grounded Q&A — all constrained to what you’ve actually read.
+                    </p>
+                    <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                      {[
+                        ["Smart Tap", "Open character profiles directly from the page without breaking flow."],
+                        ["Spoiler-safe profiles", "Descriptions adapt to your reading progress, not the full book."],
+                        ["Memory recall", "Return to the exact thread you were following — fast."],
+                        ["Relationship guardrails", "Explore connections without stepping into future chapters."],
+                      ].map(([title, body]) => (
+                        <div key={title} className={`rounded-[1.4rem] border p-4 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200/80 bg-stone-50"}`}>
+                          <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{title}</p>
+                          <p className={`mt-2 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{body}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p className={`text-xs font-semibold uppercase tracking-[0.28em] ${isDark ? "text-indigo-300" : "text-violet-600"}`}>Author workflow</p>
+                    <h3 className={`mt-4 font-serif text-3xl leading-tight ${isDark ? "text-white" : "text-stone-950"}`}>Upload one EPUB. Get your story’s continuity map.</h3>
+                    <p className={`mt-4 text-base leading-8 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
+                      LoreVia is a companion tool: character bible, relationship map, and plot thread tracking — built from your own manuscript export.
+                    </p>
+                    <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                      {[
+                        ["Character bible export", "Download a clean reference document (Markdown today; PDF can follow)."],
+                        ["Relationship map", "See connections and shifts without scanning dozens of chapters."],
+                        ["Plot threads", "Track unresolved threads and turning points across the series."],
+                        ["Continuity support", "Coming next: flag contradictions before you publish a new chapter."],
+                      ].map(([title, body]) => (
+                        <div key={title} className={`rounded-[1.4rem] border p-4 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200/80 bg-stone-50"}`}>
+                          <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{title}</p>
+                          <p className={`mt-2 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{body}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
           </div>
 
@@ -340,7 +414,7 @@ export default function HomePage() {
             <div className="max-w-3xl">
               <p className={`text-xs font-semibold uppercase tracking-[0.3em] ${isDark ? "text-indigo-300" : "text-violet-600"}`}>Compare</p>
               <h2 className={`mt-4 font-serif text-4xl leading-tight md:text-5xl ${isDark ? "text-white" : "text-stone-950"}`}>
-                Where LoreVia fits against Kindle, ChatGPT, and generic reading tools.
+                Where LoreVia fits against Royal Road, Kindle, and generic AI.
               </h2>
             </div>
             <div className={`flex items-center gap-3 text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>
@@ -353,7 +427,7 @@ export default function HomePage() {
             <div className={`grid grid-cols-[1.4fr_repeat(3,1fr)] text-sm ${isDark ? "bg-white/6 text-slate-200" : "bg-stone-100 text-stone-700"}`}>
               <div className="px-4 py-4 font-semibold">Capability</div>
               <div className="px-4 py-4 font-semibold">LoreVia</div>
-              <div className="px-4 py-4 font-semibold">Kindle</div>
+              <div className="px-4 py-4 font-semibold">Royal Road</div>
               <div className="px-4 py-4 font-semibold">Generic AI</div>
             </div>
             {compareRows.map(([capability, lorevia, kindle, generic]) => (

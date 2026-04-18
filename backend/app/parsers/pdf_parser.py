@@ -320,6 +320,8 @@ def _heading_remainder(text: str, heading: str) -> str:
 def _clean_text(text: str) -> str:
     normalized = text.replace("\r", "\n")
     normalized = normalized.replace("\u00ad", "")
+    # Remove special Unicode symbols including black diamond (u2726) and place of interest (u2318)
+    normalized = ORNAMENT_RE.sub(" ", normalized)
     normalized = re.sub(r"[ \t]+", " ", normalized)
     normalized = re.sub(r"\n{3,}", "\n\n", normalized)
     normalized = re.sub(r"[^\S\n]+([,.;:!?])", r"\1", normalized)

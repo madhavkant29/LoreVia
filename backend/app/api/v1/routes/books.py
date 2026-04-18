@@ -107,6 +107,7 @@ async def upload_book_endpoint(
     series_ids: list[str] = Form(default=[]),
     visibility: str = Form("private"),
     description: str | None = Form(None),
+    mode: str = Form("reader"),
     auto_extract_cover: str = Form("true"),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
@@ -124,6 +125,8 @@ async def upload_book_endpoint(
         raise HTTPException(400, "No file")
     if visibility not in {"private", "public"}:
         raise HTTPException(400, "Invalid visibility")
+    if mode not in {"reader", "author"}:
+        raise HTTPException(400, "Invalid mode")
     if not title.strip():
         raise HTTPException(400, "Title is required")
 
@@ -170,7 +173,7 @@ async def upload_book_endpoint(
 
     process_book_task.apply_async(args=[str(book.id)], queue="extraction")
     return {"book_id": str(book.id), "status": "processing",
-            "copyright_warning": False, "visibility": visibility}
+            "copyright_warning": False, "visibility": visibility, "mode": mode}
 
 
 @router.put("/{book_id}/series", response_model=BookOut)
@@ -628,6 +631,247 @@ async def get_book_characters(book_id: uuid.UUID, db: AsyncSession = Depends(get
     ]
 
 
+def _character_bible_markdown(
+    *,
+    book: Book,
+    characters: list[Character],
+    rel_summaries: dict[str, list[str]],
+) -> tuple[bytes, str]:
+    def _clean_line(value: str | None) -> str:
+        return " ".join((value or "").split()).strip()
+
+    def _clean_markdown_asterisks(text: str) -> str:
+        """Remove markdown asterisks while preserving the visual structure."""
+        import re
+        # Replace bold markdown **text** with just text (keeping the content)
+        text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)
+        # Replace italic markdown *text* with just text
+        text = re.sub(r'\*(.*?)\*', r'\1', text)
+        return text
+
+    def _bullets(items: list[str]) -> str:
+        cleaned = [item.strip() for item in items if item and item.strip()]
+        return "\n".join(f"- {item}" for item in cleaned) if cleaned else ""
+
+    title = _clean_line(book.title) or "LoreVia Character Bible"
+    header = [
+        f"# {_clean_markdown_asterisks(title)} - Character Bible",
+        "",
+        f"- Source: {_clean_markdown_asterisks(book.title)}",
+        f"- Format: {book.format.upper()}",
+        "",
+        "This file is generated from LoreVia's extracted character state (traits, roles, relationships, and arc summaries).",
+        "",
+        "## Characters",
+        "",
+    ]
+
+    def _clean_markdown_asterisks_list(items: list[str]) -> list[str]:
+        return [_clean_markdown_asterisks(item) for item in items]
+
+    body: list[str] = []
+    for char in characters:
+        relationships_preview = _dedupe_preserve_order(rel_summaries.get(str(char.id), []))[:6]
+        description = _clean_line(build_description(char.trait_state or {}, char.archetype))
+        if relationships_preview:
+            description = _merge_description_with_relationships(description, relationships_preview)
+        description = _clean_line(description)
+
+        tags = [t for t in (char.personality_tags or []) if _clean_line(t)]
+        motivations = [m for m in (char.motivations or []) if _clean_line(m)]
+        fears = [f for f in (char.fears or []) if _clean_line(f)]
+
+        body.extend(
+            [
+                f"### {char.name}",
+                "",
+                f"- Role: {_clean_line(char.role) or '—'}",
+                f"- First appearance: Chapter {char.first_chapter}" if char.first_chapter else "- First appearance: —",
+                f"- Also known as: {', '.join(char.aliases or [])}" if (char.aliases or []) else "- Also known as: —",
+                "",
+                f"Summary: {description or 'LoreVia is still building this profile.'}",
+                "",
+            ]
+        )
+
+        if tags:
+            body.append("Personality tags")
+            body.append(_bullets([f"`{t}`" for t in tags[:10]]))
+            body.append("")
+
+        if motivations:
+            body.append("Motivations")
+            body.append(_bullets(motivations[:8]))
+            body.append("")
+
+        if fears:
+            body.append("Fears")
+            body.append(_bullets(fears[:8]))
+            body.append("")
+
+        if _clean_line(char.arc_summary):
+            body.append("Arc")
+            body.append(_bullets([_clean_line(char.arc_summary)]))
+            body.append("")
+
+        if relationships_preview:
+            body.append("Relationships (preview)")
+            body.append(_bullets(relationships_preview))
+            body.append("")
+
+        body.append("---")
+        body.append("")
+
+    markdown = "\n".join(header + body).encode("utf-8")
+    safe_name = "".join(ch for ch in (book.title or "lorevia") if ch.isalnum() or ch in {" ", "-", "_"}).strip().replace(" ", "-")
+    filename_base = safe_name or "lorevia"
+    return markdown, filename_base
+
+
+def _character_bible_pdf(*, markdown: bytes, title: str) -> bytes:
+    from io import BytesIO
+
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
+    from reportlab.lib.units import inch
+    from reportlab.lib import colors
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, leftMargin=0.85 * inch, rightMargin=0.85 * inch, topMargin=0.8 * inch, bottomMargin=0.8 * inch)
+    styles = getSampleStyleSheet()
+    story = []
+
+    h1 = styles["Heading1"]
+    h2 = styles["Heading2"]
+    body = styles["BodyText"]
+    body.leading = 14
+    body.textColor = colors.black
+
+    text = markdown.decode("utf-8", errors="ignore").splitlines()
+    story.append(Paragraph(title, h1))
+    story.append(Spacer(1, 0.2 * inch))
+
+    for line in text:
+        if line.startswith("### "):
+            story.append(Spacer(1, 0.14 * inch))
+            story.append(Paragraph(line.replace("### ", ""), h2))
+            continue
+        if line.startswith("# "):
+            continue
+        if line.startswith("## "):
+            story.append(Spacer(1, 0.18 * inch))
+            story.append(Paragraph(line.replace("## ", ""), h1))
+            story.append(Spacer(1, 0.12 * inch))
+            continue
+        if not line.strip():
+            story.append(Spacer(1, 0.10 * inch))
+            continue
+        # simple bullet support
+        if line.startswith("- "):
+            story.append(Paragraph(f"• {line[2:]}", body))
+        else:
+            story.append(Paragraph(line, body))
+
+    doc.build(story)
+    return buffer.getvalue()
+
+
+def _character_bible_docx(*, markdown: bytes, title: str) -> bytes:
+    from io import BytesIO
+
+    from docx import Document
+
+    doc = Document()
+    doc.add_heading(title, level=1)
+    doc.add_paragraph("")
+
+    for line in markdown.decode("utf-8", errors="ignore").splitlines():
+        if line.startswith("# "):
+            continue
+        if line.startswith("## "):
+            doc.add_heading(line.replace("## ", ""), level=2)
+            continue
+        if line.startswith("### "):
+            doc.add_heading(line.replace("### ", ""), level=3)
+            continue
+        if line.startswith("- "):
+            doc.add_paragraph(line[2:], style="List Bullet")
+            continue
+        if line.strip() == "---":
+            doc.add_page_break()
+            continue
+        doc.add_paragraph(line)
+
+    buffer = BytesIO()
+    doc.save(buffer)
+    return buffer.getvalue()
+
+
+@router.get("/{book_id}/export/character-bible")
+async def export_character_bible(
+    book_id: uuid.UUID,
+    format: str = Query("md", pattern="^(md|pdf|docx)$"),
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await db.get(Book, book_id)
+    if not book or book.user_id != current_user.id:
+        raise HTTPException(404)
+
+    await consolidate_characters(db, book_id)
+    result = await db.execute(
+        select(Character).where(Character.book_id == book_id).order_by(Character.first_chapter, Character.name)
+    )
+    characters = [char for char in result.scalars().all() if _is_displayable_character(char)]
+
+    rel_result = await db.execute(
+        select(CharacterRelationship).where(CharacterRelationship.book_id == book_id)
+    )
+    relationships = rel_result.scalars().all()
+
+    char_by_id = {char.id: char for char in characters}
+    rel_summaries: dict[str, list[str]] = {}
+    rel_keys: dict[str, set[str]] = {}
+    for rel in relationships:
+        a = char_by_id.get(rel.character_a_id)
+        b = char_by_id.get(rel.character_b_id)
+        if not a or not b:
+            continue
+        summary_a = _relationship_summary_for_character(rel, a.name, b.name, a.name)
+        summary_b = _relationship_summary_for_character(rel, a.name, b.name, b.name)
+        if summary_a:
+            _append_unique_summary(rel_summaries, rel_keys, str(a.id), f"{rel.rel_type}:{b.name}".lower(), summary_a)
+        if summary_b:
+            _append_unique_summary(rel_summaries, rel_keys, str(b.id), f"{rel.rel_type}:{a.name}".lower(), summary_b)
+
+    markdown, filename_base = _character_bible_markdown(book=book, characters=characters, rel_summaries=rel_summaries)
+    title = f"{book.title} — Character Bible" if book.title else "LoreVia — Character Bible"
+
+    if format == "md":
+        filename = f"{filename_base}-character-bible.md"
+        return Response(
+            content=markdown,
+            media_type="text/markdown; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    if format == "pdf":
+        raw = _character_bible_pdf(markdown=markdown, title=title)
+        filename = f"{filename_base}-character-bible.pdf"
+        return Response(
+            content=raw,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    raw = _character_bible_docx(markdown=markdown, title=title)
+    filename = f"{filename_base}-character-bible.docx"
+    return Response(
+        content=raw,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 def _is_displayable_character(char: Character) -> bool:
     name = " ".join((char.name or "").split())
     if not name:
@@ -820,7 +1064,7 @@ async def _chapter_word_count(db: AsyncSession, book_id: uuid.UUID, chapter_numb
     try:
         from app.core.storage import download_book
 
-        text = download_book(chapter.s3_key).decode("utf-8", errors="ignore")
+        text = _clean_markdown_asterisks(download_book(chapter.s3_key).decode("utf-8", errors="ignore"))
     except Exception:
         return 0
     return len(text.replace("\r", " ").replace("\n", " ").split())

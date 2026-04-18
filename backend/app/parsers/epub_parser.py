@@ -21,8 +21,12 @@ def parse_epub(raw_bytes: bytes) -> list[dict]:
             soup = BeautifulSoup(item.get_content(), "html.parser")
             for tag in soup(["script", "style", "img"]):
                 tag.decompose()
+            # Clean text and remove special Unicode symbols
+            raw_text = soup.get_text(separator="\n")
+            # Remove special Unicode symbols including black diamond (u2726) and place of interest (u2318)
+            cleaned_text = re.sub(r"[\u2726\u2318\u2600-\u26FF\u2700-\u27BF]", " ", raw_text)
             text = "\n".join(
-                l.strip() for l in soup.get_text(separator="\n").splitlines() if l.strip()
+                l.strip() for l in cleaned_text.splitlines() if l.strip()
             )
             if len(text) < 100:
                 continue

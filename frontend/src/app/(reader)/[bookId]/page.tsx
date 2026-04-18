@@ -12,6 +12,7 @@ import { readerApi } from "@/lib/api/reader"
 import { API_BASE } from "@/lib/constants"
 import { useRecall } from "@/lib/hooks/useRecall"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
+import { useBookModeStore } from "@/lib/stores/bookModeStore"
 import type { Book } from "@/types/book"
 import type { CrossBookIntelligence } from "@/types/intelligence"
 import type { ChapterListResponse, ReadingProgress } from "@/types/reader"
@@ -35,9 +36,13 @@ export default function BookOverviewPage() {
   const [progress, setProgress] = useState<ReadingProgress | null>(null)
   const [crossBook, setCrossBook] = useState<CrossBookIntelligence | null>(null)
   const [chapterList, setChapterList] = useState<ChapterListResponse | null>(null)
+  const [exportingBible, setExportingBible] = useState(false)
+  const [bibleFormat, setBibleFormat] = useState<"md" | "pdf" | "docx">("pdf")
   const router = useRouter()
   const { recall, lastChapter, show, dismiss } = useRecall(bookId)
   const { theme, toggleTheme } = usePreferencesStore()
+  const bookMode = useBookModeStore((state) => state.getMode(bookId))
+  const setBookMode = useBookModeStore((state) => state.setMode)
   const isDark = theme === "dark"
   const overviewScrollKey = `reader-overview-scroll:${bookId}`
 
@@ -101,6 +106,24 @@ export default function BookOverviewPage() {
     if (proceed) navigateWithMemory(`/${bookId}/graph`)
   }
 
+  const exportCharacterBible = async () => {
+    setExportingBible(true)
+    try {
+      const blob = await booksApi.exportCharacterBible(bookId, bibleFormat)
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      const base = `${(book?.title ?? "lorevia").replace(/[^\w\s-]/g, "").trim().replace(/\s+/g, "-")}-character-bible`
+      a.download = `${base}.${bibleFormat === "md" ? "md" : bibleFormat}`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      window.URL.revokeObjectURL(url)
+    } finally {
+      setExportingBible(false)
+    }
+  }
+
   const quickTools = useMemo(
     () => [
       { label: "Characters", href: `/${bookId}/characters` },
@@ -113,7 +136,6 @@ export default function BookOverviewPage() {
 
   const featureTools = useMemo(
     () => [
-      { label: "Themes", meta: "Patterns and motifs", onClick: () => navigateWithMemory(`/${bookId}/themes`) },
       { label: "Foreshadowing", meta: "Signals and hints", onClick: () => navigateWithMemory(`/${bookId}/foreshadowing`) },
       { label: "Timeline", meta: "Story structure", onClick: () => navigateWithMemory(`/${bookId}/timeline`) },
       { label: "Cross-book wiki", meta: "Series echoes", onClick: () => navigateWithMemory(`/${bookId}/cross-book-wiki`) },
@@ -138,12 +160,34 @@ export default function BookOverviewPage() {
 
   return (
     <div className={`min-h-screen ${isDark ? "bg-[linear-gradient(180deg,#07111f_0%,#0b1830_44%,#0d1b35_100%)] text-slate-100" : "bg-[linear-gradient(180deg,#fcf7ef_0%,#f8f3ec_46%,#f5f0ea_100%)] text-stone-950"}`}>
-      <div className="mx-auto max-w-7xl px-4 pb-28 pt-6 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between gap-3">
+      <div className="sticky top-0 z-30 flex items-center justify-between gap-3 px-4 py-4 backdrop-blur-xl sm:px-6 lg:px-8" style={{ backgroundColor: isDark ? 'rgba(7, 17, 31, 0.8)' : 'rgba(252, 247, 239, 0.8)' }}>
+        <div className="mx-auto max-w-7xl flex items-center justify-between gap-3 w-full">
           <Link href="/library" className={`text-sm font-medium transition ${isDark ? "text-indigo-300 hover:text-indigo-200" : "text-violet-700 hover:text-violet-800"}`}>
             LoreVia
           </Link>
           <div className="flex items-center gap-2">
+            <div className={`hidden overflow-hidden rounded-xl border md:inline-flex ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white/80"}`}>
+              <button
+                onClick={() => setBookMode(bookId, "reader")}
+                className={`px-4 py-2 text-sm font-medium transition ${
+                  bookMode === "reader"
+                    ? isDark ? "bg-white text-slate-950" : "bg-white text-stone-950 shadow-sm"
+                    : isDark ? "text-slate-300 hover:bg-white/10" : "text-stone-600 hover:bg-white"
+                }`}
+              >
+                Reader
+              </button>
+              <button
+                onClick={() => setBookMode(bookId, "author")}
+                className={`px-4 py-2 text-sm font-medium transition ${
+                  bookMode === "author"
+                    ? isDark ? "bg-white text-slate-950" : "bg-white text-stone-950 shadow-sm"
+                    : isDark ? "text-slate-300 hover:bg-white/10" : "text-stone-600 hover:bg-white"
+                }`}
+              >
+                Author
+              </button>
+            </div>
             <button
               onClick={toggleTheme}
               className={`rounded-xl border px-4 py-2 text-sm transition ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-stone-200 bg-white/80 text-stone-600 hover:bg-white"}`}
@@ -155,6 +199,8 @@ export default function BookOverviewPage() {
             </Link>
           </div>
         </div>
+      </div>
+      <div className="mx-auto max-w-7xl px-4 pb-28 pt-6 sm:px-6 lg:px-8">
 
         {show && recall ? (
           <div className="mt-6">
@@ -335,6 +381,61 @@ export default function BookOverviewPage() {
                 ))}
               </div>
             </section>
+
+            {bookMode === "author" ? (
+              <section className={`rounded-[1.8rem] border p-6 ${isDark ? "border-white/10 bg-white/5" : "border-white/70 bg-white/82"}`}>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                  <div>
+                    <p className={`text-[11px] font-semibold uppercase tracking-[0.28em] ${isDark ? "text-indigo-300" : "text-violet-500"}`}>Writing tools</p>
+                    <h2 className={`mt-2 font-serif text-3xl ${isDark ? "text-white" : "text-stone-950"}`}>Use LoreVia as a continuity cockpit.</h2>
+                  </div>
+                  <p className={`max-w-xl text-sm leading-7 ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+                    Author mode removes spoiler gating and focuses on reference exports and continuity support.
+                  </p>
+                </div>
+
+                <div className="mt-5 grid gap-3 md:grid-cols-2">
+                  <div className={`rounded-[1.2rem] border p-5 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-stone-50"}`}>
+                    <p className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Export</p>
+                    <p className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>Character Bible</p>
+                    <p className={`mt-2 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
+                      Download a clean reference file: roles, first appearance, tags, motivations, arc notes, and relationship preview.
+                    </p>
+                    <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center">
+                      <select
+                        value={bibleFormat}
+                        onChange={(e) => setBibleFormat(e.target.value as "md" | "pdf" | "docx")}
+                        className={`w-full rounded-[1rem] border px-4 py-3 text-sm outline-none transition sm:w-[15rem] ${
+                          isDark ? "border-white/20 bg-stone-800 text-white" : "border-stone-200 bg-white text-stone-900"
+                        }`}
+                      >
+                        <option value="md">Markdown (.md)</option>
+                        <option value="pdf">PDF (.pdf)</option>
+                        <option value="docx">Word (.docx)</option>
+                      </select>
+                    <button
+                      onClick={exportCharacterBible}
+                      disabled={exportingBible}
+                      className="mt-4 inline-flex items-center justify-center rounded-[1rem] bg-[linear-gradient(135deg,#4f46e5,#4338ca)] px-5 py-3 text-sm font-semibold text-white shadow-[0_16px_36px_-22px_rgba(79,70,229,0.75)] transition disabled:opacity-60"
+                    >
+                      {exportingBible ? "Preparing..." : "Download"}
+                    </button>
+                    </div>
+                  </div>
+
+                  <div className={`rounded-[1.2rem] border p-5 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-stone-50"}`}>
+                    <p className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Continuity</p>
+                    <p className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>Continuity checker</p>
+                    <p className={`mt-2 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
+                      Coming next: paste a new chapter and LoreVia flags contradictions against extracted character state.
+                    </p>
+                    <div className={`mt-4 rounded-[1rem] border px-4 py-3 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-300" : "border-stone-200 bg-white/75 text-stone-600"}`}>
+                      Status: planned
+                    </div>
+                  </div>
+                </div>
+              </section>
+            ) : null}
           </div>
         </div>
       </div>

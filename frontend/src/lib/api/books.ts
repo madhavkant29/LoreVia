@@ -9,6 +9,8 @@ export const booksApi = {
   listQuotes: () => apiClient.get<SavedQuote[]>("/books/quotes").then(r => r.data),
   get: (id: string) => apiClient.get<Book>(`/books/${id}`).then(r => r.data),
   getCharacters: (id: string) => apiClient.get<Character[]>(`/books/${id}/characters`).then(r => r.data),
+  exportCharacterBible: (id: string, format: "md" | "pdf" | "docx" = "md") =>
+    apiClient.get<Blob>(`/books/${id}/export/character-bible`, { params: { format }, responseType: "blob" }).then(r => r.data),
   archive: (id: string, archived = true) =>
     apiClient.put<Book>(`/books/${id}/archive`, null, { params: { archived } }).then(r => r.data),
   hide: async (id: string, hidden = true) => {
@@ -44,6 +46,7 @@ export const booksApi = {
       seriesIds?: string[]
       autoExtractCover?: boolean
       coverFile?: File | null
+      mode?: "reader" | "author"
       onProgress?: (percent: number) => void
     }
   ) => {
@@ -57,6 +60,7 @@ export const booksApi = {
     options?.seriesIds?.forEach((seriesId) => {
       if (seriesId) form.append("series_ids", seriesId)
     })
+    if (options?.mode) form.append("mode", options.mode)
     form.append("auto_extract_cover", options?.autoExtractCover === false ? "false" : "true")
     if (options?.coverFile) form.append("cover_file", options.coverFile)
     return apiClient.post("/books/upload", form, {

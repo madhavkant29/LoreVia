@@ -251,15 +251,19 @@ async def cross_book_intelligence(
     }
 
 
-def _cosine_similarity(left: list[float] | None, right: list[float] | None) -> float:
-    if not left or not right or len(left) != len(right):
+def _cosine_similarity(left, right) -> float:
+    if left is None or right is None:
+        return 0.0
+    if len(left) != len(right):
         return 0.0
     dot = sum(a * b for a, b in zip(left, right))
     left_mag = sum(a * a for a in left) ** 0.5
     right_mag = sum(b * b for b in right) ** 0.5
-    if not left_mag or not right_mag:
+    if left_mag == 0 or right_mag == 0:
         return 0.0
-    return dot / (left_mag * right_mag)
+    similarity = dot / (left_mag * right_mag)
+    # Convert to regular Python float to avoid JSON serialization issues
+    return float(similarity)
 
 
 async def _build_prior_series_context(db: AsyncSession, book: Book, user_id: uuid.UUID) -> list[str]:

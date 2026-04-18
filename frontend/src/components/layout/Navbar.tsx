@@ -40,9 +40,11 @@ export function Navbar() {
       <div className="mx-auto flex max-w-7xl flex-col gap-4">
         <div className="flex items-center justify-between gap-4">
           <Link href="/library" className="flex min-w-0 items-center gap-3 group">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-500 text-white shadow-lg shadow-brand-500/20 group-hover:scale-105 transition-transform">
-              <span className="font-bold text-sm tracking-tighter">LV</span>
-            </div>
+            <img 
+              src="/image.png" 
+              alt="LoreVia Logo" 
+              className="h-10 w-10 shrink-0 rounded-xl shadow-lg shadow-brand-500/20 group-hover:scale-105 transition-transform object-cover"
+            />
             <div className="min-w-0">
               <p className="truncate font-serif text-xl font-bold tracking-tight text-foreground">LoreVia</p>
               <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-muted-foreground/60">Workspace</p>

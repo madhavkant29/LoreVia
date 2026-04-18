@@ -33,6 +33,19 @@ NUMBER_WORDS = {
     "first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth",
 }
 
+COMMON_NON_NAME_WORDS = {
+    # High-frequency English words that often appear capitalized at sentence start
+    # and should almost never be treated as character entities.
+    "a", "an", "and", "as", "at", "back", "because", "before", "but", "by",
+    "for", "from", "had", "has", "have", "he", "her", "here", "him", "his",
+    "how", "i", "if", "in", "into", "is", "it", "its", "like", "me", "more",
+    "my", "near", "no", "not", "now", "of", "off", "on", "once", "one",
+    "or", "our", "out", "over", "she", "so", "some", "than", "that", "the",
+    "their", "them", "then", "there", "these", "they", "this", "those", "to",
+    "too", "up", "us", "was", "we", "were", "what", "when", "where", "which",
+    "who", "why", "with", "without", "you", "your",
+}
+
 
 def entity_words(name: str | None) -> list[str]:
     return re.findall(r"[A-Za-z][A-Za-z'-]*", name or "")
@@ -51,6 +64,10 @@ def person_name_shape_score(name: str | None) -> int:
 
     lowered = [word.casefold() for word in words]
     score = 0
+
+    # Single-word common words (e.g., "From", "Then") are a primary false-positive source.
+    if len(words) == 1 and lowered[0] in COMMON_NON_NAME_WORDS:
+        score -= 6
 
     if len(words) == 1:
         score += 1 if len(words[0]) >= 4 else 0
@@ -150,6 +167,8 @@ def is_displayable_character_entity(
     )
 
     if len(words) == 1:
-        return shape_score >= 1 and evidence_score >= 1
+        # Single-token names are the hardest to disambiguate from sentence-start capitalization.
+        # Require stronger supporting evidence (traits/tags/aliases/role/etc) to avoid noise like "From", "Now", "Then".
+        return shape_score >= 1 and evidence_score >= 2
 
     return shape_score >= 2 and (evidence_score >= 1 or shape_score >= 3)

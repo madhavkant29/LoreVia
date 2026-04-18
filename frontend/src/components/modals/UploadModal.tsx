@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react"
 import { booksApi } from "@/lib/api/books"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
+import { useBookModeStore, type BookMode } from "@/lib/stores/bookModeStore"
 import { GENRE_TAGS } from "@/lib/constants/genreTags"
 import type { BookSeries } from "@/types/book"
 
@@ -10,6 +11,7 @@ const MAX_TAGS = 8
 export function UploadModal({ onClose }: { onClose: () => void }) {
   const [title, setTitle] = useState("")
   const [author, setAuthor] = useState("")
+  const [mode, setMode] = useState<BookMode>("reader")
   const [selectedTags, setSelectedTags] = useState<string[]>([])
   const [customTag, setCustomTag] = useState("")
   const [series, setSeries] = useState<BookSeries[]>([])
@@ -24,6 +26,7 @@ export function UploadModal({ onClose }: { onClose: () => void }) {
   const inputRef = useRef<HTMLInputElement>(null)
   const coverInputRef = useRef<HTMLInputElement>(null)
   const { theme } = usePreferencesStore()
+  const setBookMode = useBookModeStore((state) => state.setMode)
   const isDark = theme === "dark"
   const visibility: "private" = "private"
   const genre = selectedTags.join(", ")
@@ -71,15 +74,18 @@ export function UploadModal({ onClose }: { onClose: () => void }) {
     setUploadStage("uploading")
     setError(null)
     try {
-      await booksApi.upload(file, title, genre || undefined, author || undefined, {
+      const response = await booksApi.upload(file, title, genre || undefined, author || undefined, {
         visibility,
         seriesIds: selectedSeriesIds,
         autoExtractCover,
         coverFile: autoExtractCover ? null : coverFile,
+        mode,
         onProgress: (percent) => {
           setUploadProgress(percent)
         },
       })
+      const bookId = typeof response?.book_id === "string" ? response.book_id : null
+      if (bookId) setBookMode(bookId, mode)
       setUploadStage("processing")
       setUploadProgress(100)
       onClose()
@@ -144,6 +150,38 @@ export function UploadModal({ onClose }: { onClose: () => void }) {
                 : "border-gray-300 bg-white text-slate-950 placeholder:text-slate-400"
             }`}
           />
+
+          <div className={`rounded-xl border p-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-gray-200 bg-gray-50"}`}>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>Mode</p>
+                <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                  {mode === "reader"
+                    ? "Spoiler-aware workspace aligned to reading progress."
+                    : "Full analysis with exports and writing-focused tools."}
+                </p>
+              </div>
+            </div>
+            <div className={`mt-3 inline-flex w-full rounded-full p-1 ${isDark ? "border border-white/10 bg-white/5" : "border border-stone-200 bg-stone-100"}`}>
+              {(["reader", "author"] as const).map((value) => {
+                const active = mode === value
+                return (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setMode(value)}
+                    className={`flex-1 rounded-full px-4 py-2 text-sm font-medium transition ${
+                      active
+                        ? isDark ? "bg-white text-slate-950" : "bg-white text-stone-950 shadow-sm"
+                        : isDark ? "text-slate-300 hover:bg-white/10" : "text-stone-600 hover:bg-white/70"
+                    }`}
+                  >
+                    {value === "reader" ? "Reading mode" : "Author mode"}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
 
           <div className={`rounded-xl border p-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-gray-300 bg-gray-50"}`}>
             <div className="flex items-center justify-between gap-3">
