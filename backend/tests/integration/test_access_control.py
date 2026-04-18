@@ -1,9 +1,12 @@
+import io
 import uuid
 
 import pytest
+from sqlalchemy import select
 
 from app.models.book import Book, Chapter, Series
 from app.models.character import Character
+from app.models.book import SeriesBook
 
 
 async def _register_user(client, email: str) -> tuple[dict[str, str], uuid.UUID]:
@@ -168,3 +171,86 @@ async def test_progress_write_routes_require_book_ownership(client, db):
 
     assert update_progress.status_code == 404
     assert update_chapter.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_upload_attaches_book_to_multiple_owned_series(client, db, monkeypatch):
+    headers, user_id = await _register_user(client, "owner-upload-series@lorevia.app")
+    first_series = Series(user_id=user_id, name="Saga One")
+    second_series = Series(user_id=user_id, name="Saga Two")
+    db.add_all([first_series, second_series])
+    await db.commit()
+
+    from app.api.v1.routes import books as books_routes
+
+    monkeypatch.setattr(books_routes, "upload_book_bytes", lambda raw, owner, filename: f"uploads/{owner}/{filename}")
+
+    class _FakeTask:
+        @staticmethod
+        def apply_async(*args, **kwargs):
+            return None
+
+    monkeypatch.setattr(books_routes, "process_book_task", _FakeTask())
+
+    response = await client.post(
+        "/api/v1/books/upload",
+        headers=headers,
+        data=[
+            ("title", "Attached Book"),
+            ("series_ids", str(first_series.id)),
+            ("series_ids", str(second_series.id)),
+        ],
+        files={"file": ("attached.pdf", io.BytesIO(b"%PDF-1.4 test payload"), "application/pdf")},
+    )
+
+    assert response.status_code == 202
+    book_id = uuid.UUID(response.json()["book_id"])
+    book = await db.get(Book, book_id)
+    assert book is not None
+    assert book.user_id == user_id
+    assert book.primary_series_id == first_series.id
+
+    memberships = (
+        await db.execute(
+            select(SeriesBook).where(SeriesBook.book_id == book_id)
+        )
+    ).scalars().all()
+    assert {membership.series_id for membership in memberships} == {first_series.id, second_series.id}
+
+
+@pytest.mark.asyncio
+async def test_upload_rejects_foreign_series_ids(client, db, monkeypatch):
+    headers, user_id = await _register_user(client, "owner-upload-idor@lorevia.app")
+    _, other_user_id = await _register_user(client, "intruder-upload-idor@lorevia.app")
+    foreign_series = Series(user_id=other_user_id, name="Other User Saga")
+    db.add(foreign_series)
+    await db.commit()
+
+    from app.api.v1.routes import books as books_routes
+
+    monkeypatch.setattr(books_routes, "upload_book_bytes", lambda raw, owner, filename: f"uploads/{owner}/{filename}")
+
+    class _FakeTask:
+        @staticmethod
+        def apply_async(*args, **kwargs):
+            return None
+
+    monkeypatch.setattr(books_routes, "process_book_task", _FakeTask())
+
+    response = await client.post(
+        "/api/v1/books/upload",
+        headers=headers,
+        data=[
+            ("title", "Rejected Book"),
+            ("series_ids", str(foreign_series.id)),
+        ],
+        files={"file": ("rejected.pdf", io.BytesIO(b"%PDF-1.4 test payload"), "application/pdf")},
+    )
+
+    assert response.status_code == 404
+    books = (
+        await db.execute(
+            select(Book).where(Book.user_id == user_id, Book.title == "Rejected Book")
+        )
+    ).scalars().all()
+    assert books == []

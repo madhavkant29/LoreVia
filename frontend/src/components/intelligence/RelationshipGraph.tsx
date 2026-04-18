@@ -171,17 +171,12 @@ export function RelationshipGraph({ bookId, upToChapter, theme = "light" }: Prop
             "font-size": 13,
             "font-weight": 600,
             "text-wrap": "wrap",
-            "text-max-width": 166,
+            "text-max-width": "166px",
             "text-valign": "center",
             "text-halign": "center",
             padding: "16px",
             "overlay-padding": 6,
             "overlay-opacity": 0,
-            "shadow-blur": 22,
-            "shadow-opacity": theme === "dark" ? 0.28 : 0.14,
-            "shadow-color": theme === "dark" ? "#020617" : "#cbd5e1",
-            "shadow-offset-x": 0,
-            "shadow-offset-y": 10,
           },
         },
         {
@@ -190,13 +185,12 @@ export function RelationshipGraph({ bookId, upToChapter, theme = "light" }: Prop
             "border-color": "#2563eb",
             "border-width": 3,
             "background-color": theme === "dark" ? "#172554" : "#eef4ff",
-            "shadow-opacity": 0.32,
           },
         },
         {
           selector: "edge",
           style: {
-            width: 2.4,
+            width: "2.4px",
             "curve-style": "bezier",
             "line-color": (ele: any) => RELATIONSHIP_COLORS[ele.data("type")] || "#94a3b8",
             "target-arrow-color": (ele: any) => RELATIONSHIP_COLORS[ele.data("type")] || "#94a3b8",
@@ -209,7 +203,7 @@ export function RelationshipGraph({ bookId, upToChapter, theme = "light" }: Prop
             color: theme === "dark" ? "#9ca3af" : "#6b7280",
             "text-background-color": theme === "dark" ? "#020617" : "#ffffff",
             "text-background-opacity": 0.96,
-            "text-background-padding": 4,
+            "text-background-padding": "4px",
             "text-background-shape": "roundrectangle",
             "text-rotation": "autorotate",
             "arrow-scale": 0.9,
@@ -220,7 +214,7 @@ export function RelationshipGraph({ bookId, upToChapter, theme = "light" }: Prop
         {
           selector: "edge:selected",
           style: {
-            width: 4,
+            width: "4px",
             opacity: 1,
           },
         },
@@ -304,21 +298,15 @@ export function RelationshipGraph({ bookId, upToChapter, theme = "light" }: Prop
     if (!cy) return
     const factor = direction === "in" ? 1.18 : 1 / 1.18
     const nextZoom = Math.max(0.3, Math.min(2.4, cy.zoom() * factor))
-    cy.animate({
-      zoom: nextZoom,
-      renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 },
-      duration: 180,
-    })
+    cy.zoom({ level: nextZoom, position: { x: cy.width() / 2, y: cy.height() / 2 } })
+    setZoomLevel(cy.zoom())
   }
 
   function resetZoom() {
     const cy = cyRef.current
     if (!cy) return
-    cy.animate({
-      zoom: 1,
-      renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 },
-      duration: 180,
-    })
+    cy.zoom({ level: 1, position: { x: cy.width() / 2, y: cy.height() / 2 } })
+    setZoomLevel(cy.zoom())
   }
 
   const selectedNode = selection?.type === "node" ? selection.data : null

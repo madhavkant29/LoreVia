@@ -1,19 +1,23 @@
-from fastapi import Depends, HTTPException, Request
-from app.core.redis import get_redis, key_ratelimit
-from app.core.config import effective_tier, settings
-from app.api.deps.auth import get_current_user
-from app.models.user import User, UserRateLimitOverride
-from app.core.database import AsyncSessionLocal
-from sqlalchemy import select
 import time
+import uuid
+
+from fastapi import Depends, HTTPException, Request
+from sqlalchemy import select
+
+from app.api.deps.auth import get_current_user
+from app.core.config import effective_tier, settings
+from app.core.database import AsyncSessionLocal
+from app.core.redis import get_redis, key_ratelimit
+from app.models.user import User, UserRateLimitOverride
 
 
 async def _window(key: str, limit: int, window: int = 60) -> bool:
     r = await get_redis()
-    now = int(time.time())
+    now = time.time()
+    member = f"{int(now * 1000)}:{uuid.uuid4().hex}"
     pipe = r.pipeline()
     pipe.zremrangebyscore(key, 0, now - window)
-    pipe.zadd(key, {str(now): now})
+    pipe.zadd(key, {member: now})
     pipe.zcard(key)
     pipe.expire(key, window)
     results = await pipe.execute()
@@ -57,6 +61,12 @@ async def rate_limit_api(request: Request, current_user: User = Depends(get_curr
 
 
 def _client_identifier(request: Request) -> str:
+    cf_ip = request.headers.get("cf-connecting-ip")
+    if cf_ip:
+        return cf_ip.strip()
+    real_ip = request.headers.get("x-real-ip")
+    if real_ip:
+        return real_ip.strip()
     forwarded_for = request.headers.get("x-forwarded-for")
     if forwarded_for:
         first = forwarded_for.split(",")[0].strip()
@@ -86,6 +96,20 @@ async def rate_limit_auth_password(request: Request):
 
 async def rate_limit_auth_refresh(request: Request):
     await _auth_window(request, "refresh", 30, 300)
+
+
+async def rate_limit_public(request: Request):
+    identifier = _client_identifier(request)
+    ok = await _window(key_ratelimit(f"public:{identifier}", "api"), 120, 60)
+    if not ok:
+        raise HTTPException(429, "Public rate limit exceeded")
+
+
+async def rate_limit_public_asset(request: Request):
+    identifier = _client_identifier(request)
+    ok = await _window(key_ratelimit(f"public:{identifier}", "asset"), 240, 60)
+    if not ok:
+        raise HTTPException(429, "Asset rate limit exceeded")
 
 
 async def _limit_for_user(user_id, field: str, default: int) -> int:

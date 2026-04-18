@@ -1,5 +1,6 @@
 from app.parsers.pdf_parser import (
     _assemble_text_parts,
+    _blocks_to_paragraphs,
     _drop_front_matter_text_parts,
     _extract_heading,
     _heading_remainder,
@@ -66,3 +67,26 @@ def test_large_chapter_splits_only_on_closed_paragraph_boundary():
 def test_assemble_text_parts_preserves_paragraph_breaks():
     text = _assemble_text_parts(["First paragraph.", "[[IMAGE:test]]", "Second paragraph."])
     assert text == "First paragraph.\n\n[[IMAGE:test]]\n\nSecond paragraph."
+
+
+def test_blocks_to_paragraphs_merges_soft_wrapped_lines():
+    text = "This is a paragraph broken\nacross lines without ending punctuation\nand it should remain one paragraph."
+    assert _blocks_to_paragraphs(text) == [
+        "This is a paragraph broken across lines without ending punctuation and it should remain one paragraph."
+    ]
+
+
+def test_blocks_to_paragraphs_keeps_closed_sentence_starting_new_paragraph():
+    text = "The scene ends here.\nThe next paragraph starts cleanly."
+    assert _blocks_to_paragraphs(text) == [
+        "The scene ends here.",
+        "The next paragraph starts cleanly.",
+    ]
+
+
+def test_should_merge_across_pages_for_unfinished_paragraph():
+    assert _should_merge_across_pages("The sentence carries over", "into the next page without punctuation")
+
+
+def test_should_not_merge_across_pages_when_next_block_is_heading():
+    assert not _should_merge_across_pages("The sentence carries over", "Chapter 3")

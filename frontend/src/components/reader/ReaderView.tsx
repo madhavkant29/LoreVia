@@ -171,6 +171,7 @@ export function ReaderView({ bookId, chapterNum }: Props) {
   const totalWords = countWords(chapterText)
   const wordsRead = totalWords > 0 ? Math.min(totalWords, Math.max(0, Math.round(totalWords * scrollPct))) : 0
   const hasActiveContext = Boolean(contextResult || selectedQuote)
+  const showMobileSheet = canUseQuoteMode && (hasActiveContext || contextLoading)
 
   if (loading) return <div className="flex justify-center py-20 text-gray-400">Loading chapter...</div>
   if (error || !data) return <div className="flex justify-center py-20 text-gray-400">{error ?? "Chapter not found"}</div>
@@ -221,11 +222,21 @@ export function ReaderView({ bookId, chapterNum }: Props) {
         </div>
       </div>
 
+      {showMobileSheet ? (
+        <button
+          type="button"
+          aria-label="Close reading context"
+          onClick={clearPanel}
+          className="fixed inset-0 z-30 bg-[rgba(2,6,23,0.44)] backdrop-blur-[2px] md:hidden"
+        />
+      ) : null}
+
       {(hasActiveContext || contextLoading) && (
         <ContextPanel
           result={contextResult}
           loading={contextLoading}
           onClose={clearPanel}
+          mobileSheet={canUseQuoteMode}
           theme={theme}
           selectedQuote={selectedQuote}
           chapterNumber={chapterNum}

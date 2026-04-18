@@ -126,6 +126,26 @@ export interface RelationshipEvolutionPair {
   }>
 }
 
+export interface RelationshipGraphNode {
+  id: string
+  name: string
+  role?: string | null
+  degree?: number
+}
+
+export interface RelationshipGraphEdge {
+  source: string
+  target: string
+  type: string
+  description?: string | null
+  sentiment?: number | null
+}
+
+export interface RelationshipGraph {
+  nodes: RelationshipGraphNode[]
+  edges: RelationshipGraphEdge[]
+}
+
 export interface ChapterSummary {
   content: string
   key_events: Array<{ event: string; importance: number }> | null

@@ -132,8 +132,31 @@ def _blocks_to_paragraphs(text: str) -> list[str]:
         return []
     parts = [part.strip() for part in re.split(r"\n\s*\n", normalized) if part.strip()]
     if parts:
-        return parts
+        merged_parts: list[str] = []
+        for part in parts:
+            merged_parts.extend(_merge_soft_wrapped_lines(part))
+        return [part for part in merged_parts if part]
     return [normalized]
+
+
+def _merge_soft_wrapped_lines(text: str) -> list[str]:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not lines:
+        return []
+
+    paragraphs: list[str] = []
+    current = lines[0]
+
+    for line in lines[1:]:
+        if _should_start_new_paragraph(current, line):
+            paragraphs.append(current.strip())
+            current = line
+            continue
+        current = f"{current} {line}".strip()
+
+    if current:
+        paragraphs.append(current.strip())
+    return paragraphs
 
 
 def _build_chapters(stream: list[dict]) -> list[dict]:
@@ -156,6 +179,16 @@ def _build_chapters(stream: list[dict]) -> list[dict]:
 
             if not _chapter_has_content(current) and _is_probable_front_matter(item["text"]):
                 continue
+
+            if current["text_parts"]:
+                previous = current["text_parts"][-1]
+                if (
+                    isinstance(previous, str)
+                    and not MEDIA_MARKER_RE.fullmatch(previous.strip())
+                    and _should_merge_across_pages(previous, item["text"])
+                ):
+                    current["text_parts"][-1] = f"{previous} {item['text']}".strip()
+                    continue
 
             current["text_parts"].append(item["text"])
             continue
@@ -294,6 +327,20 @@ def _clean_text(text: str) -> str:
     normalized = re.sub(r"(?<!\n)\n(?!\n)", " ", normalized)
     normalized = re.sub(r" {2,}", " ", normalized)
     return normalized.strip()
+
+
+def _should_start_new_paragraph(previous: str, current: str) -> bool:
+    previous = previous.strip()
+    current = current.strip()
+    if not previous:
+        return True
+    if not current:
+        return False
+    if MEDIA_MARKER_RE.fullmatch(previous) or MEDIA_MARKER_RE.fullmatch(current):
+        return True
+    if re.search(r"[.!?][\"')\]]*$", previous):
+        return bool(re.match(r"^[A-Z0-9\"“‘(\[]", current))
+    return False
 
 
 def _assemble_text_parts(text_parts: list[str]) -> str:

@@ -104,6 +104,7 @@ async def upload_book_endpoint(
     title: str = Form(...),
     genre: str | None = Form(None),
     author: str | None = Form(None),
+    series_ids: list[str] = Form(default=[]),
     visibility: str = Form("private"),
     description: str | None = Form(None),
     auto_extract_cover: str = Form("true"),
@@ -153,6 +154,17 @@ async def upload_book_endpoint(
     book = Book(user_id=current_user.id, title=title, genre=genre, author=author,
                 format=fmt, s3_key=s3_key, cover_s3_key=cover_s3_key, status="pending", is_public=is_public, public_description=description)
     db.add(book)
+    await db.flush()
+
+    selected_series = await _resolve_owned_series_ids(db, current_user.id, series_ids)
+    for index, series in enumerate(selected_series):
+        membership = SeriesBook(series_id=series.id, book_id=book.id)
+        db.add(membership)
+        if index == 0:
+            book.primary_series_id = series.id
+            book.series_name = series.name
+            book.series_order = None
+
     await db.commit()
     await db.refresh(book)
 
@@ -499,13 +511,14 @@ async def get_book(book_id: uuid.UUID, db: AsyncSession = Depends(get_db), curre
     return await _book_out(db, book, current_user.id)
 
 
-@router.get("/{book_id}/cover")
-async def get_book_cover(book_id: uuid.UUID, token: str = Query(...), db: AsyncSession = Depends(get_db)):
+# Public cover endpoint (no authentication required, uses token-based access)
+async def get_book_cover_public(book_id: uuid.UUID, token: str = Query(...), db: AsyncSession = Depends(get_db)):
     book = await db.get(Book, book_id)
     if not book:
         raise HTTPException(404, "Book not found")
 
     payload = decode_token(token)
+
     if (
         not payload
         or payload.get("type") != "asset"
@@ -521,6 +534,8 @@ async def get_book_cover(book_id: uuid.UUID, token: str = Query(...), db: AsyncS
     raw = await asyncio.to_thread(download_book, book.cover_s3_key)
     media_type = mimetypes.guess_type(book.cover_s3_key)[0] or "image/png"
     return Response(content=raw, media_type=media_type)
+
+
 
 
 @router.put("/{book_id}/archive", response_model=BookOut)
@@ -823,3 +838,37 @@ async def _get_owned_series(db: AsyncSession, series_id: uuid.UUID, user_id: uui
     if not series or series.user_id != user_id:
         raise HTTPException(404, "Series not found")
     return series
+
+
+async def _resolve_owned_series_ids(db: AsyncSession, user_id: uuid.UUID, series_ids: list[str]) -> list[Series]:
+    cleaned_ids: list[uuid.UUID] = []
+    seen: set[uuid.UUID] = set()
+
+    for raw in series_ids:
+        value = (raw or "").strip()
+        if not value:
+            continue
+        try:
+            parsed = uuid.UUID(value)
+        except ValueError as exc:
+            raise HTTPException(400, "Invalid series id") from exc
+        if parsed in seen:
+            continue
+        seen.add(parsed)
+        cleaned_ids.append(parsed)
+
+    if not cleaned_ids:
+        return []
+
+    rows = (
+        await db.execute(
+            select(Series)
+            .where(Series.user_id == user_id, Series.id.in_(cleaned_ids))
+        )
+    ).scalars().all()
+    found = {series.id for series in rows}
+    if len(found) != len(cleaned_ids):
+        raise HTTPException(404, "Series not found")
+
+    order = {series_id: index for index, series_id in enumerate(cleaned_ids)}
+    return sorted(rows, key=lambda series: order[series.id])

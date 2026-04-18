@@ -51,6 +51,7 @@ export function ReaderToolbar({
         active: "bg-indigo-500 text-white hover:bg-indigo-400",
         pill: "border-white/10 bg-white/5 text-stone-300",
         border: "border-white/10",
+        heading: "text-white",
       }
     : {
         shell: "border-stone-200/80 bg-[#fcfaf4]/92 text-stone-950",
@@ -60,6 +61,7 @@ export function ReaderToolbar({
         active: "bg-[linear-gradient(135deg,#4f46e5,#4338ca)] text-white hover:opacity-95",
         pill: "border-stone-200 bg-white text-stone-600",
         border: "border-stone-200",
+        heading: "text-stone-900",
       }
 
   const increaseFont = () => onSetFontSize(Math.min(fontSize + 2, 32))
@@ -98,7 +100,7 @@ export function ReaderToolbar({
 
           <div className="hidden items-center gap-2 md:flex" style={{ fontFamily: "var(--reader-label)" }}>
             <Link prefetch={false} href={`/${bookId}`} className={`rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] transition ${toneClass.active}`}>
-              Overview
+              Back to book
             </Link>
             <button onClick={onSummary} className={`rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] transition ${toneClass.muted}`}>
               Summary
@@ -180,7 +182,7 @@ export function ReaderToolbar({
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <p className="text-[11px] uppercase tracking-[0.28em] text-violet-500">Chapter {chapterNum}</p>
-              <p className="mt-1 truncate text-lg font-semibold text-stone-900">
+              <p className={`mt-1 truncate text-lg font-semibold ${toneClass.heading}`}>
                 {chapterTitle || `Chapter ${chapterNum}`}
               </p>
               <p className={`mt-1 text-xs ${toneClass.text}`}>
@@ -203,7 +205,7 @@ export function ReaderToolbar({
 
           <div className="flex flex-wrap gap-2">
             <Link prefetch={false} href={`/${bookId}`} className={`rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] transition ${toneClass.active}`}>
-              Overview
+              Back to book
             </Link>
             <button onClick={onSummary} className={`rounded-full px-4 py-2 text-xs transition ${toneClass.muted}`}>
               Summary

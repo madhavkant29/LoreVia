@@ -6,13 +6,9 @@ import json
 import re
 from collections import Counter
 
-from openai import AsyncOpenAI
 from app.core.config import settings
+from app.core.llm import complete_with_fallback
 from app.engine.character.entity_filters import looks_like_person_entity_name, person_name_shape_score
-
-
-def get_client() -> AsyncOpenAI:
-    return AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 
 CHARACTER_SYSTEM = """You are a careful literary extraction engine.
 
@@ -65,7 +61,6 @@ Return raw JSON only."""
 
 
 async def extract_characters_and_relationships(chunk_text: str) -> dict:
-    client = get_client()
     candidate_names = _candidate_names(chunk_text)
     candidate_hint = (
         "\n\nPotential person names seen in this passage:\n- "
@@ -73,31 +68,26 @@ async def extract_characters_and_relationships(chunk_text: str) -> dict:
         + "\nUse them only if they are actually people in the passage."
         if candidate_names else ""
     )
+    raw = await complete_with_fallback(
+        system=CHARACTER_SYSTEM,
+        user=f"{chunk_text[:12000]}{candidate_hint}",
+        openai_model=settings.OPENAI_EXTRACT_MODEL,
+        gemini_model=settings.GEMINI_EXTRACT_MODEL,
+        temperature=0.1,
+        max_tokens=3000,
+        response_format={"type": "json_object"},
+    )
     try:
-        response = await client.chat.completions.create(
-            model=settings.OPENAI_EXTRACT_MODEL,
-            messages=[
-                {"role": "system", "content": CHARACTER_SYSTEM},
-                {"role": "user", "content": f"{chunk_text[:12000]}{candidate_hint}"},
-            ],
-            temperature=0.1,
-            max_tokens=3000,
-            response_format={"type": "json_object"},
-        )
-        raw = response.choices[0].message.content.strip()
-        try:
-            parsed = json.loads(raw)
-            characters = _clean_character_entries(parsed.get("characters", []), candidate_names, chunk_text)
-            relationships = parsed.get("relationships", [])
-            characters = _augment_with_named_mentions(chunk_text, characters, candidate_names)
-            return {
-                "characters": characters,
-                "relationships": relationships,
-            }
-        except json.JSONDecodeError:
-            return {"characters": _augment_with_named_mentions(chunk_text, [], candidate_names), "relationships": []}
-    finally:
-        await client.close()
+        parsed = json.loads(raw)
+        characters = _clean_character_entries(parsed.get("characters", []), candidate_names, chunk_text)
+        relationships = parsed.get("relationships", [])
+        characters = _augment_with_named_mentions(chunk_text, characters, candidate_names)
+        return {
+            "characters": characters,
+            "relationships": relationships,
+        }
+    except json.JSONDecodeError:
+        return {"characters": _augment_with_named_mentions(chunk_text, [], candidate_names), "relationships": []}
 
 
 HONORIFIC_RE = re.compile(r"\b(?:Mr|Mrs|Ms|Miss|Dr|Lady|Lord|Sir)\.?\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?\b")

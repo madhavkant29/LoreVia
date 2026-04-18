@@ -22,3 +22,16 @@ def test_single_chunk_for_short_text():
     text = "Short text. Only two sentences."
     chunks = chunk_text(text, max_tokens=1500, overlap=100)
     assert len(chunks) == 1
+
+
+def test_large_paragraph_respects_abbreviations_when_splitting():
+    text = "Dr. Hargrove stayed silent. Mr. Vale answered slowly. The corridor remained still. " * 40
+    chunks = chunk_text(text, max_tokens=120, overlap=20)
+    assert all("Dr." in chunk or "Mr." in chunk or "corridor" in chunk for chunk in chunks)
+
+
+def test_oversized_sentence_prefers_clause_boundaries_before_word_splits():
+    sentence = "Alpha, beta, gamma, delta, epsilon, zeta, eta, theta, iota, kappa, lambda."
+    chunks = chunk_text(sentence, max_tokens=15, overlap=0)
+    assert len(chunks) > 1
+    assert any("," in chunk for chunk in chunks[:-1])

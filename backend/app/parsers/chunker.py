@@ -66,7 +66,7 @@ def _paragraph_overlap(paragraphs: list[str], overlap_tokens: int) -> tuple[list
 
 
 def _split_large_paragraph(paragraph: str, max_tokens: int) -> list[str]:
-    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", paragraph) if s.strip()]
+    sentences = [s.strip() for s in _sentence_segments(paragraph) if s.strip()]
     if len(sentences) <= 1:
         return _split_oversized_sentence(paragraph.strip(), max_tokens)
 
@@ -99,6 +99,22 @@ def _split_large_paragraph(paragraph: str, max_tokens: int) -> list[str]:
 
 
 def _split_oversized_sentence(sentence: str, max_tokens: int) -> list[str]:
+    clause_parts = _split_on_clause_boundaries(sentence)
+    if len(clause_parts) > 1:
+        parts: list[str] = []
+        current: list[str] = []
+        for clause in clause_parts:
+            candidate = " ".join([*current, clause]).strip()
+            if current and count_tokens(candidate) > max_tokens:
+                parts.append(" ".join(current).strip())
+                current = [clause]
+                continue
+            current.append(clause)
+        if current:
+            parts.append(" ".join(current).strip())
+        if all(count_tokens(part) <= max_tokens for part in parts):
+            return [part for part in parts if part]
+
     words = sentence.split()
     if not words:
         return [sentence]
@@ -118,3 +134,29 @@ def _split_oversized_sentence(sentence: str, max_tokens: int) -> list[str]:
         parts.append(" ".join(current).strip())
 
     return [part for part in parts if part]
+
+
+def _sentence_segments(paragraph: str) -> list[str]:
+    protected = paragraph
+    abbreviations = {
+        "Mr.": "Mr<dot>",
+        "Mrs.": "Mrs<dot>",
+        "Ms.": "Ms<dot>",
+        "Dr.": "Dr<dot>",
+        "Prof.": "Prof<dot>",
+        "Sr.": "Sr<dot>",
+        "Jr.": "Jr<dot>",
+        "St.": "St<dot>",
+        "vs.": "vs<dot>",
+        "etc.": "etc<dot>",
+        "e.g.": "eg<dot>",
+        "i.e.": "ie<dot>",
+    }
+    for source, target in abbreviations.items():
+        protected = protected.replace(source, target)
+    segments = [segment.replace("<dot>", ".").strip() for segment in re.split(r"(?<=[.!?])\s+", protected) if segment.strip()]
+    return segments
+
+
+def _split_on_clause_boundaries(sentence: str) -> list[str]:
+    return [part.strip() for part in re.split(r"(?<=[,;:—-])\s+", sentence) if part.strip()]

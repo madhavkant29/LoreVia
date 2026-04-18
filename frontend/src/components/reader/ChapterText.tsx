@@ -72,7 +72,7 @@ export function ChapterText({
 
   const blocks = annotateWithMedia(text, characters, media)
   const mentionClass = theme === "dark"
-    ? "cursor-pointer rounded border-b border-dashed border-indigo-200/45 px-0.5 transition-colors hover:bg-indigo-200/10"
+    ? "cursor-pointer rounded border-b border-dashed border-indigo-200/45 px-0.5 text-stone-100 transition-colors hover:bg-indigo-200/10 hover:text-white"
     : "cursor-pointer rounded border-b border-dashed border-violet-500/55 px-0.5 text-stone-900 transition-colors hover:bg-violet-50"
 
   const cardTone = theme === "dark"
@@ -80,6 +80,7 @@ export function ChapterText({
         shell: "border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.02))] text-stone-100",
         helper: "text-stone-400",
         prose: "text-stone-100",
+        heading: "text-white",
         media: "border-white/10 bg-white/5",
         aside: "border-white/10 bg-white/[0.04]",
         asideBox: "bg-black/20 text-stone-300",
@@ -90,6 +91,7 @@ export function ChapterText({
         shell: "border-white/75 bg-[radial-gradient(circle_at_top,#f8f4ff,transparent_30%),linear-gradient(180deg,rgba(255,255,255,0.97),rgba(255,255,255,0.84))] text-stone-950",
         helper: "text-stone-500",
         prose: "text-stone-900",
+        heading: "text-stone-950",
         media: "border-stone-200 bg-[#f7f3ee]",
         aside: "border-stone-200 bg-white/78 backdrop-blur",
         asideBox: "bg-[#f6f1ff] text-stone-600",
@@ -117,7 +119,7 @@ export function ChapterText({
               <p className="text-[11px] uppercase tracking-[0.36em] text-stone-400" style={{ fontFamily: "var(--reader-label)" }}>
                 Chapter {chapterNum}{totalChapters ? ` of ${totalChapters}` : ""}
               </p>
-              <h1 className="mt-4 text-5xl font-light leading-tight text-stone-950 sm:text-6xl" style={{ fontFamily: "var(--reader-display)" }}>
+              <h1 className={`mt-4 text-5xl font-light leading-tight sm:text-6xl ${cardTone.heading}`} style={{ fontFamily: "var(--reader-display)" }}>
                 {chapterTitle || `Chapter ${chapterNum}`}
               </h1>
               <div className={`mt-6 h-[2px] w-16 ${cardTone.divider}`} />
@@ -187,7 +189,7 @@ export function ChapterText({
             <p className="text-[11px] uppercase tracking-[0.32em] text-stone-400" style={{ fontFamily: "var(--reader-label)" }}>
               Reading note
             </p>
-            <p className="mt-3 text-2xl leading-9 text-stone-900" style={{ fontFamily: "var(--reader-display)" }}>
+            <p className={`mt-3 text-2xl leading-9 ${cardTone.heading}`} style={{ fontFamily: "var(--reader-display)" }}>
               {quoteModeEnabled && canUseQuoteMode
                 ? selected
                   ? "Your selected passage is ready for the context rail."
@@ -216,6 +218,34 @@ export function ChapterText({
             </div>
           </div>
         </aside>
+      </div>
+
+      <div className="mx-auto mt-8 max-w-[72ch]">
+        <div className={`rounded-[1.5rem] border p-4 ${cardTone.aside}`}>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${cardTone.helper}`}>Continue reading</p>
+              <p className={`mt-1 text-sm ${cardTone.helper}`}>
+                {totalChapters ? `Chapter ${chapterNum} of ${totalChapters}` : `Chapter ${chapterNum}`}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Link prefetch={false} href={`/${bookId}`} className={`rounded-full border px-4 py-2 text-sm font-medium transition ${cardTone.nav}`}>
+                Back to book
+              </Link>
+              {chapterNum > 1 ? (
+                <Link prefetch={false} href={`/${bookId}/chapter/${chapterNum - 1}`} className={`rounded-full border px-4 py-2 text-sm font-medium transition ${cardTone.nav}`}>
+                  Previous chapter
+                </Link>
+              ) : null}
+              {totalChapters === null || chapterNum < totalChapters ? (
+                <Link prefetch={false} href={`/${bookId}/chapter/${chapterNum + 1}`} className={`rounded-full border px-4 py-2 text-sm font-medium transition ${cardTone.nav}`}>
+                  Next chapter
+                </Link>
+              ) : null}
+            </div>
+          </div>
+        </div>
       </div>
 
       <div className={`mx-auto mt-8 max-w-[72ch] rounded-[1.5rem] border p-4 xl:hidden ${cardTone.aside}`}>

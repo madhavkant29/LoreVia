@@ -1,18 +1,19 @@
 "use client"
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { booksApi } from "@/lib/api/books"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { GENRE_TAGS } from "@/lib/constants/genreTags"
+import type { BookSeries } from "@/types/book"
 
 const MAX_TAGS = 8
 
 export function UploadModal({ onClose }: { onClose: () => void }) {
   const [title, setTitle] = useState("")
   const [author, setAuthor] = useState("")
-  const [visibility, setVisibility] = useState<"private" | "public">("private")
-  const [description, setDescription] = useState("")
   const [selectedTags, setSelectedTags] = useState<string[]>([])
   const [customTag, setCustomTag] = useState("")
+  const [series, setSeries] = useState<BookSeries[]>([])
+  const [selectedSeriesIds, setSelectedSeriesIds] = useState<string[]>([])
   const [file, setFile] = useState<File | null>(null)
   const [autoExtractCover, setAutoExtractCover] = useState(true)
   const [coverFile, setCoverFile] = useState<File | null>(null)
@@ -24,8 +25,13 @@ export function UploadModal({ onClose }: { onClose: () => void }) {
   const coverInputRef = useRef<HTMLInputElement>(null)
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
+  const visibility: "private" = "private"
   const genre = selectedTags.join(", ")
   const suggestedTags = GENRE_TAGS.filter((tag) => !selectedTags.includes(tag)).slice(0, 18)
+
+  useEffect(() => {
+    booksApi.listSeries().then(setSeries).catch(() => {})
+  }, [])
 
   const addTag = (rawTag: string) => {
     const tag = normalizeTag(rawTag)
@@ -45,6 +51,14 @@ export function UploadModal({ onClose }: { onClose: () => void }) {
     setCustomTag("")
   }
 
+  const toggleSeries = (seriesId: string) => {
+    setSelectedSeriesIds((current) =>
+      current.includes(seriesId)
+        ? current.filter((item) => item !== seriesId)
+        : [...current, seriesId]
+    )
+  }
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!file) {
@@ -59,7 +73,7 @@ export function UploadModal({ onClose }: { onClose: () => void }) {
     try {
       await booksApi.upload(file, title, genre || undefined, author || undefined, {
         visibility,
-        description: visibility === "public" ? description || undefined : undefined,
+        seriesIds: selectedSeriesIds,
         autoExtractCover,
         coverFile: autoExtractCover ? null : coverFile,
         onProgress: (percent) => {
@@ -80,7 +94,7 @@ export function UploadModal({ onClose }: { onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4">
       <div
-        className={`w-full max-w-md rounded-2xl border p-6 shadow-2xl transition-colors ${
+        className={`flex max-h-[90vh] w-full max-w-md flex-col overflow-hidden rounded-2xl border p-6 shadow-2xl transition-colors ${
           isDark
             ? "border-white/10 bg-[#0f172a] text-slate-100"
             : "border-black/5 bg-white text-slate-950"
@@ -104,7 +118,8 @@ export function UploadModal({ onClose }: { onClose: () => void }) {
           </button>
         </div>
 
-        <form onSubmit={submit} className="flex flex-col gap-4">
+        <form onSubmit={submit} className="reader-scrollbar min-h-0 flex-1 overflow-y-auto pr-1">
+          <div className="flex flex-col gap-4">
           <input
             type="text"
             placeholder="Title"
@@ -189,37 +204,47 @@ export function UploadModal({ onClose }: { onClose: () => void }) {
             </div>
           </div>
 
-          <div className={`grid grid-cols-2 gap-2 rounded-xl border p-1 ${
-            isDark ? "border-white/10 bg-white/[0.03]" : "border-gray-200 bg-gray-50"
-          }`}>
-            {(["private", "public"] as const).map((option) => (
-              <button
-                key={option}
-                type="button"
-                onClick={() => setVisibility(option)}
-                className={`rounded-lg px-3 py-2 text-sm font-medium transition ${
-                  visibility === option
-                    ? isDark ? "bg-white text-slate-950" : "bg-slate-950 text-white"
-                    : isDark ? "text-slate-300 hover:bg-white/5" : "text-slate-600 hover:bg-white"
-                }`}
-              >
-                {option === "private" ? "Private upload" : "Public upload"}
-              </button>
-            ))}
+          <div className={`rounded-xl border px-4 py-3 text-sm ${isDark ? "border-white/10 bg-white/[0.03] text-slate-300" : "border-gray-200 bg-gray-50 text-slate-600"}`}>
+            Upload visibility: private
           </div>
 
-          {visibility === "public" ? (
-            <textarea
-              placeholder="Public description (shown in the public library)"
-              value={description}
-              onChange={e => setDescription(e.target.value)}
-              rows={3}
-              className={`rounded-lg border px-3 py-2.5 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
-                isDark
-                  ? "border-white/10 bg-white/5 text-slate-100 placeholder:text-slate-500"
-                  : "border-gray-300 bg-white text-slate-950 placeholder:text-slate-400"
-              }`}
-            />
+          {series.length > 0 ? (
+            <div className={`rounded-xl border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-gray-200 bg-gray-50"}`}>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>Add to series</p>
+                  <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                    Optional. Attach this upload to one or more existing series now.
+                  </p>
+                </div>
+                <span className={`text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                  {selectedSeriesIds.length} selected
+                </span>
+              </div>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {series.map((seriesItem) => {
+                  const selected = selectedSeriesIds.includes(seriesItem.id)
+                  return (
+                    <button
+                      key={seriesItem.id}
+                      type="button"
+                      onClick={() => toggleSeries(seriesItem.id)}
+                      className={`rounded-full border px-3 py-2 text-xs font-medium transition ${
+                        selected
+                          ? isDark
+                            ? "border-indigo-400/40 bg-indigo-400/20 text-indigo-100"
+                            : "border-indigo-300 bg-indigo-100 text-indigo-800"
+                          : isDark
+                            ? "border-white/10 text-slate-300 hover:bg-white/5"
+                            : "border-slate-300 text-slate-700 hover:bg-white"
+                      }`}
+                    >
+                      {seriesItem.name}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
           ) : null}
 
           <div
@@ -321,10 +346,9 @@ export function UploadModal({ onClose }: { onClose: () => void }) {
               ? uploadStage === "uploading"
                 ? "Uploading..."
                 : "Starting processing..."
-              : visibility === "public"
-                ? "Publish & Process"
-                : "Upload & Process"}
+              : "Upload & Process"}
           </button>
+          </div>
         </form>
       </div>
     </div>

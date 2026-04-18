@@ -4,13 +4,8 @@ Generated once, cached in Redis + stored in DB forever.
 """
 import json
 
-from openai import AsyncOpenAI
-
 from app.core.config import settings
-
-
-def get_client() -> AsyncOpenAI:
-    return AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+from app.core.llm import complete_with_fallback
 
 PROMPTS = {
     "short": (
@@ -40,33 +35,24 @@ Rules:
 
 
 async def generate_summary(chapter_text: str, mode: str, title: str = "") -> dict:
-    client = get_client()
-    try:
-        system = f"You are analysing chapter: {title}. " + PROMPTS[mode]
-        request_kwargs = {
-            "model": settings.OPENAI_EXTRACT_MODEL,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": chapter_text[:9000]},
-            ],
-            "temperature": 0.2,
-            "max_tokens": 2200,
-        }
-        if mode == "detailed":
-            request_kwargs["response_format"] = {"type": "json_object"}
+    system = f"You are analysing chapter: {title}. " + PROMPTS[mode]
+    content = await complete_with_fallback(
+        system=system,
+        user=chapter_text[:9000],
+        openai_model=settings.OPENAI_EXTRACT_MODEL,
+        gemini_model=settings.GEMINI_EXTRACT_MODEL,
+        temperature=0.2,
+        max_tokens=2200,
+        response_format={"type": "json_object"} if mode == "detailed" else None,
+    )
 
-        response = await client.chat.completions.create(**request_kwargs)
-        content = response.choices[0].message.content.strip()
-
-        if mode == "detailed":
-            try:
-                data = json.loads(_strip_json_fence(content))
-                return _normalize_summary_payload(data, fallback=content)
-            except json.JSONDecodeError:
-                pass
-        return {"content": content, "key_events": None, "char_changes": None, "clues": None}
-    finally:
-        await client.close()
+    if mode == "detailed":
+        try:
+            data = json.loads(_strip_json_fence(content))
+            return _normalize_summary_payload(data, fallback=content)
+        except json.JSONDecodeError:
+            pass
+    return {"content": content, "key_events": None, "char_changes": None, "clues": None}
 
 
 def _strip_json_fence(content: str) -> str:

@@ -1,26 +1,25 @@
 """
-Memory recall - generates "Previously on..." summary for returning readers.
+Memory recall - generates a grounded recap for returning readers.
 """
-from openai import AsyncOpenAI
 
 from app.core.config import settings
+from app.core.llm import complete_with_fallback
 
+RECALL_PROMPT = """You are helping a reader resume a book after a break.
+They last read up to chapter {last_chapter} of "{title}" and are about to continue.
 
-def get_client() -> AsyncOpenAI:
-    return AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+Write a grounded recap in natural prose.
 
-RECALL_PROMPT = """The user is returning to read after a break.
-They last read up to chapter {last_chapter} of "{title}".
-They are about to continue reading.
-
-Based on the story so far, generate a brief "Previously on..." recap:
-
-Recent events (last 3 important things that happened)
-Key characters active (3 most relevant right now)
-Open thread (1 unresolved mystery or question)
-
-Keep it brief, friendly, and spoiler-free (nothing past chapter {last_chapter}).
-No headers - just natural flowing text, like a friend reminding you."""
+Rules:
+- Keep it to 3-5 sentences.
+- Do not say "Previously on", "as we dive back in", "meanwhile", "the overarching themes", or any TV-show style phrasing.
+- Do not sound promotional, mystical, or AI-generated.
+- Use concrete names and events when they are available.
+- Preserve uncertainty when the source context is thin.
+- Mention at most one unresolved question near the end.
+- Never include spoilers past chapter {last_chapter}.
+- Avoid list formatting, headers, and quotation marks unless the source requires them.
+"""
 
 
 async def generate_recall(
@@ -30,24 +29,31 @@ async def generate_recall(
     active_characters: list[str],
     open_threads: list[str],
 ) -> str:
-    client = get_client()
-    try:
-        context = (
-            f"Recent events: {recent_summary}\n"
-            f"Active characters: {', '.join(active_characters[:5])}\n"
-            f"Open threads: {', '.join(open_threads[:3])}"
-        )
-        prompt = RECALL_PROMPT.format(title=title, last_chapter=last_chapter)
+    context = (
+        f"Recent events:\n{recent_summary}\n\n"
+        f"Active characters:\n{', '.join(active_characters[:5]) or 'Unknown'}\n\n"
+        f"Open threads:\n{', '.join(open_threads[:3]) or 'Unknown'}"
+    )
+    prompt = RECALL_PROMPT.format(title=title, last_chapter=last_chapter)
+    content = await complete_with_fallback(
+        system=prompt,
+        user=context,
+        openai_model=settings.OPENAI_EXTRACT_MODEL,
+        gemini_model=settings.GEMINI_EXTRACT_MODEL,
+        temperature=0.25,
+        max_tokens=220,
+    )
+    return _polish_recall(content)
 
-        r = await client.chat.completions.create(
-            model=settings.OPENAI_EXTRACT_MODEL,
-            messages=[
-                {"role": "system", "content": prompt},
-                {"role": "user", "content": context},
-            ],
-            temperature=0.4,
-            max_tokens=220,
-        )
-        return r.choices[0].message.content.strip()
-    finally:
-        await client.close()
+
+def _polish_recall(text: str) -> str:
+    cleaned = " ".join((text or "").split())
+    cleaned = cleaned.removeprefix("Previously on:").removeprefix("Previously on").strip(" :-")
+    replacements = {
+        "As we dive back in,": "",
+        "Meanwhile,": "",
+        "the overarching themes of": "",
+    }
+    for source, target in replacements.items():
+        cleaned = cleaned.replace(source, target)
+    return cleaned.strip()

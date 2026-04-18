@@ -41,6 +41,7 @@ export const booksApi = {
     options?: {
       visibility?: "private" | "public"
       description?: string
+      seriesIds?: string[]
       autoExtractCover?: boolean
       coverFile?: File | null
       onProgress?: (percent: number) => void
@@ -53,6 +54,9 @@ export const booksApi = {
     if (author) form.append("author", author)
     if (options?.visibility) form.append("visibility", options.visibility)
     if (options?.description) form.append("description", options.description)
+    options?.seriesIds?.forEach((seriesId) => {
+      if (seriesId) form.append("series_ids", seriesId)
+    })
     form.append("auto_extract_cover", options?.autoExtractCover === false ? "false" : "true")
     if (options?.coverFile) form.append("cover_file", options.coverFile)
     return apiClient.post("/books/upload", form, {

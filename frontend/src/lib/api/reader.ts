@@ -1,5 +1,6 @@
 import { apiClient } from "./client"
-import type { ChapterData, ChapterListResponse, ContextResult, ChapterSummary, ForeshadowingItem, PlotThread, ReadingProgress, RelationshipEvolutionPair, RelationshipGraph, SummaryCollectionResponse, SummaryMode, ThematicSearchResult, TimelineEvent } from "@/types/reader"
+import type { ChapterData, ChapterListResponse, ContextResult, ChapterSummary, ForeshadowingItem, PlotThread, ReadingProgress, RelationshipEvolutionPair, SummaryCollectionResponse, SummaryMode, ThematicSearchResult, TimelineEvent } from "@/types/reader"
+import type { RelationshipGraph } from "@/types/character"
 
 export const readerApi = {
   getChapter: (bookId: string, chapter: number) =>

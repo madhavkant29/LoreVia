@@ -20,6 +20,11 @@ export const usePreferencesStore = create<PreferencesStore>()(
           window.localStorage.setItem("app-theme", theme)
           window.localStorage.setItem("reader-theme", theme)
           document.documentElement.dataset.theme = theme
+          if (theme === "dark") {
+            document.documentElement.classList.add("dark")
+          } else {
+            document.documentElement.classList.remove("dark")
+          }
         }
         set({ theme })
       },
@@ -29,6 +34,11 @@ export const usePreferencesStore = create<PreferencesStore>()(
           window.localStorage.setItem("app-theme", next)
           window.localStorage.setItem("reader-theme", next)
           document.documentElement.dataset.theme = next
+          if (next === "dark") {
+            document.documentElement.classList.add("dark")
+          } else {
+            document.documentElement.classList.remove("dark")
+          }
         }
         set({ theme: next })
       },
@@ -40,6 +50,11 @@ export const usePreferencesStore = create<PreferencesStore>()(
           window.localStorage.setItem("app-theme", state.theme)
           window.localStorage.setItem("reader-theme", state.theme)
           document.documentElement.dataset.theme = state.theme
+          if (state.theme === "dark") {
+            document.documentElement.classList.add("dark")
+          } else {
+            document.documentElement.classList.remove("dark")
+          }
         }
       },
     }

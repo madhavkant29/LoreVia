@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     OPENAI_EMBED_MODEL: str = "text-embedding-3-small"
     OPENAI_EMBED_DIM: int = 1536
     ANTHROPIC_API_KEY: str | None = None         # fallback
+    GEMINI_API_KEY: str | None = None
+    GEMINI_EXTRACT_MODEL: str = "gemini-1.5-flash"
+    GEMINI_INTEL_MODEL: str = "gemini-1.5-flash"
 
     # Auth
     JWT_SECRET: str
@@ -109,4 +112,6 @@ def is_local_mode() -> bool:
 
 
 def effective_tier(tier: str) -> str:
+    if is_local_mode():
+        return "pro"
     return tier
