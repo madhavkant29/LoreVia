@@ -108,8 +108,11 @@ export function ReaderToolbar({
             <Link prefetch={false} href={`/${bookId}/graph`} className={`rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] transition ${toneClass.muted}`}>
               Graph
             </Link>
+            <Link prefetch={false} href={`/${bookId}/ask`} className={`rounded-full border px-4 py-2 text-xs transition ${toneClass.pill}`}>
+              Ask with citations
+            </Link>
             <Link prefetch={false} href={`/${bookId}/search`} className={`rounded-full border px-4 py-2 text-xs transition ${toneClass.pill}`}>
-              Search manuscript...
+              Search passages
             </Link>
           </div>
 
@@ -212,6 +215,9 @@ export function ReaderToolbar({
             </button>
             <Link prefetch={false} href={`/${bookId}/graph`} className={`rounded-full px-4 py-2 text-xs transition ${toneClass.muted}`}>
               Graph
+            </Link>
+            <Link prefetch={false} href={`/${bookId}/ask`} className={`rounded-full px-4 py-2 text-xs transition ${toneClass.muted}`}>
+              Ask
             </Link>
             {canUseQuoteMode ? (
               <button onClick={onToggleQuoteMode} className={`rounded-full px-4 py-2 text-xs transition ${quoteModeEnabled ? toneClass.active : toneClass.muted}`}>

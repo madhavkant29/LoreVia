@@ -17,6 +17,9 @@ export interface Character {
   aliases: string[]
   role: "mc" | "sc" | "background" | null
   first_chapter: number
+  last_seen_chapter?: number | null
+  mention_count?: number
+  status?: "alive" | "deceased"
   trait_state: TraitState
   description: string | null
   personality_tags: string[]
@@ -24,7 +27,18 @@ export interface Character {
   fears: string[]
   archetype: string | null
   arc_summary: string | null
+  growth_events?: Array<{
+    chapter?: number | null
+    event: string
+    impact?: string | null
+    tone?: string | null
+  }>
   relationship_summaries?: string[]
+}
+
+export interface CharacterShareResponse {
+  share_url: string
+  expires_in_minutes: number
 }
 
 export interface CharacterRelationship {
@@ -48,5 +62,14 @@ export interface RelationshipGraph {
     archetype?: string | null;
     arc_summary?: string | null;
   }>
-  edges: Array<{ source: string; target: string; type: string; sentiment: number | null; description: string | null; from_chapter?: number | null }>
+  edges: Array<{
+    id?: string | null
+    source: string
+    target: string
+    type: string
+    sentiment: number | null
+    description: string | null
+    from_chapter?: number | null
+    to_chapter?: number | null
+  }>
 }

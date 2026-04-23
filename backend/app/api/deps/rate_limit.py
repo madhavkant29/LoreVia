@@ -24,12 +24,18 @@ async def _window(key: str, limit: int, window: int = 60) -> bool:
     return results[2] <= limit
 
 
+async def _require_window(key: str, limit: int, window: int, message: str) -> None:
+    ok = await _window(key, limit, window)
+    if not ok:
+        raise HTTPException(429, message)
+
+
 async def rate_limit_search(current_user: User = Depends(get_current_user)):
     if effective_tier(current_user.tier) == "free":
         limit = await _limit_for_user(current_user.id, "search_per_hour", settings.FREE_SEARCH_PER_HOUR)
         ok = await _window(key_ratelimit(str(current_user.id), "search"), limit, 3600)
         if not ok:
-            raise HTTPException(429, "Search limit reached. Upgrade to Pro for unlimited search.")
+            raise HTTPException(429, "Too many search requests right now. Please try again later.")
 
 
 async def rate_limit_summary(current_user: User = Depends(get_current_user)):
@@ -37,7 +43,7 @@ async def rate_limit_summary(current_user: User = Depends(get_current_user)):
         limit = await _limit_for_user(current_user.id, "summary_per_hour", settings.FREE_SUMMARY_PER_HOUR)
         ok = await _window(key_ratelimit(str(current_user.id), "summary"), limit, 3600)
         if not ok:
-            raise HTTPException(429, "Summary limit reached. Upgrade to Pro.")
+            raise HTTPException(429, "Too many summary requests right now. Please try again later.")
 
 
 async def rate_limit_chat(current_user: User = Depends(get_current_user)):
@@ -50,7 +56,56 @@ async def rate_limit_chat(current_user: User = Depends(get_current_user)):
     daily_limit = await _limit_for_user(current_user.id, "chat_per_day", daily_limit)
     ok = await _window(key_ratelimit(str(current_user.id), "chat"), daily_limit, 86400)
     if not ok:
-        raise HTTPException(429, "Chat turn limit reached for today.")
+        raise HTTPException(429, "Too many chat requests right now. Please try again later.")
+
+
+async def rate_limit_advisor(current_user: User = Depends(get_current_user)):
+    tier = effective_tier(current_user.tier)
+    limits = {
+        "free": (
+            settings.FREE_ADVISOR_PER_DAY,
+            settings.FREE_ADVISOR_PER_WEEK,
+            settings.FREE_ADVISOR_PER_MONTH,
+        ),
+        "pro": (
+            settings.PRO_ADVISOR_PER_DAY,
+            settings.PRO_ADVISOR_PER_WEEK,
+            settings.PRO_ADVISOR_PER_MONTH,
+        ),
+        "power": (
+            settings.POWER_ADVISOR_PER_DAY,
+            settings.POWER_ADVISOR_PER_WEEK,
+            settings.POWER_ADVISOR_PER_MONTH,
+        ),
+    }
+    daily_limit, weekly_limit, monthly_limit = limits.get(
+        tier,
+        (
+            settings.FREE_ADVISOR_PER_DAY,
+            settings.FREE_ADVISOR_PER_WEEK,
+            settings.FREE_ADVISOR_PER_MONTH,
+        ),
+    )
+    daily_limit = await _limit_for_user(current_user.id, "advisor_per_day", daily_limit)
+    message = "Too many Story Advisor requests right now. Please try again later."
+    await _require_window(key_ratelimit(str(current_user.id), "advisor:day"), daily_limit, 86400, message)
+    await _require_window(key_ratelimit(str(current_user.id), "advisor:week"), weekly_limit, 604800, message)
+    await _require_window(key_ratelimit(str(current_user.id), "advisor:month"), monthly_limit, 2592000, message)
+
+
+async def rate_limit_continuity_checker(current_user: User = Depends(get_current_user)):
+    tier = effective_tier(current_user.tier)
+    per_minute = {
+        "free": settings.FREE_CONTINUITY_PER_MINUTE,
+        "pro": settings.PRO_CONTINUITY_PER_MINUTE,
+        "power": settings.POWER_CONTINUITY_PER_MINUTE,
+    }.get(tier, settings.FREE_CONTINUITY_PER_MINUTE)
+    await _require_window(
+        key_ratelimit(str(current_user.id), "continuity"),
+        per_minute,
+        60,
+        "Too many continuity checks right now. Please try again in a minute.",
+    )
 
 
 async def rate_limit_api(request: Request, current_user: User = Depends(get_current_user)):

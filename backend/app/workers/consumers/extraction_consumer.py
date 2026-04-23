@@ -25,6 +25,7 @@ from app.engine.embeddings.embedder import embed_batch
 from app.parsers.chunker import ChunkingConfig, chunk_text, count_tokens
 from app.utils.compliance.copyright_check import check_isbn
 from app.utils.external.isbn_lookup import extract_isbn_from_pdf
+from app.utils.book_utils import serialize_manuscript_content
 from sqlalchemy import delete, func, update as sa_update, select
 import logging
 
@@ -168,7 +169,11 @@ async def _process_chapter(db, book, ch_data: dict):
 
     s3_key = f"chapters/{book.id}/{ch_data['number']}.txt"
     try:
-        await asyncio.to_thread(upload_text, s3_key, ch_data["text"])
+        await asyncio.to_thread(
+            upload_text,
+            s3_key,
+            serialize_manuscript_content(ch_data.get("text", ""), ch_data.get("html")),
+        )
     except Exception:
         s3_key = ""
 
@@ -280,11 +285,19 @@ async def _process_chapter(db, book, ch_data: dict):
                         sa_update(Character).where(Character.id == existing_id).values(**updated)
                     )
                     if changed:
+                        growth_event = entity.get("growth_event")
+                        if isinstance(growth_event, dict):
+                            growth_event = {
+                                **growth_event,
+                                "chapter": ch_data["number"],
+                            }
                         snap = CharacterState(
                             character_id=existing_id,
                             at_chapter=ch_data["number"],
                             trait_snapshot=updated["trait_state"],
                             prompt_delta=_diff(char.trait_state or {}, updated["trait_state"]),
+                            arc_note=entity.get("arc_summary"),
+                            growth_event=growth_event if isinstance(growth_event, dict) else None,
                         )
                         db.add(snap)
                 await merge_alias(db, existing_id, entity["name"])

@@ -23,6 +23,7 @@ class User(Base):
     reading_progress = relationship("ReadingProgress", back_populates="user", cascade="all, delete-orphan")
     reading_sessions = relationship("ReadingSession", back_populates="user", cascade="all, delete-orphan")
     rate_limit_override = relationship("UserRateLimitOverride", back_populates="user", cascade="all, delete-orphan", uselist=False)
+    notifications = relationship("Notification", cascade="all, delete-orphan")
 
 
 class Subscription(Base):

@@ -1,13 +1,16 @@
 "use client"
+
 import { useEffect, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 import axios from "axios"
 import { booksApi } from "@/lib/api/books"
-import type { Character } from "@/types/character"
 import { CharacterCard } from "@/components/characters/CharacterCard"
+import type { Book } from "@/types/book"
+import type { Character } from "@/types/character"
 
 export default function CharactersPage() {
   const { bookId } = useParams<{ bookId: string }>()
+  const [book, setBook] = useState<Book | null>(null)
   const [chars, setChars] = useState<Character[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -18,10 +21,11 @@ export default function CharactersPage() {
     let active = true
     setLoading(true)
     setError(null)
-    booksApi.getCharacters(bookId)
-      .then((data) => {
+    Promise.all([booksApi.get(bookId), booksApi.getCharacters(bookId)])
+      .then(([bookData, characterData]) => {
         if (!active) return
-        setChars(data)
+        setBook(bookData)
+        setChars(characterData)
       })
       .catch((err) => {
         if (!active) return
@@ -46,7 +50,7 @@ export default function CharactersPage() {
   const isDark = theme === "dark"
 
   return (
-    <div className={`min-h-screen transition-colors ${isDark ? "bg-[linear-gradient(180deg,#07111f_0%,#0b1830_44%,#0d1b35_100%)] text-slate-100" : "bg-[linear-gradient(180deg,#fcf7ef_0%,#f8f3ec_46%,#f5f0ea_100%)] text-stone-950"}`}>
+    <div className={`min-h-screen transition-colors ${isDark ? "bg-[linear-gradient(180deg,#000000_0%,#060606_44%,#0d0d0d_100%)] text-slate-100" : "bg-[linear-gradient(180deg,#fcf7ef_0%,#f8f3ec_46%,#f5f0ea_100%)] text-stone-950"}`}>
       <div className="mx-auto max-w-7xl px-4 pb-24 pt-6 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between gap-3">
           <button
@@ -64,7 +68,7 @@ export default function CharactersPage() {
           <p className={`text-[11px] font-semibold uppercase tracking-[0.34em] ${isDark ? "text-indigo-300" : "text-violet-500"}`}>Character index</p>
           <h1 className={`font-serif text-5xl leading-[0.95] tracking-tight sm:text-6xl ${isDark ? "text-white" : "text-stone-950"}`}>People, gathered.</h1>
           <p className={`mt-2 max-w-3xl text-base leading-8 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
-            Profiles stay concise and structured, so you enjoy looking at them—without rereading half the book.
+            Profiles stay concise and grounded, and in author mode you can correct them before sharing or exporting.
           </p>
         </div>
 
@@ -81,9 +85,19 @@ export default function CharactersPage() {
             No character profiles are ready yet. Processing continues in the background after upload.
           </div>
         ) : null}
+
         <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {chars.map(char => (
-            <CharacterCard key={char.id} character={char} theme={theme} />
+          {chars.map((char) => (
+            <CharacterCard
+              key={char.id}
+              character={char}
+              bookId={bookId}
+              editable={book?.mode === "author"}
+              theme={theme}
+              onUpdated={(updated) => {
+                setChars((current) => current.map((item) => item.id === updated.id ? updated : item))
+              }}
+            />
           ))}
         </div>
       </div>

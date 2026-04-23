@@ -2,9 +2,9 @@
 Confidence-weighted character profile builder.
 Merges new trait info without overwriting and handles subjective narration.
 """
+import re
 import uuid
 from collections.abc import Iterable
-
 PROMPT_CONFIDENCE_THRESHOLD = 0.45
 SUBJECTIVE_MAX_CONFIDENCE = 0.50
 
@@ -51,6 +51,10 @@ def merge_trait_states(existing: dict, new_traits: dict) -> dict:
 
 def build_description(trait_state: dict, archetype: str | None) -> str:
     """Builds a natural-sounding description of the character for display and context."""
+    manual = trait_state.get("manual_description", {})
+    if isinstance(manual, dict) and manual.get("value"):
+        return str(manual["value"]).strip()
+
     # Extract traits with confidence threshold
     traits = {}
     for key in ["age", "build", "hair", "eyes", "face", "distinguishing"]:
@@ -131,6 +135,41 @@ def merge_list_values(*groups: Iterable[str] | None) -> list[str]:
     return merged
 
 
+def merge_growth_events(*groups: Iterable[dict] | None) -> list[dict]:
+    seen: set[tuple[int | None, str]] = set()
+    merged: list[dict] = []
+    for group in groups:
+        for item in group or []:
+            if not isinstance(item, dict):
+                continue
+            event = " ".join(str(item.get("event") or "").split()).strip()
+            if not event:
+                continue
+            chapter = item.get("chapter")
+            signature = (chapter if isinstance(chapter, int) else None, event.lower())
+            if signature in seen:
+                continue
+            seen.add(signature)
+            merged.append(
+                {
+                    "chapter": chapter if isinstance(chapter, int) else None,
+                    "event": event,
+                    "impact": _clean_line(item.get("impact")),
+                    "tone": _clean_line(item.get("tone")),
+                }
+            )
+    merged.sort(key=lambda item: (item.get("chapter") or 10**9, item.get("event") or ""))
+    return merged[-12:]
+
+
+def _normalize_trait_state(value: object) -> dict:
+    return value if isinstance(value, dict) else {}
+
+
+def _growth_event_group(value: object) -> list[dict]:
+    return [value] if isinstance(value, dict) else []
+
+
 def _clean_line(value: str | None) -> str:
     if not value:
         return ""
@@ -148,7 +187,7 @@ def choose_richer_text(*values: str | None) -> str | None:
 
 
 def build_character_profile(extracted: dict, book_id: uuid.UUID, first_chapter: int) -> dict:
-    raw_traits = extracted.get("traits", {})
+    raw_traits = _normalize_trait_state(extracted.get("traits"))
     archetype = extracted.get("archetype")
     trait_state = merge_trait_states({}, raw_traits)
 
@@ -158,6 +197,8 @@ def build_character_profile(extracted: dict, book_id: uuid.UUID, first_chapter: 
         "aliases": extracted.get("aliases", []),
         "role": extracted.get("role"),
         "first_chapter": first_chapter,
+        "last_seen_chapter": first_chapter,   # set on first appearance
+        "mention_count": 1,                    # first mention
         "trait_state": trait_state,
         "hair": flat(trait_state, "hair"),
         "eyes": flat(trait_state, "eyes"),
@@ -169,12 +210,17 @@ def build_character_profile(extracted: dict, book_id: uuid.UUID, first_chapter: 
         "fears": extracted.get("fears", []),
         "arc_summary": extracted.get("arc_summary"),
         "archetype": archetype,
+        "growth_events": merge_growth_events(_growth_event_group(extracted.get("growth_event"))),
     }
 
 
 def merge_profile_fields(existing, incoming) -> dict:
     existing_trait_state = existing.trait_state or {}
-    incoming_trait_state = incoming.get("trait_state") if isinstance(incoming, dict) else incoming.trait_state or {}
+    incoming_trait_state = (
+        _normalize_trait_state(incoming.get("trait_state"))
+        if isinstance(incoming, dict)
+        else _normalize_trait_state(incoming.trait_state)
+    )
     merged_traits = merge_trait_states(existing_trait_state, incoming_trait_state)
 
     existing_aliases = existing.aliases or []
@@ -187,14 +233,22 @@ def merge_profile_fields(existing, incoming) -> dict:
     incoming_fears = incoming.get("fears") if isinstance(incoming, dict) else incoming.fears
     incoming_arc = incoming.get("arc_summary") if isinstance(incoming, dict) else incoming.arc_summary
     incoming_archetype = incoming.get("archetype") if isinstance(incoming, dict) else incoming.archetype
+    incoming_last_seen = incoming.get("last_seen_chapter") if isinstance(incoming, dict) else getattr(incoming, "last_seen_chapter", None)
+    incoming_growth_events = incoming.get("growth_events") if isinstance(incoming, dict) else getattr(incoming, "growth_events", None)
 
     aliases = merge_list_values(existing_aliases, incoming_aliases, [incoming_name] if incoming_name else [])
     aliases = [alias for alias in aliases if alias.lower() != existing.name.lower()]
+
+    # last_seen_chapter: take the highest chapter number seen so far
+    current_last_seen = existing.last_seen_chapter or existing.first_chapter
+    new_last_seen = max(current_last_seen, incoming_last_seen or 0, incoming_first_chapter)
 
     return {
         "aliases": aliases,
         "role": existing.role or incoming_role,
         "first_chapter": min(existing.first_chapter, incoming_first_chapter),
+        "last_seen_chapter": new_last_seen,
+        "mention_count": (existing.mention_count or 0) + 1,   # increment each time seen
         "trait_state": merged_traits,
         "hair": flat(merged_traits, "hair"),
         "eyes": flat(merged_traits, "eyes"),
@@ -206,19 +260,22 @@ def merge_profile_fields(existing, incoming) -> dict:
         "fears": merge_list_values(existing.fears, incoming_fears),
         "arc_summary": choose_richer_text(existing.arc_summary, incoming_arc),
         "archetype": choose_richer_text(existing.archetype, incoming_archetype),
+        "growth_events": merge_growth_events(existing.growth_events, incoming_growth_events),
     }
 
-
 def update_profile(existing, extracted: dict) -> dict:
+    chapter = extracted.get("first_chapter", existing.first_chapter)
     return merge_profile_fields(existing, {
         "name": extracted.get("name"),
         "aliases": extracted.get("aliases", []),
         "role": extracted.get("role"),
-        "first_chapter": extracted.get("first_chapter", existing.first_chapter),
+        "first_chapter": chapter,
+        "last_seen_chapter": chapter,   # chapter currently being processed
         "trait_state": extracted.get("traits", {}),
         "personality_tags": extracted.get("personality_tags", []),
         "motivations": extracted.get("motivations", []),
         "fears": extracted.get("fears", []),
         "arc_summary": extracted.get("arc_summary"),
         "archetype": extracted.get("archetype"),
+        "growth_events": merge_growth_events(_growth_event_group(extracted.get("growth_event"))),
     })

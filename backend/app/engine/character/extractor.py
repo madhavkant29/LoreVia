@@ -40,8 +40,15 @@ Return ONLY valid JSON, no markdown, no commentary:
       "personality_tags": ["max 3"],
       "motivations": ["what drives them"],
       "fears": ["what they fear"],
+      "arc_summary": "short natural summary of where this character seems to be emotionally or morally",
       "archetype": "japanese high school boy|mentor|trickster|villain|hero|etc",
-      "first_appearance_context": "1 sentence"
+      "first_appearance_context": "1 sentence",
+      "growth_event": {
+        "chapter": 0,
+        "event": "specific event that shaped the character here",
+        "impact": "how it changes or deepens them",
+        "tone": "wounded|defiant|hopeful|corrupting|clarifying|etc"
+      }
     }
   ],
   "relationships": [
@@ -111,11 +118,22 @@ SINGLE_NAME_NON_PERSON_SUFFIXES = ("ing", "edly", "edly", "ness")
 SINGLE_NAME_NON_PERSON_EXACT = {
     "Compiled", "Translated", "Illustrations", "Formatted",
 }
+SINGLE_NAME_DISCOURSE_MARKERS = {
+    "Again", "Also", "Although", "Because", "Before", "Finally", "First",
+    "However", "Meanwhile", "Moreover", "Next", "Now", "Otherwise", "Since",
+    "Suddenly", "Then", "Therefore", "Though", "Thus", "When", "While", "Yet",
+}
+SINGLE_NAME_TIME_WORDS = {
+    "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",
+    "January", "February", "March", "April", "May", "June", "July", "August",
+    "September", "October", "November", "December",
+}
 ACTION_VERB_CONTEXT = {
     "said", "asked", "replied", "called", "told", "whispered", "shouted", "muttered",
     "smiled", "laughed", "sighed", "nodded", "stared", "looked", "turned", "answered",
     "cried", "screamed", "warned", "snapped", "grinned",
 }
+MAX_AUTO_AUGMENTED_CHARACTERS = 10
 ENTITY_NON_PERSON_TOKENS = {
     "association", "convention", "crest", "energy", "fundamentals", "magecraft", "ritual",
     "spirit", "tower", "towers", "department", "academy", "school", "city", "country",
@@ -133,9 +151,12 @@ def _augment_with_named_mentions(chunk_text: str, characters: list[dict], candid
     }
     known = {name for name in existing_names | existing_aliases if name}
 
+    promoted = 0
     for candidate in candidates or _candidate_names(chunk_text):
         normalized = _normalize_name(candidate)
         if not normalized or normalized in known:
+            continue
+        if not _allow_auto_augmentation(chunk_text, candidate):
             continue
         characters.append(
             {
@@ -145,11 +166,16 @@ def _augment_with_named_mentions(chunk_text: str, characters: list[dict], candid
                 "personality_tags": [],
                 "motivations": [],
                 "fears": [],
+                "arc_summary": None,
                 "archetype": None,
                 "first_appearance_context": "Named in the passage but not yet richly described.",
+                "growth_event": None,
             }
         )
         known.add(normalized)
+        promoted += 1
+        if promoted >= MAX_AUTO_AUGMENTED_CHARACTERS:
+            break
     return characters
 
 
@@ -168,7 +194,7 @@ def _candidate_names(text: str) -> list[str]:
     candidates.extend(
         name
         for name, count in single_counts.items()
-        if _has_character_context(text, name) or count >= 3
+        if _has_character_context(text, name) or count >= 4
     )
 
     deduped: list[str] = []
@@ -205,6 +231,10 @@ def _looks_like_character_name(name: str, source_text: str) -> bool:
 
     words = re.findall(r"[A-Za-z][A-Za-z'-]*", cleaned)
     if not words:
+        return False
+    if len(words) == 1 and (words[0] in SINGLE_NAME_DISCOURSE_MARKERS or words[0] in SINGLE_NAME_TIME_WORDS):
+        return False
+    if len(words) == 1 and words[0].isupper() and len(words[0]) > 1:
         return False
     if len(words) == 1 and _looks_like_sentence_fragment(words[0]):
         return False
@@ -299,9 +329,13 @@ def _has_name_support(text: str, name: str) -> bool:
         return strong_mentions >= 1 or len(mentions) >= 2
 
     # Single-token names are the noisiest failure mode (random capitalized words).
-    # Require at least one "person-context" mention (said/asked, honorific, possessive, etc),
-    # OR a higher bar of repeated mid-sentence usage.
-    return strong_mentions >= 1 or (len(mentions) >= 4 and non_sentence_start_mentions >= 3)
+    # Require stronger support: either repeated person-context mentions, or
+    # repeated mid-sentence usage with at least one person-context hit.
+    if strong_mentions >= 2:
+        return True
+    if strong_mentions >= 1 and (non_sentence_start_mentions >= 1 or len(mentions) >= 3):
+        return True
+    return len(mentions) >= 6 and non_sentence_start_mentions >= 4
 
 
 def _find_name_mentions(text: str, name: str) -> list[tuple[int, int]]:
@@ -327,6 +361,25 @@ def _mention_has_person_context(before: str, after: str) -> bool:
         or "'" in after[:2]
         or bool(re.match(r"^[, ]+(said|asked|replied|called|told|smiled|laughed|sighed)\b", after.casefold()))
     )
+
+
+def _allow_auto_augmentation(text: str, name: str) -> bool:
+    words = re.findall(r"[A-Za-z][A-Za-z'-]*", name)
+    if len(words) >= 2:
+        return True
+    mentions = _find_name_mentions(text, name)
+    if not mentions:
+        return False
+    strong_mentions = 0
+    non_sentence_start_mentions = 0
+    for start, end in mentions:
+        context_before = text[max(0, start - 48):start]
+        context_after = text[end:min(len(text), end + 48)]
+        if not _mention_is_sentence_start(text, start):
+            non_sentence_start_mentions += 1
+        if _mention_has_person_context(context_before, context_after):
+            strong_mentions += 1
+    return strong_mentions >= 2 or (strong_mentions >= 1 and non_sentence_start_mentions >= 1 and len(mentions) >= 3)
 
 
 def _looks_like_sentence_fragment(word: str) -> bool:

@@ -1,18 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps.auth import get_current_user
 from app.core.database import get_db
 from app.models.user import Subscription, User
+from app.schemas.billing import CheckoutBody
 from app.services.paddle_service import create_checkout_url, create_portal_url, paddle_is_configured
 
 router = APIRouter()
-
-
-class CheckoutBody(BaseModel):
-    plan: str
 
 
 @router.post("/checkout")

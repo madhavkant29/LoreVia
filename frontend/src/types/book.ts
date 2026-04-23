@@ -7,6 +7,8 @@ export interface Book {
   genre: string | null
   format: "pdf" | "epub" | "manual"
   status: BookStatus
+  mode: "reader" | "author"
+  source_kind?: string
   cover_url?: string | null
   total_chapters: number | null
   total_tokens?: number | null
@@ -67,6 +69,7 @@ export interface PublicChapter {
   total_chapters: number | null
   text_url: string | null
   text_content?: string | null
+  html_content?: string | null
 }
 
 export interface SavedQuote {
@@ -81,6 +84,18 @@ export interface SavedQuote {
   created_at: string
 }
 
+export interface BookNote {
+  id: string
+  book_id: string
+  book_title: string
+  chapter_number: number | null
+  chapter_title: string | null
+  title: string | null
+  body: string
+  created_at: string
+  updated_at: string
+}
+
 export interface UserStats {
   public: {
     total_books_read: number
@@ -92,4 +107,69 @@ export interface UserStats {
     total_chapters_tracked: number
     saved_quotes: number
   }
+}
+
+export interface ChapterReportCharacter {
+  id: string
+  name: string
+  role: string | null
+  first_chapter: number | null
+  arc_summary: string | null
+}
+
+export interface ChapterConsistencyReport {
+  chapter_number: number
+  chapter_title: string | null
+  summary: string
+  new_characters: ChapterReportCharacter[]
+  relationship_changes: string[]
+  plot_threads_opened: string[]
+  plot_threads_resolved: string[]
+  continuity_flags: string[]
+}
+
+export interface PreWritingCharacter {
+  id: string
+  name: string
+  role: string | null
+  last_seen_chapter: number | null
+  arc_summary: string | null
+}
+
+export interface PreWritingThread {
+  id: string
+  title: string
+  status: string
+  introduced_at: number | null
+  note: string | null
+}
+
+export interface PreWritingEvent {
+  chapter_number: number
+  chapter_title: string | null
+  detail: string
+}
+
+export interface AuthorAlert {
+  kind: string
+  title: string
+  body: string
+  chapter_ref: number | null
+}
+
+export interface PreWritingCheck {
+  upcoming_chapter: number
+  active_characters: PreWritingCharacter[]
+  unresolved_threads: PreWritingThread[]
+  recent_events: PreWritingEvent[]
+  alerts: AuthorAlert[]
+}
+
+export interface ChapterVersion {
+  id: string
+  chapter_number: number
+  title: string | null
+  word_count: number | null
+  note: string | null
+  created_at: string
 }

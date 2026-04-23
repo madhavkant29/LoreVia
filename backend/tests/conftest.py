@@ -1,10 +1,16 @@
-import pytest
 import asyncio
-from httpx import AsyncClient, ASGITransport
-from app.main import app
-from app.core.database import get_db, Base
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+import sys
+
+import pytest
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
 from app.core.config import settings
+from app.core.database import Base, get_db
+from app.main import app
+
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 TEST_DB = settings.DATABASE_URL.replace("postgresql://", "postgresql+psycopg://").replace("/postgres", "/test_lorevia")
 engine_test = create_async_engine(TEST_DB, echo=False)
@@ -18,7 +24,7 @@ def event_loop():
     loop.close()
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="session")
 async def setup_db():
     async with engine_test.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -28,7 +34,7 @@ async def setup_db():
 
 
 @pytest.fixture
-async def db():
+async def db(setup_db):
     async with TestSession() as s:
         yield s
 

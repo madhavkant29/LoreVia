@@ -1,3 +1,5 @@
+from typing import Any, cast
+
 import resend
 
 from app.core.config import settings
@@ -5,9 +7,9 @@ from app.core.config import settings
 resend.api_key = settings.RESEND_API_KEY
 
 
-def _send(payload: dict) -> bool:
+def _send(payload: dict[str, Any]) -> bool:
     try:
-        resend.Emails.send(payload)
+        resend.Emails.send(cast(Any, payload))
         return True
     except Exception:
         # Email delivery should never block auth or reading flows.
@@ -66,6 +68,36 @@ async def send_password_reset_email(email: str, token: str) -> None:
         <p>Use the link below to choose a new password. This link expires in 1 hour.</p>
         <p><a href="{reset_url}">Reset password</a></p>
         <p>If you did not request this, you can ignore this email.</p>
+        """,
+    })
+
+
+async def send_new_characters_detected_email(
+    email: str,
+    book_title: str,
+    chapter_number: int,
+    character_names: list[str],
+) -> None:
+    if not character_names:
+        return
+
+    preview = ", ".join(character_names[:6])
+    extra_count = max(0, len(character_names) - 6)
+    suffix = f", and {extra_count} more" if extra_count else ""
+    plural = "character" if len(character_names) == 1 else "characters"
+
+    _send({
+        "from": settings.EMAIL_FROM,
+        "to": email,
+        "subject": f"{len(character_names)} new {plural} detected in your latest upload",
+        "html": f"""
+        <h2>New character alert for {book_title}</h2>
+        <p>
+          LoreVia detected <strong>{len(character_names)} new {plural}</strong>
+          in Chapter {chapter_number}.
+        </p>
+        <p>{preview}{suffix}</p>
+        <p><a href="{settings.APP_URL.rstrip('/')}/library">Open LoreVia to review their extracted profiles</a></p>
         """,
     })
 

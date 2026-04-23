@@ -17,6 +17,8 @@ class Character(Base):
     aliases: Mapped[list[str] | None] = mapped_column(ARRAY(String))
     role: Mapped[str | None] = mapped_column(String)       # mc | sc | background
     first_chapter: Mapped[int] = mapped_column(Integer, nullable=False)
+    last_seen_chapter: Mapped[int | None] = mapped_column(Integer)      # updated during extraction
+    mention_count: Mapped[int] = mapped_column(Integer, default=0)       # running count across all chunks
 
     # Confidence-weighted trait model
     # {"hair": {"value":"black","confidence":0.9,"type":"objective"}, ...}
@@ -35,6 +37,7 @@ class Character(Base):
     fears: Mapped[list[str] | None] = mapped_column(ARRAY(String))
     arc_summary: Mapped[str | None] = mapped_column(String)
     archetype: Mapped[str | None] = mapped_column(String)
+    growth_events: Mapped[list[dict] | None] = mapped_column(JSONB, default=list)
 
     # pgvector identity anchor
     embedding: Mapped[list[float] | None] = mapped_column(Vector(1536))
@@ -57,5 +60,6 @@ class CharacterState(Base):
     trait_snapshot: Mapped[dict | None] = mapped_column(JSONB)
     prompt_delta: Mapped[str | None] = mapped_column(String)
     arc_note: Mapped[str | None] = mapped_column(String)
+    growth_event: Mapped[dict | None] = mapped_column(JSONB)
 
     character = relationship("Character", back_populates="states")

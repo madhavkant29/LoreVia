@@ -1,5 +1,4 @@
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from app.core.database import get_db
@@ -9,16 +8,10 @@ from app.models.user import User, UserRateLimitOverride
 from app.models.book import Book
 from app.models.character import Character
 from app.models.intelligence import BookChunk, ChapterSummary
+from app.schemas.admin import RateLimitOverrideBody
 import uuid
 
 router = APIRouter()
-
-
-class RateLimitOverrideBody(BaseModel):
-    search_per_hour: int | None = None
-    summary_per_hour: int | None = None
-    chat_per_day: int | None = None
-    api_per_minute: int | None = None
 
 
 @router.get("/metrics")

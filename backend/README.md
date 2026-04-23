@@ -30,7 +30,7 @@ celery -A app.workers.celery_app flower --port=5555
 ## Testing
 
 ```bash
-pip install -r requirements-dev.txt
+pip install -r requirements.txt
 pytest tests/ -v
 ```
 

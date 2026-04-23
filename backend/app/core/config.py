@@ -91,6 +91,18 @@ class Settings(BaseSettings):
     FREE_SUMMARY_PER_HOUR: int = 30
     FREE_CHAT_PER_DAY: int = 10
     PRO_CHAT_PER_DAY: int = 100
+    FREE_ADVISOR_PER_DAY: int = 20
+    FREE_ADVISOR_PER_WEEK: int = 80
+    FREE_ADVISOR_PER_MONTH: int = 240
+    PRO_ADVISOR_PER_DAY: int = 80
+    PRO_ADVISOR_PER_WEEK: int = 320
+    PRO_ADVISOR_PER_MONTH: int = 960
+    POWER_ADVISOR_PER_DAY: int = 200
+    POWER_ADVISOR_PER_WEEK: int = 800
+    POWER_ADVISOR_PER_MONTH: int = 2400
+    FREE_CONTINUITY_PER_MINUTE: int = 6
+    PRO_CONTINUITY_PER_MINUTE: int = 20
+    POWER_CONTINUITY_PER_MINUTE: int = 40
 
     # Cloudflare Tunnel
     CLOUDFLARE_TUNNEL_TOKEN: str | None = None   # Option 1 security
@@ -98,7 +110,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=True)
 
 
-settings = Settings()
+settings = Settings()  # type: ignore[call-arg]
 
 
 def cors_origins() -> list[str]:

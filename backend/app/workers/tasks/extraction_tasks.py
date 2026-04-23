@@ -34,6 +34,7 @@ def process_chapter_task(self, book_id: str, chapter_num: int, title: str, text:
         from app.models.book import Book, Chapter
         from app.parsers.epub_parser import parse_epub
         from app.parsers.pdf_parser import parse_pdf
+        from app.utils.book_utils import deserialize_manuscript_content
         from sqlalchemy import select
         import uuid
         async with AsyncSessionLocal() as db:
@@ -52,7 +53,7 @@ def process_chapter_task(self, book_id: str, chapter_num: int, title: str, text:
                 ).scalar()
                 if chapter_row and chapter_row.s3_key:
                     try:
-                        chapter_text = (await asyncio.to_thread(download_book, chapter_row.s3_key)).decode("utf-8", errors="ignore")
+                        chapter_text = str(deserialize_manuscript_content(await asyncio.to_thread(download_book, chapter_row.s3_key)).get("text") or "")
                         chapter_title = chapter_row.title or title
                     except Exception:
                         chapter_text = ""

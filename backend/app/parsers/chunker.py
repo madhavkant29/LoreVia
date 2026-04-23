@@ -95,11 +95,16 @@ def _split_paragraphs(text: str) -> list[str]:
 
 
 def _paragraph_overlap(paragraphs: list[str], overlap_tokens: int) -> tuple[list[str], int]:
+    if overlap_tokens <= 0:
+        return [], 0
+
     overlap_parts: list[str] = []
     overlap_count = 0
 
     for paragraph in reversed(paragraphs):
         token_count = count_tokens(paragraph)
+        if not overlap_parts and token_count > overlap_tokens:
+            break
         if overlap_parts and overlap_count + token_count > overlap_tokens:
             break
         overlap_parts.insert(0, paragraph)
@@ -146,19 +151,19 @@ def _split_large_paragraph(paragraph: str, max_tokens: int) -> list[str]:
 def _split_oversized_sentence(sentence: str, max_tokens: int) -> list[str]:
     clause_parts = _split_on_clause_boundaries(sentence)
     if len(clause_parts) > 1:
-        parts: list[str] = []
-        current: list[str] = []
+        split_parts: list[str] = []
+        current_clauses: list[str] = []
         for clause in clause_parts:
-            candidate = " ".join([*current, clause]).strip()
-            if current and count_tokens(candidate) > max_tokens:
-                parts.append(" ".join(current).strip())
-                current = [clause]
+            candidate = " ".join([*current_clauses, clause]).strip()
+            if current_clauses and count_tokens(candidate) > max_tokens:
+                split_parts.append(" ".join(current_clauses).strip())
+                current_clauses = [clause]
                 continue
-            current.append(clause)
-        if current:
-            parts.append(" ".join(current).strip())
-        if all(count_tokens(part) <= max_tokens for part in parts):
-            return [part for part in parts if part]
+            current_clauses.append(clause)
+        if current_clauses:
+            split_parts.append(" ".join(current_clauses).strip())
+        if all(count_tokens(part) <= max_tokens for part in split_parts):
+            return [part for part in split_parts if part]
 
     words = sentence.split()
     if not words:

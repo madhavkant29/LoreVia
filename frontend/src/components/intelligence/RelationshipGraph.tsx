@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import cytoscape from "cytoscape"
+import { booksApi } from "@/lib/api/books"
 import { RELATIONSHIP_COLORS } from "@/lib/constants"
 import type { RelationshipGraph as GraphData } from "@/types/character"
 import { readerApi } from "@/lib/api/reader"
@@ -9,6 +10,7 @@ import { readerApi } from "@/lib/api/reader"
 interface Props {
   bookId: string
   upToChapter: number
+  authorMode?: boolean
   theme?: "light" | "dark"
 }
 
@@ -20,7 +22,7 @@ type Selection =
 type GraphNode = GraphData["nodes"][number]
 type GraphEdge = GraphData["edges"][number]
 type GraphNodeView = GraphNode & { label: string; relationshipCount: number }
-type GraphEdgeView = GraphEdge & { id: string; label: string }
+type GraphEdgeView = GraphEdge & { id: string; relationshipId?: string | null; label: string }
 
 function graphStorageKey(bookId: string, chapter: number) {
   return `lorevia:graph-layout:${bookId}:${chapter}`
@@ -43,7 +45,7 @@ function sentimentLabel(value: unknown) {
   return "Mixed or neutral"
 }
 
-export function RelationshipGraph({ bookId, upToChapter, theme = "light" }: Props) {
+export function RelationshipGraph({ bookId, upToChapter, authorMode = false, theme = "light" }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const cyRef = useRef<cytoscape.Core | null>(null)
   const [graphData, setGraphData] = useState<GraphData | null>(null)
@@ -53,6 +55,9 @@ export function RelationshipGraph({ bookId, upToChapter, theme = "light" }: Prop
   const [labelOverrides, setLabelOverrides] = useState<Record<string, string>>({})
   const [interactionMode, setInteractionMode] = useState<"arrange" | "inspect">("arrange")
   const [zoomLevel, setZoomLevel] = useState(1)
+  const [edgeDraft, setEdgeDraft] = useState({ relType: "", description: "", sentiment: "0", fromChapter: "", toChapter: "" })
+  const [savingEdge, setSavingEdge] = useState(false)
+  const [edgeMessage, setEdgeMessage] = useState<string | null>(null)
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -125,6 +130,7 @@ export function RelationshipGraph({ bookId, upToChapter, theme = "light" }: Prop
         data: {
           ...edge,
           id: `${edge.source}-${edge.target}-${edge.type}-${index}`,
+          relationshipId: edge.id,
           label: relationshipLabel(edge.type),
         },
       })),
@@ -163,7 +169,7 @@ export function RelationshipGraph({ bookId, upToChapter, theme = "light" }: Prop
               return Math.max(98, Math.min(158, 62 + lines * 18))
             },
             shape: "round-rectangle",
-            "background-color": theme === "dark" ? "#0b1220" : "#fffdf9",
+            "background-color": theme === "dark" ? "#0a0a0a" : "#fffdf9",
             "background-opacity": 0.98,
             "border-width": 1.5,
             "border-color": theme === "dark" ? "#334155" : "#d6d3d1",
@@ -184,7 +190,7 @@ export function RelationshipGraph({ bookId, upToChapter, theme = "light" }: Prop
           style: {
             "border-color": "#2563eb",
             "border-width": 3,
-            "background-color": theme === "dark" ? "#172554" : "#eef4ff",
+            "background-color": theme === "dark" ? "#171717" : "#eef4ff",
           },
         },
         {
@@ -201,7 +207,7 @@ export function RelationshipGraph({ bookId, upToChapter, theme = "light" }: Prop
             "font-size": 10,
             "font-weight": 600,
             color: theme === "dark" ? "#9ca3af" : "#6b7280",
-            "text-background-color": theme === "dark" ? "#020617" : "#ffffff",
+            "text-background-color": theme === "dark" ? "#000000" : "#ffffff",
             "text-background-opacity": 0.96,
             "text-background-padding": "4px",
             "text-background-shape": "roundrectangle",
@@ -312,6 +318,18 @@ export function RelationshipGraph({ bookId, upToChapter, theme = "light" }: Prop
   const selectedNode = selection?.type === "node" ? selection.data : null
   const selectedEdge = selection?.type === "edge" ? selection.data : null
 
+  useEffect(() => {
+    if (!selectedEdge) return
+    setEdgeDraft({
+      relType: selectedEdge.type || "",
+      description: selectedEdge.description || "",
+      sentiment: typeof selectedEdge.sentiment === "number" ? String(selectedEdge.sentiment) : "0",
+      fromChapter: typeof selectedEdge.from_chapter === "number" ? String(selectedEdge.from_chapter) : "",
+      toChapter: typeof selectedEdge.to_chapter === "number" ? String(selectedEdge.to_chapter) : "",
+    })
+    setEdgeMessage(null)
+  }, [selectedEdge])
+
   if (loading) {
     return (
       <div className={`rounded-[1.75rem] border p-8 text-sm ${theme === "dark" ? "border-white/10 bg-white/[0.03] text-slate-300" : "border-slate-200 bg-white text-slate-600"}`}>
@@ -322,7 +340,7 @@ export function RelationshipGraph({ bookId, upToChapter, theme = "light" }: Prop
 
   return (
     <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
-      <section className={`rounded-[1.9rem] border p-4 ${theme === "dark" ? "border-white/10 bg-[#050816]" : "border-slate-200 bg-white"}`}>
+      <section className={`rounded-[1.9rem] border p-4 ${theme === "dark" ? "border-white/10 bg-[#050505]" : "border-slate-200 bg-white"}`}>
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className={`text-lg font-semibold ${theme === "dark" ? "text-white" : "text-slate-900"}`}>Relationship graph</h2>
@@ -374,11 +392,11 @@ export function RelationshipGraph({ bookId, upToChapter, theme = "light" }: Prop
         {filteredGraph && filteredGraph.nodes.length > 0 ? (
           <div
             ref={containerRef}
-            className={`h-[58vh] min-h-[380px] rounded-[1.5rem] border md:h-[72vh] md:min-h-[560px] ${theme === "dark" ? "border-white/5 bg-[radial-gradient(circle_at_top,_rgba(37,99,235,0.12),_transparent_30%),linear-gradient(180deg,#020617_0%,#07111f_100%)]" : "border-slate-200 bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.09),_transparent_26%),linear-gradient(180deg,#f8fafc_0%,#f5f5f4_100%)]"}`}
+            className={`h-[58vh] min-h-[380px] rounded-[1.5rem] border md:h-[72vh] md:min-h-[560px] ${theme === "dark" ? "border-white/5 bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.06),_transparent_30%),linear-gradient(180deg,#000000_0%,#0a0a0a_100%)]" : "border-slate-200 bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.09),_transparent_26%),linear-gradient(180deg,#f8fafc_0%,#f5f5f4_100%)]"}`}
             style={{ cursor: interactionMode === "arrange" ? "grab" : "default" }}
           />
         ) : (
-          <div className={`flex h-[40vh] min-h-[340px] items-center justify-center rounded-[1.5rem] border text-center ${theme === "dark" ? "border-white/5 bg-[linear-gradient(180deg,#020617_0%,#07111f_100%)] text-slate-400" : "border-slate-200 bg-[linear-gradient(180deg,#f8fafc_0%,#f5f5f4_100%)] text-slate-500"}`}>
+          <div className={`flex h-[40vh] min-h-[340px] items-center justify-center rounded-[1.5rem] border text-center ${theme === "dark" ? "border-white/5 bg-[linear-gradient(180deg,#000000_0%,#0a0a0a_100%)] text-slate-400" : "border-slate-200 bg-[linear-gradient(180deg,#f8fafc_0%,#f5f5f4_100%)] text-slate-500"}`}>
             <div className="max-w-sm space-y-2 px-6">
               <p className="text-lg font-semibold">No graphable relationships yet</p>
               <p className="text-sm leading-6">Read further or clear the active filter to see more of the character network.</p>
@@ -459,12 +477,127 @@ export function RelationshipGraph({ bookId, upToChapter, theme = "light" }: Prop
             </div>
 
             {typeof selectedEdge.from_chapter === "number" ? <p className="text-sm"><span className="font-medium">First tracked:</span> Chapter {selectedEdge.from_chapter}</p> : null}
+            {typeof selectedEdge.to_chapter === "number" ? <p className="text-sm"><span className="font-medium">Ended:</span> Chapter {selectedEdge.to_chapter}</p> : null}
 
             {sentimentLabel(selectedEdge.sentiment) ? (
               <div className={`rounded-[1.2rem] border p-4 text-sm ${theme === "dark" ? "border-white/10 bg-black/20 text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600"}`}>
                 <div className="flex items-center justify-between gap-3">
                   <span>Emotional direction</span>
                   <span className="font-semibold">{sentimentLabel(selectedEdge.sentiment)}</span>
+                </div>
+              </div>
+            ) : null}
+
+            {authorMode && selectedEdge.relationshipId ? (
+              <div className={`rounded-[1.2rem] border p-4 ${theme === "dark" ? "border-white/10 bg-black/20" : "border-slate-200 bg-slate-50"}`}>
+                <div className="mb-3">
+                  <p className={`text-xs uppercase tracking-[0.16em] ${theme === "dark" ? "text-slate-500" : "text-slate-500"}`}>Author correction</p>
+                  <p className={`mt-2 text-sm leading-6 ${theme === "dark" ? "text-slate-400" : "text-slate-500"}`}>
+                    Correct the extracted relationship if the manuscript context is clearer than the model guess.
+                  </p>
+                </div>
+                <div className="space-y-3">
+                  <label className="block">
+                    <span className={`mb-1 block text-xs ${theme === "dark" ? "text-slate-400" : "text-slate-500"}`}>Type</span>
+                    <input
+                      value={edgeDraft.relType}
+                      onChange={(event) => setEdgeDraft((value) => ({ ...value, relType: event.target.value }))}
+                      className={`w-full rounded-xl border px-3 py-2 text-sm ${theme === "dark" ? "border-white/10 bg-black/20 text-white" : "border-slate-300 bg-white text-slate-900"}`}
+                    />
+                  </label>
+                  <label className="block">
+                    <span className={`mb-1 block text-xs ${theme === "dark" ? "text-slate-400" : "text-slate-500"}`}>Relationship note</span>
+                    <textarea
+                      value={edgeDraft.description}
+                      onChange={(event) => setEdgeDraft((value) => ({ ...value, description: event.target.value }))}
+                      rows={4}
+                      className={`w-full rounded-xl border px-3 py-2 text-sm ${theme === "dark" ? "border-white/10 bg-black/20 text-white" : "border-slate-300 bg-white text-slate-900"}`}
+                    />
+                  </label>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <label className="block">
+                      <span className={`mb-1 block text-xs ${theme === "dark" ? "text-slate-400" : "text-slate-500"}`}>Sentiment</span>
+                      <input
+                        type="number"
+                        min={-1}
+                        max={1}
+                        step={0.1}
+                        value={edgeDraft.sentiment}
+                        onChange={(event) => setEdgeDraft((value) => ({ ...value, sentiment: event.target.value }))}
+                        className={`w-full rounded-xl border px-3 py-2 text-sm ${theme === "dark" ? "border-white/10 bg-black/20 text-white" : "border-slate-300 bg-white text-slate-900"}`}
+                      />
+                    </label>
+                    <label className="block">
+                      <span className={`mb-1 block text-xs ${theme === "dark" ? "text-slate-400" : "text-slate-500"}`}>From chapter</span>
+                      <input
+                        type="number"
+                        min={1}
+                        value={edgeDraft.fromChapter}
+                        onChange={(event) => setEdgeDraft((value) => ({ ...value, fromChapter: event.target.value }))}
+                        className={`w-full rounded-xl border px-3 py-2 text-sm ${theme === "dark" ? "border-white/10 bg-black/20 text-white" : "border-slate-300 bg-white text-slate-900"}`}
+                      />
+                    </label>
+                    <label className="block">
+                      <span className={`mb-1 block text-xs ${theme === "dark" ? "text-slate-400" : "text-slate-500"}`}>Ends chapter</span>
+                      <input
+                        type="number"
+                        min={1}
+                        value={edgeDraft.toChapter}
+                        onChange={(event) => setEdgeDraft((value) => ({ ...value, toChapter: event.target.value }))}
+                        placeholder="Leave blank if ongoing"
+                        className={`w-full rounded-xl border px-3 py-2 text-sm ${theme === "dark" ? "border-white/10 bg-black/20 text-white" : "border-slate-300 bg-white text-slate-900"}`}
+                      />
+                    </label>
+                  </div>
+                  {edgeMessage ? <p className={`text-sm ${edgeMessage.includes("saved") ? "text-emerald-500" : "text-red-500"}`}>{edgeMessage}</p> : null}
+                  <button
+                    type="button"
+                    disabled={savingEdge}
+                    onClick={async () => {
+                      if (!selectedEdge.relationshipId) return
+                      setSavingEdge(true)
+                      setEdgeMessage(null)
+                      try {
+                        const updated = await booksApi.updateRelationship(bookId, selectedEdge.relationshipId, {
+                          relType: edgeDraft.relType.trim(),
+                          description: edgeDraft.description.trim() || null,
+                          sentiment: edgeDraft.sentiment === "" ? null : Number(edgeDraft.sentiment),
+                          fromChapter: edgeDraft.fromChapter === "" ? null : Number(edgeDraft.fromChapter),
+                          toChapter: edgeDraft.toChapter === "" ? null : Number(edgeDraft.toChapter),
+                        })
+                        setGraphData((current) => current ? ({
+                          ...current,
+                          edges: current.edges.map((edge) => edge.id === selectedEdge.relationshipId ? {
+                            ...edge,
+                            type: updated.rel_type,
+                            description: updated.description,
+                            sentiment: updated.sentiment,
+                            from_chapter: updated.from_chapter,
+                            to_chapter: updated.to_chapter,
+                          } : edge),
+                        }) : current)
+                        setSelection((current) => current?.type === "edge" ? {
+                          type: "edge",
+                          data: {
+                            ...current.data,
+                            type: updated.rel_type,
+                            description: updated.description,
+                            sentiment: updated.sentiment,
+                            from_chapter: updated.from_chapter,
+                            to_chapter: updated.to_chapter,
+                          },
+                        } : current)
+                        setEdgeMessage("Relationship correction saved.")
+                      } catch {
+                        setEdgeMessage("Could not save the relationship correction.")
+                      } finally {
+                        setSavingEdge(false)
+                      }
+                    }}
+                    className="rounded-full bg-slate-900 px-4 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                  >
+                    {savingEdge ? "Saving..." : "Save correction"}
+                  </button>
                 </div>
               </div>
             ) : null}

@@ -38,6 +38,7 @@ export default function BookOverviewPage() {
   const [chapterList, setChapterList] = useState<ChapterListResponse | null>(null)
   const [exportingBible, setExportingBible] = useState(false)
   const [bibleFormat, setBibleFormat] = useState<"md" | "pdf" | "docx">("pdf")
+  const [modeSaving, setModeSaving] = useState(false)
   const router = useRouter()
   const { recall, lastChapter, show, dismiss } = useRecall(bookId)
   const { theme, toggleTheme } = usePreferencesStore()
@@ -52,6 +53,12 @@ export default function BookOverviewPage() {
     readerApi.getChapterList(bookId).then(setChapterList).catch(() => {})
     intelligenceApi.getCrossBookIntelligence(bookId).then(setCrossBook).catch(() => {})
   }, [bookId])
+
+  useEffect(() => {
+    if (book?.mode === "reader" || book?.mode === "author") {
+      setBookMode(bookId, book.mode)
+    }
+  }, [book?.mode, bookId, setBookMode])
 
   useEffect(() => {
     if (!book || book.status !== "processing") return
@@ -89,6 +96,7 @@ export default function BookOverviewPage() {
   const percentComplete = Math.round(progress?.percent_complete ?? book?.progress_pct ?? 0)
   const chaptersLeft = progress?.chapters_left ?? book?.chapters_left ?? 0
   const chaptersReadCount = progress?.chapters_read_count ?? book?.chapters_read_count ?? 0
+  const activeBookMode = book?.mode ?? bookMode
 
   const navigateWithMemory = (href: string) => {
     if (typeof window !== "undefined") {
@@ -127,20 +135,18 @@ export default function BookOverviewPage() {
   const quickTools = useMemo(
     () => [
       { label: "Characters", href: `/${bookId}/characters` },
+      { label: "Ask LoreVia", href: `/${bookId}/ask` },
+      { label: "Search passages", href: `/${bookId}/search` },
       { label: "Relationships", action: openRelationships },
       { label: "Summary", href: `/${bookId}/summaries` },
-      { label: "Search", href: `/${bookId}/search` },
+      ...(activeBookMode === "author" ? [{ label: "Notes", href: `/notes` }] : []),
     ],
-    [bookId]
+    [activeBookMode, bookId]
   )
 
   const featureTools = useMemo(
     () => [
-      { label: "Foreshadowing", meta: "Signals and hints", onClick: () => navigateWithMemory(`/${bookId}/foreshadowing`) },
-      { label: "Timeline", meta: "Story structure", onClick: () => navigateWithMemory(`/${bookId}/timeline`) },
-      { label: "Cross-book wiki", meta: "Series echoes", onClick: () => navigateWithMemory(`/${bookId}/cross-book-wiki`) },
-      { label: "Relationship evolution", meta: "Shifts over time", onClick: () => navigateWithMemory(`/${bookId}/relationship-evolution`) },
-      { label: "Quotes", meta: "Saved lines", onClick: () => navigateWithMemory("/quotes") },
+      { label: "Analysis", meta: "All nonessential tools", onClick: () => navigateWithMemory(`/${bookId}/analysis`) },
     ],
     [bookId]
   )
@@ -158,19 +164,38 @@ export default function BookOverviewPage() {
     return <div className={`flex justify-center py-20 ${isDark ? "text-slate-400" : "text-stone-400"}`}>Loading...</div>
   }
 
+  const updateMode = async (nextMode: "reader" | "author") => {
+    setBookMode(bookId, nextMode)
+    setModeSaving(true)
+    try {
+      const updated = await booksApi.setMode(bookId, nextMode)
+      setBook(updated)
+    } catch {
+      setBookMode(bookId, book?.mode ?? "reader")
+    } finally {
+      setModeSaving(false)
+    }
+  }
+
   return (
-    <div className={`min-h-screen ${isDark ? "bg-[linear-gradient(180deg,#07111f_0%,#0b1830_44%,#0d1b35_100%)] text-slate-100" : "bg-[linear-gradient(180deg,#fcf7ef_0%,#f8f3ec_46%,#f5f0ea_100%)] text-stone-950"}`}>
+    <div className={`min-h-screen ${isDark ? "bg-[linear-gradient(180deg,#000000_0%,#060606_44%,#0d0d0d_100%)] text-slate-100" : "bg-[linear-gradient(180deg,#fcf7ef_0%,#f8f3ec_46%,#f5f0ea_100%)] text-stone-950"}`}>
       <div className="sticky top-0 z-30 flex items-center justify-between gap-3 px-4 py-4 backdrop-blur-xl sm:px-6 lg:px-8" style={{ backgroundColor: isDark ? 'rgba(7, 17, 31, 0.8)' : 'rgba(252, 247, 239, 0.8)' }}>
         <div className="mx-auto max-w-7xl flex items-center justify-between gap-3 w-full">
-          <Link href="/library" className={`text-sm font-medium transition ${isDark ? "text-indigo-300 hover:text-indigo-200" : "text-violet-700 hover:text-violet-800"}`}>
-            LoreVia
+          <Link href="/library" className="transition hover:opacity-80">
+            <img src="/image.png" alt="LoreVia" className="h-9 w-9 rounded-xl object-cover" />
           </Link>
           <div className="flex items-center gap-2">
-            <div className={`hidden overflow-hidden rounded-xl border md:inline-flex ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white/80"}`}>
+            <Link href="/notifications" className={`flex h-10 w-10 items-center justify-center rounded-xl border ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-white/80 text-stone-600"}`}>
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M14.857 17H9.143m5.714 0H18l-1.286-1.286A2 2 0 0116 14.286V11a4 4 0 10-8 0v3.286a2 2 0 01-.714 1.428L6 17h3.143m5.714 0a3 3 0 11-5.714 0" />
+              </svg>
+            </Link>
+            <div className={`inline-flex overflow-hidden rounded-xl border ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white/80"}`}>
               <button
-                onClick={() => setBookMode(bookId, "reader")}
+                onClick={() => updateMode("reader")}
+                disabled={modeSaving}
                 className={`px-4 py-2 text-sm font-medium transition ${
-                  bookMode === "reader"
+                  activeBookMode === "reader"
                     ? isDark ? "bg-white text-slate-950" : "bg-white text-stone-950 shadow-sm"
                     : isDark ? "text-slate-300 hover:bg-white/10" : "text-stone-600 hover:bg-white"
                 }`}
@@ -178,9 +203,10 @@ export default function BookOverviewPage() {
                 Reader
               </button>
               <button
-                onClick={() => setBookMode(bookId, "author")}
+                onClick={() => updateMode("author")}
+                disabled={modeSaving}
                 className={`px-4 py-2 text-sm font-medium transition ${
-                  bookMode === "author"
+                  activeBookMode === "author"
                     ? isDark ? "bg-white text-slate-950" : "bg-white text-stone-950 shadow-sm"
                     : isDark ? "text-slate-300 hover:bg-white/10" : "text-stone-600 hover:bg-white"
                 }`}
@@ -190,9 +216,21 @@ export default function BookOverviewPage() {
             </div>
             <button
               onClick={toggleTheme}
-              className={`rounded-xl border px-4 py-2 text-sm transition ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-stone-200 bg-white/80 text-stone-600 hover:bg-white"}`}
+              aria-label={`Switch to ${isDark ? "light" : "dark"} mode`}
+              className={`flex items-center gap-3 rounded-xl border px-3 py-2 text-sm transition ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-stone-200 bg-white/90 text-stone-700 hover:bg-white"}`}
             >
-              {isDark ? "Light mode" : "Dark mode"}
+              <span className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-300" : "text-stone-500"}`}>
+                {isDark ? "Light" : "Dark"}
+              </span>
+              <span className={`relative flex h-6 w-11 items-center rounded-full transition ${isDark ? "bg-indigo-500/80" : "bg-stone-300"}`}>
+                <span
+                  className={`absolute flex h-5 w-5 items-center justify-center rounded-full bg-white text-[9px] font-semibold shadow-sm transition ${
+                    isDark ? "translate-x-5 text-amber-500" : "translate-x-0.5 text-slate-700"
+                  }`}
+                >
+                  {isDark ? "Day" : "Night"}
+                </span>
+              </span>
             </button>
             <Link href="/settings" className={`rounded-xl border px-4 py-2 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-300" : "border-stone-200 bg-white/80 text-stone-600"}`}>
               Settings
@@ -239,42 +277,6 @@ export default function BookOverviewPage() {
                   ) : null}
                 </div>
 
-                <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-                  <button
-                    onClick={continueReading}
-                    className="inline-flex items-center justify-center rounded-[1.2rem] bg-[linear-gradient(135deg,#4f46e5,#4338ca)] px-6 py-4 text-lg font-semibold text-white shadow-[0_22px_46px_-28px_rgba(79,70,229,0.78)] transition hover:translate-y-[-1px]"
-                  >
-                    {continueChapter > 1 ? `Continue - Chapter ${continueChapter}` : "Get started"}
-                  </button>
-                  <Link
-                    href={`/${bookId}/summaries`}
-                    className={`inline-flex items-center justify-center rounded-[1.2rem] border px-6 py-4 text-lg font-medium transition ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-stone-200 bg-white/85 text-stone-700 hover:bg-white"}`}
-                  >
-                    Open summary
-                  </Link>
-                </div>
-
-                <div className="mt-5 grid grid-cols-2 gap-3">
-                  {quickTools.map((tool) =>
-                    "href" in tool ? (
-                      <Link
-                        key={tool.label}
-                        href={tool.href as Route}
-                        className={`rounded-[1.05rem] border px-4 py-3 text-center text-sm font-medium transition ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-stone-200 bg-white/72 text-stone-700 hover:bg-white"}`}
-                      >
-                        {tool.label}
-                      </Link>
-                    ) : (
-                      <button
-                        key={tool.label}
-                        onClick={tool.action}
-                        className={`rounded-[1.05rem] border px-4 py-3 text-center text-sm font-medium transition ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-stone-200 bg-white/72 text-stone-700 hover:bg-white"}`}
-                      >
-                        {tool.label}
-                      </button>
-                    )
-                  )}
-                </div>
               </div>
 
               <div className="order-1 flex justify-center lg:order-2 lg:justify-end">
@@ -340,11 +342,125 @@ export default function BookOverviewPage() {
                 Open full chapter list
               </button>
             </div>
+
+            <div className={`rounded-[1.8rem] border p-5 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200/80 bg-white/78"}`}>
+              <p className={`text-[11px] font-semibold uppercase tracking-[0.28em] ${isDark ? "text-emerald-300" : "text-emerald-600"}`}>Workspace actions</p>
+              <div className="mt-4 grid gap-3">
+                <button
+                  onClick={continueReading}
+                  className="inline-flex items-center justify-center rounded-[1.15rem] bg-[linear-gradient(135deg,#4f46e5,#4338ca)] px-5 py-4 text-base font-semibold text-white shadow-[0_22px_46px_-28px_rgba(79,70,229,0.78)] transition hover:translate-y-[-1px]"
+                >
+                  {continueChapter > 1 ? `Continue - Chapter ${continueChapter}` : "Get started"}
+                </button>
+                <Link
+                  href={`/${bookId}/summaries`}
+                  className={`inline-flex items-center justify-center rounded-[1.15rem] border px-5 py-4 text-base font-medium transition ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-stone-200 bg-white text-stone-700 hover:bg-white"}`}
+                >
+                  Open summary
+                </Link>
+              </div>
+
+              <div className="mt-4 flex flex-wrap gap-2">
+                {quickTools.map((tool) =>
+                  "href" in tool ? (
+                    <Link
+                      key={tool.label}
+                      href={tool.href as Route}
+                      className={`rounded-full border px-4 py-2 text-sm font-medium transition ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-stone-200 bg-white text-stone-700 hover:bg-white"}`}
+                    >
+                      {tool.label}
+                    </Link>
+                  ) : (
+                    <button
+                      key={tool.label}
+                      onClick={tool.action}
+                      className={`rounded-full border px-4 py-2 text-sm font-medium transition ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-stone-200 bg-white text-stone-700 hover:bg-white"}`}
+                    >
+                      {tool.label}
+                    </button>
+                  )
+                )}
+              </div>
+            </div>
           </aside>
         </div>
 
         <div className="mt-8">
           <div className="space-y-6">
+            {bookMode === "author" ? (
+              <section className={`rounded-[1.8rem] border p-6 ${isDark ? "border-white/10 bg-white/5" : "border-white/70 bg-white/82"}`}>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                  <div>
+                    <p className={`text-[11px] font-semibold uppercase tracking-[0.28em] ${isDark ? "text-indigo-300" : "text-violet-500"}`}>Writing tools</p>
+                    <h2 className={`mt-2 font-serif text-3xl ${isDark ? "text-white" : "text-stone-950"}`}>Write, ask, and export from one place.</h2>
+                  </div>
+                  <p className={`max-w-xl text-sm leading-7 ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+                    Author mode removes spoiler gating and focuses on reference exports and continuity support.
+                  </p>
+                </div>
+
+                <div className="mt-5 grid gap-3 md:grid-cols-2">
+                  <div className={`rounded-[1.2rem] border p-5 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-stone-50"}`}>
+                    <p className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-emerald-300" : "text-emerald-600"}`}>Writing</p>
+                    <p className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>Manuscript editor</p>
+                    <p className={`mt-2 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
+                      Draft chapter text in a calmer manuscript workspace with optional continuity and thread side panels.
+                    </p>
+                    <button
+                      onClick={() => navigateWithMemory(`/${bookId}/manuscript`)}
+                      className="mt-4 inline-flex items-center justify-center rounded-[1rem] bg-[linear-gradient(135deg,#059669,#047857)] px-5 py-3 text-sm font-semibold text-white shadow-[0_16px_36px_-22px_rgba(5,150,105,0.75)] transition hover:translate-y-[-1px]"
+                    >
+                      Open Manuscript Editor
+                    </button>
+                  </div>
+
+                  <div className={`rounded-[1.2rem] border p-5 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-stone-50"}`}>
+                    <p className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-indigo-300" : "text-violet-500"}`}>Author Intelligence</p>
+                    <p className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>Story Advisor</p>
+                    <p className={`mt-2 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
+                      RAG-grounded author chat. Ask about plotholes, dropped threads, foreshadowing
+                      opportunities, or where an arc should go â€” every answer is grounded in retrieved
+                      passages from your manuscript.
+                    </p>
+                    <button
+                      onClick={() => navigateWithMemory(`/${bookId}/advisor`)}
+                      className="mt-4 inline-flex items-center justify-center rounded-[1rem] bg-[linear-gradient(135deg,#4f46e5,#4338ca)] px-5 py-3 text-sm font-semibold text-white shadow-[0_16px_36px_-22px_rgba(79,70,229,0.75)] transition hover:translate-y-[-1px]"
+                    >
+                      Open Story Advisor
+                    </button>
+                  </div>
+
+                  <div className={`rounded-[1.2rem] border p-5 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-stone-50"}`}>
+                    <p className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Export</p>
+                    <p className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>Character Bible</p>
+                    <p className={`mt-2 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
+                      Download a clean reference file: roles, first appearance, tags, motivations, arc notes, and relationship preview.
+                    </p>
+                    <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center">
+                      <select
+                        value={bibleFormat}
+                        onChange={(e) => setBibleFormat(e.target.value as "md" | "pdf" | "docx")}
+                        className={`w-full rounded-[1rem] border px-4 py-3 text-sm outline-none transition sm:w-[15rem] ${
+                          isDark ? "border-white/20 bg-stone-800 text-white" : "border-stone-200 bg-white text-stone-900"
+                        }`}
+                      >
+                        <option value="md">Markdown (.md)</option>
+                        <option value="pdf">PDF (.pdf)</option>
+                        <option value="docx">Word (.docx)</option>
+                      </select>
+                    <button
+                      onClick={exportCharacterBible}
+                      disabled={exportingBible}
+                      className="mt-4 inline-flex items-center justify-center rounded-[1rem] bg-[linear-gradient(135deg,#4f46e5,#4338ca)] px-5 py-3 text-sm font-semibold text-white shadow-[0_16px_36px_-22px_rgba(79,70,229,0.75)] transition disabled:opacity-60"
+                    >
+                      {exportingBible ? "Preparing..." : "Download"}
+                    </button>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            ) : null}
+
             <section className={`rounded-[1.8rem] border p-6 ${isDark ? "border-white/10 bg-white/5" : "border-white/70 bg-white/82"}`}>
               <h2 className={`font-serif text-3xl ${isDark ? "text-white" : "text-stone-950"}`}>World Mechanics</h2>
               <p className={`mt-4 max-w-3xl text-lg leading-9 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{worldNote}</p>
@@ -382,7 +498,7 @@ export default function BookOverviewPage() {
               </div>
             </section>
 
-            {bookMode === "author" ? (
+            {false && bookMode === "author" ? (
               <section className={`rounded-[1.8rem] border p-6 ${isDark ? "border-white/10 bg-white/5" : "border-white/70 bg-white/82"}`}>
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                   <div>
@@ -395,6 +511,36 @@ export default function BookOverviewPage() {
                 </div>
 
                 <div className="mt-5 grid gap-3 md:grid-cols-2">
+                  <div className={`rounded-[1.2rem] border p-5 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-stone-50"}`}>
+                    <p className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-emerald-300" : "text-emerald-600"}`}>Writing</p>
+                    <p className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>Manuscript editor</p>
+                    <p className={`mt-2 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
+                      Draft chapter text with your continuity checks, open plot threads, and advisor prompts visible in one workspace.
+                    </p>
+                    <button
+                      onClick={() => navigateWithMemory(`/${bookId}/manuscript`)}
+                      className="mt-4 inline-flex items-center justify-center rounded-[1rem] bg-[linear-gradient(135deg,#059669,#047857)] px-5 py-3 text-sm font-semibold text-white shadow-[0_16px_36px_-22px_rgba(5,150,105,0.75)] transition hover:translate-y-[-1px]"
+                    >
+                      Open Manuscript Editor
+                    </button>
+                  </div>
+
+                  <div className={`rounded-[1.2rem] border p-5 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-stone-50"}`}>
+                    <p className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-indigo-300" : "text-violet-500"}`}>Author Intelligence</p>
+                    <p className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>Story Advisor</p>
+                    <p className={`mt-2 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
+                      RAG-grounded author chat. Ask about plotholes, dropped threads, foreshadowing
+                      opportunities, or where an arc should go — every answer is grounded in retrieved
+                      passages from your manuscript.
+                    </p>
+                    <button
+                      onClick={() => navigateWithMemory(`/${bookId}/advisor`)}
+                      className="mt-4 inline-flex items-center justify-center rounded-[1rem] bg-[linear-gradient(135deg,#4f46e5,#4338ca)] px-5 py-3 text-sm font-semibold text-white shadow-[0_16px_36px_-22px_rgba(79,70,229,0.75)] transition hover:translate-y-[-1px]"
+                    >
+                      Open Story Advisor
+                    </button>
+                  </div>
+
                   <div className={`rounded-[1.2rem] border p-5 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-stone-50"}`}>
                     <p className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Export</p>
                     <p className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>Character Bible</p>
@@ -422,17 +568,6 @@ export default function BookOverviewPage() {
                     </button>
                     </div>
                   </div>
-
-                  <div className={`rounded-[1.2rem] border p-5 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-stone-50"}`}>
-                    <p className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Continuity</p>
-                    <p className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>Continuity checker</p>
-                    <p className={`mt-2 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
-                      Coming next: paste a new chapter and LoreVia flags contradictions against extracted character state.
-                    </p>
-                    <div className={`mt-4 rounded-[1rem] border px-4 py-3 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-300" : "border-stone-200 bg-white/75 text-stone-600"}`}>
-                      Status: planned
-                    </div>
-                  </div>
                 </div>
               </section>
             ) : null}
@@ -440,12 +575,13 @@ export default function BookOverviewPage() {
         </div>
       </div>
 
-      <nav className={`fixed inset-x-0 bottom-0 z-30 border-t px-4 py-3 backdrop-blur lg:hidden ${isDark ? "border-white/10 bg-[#07111f]/92" : "border-stone-200 bg-white/92"}`}>
-        <div className={`mx-auto grid max-w-xl grid-cols-5 gap-2 text-center text-[11px] font-medium ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+      <nav className={`fixed inset-x-0 bottom-0 z-30 border-t px-4 py-3 backdrop-blur lg:hidden ${isDark ? "border-white/10 bg-black/92" : "border-stone-200 bg-white/92"}`}>
+        <div className={`mx-auto grid max-w-xl grid-cols-6 gap-2 text-center text-[11px] font-medium ${isDark ? "text-slate-400" : "text-stone-500"}`}>
           <Link href={`/${bookId}`} className={`rounded-xl px-2 py-2 ${isDark ? "text-indigo-300" : "text-violet-700"}`}>Overview</Link>
           <Link href={`/${bookId}/summaries`} className="rounded-xl px-2 py-2">Summary</Link>
-          <Link href={`/${bookId}/search`} className="rounded-xl px-2 py-2">Search</Link>
+          <Link href={`/${bookId}/ask`} className="rounded-xl px-2 py-2">Query</Link>
           <button onClick={openRelationships} className="rounded-xl px-2 py-2">Graph</button>
+          <Link href="/notifications" className="rounded-xl px-2 py-2">Alerts</Link>
           <Link href="/library" className="rounded-xl px-2 py-2">Library</Link>
         </div>
       </nav>

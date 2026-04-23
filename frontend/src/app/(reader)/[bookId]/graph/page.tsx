@@ -3,6 +3,7 @@ import { useEffect, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 
 import { RelationshipGraph } from "@/components/intelligence/RelationshipGraph"
+import { booksApi } from "@/lib/api/books"
 import { readerApi } from "@/lib/api/reader"
 
 export default function GraphPage() {
@@ -11,11 +12,13 @@ export default function GraphPage() {
   const [chapter, setChapter] = useState(1)
   const [maxChapter, setMaxChapter] = useState(1)
   const [confirmed, setConfirmed] = useState(false)
+  const [authorMode, setAuthorMode] = useState(false)
   const [theme, setTheme] = useState<"light" | "dark">("light")
 
   useEffect(() => {
     const stored = window.localStorage.getItem("reader-theme")
     if (stored === "dark" || stored === "light") setTheme(stored)
+    booksApi.get(bookId).then((book) => setAuthorMode(book.mode === "author")).catch(() => {})
     readerApi.getProgress(bookId).then((progress) => {
       const readChapter = Math.max(1, progress?.current_chapter ?? 1)
       setChapter(readChapter)
@@ -67,7 +70,7 @@ export default function GraphPage() {
           />
         </div>
       </div>
-      <RelationshipGraph bookId={bookId} upToChapter={chapter} theme={theme} />
+      <RelationshipGraph bookId={bookId} upToChapter={chapter} theme={theme} authorMode={authorMode} />
     </div>
   )
 }

@@ -1,17 +1,20 @@
 """
 Analysis consumer: summaries + plot tracking for one chapter.
 """
-import uuid
 import asyncio
+import logging
+import uuid
+from typing import Any, cast
+
+from sqlalchemy import select
+
+from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.core.redis import cache_set, key_chapter_summary
-from app.core.config import settings
+from app.engine.analysis.plot_tracker import extract_plot_threads
+from app.engine.analysis.summariser import generate_summary
 from app.models.book import Chapter
 from app.models.intelligence import ChapterSummary, PlotThread
-from app.engine.analysis.summariser import generate_summary
-from app.engine.analysis.plot_tracker import extract_plot_threads
-from sqlalchemy import select
-import logging
 
 log = logging.getLogger("lorevia.analysis")
 
@@ -39,18 +42,20 @@ async def analyse_chapter(chapter_id: str, chapter_text: str, chapter_title: str
         for mode, summary_data in zip(pending_modes, summary_payloads):
             if isinstance(summary_data, Exception):
                 continue
+            payload = cast(dict[str, Any], summary_data)
             row = ChapterSummary(
                 chapter_id=chapter.id,
                 mode=mode,
-                content=summary_data["content"],
-                key_events=summary_data.get("key_events"),
-                char_changes=summary_data.get("char_changes"),
-                clues=summary_data.get("clues"),
+                content=payload["content"],
+                key_events=payload.get("key_events"),
+                char_changes=payload.get("char_changes"),
+                clues=payload.get("clues"),
+                themes=payload.get("themes"),
             )
             db.add(row)
             await cache_set(
                 key_chapter_summary(chapter_id, mode),
-                summary_data,
+                payload,
                 settings.REDIS_TTL_SUMMARY,
             )
             results[mode] = "generated"
