@@ -69,6 +69,12 @@ jobs:
       env:
         DATABASE_URL: postgresql://postgres:postgres@localhost:5432/lorevia_test
         REDIS_URL: redis://localhost:6379/0
+        S3_BUCKET: test-bucket
+        AWS_ACCESS_KEY_ID: test-key
+        AWS_SECRET_ACCESS_KEY: test-secret
+        OPENAI_API_KEY: test-key
+        JWT_SECRET: test-secret-key-for-ci
+        RESEND_API_KEY: test-key
         SECRET_KEY: test-secret-key-for-ci
         ENVIRONMENT: testing
       run: |
