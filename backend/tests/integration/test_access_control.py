@@ -1,5 +1,6 @@
 import io
 import uuid
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
@@ -18,7 +19,12 @@ def _mock_storage_uploads(monkeypatch):
 
     monkeypatch.setattr("app.api.v1.routes.books.upload_book_bytes", _fake_upload_book_bytes)
     monkeypatch.setattr("app.core.storage.upload_book_bytes", _fake_upload_book_bytes)
-    monkeypatch.setattr("app.api.v1.routes.books.process_book_task.apply_async", _noop_apply_async)
+    # Celery's @task decorator yields a lazy proxy in tests; stubbing the whole
+    # task object is more reliable than patching proxy attributes.
+    monkeypatch.setattr(
+        "app.api.v1.routes.books.process_book_task",
+        SimpleNamespace(apply_async=_noop_apply_async),
+    )
 
 
 async def _register_user(client, email: str) -> tuple[dict[str, str], uuid.UUID]:
