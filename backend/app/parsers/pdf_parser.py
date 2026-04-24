@@ -311,7 +311,9 @@ def _heading_remainder(text: str, heading: str) -> str:
         return ""
     normalized_first = _normalize_heading_candidate(lines[0])
     if normalized_first.lower() == heading.lower():
-        return _clean_text("\n".join(lines[1:]))
+        # Clean each line to remove ornaments
+        remainder_lines = [_clean_text(line) for line in lines[1:]]
+        return "\n".join(remainder_lines).strip()
     flattened = _normalize_heading_candidate(raw)
     match = re.match(re.escape(heading) + r"[\s:.\-]*", flattened, flags=re.IGNORECASE)
     if not match:
