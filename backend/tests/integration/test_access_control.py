@@ -11,7 +11,7 @@ from app.models.character import Character
 async def _register_user(client, email: str) -> tuple[dict[str, str], uuid.UUID]:
     response = await client.post(
         "/api/v1/auth/register",
-        json={"email": email, "password": "testpass123456", "accepted_terms": True},
+        json={"email": email, "password": "TestPass123!@#", "accepted_terms": True},
     )
     assert response.status_code == 201
     payload = response.json()

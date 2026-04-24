@@ -22,7 +22,7 @@ FRONT_MATTER_RE = re.compile(
     r"contents|dedication|acknowledg(?:e)?ments?)",
     re.IGNORECASE,
 )
-ORNAMENT_RE = re.compile(r"[\u2600-\u27ff\u3000-\u303f\uFF00-\uFFEF]+")
+ORNAMENT_RE = re.compile(r"[\u2600-\u27ff\u3000-\u303f\uFF00-\uFFEF\U0001F000-\U0001F9FF]+")
 MEDIA_MARKER_TEMPLATE = "[[IMAGE:{marker}]]"
 MEDIA_MARKER_RE = re.compile(r"\[\[IMAGE:[^\]]+\]\]")
 PARAGRAPH_SPLIT_MAX_WORDS = 4000
@@ -313,12 +313,18 @@ def _heading_remainder(text: str, heading: str) -> str:
     if normalized_first.lower() == heading.lower():
         # Clean each line to remove ornaments
         remainder_lines = [_clean_text(line) for line in lines[1:]]
-        return "\n".join(remainder_lines).strip()
+        # Filter out empty lines after cleaning
+        remainder_lines = [line for line in remainder_lines if line.strip()]
+        # Join and clean again to catch any remaining ornaments
+        result = "\n".join(remainder_lines).strip()
+        return _clean_text(result)
+    # Try to match heading in the flattened text and extract remainder
     flattened = _normalize_heading_candidate(raw)
     match = re.match(re.escape(heading) + r"[\s:.\-]*", flattened, flags=re.IGNORECASE)
     if not match:
         return ""
     remainder = flattened[match.end():].strip()
+    # Clean the remainder to remove any remaining ornaments
     return _clean_text(remainder)
 
 

@@ -10,3 +10,5 @@ Key non-negotiables (repeated here for quick reference):
 - One requirements file: `backend/requirements.txt` — pin exact versions, never recreate requirements-dev.txt
 - Character filtering: use `character_visibility_score()` + `VISIBILITY_THRESHOLD` — stopwords are soft penalties, not hard gates
 - No commented-out code; preserve unrelated docstrings and comments
+- **Write tests for all new functions** in `backend/tests/unit/` for utility functions and `backend/tests/integration/` for API endpoints
+- **Consider edge cases** when writing tests: empty inputs, null values, boundary conditions, malformed data, and error scenarios

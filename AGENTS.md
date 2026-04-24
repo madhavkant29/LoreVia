@@ -75,6 +75,14 @@ LoreVia2/
 - No commented-out code left in PRs.
 - Preserve all existing docstrings and comments unrelated to your change.
 
+### 7. Testing
+
+- **Write tests for all new functions** in `backend/tests/unit/` for utility functions and `backend/tests/integration/` for API endpoints.
+- **Consider edge cases** when writing tests: empty inputs, null values, boundary conditions, malformed data, and error scenarios.
+- Test both happy paths and error paths.
+- Use descriptive test names that clearly indicate what is being tested.
+- Maintain test coverage for critical paths.
+
 ---
 
 ## Before you write any code

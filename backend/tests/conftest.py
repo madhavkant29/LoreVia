@@ -6,8 +6,22 @@ import sqlalchemy as sa
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.api.deps.rate_limit import (
+    rate_limit_api,
+    rate_limit_auth_login,
+    rate_limit_auth_password,
+    rate_limit_auth_refresh,
+    rate_limit_auth_register,
+    rate_limit_chat,
+    rate_limit_continuity_checker,
+    rate_limit_public,
+    rate_limit_public_asset,
+    rate_limit_search,
+    rate_limit_summary,
+)
 from app.core.config import settings
 from app.core.database import Base, get_db
+from app.core.storage import download_book
 from app.main import app
 
 if sys.platform == "win32":
@@ -43,14 +57,31 @@ async def db(setup_db):
 
 
 @pytest.fixture
-async def client(db):
+async def client(db, monkeypatch):
     app.dependency_overrides[get_db] = lambda: db
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    # Disable rate limiting in tests
+    app.dependency_overrides[rate_limit_api] = lambda: None
+    app.dependency_overrides[rate_limit_auth_register] = lambda: None
+    app.dependency_overrides[rate_limit_auth_login] = lambda: None
+    app.dependency_overrides[rate_limit_auth_password] = lambda: None
+    app.dependency_overrides[rate_limit_auth_refresh] = lambda: None
+    app.dependency_overrides[rate_limit_search] = lambda: None
+    app.dependency_overrides[rate_limit_summary] = lambda: None
+    app.dependency_overrides[rate_limit_chat] = lambda: None
+    app.dependency_overrides[rate_limit_public] = lambda: None
+    app.dependency_overrides[rate_limit_public_asset] = lambda: None
+    app.dependency_overrides[rate_limit_continuity_checker] = lambda: None
+    # Mock download_book at module level to avoid S3 errors
+    monkeypatch.setattr("app.core.storage.download_book", lambda key: b"mock content")
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://localhost") as c:
         yield c
     app.dependency_overrides.clear()
 
 
 @pytest.fixture
 async def auth_headers(client):
-    r = await client.post("/api/v1/auth/register", json={"email": "test@lorevia.app", "password": "testpass123456", "accepted_terms": True})
+    import uuid
+    r = await client.post("/api/v1/auth/register", json={"email": f"user-{uuid.uuid4()}@lorevia.app", "password": "SecurePass456!@#", "accepted_terms": True})
+    if r.status_code != 201:
+        raise Exception(f"Registration failed: {r.status_code} - {r.text}")
     return {"Authorization": f"Bearer {r.json()['access_token']}"}
