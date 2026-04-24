@@ -2,6 +2,7 @@ import asyncio
 import sys
 
 import pytest
+import sqlalchemy as sa
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -27,6 +28,8 @@ def event_loop():
 @pytest.fixture(scope="session")
 async def setup_db():
     async with engine_test.begin() as conn:
+        # Enable pgvector extension for vector columns
+        await conn.execute(sa.text("CREATE EXTENSION IF NOT EXISTS vector"))
         await conn.run_sync(Base.metadata.create_all)
     yield
     async with engine_test.begin() as conn:

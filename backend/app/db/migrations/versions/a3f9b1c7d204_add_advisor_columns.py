@@ -36,5 +36,15 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_column("characters", "mention_count")
-    op.drop_column("characters", "last_seen_chapter")
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    tables = set(inspector.get_table_names())
+
+    if "characters" not in tables:
+        return
+
+    columns = {column["name"] for column in inspector.get_columns("characters")}
+    if "mention_count" in columns:
+        op.drop_column("characters", "mention_count")
+    if "last_seen_chapter" in columns:
+        op.drop_column("characters", "last_seen_chapter")
