@@ -52,5 +52,5 @@ async def client(db):
 
 @pytest.fixture
 async def auth_headers(client):
-    r = await client.post("/api/v1/auth/register", json={"email": "test@lorevia.app", "password": "testpass123"})
+    r = await client.post("/api/v1/auth/register", json={"email": "test@lorevia.app", "password": "testpass123456", "accepted_terms": True})
     return {"Authorization": f"Bearer {r.json()['access_token']}"}

@@ -289,9 +289,10 @@ def _extract_heading(text: str) -> str | None:
         return first_line
     if UPPER_HEADING_RE.match(first_line) and len(first_line.split()) <= 8:
         return first_line.title()
-    # Fallback: if it looks like a chapter heading with decorations, return the cleaned version
-    if any(word.lower() in ["chapter", "prologue", "epilogue", "part", "volume"] for word in first_line.split()):
-        return first_line
+    # Fallback: if it looks like a chapter heading with decorations, strip ornaments and return
+    cleaned_line = ORNAMENT_RE.sub("", first_line).strip()
+    if any(word.lower() in ["chapter", "prologue", "epilogue", "part", "volume"] for word in cleaned_line.split()):
+        return cleaned_line
     return None
 
 
