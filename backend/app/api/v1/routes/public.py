@@ -1,11 +1,19 @@
+import uuid
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-import uuid
 
 from app.api.deps.auth import get_current_user
 from app.core.database import get_db
-from app.core.redis import cache_del, cache_get, cache_set, key_public_book_detail, key_public_books, key_public_chapter
+from app.core.redis import (
+    cache_del,
+    cache_get,
+    cache_set,
+    key_public_book_detail,
+    key_public_books,
+    key_public_chapter,
+)
 from app.core.storage import download_book, get_presigned_url, upload_text
 from app.models.book import Book, Chapter
 from app.parsers.chunker import count_tokens

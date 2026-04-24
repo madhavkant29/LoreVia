@@ -11,7 +11,6 @@ from app.engine.character.entity_filters import is_displayable_character_entity
 from app.models.character import Character
 from app.models.intelligence import CharacterRelationship
 
-
 # ─── Display filter ───────────────────────────────────────────────────────────
 
 def is_displayable_character(char: Character) -> bool:

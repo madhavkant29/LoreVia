@@ -4,8 +4,8 @@ Revision ID: a3f9b1c7d204
 Revises: (first migration)
 Create Date: 2026-04-18
 """
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision = "a3f9b1c7d204"
 down_revision = None   # first migration — no predecessor

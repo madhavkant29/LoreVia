@@ -1,12 +1,13 @@
-import pytest
 from unittest.mock import AsyncMock, patch
+
+import pytest
 
 
 @pytest.mark.asyncio
 async def test_semantic_search_spoiler_gate():
     """Results must not include chapters beyond max_chapter."""
-    from unittest.mock import MagicMock
     import uuid
+    from unittest.mock import MagicMock
 
     mock_db = AsyncMock()
     mock_result = MagicMock()

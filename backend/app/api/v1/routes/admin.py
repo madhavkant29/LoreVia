@@ -1,15 +1,17 @@
+import uuid
+
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+
+from app.api.deps.auth import get_admin
 from app.core.database import get_db
 from app.core.redis import get_redis
-from app.api.deps.auth import get_admin
-from app.models.user import User, UserRateLimitOverride
 from app.models.book import Book
 from app.models.character import Character
 from app.models.intelligence import BookChunk, ChapterSummary
+from app.models.user import User, UserRateLimitOverride
 from app.schemas.admin import RateLimitOverrideBody
-import uuid
 
 router = APIRouter()
 

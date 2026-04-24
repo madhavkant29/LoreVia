@@ -20,10 +20,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.security import create_asset_token
 from app.core.storage import download_book, get_presigned_url, upload_binary
-from app.models.book import Book, BookNote, Chapter, ChapterVersion, Series, SeriesBook
-from app.models.character import Character
-from app.models.character import CharacterState
-from app.models.intelligence import CharacterRelationship, ChapterSummary, PlotThread
+from app.models.book import Book, BookNote, Chapter, ChapterVersion, Series
+from app.models.character import Character, CharacterState
+from app.models.intelligence import ChapterSummary, CharacterRelationship, PlotThread
 from app.models.progress import ReadingProgress
 from app.schemas.books import BookOut, ChapterConsistencyReport, ChapterReportCharacter
 
@@ -502,6 +501,7 @@ async def parse_import_upload(filename: str, raw: bytes, split_into_chapters: bo
         return [{"title": stem, "text": merged_text or "", "number": 1}]
     if lower.endswith(".docx"):
         from io import BytesIO
+
         from docx import Document
         doc = Document(BytesIO(raw))
         text = "\n".join(paragraph.text for paragraph in doc.paragraphs if paragraph.text.strip())
@@ -518,7 +518,7 @@ async def parse_screenplay_upload(filename: str, raw: bytes) -> list[dict]:
     
     if lower.endswith(".txt") or lower.endswith(".md") or lower.endswith(".fountain"):
         text = raw.decode("utf-8", errors="ignore")
-        from app.parsers.screenplay_parser import parse_screenplay, analyze_screenplay_stats
+        from app.parsers.screenplay_parser import analyze_screenplay_stats, parse_screenplay
         
         scenes = await asyncio.to_thread(parse_screenplay, text)
         stats = await asyncio.to_thread(analyze_screenplay_stats, scenes)
@@ -537,7 +537,7 @@ async def parse_screenplay_upload(filename: str, raw: bytes) -> list[dict]:
         chapters = await asyncio.to_thread(parse_pdf, raw)
         merged_text = "\n\n".join((ch.get("text") or "").strip() for ch in chapters if ch.get("text"))
         
-        from app.parsers.screenplay_parser import parse_screenplay, analyze_screenplay_stats
+        from app.parsers.screenplay_parser import analyze_screenplay_stats, parse_screenplay
         scenes = await asyncio.to_thread(parse_screenplay, merged_text)
         stats = await asyncio.to_thread(analyze_screenplay_stats, scenes)
         

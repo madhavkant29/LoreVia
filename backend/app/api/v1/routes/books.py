@@ -1,6 +1,6 @@
 import asyncio
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import bleach  # type: ignore[import-untyped]
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
@@ -53,20 +53,19 @@ def _validate_cover_magic(raw: bytes) -> tuple[str, str]:
 
 from app.api.deps.auth import get_current_user
 from app.api.deps.subscription import check_upload_limit
-from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import create_asset_token, decode_token
-from app.core.storage import download_book, get_presigned_url, upload_binary, upload_book_bytes
+from app.core.storage import download_book, upload_binary, upload_book_bytes
 from app.engine.character.consolidator import consolidate_characters
+from app.engine.character.profile_builder import build_description
 from app.models.book import Book, Chapter, Series, SeriesBook
 from app.models.character import Character
 from app.models.intelligence import CharacterRelationship, PlotThread, QuoteEntry
 from app.models.progress import ReadingProgress
 from app.schemas.books import (
+    BookModeBody,
     BookNoteBody,
     BookNoteOut,
-    AuthorAlertOut,
-    BookModeBody,
     BookOut,
     ChapterConsistencyReport,
     ChapterVersionOut,
@@ -84,49 +83,43 @@ from app.schemas.books import (
     SeriesOut,
     UserStatsOut,
 )
-from app.workers.consumers.analysis_consumer import analyse_chapter
-from app.workers.consumers.extraction_consumer import _process_chapter
-from app.workers.tasks.extraction_tasks import process_book_task
+from app.utils.book_utils import (
+    as_bool,
+    book_out,
+    build_chapter_consistency_report,
+    build_character_card_payload,
+    build_prewriting_check,
+    clean_manuscript_html,
+    compute_words_read_for_book,
+    delete_book_note,
+    deserialize_manuscript_content,
+    ensure_book_cover,
+    get_owned_book,
+    get_owned_series,
+    list_book_notes,
+    list_chapter_consistency_reports,
+    list_chapter_versions,
+    list_user_notes,
+    next_chapter_number,
+    normalize_imported_chapters,
+    parse_import_upload,
+    resolve_owned_series_ids,
+    save_book_note,
+    snapshot_chapter_version,
+)
 
 # ── Utils imports ──────────────────────────────────────────────────────────────
 from app.utils.character_utils import (
     append_unique_summary,
     apply_manual_character_description,
+    character_status,
     clean_optional_text,
     clean_string_list,
     dedupe_preserve_order,
     is_displayable_character,
     merge_description_with_relationships,
     relationship_summary_for_character,
-    character_status,
 )
-from app.utils.book_utils import (
-    as_bool,
-    book_out,
-    build_character_card_payload,
-    build_chapter_consistency_report,
-    build_prewriting_check,
-    deserialize_manuscript_content,
-    chapter_word_count,
-    clean_manuscript_html,
-    compute_words_read_for_book,
-    cover_url_for_book,
-    delete_book_note,
-    ensure_book_cover,
-    get_owned_book,
-    get_owned_series,
-    list_book_notes,
-    next_chapter_number,
-    normalize_imported_chapters,
-    parse_import_upload,
-    resolve_owned_series_ids,
-    save_book_note,
-    list_user_notes,
-    list_chapter_versions,
-    list_chapter_consistency_reports,
-    snapshot_chapter_version,
-)
-from app.utils.notification_utils import build_chapter_report_notification, build_continuity_risk_notifications
 from app.utils.export_utils import (
     character_bible_docx,
     character_bible_markdown,
@@ -137,7 +130,13 @@ from app.utils.export_utils import (
     manuscript_docx,
     manuscript_pdf,
 )
-from app.engine.character.profile_builder import build_description
+from app.utils.notification_utils import (
+    build_chapter_report_notification,
+    build_continuity_risk_notifications,
+)
+from app.workers.consumers.analysis_consumer import analyse_chapter
+from app.workers.consumers.extraction_consumer import _process_chapter
+from app.workers.tasks.extraction_tasks import process_book_task
 
 router = APIRouter()
 
@@ -592,7 +591,7 @@ async def set_series_book_status(
             progress.current_chapter = total
             progress.scroll_pct = 1.0
             progress.chapters_read = chapters_read
-            progress.last_read = datetime.now(timezone.utc)
+            progress.last_read = datetime.now(UTC)
     await db.commit()
     enriched = await book_out(db, book, current_user.id)
     enriched.marked_complete_in_series = membership.marked_complete
@@ -856,7 +855,7 @@ async def archive_book(
     book = await db.get(Book, book_id)
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
-    book.archived_at = datetime.now(timezone.utc) if archived else None
+    book.archived_at = datetime.now(UTC) if archived else None
     if archived:
         book.hidden_at = None
     await db.commit()
@@ -874,7 +873,7 @@ async def hide_book(
     book = await db.get(Book, book_id)
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
-    book.hidden_at = datetime.now(timezone.utc) if hidden else None
+    book.hidden_at = datetime.now(UTC) if hidden else None
     if hidden:
         book.archived_at = None
     await db.commit()
@@ -1192,7 +1191,7 @@ async def delete_book(book_id: uuid.UUID, db: AsyncSession = Depends(get_db), cu
     book = await db.get(Book, book_id)
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
-    book.hidden_at = datetime.now(timezone.utc)
+    book.hidden_at = datetime.now(UTC)
     book.archived_at = None
     await db.commit()
     await db.refresh(book)

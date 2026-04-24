@@ -9,7 +9,6 @@ import base64
 import json
 import re
 import uuid
-from datetime import datetime, timezone
 
 from fastapi import HTTPException
 from sqlalchemy import desc, select
@@ -19,14 +18,13 @@ from app.core.config import effective_tier
 from app.core.storage import download_book, get_presigned_url
 from app.engine.character.deduplicator import names_equivalent
 from app.engine.character.entity_filters import (
-    character_visibility_score,
     VISIBILITY_THRESHOLD,
+    character_visibility_score,
 )
 from app.engine.character.profile_builder import build_description
 from app.models.book import Book, Chapter, ChapterMedia
-from app.models.character import Character, CharacterState
+from app.models.character import Character
 from app.models.intelligence import ChapterSummary, PlotThread
-
 
 # ─── Character stopwords / filter sets ───────────────────────────────────────
 

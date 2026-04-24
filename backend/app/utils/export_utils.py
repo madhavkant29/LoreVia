@@ -9,14 +9,12 @@ from __future__ import annotations
 from app.engine.character.profile_builder import build_description
 from app.models.book import Book
 from app.models.character import Character
+from app.utils.book_utils import clean_manuscript_html
 from app.utils.character_utils import (
     character_status,
-    clean_markdown_asterisks,
     dedupe_preserve_order,
     merge_description_with_relationships,
 )
-from app.utils.book_utils import clean_manuscript_html
-
 
 # ─── Character card ──────────────────────────────────────────────────────────
 
@@ -187,6 +185,7 @@ def character_card_pdf(payload: dict) -> bytes:
 
 def character_card_docx(payload: dict) -> bytes:
     from io import BytesIO
+
     from docx import Document
 
     doc = Document()
@@ -354,11 +353,11 @@ def character_bible_markdown(
 def character_bible_pdf(*, markdown: bytes, title: str) -> bytes:
     from io import BytesIO
 
+    from reportlab.lib import colors
     from reportlab.lib.pagesizes import letter
     from reportlab.lib.styles import getSampleStyleSheet
-    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
     from reportlab.lib.units import inch
-    from reportlab.lib import colors
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter,
@@ -403,6 +402,7 @@ def character_bible_pdf(*, markdown: bytes, title: str) -> bytes:
 
 def character_bible_docx(*, markdown: bytes, title: str) -> bytes:
     from io import BytesIO
+
     from docx import Document
 
     doc = Document()
@@ -433,6 +433,7 @@ def character_bible_docx(*, markdown: bytes, title: str) -> bytes:
 
 def manuscript_docx(*, title: str, chapters: list[dict]) -> bytes:
     from io import BytesIO
+
     from bs4 import BeautifulSoup
     from docx import Document
     from docx.shared import Pt

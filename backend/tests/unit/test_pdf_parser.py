@@ -5,8 +5,8 @@ from app.parsers.pdf_parser import (
     _extract_heading,
     _heading_remainder,
     _is_probable_front_matter,
-    _split_large_chapter_parts,
     _should_merge_across_pages,
+    _split_large_chapter_parts,
 )
 
 

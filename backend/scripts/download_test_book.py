@@ -3,8 +3,9 @@ Download a public domain test book for development.
 Uses Project Gutenberg (public domain — no copyright issues).
 Usage: python scripts/download_test_book.py
 """
-import httpx
 import os
+
+import httpx
 
 # Pride and Prejudice — Project Gutenberg (public domain)
 GUTENBERG_URL = "https://www.gutenberg.org/files/1342/1342-0.txt"

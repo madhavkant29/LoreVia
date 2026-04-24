@@ -6,7 +6,6 @@ from collections import Counter
 
 import fitz
 
-
 CHAPTER_RE = re.compile(
     r"^(?:(?:chapter|ch\.?|part|volume|vol\.?|book|act|episode|section|scene)\s+"
     r"(?:\d+|[ivxlcdm]+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|"

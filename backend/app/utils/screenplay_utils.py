@@ -7,12 +7,12 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING
 
+from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from fastapi import HTTPException
 
-from app.models.book import Book, Scene, Dialogue
-from app.schemas.books import SceneOut, DialogueOut, ScreenplayStats, SceneAnalysis
+from app.models.book import Book, Dialogue, Scene
+from app.schemas.books import DialogueOut, SceneAnalysis, SceneOut, ScreenplayStats
 
 if TYPE_CHECKING:
     pass
@@ -101,8 +101,8 @@ async def get_screenplay_stats(db: AsyncSession, book_id: uuid.UUID, user_id: uu
         select(
             func.count(Scene.id).label('total_scenes'),
             func.sum(Scene.word_count).label('total_words'),
-            func.sum(func.case((Scene.interior == True, 1), else_=0)).label('int_scenes'),
-            func.sum(func.case((Scene.exterior == True, 1), else_=0)).label('ext_scenes')
+            func.sum(func.case((Scene.interior, 1), else_=0)).label('int_scenes'),
+            func.sum(func.case((Scene.exterior, 1), else_=0)).label('ext_scenes')
         )
         .where(Scene.book_id == book_id)
     ).first()
@@ -192,7 +192,7 @@ async def create_scenes_from_screenplay(
     screenplay_text: str
 ) -> list[Scene]:
     """Parse screenplay text and create scene models."""
-    from app.parsers.screenplay_parser import parse_screenplay, create_scene_models
+    from app.parsers.screenplay_parser import create_scene_models, parse_screenplay
     
     scenes_data = parse_screenplay(screenplay_text)
     scene_models = create_scene_models(scenes_data, book_id)
@@ -314,9 +314,9 @@ async def filter_scenes_by_type(
     query = select(Scene).where(Scene.book_id == book_id)
     
     if scene_type.upper() == "INT":
-        query = query.where(Scene.interior == True)
+        query = query.where(Scene.interior)
     elif scene_type.upper() == "EXT":
-        query = query.where(Scene.exterior == True)
+        query = query.where(Scene.exterior)
     
     return await db.execute(
         query.order_by(Scene.number)

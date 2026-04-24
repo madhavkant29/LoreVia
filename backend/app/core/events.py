@@ -1,8 +1,10 @@
-from app.core.database import engine, Base
+import logging
+
+from sqlalchemy import text
+
+from app.core.database import Base, engine
 from app.core.redis import get_redis
 from app.db import base  # noqa: F401
-from sqlalchemy import text
-import logging
 
 log = logging.getLogger("lorevia.startup")
 

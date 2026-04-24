@@ -1,4 +1,4 @@
-from app.engine.character.profile_builder import merge_trait_states, build_description
+from app.engine.character.profile_builder import build_description, merge_trait_states
 
 
 def test_subjective_trait_capped():

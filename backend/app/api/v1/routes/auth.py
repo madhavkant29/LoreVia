@@ -1,9 +1,22 @@
+import logging
+import secrets
+import uuid
+from datetime import UTC, datetime
+
+import httpx
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
-from app.core.database import get_db
+
+from app.api.deps.auth import get_current_user
+from app.api.deps.rate_limit import (
+    rate_limit_auth_login,
+    rate_limit_auth_password,
+    rate_limit_auth_refresh,
+    rate_limit_auth_register,
+)
 from app.core.config import effective_tier, is_local_mode, settings
-from app.core.security import hash_password, verify_password, create_access_token, create_refresh_token, decode_token
+from app.core.database import get_db
 from app.core.redis import (
     bump_token_version,
     consume_password_reset_token,
@@ -13,19 +26,14 @@ from app.core.redis import (
     store_password_reset_token,
     store_refresh_session,
 )
-from app.models.user import User
-from app.api.deps.auth import get_current_user
-from app.api.deps.rate_limit import (
-    rate_limit_auth_login,
-    rate_limit_auth_password,
-    rate_limit_auth_refresh,
-    rate_limit_auth_register,
+from app.core.security import (
+    create_access_token,
+    create_refresh_token,
+    decode_token,
+    hash_password,
+    verify_password,
 )
-from datetime import datetime, timezone
-import uuid
-import httpx
-import secrets
-import logging
+from app.models.user import User
 from app.schemas.auth import (
     ForgotPasswordBody,
     LoginBody,
@@ -95,7 +103,7 @@ async def register(
     user = User(
         email=email,
         password_hash=hash_password(body.password),
-        legal_accepted_at=datetime.now(timezone.utc),
+        legal_accepted_at=datetime.now(UTC),
         legal_version=LEGAL_VERSION,
     )
     db.add(user)
@@ -170,7 +178,7 @@ async def oauth_supabase(
         existing = User(
             email=email,
             password_hash=hash_password(str(uuid.uuid4())),
-            legal_accepted_at=datetime.now(timezone.utc),
+            legal_accepted_at=datetime.now(UTC),
             legal_version=LEGAL_VERSION,
         )
         db.add(existing)

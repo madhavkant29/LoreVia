@@ -1,5 +1,4 @@
 """Phase 3 intelligence tasks."""
-import asyncio
 from app.workers.celery_app import celery_app
 
 

@@ -12,6 +12,10 @@ on:
       - 'alembic/env.py'
       - 'backend/app/models/**'
 
+permissions:
+  contents: read
+  actions: read
+
 jobs:
   test-migrations:
     runs-on: ubuntu-latest

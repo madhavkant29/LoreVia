@@ -1,6 +1,7 @@
 import asyncio
+
 from app.workers.celery_app import celery_app
-from app.workers.consumers.extraction_consumer import process_book, _process_chapter
+from app.workers.consumers.extraction_consumer import _process_chapter, process_book
 
 
 def _run_coro(coro):
@@ -29,14 +30,16 @@ def process_book_task(self, book_id: str):
                  queue="extraction", max_retries=3)
 def process_chapter_task(self, book_id: str, chapter_num: int, title: str, text: str):
     async def _run():
+        import uuid
+
+        from sqlalchemy import select
+
         from app.core.database import AsyncSessionLocal
         from app.core.storage import download_book
         from app.models.book import Book, Chapter
         from app.parsers.epub_parser import parse_epub
         from app.parsers.pdf_parser import parse_pdf
         from app.utils.book_utils import deserialize_manuscript_content
-        from sqlalchemy import select
-        import uuid
         async with AsyncSessionLocal() as db:
             book = await db.get(Book, uuid.UUID(book_id))
             if not book:

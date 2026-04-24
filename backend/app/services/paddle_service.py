@@ -1,11 +1,10 @@
-import hmac
 import hashlib
+import hmac
 from typing import Any
 
 import httpx
 
 from app.core.config import settings
-
 
 PADDLE_API_BASE = "https://api.paddle.com"
 

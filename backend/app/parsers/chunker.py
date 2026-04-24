@@ -1,7 +1,7 @@
 import re
+from dataclasses import dataclass
 
 import tiktoken
-from dataclasses import dataclass
 
 _enc = tiktoken.encoding_for_model("gpt-4o")
 MEDIA_MARKER_RE = re.compile(r"\[\[IMAGE:[^\]]+\]\]")

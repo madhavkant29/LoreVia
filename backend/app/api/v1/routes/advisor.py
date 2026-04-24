@@ -11,13 +11,13 @@ Also provides:
 from __future__ import annotations
 
 import asyncio
-import json
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from openai import AsyncOpenAI
-from sqlalchemy import func, select, text as sql_text
+from sqlalchemy import func, select
+from sqlalchemy import text as sql_text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps.auth import get_current_user
@@ -41,8 +41,12 @@ def _safe_prompt_str(value: str | None) -> str:
     """
     return (value or "").replace("{", "{{").replace("}", "}}")
 from app.models.character import Character, CharacterState
-from app.models.intelligence import PlotThread, ChapterSummary
-from app.schemas.advisor import AdvisorRequest, EditorialReviewRequest, SuggestionDismiss, VoiceConsistencyRequest
+from app.models.intelligence import ChapterSummary, PlotThread
+from app.schemas.advisor import (
+    AdvisorRequest,
+    EditorialReviewRequest,
+    VoiceConsistencyRequest,
+)
 from app.utils.advisor_utils import (
     ADVISOR_SYSTEM,
     EDITORIAL_SYSTEM,
@@ -51,9 +55,9 @@ from app.utils.advisor_utils import (
     SYNOPSIS_USER,
     VOICE_CONSISTENCY_SYSTEM,
     VOICE_CONSISTENCY_USER,
+    build_character_voice_context,
     build_continuity_report_markdown,
     build_continuity_report_pdf,
-    build_character_voice_context,
     build_story_context,
     classify_intent,
     classify_response_type,

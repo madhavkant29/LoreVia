@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import uuid
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
@@ -66,7 +66,7 @@ async def mark_notification_read(
     if not notification or notification.user_id != current_user.id:
         raise HTTPException(404, "Notification not found")
     if notification.read_at is None:
-        notification.read_at = datetime.now(timezone.utc)
+        notification.read_at = datetime.now(UTC)
         await db.commit()
         await db.refresh(notification)
     return NotificationOut(
@@ -91,7 +91,7 @@ async def mark_all_notifications_read(
             select(Notification).where(Notification.user_id == current_user.id, Notification.read_at.is_(None))
         )
     ).scalars().all()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     for notification in rows:
         notification.read_at = now
     await db.commit()

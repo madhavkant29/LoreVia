@@ -1,20 +1,21 @@
-from contextlib import asynccontextmanager
 import time
 import uuid
-import logging
+from contextlib import asynccontextmanager
+
 import sentry_sdk
-from sentry_sdk.integrations.fastapi import FastApiIntegration
-from sentry_sdk.integrations.celery import CeleryIntegration
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from starlette.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import Response
-from app.core.config import allowed_hosts, cors_origins, settings
-from app.core.events import on_startup, on_shutdown
-from app.api.v1.router import api_router
-from app.core.database import engine
-from app.core.redis import get_redis
+from sentry_sdk.integrations.celery import CeleryIntegration
+from sentry_sdk.integrations.fastapi import FastApiIntegration
 from sqlalchemy import text
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+
+from app.api.v1.router import api_router
+from app.core.config import allowed_hosts, cors_origins, settings
+from app.core.database import engine
+from app.core.events import on_shutdown, on_startup
+from app.core.redis import get_redis
 
 if settings.SENTRY_DSN:
     sentry_sdk.init(

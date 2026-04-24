@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import functools
 import re
-from typing import Iterable
-
+from collections.abc import Iterable
 
 PERSON_ROLE_WORDS = {
     "mr", "mrs", "ms", "miss", "dr", "doctor", "professor", "captain", "commander",

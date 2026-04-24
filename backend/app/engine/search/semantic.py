@@ -2,11 +2,13 @@
 Semantic search over book chunks using pgvector.
 Spoiler-gated to user's current chapter.
 """
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import text
-from app.engine.embeddings.embedder import embed_text
-from app.core.config import settings
 import uuid
+
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.config import settings
+from app.engine.embeddings.embedder import embed_text
 
 
 def summarize_search_text(text: str, max_length: int = 180) -> str:

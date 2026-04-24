@@ -5,6 +5,7 @@ Merges new trait info without overwriting and handles subjective narration.
 import re
 import uuid
 from collections.abc import Iterable
+
 PROMPT_CONFIDENCE_THRESHOLD = 0.45
 SUBJECTIVE_MAX_CONFIDENCE = 0.50
 

@@ -8,7 +8,10 @@ from collections import Counter
 
 from app.core.config import settings
 from app.core.llm import complete_with_fallback
-from app.engine.character.entity_filters import looks_like_person_entity_name, person_name_shape_score
+from app.engine.character.entity_filters import (
+    looks_like_person_entity_name,
+    person_name_shape_score,
+)
 
 CHARACTER_SYSTEM = """You are a careful literary extraction engine.
 

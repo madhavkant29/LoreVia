@@ -1,1 +1,1 @@
-from app.core.database import get_db, AsyncSessionLocal, engine  # noqa: F401
+from app.core.database import AsyncSessionLocal, engine, get_db  # noqa: F401

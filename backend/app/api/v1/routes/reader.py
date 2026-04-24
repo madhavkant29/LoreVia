@@ -3,7 +3,7 @@ Reader routes — the core intelligence surface.
 Smart tap, summaries, relationship graph, memory recall, progress.
 """
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import desc, or_, select
@@ -13,11 +13,28 @@ from app.api.deps.auth import get_current_user
 from app.api.deps.rate_limit import rate_limit_search, rate_limit_summary
 from app.core.config import is_local_mode, settings
 from app.core.database import get_db
-from app.core.redis import cache_get, cache_set, key_chapter_summary, key_relationship_graph, key_memory_recall, key_search_results
+from app.core.redis import (
+    cache_get,
+    cache_set,
+    key_chapter_summary,
+    key_memory_recall,
+    key_relationship_graph,
+    key_search_results,
+)
 from app.core.storage import download_book, get_presigned_url
+from app.engine.analysis.recall import generate_recall
+from app.engine.character.consolidator import consolidate_characters
+from app.engine.character.profile_builder import build_description
+from app.engine.search.semantic import build_search_result, find_context_for_tap, semantic_search
 from app.models.book import Book, Chapter
 from app.models.character import Character, CharacterState
-from app.models.intelligence import BookChunk, ChapterSummary, CharacterRelationship, PlotThread, QuoteEntry
+from app.models.intelligence import (
+    BookChunk,
+    ChapterSummary,
+    CharacterRelationship,
+    PlotThread,
+    QuoteEntry,
+)
 from app.models.progress import ReadingProgress
 from app.schemas.reader import (
     PlotThreadOut,
@@ -25,45 +42,34 @@ from app.schemas.reader import (
     TimelineResponseOut,
     UpdatePlotThreadBody,
 )
-from app.engine.search.semantic import build_search_result, find_context_for_tap, semantic_search
-from app.engine.analysis.recall import generate_recall
-from app.engine.character.consolidator import consolidate_characters
-from app.engine.character.profile_builder import build_description
 from app.services.summary_service import get_or_generate_summary
+from app.utils.book_utils import deserialize_manuscript_content
 
 # ── Utils imports ──────────────────────────────────────────────────────────────
 from app.utils.reader_utils import (
-    GRAPH_CHARACTER_STOPWORDS,
-    TIMELINE_CHARACTER_EXACT_BLOCKLIST,
-    TIMELINE_CHARACTER_PREFIXES,
-    TIMELINE_CHARACTER_STOPWORDS,
-    TIMELINE_CHARACTER_SUFFIXES,
-    chapter_has_any_summary,
+    build_timeline_track_payload,
     chapter_intelligence_available,
     chapter_intelligence_map,
     collapse_graph_characters,
     dedupe_timeline_events,
     extract_media_markers,
-    build_timeline_track_payload,
     is_graph_character_visible,
     is_valid_timeline_character,
+    list_plot_threads,
     merge_media_items,
     normalize_summary_response,
-    normalize_timeline_label,
     parse_chapter_from_source,
     queue_analysis_if_missing,
     read_available_chapter_set,
     read_chapter_set,
     relationship_node_description,
     require_summary_access,
-    list_plot_threads,
     serialize_chapter_media,
     serialize_inline_images,
     timeline_character_detail,
     timeline_relationship_detail,
     update_plot_thread_note,
 )
-from app.utils.book_utils import deserialize_manuscript_content
 
 router = APIRouter()
 
@@ -1024,7 +1030,7 @@ async def update_progress(
         p.current_chapter = current_chapter
         p.scroll_pct = scroll_pct
         p.chapters_read = sorted(read_set)
-        p.last_read = datetime.now(timezone.utc)
+        p.last_read = datetime.now(UTC)
     else:
         db.add(ReadingProgress(user_id=current_user.id, book_id=book_id,
                                current_chapter=current_chapter, scroll_pct=scroll_pct, chapters_read=[current_chapter]))
@@ -1076,7 +1082,7 @@ async def mark_book_read(
         progress.current_chapter = total
         progress.scroll_pct = 1.0
         progress.chapters_read = chapters_read
-        progress.last_read = datetime.now(timezone.utc)
+        progress.last_read = datetime.now(UTC)
 
     await db.commit()
     return {"ok": True, "current_chapter": total, "chapters_read_count": total, "percent_complete": 100.0, "chapters_left": 0}
@@ -1111,7 +1117,7 @@ async def update_chapter_read_status(
         else:
             read_set.discard(chapter)
         progress.chapters_read = sorted(read_set)
-        progress.last_read = datetime.now(timezone.utc)
+        progress.last_read = datetime.now(UTC)
 
     await db.commit()
     if read:

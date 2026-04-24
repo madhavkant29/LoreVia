@@ -16,7 +16,6 @@ from app.models.book import Chapter
 from app.models.character import Character
 from app.models.intelligence import ChapterSummary, PlotThread
 
-
 # ─── System / prompt templates ────────────────────────────────────────────────
 
 ADVISOR_SYSTEM = """\

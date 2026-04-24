@@ -4,9 +4,8 @@ import uuid
 import pytest
 from sqlalchemy import select
 
-from app.models.book import Book, Chapter, Series
+from app.models.book import Book, Chapter, Series, SeriesBook
 from app.models.character import Character
-from app.models.book import SeriesBook
 
 
 async def _register_user(client, email: str) -> tuple[dict[str, str], uuid.UUID]:

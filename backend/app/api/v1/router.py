@@ -1,6 +1,19 @@
 from fastapi import APIRouter, Depends
-from app.api.v1.routes import auth, billing, books, characters, reader, intelligence, admin, public, webhooks, advisor, notifications
+
 from app.api.deps.rate_limit import rate_limit_api, rate_limit_public, rate_limit_public_asset
+from app.api.v1.routes import (
+    admin,
+    advisor,
+    auth,
+    billing,
+    books,
+    characters,
+    intelligence,
+    notifications,
+    public,
+    reader,
+    webhooks,
+)
 
 api_router = APIRouter()
 api_router.include_router(auth.router,          prefix="/auth",          tags=["auth"])

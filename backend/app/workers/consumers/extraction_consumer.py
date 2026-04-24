@@ -3,16 +3,17 @@ Full book processing: parse → chunk → extract characters + relationships →
 Lazy: first N chapters immediately, rest queued.
 """
 import asyncio
+import logging
 import re
 import uuid
+
+from sqlalchemy import delete, func, select
+from sqlalchemy import update as sa_update
+
+from app.core.config import effective_tier, settings
 from app.core.database import AsyncSessionLocal
 from app.core.storage import download_book, upload_binary
-from app.core.config import effective_tier, settings
-from app.models.book import Book, Chapter, ChapterMedia
-from app.models.character import Character, CharacterState
-from app.models.intelligence import BookChunk, CharacterRelationship
 from app.engine.character.consolidator import consolidate_characters
-from app.engine.character.extractor import extract_characters_and_relationships
 from app.engine.character.deduplicator import (
     character_name_keys,
     embed_for_dedup,
@@ -20,14 +21,16 @@ from app.engine.character.deduplicator import (
     merge_alias,
     names_equivalent,
 )
+from app.engine.character.extractor import extract_characters_and_relationships
 from app.engine.character.profile_builder import build_character_profile, update_profile
 from app.engine.embeddings.embedder import embed_batch
+from app.models.book import Book, Chapter, ChapterMedia
+from app.models.character import Character, CharacterState
+from app.models.intelligence import BookChunk, CharacterRelationship
 from app.parsers.chunker import ChunkingConfig, chunk_text, count_tokens
+from app.utils.book_utils import serialize_manuscript_content
 from app.utils.compliance.copyright_check import check_isbn
 from app.utils.external.isbn_lookup import extract_isbn_from_pdf
-from app.utils.book_utils import serialize_manuscript_content
-from sqlalchemy import delete, func, update as sa_update, select
-import logging
 
 log = logging.getLogger("lorevia.extraction")
 

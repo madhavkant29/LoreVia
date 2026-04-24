@@ -2,8 +2,9 @@ import ssl
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import sentry_sdk
-from sentry_sdk.integrations.celery import CeleryIntegration
 from celery import Celery
+from sentry_sdk.integrations.celery import CeleryIntegration
+
 from app.core.config import settings
 from app.utils.request_context import get_request_id, set_request_id
 

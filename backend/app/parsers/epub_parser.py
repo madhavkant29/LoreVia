@@ -1,9 +1,10 @@
-import ebooklib
-from ebooklib import epub
-from bs4 import BeautifulSoup
-import tempfile, os
+import os
 import re
+import tempfile
 
+import ebooklib
+from bs4 import BeautifulSoup
+from ebooklib import epub
 
 PARAGRAPH_SPLIT_MAX_WORDS = 4000
 
@@ -26,7 +27,7 @@ def parse_epub(raw_bytes: bytes) -> list[dict]:
             # Remove special Unicode symbols including black diamond (u2726) and place of interest (u2318)
             cleaned_text = re.sub(r"[\u2726\u2318\u2600-\u26FF\u2700-\u27BF]", " ", raw_text)
             text = "\n".join(
-                l.strip() for l in cleaned_text.splitlines() if l.strip()
+                line.strip() for line in cleaned_text.splitlines() if line.strip()
             )
             if len(text) < 100:
                 continue

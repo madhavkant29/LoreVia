@@ -5,10 +5,9 @@ transitions, and shots.
 """
 import re
 import uuid
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
-from app.models.book import Scene, Dialogue
-
+from app.models.book import Dialogue, Scene
 
 # Scene heading patterns
 SCENE_HEADING_PREFIXES = [
@@ -49,7 +48,7 @@ class ScreenplayElement:
 class SceneHeading(ScreenplayElement):
     """Scene heading element (INT./EXT. LOCATION - TIME)."""
     def __init__(self, text: str, line_number: int, interior: bool, exterior: bool, 
-                 location: str, time_of_day: str, scene_number: Optional[str] = None):
+                 location: str, time_of_day: str, scene_number: str | None = None):
         super().__init__(text, line_number)
         self.interior = interior
         self.exterior = exterior
@@ -65,13 +64,13 @@ class Action(ScreenplayElement):
 
 class Character(ScreenplayElement):
     """Character name element."""
-    def __init__(self, text: str, line_number: int, name: str, extension: Optional[str] = None):
+    def __init__(self, text: str, line_number: int, name: str, extension: str | None = None):
         super().__init__(text, line_number)
         self.name = name.strip()
         self.extension = extension.strip() if extension else None
 
 
-class Dialogue(ScreenplayElement):
+class DialogueElement(ScreenplayElement):
     """Dialogue element."""
     pass
 
@@ -91,7 +90,7 @@ class Shot(ScreenplayElement):
     pass
 
 
-def parse_scene_heading(line: str, line_number: int) -> Optional[SceneHeading]:
+def parse_scene_heading(line: str, line_number: int) -> SceneHeading | None:
     """Parse a scene heading line."""
     # Standard format: INT. LOCATION - DAY
     match = SCENE_HEADING_REGEX.match(line.strip())
@@ -114,7 +113,7 @@ def parse_scene_heading(line: str, line_number: int) -> Optional[SceneHeading]:
     return None
 
 
-def parse_character(line: str, line_number: int) -> Optional[Character]:
+def parse_character(line: str, line_number: int) -> Character | None:
     """Parse a character name line."""
     # Forced character with @ symbol
     if line.startswith('@') and len(line) > 1:
@@ -130,7 +129,7 @@ def parse_character(line: str, line_number: int) -> Optional[Character]:
     return None
 
 
-def parse_parenthetical(line: str, line_number: int) -> Optional[Parenthetical]:
+def parse_parenthetical(line: str, line_number: int) -> Parenthetical | None:
     """Parse a parenthetical line."""
     match = PARENTHETICAL_REGEX.match(line.strip())
     if match:
@@ -139,7 +138,7 @@ def parse_parenthetical(line: str, line_number: int) -> Optional[Parenthetical]:
     return None
 
 
-def parse_transition(line: str, line_number: int) -> Optional[Transition]:
+def parse_transition(line: str, line_number: int) -> Transition | None:
     """Parse a transition line."""
     # Forced transition with > symbol
     if line.startswith('>') and len(line) > 1:
@@ -155,7 +154,7 @@ def parse_transition(line: str, line_number: int) -> Optional[Transition]:
     return None
 
 
-def parse_shot(line: str, line_number: int) -> Optional[Shot]:
+def parse_shot(line: str, line_number: int) -> Shot | None:
     """Parse a shot/camera angle line."""
     upper_line = line.strip().upper()
     for pattern in SHOT_PATTERNS:
@@ -164,7 +163,7 @@ def parse_shot(line: str, line_number: int) -> Optional[Shot]:
     return None
 
 
-def parse_screenplay(text: str) -> List[SceneHeading]:
+def parse_screenplay(text: str) -> list[SceneHeading]:
     """
     Parse screenplay text and return a list of scenes with their elements.
     
@@ -175,9 +174,9 @@ def parse_screenplay(text: str) -> List[SceneHeading]:
         List of parsed scenes
     """
     lines = text.split('\n')
-    scenes: List[SceneHeading] = []
-    current_scene: Optional[SceneHeading] = None
-    scene_elements: List[Any] = []
+    scenes: list[SceneHeading] = []
+    current_scene: SceneHeading | None = None
+    scene_elements: list[Any] = []
     
     i = 0
     while i < len(lines):
@@ -244,7 +243,7 @@ def parse_screenplay(text: str) -> List[SceneHeading]:
     return scenes
 
 
-def extract_dialogue_from_scene(scene: SceneHeading) -> List[Dict[str, Any]]:
+def extract_dialogue_from_scene(scene: SceneHeading) -> list[dict[str, Any]]:
     """Extract dialogue lines from a scene's elements."""
     dialogue_lines = []
     current_character = None
@@ -254,7 +253,7 @@ def extract_dialogue_from_scene(scene: SceneHeading) -> List[Dict[str, Any]]:
         if isinstance(element, Character):
             current_character = element
             line_number = 0
-        elif isinstance(element, Dialogue) and current_character:
+        elif isinstance(element, DialogueElement) and current_character:
             dialogue_lines.append({
                 'character_name': current_character.name,
                 'character_extension': current_character.extension,
@@ -269,7 +268,7 @@ def extract_dialogue_from_scene(scene: SceneHeading) -> List[Dict[str, Any]]:
     return dialogue_lines
 
 
-def create_scene_models(scenes: List[SceneHeading], book_id: uuid.UUID) -> List[Scene]:
+def create_scene_models(scenes: list[SceneHeading], book_id: uuid.UUID) -> list[Scene]:
     """Convert parsed scenes to database models."""
     scene_models = []
     
@@ -317,7 +316,7 @@ def create_scene_models(scenes: List[SceneHeading], book_id: uuid.UUID) -> List[
     return scene_models
 
 
-def parse_fountain_screenplay(text: str) -> List[SceneHeading]:
+def parse_fountain_screenplay(text: str) -> list[SceneHeading]:
     """
     Parse Fountain format screenplay text.
     Fountain is a plain text screenplay format that looks like a screenplay.
@@ -327,7 +326,7 @@ def parse_fountain_screenplay(text: str) -> List[SceneHeading]:
     return parse_screenplay(text)
 
 
-def analyze_screenplay_stats(scenes: List[SceneHeading]) -> Dict[str, Any]:
+def analyze_screenplay_stats(scenes: list[SceneHeading]) -> dict[str, Any]:
     """Analyze screenplay statistics."""
     stats = {
         'total_scenes': len(scenes),
