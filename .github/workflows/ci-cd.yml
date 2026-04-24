@@ -72,7 +72,7 @@ jobs:
         JWT_SECRET: test-secret-key-for-ci
         RESEND_API_KEY: test-key
         SECRET_KEY: test-secret-key-for-ci
-        ENVIRONMENT: test
+        DEBUG: "true"
       run: |
         cd backend
         pytest tests/ -v --cov=app --cov-report=xml --cov-report=term-missing

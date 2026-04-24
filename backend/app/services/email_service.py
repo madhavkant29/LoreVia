@@ -8,8 +8,8 @@ resend.api_key = settings.RESEND_API_KEY
 
 
 def _send(payload: dict[str, Any]) -> bool:
-    # Disable email sending in test/dev environments
-    if settings.ENVIRONMENT in ["test", "local", "development"]:
+    # Disable email sending in debug/test environments
+    if settings.DEBUG:
         return True
     
     try:
