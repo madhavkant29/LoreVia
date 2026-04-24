@@ -32,15 +32,48 @@ def mock_download_book(monkeypatch):
     monkeypatch.setattr("app.core.storage.download_book", lambda key: b"mock content")
 
 
-@pytest_asyncio.fixture(autouse=True)
-async def reset_redis():
-    """Reset Redis module-level cache between tests to avoid event loop mismatch."""
+@pytest.fixture(autouse=True)
+def mock_redis(monkeypatch):
+    """Mock Redis to avoid event loop issues with global _redis connection."""
     from app.core import redis as redis_module
-    redis_module._redis = None
-    yield
-    if redis_module._redis:
-        await redis_module._redis.aclose()
-    redis_module._redis = None
+    
+    class FakeRedis:
+        async def ping(self):
+            return True
+        async def get(self, key):
+            return None
+        async def set(self, key, value, ex=None, nx=False):
+            return True
+        async def setex(self, key, ttl, value):
+            return True
+        async def delete(self, *keys):
+            return 0
+        async def exists(self, *keys):
+            return 0
+        async def incr(self, key):
+            return 1
+        async def pipeline(self, transaction=True):
+            class FakePipeline:
+                async def __aenter__(self):
+                    return self
+                async def __aexit__(self, *args):
+                    pass
+                def delete(self, *keys):
+                    return self
+                def setex(self, key, ttl, value):
+                    return self
+                async def execute(self):
+                    return []
+            return FakePipeline()
+        async def aclose(self):
+            pass
+    
+    monkeypatch.setattr(redis_module, "_redis", FakeRedis())
+    
+    async def fake_get_redis():
+        return redis_module._redis
+    
+    monkeypatch.setattr(redis_module, "get_redis", fake_get_redis)
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
