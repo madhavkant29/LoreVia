@@ -35,6 +35,8 @@ def mock_download_book(monkeypatch):
 @pytest.fixture(autouse=True)
 def mock_storage_uploads(monkeypatch):
     """Mock upload functions to avoid S3/local storage errors in all tests."""
+    # Force local storage mode to bypass S3 entirely
+    monkeypatch.setattr("app.core.storage.is_local_storage", lambda: True)
     monkeypatch.setattr("app.core.storage.upload_book_bytes", lambda raw, owner, filename: f"uploads/{owner}/{filename}", raising=False)
     monkeypatch.setattr("app.core.storage.upload_binary", lambda key, raw, content_type=None: key, raising=False)
     monkeypatch.setattr("app.core.storage.upload_book", lambda *args, **kwargs: "books/mock.pdf", raising=False)
