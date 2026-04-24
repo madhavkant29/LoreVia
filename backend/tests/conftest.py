@@ -35,8 +35,9 @@ def mock_download_book(monkeypatch):
 @pytest.fixture(autouse=True)
 def mock_storage_uploads(monkeypatch):
     """Mock upload functions to avoid S3/local storage errors in all tests."""
-    monkeypatch.setattr("app.core.storage.upload_book_bytes", lambda raw, owner, filename: f"uploads/{owner}/{filename}")
-    monkeypatch.setattr("app.core.storage.upload_binary", lambda key, raw, content_type=None: key)
+    monkeypatch.setattr("app.core.storage.upload_book_bytes", lambda raw, owner, filename: f"uploads/{owner}/{filename}", raising=False)
+    monkeypatch.setattr("app.core.storage.upload_binary", lambda key, raw, content_type=None: key, raising=False)
+    monkeypatch.setattr("app.core.storage.upload_book", lambda *args, **kwargs: "books/mock.pdf", raising=False)
 
 
 @pytest.fixture(autouse=True)
@@ -46,7 +47,13 @@ def mock_celery_tasks(monkeypatch):
         @staticmethod
         def apply_async(*args, **kwargs):
             return None
+        
+        @staticmethod
+        def delay(*args, **kwargs):
+            return None
+    
     monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_book_task", _FakeTask())
+    monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_book_task.delay", lambda *args, **kwargs: None, raising=False)
 
 
 @pytest.fixture(autouse=True)
