@@ -141,22 +141,3 @@ jobs:
       run: |
         cd backend
         python -c "from sqlalchemy import create_engine; from alembic.runtime.migration import MigrationContext; from alembic.config import Config; from alembic.script import ScriptDirectory; import os; engine = create_engine(os.environ['DATABASE_URL']); connection = engine.connect(); context = MigrationContext.configure(connection); current_rev = context.get_current_revision(); config = Config('alembic.ini'); script = ScriptDirectory.from_config(config); head_rev = script.get_current_head(); exit(1) if current_rev != head_rev else print('Migration verification passed!')"
-
-    - name: Notify migration success
-      uses: 8398a7/action-slack@v3
-      with:
-        status: success
-        channel: '#deployments'
-        text: '✅ Database migrations completed successfully!'
-      env:
-        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-
-    - name: Notify migration failure
-      if: failure()
-      uses: 8398a7/action-slack@v3
-      with:
-        status: failure
-        channel: '#deployments'
-        text: '❌ Database migrations failed!'
-      env:
-        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
