@@ -26,15 +26,26 @@ _COVER_MAGIC: dict[bytes, tuple[str, str]] = {
 
 async def _read_upload_bounded(upload: UploadFile, max_bytes: int, label: str) -> bytes:
     """Read an UploadFile in chunks, raising 413 if the size cap is exceeded."""
-    data = b""
-    async for chunk in upload:
-        data += chunk
-        if len(data) > max_bytes:
+    parts = []
+    total = 0
+
+    while True:
+        chunk = await upload.read(1024 * 1024)  # 1MB chunks
+        if not chunk:
+            break
+
+        total += len(chunk)
+
+        if total > max_bytes:
             raise HTTPException(
                 413,
                 f"{label} exceeds the maximum allowed size ({max_bytes // 1024 // 1024} MB).",
             )
-    return data
+
+        parts.append(chunk)
+
+    await upload.seek(0)
+    return b"".join(parts)
 
 
 def _validate_cover_magic(raw: bytes) -> tuple[str, str]:
