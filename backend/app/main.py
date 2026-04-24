@@ -74,7 +74,16 @@ class SecurityHeadersMiddleware:
             await self.app(scope, receive, send)
             return
 
-        request_id = scope.get("headers", {}).get(b"x-request-id") or str(uuid.uuid4())
+        # ASGI headers are a list of [name, value] tuples, not a dict
+        headers_list = scope.get("headers", [])
+        request_id = None
+        for name, value in headers_list:
+            if name == b"x-request-id":
+                request_id = value.decode()
+                break
+        if not request_id:
+            request_id = str(uuid.uuid4())
+        
         from app.utils.request_context import set_request_id
         set_request_id(request_id)
         started_at = time.perf_counter()
