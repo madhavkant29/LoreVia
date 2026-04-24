@@ -222,7 +222,7 @@ async def smart_tap(
             select(CharacterRelationship).where(
                 (CharacterRelationship.character_a_id == char.id) | (CharacterRelationship.character_b_id == char.id),
                 CharacterRelationship.from_chapter <= chapter,
-                (CharacterRelationship.to_chapter == None) | (CharacterRelationship.to_chapter >= chapter),
+                (CharacterRelationship.to_chapter is None) | (CharacterRelationship.to_chapter >= chapter),
             )
         )).scalars().all()
 
@@ -335,7 +335,7 @@ async def get_relationships(
         select(CharacterRelationship).where(
             CharacterRelationship.book_id == book_id,
             CharacterRelationship.from_chapter <= chapter,
-            (CharacterRelationship.to_chapter == None) | (CharacterRelationship.to_chapter >= chapter),
+            (CharacterRelationship.to_chapter is None) | (CharacterRelationship.to_chapter >= chapter),
         )
     )).scalars().all()
     rels = [

@@ -891,8 +891,7 @@ async def get_book_characters(book_id: uuid.UUID, db: AsyncSession = Depends(get
     characters = [char for char in result.scalars().all() if is_displayable_character(char)]
     rel_result = await db.execute(select(CharacterRelationship).where(CharacterRelationship.book_id == book_id))
     relationships = rel_result.scalars().all()
-    thread_result = await db.execute(select(PlotThread).where(PlotThread.book_id == book_id))
-    plot_threads = thread_result.scalars().all()
+    # Plot threads data available if needed later
 
     char_by_id = {char.id: char for char in characters}
     rel_summaries: dict[str, list[str]] = {}
