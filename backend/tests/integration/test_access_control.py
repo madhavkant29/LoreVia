@@ -180,14 +180,14 @@ async def test_upload_attaches_book_to_multiple_owned_series(client, db, monkeyp
     db.add_all([first_series, second_series])
     await db.commit()
 
-    monkeypatch.setattr("app.api.v1.routes.books.upload_book_bytes", lambda raw, owner, filename: f"uploads/{owner}/{filename}")
+    monkeypatch.setattr("app.core.storage.upload_book_bytes", lambda raw, owner, filename: f"uploads/{owner}/{filename}")
 
     class _FakeTask:
         @staticmethod
         def apply_async(*args, **kwargs):
             return None
 
-    monkeypatch.setattr("app.api.v1.routes.books.process_book_task", _FakeTask())
+    monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_book_task", _FakeTask())
 
     response = await client.post(
         "/api/v1/books/upload",
@@ -223,14 +223,14 @@ async def test_upload_rejects_foreign_series_ids(client, db, monkeypatch):
     db.add(foreign_series)
     await db.commit()
 
-    monkeypatch.setattr("app.api.v1.routes.books.upload_book_bytes", lambda raw, owner, filename: f"uploads/{owner}/{filename}")
+    monkeypatch.setattr("app.core.storage.upload_book_bytes", lambda raw, owner, filename: f"uploads/{owner}/{filename}")
 
     class _FakeTask:
         @staticmethod
         def apply_async(*args, **kwargs):
             return None
 
-    monkeypatch.setattr("app.api.v1.routes.books.process_book_task", _FakeTask())
+    monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_book_task", _FakeTask())
 
     response = await client.post(
         "/api/v1/books/upload",
