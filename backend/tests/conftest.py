@@ -49,7 +49,7 @@ engine_test = create_async_engine(TEST_DB, echo=False)
 TestSession = async_sessionmaker(engine_test, class_=AsyncSession, expire_on_commit=False)
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 async def setup_db():
     async with engine_test.begin() as conn:
         # Enable pgvector extension for vector columns
