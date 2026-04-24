@@ -77,7 +77,7 @@ Given this Story Advisor reply, classify the PRIMARY response type into ONE of:
   standard | warning | opportunity | tradeoff
 
 - warning: reply leads with ⚠️ Contradiction or contradicts the author's plan
-- opportunity: reply leads with ✨ Opportunity or surfaces unused story potential  
+- opportunity: reply leads with ✨ Opportunity or surfaces unused story potential
 - tradeoff: reply uses 🔀 Option A/B or debates story direction choices
 - standard: informational answer, analysis, or general advice
 
@@ -414,7 +414,8 @@ def identify_character_mentions(
     character_rows: list[dict],
     limit: int = 5,
 ) -> list[dict]:
-    normalized_text = f" {re.sub(r'\\s+', ' ', text.casefold()).strip()} "
+    stripped_text = re.sub(r'\\s+', ' ', text.casefold()).strip()
+    normalized_text = f" {stripped_text} "
     matches: list[tuple[int, dict]] = []
 
     for row in character_rows:
