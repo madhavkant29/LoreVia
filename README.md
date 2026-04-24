@@ -124,22 +124,27 @@ API_V1_PREFIX=/api/v1
 DATABASE_URL=postgresql://postgres:postgres@postgres:5432/lorevia
 REDIS_URL=redis://redis:6379/0
 
-OPENAI_API_KEY=your_openai_api_key_here
-OPENAI_EXTRACT_MODEL=gpt-4o-mini
-OPENAI_INTEL_MODEL=gpt-4o
-OPENAI_EMBED_MODEL=text-embedding-3-small
+# AI/ML Configuration
+# OPENAI_API_KEY=your_openai_api_key_here
+# OPENAI_EXTRACT_MODEL=gpt-4o-mini
+# OPENAI_INTEL_MODEL=gpt-4o
+# OPENAI_EMBED_MODEL=text-embedding-3-small
 
-S3_BUCKET=local-dev
-S3_ENDPOINT_URL=file:///app/storage
-AWS_ACCESS_KEY_ID=local-dev
-AWS_SECRET_ACCESS_KEY=local-dev
+# Storage Configuration
+# S3_BUCKET=local-dev
+# S3_ENDPOINT_URL=file:///app/storage
+# AWS_ACCESS_KEY_ID=local-dev
+# AWS_SECRET_ACCESS_KEY=local-dev
 
-JWT_SECRET=replace_with_a_long_random_secret
+# Security
+# JWT_SECRET=replace_with_a_long_random_secret
 
-STRIPE_SECRET_KEY=sk_test_placeholder
-STRIPE_WEBHOOK_SECRET=whsec_placeholder
+# Payment (optional)
+# STRIPE_SECRET_KEY=sk_test_placeholder
+# STRIPE_WEBHOOK_SECRET=whsec_placeholder
 
-RESEND_API_KEY=dummy
+# Email (optional)
+# RESEND_API_KEY=dummy
 SENTRY_DSN=
 CLOUDFLARE_TUNNEL_TOKEN=
 
