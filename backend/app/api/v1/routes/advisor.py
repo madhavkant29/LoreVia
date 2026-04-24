@@ -28,6 +28,18 @@ from app.core.storage import download_book
 from app.engine.embeddings.embedder import embed_text
 from app.engine.search.semantic import semantic_search
 from app.models.book import Book
+
+
+def _safe_prompt_str(value: str | None) -> str:
+    """Escape Python str.format() brace syntax in user-controlled values.
+
+    A book title like '} Ignore all previous instructions. {title' would
+    otherwise be interpreted by str.format() as a closing/opening brace,
+    causing a KeyError or — depending on the template — injecting unexpected
+    content into the LLM system prompt.  We escape both braces so the value
+    is always treated as a literal string by the template engine.
+    """
+    return (value or "").replace("{", "{{").replace("}", "}}")
 from app.models.character import Character, CharacterState
 from app.models.intelligence import PlotThread, ChapterSummary
 from app.schemas.advisor import AdvisorRequest, EditorialReviewRequest, SuggestionDismiss, VoiceConsistencyRequest
@@ -150,7 +162,10 @@ async def advisor_message(
         )
 
         # 5. Build message list for LLM
-        system_prompt = ADVISOR_SYSTEM.format(title=book.title, story_context=story_context)
+        system_prompt = ADVISOR_SYSTEM.format(
+            title=_safe_prompt_str(book.title),
+            story_context=_safe_prompt_str(story_context),
+        )
         llm_messages: list[dict] = [{"role": "system", "content": system_prompt}]
         for msg in history[:-1]:
             llm_messages.append({"role": msg.role, "content": msg.content})
@@ -575,7 +590,10 @@ async def editorial_review(
             "Chapter number not specified."
         )
 
-        system_msg = EDITORIAL_SYSTEM.format(title=book.title, story_context=story_ctx)
+        system_msg = EDITORIAL_SYSTEM.format(
+            title=_safe_prompt_str(book.title),
+            story_context=_safe_prompt_str(story_ctx),
+        )
         user_msg = EDITORIAL_USER.format(
             chapter_hint=chapter_hint,
             text=body.text[:4000],
@@ -663,9 +681,9 @@ async def manuscript_synopsis(
                 {
                     "role": "system",
                     "content": SYNOPSIS_SYSTEM.format(
-                        title=book.title,
+                        title=_safe_prompt_str(book.title),
                         spoiler_level=spoiler_level,
-                        story_context=story_context,
+                        story_context=_safe_prompt_str(story_context),
                     ),
                 },
                 {
@@ -737,7 +755,10 @@ async def voice_consistency_review(
             "Chapter number not specified."
         )
 
-        system_msg = VOICE_CONSISTENCY_SYSTEM.format(title=book.title, story_context=story_ctx)
+        system_msg = VOICE_CONSISTENCY_SYSTEM.format(
+            title=_safe_prompt_str(book.title),
+            story_context=_safe_prompt_str(story_ctx),
+        )
         user_msg = VOICE_CONSISTENCY_USER.format(
             chapter_hint=chapter_hint,
             character_context=character_context,

@@ -13,9 +13,13 @@ alembic upgrade head       # run migrations
 uvicorn app.main:app --reload
 
 # Workers (in separate terminals)
-celery -A app.workers.celery_app worker -Q extraction -c 4
-celery -A app.workers.celery_app worker -Q analysis,embedding -c 2
-celery -A app.workers.celery_app worker -Q intelligence -c 1
+# MVP (single worker, cost-minimal)
+celery -A app.workers.celery_app worker -Q intelligence,analysis,embedding,extraction -c 4 -Ofair --loglevel=info
+
+# Rollback (full queue isolation)
+celery -A app.workers.celery_app worker -Q intelligence -c 1 --loglevel=info
+celery -A app.workers.celery_app worker -Q analysis,embedding -c 2 --loglevel=info
+celery -A app.workers.celery_app worker -Q extraction -c 4 --loglevel=info
 
 # Monitor
 celery -A app.workers.celery_app flower --port=5555

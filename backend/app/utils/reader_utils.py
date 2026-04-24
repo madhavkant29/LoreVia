@@ -568,7 +568,9 @@ async def update_plot_thread_note(
     if thread is None:
         return None
 
-    thread.note = " ".join((note or "").split()).strip() or None
+    import bleach  # type: ignore[import-untyped]
+    cleaned = bleach.clean(" ".join((note or "").split()).strip(), tags=[], strip=True) or None
+    thread.note = cleaned
     await db.commit()
     await db.refresh(thread)
     return serialize_plot_thread(thread)

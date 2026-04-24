@@ -107,7 +107,7 @@ class Settings(BaseSettings):
     # Cloudflare Tunnel
     CLOUDFLARE_TUNNEL_TOKEN: str | None = None   # Option 1 security
 
-    model_config = SettingsConfigDict(env_file=".env", case_sensitive=True)
+    model_config = SettingsConfigDict(env_file=".env", case_sensitive=True, extra="ignore")
 
 
 settings = Settings()  # type: ignore[call-arg]
@@ -122,11 +122,13 @@ def allowed_hosts() -> list[str]:
 
 
 def is_local_mode() -> bool:
-    app_url = (settings.APP_URL or "").lower()
-    return settings.DEBUG or "localhost" in app_url or "127.0.0.1" in app_url
+    # Derive ONLY from the explicit DEBUG flag — never from APP_URL.
+    # APP_URL can be misconfigured in production, which previously caused
+    # every user to silently receive Pro access.
+    return settings.DEBUG
 
 
 def effective_tier(tier: str) -> str:
-    if is_local_mode():
+    if settings.DEBUG:
         return "pro"
     return tier

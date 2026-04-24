@@ -8,6 +8,49 @@ from fastapi.responses import Response
 from sqlalchemy import and_, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+# ─── Upload limits ────────────────────────────────────────────────────────────
+# Hard cap on book uploads. file.read() without a limit causes OOM DoS.
+MAX_BOOK_UPLOAD_BYTES = 100 * 1024 * 1024   # 100 MB
+MAX_COVER_UPLOAD_BYTES = 5 * 1024 * 1024    # 5 MB
+
+# Magic-byte signatures for allowed cover image formats.
+# We inspect actual bytes rather than trusting the client-supplied MIME type
+# or filename extension — both are fully attacker-controlled.
+_COVER_MAGIC: dict[bytes, tuple[str, str]] = {
+    b"\xff\xd8\xff": ("jpg", "image/jpeg"),
+    b"\x89PNG": ("png", "image/png"),
+    b"GIF8": ("gif", "image/gif"),
+    b"RIFF": ("webp", "image/webp"),   # bytes [8:12] must be b"WEBP"
+}
+
+
+async def _read_upload_bounded(upload: UploadFile, max_bytes: int, label: str) -> bytes:
+    """Read an UploadFile in chunks, raising 413 if the size cap is exceeded."""
+    data = b""
+    async for chunk in upload:
+        data += chunk
+        if len(data) > max_bytes:
+            raise HTTPException(
+                413,
+                f"{label} exceeds the maximum allowed size ({max_bytes // 1024 // 1024} MB).",
+            )
+    return data
+
+
+def _validate_cover_magic(raw: bytes) -> tuple[str, str]:
+    """Return (extension, mime_type) by inspecting magic bytes.
+
+    Raises HTTP 400 if the bytes do not match a permitted image format.
+    Prevents SVG/HTML/script files from being stored as cover images.
+    """
+    for magic, (suffix, mime) in _COVER_MAGIC.items():
+        if raw[:len(magic)] == magic:
+            # Extra check for WebP: bytes[8:12] must equal b"WEBP"
+            if mime == "image/webp" and raw[8:12] != b"WEBP":
+                continue
+            return suffix, mime
+    raise HTTPException(400, "Cover image must be a JPEG, PNG, GIF, or WebP file.")
+
 from app.api.deps.auth import get_current_user
 from app.api.deps.subscription import check_upload_limit
 from app.core.config import settings
@@ -142,16 +185,17 @@ async def upload_book_endpoint(
         raise HTTPException(400, "Only PDF and EPUB files are supported")
 
     is_public = visibility == "public"
-    raw = await file.read()
+    # Stream-read with a hard size cap to prevent OOM DoS.
+    raw = await _read_upload_bounded(file, MAX_BOOK_UPLOAD_BYTES, "Book file")
     if not raw:
         raise HTTPException(400, "Uploaded file is empty")
     s3_key = upload_book_bytes(raw, str(current_user.id), file.filename)
     cover_s3_key = None
     if not as_bool(auto_extract_cover) and cover_file is not None and cover_file.filename:
-        cover_raw = await cover_file.read()
+        cover_raw = await _read_upload_bounded(cover_file, MAX_COVER_UPLOAD_BYTES, "Cover image")
         if cover_raw:
-            suffix = cover_file.filename.rsplit(".", 1)[-1].lower() if "." in cover_file.filename else "png"
-            content_type = cover_file.content_type or f"image/{suffix}"
+            # Validate magic bytes — never trust client-supplied MIME or extension.
+            suffix, content_type = _validate_cover_magic(cover_raw)
             cover_s3_key = upload_binary(
                 f"covers/{current_user.id}/{uuid.uuid4()}.{suffix}",
                 cover_raw,
@@ -253,10 +297,11 @@ async def import_manuscript_content(
             )
         )
 
+    MAX_MANUSCRIPT_BYTES = 20 * 1024 * 1024  # 20 MB per file
     for upload in files or []:
         if not upload.filename:
             continue
-        raw = await upload.read()
+        raw = await _read_upload_bounded(upload, MAX_MANUSCRIPT_BYTES, "Manuscript file")
         if not raw:
             continue
         parsed = await parse_import_upload(upload.filename, raw, split_flag)

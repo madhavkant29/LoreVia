@@ -198,3 +198,66 @@ class PrivateUserStats(BaseModel):
 class UserStatsOut(BaseModel):
     public: PublicUserStats
     private: PrivateUserStats
+
+
+# Screenplay-specific schemas
+
+class SceneOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    
+    id: uuid.UUID
+    book_id: uuid.UUID
+    chapter_id: uuid.UUID | None = None
+    number: int
+    heading: str
+    location: str | None = None
+    time_of_day: str | None = None
+    interior: bool = False
+    exterior: bool = False
+    scene_number: str | None = None
+    description: str | None = None
+    word_count: int | None = None
+    page_number: int | None = None
+    created_at: datetime
+    dialogue: list[DialogueOut] = []
+
+
+class DialogueOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    
+    id: uuid.UUID
+    scene_id: uuid.UUID
+    character_name: str
+    character_extension: str | None = None
+    dialogue_text: str
+    parenthetical: str | None = None
+    line_number: int
+    word_count: int | None = None
+    created_at: datetime
+
+
+class ScreenplayImportResult(BaseModel):
+    book_id: str
+    imported_scenes: list[int]
+    total_scenes: int
+    total_dialogue_lines: int
+    mode: str
+    source_kind: str
+
+
+class SceneAnalysis(BaseModel):
+    scene_number: int
+    scene_heading: str
+    characters_present: list[str]
+    dialogue_count: int
+    action_lines: int
+    estimated_duration_minutes: float | None = None
+
+
+class ScreenplayStats(BaseModel):
+    total_scenes: int
+    total_dialogue_lines: int
+    total_words: int
+    estimated_pages: int | None = None
+    character_dialogue_counts: dict[str, int]
+    scene_types: dict[str, int]  # INT/EXT breakdown

@@ -115,19 +115,60 @@ async def rate_limit_api(request: Request, current_user: User = Depends(get_curr
         raise HTTPException(429, "Rate limit exceeded")
 
 
+import ipaddress as _ipaddress
+
+# RFC-1918 + loopback ranges that may legitimately act as reverse proxies.
+# Forwarded-IP headers are only trusted when the *direct* TCP connection
+# comes from one of these networks — preventing header-spoofing by external
+# clients who otherwise control X-Forwarded-For / CF-Connecting-IP freely.
+_TRUSTED_PROXY_NETS = [
+    _ipaddress.ip_network("10.0.0.0/8"),
+    _ipaddress.ip_network("172.16.0.0/12"),
+    _ipaddress.ip_network("192.168.0.0/16"),
+    _ipaddress.ip_network("127.0.0.0/8"),
+    _ipaddress.ip_network("::1/128"),
+]
+
+
+def _is_trusted_proxy(host: str) -> bool:
+    try:
+        addr = _ipaddress.ip_address(host)
+        return any(addr in net for net in _TRUSTED_PROXY_NETS)
+    except ValueError:
+        return False
+
+
 def _client_identifier(request: Request) -> str:
-    cf_ip = request.headers.get("cf-connecting-ip")
-    if cf_ip:
-        return cf_ip.strip()
-    real_ip = request.headers.get("x-real-ip")
-    if real_ip:
-        return real_ip.strip()
-    forwarded_for = request.headers.get("x-forwarded-for")
-    if forwarded_for:
-        first = forwarded_for.split(",")[0].strip()
-        if first:
-            return first
-    return request.client.host if request.client else "unknown"
+    direct_ip = request.client.host if request.client else None
+
+    # Only trust forwarded-IP headers when the TCP peer is a known proxy.
+    # An external client can freely forge these headers if we skip this check.
+    if direct_ip and _is_trusted_proxy(direct_ip):
+        # Priority order matters:
+        #   1. CF-Connecting-IP  — set exclusively by Cloudflare; clients cannot forge it
+        #      when the request arrives via the Cloudflare Tunnel.
+        #   2. X-Real-IP        — set directly by Render's LB / Nginx; clients cannot
+        #      inject it because the proxy overwrites (not appends) this header.
+        #   3. X-Forwarded-For  — least reliable: proxies *append* to it, so a client
+        #      can prepend fake IPs. Checked last as a fallback.
+        cf_ip = request.headers.get("cf-connecting-ip")
+        if cf_ip and cf_ip.strip():
+            return cf_ip.strip()
+
+        real_ip = request.headers.get("x-real-ip")
+        if real_ip and real_ip.strip():
+            return real_ip.strip()
+
+        xff = request.headers.get("x-forwarded-for")
+        if xff:
+            # Take the leftmost entry only — valid when the proxy *prepends*
+            # the real client IP (Cloudflare / most CDNs). For Render, prefer
+            # X-Real-IP above so we never reach this branch with spoofed data.
+            leftmost = xff.split(",")[0].strip()
+            if leftmost:
+                return leftmost
+
+    return direct_ip or "unknown"
 
 
 async def _auth_window(request: Request, bucket: str, limit: int, window: int) -> None:

@@ -149,8 +149,8 @@ async def save_book_note(
     title: str | None,
     body: str,
 ) -> dict:
-    normalized_title = " ".join((title or "").split()).strip() or None
-    normalized_body = body.strip()
+    normalized_title = bleach.clean(" ".join((title or "").split()).strip(), tags=[], strip=True) or None
+    normalized_body = bleach.clean(body.strip(), tags=[], strip=True)
     if not normalized_body:
         raise HTTPException(400, "Note body is required")
 
@@ -506,9 +506,57 @@ async def parse_import_upload(filename: str, raw: bytes, split_into_chapters: bo
         doc = Document(BytesIO(raw))
         text = "\n".join(paragraph.text for paragraph in doc.paragraphs if paragraph.text.strip())
         return [{"title": stem, "text": text, "number": 1}]
-    if lower.endswith(".txt") or lower.endswith(".md"):
+    if lower.endswith(".txt") or lower.endswith(".md") or lower.endswith(".fountain"):
         return [{"title": stem, "text": raw.decode("utf-8", errors="ignore"), "number": 1}]
     raise HTTPException(400, f"Unsupported manuscript import file: {filename}")
+
+
+async def parse_screenplay_upload(filename: str, raw: bytes) -> list[dict]:
+    """Parse screenplay files and return scene data."""
+    lower = filename.lower()
+    stem = os.path.splitext(os.path.basename(filename))[0] or "Imported screenplay"
+    
+    if lower.endswith(".txt") or lower.endswith(".md") or lower.endswith(".fountain"):
+        text = raw.decode("utf-8", errors="ignore")
+        from app.parsers.screenplay_parser import parse_screenplay, analyze_screenplay_stats
+        
+        scenes = await asyncio.to_thread(parse_screenplay, text)
+        stats = await asyncio.to_thread(analyze_screenplay_stats, scenes)
+        
+        return [{
+            "title": stem,
+            "text": text,
+            "scenes": len(scenes),
+            "stats": stats,
+            "number": 1
+        }]
+    
+    # For PDF screenplays, extract text then parse
+    if lower.endswith(".pdf"):
+        from app.parsers.pdf_parser import parse_pdf
+        chapters = await asyncio.to_thread(parse_pdf, raw)
+        merged_text = "\n\n".join((ch.get("text") or "").strip() for ch in chapters if ch.get("text"))
+        
+        from app.parsers.screenplay_parser import parse_screenplay, analyze_screenplay_stats
+        scenes = await asyncio.to_thread(parse_screenplay, merged_text)
+        stats = await asyncio.to_thread(analyze_screenplay_stats, scenes)
+        
+        return [{
+            "title": stem,
+            "text": merged_text,
+            "scenes": len(scenes),
+            "stats": stats,
+            "number": 1
+        }]
+    
+    raise HTTPException(400, f"Unsupported screenplay format: {filename}")
+
+
+def is_screenplay_file(filename: str) -> bool:
+    """Check if file is likely a screenplay based on extension."""
+    screenplay_extensions = {".fountain", ".screenplay", ".script"}
+    lower = filename.lower()
+    return any(lower.endswith(ext) for ext in screenplay_extensions) or "screenplay" in lower
 
 
 def normalize_imported_chapters(

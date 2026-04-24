@@ -647,7 +647,10 @@ async def get_timeline(
         availability = await chapter_intelligence_map(db, book, current_user)
         read_set = {chapter for chapter, available in availability.items() if available}
     else:
-        read_set = await read_available_chapter_set(db, book, current_user, base_read_set)
+        # Timeline should reflect what the reader has actually read.
+        # Do not gate it on intelligence availability/budgets; the payload will naturally be sparse
+        # until summaries/relationships/threads exist.
+        read_set = base_read_set
     if not read_set:
         return build_timeline_track_payload([], [], [], [], [])
 
@@ -873,12 +876,15 @@ async def save_quote(
     book = await db.get(Book, book_id)
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
-    quote_text = (body.quote_text or "").strip()
+    import bleach  # type: ignore[import-untyped]
+    quote_text = bleach.clean((body.quote_text or "").strip(), tags=[], strip=True)
     if not quote_text:
         raise HTTPException(400, "Quote text is required")
+    character_name = bleach.clean((body.character_name or "").strip(), tags=[], strip=True) or None
+    note_text = bleach.clean((body.note or "").strip(), tags=[], strip=True) or None
 
     quote = QuoteEntry(user_id=current_user.id, book_id=book_id, chapter_number=body.chapter_number,
-                       character_name=body.character_name, quote_text=quote_text, note=body.note)
+                       character_name=character_name, quote_text=quote_text, note=note_text)
     db.add(quote)
     await db.commit()
     await db.refresh(quote)

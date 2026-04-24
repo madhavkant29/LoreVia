@@ -3,6 +3,8 @@ import time
 import uuid
 import logging
 import sentry_sdk
+from sentry_sdk.integrations.fastapi import FastApiIntegration
+from sentry_sdk.integrations.celery import CeleryIntegration
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -10,11 +12,24 @@ from fastapi.responses import Response
 from app.core.config import allowed_hosts, cors_origins, settings
 from app.core.events import on_startup, on_shutdown
 from app.api.v1.router import api_router
+from app.core.database import engine
+from app.core.redis import get_redis
+from sqlalchemy import text
 
 if settings.SENTRY_DSN:
-    sentry_sdk.init(dsn=settings.SENTRY_DSN, traces_sample_rate=0.1)
+    sentry_sdk.init(
+        dsn=settings.SENTRY_DSN,
+        integrations=[
+            FastApiIntegration(),
+            CeleryIntegration(),
+        ],
+        traces_sample_rate=0.1,
+        profiles_sample_rate=0.1,
+    )
 
-log = logging.getLogger("lorevia.http")
+from app.utils.logging.logger import get_logger
+
+log = get_logger("lorevia.http")
 
 
 @asynccontextmanager
@@ -51,6 +66,9 @@ app.include_router(api_router, prefix=settings.API_V1_PREFIX)
 @app.middleware("http")
 async def security_headers(request: Request, call_next):
     request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    from app.utils.request_context import set_request_id
+
+    set_request_id(request_id)
     started_at = time.perf_counter()
     try:
         response: Response = await call_next(request)
@@ -92,3 +110,15 @@ async def security_headers(request: Request, call_next):
 @app.get("/health")
 async def health():
     return {"status": "ok", "app": "LoreVia", "version": "2.0.0"}
+
+
+@app.get("/ready")
+async def ready():
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        r = await get_redis()
+        await r.ping()
+    except Exception:
+        return Response(status_code=503, content="not ready")
+    return {"status": "ready"}

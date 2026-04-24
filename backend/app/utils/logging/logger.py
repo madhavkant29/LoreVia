@@ -11,6 +11,7 @@ class JSONFormatter(logging.Formatter):
             "logger": record.name,
             "msg": record.getMessage(),
             "module": record.module,
+            **({"request_id": getattr(record, "request_id")} if getattr(record, "request_id", None) else {}),
             **({"exc": self.formatException(record.exc_info)} if record.exc_info else {}),
         })
 
