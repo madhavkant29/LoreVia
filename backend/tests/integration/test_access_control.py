@@ -13,8 +13,12 @@ def _mock_storage_uploads(monkeypatch):
     def _fake_upload_book_bytes(raw: bytes, user_id: str, filename: str) -> str:
         return f"books/{user_id}/test/{uuid.uuid4()}/{filename}"
 
+    def _noop_apply_async(*args, **kwargs):
+        return None
+
     monkeypatch.setattr("app.api.v1.routes.books.upload_book_bytes", _fake_upload_book_bytes)
     monkeypatch.setattr("app.core.storage.upload_book_bytes", _fake_upload_book_bytes)
+    monkeypatch.setattr("app.api.v1.routes.books.process_book_task.apply_async", _noop_apply_async)
 
 
 async def _register_user(client, email: str) -> tuple[dict[str, str], uuid.UUID]:
