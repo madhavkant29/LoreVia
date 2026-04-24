@@ -183,6 +183,9 @@ async def upload_book_endpoint(
     else:
         raise HTTPException(400, "Only PDF and EPUB files are supported")
 
+    # Validate series ownership BEFORE expensive file operations
+    selected_series = await resolve_owned_series_ids(db, current_user.id, series_ids)
+
     is_public = visibility == "public"
     # Stream-read with a hard size cap to prevent OOM DoS.
     raw = await _read_upload_bounded(file, MAX_BOOK_UPLOAD_BYTES, "Book file")
@@ -216,8 +219,6 @@ async def upload_book_endpoint(
     )
     db.add(book)
     await db.flush()
-
-    selected_series = await resolve_owned_series_ids(db, current_user.id, series_ids)
     for index, series in enumerate(selected_series):
         membership = SeriesBook(series_id=series.id, book_id=book.id)
         db.add(membership)
