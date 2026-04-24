@@ -40,6 +40,7 @@ def _safe_prompt_str(value: str | None) -> str:
     is always treated as a literal string by the template engine.
     """
     return (value or "").replace("{", "{{").replace("}", "}}")
+from app.models.book import Chapter
 from app.models.character import Character, CharacterState
 from app.models.intelligence import ChapterSummary, PlotThread
 from app.schemas.advisor import (
