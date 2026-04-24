@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 from openai import AsyncOpenAI
 
@@ -24,15 +24,18 @@ async def complete_with_fallback(
     if settings.OPENAI_API_KEY:
         client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
         try:
-            request_kwargs: dict[str, Any] = {
-                "model": openai_model,
-                "messages": [
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
-                "temperature": temperature,
-                "max_tokens": max_tokens,
-            }
+            request_kwargs = cast(
+                dict[str, Any],
+                {
+                    "model": openai_model,
+                    "messages": [
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user},
+                    ],
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
+                },
+            )
             if response_format is not None:
                 request_kwargs["response_format"] = response_format
             response = await client.chat.completions.create(**request_kwargs)
@@ -75,8 +78,8 @@ async def _complete_with_gemini(
     want_json: bool,
 ) -> str:
     try:
-        from google import genai
-        from google.genai import types
+        from google import generativeai as genai
+        from google.generativeai import types
     except Exception as exc:  # pragma: no cover - optional dependency
         raise RuntimeError("Gemini fallback requested but google-genai is not installed") from exc
 

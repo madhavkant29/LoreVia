@@ -1,15 +1,24 @@
+import uuid
+
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-import uuid
 
 from app.api.deps.auth import get_current_user
 from app.core.database import get_db
-from app.core.redis import cache_del, cache_get, cache_set, key_public_book_detail, key_public_books, key_public_chapter
+from app.core.redis import (
+    cache_del,
+    cache_get,
+    cache_set,
+    key_public_book_detail,
+    key_public_books,
+    key_public_chapter,
+)
 from app.core.storage import download_book, get_presigned_url, upload_text
 from app.models.book import Book, Chapter
 from app.parsers.chunker import count_tokens
+from app.schemas.public import PublicBookManualIn, PublicChapterIn
+from app.utils.book_utils import deserialize_manuscript_content
 
 router = APIRouter()
 PUBLIC_MODE_ENABLED = False
@@ -18,20 +27,6 @@ PUBLIC_MODE_ENABLED = False
 def _ensure_public_mode_enabled() -> None:
     if not PUBLIC_MODE_ENABLED:
         raise HTTPException(503, "Public mode is temporarily disabled")
-
-
-class PublicChapterIn(BaseModel):
-    title: str
-    text: str
-    description: str | None = None
-
-
-class PublicBookManualIn(BaseModel):
-    title: str
-    author: str | None = None
-    genre: str | None = None
-    description: str | None = None
-    chapters: list[PublicChapterIn]
 
 
 @router.get("/books")
@@ -118,6 +113,7 @@ async def get_public_chapter(book_id: uuid.UUID, chapter_num: int, db: AsyncSess
     if not chapter:
         raise HTTPException(404, "Chapter not found")
 
+    stored_payload = deserialize_manuscript_content(download_book(chapter.s3_key)) if chapter.s3_key else {"text": None, "html": None}
     payload = {
         "book_id": str(book.id),
         "book_title": book.title,
@@ -126,7 +122,8 @@ async def get_public_chapter(book_id: uuid.UUID, chapter_num: int, db: AsyncSess
         "chapter_description": chapter.description,
         "total_chapters": book.total_chapters,
         "text_url": get_presigned_url(chapter.s3_key) if chapter.s3_key else None,
-        "text_content": download_book(chapter.s3_key).decode("utf-8", errors="ignore") if chapter.s3_key and not get_presigned_url(chapter.s3_key) else None,
+        "text_content": stored_payload.get("text"),
+        "html_content": stored_payload.get("html"),
     }
     await cache_set(key_public_chapter(str(book_id), chapter_num), payload, 3600)
     return payload

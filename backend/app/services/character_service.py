@@ -1,16 +1,19 @@
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from app.models.character import Character, CharacterState
-from app.core.redis import cache_get, cache_set, key_character_profile
-from app.core.config import settings
 import uuid
+from typing import Any, cast
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.config import settings
+from app.core.redis import cache_get, cache_set, key_character_profile
+from app.models.character import Character, CharacterState
 
 
 async def get_character_cached(db: AsyncSession, character_id: uuid.UUID) -> dict | None:
     """Return character profile from cache or DB."""
     cached = await cache_get(key_character_profile(str(character_id)))
     if cached:
-        return cached
+        return cast(dict[str, Any], cached)
 
     char = await db.get(Character, character_id)
     if not char:

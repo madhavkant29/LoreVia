@@ -6,7 +6,6 @@ from collections import Counter
 
 import fitz
 
-
 CHAPTER_RE = re.compile(
     r"^(?:(?:chapter|ch\.?|part|volume|vol\.?|book|act|episode|section|scene)\s+"
     r"(?:\d+|[ivxlcdm]+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|"
@@ -23,7 +22,7 @@ FRONT_MATTER_RE = re.compile(
     r"contents|dedication|acknowledg(?:e)?ments?)",
     re.IGNORECASE,
 )
-ORNAMENT_RE = re.compile(r"[\u2600-\u27ff\u3000-\u303f\uFF00-\uFFEF]+")
+ORNAMENT_RE = re.compile(r"[\u2600-\u27ff\u3000-\u303f\uFF00-\uFFEF\U0001F000-\U0001F9FF]+")
 MEDIA_MARKER_TEMPLATE = "[[IMAGE:{marker}]]"
 MEDIA_MARKER_RE = re.compile(r"\[\[IMAGE:[^\]]+\]\]")
 PARAGRAPH_SPLIT_MAX_WORDS = 4000
@@ -290,6 +289,10 @@ def _extract_heading(text: str) -> str | None:
         return first_line
     if UPPER_HEADING_RE.match(first_line) and len(first_line.split()) <= 8:
         return first_line.title()
+    # Fallback: if it looks like a chapter heading with decorations, strip all non-alphanumeric and return
+    cleaned_line = re.sub(r"[^\w\s]", "", first_line).strip()
+    if any(word.lower() in ["chapter", "prologue", "epilogue", "part", "volume"] for word in cleaned_line.split()):
+        return cleaned_line
     return None
 
 
@@ -308,18 +311,28 @@ def _heading_remainder(text: str, heading: str) -> str:
         return ""
     normalized_first = _normalize_heading_candidate(lines[0])
     if normalized_first.lower() == heading.lower():
-        return _clean_text("\n".join(lines[1:]))
+        # Clean each line to remove ornaments
+        remainder_lines = [_clean_text(line) for line in lines[1:]]
+        # Filter out empty lines after cleaning
+        remainder_lines = [line for line in remainder_lines if line.strip()]
+        # Join and clean again to catch any remaining ornaments
+        result = "\n".join(remainder_lines).strip()
+        return _clean_text(result)
+    # Try to match heading in the flattened text and extract remainder
     flattened = _normalize_heading_candidate(raw)
     match = re.match(re.escape(heading) + r"[\s:.\-]*", flattened, flags=re.IGNORECASE)
     if not match:
         return ""
     remainder = flattened[match.end():].strip()
+    # Clean the remainder to remove any remaining ornaments
     return _clean_text(remainder)
 
 
 def _clean_text(text: str) -> str:
     normalized = text.replace("\r", "\n")
     normalized = normalized.replace("\u00ad", "")
+    # Remove special Unicode symbols including black diamond (u2726) and place of interest (u2318)
+    normalized = ORNAMENT_RE.sub("", normalized)
     normalized = re.sub(r"[ \t]+", " ", normalized)
     normalized = re.sub(r"\n{3,}", "\n\n", normalized)
     normalized = re.sub(r"[^\S\n]+([,.;:!?])", r"\1", normalized)

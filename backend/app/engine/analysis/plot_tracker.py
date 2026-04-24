@@ -2,7 +2,9 @@
 Plot thread extraction and status tracking.
 """
 import json
+
 from openai import AsyncOpenAI
+
 from app.core.config import settings
 
 
@@ -26,6 +28,7 @@ Rules:
 - Focus on meaningful story threads, not minor events.
 - Use specific titles grounded in the text, not generic labels.
 - Only emit a thread if it has clear stakes or ongoing narrative importance.
+- Track psychological and philosophical tensions when they meaningfully drive the plot, including false altruism, self-hatred, denial, obsession, moral injury, or unreliable narration.
 - Return raw JSON only. No markdown fences.
 - Return [] if nothing significant."""
 
@@ -44,7 +47,8 @@ async def extract_plot_threads(chapter_text: str, chapter_num: int) -> list[dict
             response_format={"type": "json_object"},
         )
         try:
-            data = json.loads(_strip_json_fence(r.choices[0].message.content))
+            content = r.choices[0].message.content or ""
+            data = json.loads(_strip_json_fence(content))
             threads = data.get("threads", [])
             for t in threads:
                 t["introduced_at"] = chapter_num

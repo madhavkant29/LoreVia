@@ -1,18 +1,36 @@
 import io
 import uuid
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
 
-from app.models.book import Book, Chapter, Series
+from app.models.book import Book, Chapter, Series, SeriesBook
 from app.models.character import Character
-from app.models.book import SeriesBook
+
+
+@pytest.fixture(autouse=True)
+def _mock_storage_uploads(monkeypatch):
+    def _fake_upload_book_bytes(raw: bytes, user_id: str, filename: str) -> str:
+        return f"books/{user_id}/test/{uuid.uuid4()}/{filename}"
+
+    def _noop_apply_async(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr("app.api.v1.routes.books.upload_book_bytes", _fake_upload_book_bytes)
+    monkeypatch.setattr("app.core.storage.upload_book_bytes", _fake_upload_book_bytes)
+    # Celery's @task decorator yields a lazy proxy in tests; stubbing the whole
+    # task object is more reliable than patching proxy attributes.
+    monkeypatch.setattr(
+        "app.api.v1.routes.books.process_book_task",
+        SimpleNamespace(apply_async=_noop_apply_async),
+    )
 
 
 async def _register_user(client, email: str) -> tuple[dict[str, str], uuid.UUID]:
     response = await client.post(
         "/api/v1/auth/register",
-        json={"email": email, "password": "testpass123"},
+        json={"email": email, "password": "TestPass123!@#", "accepted_terms": True},
     )
     assert response.status_code == 201
     payload = response.json()
@@ -174,33 +192,21 @@ async def test_progress_write_routes_require_book_ownership(client, db):
 
 
 @pytest.mark.asyncio
-async def test_upload_attaches_book_to_multiple_owned_series(client, db, monkeypatch):
+async def test_upload_attaches_book_to_multiple_owned_series(client, db):
     headers, user_id = await _register_user(client, "owner-upload-series@lorevia.app")
     first_series = Series(user_id=user_id, name="Saga One")
     second_series = Series(user_id=user_id, name="Saga Two")
     db.add_all([first_series, second_series])
     await db.commit()
 
-    from app.api.v1.routes import books as books_routes
-
-    monkeypatch.setattr(books_routes, "upload_book_bytes", lambda raw, owner, filename: f"uploads/{owner}/{filename}")
-
-    class _FakeTask:
-        @staticmethod
-        def apply_async(*args, **kwargs):
-            return None
-
-    monkeypatch.setattr(books_routes, "process_book_task", _FakeTask())
-
     response = await client.post(
         "/api/v1/books/upload",
         headers=headers,
-        data=[
-            ("title", "Attached Book"),
-            ("series_ids", str(first_series.id)),
-            ("series_ids", str(second_series.id)),
-        ],
-        files={"file": ("attached.pdf", io.BytesIO(b"%PDF-1.4 test payload"), "application/pdf")},
+        files={"file": ("attached.pdf", b"%PDF-1.4 test payload", "application/pdf")},
+        data={
+            "title": "Attached Book",
+            "series_ids": [str(first_series.id), str(second_series.id)],
+        },
     )
 
     assert response.status_code == 202
@@ -219,32 +225,21 @@ async def test_upload_attaches_book_to_multiple_owned_series(client, db, monkeyp
 
 
 @pytest.mark.asyncio
-async def test_upload_rejects_foreign_series_ids(client, db, monkeypatch):
+async def test_upload_rejects_foreign_series_ids(client, db):
     headers, user_id = await _register_user(client, "owner-upload-idor@lorevia.app")
     _, other_user_id = await _register_user(client, "intruder-upload-idor@lorevia.app")
     foreign_series = Series(user_id=other_user_id, name="Other User Saga")
     db.add(foreign_series)
     await db.commit()
 
-    from app.api.v1.routes import books as books_routes
-
-    monkeypatch.setattr(books_routes, "upload_book_bytes", lambda raw, owner, filename: f"uploads/{owner}/{filename}")
-
-    class _FakeTask:
-        @staticmethod
-        def apply_async(*args, **kwargs):
-            return None
-
-    monkeypatch.setattr(books_routes, "process_book_task", _FakeTask())
-
     response = await client.post(
         "/api/v1/books/upload",
         headers=headers,
-        data=[
-            ("title", "Rejected Book"),
-            ("series_ids", str(foreign_series.id)),
-        ],
-        files={"file": ("rejected.pdf", io.BytesIO(b"%PDF-1.4 test payload"), "application/pdf")},
+        files={"file": ("rejected.pdf", b"%PDF-1.4 test payload", "application/pdf")},
+        data={
+            "title": "Rejected Book",
+            "series_ids": [str(foreign_series.id)],
+        },
     )
 
     assert response.status_code == 404

@@ -1,8 +1,10 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import String, DateTime, func
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from sqlalchemy import DateTime, String, func
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from app.core.database import Base
 
 
@@ -23,6 +25,7 @@ class User(Base):
     reading_progress = relationship("ReadingProgress", back_populates="user", cascade="all, delete-orphan")
     reading_sessions = relationship("ReadingSession", back_populates="user", cascade="all, delete-orphan")
     rate_limit_override = relationship("UserRateLimitOverride", back_populates="user", cascade="all, delete-orphan", uselist=False)
+    notifications = relationship("Notification", cascade="all, delete-orphan")
 
 
 class Subscription(Base):

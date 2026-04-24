@@ -3,10 +3,12 @@ New models for intelligence features — no image generation models here.
 """
 import uuid
 from datetime import datetime
-from sqlalchemy import String, Integer, Float, Boolean, DateTime, ForeignKey, func, ARRAY, Text
-from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+
 from pgvector.sqlalchemy import Vector
+from sqlalchemy import ARRAY, DateTime, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from app.core.database import Base
 
 
@@ -60,6 +62,7 @@ class PlotThread(Base):
     # introduced | ongoing | resolved | abandoned | unknown
     introduced_at: Mapped[int | None] = mapped_column(Integer)
     resolved_at: Mapped[int | None] = mapped_column(Integer)
+    note: Mapped[str | None] = mapped_column(Text)
     character_ids: Mapped[list[str] | None] = mapped_column(ARRAY(String))
     importance: Mapped[int] = mapped_column(Integer, default=5)  # 1–10
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -78,6 +81,7 @@ class ChapterSummary(Base):
     key_events: Mapped[dict | None] = mapped_column(JSONB)
     char_changes: Mapped[dict | None] = mapped_column(JSONB)
     clues: Mapped[dict | None] = mapped_column(JSONB)
+    themes: Mapped[list[dict] | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     chapter = relationship("Chapter", back_populates="summaries")
@@ -113,3 +117,18 @@ class QuoteEntry(Base):
     quote_text: Mapped[str] = mapped_column(Text, nullable=False)
     note: Mapped[str | None] = mapped_column(String)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Notification(Base):
+    """In-app notifications for author and reader workflows."""
+    __tablename__ = "notifications"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    book_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    data: Mapped[dict | None] = mapped_column(JSONB)
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)

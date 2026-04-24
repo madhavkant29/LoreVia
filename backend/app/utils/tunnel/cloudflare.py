@@ -14,3 +14,4 @@ This module provides a FastAPI middleware that validates the
 CF-Connecting-IP header is present (set by Cloudflare on tunnelled requests).
 When running via tunnel, all requests will have this header.
 Direct requests to the Railway URL will not — and get rejected.
+"""

@@ -1,5 +1,6 @@
-import fitz
 import re
+
+import fitz
 
 ISBN_RE = re.compile(r"97[89][\d\s-]{10,17}\d")
 

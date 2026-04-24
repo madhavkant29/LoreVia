@@ -1,6 +1,6 @@
-from pydantic import BaseModel, ConfigDict
 from datetime import datetime
-import uuid
+
+from pydantic import BaseModel, ConfigDict
 
 
 class TimestampMixin(BaseModel):

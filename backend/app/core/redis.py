@@ -1,9 +1,10 @@
-import redis.asyncio as aioredis
+import hashlib
+import json
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+import redis.asyncio as aioredis
+
 from app.core.config import settings
-import json
-import hashlib
 
 _redis: aioredis.Redis | None = None
 

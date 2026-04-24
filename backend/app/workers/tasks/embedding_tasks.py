@@ -1,4 +1,5 @@
 import asyncio
+
 from app.workers.celery_app import celery_app
 
 
@@ -19,11 +20,13 @@ def _run_coro(coro):
                  queue="embedding", max_retries=3)
 def update_character_embedding_task(self, character_id: str):
     async def _run():
-        from app.core.database import AsyncSessionLocal
-        from app.models.character import Character
-        from app.engine.embeddings.embedder import embed_character
-        from sqlalchemy import update
         import uuid
+
+        from sqlalchemy import update
+
+        from app.core.database import AsyncSessionLocal
+        from app.engine.embeddings.embedder import embed_character
+        from app.models.character import Character
         async with AsyncSessionLocal() as db:
             char = await db.get(Character, uuid.UUID(character_id))
             if not char:

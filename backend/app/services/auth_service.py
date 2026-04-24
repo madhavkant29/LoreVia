@@ -1,10 +1,17 @@
-from sqlalchemy.ext.asyncio import AsyncSession
+import uuid
+
 from sqlalchemy import select
-from app.models.user import User
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.config import settings
 from app.core.redis import get_token_version, store_refresh_session
-from app.core.security import hash_password, verify_password, create_access_token, create_refresh_token
-import uuid
+from app.core.security import (
+    create_access_token,
+    create_refresh_token,
+    hash_password,
+    verify_password,
+)
+from app.models.user import User
 
 
 async def register_user(db: AsyncSession, email: str, password: str) -> tuple[User, str, str]:

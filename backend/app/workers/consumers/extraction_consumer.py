@@ -3,16 +3,17 @@ Full book processing: parse → chunk → extract characters + relationships →
 Lazy: first N chapters immediately, rest queued.
 """
 import asyncio
+import logging
 import re
 import uuid
+
+from sqlalchemy import delete, func, select
+from sqlalchemy import update as sa_update
+
+from app.core.config import effective_tier, settings
 from app.core.database import AsyncSessionLocal
 from app.core.storage import download_book, upload_binary
-from app.core.config import effective_tier, settings
-from app.models.book import Book, Chapter, ChapterMedia
-from app.models.character import Character, CharacterState
-from app.models.intelligence import BookChunk, CharacterRelationship
 from app.engine.character.consolidator import consolidate_characters
-from app.engine.character.extractor import extract_characters_and_relationships
 from app.engine.character.deduplicator import (
     character_name_keys,
     embed_for_dedup,
@@ -20,13 +21,16 @@ from app.engine.character.deduplicator import (
     merge_alias,
     names_equivalent,
 )
+from app.engine.character.extractor import extract_characters_and_relationships
 from app.engine.character.profile_builder import build_character_profile, update_profile
 from app.engine.embeddings.embedder import embed_batch
-from app.parsers.chunker import chunk_text, count_tokens
+from app.models.book import Book, Chapter, ChapterMedia
+from app.models.character import Character, CharacterState
+from app.models.intelligence import BookChunk, CharacterRelationship
+from app.parsers.chunker import ChunkingConfig, chunk_text, count_tokens
+from app.utils.book_utils import serialize_manuscript_content
 from app.utils.compliance.copyright_check import check_isbn
 from app.utils.external.isbn_lookup import extract_isbn_from_pdf
-from sqlalchemy import delete, func, update as sa_update, select
-import logging
 
 log = logging.getLogger("lorevia.extraction")
 
@@ -168,7 +172,11 @@ async def _process_chapter(db, book, ch_data: dict):
 
     s3_key = f"chapters/{book.id}/{ch_data['number']}.txt"
     try:
-        await asyncio.to_thread(upload_text, s3_key, ch_data["text"])
+        await asyncio.to_thread(
+            upload_text,
+            s3_key,
+            serialize_manuscript_content(ch_data.get("text", ""), ch_data.get("html")),
+        )
     except Exception:
         s3_key = ""
 
@@ -211,7 +219,16 @@ async def _process_chapter(db, book, ch_data: dict):
     await db.execute(delete(BookChunk).where(BookChunk.chapter_id == chapter.id))
 
     # Chunk + extract
-    chunks = chunk_text(ch_data["text"], settings.CHUNK_MAX_TOKENS, settings.CHUNK_OVERLAP_TOKENS)
+    chunks = chunk_text(
+        ch_data["text"],
+        config=ChunkingConfig(
+            target_tokens=settings.CHUNK_TARGET_TOKENS,
+            max_tokens=settings.CHUNK_MAX_TOKENS,
+            min_tokens=settings.CHUNK_MIN_TOKENS,
+            overlap_tokens=settings.CHUNK_OVERLAP_TOKENS,
+            overlap_ratio=settings.CHUNK_OVERLAP_RATIO,
+        ),
+    )
 
     # Batch embed all chunks at once — cheaper
     chunk_embeddings = await embed_batch(chunks)
@@ -271,11 +288,19 @@ async def _process_chapter(db, book, ch_data: dict):
                         sa_update(Character).where(Character.id == existing_id).values(**updated)
                     )
                     if changed:
+                        growth_event = entity.get("growth_event")
+                        if isinstance(growth_event, dict):
+                            growth_event = {
+                                **growth_event,
+                                "chapter": ch_data["number"],
+                            }
                         snap = CharacterState(
                             character_id=existing_id,
                             at_chapter=ch_data["number"],
                             trait_snapshot=updated["trait_state"],
                             prompt_delta=_diff(char.trait_state or {}, updated["trait_state"]),
+                            arc_note=entity.get("arc_summary"),
+                            growth_event=growth_event if isinstance(growth_event, dict) else None,
                         )
                         db.add(snap)
                 await merge_alias(db, existing_id, entity["name"])

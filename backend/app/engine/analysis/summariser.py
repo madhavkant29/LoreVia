@@ -18,6 +18,7 @@ PROMPTS = {
   "key_events": [{"event": "...", "importance": 1-10, "impact": "..."}],
   "char_changes": [{"character": "...", "change": "...", "evidence": "..."}],
   "clues": [{"clue": "...", "foreshadows": "...", "why_it_matters": "..."}],
+  "themes": [{"theme": "...", "signal": "explicit|subtext", "evidence": "...", "depth": "surface|complex"}],
   "open_questions": ["..."]
 }
 Rules:
@@ -25,6 +26,7 @@ Rules:
 - Use concrete names, motivations, and turning points from the text.
 - The summary should feel rich enough for a reader who forgot the chapter, not like a compressed blurb.
 - Preserve chronology and explain why the chapter matters.
+- Include both obvious and philosophical themes when grounded in the text, such as false altruism, self-hatred, moral injury, denial, obsession, unreliable narration, or identity fracture.
 - If there are no character changes or clues, return empty arrays.
 - Do not include any text before or after the JSON.""",
     "key_points": (
@@ -52,7 +54,7 @@ async def generate_summary(chapter_text: str, mode: str, title: str = "") -> dic
             return _normalize_summary_payload(data, fallback=content)
         except json.JSONDecodeError:
             pass
-    return {"content": content, "key_events": None, "char_changes": None, "clues": None}
+    return {"content": content, "key_events": None, "char_changes": None, "clues": None, "themes": None}
 
 
 def _strip_json_fence(content: str) -> str:
@@ -72,4 +74,5 @@ def _normalize_summary_payload(data: dict, fallback: str) -> dict:
         "key_events": data.get("key_events") or [],
         "char_changes": data.get("char_changes") or [],
         "clues": data.get("clues") or [],
+        "themes": data.get("themes") or [],
     }

@@ -1,9 +1,11 @@
 """Seed test user. Usage: python scripts/seed_db.py"""
 import asyncio
+
+from sqlalchemy import select
+
 from app.core.database import AsyncSessionLocal
 from app.core.security import hash_password
 from app.models.user import User
-from sqlalchemy import select
 
 
 async def seed():

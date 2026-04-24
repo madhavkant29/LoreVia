@@ -1,66 +1,186 @@
 "use client"
-import { useEffect, useState } from "react"
+
+import Link from "next/link"
+import { useEffect, useMemo, useState } from "react"
+
 import { readerApi } from "@/lib/api/reader"
+import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import type { PlotThread } from "@/types/reader"
-import { STATUS_COLORS } from "@/lib/constants"
 
-interface Props { bookId: string; chapter: number }
-
-const STATUS_ICONS: Record<string, string> = {
-  introduced: "🔵",
-  ongoing: "🔄",
-  resolved: "✅",
-  abandoned: "⚫",
-  unknown: "❓",
+interface Props {
+  bookId: string
+  chapter?: number
+  mode?: "compact" | "dashboard"
 }
 
-export function PlotTracker({ bookId, chapter }: Props) {
+const STATUS_LABELS: Record<string, string> = {
+  introduced: "Introduced",
+  ongoing: "Ongoing",
+  resolved: "Resolved",
+  abandoned: "Abandoned",
+  unknown: "Unknown",
+}
+
+const STATUS_ORDER = ["ongoing", "introduced", "resolved", "abandoned", "unknown"] as const
+
+function statusClasses(status: string, isDark: boolean) {
+  const palette: Record<string, string> = {
+    introduced: isDark ? "border-cyan-400/20 bg-cyan-400/10 text-cyan-200" : "border-cyan-200 bg-cyan-50 text-cyan-800",
+    ongoing: isDark ? "border-emerald-400/20 bg-emerald-400/10 text-emerald-200" : "border-emerald-200 bg-emerald-50 text-emerald-800",
+    resolved: isDark ? "border-stone-300/20 bg-stone-200/10 text-stone-200" : "border-stone-300 bg-stone-100 text-stone-700",
+    abandoned: isDark ? "border-rose-400/20 bg-rose-400/10 text-rose-200" : "border-rose-200 bg-rose-50 text-rose-800",
+    unknown: isDark ? "border-slate-400/20 bg-slate-400/10 text-slate-200" : "border-slate-200 bg-slate-100 text-slate-700",
+  }
+  return palette[status] ?? palette.unknown
+}
+
+export function PlotTracker({ bookId, chapter, mode = "compact" }: Props) {
   const [threads, setThreads] = useState<PlotThread[]>([])
   const [loading, setLoading] = useState(true)
+  const [savingId, setSavingId] = useState<string | null>(null)
+  const [draftNotes, setDraftNotes] = useState<Record<string, string>>({})
+  const { theme } = usePreferencesStore()
+  const isDark = theme === "dark"
 
   useEffect(() => {
+    setLoading(true)
     readerApi.getPlotThreads(bookId, chapter)
-      .then(setThreads)
+      .then((items) => {
+        setThreads(items)
+        setDraftNotes(Object.fromEntries(items.map((item) => [item.id, item.note ?? ""])))
+      })
       .finally(() => setLoading(false))
   }, [bookId, chapter])
 
-  if (loading) return <div className="text-sm text-gray-400 py-4 text-center">Loading plot threads...</div>
-  if (threads.length === 0) return <div className="text-sm text-gray-400 py-4 text-center">No plot threads tracked yet</div>
+  const grouped = useMemo(() => {
+    const initial = Object.fromEntries(STATUS_ORDER.map((status) => [status, [] as PlotThread[]])) as Record<string, PlotThread[]>
+    for (const thread of threads) {
+      const key = STATUS_ORDER.includes(thread.status as typeof STATUS_ORDER[number]) ? thread.status : "unknown"
+      initial[key].push(thread)
+    }
+    return initial
+  }, [threads])
 
-  const byType = threads.reduce((acc, t) => {
-    const key = t.type ?? "other"
-    if (!acc[key]) acc[key] = []
-    acc[key].push(t)
-    return acc
-  }, {} as Record<string, PlotThread[]>)
+  const saveNote = async (threadId: string) => {
+    setSavingId(threadId)
+    try {
+      const updated = await readerApi.updatePlotThread(bookId, threadId, {
+        note: draftNotes[threadId]?.trim() ? draftNotes[threadId].trim() : null,
+      })
+      setThreads((current) => current.map((item) => item.id === threadId ? updated : item))
+      setDraftNotes((current) => ({ ...current, [threadId]: updated.note ?? "" }))
+    } finally {
+      setSavingId(null)
+    }
+  }
+
+  if (loading) return <div className={`py-4 text-center text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>Loading plot threads...</div>
+  if (threads.length === 0) return <div className={`py-4 text-center text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>No plot threads tracked yet.</div>
+
+  if (mode === "compact") {
+    return (
+      <div className="space-y-3">
+        {threads.slice(0, 6).map((thread) => (
+          <div key={thread.id} className={`rounded-[1rem] border px-3 py-3 text-sm ${isDark ? "border-white/10 bg-white/[0.03] text-slate-200" : "border-stone-200 bg-stone-50 text-stone-700"}`}>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="font-semibold">{thread.title}</p>
+                <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+                  Introduced in chapter {thread.introduced_at ?? "?"}
+                  {thread.resolved_at ? ` • Resolved in chapter ${thread.resolved_at}` : ""}
+                </p>
+              </div>
+              <span className={`rounded-full border px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] ${statusClasses(thread.status, isDark)}`}>
+                {STATUS_LABELS[thread.status] ?? STATUS_LABELS.unknown}
+              </span>
+            </div>
+            {thread.note ? <p className={`mt-2 text-xs leading-5 ${isDark ? "text-amber-200" : "text-amber-800"}`}>Note: {thread.note}</p> : null}
+          </div>
+        ))}
+        <Link
+          href={`/${bookId}/plot-threads`}
+          className={`inline-flex rounded-full border px-4 py-2 text-sm font-medium ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}
+        >
+          Open full plot thread dashboard
+        </Link>
+      </div>
+    )
+  }
 
   return (
-    <div className="flex flex-col gap-4">
-      {Object.entries(byType).map(([type, typeThreads]) => (
-        <div key={type}>
-          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2 capitalize">{type}</p>
-          <div className="flex flex-col gap-2">
-            {typeThreads.map(t => (
-              <div key={t.id} className="flex items-start gap-2 bg-white rounded-lg border border-gray-100 p-3">
-                <span className="text-sm mt-0.5">{STATUS_ICONS[t.status]}</span>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-0.5">
-                    <p className="text-sm font-medium text-gray-800 truncate">{t.title}</p>
-                    <span className={`text-xs px-1.5 py-0.5 rounded-full shrink-0 ${STATUS_COLORS[t.status] ?? STATUS_COLORS.unknown}`}>
-                      {t.status}
+    <div className="space-y-6">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        {STATUS_ORDER.map((status) => (
+          <div key={status} className={`rounded-[1.25rem] border px-4 py-4 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-white/80"}`}>
+            <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>{STATUS_LABELS[status]}</p>
+            <p className={`mt-3 text-3xl font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{grouped[status].length}</p>
+          </div>
+        ))}
+      </div>
+
+      {STATUS_ORDER.map((status) => {
+        const statusThreads = grouped[status]
+        if (statusThreads.length === 0) return null
+        return (
+          <section key={status}>
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <p className={`text-xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>{STATUS_LABELS[status]}</p>
+                <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>{statusThreads.length} thread{statusThreads.length === 1 ? "" : "s"}</p>
+              </div>
+              <span className={`rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] ${statusClasses(status, isDark)}`}>
+                {STATUS_LABELS[status]}
+              </span>
+            </div>
+            <div className="space-y-3">
+              {statusThreads.map((thread) => (
+                <div key={thread.id} className={`rounded-[1.4rem] border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white/90"}`}>
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className={`text-base font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{thread.title}</p>
+                        {thread.type ? <span className={`rounded-full px-2.5 py-1 text-[11px] uppercase tracking-[0.16em] ${isDark ? "bg-white/8 text-slate-300" : "bg-stone-100 text-stone-600"}`}>{thread.type}</span> : null}
+                      </div>
+                      {thread.description ? <p className={`mt-2 max-w-3xl text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{thread.description}</p> : null}
+                      <p className={`mt-2 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>
+                        Introduced in chapter {thread.introduced_at ?? "?"}
+                        {thread.resolved_at ? ` • Resolved in chapter ${thread.resolved_at}` : ""}
+                        {thread.character_ids.length > 0 ? ` • ${thread.character_ids.length} linked characters` : ""}
+                      </p>
+                    </div>
+                    <span className={`rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] ${statusClasses(thread.status, isDark)}`}>
+                      {STATUS_LABELS[thread.status] ?? STATUS_LABELS.unknown}
                     </span>
                   </div>
-                  {t.description && <p className="text-xs text-gray-500 leading-relaxed">{t.description}</p>}
-                  <p className="text-xs text-gray-400 mt-1">
-                    Introduced ch. {t.introduced_at}
-                    {t.resolved_at ? ` · Resolved ch. ${t.resolved_at}` : ""}
-                  </p>
+
+                  <div className="mt-4">
+                    <label className={`mb-2 block text-xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>
+                      Private note
+                    </label>
+                    <textarea
+                      value={draftNotes[thread.id] ?? ""}
+                      onChange={(event) => setDraftNotes((current) => ({ ...current, [thread.id]: event.target.value }))}
+                      placeholder="Resolve this in arc 5."
+                      rows={3}
+                      className={`w-full rounded-[1rem] border px-3 py-3 text-sm leading-6 outline-none ${isDark ? "border-white/10 bg-black text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-stone-50 text-stone-900 placeholder:text-stone-400"}`}
+                    />
+                    <div className="mt-3 flex items-center justify-between gap-3">
+                      <p className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Only visible inside your LoreVia workspace.</p>
+                      <button
+                        onClick={() => saveNote(thread.id)}
+                        disabled={savingId === thread.id}
+                        className="rounded-full bg-[linear-gradient(135deg,#115e59,#0f766e)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                      >
+                        {savingId === thread.id ? "Saving..." : "Save note"}
+                      </button>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      ))}
+              ))}
+            </div>
+          </section>
+        )
+      })}
     </div>
   )
 }

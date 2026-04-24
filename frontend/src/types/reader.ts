@@ -8,6 +8,7 @@ export interface ChapterData {
   intelligence_available?: boolean
   text_url: string | null
   text_content?: string | null
+  html_content?: string | null
   media?: ChapterMedia[]
   characters: ChapterCharacter[]
 }
@@ -42,6 +43,7 @@ export interface ContextResult {
 export interface SearchResult {
   text: string
   summary: string
+  chunk_index?: number
   chapter_num: number
   chapter_title: string | null
   relevance: number
@@ -92,6 +94,8 @@ export interface PlotThread {
   introduced_at: number | null
   resolved_at: number | null
   importance: number
+  note: string | null
+  character_ids: string[]
 }
 
 export interface ForeshadowingItem {
@@ -107,6 +111,45 @@ export interface TimelineEvent {
   kind: string
   title: string
   detail: string | null
+}
+
+export interface TimelineChapter {
+  number: number
+  title: string | null
+}
+
+export interface CharacterTimelineTrack {
+  id: string
+  name: string
+  role: string | null
+  start_chapter: number
+  end_chapter: number
+  detail: string | null
+}
+
+export interface PlotThreadTimelineTrack {
+  id: string
+  title: string
+  status: string
+  start_chapter: number
+  end_chapter: number
+  note: string | null
+  detail: string | null
+}
+
+export interface RelationshipTimelineMarker {
+  id: string
+  title: string
+  chapter_number: number
+  detail: string | null
+}
+
+export interface TimelineResponse {
+  chapters: TimelineChapter[]
+  events: TimelineEvent[]
+  character_tracks: CharacterTimelineTrack[]
+  thread_tracks: PlotThreadTimelineTrack[]
+  relationship_markers: RelationshipTimelineMarker[]
 }
 
 export interface ThematicSearchResult {
@@ -134,11 +177,14 @@ export interface RelationshipGraphNode {
 }
 
 export interface RelationshipGraphEdge {
+  id?: string | null
   source: string
   target: string
   type: string
   description?: string | null
   sentiment?: number | null
+  from_chapter?: number | null
+  to_chapter?: number | null
 }
 
 export interface RelationshipGraph {

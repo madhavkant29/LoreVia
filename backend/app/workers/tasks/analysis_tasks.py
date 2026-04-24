@@ -1,4 +1,5 @@
 import asyncio
+
 from app.workers.celery_app import celery_app
 from app.workers.consumers.analysis_consumer import analyse_chapter
 

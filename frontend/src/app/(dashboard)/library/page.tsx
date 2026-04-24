@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import type { Route } from "next"
 import Link from "next/link"
 
 import { UploadModal } from "@/components/modals/UploadModal"
@@ -102,7 +103,7 @@ export default function LibraryPage() {
     <div
       className={`min-h-screen transition-colors ${
         isDark
-          ? "bg-[linear-gradient(180deg,#07111f_0%,#0b1830_44%,#0d1b35_100%)] text-slate-100"
+          ? "bg-[linear-gradient(180deg,#000000_0%,#060606_44%,#0d0d0d_100%)] text-slate-100"
           : "bg-[linear-gradient(180deg,#fcf7ef_0%,#f8f3eb_42%,#f4f0ea_100%)] text-stone-950"
       }`}
     >
@@ -124,6 +125,12 @@ export default function LibraryPage() {
             </div>
 
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+              <Link
+                href="/notes"
+                className={`inline-flex items-center justify-center rounded-[1.1rem] border px-6 py-3.5 text-sm font-semibold transition ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-stone-200 bg-white/85 text-stone-700 hover:bg-white"}`}
+              >
+                Notes
+              </Link>
               <button
                 onClick={() => setShowUpload(true)}
                 className="inline-flex items-center justify-center rounded-[1.1rem] bg-[linear-gradient(135deg,#4f46e5,#4338ca)] px-6 py-3.5 text-sm font-semibold text-white shadow-[0_18px_40px_-24px_rgba(79,70,229,0.7)] transition hover:translate-y-[-1px]"
@@ -306,6 +313,22 @@ function ShelfSection({
                     >
                       Open
                     </Link>
+                    {book.mode === "author" ? (
+                      <>
+                        <Link
+                          href={`/${book.id}/manuscript` as Route}
+                          className={`rounded-full border px-5 py-2.5 text-sm font-medium transition ${isDark ? "border-emerald-400/30 text-emerald-200 hover:bg-emerald-400/10" : "border-emerald-200 text-emerald-700 hover:bg-emerald-50"}`}
+                        >
+                          Manage chapters
+                        </Link>
+                        <Link
+                          href="/notes"
+                          className={`rounded-full border px-5 py-2.5 text-sm font-medium transition ${isDark ? "border-white/15 text-slate-200 hover:bg-white/5" : "border-stone-300 text-stone-700 hover:bg-stone-50"}`}
+                        >
+                          Notes
+                        </Link>
+                      </>
+                    ) : null}
                     {archived ? (
                       <button
                         onClick={() => onRestore(book.id)}
@@ -361,6 +384,16 @@ function ShelfSection({
                 </div>
 
                 <div className="mt-4 flex items-center gap-2">
+                  {book.mode === "author" ? (
+                    <>
+                      <Link href={`/${book.id}/manuscript` as Route} className={`rounded-full border px-4 py-2 text-sm ${isDark ? "border-emerald-400/30 text-emerald-200" : "border-emerald-200 text-emerald-700"}`}>
+                        Chapters
+                      </Link>
+                      <Link href="/notes" className={`rounded-full border px-4 py-2 text-sm ${isDark ? "border-white/15 text-slate-200" : "border-stone-300 text-stone-700"}`}>
+                        Notes
+                      </Link>
+                    </>
+                  ) : null}
                   {archived ? (
                     <button
                       onClick={() => onRestore(book.id)}

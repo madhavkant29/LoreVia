@@ -3,6 +3,7 @@ import { useState, useEffect } from "react"
 import { readerApi } from "@/lib/api/reader"
 import type { ChapterSummary, SummaryMode } from "@/types/reader"
 import { SUMMARY_MODE_LABELS } from "@/lib/constants"
+import { capture } from "@/lib/analytics/posthog"
 
 interface Props {
   bookId: string
@@ -19,7 +20,11 @@ export function SummaryPanel({ bookId, chapterNum, onClose, theme }: Props) {
   useEffect(() => {
     setLoading(true)
     readerApi.getSummary(bookId, chapterNum, mode)
-      .then(setSummary)
+      .then((data) => {
+        setSummary(data)
+        capture("summary_viewed", { book_id: bookId, chapter: chapterNum, mode })
+        return data
+      })
       .finally(() => setLoading(false))
   }, [bookId, chapterNum, mode])
 

@@ -66,7 +66,8 @@ async def predict(
             response_format={"type": "json_object"},
         )
         try:
-            data = json.loads(r.choices[0].message.content)
+            content = r.choices[0].message.content or "{}"
+            data = json.loads(content)
             return data.get("theories", [])
         except Exception:
             return []

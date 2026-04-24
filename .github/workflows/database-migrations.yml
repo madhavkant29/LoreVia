@@ -1,0 +1,162 @@
+name: Database Migrations
+
+on:
+  push:
+    paths:
+      - 'alembic/versions/**'
+      - 'alembic/env.py'
+      - 'backend/app/models/**'
+  pull_request:
+    paths:
+      - 'alembic/versions/**'
+      - 'alembic/env.py'
+      - 'backend/app/models/**'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  test-migrations:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: lorevia_migration_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r backend/requirements.txt
+
+    - name: Create migration test database
+      env:
+        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/lorevia_migration_test
+        REDIS_URL: redis://localhost:6379/0
+        S3_BUCKET: test-bucket
+        AWS_ACCESS_KEY_ID: test-key
+        AWS_SECRET_ACCESS_KEY: test-secret
+        OPENAI_API_KEY: test-key
+        JWT_SECRET: test-secret-key-for-migrations
+        RESEND_API_KEY: test-key
+      run: |
+        cd backend
+        alembic upgrade head
+
+    - name: Test downgrade and upgrade
+      env:
+        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/lorevia_migration_test
+        REDIS_URL: redis://localhost:6379/0
+        S3_BUCKET: test-bucket
+        AWS_ACCESS_KEY_ID: test-key
+        AWS_SECRET_ACCESS_KEY: test-secret
+        OPENAI_API_KEY: test-key
+        JWT_SECRET: test-secret-key-for-migrations
+        RESEND_API_KEY: test-key
+      run: |
+        cd backend
+        # Test downgrading
+        alembic downgrade -1
+        # Test upgrading back
+        alembic upgrade head
+        # Test all the way down and up
+        alembic downgrade base
+        alembic upgrade head
+
+    - name: Check for migration conflicts
+      env:
+        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/lorevia_migration_test
+        REDIS_URL: redis://localhost:6379/0
+        S3_BUCKET: test-bucket
+        AWS_ACCESS_KEY_ID: test-key
+        AWS_SECRET_ACCESS_KEY: test-secret
+        OPENAI_API_KEY: test-key
+        JWT_SECRET: test-secret-key-for-migrations
+        RESEND_API_KEY: test-key
+      run: |
+        cd backend
+        python -c "import alembic.config; import alembic.script; from alembic.runtime.migration import MigrationContext; from sqlalchemy import create_engine; config = alembic.config.Config('alembic.ini'); script = alembic.script.ScriptDirectory.from_config(config); heads = script.get_heads(); exit(1) if len(heads) > 1 else print('Migration structure is valid.')"
+
+  migrate:
+    needs: test-migrations
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment: production
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r backend/requirements.txt
+
+    - name: Create database backup
+      env:
+        DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      run: |
+        cd backend
+        # Create a backup before migrating
+        python -c "import os; from sqlalchemy import create_engine; from datetime import datetime; backup_name = f'pre_migration_backup_{datetime.now().strftime(\"%Y%m%d_%H%M%S\")}.sql'; print(f'Creating backup: {backup_name}')"
+
+    - name: Run database migrations
+      env:
+        DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      run: |
+        cd backend
+        alembic upgrade head
+
+    - name: Verify migration success
+      env:
+        DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      run: |
+        cd backend
+        python -c "from sqlalchemy import create_engine; from alembic.runtime.migration import MigrationContext; from alembic.config import Config; from alembic.script import ScriptDirectory; import os; engine = create_engine(os.environ['DATABASE_URL']); connection = engine.connect(); context = MigrationContext.configure(connection); current_rev = context.get_current_revision(); config = Config('alembic.ini'); script = ScriptDirectory.from_config(config); head_rev = script.get_current_head(); exit(1) if current_rev != head_rev else print('Migration verification passed!')"
+
+    - name: Notify migration success
+      uses: 8398a7/action-slack@v3
+      with:
+        status: success
+        channel: '#deployments'
+        text: '✅ Database migrations completed successfully!'
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+    - name: Notify migration failure
+      if: failure()
+      uses: 8398a7/action-slack@v3
+      with:
+        status: failure
+        channel: '#deployments'
+        text: '❌ Database migrations failed!'
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

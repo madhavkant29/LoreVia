@@ -2,15 +2,19 @@
 Summary service — thin wrapper around the analysis engine + cache.
 Called by the reader route for on-demand summary generation.
 """
-from sqlalchemy.ext.asyncio import AsyncSession
+import uuid
+from typing import Any, cast
+
 from sqlalchemy import select
-from app.models.book import Chapter
-from app.models.intelligence import ChapterSummary
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.config import settings
 from app.core.redis import cache_get, cache_set, key_chapter_summary
 from app.core.storage import download_book
-from app.core.config import settings
 from app.engine.analysis.summariser import generate_summary
-import uuid
+from app.models.book import Chapter
+from app.models.intelligence import ChapterSummary
+from app.utils.book_utils import deserialize_manuscript_content
 
 
 async def get_or_generate_summary(
@@ -28,7 +32,7 @@ async def get_or_generate_summary(
     # 1. Redis cache
     cached = await cache_get(key_chapter_summary(str(chapter.id), mode))
     if cached:
-        return cached
+        return cast(dict[str, Any], cached)
 
     # 2. DB
     row = (await db.execute(
@@ -47,7 +51,7 @@ async def get_or_generate_summary(
     if not chapter.s3_key:
         return None
     raw = download_book(chapter.s3_key)
-    text = raw.decode("utf-8", errors="ignore")
+    text = str(deserialize_manuscript_content(raw).get("text") or "")
     data = await generate_summary(text, mode, chapter.title or "")
 
     row = ChapterSummary(

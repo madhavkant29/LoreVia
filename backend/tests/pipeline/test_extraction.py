@@ -1,7 +1,6 @@
-import pytest
-from unittest.mock import AsyncMock, patch
-from app.engine.character.profile_builder import build_character_profile
 import uuid
+
+from app.engine.character.profile_builder import build_character_profile
 
 
 def test_profile_builder_handles_sparse_data():

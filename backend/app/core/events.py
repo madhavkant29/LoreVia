@@ -1,8 +1,10 @@
-from app.core.database import engine, Base
+import logging
+
+from sqlalchemy import text
+
+from app.core.database import Base, engine
 from app.core.redis import get_redis
 from app.db import base  # noqa: F401
-from sqlalchemy import text
-import logging
 
 log = logging.getLogger("lorevia.startup")
 
@@ -19,6 +21,8 @@ async def on_startup() -> None:
         await conn.execute(text("ALTER TABLE books ADD COLUMN IF NOT EXISTS total_tokens INTEGER"))
         await conn.execute(text("ALTER TABLE books ADD COLUMN IF NOT EXISTS total_chunks INTEGER"))
         await conn.execute(text("ALTER TABLE books ADD COLUMN IF NOT EXISTS is_truncated BOOLEAN DEFAULT FALSE NOT NULL"))
+        await conn.execute(text("ALTER TABLE books ADD COLUMN IF NOT EXISTS mode VARCHAR DEFAULT 'reader' NOT NULL"))
+        await conn.execute(text("ALTER TABLE books ADD COLUMN IF NOT EXISTS source_kind VARCHAR DEFAULT 'single_upload' NOT NULL"))
         await conn.execute(text("ALTER TABLE books ADD COLUMN IF NOT EXISTS cover_s3_key VARCHAR"))
         await conn.execute(text("ALTER TABLE books ADD COLUMN IF NOT EXISTS primary_series_id UUID"))
         await conn.execute(text("ALTER TABLE books ADD COLUMN IF NOT EXISTS series_name VARCHAR"))
@@ -54,9 +58,12 @@ async def on_startup() -> None:
         await conn.execute(text("ALTER TABLE reading_progress ADD COLUMN IF NOT EXISTS chapters_read INTEGER[] DEFAULT ARRAY[]::INTEGER[]"))
         await conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_reading_progress_user_book ON reading_progress(user_id, book_id)"))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_characters_book_first_created ON characters(book_id, first_chapter, created_at)"))
+        await conn.execute(text("ALTER TABLE characters ADD COLUMN IF NOT EXISTS growth_events JSONB DEFAULT '[]'::jsonb"))
+        await conn.execute(text("ALTER TABLE character_states ADD COLUMN IF NOT EXISTS growth_event JSONB"))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_character_relationships_book_chapter ON character_relationships(book_id, from_chapter, to_chapter)"))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_book_chunks_book_chapter_chunk ON book_chunks(book_id, chapter_id, chunk_index)"))
         await conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_chapter_summaries_chapter_mode ON chapter_summaries(chapter_id, mode)"))
+        await conn.execute(text("ALTER TABLE chapter_summaries ADD COLUMN IF NOT EXISTS themes JSONB"))
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS series (
                 id UUID PRIMARY KEY,

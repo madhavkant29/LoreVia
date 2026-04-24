@@ -2,7 +2,10 @@
 Character chat — in-character responses grounded in story context.
 Phase 3 feature. Uses GPT-4o for quality.
 """
+from typing import Any, cast
+
 from openai import AsyncOpenAI
+
 from app.core.config import settings
 from app.models.character import Character
 
@@ -56,13 +59,14 @@ async def chat_as_character(
 
         # Keep last 10 turns to manage context window
         recent = messages[-10:]
+        chat_messages = cast(Any, [{"role": "system", "content": system}] + recent)
 
         r = await client.chat.completions.create(
             model=settings.OPENAI_INTEL_MODEL,
-            messages=[{"role": "system", "content": system}] + recent,
+            messages=chat_messages,
             temperature=0.7,
             max_tokens=220,
         )
-        return r.choices[0].message.content.strip()
+        return (r.choices[0].message.content or "").strip()
     finally:
         await client.close()
