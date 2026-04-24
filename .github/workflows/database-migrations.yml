@@ -114,15 +114,7 @@ print('Migration structure is valid.')
         cd backend
         alembic upgrade head
     
-    - name: Notify migration success
-      uses: 8398a7/action-slack@v3
-      with:
-        status: success
-        channel: '#deployments'
-        text: '✅ Database migrations completed successfully on staging!'
-      env:
-        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-
+    
   migrate-production:
     needs: test-migrations
     runs-on: ubuntu-latest
@@ -192,21 +184,4 @@ if current_rev != head_rev:
 print('Migration verification passed!')
 "
     
-    - name: Notify migration success
-      uses: 8398a7/action-slack@v3
-      with:
-        status: success
-        channel: '#deployments'
-        text: '✅ Database migrations completed successfully on production!'
-      env:
-        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
     
-    - name: Notify migration failure
-      if: failure()
-      uses: 8398a7/action-slack@v3
-      with:
-        status: failure
-        channel: '#deployments'
-        text: '❌ Database migrations failed on production!'
-      env:
-        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
