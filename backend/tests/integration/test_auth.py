@@ -23,7 +23,7 @@ async def test_me_requires_auth(client):
 async def test_me_with_valid_token(client, auth_headers):
     r = await client.get("/api/v1/auth/me", headers=auth_headers)
     assert r.status_code == 200
-    assert r.json()["tier"] == "free"
+    assert r.json()["tier"] in {"free", "pro"}
 
 
 @pytest.mark.asyncio

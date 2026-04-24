@@ -194,12 +194,12 @@ async def test_upload_attaches_book_to_multiple_owned_series(client, db, monkeyp
     response = await client.post(
         "/api/v1/books/upload",
         headers=headers,
-        data=[
-            ("title", "Attached Book"),
-            ("series_ids", str(first_series.id)),
-            ("series_ids", str(second_series.id)),
+        files=[
+            ("file", ("attached.pdf", b"%PDF-1.4 test payload", "application/pdf")),
+            ("title", (None, "Attached Book")),
+            ("series_ids", (None, str(first_series.id))),
+            ("series_ids", (None, str(second_series.id))),
         ],
-        files={"file": ("attached.pdf", io.BytesIO(b"%PDF-1.4 test payload"), "application/pdf")},
     )
 
     assert response.status_code == 202
@@ -239,11 +239,11 @@ async def test_upload_rejects_foreign_series_ids(client, db, monkeypatch):
     response = await client.post(
         "/api/v1/books/upload",
         headers=headers,
-        data=[
-            ("title", "Rejected Book"),
-            ("series_ids", str(foreign_series.id)),
+        files=[
+            ("file", ("rejected.pdf", b"%PDF-1.4 test payload", "application/pdf")),
+            ("title", (None, "Rejected Book")),
+            ("series_ids", (None, str(foreign_series.id))),
         ],
-        files={"file": ("rejected.pdf", io.BytesIO(b"%PDF-1.4 test payload"), "application/pdf")},
     )
 
     assert response.status_code == 404
