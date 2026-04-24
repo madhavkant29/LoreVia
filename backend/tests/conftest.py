@@ -2,6 +2,7 @@ import asyncio
 import sys
 
 import pytest
+import pytest_asyncio
 import sqlalchemy as sa
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -31,7 +32,7 @@ def mock_download_book(monkeypatch):
     monkeypatch.setattr("app.core.storage.download_book", lambda key: b"mock content")
 
 
-@pytest.fixture(autouse=True)
+@pytest_asyncio.fixture(autouse=True)
 async def reset_redis():
     """Reset Redis module-level cache between tests to avoid event loop mismatch."""
     from app.core import redis as redis_module
@@ -49,7 +50,7 @@ engine_test = None
 TestSession = None
 
 
-@pytest.fixture(scope="session")
+@pytest_asyncio.fixture(scope="session")
 async def setup_engine():
     global engine_test, TestSession
     engine_test = create_async_engine(TEST_DB, echo=False)
@@ -60,7 +61,7 @@ async def setup_engine():
     TestSession = None
 
 
-@pytest.fixture
+@pytest_asyncio.fixture(scope="session")
 async def setup_db(setup_engine):
     async with engine_test.begin() as conn:
         # Enable pgvector extension for vector columns
@@ -71,15 +72,17 @@ async def setup_db(setup_engine):
         await conn.run_sync(Base.metadata.drop_all)
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def db(setup_db):
     async with TestSession() as s:
         yield s
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def client(db):
-    app.dependency_overrides[get_db] = lambda: db
+    async def override_get_db():
+        yield db
+    app.dependency_overrides[get_db] = override_get_db
     # Disable rate limiting in tests
     app.dependency_overrides[rate_limit_api] = lambda: None
     app.dependency_overrides[rate_limit_auth_register] = lambda: None
@@ -97,7 +100,7 @@ async def client(db):
     app.dependency_overrides.clear()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def auth_headers(client):
     import uuid
     r = await client.post("/api/v1/auth/register", json={"email": f"user-{uuid.uuid4()}@lorevia.app", "password": "SecurePass456!@#", "accepted_terms": True})
