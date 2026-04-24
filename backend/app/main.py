@@ -18,7 +18,7 @@ from app.core.database import engine
 from app.core.events import on_shutdown, on_startup
 from app.core.redis import get_redis
 
-if settings.SENTRY_DSN:
+if settings.SENTRY_DSN and not settings.DEBUG:
     sentry_sdk.init(
         dsn=settings.SENTRY_DSN,
         integrations=[
