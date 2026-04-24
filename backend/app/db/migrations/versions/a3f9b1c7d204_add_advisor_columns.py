@@ -16,6 +16,11 @@ depends_on = None
 def upgrade() -> None:
     bind = op.get_bind()
     inspector = sa.inspect(bind)
+    tables = set(inspector.get_table_names())
+
+    if "characters" not in tables:
+        return
+
     columns = {column["name"] for column in inspector.get_columns("characters")}
 
     if "last_seen_chapter" not in columns:
