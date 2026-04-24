@@ -45,12 +45,23 @@ if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 TEST_DB = settings.DATABASE_URL.replace("postgresql://", "postgresql+psycopg://")
-engine_test = create_async_engine(TEST_DB, echo=False)
-TestSession = async_sessionmaker(engine_test, class_=AsyncSession, expire_on_commit=False)
+engine_test = None
+TestSession = None
+
+
+@pytest.fixture(scope="session")
+async def setup_engine():
+    global engine_test, TestSession
+    engine_test = create_async_engine(TEST_DB, echo=False)
+    TestSession = async_sessionmaker(engine_test, class_=AsyncSession, expire_on_commit=False)
+    yield
+    await engine_test.dispose()
+    engine_test = None
+    TestSession = None
 
 
 @pytest.fixture
-async def setup_db():
+async def setup_db(setup_engine):
     async with engine_test.begin() as conn:
         # Enable pgvector extension for vector columns
         await conn.execute(sa.text("CREATE EXTENSION IF NOT EXISTS vector"))
