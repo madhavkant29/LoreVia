@@ -123,6 +123,13 @@ jobs:
     - name: Create database backup
       env:
         DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        REDIS_URL: redis://localhost:6379/0
+        S3_BUCKET: test-bucket
+        AWS_ACCESS_KEY_ID: test-key
+        AWS_SECRET_ACCESS_KEY: test-secret
+        OPENAI_API_KEY: test-key
+        JWT_SECRET: test-secret-key-for-migrations
+        RESEND_API_KEY: test-key
       run: |
         cd backend
         # Create a backup before migrating
@@ -131,6 +138,13 @@ jobs:
     - name: Run database migrations
       env:
         DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        REDIS_URL: redis://localhost:6379/0
+        S3_BUCKET: test-bucket
+        AWS_ACCESS_KEY_ID: test-key
+        AWS_SECRET_ACCESS_KEY: test-secret
+        OPENAI_API_KEY: test-key
+        JWT_SECRET: test-secret-key-for-migrations
+        RESEND_API_KEY: test-key
       run: |
         cd backend
         alembic upgrade head
@@ -138,6 +152,13 @@ jobs:
     - name: Verify migration success
       env:
         DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        REDIS_URL: redis://localhost:6379/0
+        S3_BUCKET: test-bucket
+        AWS_ACCESS_KEY_ID: test-key
+        AWS_SECRET_ACCESS_KEY: test-secret
+        OPENAI_API_KEY: test-key
+        JWT_SECRET: test-secret-key-for-migrations
+        RESEND_API_KEY: test-key
       run: |
         cd backend
         python -c "from sqlalchemy import create_engine; from alembic.runtime.migration import MigrationContext; from alembic.config import Config; from alembic.script import ScriptDirectory; import os; engine = create_engine(os.environ['DATABASE_URL']); connection = engine.connect(); context = MigrationContext.configure(connection); current_rev = context.get_current_revision(); config = Config('alembic.ini'); script = ScriptDirectory.from_config(config); head_rev = script.get_current_head(); exit(1) if current_rev != head_rev else print('Migration verification passed!')"
