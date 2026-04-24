@@ -17,25 +17,41 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("books", sa.Column("mode", sa.String(), nullable=False, server_default="reader"))
-    op.add_column("books", sa.Column("source_kind", sa.String(), nullable=False, server_default="single_upload"))
-    op.add_column(
-        "characters",
-        sa.Column("growth_events", postgresql.JSONB(astext_type=sa.Text()), nullable=True, server_default=sa.text("'[]'::jsonb")),
-    )
-    op.add_column(
-        "character_states",
-        sa.Column("growth_event", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-    )
-    op.add_column(
-        "chapter_summaries",
-        sa.Column("themes", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-    )
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    tables = set(inspector.get_table_names())
+
+    if "books" in tables:
+        op.add_column("books", sa.Column("mode", sa.String(), nullable=False, server_default="reader"))
+        op.add_column("books", sa.Column("source_kind", sa.String(), nullable=False, server_default="single_upload"))
+    if "characters" in tables:
+        op.add_column(
+            "characters",
+            sa.Column("growth_events", postgresql.JSONB(astext_type=sa.Text()), nullable=True, server_default=sa.text("'[]'::jsonb")),
+        )
+    if "character_states" in tables:
+        op.add_column(
+            "character_states",
+            sa.Column("growth_event", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+        )
+    if "chapter_summaries" in tables:
+        op.add_column(
+            "chapter_summaries",
+            sa.Column("themes", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+        )
 
 
 def downgrade() -> None:
-    op.drop_column("chapter_summaries", "themes")
-    op.drop_column("character_states", "growth_event")
-    op.drop_column("characters", "growth_events")
-    op.drop_column("books", "source_kind")
-    op.drop_column("books", "mode")
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    tables = set(inspector.get_table_names())
+
+    if "chapter_summaries" in tables:
+        op.drop_column("chapter_summaries", "themes")
+    if "character_states" in tables:
+        op.drop_column("character_states", "growth_event")
+    if "characters" in tables:
+        op.drop_column("characters", "growth_events")
+    if "books" in tables:
+        op.drop_column("books", "source_kind")
+        op.drop_column("books", "mode")

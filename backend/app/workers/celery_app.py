@@ -2,7 +2,7 @@ import ssl
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import sentry_sdk
-from celery import Celery
+from celery import Celery, signals
 from sentry_sdk.integrations.celery import CeleryIntegration
 
 from app.core.config import settings
@@ -122,12 +122,10 @@ if redis_ssl_options:
     celery_app.conf.redis_backend_use_ssl = redis_ssl_options
 
 
-@celery_app.task_prerun.connect
-def _task_prerun_set_request_id(task_id=None, task=None, *args, **kwargs):
+@signals.before_task_publish.connect
+def _task_prerun_set_request_id(sender=None, headers=None, body=None, **kwargs):
     try:
-        request_id = None
-        if task is not None and getattr(task, "request", None) is not None:
-            request_id = (getattr(task.request, "headers", None) or {}).get("request_id")
+        request_id = (headers or {}).get("request_id")
         set_request_id(request_id)
         if request_id and settings.SENTRY_DSN:
             sentry_sdk.set_tag("request_id", request_id)
@@ -136,8 +134,8 @@ def _task_prerun_set_request_id(task_id=None, task=None, *args, **kwargs):
         return
 
 
-@celery_app.task_postrun.connect
-def _task_postrun_clear_request_id(task_id=None, task=None, *args, **kwargs):
+@signals.after_task_publish.connect
+def _task_postrun_clear_request_id(sender=None, headers=None, body=None, **kwargs):
     try:
         set_request_id(None)
     except Exception:

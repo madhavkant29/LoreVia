@@ -17,6 +17,11 @@ depends_on = None
 def upgrade() -> None:
     bind = op.get_bind()
     inspector = sa.inspect(bind)
+    tables = set(inspector.get_table_names())
+
+    if "plot_threads" not in tables:
+        return
+
     columns = {column["name"] for column in inspector.get_columns("plot_threads")}
     if "note" not in columns:
         op.add_column("plot_threads", sa.Column("note", sa.Text(), nullable=True))
@@ -25,6 +30,11 @@ def upgrade() -> None:
 def downgrade() -> None:
     bind = op.get_bind()
     inspector = sa.inspect(bind)
+    tables = set(inspector.get_table_names())
+
+    if "plot_threads" not in tables:
+        return
+
     columns = {column["name"] for column in inspector.get_columns("plot_threads")}
     if "note" in columns:
         op.drop_column("plot_threads", "note")
