@@ -12,7 +12,7 @@ from app.main import app
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-TEST_DB = settings.DATABASE_URL.replace("postgresql://", "postgresql+psycopg://").replace("/postgres", "/test_lorevia")
+TEST_DB = settings.DATABASE_URL.replace("postgresql://", "postgresql+psycopg://")
 engine_test = create_async_engine(TEST_DB, echo=False)
 TestSession = async_sessionmaker(engine_test, class_=AsyncSession, expire_on_commit=False)
 

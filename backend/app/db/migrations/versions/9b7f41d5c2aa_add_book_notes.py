@@ -22,16 +22,26 @@ def upgrade() -> None:
     if "book_notes" in tables:
         return
 
+    has_users = "users" in tables
+    has_books = "books" in tables
+
+    fk_constraints = []
+    if has_users:
+        fk_constraints.append(sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"))
+    if has_books:
+        fk_constraints.append(sa.ForeignKeyConstraint(["book_id"], ["books.id"], ondelete="CASCADE"))
+
     op.create_table(
         "book_notes",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True, nullable=False),
-        sa.Column("user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("book_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("books.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("user_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("book_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("chapter_number", sa.Integer(), nullable=True),
         sa.Column("title", sa.String(), nullable=True),
         sa.Column("body", sa.Text(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        *fk_constraints,
     )
     op.create_index("ix_book_notes_user_id", "book_notes", ["user_id"])
     op.create_index("ix_book_notes_book_id", "book_notes", ["book_id"])

@@ -16,6 +16,23 @@ depends_on = None
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    tables = set(inspector.get_table_names())
+
+    if "notifications" in tables:
+        return
+
+    # Check if referenced tables exist
+    has_users = "users" in tables
+    has_books = "books" in tables
+
+    fk_constraints = []
+    if has_books:
+        fk_constraints.append(sa.ForeignKeyConstraint(["book_id"], ["books.id"], ondelete="CASCADE"))
+    if has_users:
+        fk_constraints.append(sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"))
+
     op.create_table(
         "notifications",
         sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
@@ -27,8 +44,7 @@ def upgrade() -> None:
         sa.Column("data", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
         sa.Column("read_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.ForeignKeyConstraint(["book_id"], ["books.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
+        *fk_constraints,
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index(op.f("ix_notifications_user_id"), "notifications", ["user_id"], unique=False)
