@@ -10,6 +10,7 @@ from sentry_sdk.integrations.celery import CeleryIntegration
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 from sqlalchemy import text
 from starlette.middleware.trustedhost import TrustedHostMiddleware
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.api.v1.router import api_router
 from app.core.config import allowed_hosts, cors_origins, settings
@@ -61,51 +62,64 @@ app.add_middleware(
     allowed_hosts=allowed_hosts(),
 )
 
+
+class SecurityHeadersMiddleware:
+    """Pure ASGI middleware to avoid BaseHTTPMiddleware event loop issues."""
+    
+    def __init__(self, app: ASGIApp):
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        request_id = scope.get("headers", {}).get(b"x-request-id") or str(uuid.uuid4())
+        from app.utils.request_context import set_request_id
+        set_request_id(request_id)
+        started_at = time.perf_counter()
+
+        async def send_with_headers(message):
+            if message["type"] == "http.response.start":
+                headers = dict(message.get("headers", []))
+                headers[b"x-request-id"] = request_id.encode()
+                headers[b"x-frame-options"] = b"DENY"
+                headers[b"x-content-type-options"] = b"nosniff"
+                headers[b"referrer-policy"] = b"strict-origin-when-cross-origin"
+                headers[b"permissions-policy"] = b"camera=(), microphone=(), geolocation=()"
+                headers[b"content-security-policy"] = b"default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+                if not settings.DEBUG:
+                    headers[b"strict-transport-security"] = b"max-age=31536000; includeSubDomains; preload"
+                message["headers"] = list(headers.items())
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_with_headers)
+        except Exception:
+            log.exception(
+                "request_failed",
+                extra={
+                    "request_id": request_id,
+                    "method": scope.get("method"),
+                    "path": scope.get("path"),
+                },
+            )
+            raise
+
+        duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
+        if settings.DEBUG or duration_ms >= 1200:
+            log.info(
+                "request_complete",
+                extra={
+                    "request_id": request_id,
+                    "method": scope.get("method"),
+                    "path": scope.get("path"),
+                    "duration_ms": duration_ms,
+                },
+            )
+
+app.add_middleware(SecurityHeadersMiddleware)
 app.include_router(api_router, prefix=settings.API_V1_PREFIX)
-
-
-@app.middleware("http")
-async def security_headers(request: Request, call_next):
-    request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
-    from app.utils.request_context import set_request_id
-
-    set_request_id(request_id)
-    started_at = time.perf_counter()
-    try:
-        response: Response = await call_next(request)
-    except Exception:
-        log.exception(
-            "request_failed",
-            extra={
-                "request_id": request_id,
-                "method": request.method,
-                "path": request.url.path,
-                "client": request.client.host if request.client else None,
-            },
-        )
-        raise
-    duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
-    response.headers["X-Request-ID"] = request_id
-    response.headers["X-Frame-Options"] = "DENY"
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
-    response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
-    if not settings.DEBUG:
-        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
-    if settings.DEBUG or duration_ms >= 1200 or response.status_code >= 500:
-        log.info(
-            "request_complete",
-            extra={
-                "request_id": request_id,
-                "method": request.method,
-                "path": request.url.path,
-                "status_code": response.status_code,
-                "duration_ms": duration_ms,
-                "client": request.client.host if request.client else None,
-            },
-        )
-    return response
 
 
 @app.get("/health")

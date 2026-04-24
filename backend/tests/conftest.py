@@ -24,19 +24,29 @@ from app.core.database import Base, get_db
 from app.core.storage import download_book
 from app.main import app
 
+
+@pytest.fixture(autouse=True)
+def mock_download_book(monkeypatch):
+    """Mock download_book to avoid S3 errors in all tests."""
+    monkeypatch.setattr("app.core.storage.download_book", lambda key: b"mock content")
+
+
+@pytest.fixture(autouse=True)
+async def reset_redis():
+    """Reset Redis module-level cache between tests to avoid event loop mismatch."""
+    from app.core import redis as redis_module
+    redis_module._redis = None
+    yield
+    if redis_module._redis:
+        await redis_module._redis.aclose()
+    redis_module._redis = None
+
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 TEST_DB = settings.DATABASE_URL.replace("postgresql://", "postgresql+psycopg://")
 engine_test = create_async_engine(TEST_DB, echo=False)
 TestSession = async_sessionmaker(engine_test, class_=AsyncSession, expire_on_commit=False)
-
-
-@pytest.fixture(scope="session")
-def event_loop():
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
 
 
 @pytest.fixture(scope="session")
@@ -57,7 +67,7 @@ async def db(setup_db):
 
 
 @pytest.fixture
-async def client(db, monkeypatch):
+async def client(db):
     app.dependency_overrides[get_db] = lambda: db
     # Disable rate limiting in tests
     app.dependency_overrides[rate_limit_api] = lambda: None
@@ -71,8 +81,6 @@ async def client(db, monkeypatch):
     app.dependency_overrides[rate_limit_public] = lambda: None
     app.dependency_overrides[rate_limit_public_asset] = lambda: None
     app.dependency_overrides[rate_limit_continuity_checker] = lambda: None
-    # Mock download_book at module level to avoid S3 errors
-    monkeypatch.setattr("app.core.storage.download_book", lambda key: b"mock content")
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://localhost") as c:
         yield c
     app.dependency_overrides.clear()

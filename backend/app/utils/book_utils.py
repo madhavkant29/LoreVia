@@ -307,7 +307,12 @@ async def ensure_book_cover(db: AsyncSession, book: Book) -> None:
 
     from app.parsers.pdf_parser import extract_first_page_cover
 
-    raw = await asyncio.to_thread(download_book, book.s3_key)
+    try:
+        raw = await asyncio.to_thread(download_book, book.s3_key)
+    except Exception:
+        # Book file doesn't exist in S3, skip cover extraction
+        return
+
     cover = await asyncio.to_thread(extract_first_page_cover, raw)
     if not cover:
         return
