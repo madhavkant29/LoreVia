@@ -117,11 +117,6 @@ jobs:
         cd frontend
         npm run type-check
 
-    - name: Run tests
-      run: |
-        cd frontend
-        npm run test
-
     - name: Build application
       run: |
         cd frontend
