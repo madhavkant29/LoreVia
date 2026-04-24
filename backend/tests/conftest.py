@@ -33,6 +33,23 @@ def mock_download_book(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def mock_storage_uploads(monkeypatch):
+    """Mock upload functions to avoid S3/local storage errors in all tests."""
+    monkeypatch.setattr("app.core.storage.upload_book_bytes", lambda raw, owner, filename: f"uploads/{owner}/{filename}")
+    monkeypatch.setattr("app.core.storage.upload_binary", lambda key, raw, content_type=None: key)
+
+
+@pytest.fixture(autouse=True)
+def mock_celery_tasks(monkeypatch):
+    """Mock Celery tasks to avoid worker dependency in all tests."""
+    class _FakeTask:
+        @staticmethod
+        def apply_async(*args, **kwargs):
+            return None
+    monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_book_task", _FakeTask())
+
+
+@pytest.fixture(autouse=True)
 def mock_redis(monkeypatch):
     """Mock Redis to avoid event loop issues with global _redis connection."""
     from app.core import redis as redis_module

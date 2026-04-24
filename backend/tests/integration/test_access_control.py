@@ -173,21 +173,12 @@ async def test_progress_write_routes_require_book_ownership(client, db):
 
 
 @pytest.mark.asyncio
-async def test_upload_attaches_book_to_multiple_owned_series(client, db, monkeypatch):
+async def test_upload_attaches_book_to_multiple_owned_series(client, db):
     headers, user_id = await _register_user(client, "owner-upload-series@lorevia.app")
     first_series = Series(user_id=user_id, name="Saga One")
     second_series = Series(user_id=user_id, name="Saga Two")
     db.add_all([first_series, second_series])
     await db.commit()
-
-    monkeypatch.setattr("app.core.storage.upload_book_bytes", lambda raw, owner, filename: f"uploads/{owner}/{filename}")
-
-    class _FakeTask:
-        @staticmethod
-        def apply_async(*args, **kwargs):
-            return None
-
-    monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_book_task", _FakeTask())
 
     response = await client.post(
         "/api/v1/books/upload",
@@ -216,21 +207,12 @@ async def test_upload_attaches_book_to_multiple_owned_series(client, db, monkeyp
 
 
 @pytest.mark.asyncio
-async def test_upload_rejects_foreign_series_ids(client, db, monkeypatch):
+async def test_upload_rejects_foreign_series_ids(client, db):
     headers, user_id = await _register_user(client, "owner-upload-idor@lorevia.app")
     _, other_user_id = await _register_user(client, "intruder-upload-idor@lorevia.app")
     foreign_series = Series(user_id=other_user_id, name="Other User Saga")
     db.add(foreign_series)
     await db.commit()
-
-    monkeypatch.setattr("app.core.storage.upload_book_bytes", lambda raw, owner, filename: f"uploads/{owner}/{filename}")
-
-    class _FakeTask:
-        @staticmethod
-        def apply_async(*args, **kwargs):
-            return None
-
-    monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_book_task", _FakeTask())
 
     response = await client.post(
         "/api/v1/books/upload",
