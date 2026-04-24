@@ -1,7 +1,7 @@
 """Add screenplay support - scenes and dialogue tables
 
 Revision ID: 20240424_screenplay_support
-Revises: 20240320_initial_schema
+Revises: 9b7f41d5c2aa
 Create Date: 2024-04-24 17:30:00.000000
 
 """
