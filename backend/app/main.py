@@ -78,9 +78,12 @@ class SecurityHeadersMiddleware:
         from app.utils.request_context import set_request_id
         set_request_id(request_id)
         started_at = time.perf_counter()
+        response_started = False
 
         async def send_with_headers(message):
+            nonlocal response_started
             if message["type"] == "http.response.start":
+                response_started = True
                 headers = dict(message.get("headers", []))
                 headers[b"x-request-id"] = request_id.encode()
                 headers[b"x-frame-options"] = b"DENY"
@@ -104,7 +107,22 @@ class SecurityHeadersMiddleware:
                     "path": scope.get("path"),
                 },
             )
-            raise
+            # If response hasn't started, send a 500 error response
+            if not response_started:
+                await send({
+                    "type": "http.response.start",
+                    "status": 500,
+                    "headers": [
+                        [b"content-type", b"text/plain"],
+                        [b"x-request-id", request_id.encode()],
+                    ],
+                })
+                await send({
+                    "type": "http.response.body",
+                    "body": b"Internal Server Error",
+                })
+            else:
+                raise
 
         duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
         if settings.DEBUG or duration_ms >= 1200:
