@@ -3,13 +3,13 @@ name: Database Migrations
 on:
   push:
     paths:
-      - 'alembic/versions/**'
-      - 'alembic/env.py'
+      - 'backend/app/db/migrations/versions/**'
+      - 'backend/app/db/env.py'
       - 'backend/app/models/**'
   pull_request:
     paths:
-      - 'alembic/versions/**'
-      - 'alembic/env.py'
+      - 'backend/app/db/migrations/versions/**'
+      - 'backend/app/db/env.py'
       - 'backend/app/models/**'
 
 permissions:
