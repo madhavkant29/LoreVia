@@ -16,7 +16,7 @@ const ANALYSIS_TOOLS = [
   {
     href: "timeline",
     eyebrow: "Story structure",
-    title: "Timeline",
+    title: "Major events",
     description: "Follow the chapter-axis view of characters, thread movement, and relationship turns.",
   },
   {

@@ -6,6 +6,7 @@ import { readerApi } from "@/lib/api/reader"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { useBookModeStore, type BookMode } from "@/lib/stores/bookModeStore"
 import { GENRE_TAGS } from "@/lib/constants/genreTags"
+import { capture } from "@/lib/analytics/posthog"
 import type { Book, BookSeries, ChapterConsistencyReport } from "@/types/book"
 import type { AdvisorSuggestion, EditorialReview, EditorialReviewPassage, ManuscriptSynopsis } from "@/types/intelligence"
 import type { PlotThread } from "@/types/reader"
@@ -113,6 +114,14 @@ export function UploadModal({ onClose }: { onClose: () => void }) {
         })
         bookId = response.book_id
         setBookMode(response.book_id, "author")
+        capture("book_uploaded", {
+          mode: "author",
+          kind: "manuscript_import",
+          file_count: files.length,
+          replace_existing: replaceExisting,
+          split_into_chapters: splitIntoChapters,
+          chunk_long_documents: chunkLongDocuments,
+        })
         setChapterReports(response.chapter_reports ?? [])
         const importedChapter = response.imported_chapters[0]
         if (importedChapter) {
@@ -130,6 +139,8 @@ export function UploadModal({ onClose }: { onClose: () => void }) {
         return
       } else {
         const primaryFile = files[0]
+        const filename = (primaryFile?.name || "").toLowerCase()
+        const format = filename.endsWith(".pdf") ? "pdf" : filename.endsWith(".epub") ? "epub" : "other"
         const response = await booksApi.upload(primaryFile, title, genre || undefined, author || undefined, {
           visibility,
           seriesIds: selectedSeriesIds,
@@ -142,6 +153,14 @@ export function UploadModal({ onClose }: { onClose: () => void }) {
         })
         bookId = typeof response?.book_id === "string" ? response.book_id : null
         if (bookId) setBookMode(bookId, mode)
+        capture("book_uploaded", {
+          mode,
+          kind: "new_upload",
+          format,
+          has_cover_file: Boolean(coverFile) && !autoExtractCover,
+          tag_count: selectedTags.length,
+          in_series: selectedSeriesIds.length > 0,
+        })
       }
       setUploadStage("processing")
       setUploadProgress(100)

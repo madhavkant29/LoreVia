@@ -9,6 +9,7 @@ import { booksApi } from "@/lib/api/books"
 import { intelligenceApi } from "@/lib/api/intelligence"
 import { readerApi } from "@/lib/api/reader"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
+import { capture } from "@/lib/analytics/posthog"
 import type { Book, BookNote, ChapterVersion, PreWritingCheck } from "@/types/book"
 import type { Character } from "@/types/character"
 import type { AdvisorSuggestion, EditorialReview, EditorialReviewPassage, ManuscriptSynopsis, VoiceConsistencyReview } from "@/types/intelligence"
@@ -22,6 +23,10 @@ export default function ManuscriptPage() {
   const { bookId } = useParams<{ bookId: string }>()
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
+
+  useEffect(() => {
+    capture("author_manuscript_opened", { book_id: bookId })
+  }, [bookId])
 
   const [book, setBook] = useState<Book | null>(null)
   const [characters, setCharacters] = useState<Character[]>([])
@@ -623,7 +628,7 @@ export default function ManuscriptPage() {
                   </div>
                   <div className="flex gap-2">
                     <Link href={`/${bookId}/plot-threads`} className={`rounded-full px-3 py-1.5 text-xs font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-white text-stone-700"}`}>Threads</Link>
-                    <Link href={`/${bookId}/timeline`} className={`rounded-full px-3 py-1.5 text-xs font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-white text-stone-700"}`}>Timeline</Link>
+                    <Link href={`/${bookId}/timeline`} className={`rounded-full px-3 py-1.5 text-xs font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-white text-stone-700"}`}>Major events</Link>
                   </div>
                 </div>
                 <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">

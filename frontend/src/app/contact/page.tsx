@@ -1,5 +1,11 @@
+import type { Metadata } from "next"
 import Link from "next/link"
 import { LEGAL_EMAIL, SUPPORT_EMAIL } from "@/lib/constants/contact"
+
+export const metadata: Metadata = {
+  title: "Contact",
+  description: "Get in touch with the LoreVia team for support, feedback, or partnership inquiries.",
+}
 
 export default function ContactPage() {
   return (

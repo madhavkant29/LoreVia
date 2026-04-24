@@ -6,6 +6,7 @@ import { useParams } from "next/navigation"
 
 import { booksApi } from "@/lib/api/books"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
+import { capture } from "@/lib/analytics/posthog"
 import type { ChapterConsistencyReport } from "@/types/book"
 
 export default function ChapterReportsPage() {
@@ -17,6 +18,7 @@ export default function ChapterReportsPage() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    capture("author_reports_opened", { book_id: bookId })
     booksApi.getChapterReports(bookId).then(setReports).finally(() => setLoading(false))
   }, [bookId])
 

@@ -76,7 +76,7 @@ The backend manages auth, uploads, parsing, progress tracking, book metadata, ch
 ### Background Processing
 
 - `Celery`
-- Separate worker queues for extraction, analysis, embedding, and intelligence tasks
+- Single Celery worker (MVP) consuming extraction, analysis, embedding, and intelligence queues
 
 Workers parse books, generate chunks, compute embeddings, extract characters and relationships, and produce derived reading features.
 
@@ -169,15 +169,21 @@ From the project root:
 docker compose -f docker-compose-local.yml up --build
 ```
 
-This starts:
+This starts (MVP single-worker mode):
 
 - `api`
-- `worker-extraction`
-- `worker-analysis`
-- `worker-intelligence`
+- `worker`
 - `postgres`
 - `redis`
 - `flower`
+
+#### Rollback (full multi-worker isolation)
+
+If you want the original queue isolation (or you hit user-facing latency issues), use:
+
+```bash
+docker compose -f docker-compose-local.multiworkers.yml up --build
+```
 
 ### 4. Open the app
 

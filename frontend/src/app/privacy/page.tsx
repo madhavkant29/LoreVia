@@ -1,3 +1,10 @@
+import type { Metadata } from "next"
+
+export const metadata: Metadata = {
+  title: "Privacy Policy",
+  description: "Read the LoreVia Privacy Policy to understand how we collect, use, and protect your data.",
+}
+
 export default function PrivacyPage() {
   return (
     <main className="min-h-screen bg-[linear-gradient(180deg,#020202_0%,#0a0a0a_45%,#111111_100%)] px-6 py-16 text-white">
@@ -20,6 +27,17 @@ export default function PrivacyPage() {
           </ul>
         </div>
         <div>
+          <p className="font-semibold text-white">Analytics (PostHog — EU)</p>
+          <p className="mt-2">
+            If you consent to analytics, we use PostHog Cloud in the EU region (EU servers) to understand product usage
+            (for example: which features are used, where users drop off). We configure analytics to avoid storing raw IP
+            addresses. PostHog uses a consent cookie and may use localStorage to persist anonymous analytics identifiers.
+          </p>
+          <p className="mt-2">
+            We do not enable session recording or heatmaps for analytics.
+          </p>
+        </div>
+        <div>
           <p className="font-semibold text-white">How we use it</p>
           <ul className="mt-2 list-disc space-y-1 pl-5">
             <li>Provide reading, search, advisor, and continuity features.</li>
@@ -34,7 +52,11 @@ export default function PrivacyPage() {
         </div>
         <div>
           <p className="font-semibold text-white">Your choices</p>
-          <p className="mt-2">You can manage account data, delete content, change visibility, and contact us about access or deletion requests at legal@getlorevia.com or support@getlorevia.com.</p>
+          <p className="mt-2">
+            You can manage account data, delete content, change visibility, and contact us about access or deletion
+            requests at legal@getlorevia.com or support@getlorevia.com. You can also decline analytics consent at any
+            time by clearing the analytics consent cookie in your browser.
+          </p>
         </div>
       </div>
       </div>

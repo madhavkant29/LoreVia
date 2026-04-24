@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation"
 import { RelationshipGraph } from "@/components/intelligence/RelationshipGraph"
 import { booksApi } from "@/lib/api/books"
 import { readerApi } from "@/lib/api/reader"
+import { capture } from "@/lib/analytics/posthog"
 
 export default function GraphPage() {
   const { bookId } = useParams<{ bookId: string }>()
@@ -25,6 +26,12 @@ export default function GraphPage() {
       setMaxChapter(readChapter)
     }).catch(() => {})
   }, [bookId])
+
+  useEffect(() => {
+    if (confirmed) {
+      capture("graph_opened", { book_id: bookId })
+    }
+  }, [bookId, confirmed])
 
   if (!confirmed) {
     return (

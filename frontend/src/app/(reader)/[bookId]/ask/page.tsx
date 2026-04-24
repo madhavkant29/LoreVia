@@ -7,6 +7,7 @@ import { useParams } from "next/navigation"
 import { intelligenceApi } from "@/lib/api/intelligence"
 import { readerApi } from "@/lib/api/reader"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
+import { capture } from "@/lib/analytics/posthog"
 import type { GroundedCitation } from "@/types/intelligence"
 
 const QUICK_PROMPTS = [
@@ -56,6 +57,7 @@ export default function AskPage() {
     setInput("")
     setError(null)
     setLoading(true)
+    capture("ask_submitted", { book_id: bookId, chapter: currentChapter, question_len: question.length })
     try {
       const response = await intelligenceApi.answer(bookId, question, currentChapter)
       setHistory((previous) => [

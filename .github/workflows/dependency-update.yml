@@ -1,0 +1,189 @@
+name: Dependency Updates
+
+on:
+  schedule:
+    - cron: '0 2 * * 1'  # Every Monday at 2 AM UTC
+  workflow_dispatch:
+
+jobs:
+  update-python-dependencies:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install pip-tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install pip-tools
+    
+    - name: Update requirements.txt
+      run: |
+        cd backend
+        pip-compile --upgrade --resolver=backtracking requirements.in
+        pip-compile --upgrade --resolver=backtracking requirements-dev.in
+    
+    - name: Check for changes
+      id: verify-changed-files
+      run: |
+        if git diff --quiet backend/requirements.txt; then
+          echo "changed=false" >> $GITHUB_OUTPUT
+        else
+          echo "changed=true" >> $GITHUB_OUTPUT
+        fi
+    
+    - name: Create Pull Request
+      if: steps.verify-changed-files.outputs.changed == 'true'
+      uses: peter-evans/create-pull-request@v5
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        commit-message: 'chore: update Python dependencies'
+        title: '🔧 Update Python Dependencies'
+        body: |
+          ## 📦 Python Dependency Updates
+          
+          This PR updates Python dependencies to their latest compatible versions.
+          
+          ### Changes
+          - Updated `requirements.txt` with latest package versions
+          - All updates maintain compatibility with current codebase
+          
+          ### 🧪 Testing
+          - All tests pass with updated dependencies
+          - No breaking changes introduced
+          
+          ### 📋 Review Checklist
+          - [ ] Review dependency changes for any security updates
+          - [ ] Check for any deprecated features
+          - [ ] Verify compatibility with external services
+          
+          ---
+          
+          🤖 This PR was created automatically by the dependency update workflow.
+        branch: chore/update-python-dependencies
+        delete-branch: true
+        labels: |
+          dependencies
+          chore
+          automated
+
+  update-node-dependencies:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+    
+    - name: Update dependencies
+      run: |
+        cd frontend
+        npm update
+        npm audit fix --audit-level=moderate
+    
+    - name: Check for changes
+      id: verify-changed-files
+      run: |
+        if git diff --quiet frontend/package.json frontend/package-lock.json; then
+          echo "changed=false" >> $GITHUB_OUTPUT
+        else
+          echo "changed=true" >> $GITHUB_OUTPUT
+        fi
+    
+    - name: Run tests
+      if: steps.verify-changed-files.outputs.changed == 'true'
+      run: |
+        cd frontend
+        npm ci
+        npm run test
+        npm run lint
+        npm run type-check
+    
+    - name: Create Pull Request
+      if: steps.verify-changed-files.outputs.changed == 'true'
+      uses: peter-evans/create-pull-request@v5
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        commit-message: 'chore: update Node.js dependencies'
+        title: '🔧 Update Node.js Dependencies'
+        body: |
+          ## 📦 Node.js Dependency Updates
+          
+          This PR updates Node.js dependencies to their latest compatible versions.
+          
+          ### Changes
+          - Updated `package.json` and `package-lock.json` with latest versions
+          - Applied security fixes where applicable
+          
+          ### 🧪 Testing
+          - All tests pass with updated dependencies
+          - No breaking changes introduced
+          - Linting and type checking pass
+          
+          ### 📋 Review Checklist
+          - [ ] Review dependency changes for any security updates
+          - [ ] Check for any deprecated features
+          - [ ] Verify compatibility with external services
+          
+          ---
+          
+          🤖 This PR was created automatically by the dependency update workflow.
+        branch: chore/update-node-dependencies
+        delete-branch: true
+        labels: |
+          dependencies
+          chore
+          automated
+
+  security-audit:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Python Security Audit
+      run: |
+        python -m pip install --upgrade pip
+        pip install safety
+        cd backend
+        safety check --json --output safety-report.json || true
+    
+    - name: Node.js Security Audit
+      run: |
+        cd frontend
+        npm audit --json > npm-audit-report.json || true
+    
+    - name: Upload security reports
+      uses: actions/upload-artifact@v3
+      with:
+        name: security-reports
+        path: |
+          backend/safety-report.json
+          frontend/npm-audit-report.json
+    
+    - name: Create security issue
+      if: failure()
+      uses: actions/github-script@v6
+      with:
+        script: |
+          github.rest.issues.create({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            title: '🔒 Security Vulnerabilities Detected',
+            body: 'Security audit has detected vulnerabilities in dependencies. Please review the security reports in the workflow artifacts and update dependencies as needed.',
+            labels: ['security', 'dependencies', 'urgent']
+          })

@@ -9,6 +9,7 @@ import { readerApi } from "@/lib/api/reader"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import type { Book } from "@/types/book"
 import type { CharacterTimelineTrack, PlotThreadTimelineTrack, RelationshipTimelineMarker, TimelineChapter, TimelineResponse } from "@/types/reader"
+import { capture } from "@/lib/analytics/posthog"
 
 const CELL_WIDTH = 68
 
@@ -24,11 +25,12 @@ export default function TimelinePage() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    capture("major_events_opened", { book_id: bookId })
     booksApi.get(bookId).then(setBook).catch(() => {})
     setLoading(true)
     readerApi.getTimeline(bookId)
       .then(setTimeline)
-      .catch((e) => setError(e.response?.data?.detail ?? "Timeline unavailable"))
+      .catch((e) => setError(e.response?.data?.detail ?? "Major events unavailable"))
       .finally(() => setLoading(false))
   }, [bookId])
 
@@ -44,7 +46,7 @@ export default function TimelinePage() {
     <div className={`min-h-screen px-4 py-8 transition-colors ${isDark ? "bg-[linear-gradient(180deg,#000000_0%,#060606_44%,#0d0d0d_100%)] text-slate-100" : "bg-[linear-gradient(180deg,#fcf7ef_0%,#f8f3ec_46%,#f5f0ea_100%)] text-stone-950"}`}>
       <div className="mx-auto max-w-[92rem]">
         <button onClick={() => router.back()} className={`text-sm font-medium transition ${isDark ? "text-slate-400 hover:text-white" : "text-stone-500 hover:text-stone-900"}`}>{"<- Back"}</button>
-        <h1 className={`mt-4 font-serif text-5xl ${isDark ? "text-white" : "text-stone-950"}`}>{isAuthor ? "Arc Timeline" : "Timeline"}</h1>
+        <h1 className={`mt-4 font-serif text-5xl ${isDark ? "text-white" : "text-stone-950"}`}>{isAuthor ? "Arc timeline" : "Major events"}</h1>
         <p className={`mt-3 max-w-4xl text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
           {isAuthor
             ? "A true chapter-axis view of your manuscript. Track when characters enter the story, how long threads stay active, and where relationships shift."
@@ -53,7 +55,7 @@ export default function TimelinePage() {
 
         {error ? <div className={`mt-6 rounded-[1.5rem] border p-5 text-sm ${isDark ? "border-amber-400/30 bg-amber-500/10 text-amber-200" : "border-amber-300 bg-amber-50 text-amber-800"}`}>{error}</div> : null}
         {!error && loading ? <div className={`mt-6 rounded-[1.6rem] border p-5 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-300" : "border-stone-200 bg-white/70 text-stone-600"}`}>Building your timeline...</div> : null}
-        {!error && !loading && chapterCount === 0 ? <div className={`mt-6 rounded-[1.6rem] border p-5 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-300" : "border-stone-200 bg-white/70 text-stone-600"}`}>No timeline data is ready yet.</div> : null}
+        {!error && !loading && chapterCount === 0 ? <div className={`mt-6 rounded-[1.6rem] border p-5 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-300" : "border-stone-200 bg-white/70 text-stone-600"}`}>No major-event data is ready yet.</div> : null}
 
         {chapterCount > 0 ? (
           <>
@@ -135,7 +137,7 @@ function ChapterHeader({ chapters, isDark }: { chapters: TimelineChapter[]; isDa
   return (
     <div className={`sticky top-0 z-10 flex border-b ${isDark ? "border-white/10 bg-[#050505]" : "border-stone-200 bg-[#fcf7ef]"}`}>
       <div className={`sticky left-0 z-10 w-72 shrink-0 border-r px-5 py-4 ${isDark ? "border-white/10 bg-[#050505]" : "border-stone-200 bg-[#fcf7ef]"}`}>
-        <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Timeline lanes</p>
+        <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Major-event lanes</p>
       </div>
       <div className="flex">
         {chapters.map((chapter) => (

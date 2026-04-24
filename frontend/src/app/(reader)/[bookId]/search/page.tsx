@@ -7,6 +7,7 @@ import { useEffect, useState } from "react"
 import { booksApi } from "@/lib/api/books"
 import { readerApi } from "@/lib/api/reader"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
+import { capture } from "@/lib/analytics/posthog"
 import type { Book } from "@/types/book"
 import type { SearchResult } from "@/types/reader"
 
@@ -39,9 +40,11 @@ export default function SearchPage() {
     setQuery(trimmed)
     setLoading(true)
     setError(null)
+    capture("search_submitted", { book_id: bookId, query_len: trimmed.length, workspace: isAuthor ? "author" : "reader" })
     try {
       const data = await readerApi.search(bookId, trimmed, 9999)
       setResults(data)
+      capture("search_results_loaded", { book_id: bookId, result_count: data.length })
     } catch {
       setResults([])
       setError("Search failed. Please try again.")

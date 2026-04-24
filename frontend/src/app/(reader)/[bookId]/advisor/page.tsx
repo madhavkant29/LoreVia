@@ -6,6 +6,7 @@ import { useParams } from "next/navigation"
 import { booksApi } from "@/lib/api/books"
 import { intelligenceApi } from "@/lib/api/intelligence"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
+import { capture } from "@/lib/analytics/posthog"
 import type {
   AdvisorMessage,
   AdvisorPassage,
@@ -311,6 +312,7 @@ export default function AdvisorPage() {
 
   // Fetch greeting + suggestions on mount (badge needs count before tab opens)
   useEffect(() => {
+    capture("author_advisor_opened", { book_id: bookId })
     booksApi.get(bookId).then((book) => setBookMode(book.mode ?? "author")).catch(() => {})
     intelligenceApi.advisorGreeting(bookId).then(setGreeting).catch(() => {})
     intelligenceApi.advisorSuggestions(bookId)
