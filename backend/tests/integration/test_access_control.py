@@ -8,6 +8,15 @@ from app.models.book import Book, Chapter, Series, SeriesBook
 from app.models.character import Character
 
 
+@pytest.fixture(autouse=True)
+def _mock_storage_uploads(monkeypatch):
+    def _fake_upload_book_bytes(raw: bytes, user_id: str, filename: str) -> str:
+        return f"books/{user_id}/test/{uuid.uuid4()}/{filename}"
+
+    monkeypatch.setattr("app.api.v1.routes.books.upload_book_bytes", _fake_upload_book_bytes)
+    monkeypatch.setattr("app.core.storage.upload_book_bytes", _fake_upload_book_bytes)
+
+
 async def _register_user(client, email: str) -> tuple[dict[str, str], uuid.UUID]:
     response = await client.post(
         "/api/v1/auth/register",
