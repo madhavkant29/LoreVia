@@ -27,8 +27,9 @@ export interface Character {
   fears: string[]
   archetype: string | null
   arc_summary: string | null
-  character_type?: "complex" | "gag" | "meme" | null
-  gag_score?: number | null
+  character_type?: "complex" | "normal" | "gag" | "meme" | null
+  character_type_score?: number | null
+  subtype_scores?: Record<string, number>
   growth_events?: Array<{
     chapter?: number | null
     event: string

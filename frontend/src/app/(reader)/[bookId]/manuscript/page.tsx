@@ -60,7 +60,7 @@ export default function ManuscriptPage() {
   const [fontFamily, setFontFamily] = useState<"times" | "georgia" | "sans">("times")
   const [lineHeight, setLineHeight] = useState(1.8)
   const [showPageGuides, setShowPageGuides] = useState(true)
-  const [firstLineIndent, setFirstLineIndent] = useState(true)
+  const [firstLineIndent, setFirstLineIndent] = useState(false)
   const [showLeftRail, setShowLeftRail] = useState(false)
   const [showRightRail, setShowRightRail] = useState(false)
   const [activeRightPane, setActiveRightPane] = useState<RightPane>("insights")
@@ -1088,17 +1088,17 @@ export default function ManuscriptPage() {
 
             {editorMode === "chapter" ? (
               <div className="space-y-4">
-                <div className={`relative mx-auto w-full max-w-full overflow-hidden rounded-[1.4rem] border shadow-[0_24px_80px_-55px_rgba(15,23,42,0.25)] ${isDark ? "border-white/10 bg-[#101010]" : "border-[#d8d0c4] bg-[#fdfcf9]"}`}>
+                <div className={`relative mx-auto w-full max-w-full rounded-[1.4rem] border shadow-[0_24px_80px_-55px_rgba(15,23,42,0.25)] ${isDark ? "border-white/10 bg-[#101010]" : "border-[#d8d0c4] bg-[#fdfcf9]"}`}>
                   {showPageGuides ? (
                     <div
                       aria-hidden
-                      className={`pointer-events-none absolute inset-0 ${isDark ? "opacity-20" : "opacity-35"}`}
+                      className={`pointer-events-none absolute inset-0 rounded-[1.4rem] ${isDark ? "opacity-20" : "opacity-35"}`}
                       style={{
                         backgroundImage: `repeating-linear-gradient(to bottom, transparent 0, transparent calc(297mm - 1px), ${isDark ? "rgba(255,255,255,0.08)" : "rgba(15,23,42,0.08)"} calc(297mm - 1px), ${isDark ? "rgba(255,255,255,0.08)" : "rgba(15,23,42,0.08)"} 297mm)`,
                       }}
                     />
                   ) : null}
-                  <div className={`border-b px-6 py-6 sm:px-8 ${isDark ? "border-white/10 bg-white/[0.02]" : "border-[#e6dfd4] bg-[#f7f3ed]"}`}>
+                  <div className={`border-b rounded-t-[1.4rem] px-6 py-6 sm:px-8 ${isDark ? "border-white/10 bg-white/[0.02]" : "border-[#e6dfd4] bg-[#f7f3ed]"}`}>
                     <div className="flex items-start justify-between gap-4">
                       <div className="min-w-0 flex-1">
                         <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{selectedChapter === null ? "New chapter draft" : "Current chapter"}</p>
@@ -1184,18 +1184,18 @@ export default function ManuscriptPage() {
                       ref={(node) => {
                         chapterRefs.current[chapter.number] = node
                       }}
-                      className={`relative mx-auto w-full max-w-full overflow-hidden rounded-[1.4rem] border shadow-[0_24px_80px_-55px_rgba(15,23,42,0.25)] ${jumpTarget === chapter.number ? isDark ? "border-teal-400/40 bg-[#101010]" : "border-teal-300 bg-[#fdfcf9]" : isDark ? "border-white/10 bg-[#101010]" : "border-[#d8d0c4] bg-[#fdfcf9]"}`}
+                      className={`relative mx-auto w-full max-w-full rounded-[1.4rem] border shadow-[0_24px_80px_-55px_rgba(15,23,42,0.25)] ${jumpTarget === chapter.number ? isDark ? "border-teal-400/40 bg-[#101010]" : "border-teal-300 bg-[#fdfcf9]" : isDark ? "border-white/10 bg-[#101010]" : "border-[#d8d0c4] bg-[#fdfcf9]"}`}
                     >
                       {showPageGuides ? (
                         <div
                           aria-hidden
-                          className={`pointer-events-none absolute inset-0 ${isDark ? "opacity-20" : "opacity-35"}`}
+                          className={`pointer-events-none absolute inset-0 rounded-[1.4rem] ${isDark ? "opacity-20" : "opacity-35"}`}
                           style={{
                             backgroundImage: `repeating-linear-gradient(to bottom, transparent 0, transparent calc(297mm - 1px), ${isDark ? "rgba(255,255,255,0.08)" : "rgba(15,23,42,0.08)"} calc(297mm - 1px), ${isDark ? "rgba(255,255,255,0.08)" : "rgba(15,23,42,0.08)"} 297mm)`,
                           }}
                         />
                       ) : null}
-                      <div className={`border-b px-6 py-6 sm:px-8 ${isDark ? "border-white/10 bg-white/[0.02]" : "border-[#e6dfd4] bg-[#f7f3ed]"}`}>
+                      <div className={`border-b rounded-t-[1.4rem] px-6 py-6 sm:px-8 ${isDark ? "border-white/10 bg-white/[0.02]" : "border-[#e6dfd4] bg-[#f7f3ed]"}`}>
                         <div className="flex items-start justify-between gap-4">
                           <div className="min-w-0 flex-1">
                             <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Chapter {chapter.number}</p>
@@ -1242,7 +1242,7 @@ export default function ManuscriptPage() {
                           </div>
                         </div>
                       </div>
-                      <div className="hidden">
+                      <div className={`sticky top-3 z-10 border-b px-4 py-3 transition-all duration-200 translate-y-0 opacity-100 pointer-events-auto ${isDark ? "border-white/10 bg-[#0d1117]/95 backdrop-blur" : "border-[#e6dfd4] bg-[#f7f3ed]/95 backdrop-blur"}`}>
                         <EditorToolbar isDark={isDark} compact characters={characters} />
                       </div>
                       <RichTextEditor

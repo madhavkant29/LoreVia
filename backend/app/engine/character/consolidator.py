@@ -7,6 +7,7 @@ from app.engine.character.deduplicator import character_name_keys, names_equival
 from app.engine.character.profile_builder import merge_profile_fields
 from app.models.character import Character, CharacterState
 from app.models.intelligence import CharacterRelationship
+from app.utils.character_utils import update_character_classification
 
 
 async def consolidate_characters(
@@ -49,6 +50,12 @@ async def consolidate_characters(
 
     if merged_any:
         await db.commit()
+    
+    # Recompute classification scores for all characters in the book
+    for char in key_to_primary.values():
+        update_character_classification(char)
+    
+    await db.commit()
     return merged_any
 
 

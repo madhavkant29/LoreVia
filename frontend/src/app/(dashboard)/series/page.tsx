@@ -8,7 +8,7 @@ import { intelligenceApi } from "@/lib/api/intelligence"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import type { Book, BookSeries } from "@/types/book"
-import type { AdvisorMessage, AdvisorResponse } from "@/types/intelligence"
+import type { AdvisorMessage, AdvisorResponse, SeriesContinuityResponse } from "@/types/intelligence"
 
 export default function SeriesPage() {
   const user = useAuthStore((state) => state.user)
@@ -28,7 +28,7 @@ export default function SeriesPage() {
   const [continuityText, setContinuityText] = useState("")
   const [continuityChapterNum, setContinuityChapterNum] = useState("")
   const [continuityBookId, setContinuityBookId] = useState("")
-  const [continuityResult, setContinuityResult] = useState<null | { review: { overall_verdict: string; continuity_issues: Array<{title: string; description: string; severity: string; suggestion?: string}>; cross_book_opportunities: Array<{title: string; description: string}>; thematic_fit: {score: string; notes: string} }; retrieved_passages: Array<{book_title?: string; chapter_num: number; excerpt: string}>; cached?: boolean }>(null)
+  const [continuityResult, setContinuityResult] = useState<SeriesContinuityResponse | null>(null)
   const [continuityLoading, setContinuityLoading] = useState(false)
 
   async function load() {

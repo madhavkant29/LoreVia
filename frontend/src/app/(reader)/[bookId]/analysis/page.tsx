@@ -28,8 +28,8 @@ const ANALYSIS_TOOLS = [
   {
     href: "reports",
     eyebrow: "Chapter-by-chapter checks",
-    title: "Reports",
-    description: "Open the running continuity summaries and review passes generated from your text.",
+    title: "Chapter Analysis",
+    description: "Track characters, relationships, plot threads, and continuity across each chapter.",
   },
   {
     href: "cross-book-wiki",
@@ -65,9 +65,6 @@ export default function AnalysisPage() {
             <div className="flex flex-wrap gap-2">
               <Link href={`/${bookId}`} className={`rounded-full border px-4 py-2 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
                 Overview
-              </Link>
-              <Link href={`/${bookId}/manuscript`} className={`rounded-full border px-4 py-2 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
-                Manuscript
               </Link>
             </div>
           </div>

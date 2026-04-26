@@ -20,6 +20,15 @@ Prefer precision, but do not miss clearly named people who appear in the passage
 Do not invent people, aliases, or relationships.
 If a capitalized phrase is a place, institution, magic system, event, title fragment, or sentence starter instead of a person, exclude it.
 
+CHARACTER TYPE SUGGESTION:
+For each character, suggest their main type based on this passage:
+- "complex": Has depth, growth, internal conflict, or significant narrative role
+- "normal": Standard character with some traits but limited depth
+- "gag": Comic relief, used primarily for humor or jokes
+- "meme": Meta-commentary, fourth-wall breaking, or reference-based
+
+This is a suggestion based on this passage only - the final classification will be computed from full character data.
+
 TRAIT CONFIDENCE RULES:
 - Explicit direct description → 0.85–1.0
 - Implied/inferred → 0.5–0.7
@@ -32,6 +41,7 @@ Return ONLY valid JSON, no markdown, no commentary:
     {
       "name": "primary name",
       "aliases": ["other names"],
+      "suggested_type": "complex|normal|gag|meme",
       "traits": {
         "hair":   {"value": "...", "confidence": 0.0, "type": "objective|subjective|abstract"},
         "eyes":   {"value": "...", "confidence": 0.0, "type": "..."},

@@ -469,3 +469,480 @@ def is_gag_character(
         role=role,
         growth_events=growth_events,
     ) >= threshold
+
+
+# ─── Complex character detection ─────────────────────────────────────────────
+# Identifies characters with depth, growth, and narrative significance.
+
+def complex_character_score(
+    *,
+    personality_tags: list[str] | None = None,
+    archetype: str | None = None,
+    arc_summary: str | None = None,
+    mention_count: int = 0,
+    role: str | None = None,
+    growth_events: list[dict] | None = None,
+    motivations: list[str] | None = None,
+    fears: list[str] | None = None,
+) -> int:
+    """Composite score for whether a character is complex (has depth and growth).
+
+    Score components
+    ────────────────
+    + personality_tags count (+1 per tag, cap 3)
+    + motivations present (+2)
+    + fears present (+2)
+    + growth_events count (+1 per event, cap 3)
+    + arc_summary length and depth (+2 if >100 chars, +1 if >50)
+    + role is "mc" or "sc" (+2)
+    + mention_count > 10 (+1)
+    - arc_summary is very short or missing (-2)
+    - no growth_events and high mention_count (-2)
+    """
+    score = 0
+
+    # 1. Personality tags diversity
+    if personality_tags:
+        score += min(len(personality_tags), 3)
+
+    # 2. Internal conflict indicators
+    if motivations:
+        score += 2
+    if fears:
+        score += 2
+
+    # 3. Growth events
+    if growth_events:
+        score += min(len(growth_events), 3)
+
+    # 4. Arc summary depth
+    arc_len = len(arc_summary or "")
+    if arc_len > 100:
+        score += 2
+    elif arc_len > 50:
+        score += 1
+    elif arc_len < 20:
+        score -= 2
+
+    # 5. Role significance
+    if role in ("mc", "sc"):
+        score += 2
+
+    # 6. Narrative presence
+    if mention_count > 10:
+        score += 1
+
+    # 7. Override penalties
+    if not growth_events and mention_count > 20:
+        score -= 2  # high mentions but no growth suggests flat character
+
+    return score
+
+
+# ─── Subtype scoring functions ───────────────────────────────────────────────
+# Each subtype has markers for personality, archetype, and arc language.
+
+# Emotional subtypes
+_STOIC_MARKERS: frozenset[str] = frozenset({
+    "stoic", "unemotional", "reserved", "calm", "composed", "detached",
+    "unflappable", "steady", "stoic", "emotionless", "impassive",
+})
+_STOIC_ARCHETYPES: frozenset[str] = frozenset({
+    "stoic hero", "silent protagonist", "warrior monk", "stoic mentor",
+    "unflappable leader", "stone-faced",
+})
+_STOIC_PHRASES: tuple[str, ...] = (
+    "maintains composure", "shows no emotion", "keeps feelings hidden",
+    "stoic demeanor", "unflappable", "emotionally reserved", "calm under pressure",
+)
+
+def stoic_score(
+    *,
+    personality_tags: list[str] | None = None,
+    archetype: str | None = None,
+    arc_summary: str | None = None,
+) -> int:
+    score = 0
+    for tag in (personality_tags or []):
+        if tag.strip().lower() in _STOIC_MARKERS:
+            score += 2
+    arch_lower = (archetype or "").strip().lower()
+    if any(signal in arch_lower for signal in _STOIC_ARCHETYPES):
+        score += 3
+    arc_lower = (arc_summary or "").lower()
+    for phrase in _STOIC_PHRASES:
+        if phrase in arc_lower:
+            score += 2
+    return min(score, 10)
+
+
+_BROKEN_MARKERS: frozenset[str] = frozenset({
+    "broken", "traumatized", "damaged", "scarred", "wounded", "shattered",
+    "haunted", "tormented", "suffering", "pained", "hurt", "devastated",
+})
+_BROKEN_ARCHETYPES: frozenset[str] = frozenset({
+    "broken hero", "tragic figure", "wounded healer", "trauma survivor",
+    "damaged protagonist", "haunted past",
+})
+_BROKEN_PHRASES: tuple[str, ...] = (
+    "broken by", "trauma from", "haunted by past", "emotional scars",
+    "deeply wounded", "psychological damage", "never recovered from",
+)
+
+def broken_score(
+    *,
+    personality_tags: list[str] | None = None,
+    archetype: str | None = None,
+    arc_summary: str | None = None,
+    growth_events: list[dict] | None = None,
+) -> int:
+    score = 0
+    for tag in (personality_tags or []):
+        if tag.strip().lower() in _BROKEN_MARKERS:
+            score += 2
+    arch_lower = (archetype or "").strip().lower()
+    if any(signal in arch_lower for signal in _BROKEN_ARCHETYPES):
+        score += 3
+    arc_lower = (arc_summary or "").lower()
+    for phrase in _BROKEN_PHRASES:
+        if phrase in arc_lower:
+            score += 2
+    # Check growth events for trauma-related impact
+    if growth_events:
+        for event in growth_events:
+            impact = (event.get("impact") or "").lower()
+            if any(word in impact for word in ["trauma", "wound", "scar", "broken", "hurt"]):
+                score += 1
+    return min(score, 10)
+
+
+_HIDING_FEELINGS_MARKERS: frozenset[str] = frozenset({
+    "secretive", "guarded", "closed off", "withdrawn", "private", "mysterious",
+    "evasive", "defensive", "hidden", "suppressed", "bottled up",
+})
+_HIDING_FEELINGS_ARCHETYPES: frozenset[str] = frozenset({
+    "mysterious stranger", "secretive protagonist", "hidden past",
+    "enigmatic figure", "cloaked figure",
+})
+_HIDING_FEELINGS_PHRASES: tuple[str, ...] = (
+    "hides feelings", "bottles up emotions", "keeps to themselves",
+    "guarded about", "secretive nature", "won't open up", "emotional walls",
+)
+
+def hiding_feelings_score(
+    *,
+    personality_tags: list[str] | None = None,
+    archetype: str | None = None,
+    arc_summary: str | None = None,
+) -> int:
+    score = 0
+    for tag in (personality_tags or []):
+        if tag.strip().lower() in _HIDING_FEELINGS_MARKERS:
+            score += 2
+    arch_lower = (archetype or "").strip().lower()
+    if any(signal in arch_lower for signal in _HIDING_FEELINGS_ARCHETYPES):
+        score += 3
+    arc_lower = (arc_summary or "").lower()
+    for phrase in _HIDING_FEELINGS_PHRASES:
+        if phrase in arc_lower:
+            score += 2
+    return min(score, 10)
+
+
+# Moral subtypes
+_PSYCHOPATH_MARKERS: frozenset[str] = frozenset({
+    "psychopathic", "sociopathic", "remorseless", "ruthless", "cold-blooded",
+    "sadistic", "manipulative", "lacks empathy", "cruel", "merciless",
+})
+_PSYCHOPATH_ARCHETYPES: frozenset[str] = frozenset({
+    "psychopath", "sociopath", "serial killer", "cold-blooded killer",
+    "ruthless villain", "sadistic antagonist",
+})
+_PSYCHOPATH_PHRASES: tuple[str, ...] = (
+    "no empathy", "lacks remorse", "psychopathic tendencies", "cold-blooded",
+    "sadistic pleasure", "enjoys suffering", "ruthless killer",
+)
+
+def psychopath_score(
+    *,
+    personality_tags: list[str] | None = None,
+    archetype: str | None = None,
+    arc_summary: str | None = None,
+) -> int:
+    score = 0
+    for tag in (personality_tags or []):
+        if tag.strip().lower() in _PSYCHOPATH_MARKERS:
+            score += 2
+    arch_lower = (archetype or "").strip().lower()
+    if any(signal in arch_lower for signal in _PSYCHOPATH_ARCHETYPES):
+        score += 3
+    arc_lower = (arc_summary or "").lower()
+    for phrase in _PSYCHOPATH_PHRASES:
+        if phrase in arc_lower:
+            score += 2
+    return min(score, 10)
+
+
+_SERIOUS_MARKERS: frozenset[str] = frozenset({
+    "serious", "grim", "stern", "solemn", "dour", "severe", "intense",
+    "no-nonsense", "businesslike", "formal", "strict", "disciplined",
+})
+_SERIOUS_ARCHETYPES: frozenset[str] = frozenset({
+    "serious protagonist", "grim warrior", "stern mentor", "no-nonsense leader",
+    "disciplined soldier", "formal authority",
+})
+_SERIOUS_PHRASES: tuple[str, ...] = (
+    "takes things seriously", "grim demeanor", "stern expression",
+    "no-nonsense approach", "serious manner", "deadly serious",
+)
+
+def serious_score(
+    *,
+    personality_tags: list[str] | None = None,
+    archetype: str | None = None,
+    arc_summary: str | None = None,
+) -> int:
+    score = 0
+    for tag in (personality_tags or []):
+        if tag.strip().lower() in _SERIOUS_MARKERS:
+            score += 2
+    arch_lower = (archetype or "").strip().lower()
+    if any(signal in arch_lower for signal in _SERIOUS_ARCHETYPES):
+        score += 3
+    arc_lower = (arc_summary or "").lower()
+    for phrase in _SERIOUS_PHRASES:
+        if phrase in arc_lower:
+            score += 2
+    return min(score, 10)
+
+
+# Personality subtypes
+_CHARISMATIC_MARKERS: frozenset[str] = frozenset({
+    "charismatic", "charming", "magnetic", "persuasive", "influential",
+    "captivating", "enchanting", "compelling", "inspiring", "leader-like",
+})
+_CHARISMATIC_ARCHETYPES: frozenset[str] = frozenset({
+    "charismatic leader", "natural leader", "inspiring figure", "cult leader",
+    "beloved hero", "popular figure",
+})
+_CHARISMATIC_PHRASES: tuple[str, ...] = (
+    "natural charisma", "magnetic personality", "inspires others",
+    "charms people", "persuasive speaker", "draws people in",
+)
+
+def charismatic_score(
+    *,
+    personality_tags: list[str] | None = None,
+    archetype: str | None = None,
+    arc_summary: str | None = None,
+) -> int:
+    score = 0
+    for tag in (personality_tags or []):
+        if tag.strip().lower() in _CHARISMATIC_MARKERS:
+            score += 2
+    arch_lower = (archetype or "").strip().lower()
+    if any(signal in arch_lower for signal in _CHARISMATIC_ARCHETYPES):
+        score += 3
+    arc_lower = (arc_summary or "").lower()
+    for phrase in _CHARISMATIC_PHRASES:
+        if phrase in arc_lower:
+            score += 2
+    return min(score, 10)
+
+
+_CYNICAL_MARKERS: frozenset[str] = frozenset({
+    "cynical", "skeptical", "distrustful", "pessimistic", "world-weary",
+    "jaded", "disillusioned", "cynical", "sarcastic", "ironic",
+})
+_CYNICAL_ARCHETYPES: frozenset[str] = frozenset({
+    "cynical protagonist", "jaded veteran", "disillusioned hero",
+    "world-weary detective", "skeptical investigator",
+})
+_CYNICAL_PHRASES: tuple[str, ...] = (
+    "cynical outlook", "lost faith", "disillusioned with", "skeptical of",
+    "world-weary", "jaded by experience", "sees the worst in people",
+)
+
+def cynical_score(
+    *,
+    personality_tags: list[str] | None = None,
+    archetype: str | None = None,
+    arc_summary: str | None = None,
+) -> int:
+    score = 0
+    for tag in (personality_tags or []):
+        if tag.strip().lower() in _CYNICAL_MARKERS:
+            score += 2
+    arch_lower = (archetype or "").strip().lower()
+    if any(signal in arch_lower for signal in _CYNICAL_ARCHETYPES):
+        score += 3
+    arc_lower = (arc_summary or "").lower()
+    for phrase in _CYNICAL_PHRASES:
+        if phrase in arc_lower:
+            score += 2
+    return min(score, 10)
+
+
+# Social subtypes
+_LONER_MARKERS: frozenset[str] = frozenset({
+    "loner", "solitary", "isolated", "reclusive", "anti-social", "withdrawn",
+    "introverted", "alone", "independent", "self-reliant",
+})
+_LONER_ARCHETYPES: frozenset[str] = frozenset({
+    "loner protagonist", "solitary figure", "reclusive genius",
+    "isolated wanderer", "lone wolf",
+})
+_LONER_PHRASES: tuple[str, ...] = (
+    "prefers solitude", "works alone", "isolated from", "loner by choice",
+    "keeps to themselves", "no close connections", "solitary life",
+)
+
+def loner_score(
+    *,
+    personality_tags: list[str] | None = None,
+    archetype: str | None = None,
+    arc_summary: str | None = None,
+) -> int:
+    score = 0
+    for tag in (personality_tags or []):
+        if tag.strip().lower() in _LONER_MARKERS:
+            score += 2
+    arch_lower = (archetype or "").strip().lower()
+    if any(signal in arch_lower for signal in _LONER_ARCHETYPES):
+        score += 3
+    arc_lower = (arc_summary or "").lower()
+    for phrase in _LONER_PHRASES:
+        if phrase in arc_lower:
+            score += 2
+    return min(score, 10)
+
+
+_MENTOR_MARKERS: frozenset[str] = frozenset({
+    "wise", "guiding", "teaching", "mentor", "teacher", "advisor",
+    "experienced", "knowledgeable", "patient", "nurturing",
+})
+_MENTOR_ARCHETYPES: frozenset[str] = frozenset({
+    "mentor", "wise teacher", "old master", "guiding figure",
+    "experienced advisor", "patient teacher",
+})
+_MENTOR_PHRASES: tuple[str, ...] = (
+    "mentors", "teaches", "guides", "imparts wisdom", "shares experience",
+    "acts as mentor", "wise guidance", "teacher figure",
+)
+
+def mentor_score(
+    *,
+    personality_tags: list[str] | None = None,
+    archetype: str | None = None,
+    arc_summary: str | None = None,
+) -> int:
+    score = 0
+    for tag in (personality_tags or []):
+        if tag.strip().lower() in _MENTOR_MARKERS:
+            score += 2
+    arch_lower = (archetype or "").strip().lower()
+    if any(signal in arch_lower for signal in _MENTOR_ARCHETYPES):
+        score += 3
+    arc_lower = (arc_summary or "").lower()
+    for phrase in _MENTOR_PHRASES:
+        if phrase in arc_lower:
+            score += 2
+    return min(score, 10)
+
+
+# Mental subtypes
+_INTELLIGENT_MARKERS: frozenset[str] = frozenset({
+    "intelligent", "smart", "brilliant", "genius", "clever", "sharp",
+    "analytical", "strategic", "intellectual", "quick-witted",
+})
+_INTELLIGENT_ARCHETYPES: frozenset[str] = frozenset({
+    "genius", "intellectual", "strategist", "mastermind", "brilliant scientist",
+    "clever tactician", "quick-witted hero",
+})
+_INTELLIGENT_PHRASES: tuple[str, ...] = (
+    "highly intelligent", "brilliant mind", "strategic thinker", "genius-level",
+    "quick-witted", "analytical mind", "intellectual prowess",
+)
+
+def intelligent_score(
+    *,
+    personality_tags: list[str] | None = None,
+    archetype: str | None = None,
+    arc_summary: str | None = None,
+) -> int:
+    score = 0
+    for tag in (personality_tags or []):
+        if tag.strip().lower() in _INTELLIGENT_MARKERS:
+            score += 2
+    arch_lower = (archetype or "").strip().lower()
+    if any(signal in arch_lower for signal in _INTELLIGENT_ARCHETYPES):
+        score += 3
+    arc_lower = (arc_summary or "").lower()
+    for phrase in _INTELLIGENT_PHRASES:
+        if phrase in arc_lower:
+            score += 2
+    return min(score, 10)
+
+
+_NAIVE_MARKERS: frozenset[str] = frozenset({
+    "naive", "innocent", "inexperienced", "idealistic", "optimistic",
+    "trusting", "gullible", "unworldly", "pure", "unsuspecting",
+})
+_NAIVE_ARCHETYPES: frozenset[str] = frozenset({
+    "innocent protagonist", "naive hero", "idealistic youth",
+    "trusting soul", "pure-hearted figure",
+})
+_NAIVE_PHRASES: tuple[str, ...] = (
+    "naive about", "innocent to", "idealistic view", "trusting nature",
+    "believes the best", "unaware of", "pure heart",
+)
+
+def naive_score(
+    *,
+    personality_tags: list[str] | None = None,
+    archetype: str | None = None,
+    arc_summary: str | None = None,
+) -> int:
+    score = 0
+    for tag in (personality_tags or []):
+        if tag.strip().lower() in _NAIVE_MARKERS:
+            score += 2
+    arch_lower = (archetype or "").strip().lower()
+    if any(signal in arch_lower for signal in _NAIVE_ARCHETYPES):
+        score += 3
+    arc_lower = (arc_summary or "").lower()
+    for phrase in _NAIVE_PHRASES:
+        if phrase in arc_lower:
+            score += 2
+    return min(score, 10)
+
+
+# ─── Composite subtype scoring ───────────────────────────────────────────────
+
+def compute_all_subtype_scores(
+    *,
+    personality_tags: list[str] | None = None,
+    archetype: str | None = None,
+    arc_summary: str | None = None,
+    growth_events: list[dict] | None = None,
+) -> dict[str, int]:
+    """Compute scores for all subtypes and return as a dictionary.
+
+    Returns a dict like {"stoic": 7, "broken": 3, "charismatic": 5, ...}
+    Only includes subtypes with score >= 3 to reduce noise.
+    """
+    scores = {
+        "stoic": stoic_score(personality_tags=personality_tags, archetype=archetype, arc_summary=arc_summary),
+        "broken": broken_score(personality_tags=personality_tags, archetype=archetype, arc_summary=arc_summary, growth_events=growth_events),
+        "hiding_feelings": hiding_feelings_score(personality_tags=personality_tags, archetype=archetype, arc_summary=arc_summary),
+        "psychopath": psychopath_score(personality_tags=personality_tags, archetype=archetype, arc_summary=arc_summary),
+        "serious": serious_score(personality_tags=personality_tags, archetype=archetype, arc_summary=arc_summary),
+        "charismatic": charismatic_score(personality_tags=personality_tags, archetype=archetype, arc_summary=arc_summary),
+        "cynical": cynical_score(personality_tags=personality_tags, archetype=archetype, arc_summary=arc_summary),
+        "loner": loner_score(personality_tags=personality_tags, archetype=archetype, arc_summary=arc_summary),
+        "mentor": mentor_score(personality_tags=personality_tags, archetype=archetype, arc_summary=arc_summary),
+        "intelligent": intelligent_score(personality_tags=personality_tags, archetype=archetype, arc_summary=arc_summary),
+        "naive": naive_score(personality_tags=personality_tags, archetype=archetype, arc_summary=arc_summary),
+    }
+    # Filter to only scores >= 3 to reduce noise
+    return {k: v for k, v in scores.items() if v >= 3}

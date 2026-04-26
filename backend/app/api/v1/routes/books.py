@@ -131,7 +131,6 @@ from app.utils.character_utils import (
     merge_description_with_relationships,
     relationship_summary_for_character,
 )
-from app.engine.character.entity_filters import is_gag_character
 from app.utils.export_utils import (
     character_bible_docx,
     character_bible_markdown,
@@ -945,16 +944,9 @@ async def get_book_characters(book_id: uuid.UUID, db: AsyncSession = Depends(get
             "arc_summary": char.arc_summary,
             "growth_events": char.growth_events or [],
             "relationship_summaries": dedupe_preserve_order(rel_summaries.get(str(char.id), [])),
-            "character_type": (
-                "gag" if is_gag_character(
-                    personality_tags=char.personality_tags or [],
-                    archetype=char.archetype,
-                    arc_summary=char.arc_summary,
-                    mention_count=char.mention_count or 0,
-                    role=char.role,
-                    growth_events=char.growth_events or [],
-                ) else "complex"
-            ),
+            "character_type": char.character_type,
+            "character_type_score": char.character_type_score,
+            "subtype_scores": char.subtype_scores or {},
         }
         for char in characters
     ]

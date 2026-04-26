@@ -736,10 +736,10 @@ async def build_chapter_consistency_report(
             )
             for char in new_characters
         ],
-        relationship_changes=relationship_changes[:6],
-        plot_threads_opened=[thread.title for thread in opened_threads[:6]],
-        plot_threads_resolved=[thread.title for thread in resolved_threads[:6]],
-        continuity_flags=continuity_flags[:6],
+        relationship_changes=list(dict.fromkeys(relationship_changes[:6])),
+        plot_threads_opened=list(dict.fromkeys(thread.title for thread in opened_threads[:6])),
+        plot_threads_resolved=list(dict.fromkeys(thread.title for thread in resolved_threads[:6])),
+        continuity_flags=list(dict.fromkeys(continuity_flags[:6])),
     )
 
 

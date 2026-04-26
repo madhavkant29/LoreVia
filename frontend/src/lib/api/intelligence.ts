@@ -8,6 +8,7 @@ import type {
   AdvisorGreeting,
   AdvisorSuggestionsResponse,
   EditorialReviewResponse,
+  SeriesContinuityResponse,
   ManuscriptSynopsis,
   ContinuityReportFormat,
   VoiceConsistencyResponse,
@@ -68,7 +69,7 @@ export const intelligenceApi = {
     }).then(r => r.data),
 
   seriesContinuityCheck: (seriesId: string, bookId: string, text: string, chapterNum?: number) =>
-    apiClient.post<EditorialReviewResponse>(`/intelligence/series/${seriesId}/continuity-check`, {
+    apiClient.post<SeriesContinuityResponse>(`/intelligence/series/${seriesId}/continuity-check`, {
       book_id: bookId,
       text,
       chapter_num: chapterNum ?? null,

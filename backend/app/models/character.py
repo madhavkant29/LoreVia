@@ -41,6 +41,11 @@ class Character(Base):
     archetype: Mapped[str | None] = mapped_column(String)
     growth_events: Mapped[list[dict] | None] = mapped_column(JSONB, default=list)
 
+    # Character classification
+    character_type: Mapped[str | None] = mapped_column(String)  # complex | normal | gag | meme
+    character_type_score: Mapped[int | None] = mapped_column(Integer)  # 0-10 score for main type
+    subtype_scores: Mapped[dict | None] = mapped_column(JSONB, default=dict)  # {"stoic": 7, "broken": 3, ...}
+
     # pgvector identity anchor
     embedding: Mapped[list[float] | None] = mapped_column(Vector(1536))
 

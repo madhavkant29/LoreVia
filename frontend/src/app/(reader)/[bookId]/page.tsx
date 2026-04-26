@@ -360,13 +360,13 @@ export default function BookOverviewPage() {
                 </Link>
               </div>
 
-              <div className="mt-4 flex flex-wrap gap-2">
+              <div className="mt-4 grid grid-cols-2 gap-2">
                 {quickTools.map((tool) =>
                   "href" in tool ? (
                     <Link
                       key={tool.label}
                       href={tool.href as Route}
-                      className={`rounded-full border px-4 py-2 text-sm font-medium transition ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-stone-200 bg-white text-stone-700 hover:bg-white"}`}
+                      className={`w-full text-center rounded-lg border px-4 py-2 text-sm font-medium transition ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-stone-200 bg-white text-stone-700 hover:bg-white"}`}
                     >
                       {tool.label}
                     </Link>
@@ -374,7 +374,7 @@ export default function BookOverviewPage() {
                     <button
                       key={tool.label}
                       onClick={tool.action}
-                      className={`rounded-full border px-4 py-2 text-sm font-medium transition ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-stone-200 bg-white text-stone-700 hover:bg-white"}`}
+                      className={`w-full text-center rounded-lg border px-4 py-2 text-sm font-medium transition ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-stone-200 bg-white text-stone-700 hover:bg-white"}`}
                     >
                       {tool.label}
                     </button>
@@ -392,10 +392,10 @@ export default function BookOverviewPage() {
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                   <div>
                     <p className={`text-[11px] font-semibold uppercase tracking-[0.28em] ${isDark ? "text-indigo-300" : "text-violet-500"}`}>Writing tools</p>
-                    <h2 className={`mt-2 font-serif text-3xl ${isDark ? "text-white" : "text-stone-950"}`}>Write, ask, and export from one place.</h2>
+                    <h2 className={`mt-2 font-serif text-3xl ${isDark ? "text-white" : "text-stone-950"}`}>Write, ask, and export</h2>
                   </div>
                   <p className={`max-w-xl text-sm leading-7 ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-                    Author mode removes spoiler gating and focuses on reference exports and continuity support.
+                    Reference exports and continuity support for authors.
                   </p>
                 </div>
 
@@ -404,7 +404,7 @@ export default function BookOverviewPage() {
                     <p className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-emerald-300" : "text-emerald-600"}`}>Writing</p>
                     <p className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>Manuscript editor</p>
                     <p className={`mt-2 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
-                      Draft chapter text in a calmer manuscript workspace with optional continuity and thread side panels.
+                      Draft chapters with continuity and thread side panels.
                     </p>
                     <button
                       onClick={() => navigateWithMemory(`/${bookId}/manuscript`)}
@@ -418,9 +418,7 @@ export default function BookOverviewPage() {
                     <p className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-indigo-300" : "text-violet-500"}`}>Author Intelligence</p>
                     <p className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>Story Advisor</p>
                     <p className={`mt-2 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
-                      RAG-grounded author chat. Ask about plotholes, dropped threads, foreshadowing
-                      opportunities, or where an arc should go â€” every answer is grounded in retrieved
-                      passages from your manuscript.
+                      Ask about plotholes, threads, and arcs. Every answer is grounded in your manuscript.
                     </p>
                     <button
                       onClick={() => navigateWithMemory(`/${bookId}/advisor`)}
@@ -434,7 +432,7 @@ export default function BookOverviewPage() {
                     <p className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Export</p>
                     <p className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>Character Bible</p>
                     <p className={`mt-2 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
-                      Download a clean reference file: roles, first appearance, tags, motivations, arc notes, and relationship preview.
+                      Download character roles, tags, motivations, and relationships.
                     </p>
                     <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center">
                       <select
@@ -460,19 +458,6 @@ export default function BookOverviewPage() {
                 </div>
               </section>
             ) : null}
-
-            <section className={`rounded-[1.8rem] border p-6 ${isDark ? "border-white/10 bg-white/5" : "border-white/70 bg-white/82"}`}>
-              <h2 className={`font-serif text-3xl ${isDark ? "text-white" : "text-stone-950"}`}>World Mechanics</h2>
-              <p className={`mt-4 max-w-3xl text-lg leading-9 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{worldNote}</p>
-            </section>
-
-            <section className={`rounded-[1.8rem] border p-6 ${isDark ? "border-white/10 bg-white/5" : "border-white/70 bg-white/82"}`}>
-              <h2 className={`font-serif text-3xl ${isDark ? "text-white" : "text-stone-950"}`}>Recent Theories</h2>
-              <div className={`mt-4 rounded-[1.35rem] p-5 ${isDark ? "bg-white/5" : "bg-stone-50"}`}>
-                <p className={`text-lg italic leading-9 ${isDark ? "text-slate-300" : "text-stone-600"}`}>“{theoryNote}”</p>
-                <p className={`mt-4 text-sm ${isDark ? "text-slate-500" : "text-stone-500"}`}>LoreVia story model</p>
-              </div>
-            </section>
 
             <section className={`rounded-[1.8rem] border p-6 ${isDark ? "border-white/10 bg-white/5" : "border-white/70 bg-white/82"}`}>
               <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">

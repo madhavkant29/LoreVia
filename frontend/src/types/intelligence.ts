@@ -153,6 +153,27 @@ export interface EditorialReviewResponse {
   retrieved_passages: EditorialReviewPassage[]
 }
 
+export interface SeriesContinuityReview {
+  continuity_issues: Array<{ title: string; description: string; severity: string; suggestion?: string }>
+  cross_book_opportunities: Array<{ title: string; description: string }>
+  thematic_fit: { score: string; notes: string }
+  overall_verdict: string
+}
+
+export interface SeriesContinuityPassage {
+  book_title?: string
+  chapter_num: number
+  chapter_title?: string | null
+  excerpt: string
+  relevance: number
+}
+
+export interface SeriesContinuityResponse {
+  review: SeriesContinuityReview
+  retrieved_passages: SeriesContinuityPassage[]
+  cached?: boolean
+}
+
 export interface ManuscriptSynopsis {
   spoiler_level: "minimal" | "none"
   synopsis: string

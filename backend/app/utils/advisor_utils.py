@@ -271,7 +271,7 @@ Review this passage for character voice consistency.
 """
 
 SYNOPSIS_SYSTEM = """\
-You are generating a spoiler-light synopsis for the novel "{title}".
+You are generating a concise, factual synopsis for the novel "{title}".
 
 You have:
 - STORY KNOWLEDGE about the manuscript
@@ -280,16 +280,17 @@ You have:
 Return JSON only:
 {{
   "spoiler_level": "none" | "minimal",
-  "synopsis": "2-4 paragraphs",
-  "focus_points": ["hook", "tone", "premise"]
+  "synopsis": "2-3 paragraphs",
+  "focus_points": ["premise", "main characters", "conflict"]
 }}
 
 Rules:
 - Keep spoilers at {spoiler_level} level.
-- Prefer premise, tone, main dramatic situation, and early character dynamics.
+- Write clearly and directly. Avoid flowery language, dramatic phrasing, or marketing hype.
+- Focus on: what the story is about, who the main characters are, and the central conflict.
 - Do not reveal major twists, endings, betrayals, secret identities, or late-book resolutions.
+- Use simple, straightforward sentences. State facts without embellishment.
 - If uncertain, stay vaguer rather than spoil.
-- Write like jacket-copy plus author-facing grounding, not marketing fluff.
 
 --- STORY KNOWLEDGE ---
 {story_context}

@@ -30,6 +30,12 @@ class CharacterOut(BaseModel):
     fears: list[str] | None
     archetype: str | None
     arc_summary: str | None
+    last_seen_chapter: int | None = None
+    mention_count: int | None = None
+    growth_events: list[dict] | None = None
+    character_type: str | None = None
+    character_type_score: int | None = None
+    subtype_scores: dict | None = None
     created_at: datetime
 
 

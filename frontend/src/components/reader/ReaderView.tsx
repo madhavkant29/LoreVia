@@ -63,7 +63,7 @@ export function ReaderView({ bookId, chapterNum }: Props) {
       try {
         const parsed = JSON.parse(bookmark) as ReaderBookmark
         restoreBookmarkRef.current = parsed?.chapter === chapterNum ? parsed : null
-      } catch {}
+      } catch { }
     }
 
     const updateQuoteModeCapability = () => {
@@ -177,11 +177,10 @@ export function ReaderView({ bookId, chapterNum }: Props) {
   if (error || !data) return <div className="flex justify-center py-20 text-gray-400">{error ?? "Chapter not found"}</div>
 
   return (
-    <div className={`flex h-[100dvh] min-h-[100dvh] overflow-hidden transition-colors ${
-      theme === "dark"
+    <div className={`flex h-[100dvh] min-h-[100dvh] overflow-hidden transition-colors ${theme === "dark"
         ? "bg-[radial-gradient(circle_at_top,#20253f,#0b1020_58%,#090b12)] text-stone-100"
         : "bg-[linear-gradient(180deg,#fcf7ef_0%,#f7f2eb_45%,#f3efe9_100%)] text-slate-950"
-    }`}>
+      }`}>
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <ReaderToolbar
           bookId={bookId}
