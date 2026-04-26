@@ -1,7 +1,7 @@
 """
 Story Advisor — author-mode intelligence endpoint.
 RAG-grounded conversation: embeds each user message, retrieves top-5 relevant
-chunks, sends only those chunks + last 10 conversation turns to GPT-4o.
+chunks, sends only those chunks + last 10 conversation turns to GPT-4o-mini.
 
 Also provides:
 - /advisor/suggestions  — proactive scan for plotholes, dropped threads, dead
@@ -27,7 +27,43 @@ from app.core.database import get_db
 from app.core.storage import download_book
 from app.engine.embeddings.embedder import embed_text
 from app.engine.search.semantic import semantic_search
-from app.models.book import Book
+from app.models.book import Book, Chapter, Series, SeriesBook
+from app.models.character import Character, CharacterState
+from app.models.intelligence import ChapterSummary, PlotThread
+from app.schemas.advisor import (
+    AdvisorRequest,
+    EditorialReviewRequest,
+    VoiceConsistencyRequest,
+)
+from app.utils.advisor_utils import (
+    ADVISOR_SYSTEM,
+    EDITORIAL_SYSTEM,
+    EDITORIAL_USER,
+    SERIES_ADVISOR_SYSTEM,
+    SERIES_CONTINUITY_SYSTEM,
+    SYNOPSIS_SYSTEM,
+    SYNOPSIS_USER,
+    VOICE_CONSISTENCY_SYSTEM,
+    VOICE_CONSISTENCY_USER,
+    advisor_response_cache,
+    build_character_voice_context,
+    build_continuity_report_markdown,
+    build_continuity_report_pdf,
+    build_fallback_advisor_suggestions,
+    build_series_story_context,
+    build_story_context,
+    classify_intent,
+    classify_response_type,
+    identify_character_mentions,
+    make_advisor_cache_key,
+    make_editorial_cache_key,
+    normalize_editorial_review_result,
+    normalize_series_continuity_result,
+    normalize_synopsis_result,
+    normalize_voice_consistency_result,
+)
+
+router = APIRouter()
 
 
 def _safe_prompt_str(value: str | None) -> str:
@@ -40,36 +76,6 @@ def _safe_prompt_str(value: str | None) -> str:
     is always treated as a literal string by the template engine.
     """
     return (value or "").replace("{", "{{").replace("}", "}}")
-from app.models.book import Chapter
-from app.models.character import Character, CharacterState
-from app.models.intelligence import ChapterSummary, PlotThread
-from app.schemas.advisor import (
-    AdvisorRequest,
-    EditorialReviewRequest,
-    VoiceConsistencyRequest,
-)
-from app.utils.advisor_utils import (
-    ADVISOR_SYSTEM,
-    EDITORIAL_SYSTEM,
-    EDITORIAL_USER,
-    SYNOPSIS_SYSTEM,
-    SYNOPSIS_USER,
-    VOICE_CONSISTENCY_SYSTEM,
-    VOICE_CONSISTENCY_USER,
-    build_character_voice_context,
-    build_continuity_report_markdown,
-    build_continuity_report_pdf,
-    build_story_context,
-    classify_intent,
-    classify_response_type,
-    identify_character_mentions,
-    normalize_editorial_review_result,
-    normalize_synopsis_result,
-    normalize_voice_consistency_result,
-)
-
-router = APIRouter()
-
 
 # ─── Main advisor conversation endpoint ──────────────────────────────────────
 
@@ -93,6 +99,12 @@ async def advisor_message(
     )
     if not last_user_msg:
         raise HTTPException(400, detail="no user message found")
+
+    # ── Response cache: check before any LLM work ─────────────────────────────
+    cache_key = make_advisor_cache_key(book_id, last_user_msg)
+    cached = advisor_response_cache.get(cache_key)
+    if cached is not None:
+        return {**cached, "cached": True}
 
     # Cap history to last 10 turns (20 messages) to control cost
     history = body.messages[-20:]
@@ -176,7 +188,7 @@ async def advisor_message(
             llm_messages.append({"role": msg.role, "content": msg.content})
         llm_messages.append({"role": "user", "content": augmented_last})
 
-        # 6. Call GPT-4o (main response)
+        # 6. Call GPT-4o-mini (main response)
         response = await client.chat.completions.create(
             model=settings.OPENAI_INTEL_MODEL,
             temperature=0.55,
@@ -188,7 +200,7 @@ async def advisor_message(
         # 7. Classify response type
         response_type = await classify_response_type(client, reply)
 
-        return {
+        result = {
             "reply": reply,
             "intent": intent,
             "response_type": response_type,
@@ -201,7 +213,11 @@ async def advisor_message(
                 }
                 for h in hits[:5]
             ],
+            "cached": False,
         }
+        # Store in cache for subsequent identical queries
+        advisor_response_cache.set(cache_key, result)
+        return result
     finally:
         await client.close()
 
@@ -575,6 +591,12 @@ async def editorial_review(
     if not body.text.strip():
         raise HTTPException(400, detail="Passage text is required.")
 
+    # Cache check
+    cache_key = make_editorial_cache_key(book_id, body.text, body.chapter_num)
+    cached = advisor_response_cache.get(cache_key)
+    if cached is not None:
+        return {**cached, "cached": True}
+
     total_ch = book.total_chapters or 9999
     client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 
@@ -606,7 +628,7 @@ async def editorial_review(
         )
 
         response = await client.chat.completions.create(
-            model="gpt-4o",
+            model=settings.OPENAI_INTEL_MODEL,
             temperature=0.2,
             max_tokens=1400,
             response_format={"type": "json_object"},
@@ -619,7 +641,7 @@ async def editorial_review(
         raw = response.choices[0].message.content or "{}"
         result = normalize_editorial_review_result(raw)
 
-        return {
+        response_payload = {
             "review": result,
             "retrieved_passages": [
                 {
@@ -631,7 +653,10 @@ async def editorial_review(
                 }
                 for h in hits[:4]
             ],
+            "cached": False,
         }
+        advisor_response_cache.set(cache_key, response_payload)
+        return response_payload
 
     finally:
         await client.close()
@@ -772,7 +797,7 @@ async def voice_consistency_review(
         )
 
         response = await client.chat.completions.create(
-            model="gpt-4o",
+            model=settings.OPENAI_INTEL_MODEL,
             temperature=0.2,
             max_tokens=1200,
             response_format={"type": "json_object"},
@@ -856,3 +881,288 @@ async def continuity_report(
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename_base}-continuity-report.pdf"'},
     )
+
+
+# ─── Series Ask endpoint ──────────────────────────────────────────────────────
+
+@router.post("/series/{series_id}/advisor/message")
+async def series_advisor_message(
+    series_id: uuid.UUID,
+    body: AdvisorRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _=Depends(rate_limit_advisor),
+):
+    """Single-LLM-call advisor that answers questions spanning a whole book series.
+
+    Cost strategy:
+    - One round of RAG-free context (series story context only, capped tokens).
+    - One LLM call to gpt-4o-mini.
+    - No per-book round-trips.
+    """
+    series = await db.get(Series, series_id)
+    if not series or series.user_id != current_user.id:
+        raise HTTPException(404)
+
+    if not body.messages:
+        raise HTTPException(400, detail="messages list is empty")
+
+    last_user_msg = next(
+        (m.content for m in reversed(body.messages) if m.role == "user"), ""
+    )
+    if not last_user_msg:
+        raise HTTPException(400, detail="no user message found")
+
+    # Cache check
+    cache_key = make_advisor_cache_key(f"series:{series_id}", last_user_msg)
+    cached = advisor_response_cache.get(cache_key)
+    if cached is not None:
+        return {**cached, "cached": True}
+
+    # Load all books in this series
+    memberships = (
+        await db.execute(
+            select(SeriesBook.book_id, SeriesBook.position)
+            .where(SeriesBook.series_id == series_id)
+            .order_by(SeriesBook.position.asc().nulls_last())
+        )
+    ).all()
+
+    if not memberships:
+        raise HTTPException(400, detail="No books found in this series.")
+
+    book_ids = [row.book_id for row in memberships]
+
+    # Load book titles for labelling
+    book_rows = (
+        await db.execute(
+            select(Book.id, Book.title).where(Book.id.in_(book_ids))
+        )
+    ).all()
+    book_titles = {row.id: row.title for row in book_rows}
+
+    # Build merged series context (capped per-book to keep token count low)
+    story_context = await build_series_story_context(
+        db, book_ids, book_titles,
+        max_chars_per_book=6, max_threads_per_book=4,
+    )
+
+    history = body.messages[-16:]  # cap history tighter for series context
+
+    system_prompt = SERIES_ADVISOR_SYSTEM.format(
+        series_name=_safe_prompt_str(series.name),
+        story_context=_safe_prompt_str(story_context),
+    )
+
+    llm_messages: list[dict] = [{"role": "system", "content": system_prompt}]
+    for msg in history[:-1]:
+        llm_messages.append({"role": msg.role, "content": msg.content})
+    llm_messages.append({"role": "user", "content": last_user_msg})
+
+    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    try:
+        # Single call — gpt-4o-mini for cost efficiency
+        response = await client.chat.completions.create(
+            model=settings.OPENAI_INTEL_MODEL,
+            temperature=0.55,
+            max_tokens=900,
+            messages=llm_messages,
+        )
+        reply = (response.choices[0].message.content or "").strip()
+        response_type = await classify_response_type(client, reply)
+        intent = await classify_intent(client, last_user_msg)
+
+        result = {
+            "reply": reply,
+            "intent": intent,
+            "response_type": response_type,
+            "series_id": str(series_id),
+            "book_count": len(book_ids),
+            "retrieved_passages": [],
+            "cached": False,
+        }
+        advisor_response_cache.set(cache_key, result)
+        return result
+    finally:
+        await client.close()
+
+
+# ─── Series continuity check endpoint ────────────────────────────────────────
+
+class SeriesContinuityRequest(AdvisorRequest):
+    """Reuse AdvisorRequest shape but add book_id and optional chapter_num."""
+    book_id: uuid.UUID
+    chapter_num: int | None = None
+    text: str
+
+
+@router.post("/series/{series_id}/continuity-check")
+async def series_continuity_check(
+    series_id: uuid.UUID,
+    body: SeriesContinuityRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _=Depends(rate_limit_continuity_checker),
+):
+    """Cross-series continuity check: compares a new passage against prior volumes.
+
+    Cost strategy:
+    - Context from prior books only (up to 3, capped per book).
+    - Single LLM call using gpt-4o-mini with JSON mode.
+    - RAG retrieval scoped to prior book IDs only (up to 6 passages).
+    """
+    series = await db.get(Series, series_id)
+    if not series or series.user_id != current_user.id:
+        raise HTTPException(404)
+
+    if not body.text.strip():
+        raise HTTPException(400, detail="Passage text is required.")
+
+    # Current book must be in the series
+    current_book = await db.get(Book, body.book_id)
+    if not current_book or current_book.user_id != current_user.id:
+        raise HTTPException(404, detail="Book not found.")
+
+    # ── Cache check ───────────────────────────────────────────────────────────
+    series_cache_key = make_editorial_cache_key(
+        str(series_id) + str(body.book_id),  # scope to series+book pair
+        body.text,
+        body.chapter_num,
+    )
+    cached_series = advisor_response_cache.get(series_cache_key)
+    if cached_series is not None:
+        return {**cached_series, "cached": True}
+
+    # Load all memberships in order
+    memberships = (
+        await db.execute(
+            select(SeriesBook.book_id, SeriesBook.position)
+            .where(SeriesBook.series_id == series_id)
+            .order_by(SeriesBook.position.asc().nulls_last())
+        )
+    ).all()
+
+    current_position = next(
+        (row.position for row in memberships if row.book_id == body.book_id), None
+    )
+
+    # Prior books = those with a lower series position, or all others if unordered
+    if current_position is not None:
+        prior_book_ids = [
+            row.book_id for row in memberships
+            if row.book_id != body.book_id and (row.position or 999) < current_position
+        ]
+    else:
+        prior_book_ids = [row.book_id for row in memberships if row.book_id != body.book_id]
+
+    # Limit to top 3 prior books for cost efficiency
+    prior_book_ids = prior_book_ids[:3]
+
+    if not prior_book_ids:
+        return {
+            "review": {
+                "continuity_issues": [],
+                "cross_book_opportunities": [],
+                "thematic_fit": {"score": "strong", "notes": "No prior books in series to compare against."},
+                "overall_verdict": "This is the first book in the series — no cross-book continuity check possible.",
+            },
+            "retrieved_passages": [],
+        }
+
+    # Load prior book titles
+    prior_book_rows = (
+        await db.execute(select(Book.id, Book.title).where(Book.id.in_(prior_book_ids)))
+    ).all()
+    prior_titles = {row.id: row.title for row in prior_book_rows}
+
+    # Build prior series context
+    story_ctx = await build_series_story_context(
+        db, prior_book_ids, prior_titles,
+        max_chars_per_book=8, max_threads_per_book=5,
+    )
+
+    # RAG: retrieve relevant passages from prior books only (cross-series search)
+    prior_book_id_strs = ", ".join(f"'{bid}'" for bid in prior_book_ids)
+    query_emb = await embed_text(body.text[:600])
+    rows = await db.execute(
+        sql_text(f"""
+            SELECT bc.text, ch.number AS chapter_num, ch.title AS chapter_title,
+                   b.title AS book_title,
+                   1 - (bc.embedding <=> CAST(:emb AS vector)) AS relevance
+            FROM book_chunks bc
+            JOIN chapters ch ON ch.id = bc.chapter_id
+            JOIN books b ON b.id = bc.book_id
+            WHERE bc.book_id IN ({prior_book_id_strs})
+              AND bc.embedding IS NOT NULL
+              AND 1 - (bc.embedding <=> CAST(:emb AS vector)) > 0.22
+            ORDER BY relevance DESC
+            LIMIT 6
+        """),
+        {"emb": str(query_emb)},
+    )
+    hits = [
+        {
+            "text": r.text,
+            "chapter_num": r.chapter_num,
+            "chapter_title": r.chapter_title,
+            "book_title": r.book_title,
+            "relevance": round(float(r.relevance), 3),
+        }
+        for r in rows.fetchall()
+    ]
+
+    passages_block = "\n\n".join(
+        f"[{h['book_title']} — Ch. {h['chapter_num']}]: {h['text'][:300]}"
+        for h in hits
+    ) or "No closely matching passages found in earlier books."
+
+    chapter_hint = (
+        f"This passage will appear in Chapter {body.chapter_num} of \"{current_book.title}\"."
+        if body.chapter_num
+        else f"Chapter number not specified. Book: \"{current_book.title}\"."
+    )
+
+    system_msg = SERIES_CONTINUITY_SYSTEM.format(
+        series_name=_safe_prompt_str(series.name),
+        new_book_title=_safe_prompt_str(current_book.title),
+        story_context=_safe_prompt_str(story_ctx),
+    )
+    user_msg = (
+        f"{chapter_hint}\n\n"
+        f"--- NEW PASSAGE ---\n{body.text[:4000]}\n\n"
+        f"--- RETRIEVED PASSAGES FROM EARLIER BOOKS ---\n{passages_block}"
+    )
+
+    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    try:
+        response = await client.chat.completions.create(
+            model=settings.OPENAI_INTEL_MODEL,
+            temperature=0.2,
+            max_tokens=1200,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": user_msg},
+            ],
+        )
+        raw = response.choices[0].message.content or "{}"
+        result = normalize_series_continuity_result(raw)
+
+        response_payload = {
+            "review": result,
+            "retrieved_passages": [
+                {
+                    "book_title": h["book_title"],
+                    "chapter_num": h["chapter_num"],
+                    "chapter_title": h.get("chapter_title"),
+                    "excerpt": h["text"][:220],
+                    "relevance": h["relevance"],
+                }
+                for h in hits[:5]
+            ],
+            "cached": False,
+        }
+        advisor_response_cache.set(series_cache_key, response_payload)
+        return response_payload
+    finally:
+        await client.close()

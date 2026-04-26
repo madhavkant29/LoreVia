@@ -1,6 +1,6 @@
 """
 Character chat — in-character responses grounded in story context.
-Phase 3 feature. Uses GPT-4o for quality.
+Phase 3 feature. Uses GPT-4o-mini for quality.
 """
 from typing import Any, cast
 

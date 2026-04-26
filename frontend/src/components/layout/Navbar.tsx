@@ -38,14 +38,14 @@ export function Navbar() {
   ]
 
   return (
-    <nav className="sticky top-0 z-30 border-b border-border bg-background/80 px-4 py-4 backdrop-blur-xl transition-all duration-300">
+    <nav className="sticky top-0 z-30 border-b border-border bg-background px-4 py-4 transition-colors duration-150">
       <div className="mx-auto flex max-w-7xl flex-col gap-4">
         <div className="flex items-center justify-between gap-4">
           <Link href="/library" className="group flex items-center">
             <img 
               src="/image.png" 
               alt="LoreVia" 
-              className="h-10 w-10 rounded-xl object-cover shadow-lg shadow-brand-500/20 transition-transform group-hover:scale-105"
+              className="h-10 w-10 rounded-lg object-cover transition-transform group-hover:scale-105"
             />
           </Link>
 
@@ -53,7 +53,7 @@ export function Navbar() {
             <NotificationBell />
             <button
               onClick={toggleTheme}
-              className="group relative flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-card hover:bg-muted transition-colors"
+              className="group relative flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-card hover:bg-muted transition-colors duration-150"
               aria-label="Toggle theme"
             >
               {isDark ? (
@@ -70,7 +70,7 @@ export function Navbar() {
             {user && (
               <button
                 onClick={handleLogout}
-                className="hidden sm:flex rounded-xl px-4 py-2 text-sm font-semibold text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+                className="hidden sm:flex rounded-lg px-4 py-2 text-sm font-semibold text-muted-foreground hover:text-foreground hover:bg-muted transition-colors duration-150"
               >
                 Sign out
               </button>
@@ -78,7 +78,7 @@ export function Navbar() {
 
             <button
               onClick={() => setMobileMenuOpen((v) => !v)}
-              className="lg:hidden flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-card text-foreground"
+              className="lg:hidden flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-card text-foreground"
             >
               <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={mobileMenuOpen ? "M6 18L18 6M6 6l12 12" : "M4 6h16M4 12h16M4 18h16"} />
@@ -94,15 +94,15 @@ export function Navbar() {
                 key={item.href}
                 href={item.href}
                 onClick={() => setMobileMenuOpen(false)}
-                className={`relative px-4 py-2 text-sm font-bold tracking-tight transition-all rounded-lg ${
+                className={`relative px-4 py-2 text-sm font-semibold tracking-tight transition-colors duration-150 rounded-md ${
                   pathname === item.href
-                    ? "text-brand-600 bg-brand-500/5 dark:text-brand-400"
+                    ? "text-slate-900 bg-slate-100 dark:text-white dark:bg-slate-800"
                     : "text-muted-foreground hover:text-foreground hover:bg-muted"
                 }`}
               >
                 {item.label}
                 {pathname === item.href && (
-                  <span className="absolute bottom-0 left-4 right-4 h-0.5 bg-brand-500 rounded-full" />
+                  <span className="absolute bottom-0 left-4 right-4 h-0.5 bg-slate-900 dark:bg-white rounded-full" />
                 )}
               </Link>
             ))}

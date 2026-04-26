@@ -60,4 +60,17 @@ export const intelligenceApi = {
     apiClient.get<ManuscriptSynopsis>(`/intelligence/${bookId}/advisor/synopsis`, {
       params: { spoiler_level: spoilerLevel },
     }).then(r => r.data),
+
+  // Series-wide operations
+  seriesAdvisorMessage: (seriesId: string, messages: AdvisorMessage[]) =>
+    apiClient.post<AdvisorResponse>(`/intelligence/series/${seriesId}/advisor/message`, {
+      messages,
+    }).then(r => r.data),
+
+  seriesContinuityCheck: (seriesId: string, bookId: string, text: string, chapterNum?: number) =>
+    apiClient.post<EditorialReviewResponse>(`/intelligence/series/${seriesId}/continuity-check`, {
+      book_id: bookId,
+      text,
+      chapter_num: chapterNum ?? null,
+    }).then(r => r.data),
 }

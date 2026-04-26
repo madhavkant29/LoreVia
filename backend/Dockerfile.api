@@ -11,6 +11,10 @@ RUN apt-get update && apt-get install -y curl && \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Pre-download tiktoken encoding to avoid runtime network issues
+# Matches default OPENAI_ENCODING_MODEL in config.py
+RUN python -c "import tiktoken; tiktoken.encoding_for_model('gpt-4o-mini')"
+
 COPY . .
 RUN chmod +x start.sh
 

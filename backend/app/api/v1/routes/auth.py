@@ -74,7 +74,7 @@ def _validate_password(password: str, email: str) -> None:
         )
 
 
-async def _mint_token_pair(user_id: str) -> TokenOut:
+async def _mint_token_pair(user_id: str, user: User | None = None) -> TokenOut:
     version = await get_token_version(user_id)
     session_id = str(uuid.uuid4())
     await store_refresh_session(
@@ -82,9 +82,11 @@ async def _mint_token_pair(user_id: str) -> TokenOut:
         session_id,
         settings.JWT_REFRESH_EXPIRE_DAYS * 24 * 60 * 60,
     )
+    user_out = UserOut.model_validate(user) if user else None
     return TokenOut(
         access_token=create_access_token(user_id, version),
         refresh_token=create_refresh_token(user_id, version, session_id),
+        user=user_out,
     )
 
 
@@ -110,7 +112,7 @@ async def register(
     await db.commit()
     await db.refresh(user)
     await send_onboarding_email(user.email)
-    return await _mint_token_pair(str(user.id))
+    return await _mint_token_pair(str(user.id), user)
 
 
 @router.post("/login", response_model=TokenOut)
@@ -129,7 +131,7 @@ async def login(
         valid = False
     if not valid:
         raise HTTPException(401, "Invalid credentials")
-    return await _mint_token_pair(str(user.id))
+    return await _mint_token_pair(str(user.id), user)
 
 
 @router.post("/oauth/supabase", response_model=TokenOut)

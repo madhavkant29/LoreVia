@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 
 import { booksApi } from "@/lib/api/books"
+import { renderRichTextHtml } from "@/lib/utils/richText"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import type { BookNote } from "@/types/book"
 
@@ -81,7 +82,10 @@ export default function NotesPage() {
                     </span>
                   </div>
 
-                  <p className={`mt-4 whitespace-pre-wrap text-sm leading-7 ${isDark ? "text-slate-200" : "text-stone-700"}`}>{note.body}</p>
+                  <div
+                    className={`note-rich-content mt-4 text-sm leading-7 ${isDark ? "text-slate-200" : "text-stone-700"}`}
+                    dangerouslySetInnerHTML={{ __html: renderRichTextHtml(note.body) }}
+                  />
 
                   <div className="mt-5 flex flex-wrap gap-2">
                     <Link

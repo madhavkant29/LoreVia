@@ -120,20 +120,27 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r backend/requirements.txt
 
+    - name: Install PostgreSQL client
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y postgresql-client
+
     - name: Create database backup
       env:
         DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        REDIS_URL: redis://localhost:6379/0
-        S3_BUCKET: test-bucket
-        AWS_ACCESS_KEY_ID: test-key
-        AWS_SECRET_ACCESS_KEY: test-secret
-        OPENAI_API_KEY: test-key
-        JWT_SECRET: test-secret-key-for-migrations
-        RESEND_API_KEY: test-key
       run: |
-        cd backend
-        # Create a backup before migrating
-        python -c "import os; from sqlalchemy import create_engine; from datetime import datetime; backup_name = f'pre_migration_backup_{datetime.now().strftime(\"%Y%m%d_%H%M%S\")}.sql'; print(f'Creating backup: {backup_name}')"
+        mkdir -p migration_backups
+        BACKUP_NAME="migration_backups/pre_migration_backup_$(date +%Y%m%d_%H%M%S).dump"
+        pg_dump --format=custom --file "$BACKUP_NAME" "$DATABASE_URL"
+        echo "BACKUP_NAME=$BACKUP_NAME" >> "$GITHUB_ENV"
+
+    - name: Upload database backup artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: pre-migration-backup-${{ github.run_id }}
+        path: ${{ env.BACKUP_NAME }}
+        if-no-files-found: error
+        retention-days: 14
 
     - name: Run database migrations
       env:

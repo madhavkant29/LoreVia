@@ -59,6 +59,7 @@ export interface AdvisorResponse {
   intent: "plothole" | "direction" | "opportunity" | "consistency" | "general"
   response_type: "standard" | "warning" | "opportunity" | "tradeoff"
   retrieved_passages: AdvisorPassage[]
+  cached?: boolean
 }
 
 export interface AdvisorGreeting {
@@ -80,6 +81,8 @@ export type SuggestionType =
   | "foreshadowing_opportunity"
   | "unresolved_clue"
   | "future_direction"
+  | "manuscript_checkpoint"
+  | "editorial_focus"
 
 export interface AdvisorSuggestion {
   id: string

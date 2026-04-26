@@ -91,3 +91,12 @@ LoreVia2/
 2. Check `app/utils/` — the helper may already exist.
 3. Check `app/models/` — the model may already exist.
 4. Only then write new code, always in the right layer.
+
+## Schema Changes
+
+When adding a new table or changing schema:
+
+1. Update the SQLAlchemy model in `backend/app/models/...`.
+2. Create a new Alembic revision.
+3. Fill in the migration’s `upgrade()` and `downgrade()` functions.
+4. Push the branch after verifying the migration locally.

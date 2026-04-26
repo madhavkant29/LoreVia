@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     OPENAI_INTEL_MODEL: str = "gpt-4o-mini"           # chat, predictions #revert to gpt-4o-mini for now, gpt-4o is too costly and not significantly better for our use case
     OPENAI_EMBED_MODEL: str = "text-embedding-3-small"
     OPENAI_EMBED_DIM: int = 1536
+    OPENAI_ENCODING_MODEL: str = "gpt-4o-mini"   # tiktoken encoding for token counting
     ANTHROPIC_API_KEY: str | None = None         # fallback
     GEMINI_API_KEY: str | None = None
     GEMINI_EXTRACT_MODEL: str = "gemini-1.5-flash"

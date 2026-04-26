@@ -62,6 +62,22 @@ jobs:
       run: |
         python -m spacy download en_core_web_sm
 
+    - name: Run Alembic migrations
+      env:
+        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/lorevia_test
+        REDIS_URL: redis://localhost:6379/0
+        S3_BUCKET: test-bucket
+        AWS_ACCESS_KEY_ID: test-key
+        AWS_SECRET_ACCESS_KEY: test-secret
+        OPENAI_API_KEY: test-key
+        JWT_SECRET: test-secret-key-for-ci
+        RESEND_API_KEY: test-key
+        SECRET_KEY: test-secret-key-for-ci
+        DEBUG: "true"
+      run: |
+        cd backend
+        alembic upgrade head
+
     - name: Run tests
       env:
         DATABASE_URL: postgresql://postgres:postgres@localhost:5432/lorevia_test
@@ -107,6 +123,11 @@ jobs:
       run: |
         cd frontend
         npm run type-check
+
+    - name: Run ESLint
+      run: |
+        cd frontend
+        npm run lint
 
     - name: Build application
       run: |

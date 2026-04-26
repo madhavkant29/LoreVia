@@ -5,32 +5,32 @@
 @tailwind utilities;
 
 :root {
-  --background: 252 247 239;
-  --foreground: 28 25 23;
+  --background: 255 255 255;
+  --foreground: 15 23 42;
   --card: 255 255 255;
-  --card-foreground: 28 25 23;
-  --muted: 248 243 235;
-  --muted-foreground: 87 83 78;
-  --border: 231 229 228;
+  --card-foreground: 15 23 42;
+  --muted: 241 245 249;
+  --muted-foreground: 100 116 139;
+  --border: 226 232 240;
   --accent: 99 102 241;
   --accent-foreground: 255 255 255;
   
   --reader-font: var(--font-merriweather), Georgia, serif;
-  --reader-line-height: 1.9;
+  --reader-line-height: 1.5;
   --reader-size: 18px;
   --reader-display: var(--font-newsreader), "Times New Roman", serif;
   --reader-label: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
 }
 
 .dark {
-  --background: 0 0 0;
+  --background: 2 6 23;
   --foreground: 248 250 252;
-  --card: 10 10 10;
-  --card-foreground: 241 245 249;
-  --muted: 18 18 18;
-  --muted-foreground: 163 163 163;
-  --border: 38 38 38;
-  --accent: 64 64 64;
+  --card: 15 23 42;
+  --card-foreground: 248 250 252;
+  --muted: 30 41 59;
+  --muted-foreground: 148 163 184;
+  --border: 51 65 85;
+  --accent: 99 102 241;
   --accent-foreground: 255 255 255;
 }
 
@@ -101,4 +101,101 @@ body {
     --reader-size: 19px;
     --reader-line-height: 1.95;
   }
+}
+
+.manuscript-editor {
+  position: relative;
+}
+
+.manuscript-editor:focus {
+  outline: none;
+}
+
+.manuscript-editor p {
+  margin: 0;
+}
+
+/* Tailwind preflight resets block margins; reintroduce paragraph spacing
+   so blank-line-separated text (\\n\\n) reads correctly in the editor. */
+.manuscript-editor p + p {
+  margin-top: 1em;
+}
+
+.manuscript-editor p:empty {
+  min-height: 1em;
+}
+
+.manuscript-editor[data-placeholder]:empty::before {
+  content: attr(data-placeholder);
+  color: rgba(148, 163, 184, 0.8);
+  pointer-events: none;
+}
+
+.manuscript-editor img,
+.note-rich-content img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 1rem 0;
+  border-radius: 0.9rem;
+}
+
+.manuscript-editor a,
+.note-rich-content a {
+  color: #0f766e;
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+
+.dark .manuscript-editor a,
+.dark .note-rich-content a {
+  color: #5eead4;
+}
+
+.mention-token {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 9999px;
+  padding: 0.14rem 0.55rem;
+  margin: 0 0.08rem;
+  background: rgba(20, 184, 166, 0.12);
+  color: #0f766e;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.dark .mention-token {
+  background: rgba(45, 212, 191, 0.18);
+  color: #99f6e4;
+}
+
+.note-rich-content p,
+.note-rich-content ul,
+.note-rich-content ol,
+.note-rich-content blockquote,
+.note-rich-content h1,
+.note-rich-content h2,
+.note-rich-content h3 {
+  margin: 0.75rem 0 0;
+}
+
+.note-rich-content p:first-child,
+.note-rich-content ul:first-child,
+.note-rich-content ol:first-child,
+.note-rich-content blockquote:first-child,
+.note-rich-content h1:first-child,
+.note-rich-content h2:first-child,
+.note-rich-content h3:first-child {
+  margin-top: 0;
+}
+
+.note-rich-content ul,
+.note-rich-content ol {
+  padding-left: 1.3rem;
+}
+
+.note-rich-content blockquote {
+  border-left: 3px solid rgba(148, 163, 184, 0.4);
+  padding-left: 0.9rem;
+  opacity: 0.95;
 }

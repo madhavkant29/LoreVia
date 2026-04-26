@@ -3,13 +3,23 @@ from dataclasses import dataclass
 
 import tiktoken
 
-_enc = tiktoken.encoding_for_model("gpt-4o")
+from app.core.config import settings
+
 MEDIA_MARKER_RE = re.compile(r"\[\[IMAGE:[^\]]+\]\]")
+
+_enc: tiktoken.Encoding | None = None
+
+
+def _get_encoding() -> tiktoken.Encoding:
+    global _enc
+    if _enc is None:
+        _enc = tiktoken.encoding_for_model(settings.OPENAI_ENCODING_MODEL)
+    return _enc
 
 
 def count_tokens(text: str) -> int:
     sanitized = MEDIA_MARKER_RE.sub(" ", text)
-    return len(_enc.encode(sanitized))
+    return len(_get_encoding().encode(sanitized))
 
 
 @dataclass(frozen=True)

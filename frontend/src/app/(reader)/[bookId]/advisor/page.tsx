@@ -18,6 +18,7 @@ import type {
 
 // ─── Response type visual config (4 variants) ────────────────────────────────
 type ResponseType = "standard" | "warning" | "opportunity" | "tradeoff"
+type AdvisorPanel = "checker" | "suggestions"
 
 function responseTypeStyle(type: ResponseType, isDark: boolean) {
   switch (type) {
@@ -91,6 +92,35 @@ function severityConfig(severity: string) {
         dot: "bg-blue-400",
         label: "Info",
       }
+  }
+}
+
+function buildReplyFollowUps(responseType: ResponseType) {
+  switch (responseType) {
+    case "warning":
+      return [
+        "How can I fix this without breaking continuity?",
+        "What setup should I add earlier to support this?",
+        "Is this contradiction salvageable if I make it intentional?",
+      ]
+    case "opportunity":
+      return [
+        "What foreshadowing beats should I plant now?",
+        "How can I turn this into a stronger payoff?",
+        "Which character best carries this opportunity?",
+      ]
+    case "tradeoff":
+      return [
+        "Which option best fits the manuscript so far?",
+        "What would each ending cost thematically?",
+        "What setup is missing for the strongest option?",
+      ]
+    default:
+      return [
+        "Are there any plotholes I should know about?",
+        "What foreshadowing opportunities am I missing?",
+        "Help me think through how to end the current arc.",
+      ]
   }
 }
 
@@ -190,6 +220,7 @@ function SuggestionGroup({
   isDark,
   intentionalIds,
   onAsk,
+  onSaveNote,
   onMarkIntentional,
   onDismiss,
 }: {
@@ -199,6 +230,7 @@ function SuggestionGroup({
   isDark: boolean
   intentionalIds: Set<string>
   onAsk: (p: string) => void
+  onSaveNote: (payload: { chapterNumber: number | null; title: string | null; body: string }) => void
   onMarkIntentional: (id: string) => void
   onDismiss: (id: string) => void
 }) {
@@ -246,6 +278,22 @@ function SuggestionGroup({
                       {s.action_label} →
                     </button>
                     <button
+                      onClick={() => onSaveNote({
+                        chapterNumber: typeof s.chapter_ref === "number" ? s.chapter_ref : null,
+                        title: `Scan: ${s.title}`.slice(0, 120),
+                        body: [
+                          `Continuity scan (${s.severity}): ${s.title}`,
+                          s.chapter_ref ? `Chapter: ${s.chapter_ref}` : "",
+                          `Type: ${s.type.replace(/_/g, " ")}`,
+                          "",
+                          s.description,
+                        ].filter(Boolean).join("\n"),
+                      })}
+                      className={`rounded-[0.7rem] px-3 py-1.5 text-xs font-semibold transition ${isDark ? "bg-white/10 text-slate-200 hover:bg-white/15" : "bg-white text-stone-700 hover:bg-stone-50"}`}
+                    >
+                      Save note
+                    </button>
+                    <button
                       onClick={() => onMarkIntentional(s.id)}
                       className={`rounded-[0.7rem] px-3 py-1.5 text-xs font-medium transition ${isDark ? "border border-white/10 bg-white/5 text-slate-400 hover:bg-white/10" : "border border-stone-200 bg-white text-stone-500 hover:bg-stone-50"}`}
                       title="Mark as a deliberate authorial choice — won't reappear"
@@ -276,7 +324,7 @@ export default function AdvisorPage() {
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
 
-  const [tab, setTab] = useState<"chat" | "suggestions">("chat")
+  const [tab, setTab] = useState<AdvisorPanel>("checker")
   const [greeting, setGreeting] = useState<AdvisorGreeting | null>(null)
   const [messages, setMessages] = useState<AdvisorMessage[]>([])
   const [passages, setPassages] = useState<AdvisorPassage[]>([])
@@ -292,7 +340,6 @@ export default function AdvisorPage() {
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set())
   const [intentionalIds, setIntentionalIds] = useState<Set<string>>(new Set())
 
-  // Editorial review state
   const [sugTab, setSugTab] = useState<"scan" | "editorial">("scan")
   const [editText, setEditText] = useState("")
   const [editChapter, setEditChapter] = useState<string>("")
@@ -306,6 +353,7 @@ export default function AdvisorPage() {
   const [splitIntoChapters, setSplitIntoChapters] = useState(true)
   const [importLoading, setImportLoading] = useState(false)
   const [importMessage, setImportMessage] = useState<string | null>(null)
+  const [noteToast, setNoteToast] = useState<string | null>(null)
 
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -325,7 +373,7 @@ export default function AdvisorPage() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages, loading])
 
-  // Lazy-load suggestions when tab opens if not loaded yet
+  // Lazy-load suggestions when continuity scan opens if not loaded yet
   useEffect(() => {
     if (tab !== "suggestions" || suggestionsLoaded) return
     setSuggestionsLoading(true)
@@ -373,16 +421,41 @@ export default function AdvisorPage() {
   }
 
   const handleSuggestionAsk = (prompt: string) => {
-    setTab("chat")
+    setTab("checker")
     setInput(prompt)
     setTimeout(() => inputRef.current?.focus(), 100)
   }
+
+  const refreshSuggestions = useCallback(() => {
+    setSuggestions([])
+    setSuggestionsLoaded(false)
+    setSuggestionsLoading(true)
+    intelligenceApi.advisorSuggestions(bookId)
+      .then(r => setSuggestions(r.suggestions))
+      .catch(() => setSuggestions([]))
+      .finally(() => { setSuggestionsLoading(false); setSuggestionsLoaded(true) })
+  }, [bookId])
 
   const dismissSuggestion = (id: string) => setDismissedIds(prev => new Set([...prev, id]))
   const markIntentional = (id: string) => {
     setIntentionalIds(prev => new Set([...prev, id]))
     setDismissedIds(prev => new Set([...prev, id]))
   }
+
+  const saveQuickNote = useCallback(async (payload: { chapterNumber: number | null; title: string | null; body: string }) => {
+    try {
+      await booksApi.saveBookNote(bookId, {
+        chapterNumber: payload.chapterNumber,
+        title: payload.title,
+        body: payload.body,
+      })
+      setNoteToast(`Saved note${payload.chapterNumber ? ` for chapter ${payload.chapterNumber}` : ""}.`)
+    } catch {
+      setNoteToast("Could not save note. Please try again.")
+    } finally {
+      window.setTimeout(() => setNoteToast(null), 2400)
+    }
+  }, [bookId])
 
   const visibleSuggestions = suggestions.filter(s => !dismissedIds.has(s.id))
   const warnCount = visibleSuggestions.filter(s => s.severity === "warning").length
@@ -408,6 +481,14 @@ export default function AdvisorPage() {
       `}</style>
 
       <div className={`min-h-screen ${isDark ? "bg-[linear-gradient(180deg,#000000_0%,#060606_44%,#0d0d0d_100%)] text-slate-100" : "bg-stone-50 text-stone-950"}`}>
+
+        {noteToast ? (
+          <div className="fixed bottom-5 left-1/2 z-50 w-[min(92vw,32rem)] -translate-x-1/2">
+            <div className={`rounded-full border px-4 py-2 text-center text-sm font-medium shadow-lg ${isDark ? "border-white/10 bg-black/80 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+              {noteToast}
+            </div>
+          </div>
+        ) : null}
 
         {/* ── Header ─────────────────────────────────────────────────────────── */}
         <header className={`sticky top-0 z-30 flex items-center justify-between px-4 py-3 backdrop-blur-xl border-b sm:px-6 ${isDark ? "border-white/8 bg-black/85" : "border-stone-200 bg-white/85"}`}>
@@ -459,27 +540,34 @@ export default function AdvisorPage() {
           <div className={`mb-6 inline-flex overflow-hidden rounded-[1rem] border ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white"}`}>
             <button
               id="advisor-tab-chat"
-              onClick={() => setTab("chat")}
-              className={`px-5 py-2.5 text-sm font-medium transition ${tab === "chat" ? isDark ? "bg-white text-slate-950" : "bg-stone-900 text-white" : isDark ? "text-slate-300 hover:bg-white/8" : "text-stone-600 hover:bg-stone-50"}`}
+              onClick={() => setTab("checker")}
+              className={`px-5 py-2.5 text-sm font-medium transition ${tab === "checker" ? isDark ? "bg-white text-slate-950" : "bg-stone-900 text-white" : isDark ? "text-slate-300 hover:bg-white/8" : "text-stone-600 hover:bg-stone-50"}`}
             >
-              Chat
+              Continuity Checker
             </button>
             <button
-              id="advisor-tab-suggestions"
-              onClick={() => setTab("suggestions")}
-              className={`relative px-5 py-2.5 text-sm font-medium transition ${tab === "suggestions" ? isDark ? "bg-white text-slate-950" : "bg-stone-900 text-white" : isDark ? "text-slate-300 hover:bg-white/8" : "text-stone-600 hover:bg-stone-50"}`}
+              id="advisor-tab-scan"
+              onClick={() => { setTab("suggestions"); setSugTab("scan") }}
+              className={`relative px-5 py-2.5 text-sm font-medium transition ${tab === "suggestions" && sugTab === "scan" ? isDark ? "bg-white text-slate-950" : "bg-stone-900 text-white" : isDark ? "text-slate-300 hover:bg-white/8" : "text-stone-600 hover:bg-stone-50"}`}
             >
-              Suggestions
+              Continuity Scan
               {warnCount > 0 && (
                 <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-amber-500 text-[10px] font-bold text-white">
                   {warnCount}
                 </span>
               )}
             </button>
+            <button
+              id="advisor-tab-editorial"
+              onClick={() => { setTab("suggestions"); setSugTab("editorial") }}
+              className={`px-5 py-2.5 text-sm font-medium transition ${tab === "suggestions" && sugTab === "editorial" ? isDark ? "bg-white text-slate-950" : "bg-stone-900 text-white" : isDark ? "text-slate-300 hover:bg-white/8" : "text-stone-600 hover:bg-stone-50"}`}
+            >
+              Editorial Review
+            </button>
           </div>
 
           {/* ══ CHAT TAB ════════════════════════════════════════════════════════ */}
-          {tab === "chat" && (
+          {tab === "checker" && (
             <div className="grid gap-5 lg:grid-cols-[1fr_22rem]">
 
               {/* Chat area */}
@@ -503,7 +591,7 @@ export default function AdvisorPage() {
                         ].map(prompt => (
                           <button
                             key={prompt}
-                            onClick={() => sendMessage(prompt)}
+                            onClick={() => void sendMessage(prompt)}
                             className={`rounded-[0.9rem] border px-3 py-1.5 text-xs font-medium transition ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/12" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`}
                           >
                             {prompt}
@@ -539,7 +627,31 @@ export default function AdvisorPage() {
                           </div>
                         )}
                         {isAssistant ? (
-                          <RichMessage content={msg.content} isDark={isDark} />
+                          <div className="space-y-4">
+                            <RichMessage content={msg.content} isDark={isDark} />
+                            <div className="flex flex-wrap gap-2">
+                              {buildReplyFollowUps(rType).map((prompt) => (
+                                <button
+                                  key={`${i}-${prompt}`}
+                                  onClick={() => void sendMessage(prompt)}
+                                  disabled={loading}
+                                  className={`rounded-[0.85rem] border px-3 py-1.5 text-xs font-medium transition disabled:opacity-40 ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/12" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`}
+                                >
+                                  {prompt}
+                                </button>
+                              ))}
+                              <button
+                                onClick={() => void saveQuickNote({
+                                  chapterNumber: null,
+                                  title: `Advisor insight`,
+                                  body: msg.content,
+                                })}
+                                className={`rounded-[0.85rem] border px-3 py-1.5 text-xs font-medium transition ${isDark ? "border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-slate-200" : "border-stone-200 bg-white text-stone-400 hover:text-stone-700"}`}
+                              >
+                                Save to notes
+                              </button>
+                            </div>
+                          </div>
                         ) : (
                           <p className={`text-sm leading-7 whitespace-pre-wrap ${isDark ? "text-slate-200" : "text-stone-700"}`}>
                             {msg.content}
@@ -584,7 +696,7 @@ export default function AdvisorPage() {
                     />
                     <button
                       id="advisor-send"
-                      onClick={() => sendMessage(input)}
+                      onClick={() => void sendMessage(input)}
                       disabled={!input.trim() || loading}
                       className="shrink-0 rounded-[0.8rem] bg-[linear-gradient(135deg,#4f46e5,#4338ca)] px-4 py-2 text-sm font-semibold text-white shadow-[0_8px_24px_-12px_rgba(79,70,229,0.7)] transition disabled:opacity-40 hover:-translate-y-[1px]"
                     >
@@ -660,7 +772,7 @@ export default function AdvisorPage() {
             <div>
 
               {/* Sub-tab switcher */}
-              <div className={`mb-6 inline-flex overflow-hidden rounded-[1rem] border ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white"}`}>
+              <div className="hidden">
                 <button
                   id="suggestions-tab-scan"
                   onClick={() => setSugTab("scan")}
@@ -686,15 +798,7 @@ export default function AdvisorPage() {
                       opportunities. Powered by extracted story data, not the full book.
                     </p>
                     <button
-                      onClick={() => {
-                        setSuggestions([])
-                        setSuggestionsLoaded(false)
-                        setSuggestionsLoading(true)
-                        intelligenceApi.advisorSuggestions(bookId)
-                          .then(r => setSuggestions(r.suggestions))
-                          .catch(() => setSuggestions([]))
-                          .finally(() => { setSuggestionsLoading(false); setSuggestionsLoaded(true) })
-                      }}
+                      onClick={refreshSuggestions}
                       className={`shrink-0 rounded-[0.8rem] border px-4 py-2 text-xs font-medium transition ${isDark ? "border-white/10 bg-white/5 text-slate-300 hover:bg-white/10" : "border-stone-200 bg-white text-stone-600 hover:bg-stone-50"}`}
                     >
                       ↺ Refresh
@@ -710,18 +814,17 @@ export default function AdvisorPage() {
                   ) : visibleSuggestions.length === 0 ? (
                     <div className={`rounded-[1.8rem] border p-10 text-center ${isDark ? "border-white/10 bg-white/4" : "border-stone-200 bg-white"}`}>
                       <p className="text-3xl mb-3">✅</p>
-                      <p className={`font-semibold text-lg ${isDark ? "text-white" : "text-stone-900"}`}>No active suggestions</p>
+                      <p className={`font-semibold text-lg ${isDark ? "text-white" : "text-stone-900"}`}>Scan warming up</p>
                       <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-                        The advisor found no structural issues or notable opportunities right now.
-                        Check back as you add more chapters.
+                        No scan cards are available yet. Refresh after your next extraction pass or ask the continuity checker for a proactive story audit.
                       </p>
                     </div>
                   ) : (
                     <div className="space-y-8">
-                      <SuggestionGroup label="Warnings" icon="⚠️" items={grouped.warning} isDark={isDark} intentionalIds={intentionalIds} onAsk={handleSuggestionAsk} onMarkIntentional={markIntentional} onDismiss={dismissSuggestion} />
-                      <SuggestionGroup label="Future Direction" icon="🧭" items={grouped.direction} isDark={isDark} intentionalIds={intentionalIds} onAsk={handleSuggestionAsk} onMarkIntentional={markIntentional} onDismiss={dismissSuggestion} />
-                      <SuggestionGroup label="Opportunities" icon="✨" items={grouped.opportunity} isDark={isDark} intentionalIds={intentionalIds} onAsk={handleSuggestionAsk} onMarkIntentional={markIntentional} onDismiss={dismissSuggestion} />
-                      <SuggestionGroup label="Info" icon="ℹ️" items={grouped.info} isDark={isDark} intentionalIds={intentionalIds} onAsk={handleSuggestionAsk} onMarkIntentional={markIntentional} onDismiss={dismissSuggestion} />
+                      <SuggestionGroup label="Warnings" icon="⚠️" items={grouped.warning} isDark={isDark} intentionalIds={intentionalIds} onAsk={handleSuggestionAsk} onSaveNote={saveQuickNote} onMarkIntentional={markIntentional} onDismiss={dismissSuggestion} />
+                      <SuggestionGroup label="Future Direction" icon="🧭" items={grouped.direction} isDark={isDark} intentionalIds={intentionalIds} onAsk={handleSuggestionAsk} onSaveNote={saveQuickNote} onMarkIntentional={markIntentional} onDismiss={dismissSuggestion} />
+                      <SuggestionGroup label="Opportunities" icon="✨" items={grouped.opportunity} isDark={isDark} intentionalIds={intentionalIds} onAsk={handleSuggestionAsk} onSaveNote={saveQuickNote} onMarkIntentional={markIntentional} onDismiss={dismissSuggestion} />
+                      <SuggestionGroup label="Info" icon="ℹ️" items={grouped.info} isDark={isDark} intentionalIds={intentionalIds} onAsk={handleSuggestionAsk} onSaveNote={saveQuickNote} onMarkIntentional={markIntentional} onDismiss={dismissSuggestion} />
 
                       {intentionalIds.size > 0 && (
                         <div className={`rounded-[1.5rem] border p-5 ${isDark ? "border-white/8 bg-white/3" : "border-stone-100 bg-stone-50"}`}>
@@ -974,6 +1077,24 @@ export default function AdvisorPage() {
                                       : isDark ? "bg-white/10 text-slate-400" : "bg-stone-100 text-stone-500"
                                   }`}>{issue.severity}</span>
                                   <span className={`text-[10px] font-medium ${isDark ? "text-slate-500" : "text-stone-400"}`}>{issue.type.replace(/_/g, " ")}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => void saveQuickNote({
+                                      chapterNumber: editChapter ? parseInt(editChapter) : null,
+                                      title: `Continuity: ${issue.title}`.slice(0, 120),
+                                      body: [
+                                        `Continuity issue: ${issue.title}`,
+                                        `Severity: ${issue.severity}`,
+                                        `Type: ${issue.type.replace(/_/g, " ")}`,
+                                        "",
+                                        issue.description,
+                                        issue.suggestion ? `\nSuggestion: ${issue.suggestion}` : "",
+                                      ].join("\n").trim(),
+                                    })}
+                                    className={`ml-auto rounded-full px-3 py-1 text-[11px] font-semibold transition ${isDark ? "bg-white/10 text-slate-200 hover:bg-white/15" : "bg-white text-stone-700 hover:bg-stone-50"}`}
+                                  >
+                                    Save note
+                                  </button>
                                 </div>
                                 <p className={`text-sm font-semibold mb-1 ${isDark ? "text-white" : "text-stone-900"}`}>{issue.title}</p>
                                 <p className={`text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{issue.description}</p>
@@ -1002,6 +1123,24 @@ export default function AdvisorPage() {
                                     <p className={`text-[10px] font-semibold uppercase tracking-[0.2em] mb-1 ${isDark ? "text-slate-500" : "text-stone-400"}`}>{g.issue}</p>
                                     <p className={`text-sm mb-1 line-through opacity-60 ${isDark ? "text-slate-400" : "text-stone-500"}`}>"{g.original}"</p>
                                     <p className={`text-sm font-medium ${isDark ? "text-teal-300" : "text-teal-700"}`}>→ "{g.fix}"</p>
+                                    <div className="mt-3">
+                                      <button
+                                        type="button"
+                                        onClick={() => void saveQuickNote({
+                                          chapterNumber: editChapter ? parseInt(editChapter) : null,
+                                          title: `Grammar: ${g.issue}`.slice(0, 120),
+                                          body: [
+                                            `Grammar issue: ${g.issue}`,
+                                            "",
+                                            `Original: "${g.original}"`,
+                                            `Fix: "${g.fix}"`,
+                                          ].join("\n"),
+                                        })}
+                                        className={`rounded-full px-3 py-1 text-[11px] font-semibold transition ${isDark ? "bg-white/10 text-slate-200 hover:bg-white/15" : "bg-white text-stone-700 hover:bg-stone-50"}`}
+                                      >
+                                        Save note
+                                      </button>
+                                    </div>
                                   </div>
                                 </div>
                               </div>
@@ -1020,7 +1159,20 @@ export default function AdvisorPage() {
                             {editResult.formatting_notes.map((note, i) => (
                               <div key={i} className="flex items-start gap-2.5">
                                 <span className={`mt-0.5 text-xs shrink-0 ${isDark ? "text-slate-500" : "text-stone-400"}`}>·</span>
-                                <p className={`text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{note}</p>
+                                <div className="flex-1">
+                                  <p className={`text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{note}</p>
+                                  <button
+                                    type="button"
+                                    onClick={() => void saveQuickNote({
+                                      chapterNumber: editChapter ? parseInt(editChapter) : null,
+                                      title: "Formatting note",
+                                      body: `Formatting note:\n${note}`,
+                                    })}
+                                    className={`mt-2 rounded-full px-3 py-1 text-[11px] font-semibold transition ${isDark ? "bg-white/10 text-slate-200 hover:bg-white/15" : "bg-white text-stone-700 hover:bg-stone-50"}`}
+                                  >
+                                    Save note
+                                  </button>
+                                </div>
                               </div>
                             ))}
                           </div>
@@ -1073,4 +1225,3 @@ function StatPill({ label, value, isDark }: { label: string; value: string; isDa
     </div>
   )
 }
-

@@ -146,7 +146,7 @@ export default function BookOverviewPage() {
 
   const featureTools = useMemo(
     () => [
-      { label: "Analysis", meta: "All nonessential tools", onClick: () => navigateWithMemory(`/${bookId}/analysis`) },
+      { label: "Analysis", meta: "All advanced tools", onClick: () => navigateWithMemory(`/${bookId}/analysis`) },
     ],
     [bookId]
   )

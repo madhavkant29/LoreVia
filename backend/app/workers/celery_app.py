@@ -32,7 +32,7 @@ def _normalize_celery_redis_url(raw_url: str) -> tuple[str, dict]:
 redis_url, redis_ssl_options = _normalize_celery_redis_url(settings.REDIS_URL)
 
 
-if settings.SENTRY_DSN:
+if settings.SENTRY_DSN and not settings.DEBUG:
     sentry_sdk.init(
         dsn=settings.SENTRY_DSN,
         integrations=[CeleryIntegration()],

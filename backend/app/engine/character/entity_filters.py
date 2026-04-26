@@ -355,3 +355,117 @@ def character_visibility_score(
         score += SUFFIX_CONCEPT_PENALTY
 
     return score
+
+
+# ─── Gag / meme character detection ──────────────────────────────────────────
+# Identifies comic-relief, absurdist, and one-off meme characters based on
+# soft scoring across personality signals, archetype, arc language, and
+# statistical footprint.  Never a hard gate — returns a numeric score so
+# callers can apply their own threshold.
+
+_GAG_PERSONALITY_MARKERS: frozenset[str] = frozenset({
+    "comedic", "absurdist", "clumsy", "bumbling", "eccentric", "quirky",
+    "slapstick", "goofy", "silly", "ridiculous", "oblivious", "buffoon",
+    "hapless", "dim-witted", "naive", "over-the-top", "flamboyant",
+    "chaotic", "erratic", "wacky", "manic", "comic-relief", "parody",
+    "self-aware", "fourth-wall", "meta", "satirical", "ironic",
+})
+
+_GAG_ARCHETYPE_SIGNALS: frozenset[str] = frozenset({
+    "fool", "trickster", "jester", "court jester", "clown", "comic relief",
+    "sidekick", "bumbling sidekick", "village idiot", "eccentric mentor",
+    "absurd villain", "parody", "meme", "comic villain", "one-off",
+    "throwaway", "cameo",
+})
+
+_GAG_ARC_PHRASES: tuple[str, ...] = (
+    "comic relief", "played for laughs", "running gag", "running joke",
+    "punchline", "punchline character", "absurd", "deliberately ridiculous",
+    "comedic foil", "meme", "satirical", "satirize", "parody of",
+    "breaks the fourth wall", "self-aware", "one-off joke",
+    "appears once for a laugh", "forgotten immediately", "throwaway",
+)
+
+
+def gag_character_score(
+    *,
+    personality_tags: list[str] | None = None,
+    archetype: str | None = None,
+    arc_summary: str | None = None,
+    mention_count: int = 0,
+    role: str | None = None,
+    growth_events: list[dict] | None = None,
+) -> int:
+    """Composite score for whether a character functions as a gag / meme figure.
+
+    Score components
+    ────────────────
+    + personality_tag overlap with _GAG_PERSONALITY_MARKERS (+2 per match, cap 4)
+    + archetype overlap with _GAG_ARCHETYPE_SIGNALS (+3)
+    + arc_summary contains known gag phrases (+2 per match, cap 4)
+    + very low mention count with a non-major role (+1)  — throwaway figures
+    - arc_summary is long and has growth_events  (-2)    — genuine arc overrides
+    - role is "mc" or "sc" and mention_count > 10  (-3) — significant characters
+
+    Callers should treat score >= 3 as a probable gag character.
+    """
+    score = 0
+
+    # 1. Personality tags
+    tag_hits = 0
+    for tag in (personality_tags or []):
+        if tag.strip().lower() in _GAG_PERSONALITY_MARKERS:
+            score += 2
+            tag_hits += 1
+            if tag_hits >= 2:
+                break  # cap: +4
+
+    # 2. Archetype signal
+    arch_lower = (archetype or "").strip().lower()
+    if any(signal in arch_lower for signal in _GAG_ARCHETYPE_SIGNALS):
+        score += 3
+
+    # 3. Arc summary phrase matching
+    arc_lower = (arc_summary or "").lower()
+    phrase_hits = 0
+    for phrase in _GAG_ARC_PHRASES:
+        if phrase in arc_lower:
+            score += 2
+            phrase_hits += 1
+            if phrase_hits >= 2:
+                break  # cap: +4
+
+    # 4. Low-mention throwaway bonus
+    if mention_count > 0 and mention_count <= 3 and role not in ("mc", "sc"):
+        score += 1
+
+    # 5. Genuine-arc override penalties
+    has_growth = isinstance(growth_events, list) and len(growth_events) >= 2
+    if has_growth and len(arc_lower) > 200:
+        score -= 2  # a real arc with multiple growth beats is unlikely a gag
+
+    if role in ("mc", "sc") and mention_count > 10:
+        score -= 3  # main/supporting cast with many mentions are story-critical
+
+    return score
+
+
+def is_gag_character(
+    *,
+    personality_tags: list[str] | None = None,
+    archetype: str | None = None,
+    arc_summary: str | None = None,
+    mention_count: int = 0,
+    role: str | None = None,
+    growth_events: list[dict] | None = None,
+    threshold: int = 3,
+) -> bool:
+    """Return True when the character scores at or above the gag threshold."""
+    return gag_character_score(
+        personality_tags=personality_tags,
+        archetype=archetype,
+        arc_summary=arc_summary,
+        mention_count=mention_count,
+        role=role,
+        growth_events=growth_events,
+    ) >= threshold

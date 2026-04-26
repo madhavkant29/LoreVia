@@ -87,8 +87,12 @@ export default function RegisterPage() {
     try {
       const res = await authApi.register(email, password, acceptedTerms)
       setAuth(res.access_token, res.refresh_token)
-      const me = await authApi.me()
-      setUser(me)
+      if (res.user) {
+        setUser(res.user)
+      } else {
+        const me = await authApi.me()
+        setUser(me)
+      }
       router.push("/library")
     } catch {
       setError("Registration failed. Email may already be taken.")

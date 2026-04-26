@@ -57,8 +57,12 @@ function LoginInner() {
     try {
       const res = await authApi.login(email, password)
       setAuth(res.access_token, res.refresh_token)
-      const me = await authApi.me()
-      setUser(me)
+      if (res.user) {
+        setUser(res.user)
+      } else {
+        const me = await authApi.me()
+        setUser(me)
+      }
       router.push("/library")
     } catch {
       setError("Invalid email or password.")

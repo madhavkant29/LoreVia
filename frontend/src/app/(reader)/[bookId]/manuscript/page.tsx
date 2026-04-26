@@ -8,6 +8,7 @@ import { useParams } from "next/navigation"
 import { booksApi } from "@/lib/api/books"
 import { intelligenceApi } from "@/lib/api/intelligence"
 import { readerApi } from "@/lib/api/reader"
+import { htmlToPlainText, renderRichTextHtml, sanitizeRichTextHtml } from "@/lib/utils/richText"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { capture } from "@/lib/analytics/posthog"
 import type { Book, BookNote, ChapterVersion, PreWritingCheck } from "@/types/book"
@@ -17,7 +18,7 @@ import type { ChapterListResponse, PlotThread, SearchResult } from "@/types/read
 
 type EditorMode = "chapter" | "book"
 type BookDraftMap = Record<number, { title: string; text: string; html: string }>
-type RightPane = "insights" | "notes"
+type RightPane = "insights" | "notes" | "character"
 
 export default function ManuscriptPage() {
   const { bookId } = useParams<{ bookId: string }>()
@@ -32,6 +33,7 @@ export default function ManuscriptPage() {
   const [characters, setCharacters] = useState<Character[]>([])
   const [chapterList, setChapterList] = useState<ChapterListResponse | null>(null)
   const [selectedChapter, setSelectedChapter] = useState<number | null>(null)
+  const [draftChapterNumber, setDraftChapterNumber] = useState<number | null>(null)
   const [chapterTitle, setChapterTitle] = useState("")
   const [text, setText] = useState("")
   const [html, setHtml] = useState("")
@@ -54,6 +56,7 @@ export default function ManuscriptPage() {
   const [synopsis, setSynopsis] = useState<ManuscriptSynopsis | null>(null)
   const [editorMode, setEditorMode] = useState<EditorMode>("chapter")
   const [fontSize, setFontSize] = useState(12)
+  const [fontSizeLocked, setFontSizeLocked] = useState(false)
   const [fontFamily, setFontFamily] = useState<"times" | "georgia" | "sans">("times")
   const [lineHeight, setLineHeight] = useState(1.8)
   const [showPageGuides, setShowPageGuides] = useState(true)
@@ -61,6 +64,19 @@ export default function ManuscriptPage() {
   const [showLeftRail, setShowLeftRail] = useState(false)
   const [showRightRail, setShowRightRail] = useState(false)
   const [activeRightPane, setActiveRightPane] = useState<RightPane>("insights")
+  const [selectedCharCard, setSelectedCharCard] = useState<Character | null>(null)
+  const [charCardEditing, setCharCardEditing] = useState(false)
+  const [charCardSaving, setCharCardSaving] = useState(false)
+  const [charCardDraft, setCharCardDraft] = useState<{
+    arcSummary: string
+    description: string
+    personalityTags: string
+    motivations: string
+    fears: string
+  }>({ arcSummary: "", description: "", personalityTags: "", motivations: "", fears: "" })
+  const [showExportMenu, setShowExportMenu] = useState(false)
+  const [showEditorSettings, setShowEditorSettings] = useState(false)
+  const [activeEditorKey, setActiveEditorKey] = useState<string | null>(null)
   const [fullBookLoading, setFullBookLoading] = useState(false)
   const [bookDrafts, setBookDrafts] = useState<BookDraftMap>({})
   const [exporting, setExporting] = useState<"pdf" | "docx" | null>(null)
@@ -72,21 +88,26 @@ export default function ManuscriptPage() {
   const [showPageSetup, setShowPageSetup] = useState(false)
   const [showSearchTools, setShowSearchTools] = useState(false)
   const [notes, setNotes] = useState<BookNote[]>([])
-  const [notesLoading, setNotesLoading] = useState(true)
+  const [notesLoading, setNotesLoading] = useState(false)
+  const [notesLoaded, setNotesLoaded] = useState(false)
   const [savingNote, setSavingNote] = useState(false)
   const [noteScope, setNoteScope] = useState<"chapter" | "book">("chapter")
   const [noteTitle, setNoteTitle] = useState("")
   const [noteBody, setNoteBody] = useState("")
+  const [noteBodyText, setNoteBodyText] = useState("")
+  const [dirtyDrafts, setDirtyDrafts] = useState<number[]>([])
 
   const chapterRefs = useRef<Record<number, HTMLDivElement | null>>({})
   const searchInputRef = useRef<HTMLInputElement | null>(null)
+  const manuscriptSectionRef = useRef<HTMLDivElement | null>(null)
+  const initialChapterLoadedRef = useRef<number | null>(null)
 
   const nextChapterNumber = useMemo(() => {
     const numbers = chapterList?.chapters.map((chapter) => chapter.number) ?? []
     return numbers.length ? Math.max(...numbers) + 1 : 1
   }, [chapterList])
 
-  const activeChapterNumber = selectedChapter ?? nextChapterNumber
+  const activeChapterNumber = selectedChapter ?? draftChapterNumber ?? nextChapterNumber
 
   const sheetStyle = {
     fontSize: `${fontSize}pt`,
@@ -174,19 +195,106 @@ export default function ManuscriptPage() {
     setShowRightRail(true)
   }
 
+  const openCharCard = (char: Character) => {
+    setSelectedCharCard(char)
+    setCharCardEditing(false)
+    setCharCardDraft({
+      arcSummary: char.arc_summary ?? "",
+      description: char.description ?? "",
+      personalityTags: (char.personality_tags ?? []).join(", "),
+      motivations: (char.motivations ?? []).join(", "),
+      fears: (char.fears ?? []).join(", "),
+    })
+    setActiveRightPane("character")
+    setShowRightRail(true)
+  }
+
+  const saveCharCard = async () => {
+    if (!selectedCharCard) return
+    setCharCardSaving(true)
+    try {
+      const updated = await booksApi.updateCharacter(bookId, selectedCharCard.id, {
+        arcSummary: charCardDraft.arcSummary.trim() || null,
+        description: charCardDraft.description.trim() || null,
+        personalityTags: charCardDraft.personalityTags.split(",").map(t => t.trim()).filter(Boolean),
+        motivations: charCardDraft.motivations.split(",").map(t => t.trim()).filter(Boolean),
+        fears: charCardDraft.fears.split(",").map(t => t.trim()).filter(Boolean),
+      })
+      setSelectedCharCard(updated)
+      setCharacters(prev => prev.map(c => c.id === updated.id ? updated : c))
+      setCharCardEditing(false)
+      setStatusMessage(`Character card for ${updated.name} saved.`)
+    } finally {
+      setCharCardSaving(false)
+    }
+  }
+
+  const markDraftDirty = (chapterNumber: number) => {
+    setDirtyDrafts((current) => (current.includes(chapterNumber) ? current : [...current, chapterNumber]))
+  }
+
+  const clearDraftDirty = (chapterNumber: number) => {
+    setDirtyDrafts((current) => current.filter((value) => value !== chapterNumber))
+  }
+
+  const formatChapterHeading = (chapterNumber: number, title: string) => `${chapterNumber}. ${title.trim() || `Chapter ${chapterNumber}`}`
+
+  const parseChapterHeading = (value: string, fallbackNumber: number, fallbackTitle: string) => {
+    const trimmed = value.trim()
+    if (!trimmed) {
+      return { chapterNumber: fallbackNumber, title: fallbackTitle.trim() || `Chapter ${fallbackNumber}` }
+    }
+
+    const matched = trimmed.match(/^(\d+)\.\s*(.+)$/)
+    if (!matched) {
+      return { chapterNumber: fallbackNumber, title: trimmed }
+    }
+
+    return {
+      chapterNumber: Number.parseInt(matched[1], 10) || fallbackNumber,
+      title: matched[2].trim() || fallbackTitle.trim() || `Chapter ${fallbackNumber}`,
+    }
+  }
+
   const loadBase = async () => {
-    const [bookData, chapters, characterData, synopsisData] = await Promise.all([
+    const [bookData, chapters] = await Promise.all([
       booksApi.get(bookId),
       readerApi.getChapterList(bookId),
-      booksApi.getCharacters(bookId).catch(() => []),
-      intelligenceApi.synopsis(bookId, "minimal").catch(() => null),
     ])
     setBook(bookData)
     setChapterList(chapters)
-    setCharacters(characterData)
-    setSynopsis(synopsisData)
-    if (selectedChapter === null && chapters.chapters.length > 0) {
-      setSelectedChapter(chapters.chapters[chapters.chapters.length - 1].number)
+    const initialChapterNumber = chapters.chapters.some((item) => item.number === selectedChapter)
+      ? selectedChapter
+      : chapters.chapters[chapters.chapters.length - 1]?.number ?? null
+    if (initialChapterNumber === null) {
+      setSelectedChapter(null)
+      return
+    }
+    if (selectedChapter !== initialChapterNumber) setSelectedChapter(initialChapterNumber)
+
+    const chapterMeta = chapters.chapters.find((item) => item.number === initialChapterNumber)
+    try {
+      const chapter = await readerApi.getChapter(bookId, initialChapterNumber)
+      const title = chapter.chapter_title || chapterMeta?.title || `Chapter ${initialChapterNumber}`
+      const chapterText = chapter.text_content || ""
+      const chapterHtml = chapter.html_content || textToHtml(chapterText)
+      initialChapterLoadedRef.current = initialChapterNumber
+      setDraftChapterNumber(null)
+      setChapterTitle(title)
+      setText(chapterText)
+      setHtml(chapterHtml)
+      setBookDrafts((current) => ({
+        ...current,
+        [initialChapterNumber]: {
+          title,
+          text: current[initialChapterNumber]?.text ?? chapterText,
+          html: current[initialChapterNumber]?.html ?? chapterHtml,
+        },
+      }))
+    } catch {
+      setChapterTitle(chapterMeta?.title || `Chapter ${initialChapterNumber}`)
+      setText("")
+      setHtml(textToHtml(""))
     }
   }
 
@@ -195,6 +303,7 @@ export default function ManuscriptPage() {
     try {
       const noteData = await booksApi.getBookNotes(bookId)
       setNotes(noteData)
+      setNotesLoaded(true)
     } finally {
       setNotesLoading(false)
     }
@@ -205,11 +314,24 @@ export default function ManuscriptPage() {
   }, [bookId])
 
   useEffect(() => {
-    loadNotes().catch(() => setNotes([]))
+    setNotes([])
+    setNotesLoaded(false)
+    setNotesLoading(false)
+    booksApi.getCharacters(bookId).then(setCharacters).catch(() => setCharacters([]))
+    intelligenceApi.synopsis(bookId, "minimal").then(setSynopsis).catch(() => setSynopsis(null))
   }, [bookId])
 
   useEffect(() => {
+    if (!showRightRail || activeRightPane !== "notes" || notesLoaded || notesLoading) return
+    loadNotes().catch(() => {
+      setNotes([])
+      setNotesLoaded(true)
+    })
+  }, [activeRightPane, bookId, notesLoaded, notesLoading, showRightRail])
+
+  useEffect(() => {
     if (selectedChapter === null) {
+      setDraftChapterNumber(nextChapterNumber)
       setChapterTitle(`Chapter ${nextChapterNumber}`)
       setText("")
       setHtml(textToHtml(""))
@@ -219,11 +341,16 @@ export default function ManuscriptPage() {
       setVoiceCharacters([])
       return
     }
+    if (initialChapterLoadedRef.current === selectedChapter) {
+      initialChapterLoadedRef.current = null
+      return
+    }
     const chapterMeta = chapterList?.chapters.find((item) => item.number === selectedChapter)
     readerApi.getChapter(bookId, selectedChapter).then((chapter) => {
       const title = chapter.chapter_title || chapterMeta?.title || `Chapter ${selectedChapter}`
       const chapterText = chapter.text_content || ""
       const chapterHtml = chapter.html_content || textToHtml(chapterText)
+      setDraftChapterNumber(null)
       setChapterTitle(title)
       setText(chapterText)
       setHtml(chapterHtml)
@@ -248,16 +375,20 @@ export default function ManuscriptPage() {
   }, [bookId, chapterList, nextChapterNumber, selectedChapter])
 
   useEffect(() => {
-    booksApi.getPreWritingCheck(bookId, activeChapterNumber).then(setPreWritingCheck).catch(() => {})
-  }, [activeChapterNumber, bookId])
+    if (loading) return
+    const handle = window.setTimeout(() => {
+      booksApi.getPreWritingCheck(bookId, activeChapterNumber).then(setPreWritingCheck).catch(() => {})
+    }, 180)
+    return () => window.clearTimeout(handle)
+  }, [activeChapterNumber, bookId, loading])
 
   useEffect(() => {
-    if (selectedChapter === null) {
+    if (!showLeftRail || selectedChapter === null) {
       setChapterVersions([])
       return
     }
     booksApi.getChapterVersions(bookId, selectedChapter).then(setChapterVersions).catch(() => setChapterVersions([]))
-  }, [bookId, selectedChapter])
+  }, [bookId, selectedChapter, showLeftRail])
 
   useEffect(() => {
     if (editorMode !== "book" || !chapterList?.chapters.length) return
@@ -306,6 +437,27 @@ export default function ManuscriptPage() {
     window.addEventListener("keydown", handler)
     return () => window.removeEventListener("keydown", handler)
   }, [])
+
+  useEffect(() => {
+    if (fontSizeLocked) return
+
+    const updateFontSize = () => {
+      const width = manuscriptSectionRef.current?.clientWidth ?? window.innerWidth
+      if (width <= 900) {
+        setFontSize(12)
+      } else if (width <= 1200) {
+        setFontSize(13)
+      } else if (width <= 1600) {
+        setFontSize(14)
+      } else {
+        setFontSize(15)
+      }
+    }
+
+    updateFontSize()
+    window.addEventListener("resize", updateFontSize)
+    return () => window.removeEventListener("resize", updateFontSize)
+  }, [fontSizeLocked])
 
   useEffect(() => {
     const trimmed = recallQuery.trim()
@@ -367,6 +519,8 @@ export default function ManuscriptPage() {
     })
     const importedChapter = result.imported_chapters[0] ?? chapterNumber
     setSelectedChapter(importedChapter)
+    clearDraftDirty(chapterNumber)
+    clearDraftDirty(importedChapter)
     await runAutomaticChecks(importedChapter, currentDraft.text)
     setStatusMessage(`Saved chapter ${importedChapter}. Continuity, synopsis, and thread context refreshed.`)
   }
@@ -386,6 +540,7 @@ export default function ManuscriptPage() {
       await loadBase()
       const importedChapter = result.imported_chapters[0] ?? activeChapterNumber
       setSelectedChapter(importedChapter)
+      clearDraftDirty(importedChapter)
       setBookDrafts((current) => ({
         ...current,
         [importedChapter]: { title: chapterTitle.trim() || `Chapter ${importedChapter}`, text, html },
@@ -394,6 +549,38 @@ export default function ManuscriptPage() {
       setStatusMessage(`Saved chapter ${importedChapter}. Continuity, synopsis, and thread context refreshed.`)
     } catch {
       setStatusMessage("Save failed. Please check the chapter number and try again.")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleChapterHeadingBlur = async (rawValue: string, fallbackNumber: number, fallbackTitle: string) => {
+    const parsed = parseChapterHeading(rawValue, fallbackNumber, fallbackTitle)
+    const currentDraft = bookDrafts[fallbackNumber] ?? { title: fallbackTitle, text, html }
+    const nextDraft = { ...currentDraft, title: parsed.title }
+
+    setChapterTitle(parsed.title)
+    setDraftChapterNumber(selectedChapter === null ? parsed.chapterNumber : null)
+    setBookDrafts((current) => ({
+      ...current,
+      [parsed.chapterNumber]: {
+        ...(current[parsed.chapterNumber] ?? nextDraft),
+        title: parsed.title,
+        text: selectedChapter === null ? text : current[parsed.chapterNumber]?.text ?? nextDraft.text,
+        html: selectedChapter === null ? html : current[parsed.chapterNumber]?.html ?? nextDraft.html,
+      },
+    }))
+    markDraftDirty(parsed.chapterNumber)
+
+    const draftToPersist = selectedChapter === null
+      ? { title: parsed.title, text, html }
+      : { title: parsed.title, text: currentDraft.text, html: currentDraft.html }
+
+    if (!draftToPersist.text.trim()) return
+
+    setSaving(true)
+    try {
+      await saveChapterDraft(parsed.chapterNumber, draftToPersist)
     } finally {
       setSaving(false)
     }
@@ -450,7 +637,7 @@ export default function ManuscriptPage() {
   }
 
   const saveNote = async () => {
-    if (!noteBody.trim()) return
+    if (!noteBodyText.trim()) return
     setSavingNote(true)
     try {
       const saved = await booksApi.saveBookNote(bookId, {
@@ -461,6 +648,7 @@ export default function ManuscriptPage() {
       setNotes((current) => [saved, ...current.filter((note) => note.id !== saved.id)])
       setNoteTitle("")
       setNoteBody("")
+      setNoteBodyText("")
       setStatusMessage(`Saved note${saved.chapter_number ? ` for chapter ${saved.chapter_number}` : ""}.`)
     } finally {
       setSavingNote(false)
@@ -482,6 +670,7 @@ export default function ManuscriptPage() {
     const nextHtml = textToHtml(nextText)
     setText(nextText)
     setHtml(nextHtml)
+    markDraftDirty(activeChapterNumber)
     setBookDrafts((current) => ({
       ...current,
       [activeChapterNumber]: { title: chapterTitle, text: nextText, html: nextHtml },
@@ -495,6 +684,7 @@ export default function ManuscriptPage() {
       const nextHtml = textToHtml(nextText)
       setText(nextText)
       setHtml(nextHtml)
+      markDraftDirty(activeChapterNumber)
       setBookDrafts((current) => ({
         ...current,
         [activeChapterNumber]: { title: chapterTitle, text: nextText, html: nextHtml },
@@ -529,40 +719,43 @@ export default function ManuscriptPage() {
     <div className={`min-h-screen ${isDark ? "bg-[#080808] text-slate-100" : "bg-[#f3eee6] text-stone-950"}`}>
       <div className="mx-auto max-w-[1600px] px-4 pb-12 pt-5 sm:px-6 lg:px-8">
         <div className={`rounded-[2rem] border px-5 py-5 shadow-[0_22px_70px_-55px_rgba(15,23,42,0.2)] ${isDark ? "border-white/10 bg-white/[0.03]" : "border-white/80 bg-white/92"}`}>
-          <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+          <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
             <div className="max-w-3xl">
               <p className={`text-[11px] font-semibold uppercase tracking-[0.32em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Manuscript editor</p>
               <h1 className={`mt-2 font-serif text-4xl leading-tight ${isDark ? "text-white" : "text-stone-950"}`}>{book?.title}</h1>
-              <p className={`mt-2 max-w-2xl text-sm leading-7 ${isDark ? "text-slate-400" : "text-stone-600"}`}>
-                A quiet drafting space with A4 pages, chapter and full-book modes, and continuity jumps that stay close when you need them.
-              </p>
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap items-center gap-3">
               <Link href={`/${bookId}`} className={`rounded-full border px-4 py-2 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>Overview</Link>
-              <Link href={`/${bookId}/advisor`} className="rounded-full bg-stone-900 px-4 py-2 text-sm font-semibold text-white">Story Advisor</Link>
-              <button onClick={printManuscript} className={`rounded-full border px-4 py-2 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
-                Print
-              </button>
-              <button onClick={() => void exportManuscript("docx")} disabled={!!exporting} className={`rounded-full border px-4 py-2 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
-                {exporting === "docx" ? "Exporting..." : "Download Word"}
-              </button>
-              <button onClick={() => void exportManuscript("pdf")} disabled={!!exporting} className={`rounded-full border px-4 py-2 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
-                {exporting === "pdf" ? "Exporting..." : "Download PDF"}
-              </button>
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setShowExportMenu((value) => !value)}
+                  className={`rounded-full border px-4 py-2 text-sm font-medium ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}
+                >
+                  Export
+                </button>
+                {showExportMenu ? (
+                  <div className={`absolute right-0 top-full z-20 mt-2 w-48 rounded-2xl border p-1.5 shadow-[0_18px_50px_-24px_rgba(15,23,42,0.4)] ${isDark ? "border-white/10 bg-[#0f1117]" : "border-stone-200 bg-white"}`}>
+                    <button onClick={() => { setShowExportMenu(false); printManuscript() }} className={`block w-full rounded-xl px-3 py-2 text-left text-sm ${isDark ? "text-slate-200 hover:bg-white/10" : "text-stone-700 hover:bg-stone-100"}`}>Print</button>
+                    <button onClick={() => { setShowExportMenu(false); void exportManuscript("docx") }} disabled={!!exporting} className={`block w-full rounded-xl px-3 py-2 text-left text-sm disabled:opacity-40 ${isDark ? "text-slate-200 hover:bg-white/10" : "text-stone-700 hover:bg-stone-100"}`}>{exporting === "docx" ? "Exporting Word..." : "Download Word"}</button>
+                    <button onClick={() => { setShowExportMenu(false); void exportManuscript("pdf") }} disabled={!!exporting} className={`block w-full rounded-xl px-3 py-2 text-left text-sm disabled:opacity-40 ${isDark ? "text-slate-200 hover:bg-white/10" : "text-stone-700 hover:bg-stone-100"}`}>{exporting === "pdf" ? "Exporting PDF..." : "Download PDF"}</button>
+                  </div>
+                ) : null}
+              </div>
               <button onClick={() => setShowLeftRail((value) => !value)} className={`rounded-full border px-4 py-2 text-sm font-medium ${showLeftRail ? isDark ? "border-indigo-300/40 bg-indigo-400/15 text-white" : "border-violet-300 bg-violet-50 text-stone-900" : isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
                 {showLeftRail ? "Hide chapters" : "Chapters"}
               </button>
-              <button onClick={() => openRightPane("insights")} className={`rounded-full border px-4 py-2 text-sm font-medium ${showRightRail && activeRightPane === "insights" ? isDark ? "border-emerald-300/40 bg-emerald-400/15 text-white" : "border-emerald-300 bg-emerald-50 text-stone-900" : isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
-                {showRightRail && activeRightPane === "insights" ? "Hide insights" : "Insights"}
-              </button>
-              <button onClick={() => openRightPane("notes")} className={`rounded-full border px-4 py-2 text-sm font-medium ${showRightRail && activeRightPane === "notes" ? isDark ? "border-amber-300/40 bg-amber-400/15 text-white" : "border-amber-300 bg-amber-50 text-stone-900" : isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
-                {showRightRail && activeRightPane === "notes" ? "Hide notes" : "Notes"}
-              </button>
+              <div className={`inline-flex rounded-full border p-1 ${isDark ? "border-white/10 bg-black/30" : "border-stone-200 bg-stone-100/80"}`}>
+                <Link href={`/${bookId}/advisor`} className={`rounded-full px-3 py-2 text-sm font-medium transition ${isDark ? "text-slate-200 hover:bg-white/10" : "text-stone-700 hover:bg-white"}`}>Story Advisor</Link>
+                <button onClick={() => openRightPane("insights")} className={`rounded-full px-3 py-2 text-sm font-medium transition ${showRightRail && activeRightPane === "insights" ? isDark ? "bg-white text-slate-950" : "bg-stone-900 text-white" : isDark ? "text-slate-300 hover:bg-white/10" : "text-stone-600 hover:bg-white"}`}>Insights</button>
+                <button onClick={() => openRightPane("character")} className={`rounded-full px-3 py-2 text-sm font-medium transition ${showRightRail && activeRightPane === "character" ? isDark ? "bg-white text-slate-950" : "bg-stone-900 text-white" : isDark ? "text-slate-300 hover:bg-white/10" : "text-stone-600 hover:bg-white"}`}>Characters</button>
+                <button onClick={() => openRightPane("notes")} className={`rounded-full px-3 py-2 text-sm font-medium transition ${showRightRail && activeRightPane === "notes" ? isDark ? "bg-white text-slate-950" : "bg-stone-900 text-white" : isDark ? "text-slate-300 hover:bg-white/10" : "text-stone-600 hover:bg-white"}`}>Notes</button>
+              </div>
             </div>
           </div>
         </div>
 
-        <div className={`mt-5 grid gap-5 ${desktopLayoutClass}`}>
+        <div className={`mt-8 grid gap-5 ${desktopLayoutClass}`}>
           {showLeftRail ? (
           <aside className={`rounded-[1.6rem] border p-4 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white/80"}`}>
             <div className="flex items-center justify-between">
@@ -570,6 +763,7 @@ export default function ManuscriptPage() {
               <button
                 onClick={() => {
                   setSelectedChapter(null)
+                  setDraftChapterNumber(nextChapterNumber)
                   setReplaceExisting(false)
                   setChapterTitle(`Chapter ${nextChapterNumber}`)
                   setText("")
@@ -590,6 +784,7 @@ export default function ManuscriptPage() {
                     key={chapter.number}
                     onClick={() => {
                       setSelectedChapter(chapter.number)
+                      setDraftChapterNumber(null)
                       setReplaceExisting(true)
                     }}
                     className={`w-full rounded-[1rem] border px-3 py-3 text-left text-sm transition ${active ? isDark ? "border-indigo-400/40 bg-indigo-400/15 text-white" : "border-violet-300 bg-violet-50 text-stone-900" : isDark ? "border-white/10 bg-white/[0.03] text-slate-300 hover:bg-white/10" : "border-stone-200 bg-stone-50 text-stone-700 hover:bg-white"}`}
@@ -618,7 +813,7 @@ export default function ManuscriptPage() {
           </aside>
           ) : null}
 
-          <section className={`rounded-[1.8rem] border p-5 ${!showLeftRail && !showRightRail ? "xl:mx-auto xl:max-w-[980px]" : ""} ${isDark ? "border-white/10 bg-black/80" : "border-stone-200 bg-[#faf8f4]"}`}>
+          <section ref={manuscriptSectionRef} className={`rounded-[1.8rem] border p-5 ${!showLeftRail && !showRightRail ? "xl:mx-auto xl:max-w-[980px]" : ""} ${isDark ? "border-white/10 bg-black/80" : "border-stone-200 bg-[#faf8f4]"}`}>
             {preWritingCheck ? (
               <div className={`mb-5 rounded-[1.3rem] border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -664,7 +859,7 @@ export default function ManuscriptPage() {
                   </label>
                   <label className={`text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>
                     Font size
-                    <select value={fontSize} onChange={(event) => setFontSize(Number(event.target.value))} className={`ml-2 rounded-lg border px-2 py-1 text-sm ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}>
+                    <select value={fontSize} onChange={(event) => { setFontSize(Number(event.target.value)); setFontSizeLocked(true) }} className={`ml-2 rounded-lg border px-2 py-1 text-sm ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}>
                       {[11, 12, 13, 14, 15].map((size) => <option key={size} value={size}>{size}pt</option>)}
                     </select>
                   </label>
@@ -762,14 +957,14 @@ export default function ManuscriptPage() {
               </div>
             </div>
 
-            <div className={`mb-5 rounded-[1.2rem] border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white"}`}>
+            <div className={`mb-8 rounded-[1.4rem] border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white/90"}`}>
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className={`inline-flex rounded-full p-1 ${isDark ? "border border-white/10 bg-black/30" : "border border-stone-200 bg-stone-50"}`}>
+                <div className={`inline-flex rounded-full p-1 ${isDark ? "border border-white/10 bg-black/40 shadow-inner" : "border border-stone-200 bg-stone-100 shadow-inner"}`}>
                   {(["chapter", "book"] as const).map((mode) => (
                     <button
                       key={mode}
                       onClick={() => setEditorMode(mode)}
-                      className={`rounded-full px-4 py-2 text-sm font-medium transition ${editorMode === mode ? isDark ? "bg-white text-slate-950" : "bg-stone-900 text-white" : isDark ? "text-slate-300 hover:bg-white/10" : "text-stone-600 hover:bg-stone-100"}`}
+                      className={`rounded-full px-5 py-2 text-sm font-medium transition ${editorMode === mode ? isDark ? "bg-white text-slate-950 shadow-sm" : "bg-stone-900 text-white shadow-sm" : isDark ? "text-slate-300 hover:bg-white/10" : "text-stone-600 hover:bg-white"}`}
                     >
                       {mode === "chapter" ? "Chapter" : "Full book"}
                     </button>
@@ -784,12 +979,6 @@ export default function ManuscriptPage() {
                   </button>
                   <button onClick={() => setShowLeftRail((value) => !value)} className={`rounded-full px-3 py-1.5 text-xs font-medium ${showLeftRail ? isDark ? "bg-indigo-400/15 text-white" : "bg-violet-100 text-stone-900" : isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}>
                     {showLeftRail ? "Hide chapters" : "Show chapters"}
-                  </button>
-                  <button onClick={() => openRightPane("insights")} className={`rounded-full px-3 py-1.5 text-xs font-medium ${showRightRail && activeRightPane === "insights" ? isDark ? "bg-emerald-400/15 text-white" : "bg-emerald-100 text-stone-900" : isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}>
-                    {showRightRail && activeRightPane === "insights" ? "Hide insights" : "Show insights"}
-                  </button>
-                  <button onClick={() => openRightPane("notes")} className={`rounded-full px-3 py-1.5 text-xs font-medium ${showRightRail && activeRightPane === "notes" ? isDark ? "bg-amber-400/15 text-white" : "bg-amber-100 text-stone-900" : isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}>
-                    {showRightRail && activeRightPane === "notes" ? "Hide notes" : "Show notes"}
                   </button>
                 </div>
               </div>
@@ -810,7 +999,7 @@ export default function ManuscriptPage() {
                   </label>
                   <label className={`text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>
                     Font size
-                    <select value={fontSize} onChange={(event) => setFontSize(Number(event.target.value))} className={`ml-2 rounded-lg border px-2 py-1 text-sm ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}>
+                    <select value={fontSize} onChange={(event) => { setFontSize(Number(event.target.value)); setFontSizeLocked(true) }} className={`ml-2 rounded-lg border px-2 py-1 text-sm ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}>
                       {[11, 12, 13, 14, 15].map((size) => <option key={size} value={size}>{size}pt</option>)}
                     </select>
                   </label>
@@ -899,43 +1088,7 @@ export default function ManuscriptPage() {
 
             {editorMode === "chapter" ? (
               <div className="space-y-4">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <input
-                      type="number"
-                      min={1}
-                      value={activeChapterNumber}
-                      onChange={(e) => setSelectedChapter(e.target.value ? parseInt(e.target.value) : null)}
-                      className={`w-28 rounded-[0.9rem] border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-100" : "border-stone-200 bg-stone-50 text-stone-900"}`}
-                    />
-                    <input
-                      type="text"
-                      value={chapterTitle}
-                      onChange={(e) => {
-                        setChapterTitle(e.target.value)
-                        setBookDrafts((current) => ({
-                          ...current,
-                          [activeChapterNumber]: { title: e.target.value, text, html },
-                        }))
-                      }}
-                      placeholder="Chapter title"
-                      className={`min-w-[18rem] flex-1 rounded-[0.9rem] border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-100" : "border-stone-200 bg-stone-50 text-stone-900"}`}
-                    />
-                  </div>
-                  <button
-                    onClick={saveCurrentChapter}
-                    disabled={saving || !text.trim()}
-                    className="rounded-[1rem] bg-[linear-gradient(135deg,#0f766e,#115e59)] px-5 py-3 text-sm font-semibold text-white transition disabled:opacity-40"
-                  >
-                    {saving ? "Saving..." : "Save chapter"}
-                  </button>
-                </div>
-                <label className={`flex items-center gap-2 text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>
-                    <input type="checkbox" checked={replaceExisting || selectedChapter !== null} onChange={(e) => setReplaceExisting(e.target.checked)} />
-                    Replace existing chapter
-                </label>
-
-                <div className={`relative mx-auto w-full max-w-[210mm] overflow-hidden rounded-[1.25rem] border shadow-[0_24px_80px_-55px_rgba(15,23,42,0.25)] ${isDark ? "border-white/10 bg-[#101010]" : "border-[#d8d0c4] bg-[#fdfcf9]"}`}>
+                <div className={`relative mx-auto w-full max-w-full overflow-hidden rounded-[1.4rem] border shadow-[0_24px_80px_-55px_rgba(15,23,42,0.25)] ${isDark ? "border-white/10 bg-[#101010]" : "border-[#d8d0c4] bg-[#fdfcf9]"}`}>
                   {showPageGuides ? (
                     <div
                       aria-hidden
@@ -945,22 +1098,78 @@ export default function ManuscriptPage() {
                       }}
                     />
                   ) : null}
-                  <div className={`border-b px-5 py-3 ${isDark ? "border-white/10 bg-white/[0.02]" : "border-[#e6dfd4] bg-[#f7f3ed]"}`}>
-                    <EditorToolbar isDark={isDark} />
+                  <div className={`border-b px-6 py-6 sm:px-8 ${isDark ? "border-white/10 bg-white/[0.02]" : "border-[#e6dfd4] bg-[#f7f3ed]"}`}>
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="min-w-0 flex-1">
+                        <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{selectedChapter === null ? "New chapter draft" : "Current chapter"}</p>
+                        <input
+                          key={`chapter-heading-${activeChapterNumber}-${chapterTitle}`}
+                          type="text"
+                          defaultValue={formatChapterHeading(activeChapterNumber, chapterTitle)}
+                          onBlur={(event) => void handleChapterHeadingBlur(event.target.value, activeChapterNumber, chapterTitle)}
+                          className={`mt-3 w-full border-0 bg-transparent font-serif text-3xl font-semibold leading-tight outline-none sm:text-4xl ${isDark ? "text-white placeholder:text-slate-600" : "text-stone-950 placeholder:text-stone-400"}`}
+                        />
+                        <p className={`mt-2 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{chapterWordCount.toLocaleString()} words · ~{chapterApproxPages} pages</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className={`rounded-full px-3 py-1.5 text-[11px] font-semibold ${dirtyDrafts.includes(activeChapterNumber) ? isDark ? "bg-amber-500/10 text-amber-200" : "bg-amber-100 text-amber-800" : isDark ? "bg-emerald-500/10 text-emerald-200" : "bg-emerald-100 text-emerald-800"}`}>
+                          {saving ? "Saving..." : dirtyDrafts.includes(activeChapterNumber) ? "Unsaved" : "Saved"}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setShowEditorSettings((value) => !value)}
+                          className={`rounded-full border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}
+                          aria-label="Editor settings"
+                        >
+                          ⚙
+                        </button>
+                        <button
+                          onClick={saveCurrentChapter}
+                          disabled={saving || !text.trim()}
+                          className={`rounded-full border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-100 disabled:opacity-40" : "border-stone-200 bg-white text-stone-700 disabled:opacity-40"}`}
+                          aria-label="Save now"
+                        >
+                          Save
+                        </button>
+                      </div>
+                    </div>
+                    {showEditorSettings ? (
+                      <div className={`mt-4 inline-flex items-center gap-2 rounded-full border px-3 py-2 text-xs ${isDark ? "border-white/10 bg-black/30 text-slate-300" : "border-stone-200 bg-white text-stone-600"}`}>
+                        <span>Replace existing chapter</span>
+                        <button
+                          type="button"
+                          onClick={() => setReplaceExisting((value) => !value)}
+                          className={`rounded-full px-2.5 py-1 font-semibold ${replaceExisting || selectedChapter !== null ? isDark ? "bg-white text-slate-950" : "bg-stone-900 text-white" : isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}
+                        >
+                          {replaceExisting || selectedChapter !== null ? "On" : "Off"}
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className={`sticky top-3 z-10 border-b px-4 py-3 transition-all duration-200 translate-y-0 opacity-100 pointer-events-auto ${isDark ? "border-white/10 bg-[#0d1117]/95 backdrop-blur" : "border-[#e6dfd4] bg-[#f7f3ed]/95 backdrop-blur"}`}>
+                    <EditorToolbar isDark={isDark} compact characters={characters} />
                   </div>
                   <RichTextEditor
                     html={html}
                     onChange={(nextHtml, nextText) => {
                       setHtml(nextHtml)
                       setText(nextText)
+                      markDraftDirty(activeChapterNumber)
                       setBookDrafts((current) => ({
                         ...current,
                         [activeChapterNumber]: { title: chapterTitle, text: nextText, html: nextHtml },
                       }))
                     }}
+                    onFocus={() => setActiveEditorKey(`chapter-${activeChapterNumber}`)}
+                    onBlur={() => setActiveEditorKey((current) => current === `chapter-${activeChapterNumber}` ? null : current)}
+                    onCharacterClick={(characterName) => {
+                      const char = characters.find((c) => c.name === characterName || c.aliases?.includes(characterName))
+                      if (char) openCharCard(char)
+                    }}
                     placeholder="Write or paste the chapter here..."
                     style={{ ...sheetStyle, textIndent: firstLineIndent ? "1.5em" : "0" }}
-                    className={`relative min-h-[297mm] w-full border-0 bg-transparent px-[20mm] py-[24mm] outline-none ${isDark ? "text-slate-100 placeholder:text-slate-500" : "text-stone-900 placeholder:text-stone-400"}`}
+                    className={`relative min-h-[297mm] w-full border-0 bg-transparent px-6 py-10 sm:px-[20mm] sm:py-[24mm] outline-none ${isDark ? "text-slate-100 placeholder:text-slate-500" : "text-stone-900 placeholder:text-stone-400"}`}
+                    contentClassName="mx-auto w-full"
                   />
                 </div>
               </div>
@@ -975,7 +1184,7 @@ export default function ManuscriptPage() {
                       ref={(node) => {
                         chapterRefs.current[chapter.number] = node
                       }}
-                      className={`relative mx-auto w-full max-w-[210mm] overflow-hidden rounded-[1.25rem] border shadow-[0_24px_80px_-55px_rgba(15,23,42,0.25)] ${jumpTarget === chapter.number ? isDark ? "border-teal-400/40 bg-[#101010]" : "border-teal-300 bg-[#fdfcf9]" : isDark ? "border-white/10 bg-[#101010]" : "border-[#d8d0c4] bg-[#fdfcf9]"}`}
+                      className={`relative mx-auto w-full max-w-full overflow-hidden rounded-[1.4rem] border shadow-[0_24px_80px_-55px_rgba(15,23,42,0.25)] ${jumpTarget === chapter.number ? isDark ? "border-teal-400/40 bg-[#101010]" : "border-teal-300 bg-[#fdfcf9]" : isDark ? "border-white/10 bg-[#101010]" : "border-[#d8d0c4] bg-[#fdfcf9]"}`}
                     >
                       {showPageGuides ? (
                         <div
@@ -986,50 +1195,79 @@ export default function ManuscriptPage() {
                           }}
                         />
                       ) : null}
-                      <div className={`mb-4 border-b px-[20mm] py-4 ${isDark ? "border-white/10 bg-white/[0.02]" : "border-[#e6dfd4] bg-[#f7f3ed]"}`}>
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div>
-                          <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Chapter {chapter.number}</p>
-                          <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{countWords(draft.text).toLocaleString()} words · ~{Math.max(1, Math.ceil(countWords(draft.text) / 500))} pages</p>
+                      <div className={`border-b px-6 py-6 sm:px-8 ${isDark ? "border-white/10 bg-white/[0.02]" : "border-[#e6dfd4] bg-[#f7f3ed]"}`}>
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="min-w-0 flex-1">
+                            <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Chapter {chapter.number}</p>
+                            <input
+                              key={`book-heading-${chapter.number}-${draft.title}`}
+                              type="text"
+                              defaultValue={formatChapterHeading(chapter.number, draft.title)}
+                              onBlur={async (event) => {
+                                const parsed = parseChapterHeading(event.target.value, chapter.number, draft.title)
+                                setBookDrafts((current) => ({
+                                  ...current,
+                                  [chapter.number]: {
+                                    title: parsed.title,
+                                    text: current[chapter.number]?.text ?? draft.text,
+                                    html: current[chapter.number]?.html ?? draft.html,
+                                  },
+                                }))
+                                markDraftDirty(chapter.number)
+                                if (draft.text.trim()) {
+                                  setSaving(true)
+                                  try {
+                                    await saveChapterDraft(chapter.number, { ...draft, title: parsed.title })
+                                  } finally {
+                                    setSaving(false)
+                                  }
+                                }
+                              }}
+                              className={`mt-3 w-full border-0 bg-transparent font-serif text-3xl font-semibold leading-tight outline-none sm:text-4xl ${isDark ? "text-white placeholder:text-slate-600" : "text-stone-950 placeholder:text-stone-400"}`}
+                            />
+                            <p className={`mt-2 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{countWords(draft.text).toLocaleString()} words / ~{Math.max(1, Math.ceil(countWords(draft.text) / 500))} pages</p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className={`rounded-full px-3 py-1.5 text-[11px] font-semibold ${dirtyDrafts.includes(chapter.number) ? isDark ? "bg-amber-500/10 text-amber-200" : "bg-amber-100 text-amber-800" : isDark ? "bg-emerald-500/10 text-emerald-200" : "bg-emerald-100 text-emerald-800"}`}>
+                              {saving ? "Saving..." : dirtyDrafts.includes(chapter.number) ? "Unsaved" : "Saved"}
+                            </span>
+                            <button
+                              onClick={() => void saveChapterDraft(chapter.number, draft)}
+                              disabled={saving || !draft.text.trim()}
+                              className={`rounded-full border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-100 disabled:opacity-40" : "border-stone-200 bg-white text-stone-700 disabled:opacity-40"}`}
+                              aria-label={`Save chapter ${chapter.number}`}
+                            >
+                              Save
+                            </button>
+                          </div>
                         </div>
-                        <button
-                          onClick={() => void saveChapterDraft(chapter.number, draft)}
-                          disabled={saving || !draft.text.trim()}
-                          className="rounded-full bg-[linear-gradient(135deg,#0f766e,#115e59)] px-4 py-2 text-xs font-semibold text-white disabled:opacity-40"
-                        >
-                          Save this chapter
-                        </button>
                       </div>
-                      </div>
-                      <input
-                        type="text"
-                        value={draft.title}
-                        onChange={(event) => setBookDrafts((current) => ({
-                          ...current,
-                          [chapter.number]: {
-                            title: event.target.value,
-                            text: current[chapter.number]?.text ?? "",
-                            html: current[chapter.number]?.html ?? draft.html,
-                          },
-                        }))}
-                        className={`mb-4 mt-5 w-full border-0 bg-transparent px-[20mm] text-2xl font-semibold outline-none ${isDark ? "text-white" : "text-stone-950"}`}
-                      />
-                      <div className={`border-y px-[20mm] py-3 ${isDark ? "border-white/10 bg-white/[0.02]" : "border-[#e6dfd4] bg-[#f7f3ed]"}`}>
-                        <EditorToolbar isDark={isDark} compact />
+                      <div className="hidden">
+                        <EditorToolbar isDark={isDark} compact characters={characters} />
                       </div>
                       <RichTextEditor
                         html={draft.html}
-                        onChange={(nextHtml, nextText) => setBookDrafts((current) => ({
-                          ...current,
-                          [chapter.number]: {
-                            title: current[chapter.number]?.title ?? draft.title,
-                            text: nextText,
-                            html: nextHtml,
-                          },
-                        }))}
+                        onChange={(nextHtml, nextText) => {
+                          markDraftDirty(chapter.number)
+                          setBookDrafts((current) => ({
+                            ...current,
+                            [chapter.number]: {
+                              title: current[chapter.number]?.title ?? draft.title,
+                              text: nextText,
+                              html: nextHtml,
+                            },
+                          }))
+                        }}
+                        onFocus={() => setActiveEditorKey(`book-${chapter.number}`)}
+                        onBlur={() => setActiveEditorKey((current) => current === `book-${chapter.number}` ? null : current)}
+                        onCharacterClick={(characterName) => {
+                          const char = characters.find((c) => c.name === characterName || c.aliases?.includes(characterName))
+                          if (char) openCharCard(char)
+                        }}
                         placeholder="Draft this chapter..."
                         style={{ ...sheetStyle, textIndent: firstLineIndent ? "1.5em" : "0" }}
-                        className={`relative min-h-[240mm] w-full border-0 bg-transparent px-[20mm] py-[22mm] outline-none ${isDark ? "text-slate-100 placeholder:text-slate-500" : "text-stone-900 placeholder:text-stone-400"}`}
+                        className={`relative min-h-[240mm] w-full border-0 bg-transparent px-6 py-10 sm:px-[20mm] sm:py-[22mm] outline-none ${isDark ? "text-slate-100 placeholder:text-slate-500" : "text-stone-900 placeholder:text-stone-400"}`}
+                        contentClassName="mx-auto w-full"
                       />
                     </div>
                   )
@@ -1043,19 +1281,259 @@ export default function ManuscriptPage() {
                   ? "Save runs continuity review and refreshes unresolved plot-thread context immediately after ingest."
                   : "Full-book mode lets continuity findings and search hits jump straight to the right chapter card."}
               </p>
-              <button
-                onClick={editorMode === "chapter" ? saveCurrentChapter : saveFullBook}
-                disabled={saving || (editorMode === "chapter" ? !text.trim() : Object.values(bookDrafts).every((draft) => !draft.text.trim()))}
-                className="rounded-[1rem] bg-[linear-gradient(135deg,#0f766e,#115e59)] px-5 py-3 text-sm font-semibold text-white transition disabled:opacity-40"
-              >
-                {saving ? "Saving..." : editorMode === "chapter" ? "Save chapter" : "Save full book"}
-              </button>
+              {editorMode === "book" ? (
+                <button
+                  onClick={saveFullBook}
+                  disabled={saving || Object.values(bookDrafts).every((draft) => !draft.text.trim())}
+                  className={`rounded-full border px-4 py-2 text-sm font-medium ${isDark ? "border-white/10 bg-white/5 text-slate-100 disabled:opacity-40" : "border-stone-200 bg-white text-stone-700 disabled:opacity-40"}`}
+                >
+                  {saving ? "Saving..." : "Save all chapters"}
+                </button>
+              ) : null}
             </div>
             {statusMessage ? <p className={`mt-3 text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>{statusMessage}</p> : null}
           </section>
 
           {showRightRail ? (
           <aside className="space-y-4">
+
+            {/* ── Character Card pane ──────────────────────────── */}
+            {activeRightPane === "character" ? (
+              <div className={`rounded-[1.6rem] border ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white/80"}`}>
+                {/* Header: browse list or card header */}
+                {selectedCharCard ? (
+                  <>
+                    <div className={`flex items-center justify-between gap-3 border-b p-4 ${isDark ? "border-white/10" : "border-stone-200"}`}>
+                      <div>
+                        <button
+                          onClick={() => setSelectedCharCard(null)}
+                          className={`mb-1 text-[11px] font-semibold uppercase tracking-[0.18em] transition ${isDark ? "text-slate-500 hover:text-slate-300" : "text-stone-400 hover:text-stone-600"}`}
+                        >
+                          ← All characters
+                        </button>
+                        <p className={`text-base font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{selectedCharCard.name}</p>
+                        {selectedCharCard.aliases.length > 0 && (
+                          <p className={`text-xs ${isDark ? "text-slate-500" : "text-stone-400"}`}>aka {selectedCharCard.aliases.join(", ")}</p>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {charCardEditing ? (
+                          <>
+                            <button
+                              onClick={saveCharCard}
+                              disabled={charCardSaving}
+                              className="rounded-full bg-[linear-gradient(135deg,#4f46e5,#4338ca)] px-4 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                            >
+                              {charCardSaving ? "Saving…" : "Save"}
+                            </button>
+                            <button
+                              onClick={() => setCharCardEditing(false)}
+                              className={`rounded-full border px-3 py-1.5 text-xs font-medium ${isDark ? "border-white/10 text-slate-300" : "border-stone-200 text-stone-600"}`}
+                            >
+                              Cancel
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            onClick={() => setCharCardEditing(true)}
+                            className={`rounded-full border px-3 py-1.5 text-xs font-medium ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`}
+                          >
+                            Edit card
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="space-y-4 p-4">
+                      {/* Role + First chapter badges */}
+                      <div className="flex flex-wrap gap-2">
+                        {selectedCharCard.role && (
+                          <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] ${
+                            selectedCharCard.role === "mc" ? isDark ? "bg-indigo-500/20 text-indigo-200" : "bg-indigo-100 text-indigo-700"
+                            : selectedCharCard.role === "sc" ? isDark ? "bg-teal-500/20 text-teal-200" : "bg-teal-100 text-teal-700"
+                            : isDark ? "bg-white/10 text-slate-300" : "bg-stone-100 text-stone-600"
+                          }`}>{selectedCharCard.role === "mc" ? "Main" : selectedCharCard.role === "sc" ? "Supporting" : "Background"}</span>
+                        )}
+                        <span className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${isDark ? "bg-white/8 text-slate-400" : "bg-stone-100 text-stone-500"}`}>
+                          Ch. {selectedCharCard.first_chapter}{selectedCharCard.last_seen_chapter ? ` – ${selectedCharCard.last_seen_chapter}` : ""}
+                        </span>
+                        {selectedCharCard.archetype && (
+                          <span className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${isDark ? "bg-white/8 text-slate-400" : "bg-stone-100 text-stone-500"}`}>{selectedCharCard.archetype}</span>
+                        )}
+                        {selectedCharCard.character_type === "gag" && (
+                          <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${isDark ? "bg-amber-500/20 text-amber-300" : "bg-amber-100 text-amber-700"}`}>🎭 Gag</span>
+                        )}
+                      </div>
+
+                      {/* Description */}
+                      <div>
+                        <p className={`mb-1 text-[10px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Description</p>
+                        {charCardEditing ? (
+                          <textarea
+                            rows={3}
+                            value={charCardDraft.description}
+                            onChange={e => setCharCardDraft(d => ({ ...d, description: e.target.value }))}
+                            className={`w-full resize-none rounded-[0.8rem] border px-3 py-2 text-sm leading-6 outline-none ${isDark ? "border-white/10 bg-black/30 text-slate-200" : "border-stone-200 bg-stone-50 text-stone-800"}`}
+                          />
+                        ) : (
+                          <p className={`text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{selectedCharCard.description || <span className="opacity-40">No description yet.</span>}</p>
+                        )}
+                      </div>
+
+                      {/* Arc summary */}
+                      <div>
+                        <p className={`mb-1 text-[10px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Arc summary</p>
+                        {charCardEditing ? (
+                          <textarea
+                            rows={4}
+                            value={charCardDraft.arcSummary}
+                            onChange={e => setCharCardDraft(d => ({ ...d, arcSummary: e.target.value }))}
+                            className={`w-full resize-none rounded-[0.8rem] border px-3 py-2 text-sm leading-6 outline-none ${isDark ? "border-white/10 bg-black/30 text-slate-200" : "border-stone-200 bg-stone-50 text-stone-800"}`}
+                          />
+                        ) : (
+                          <p className={`text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{selectedCharCard.arc_summary || <span className="opacity-40">No arc summary yet.</span>}</p>
+                        )}
+                      </div>
+
+                      {/* Personality tags */}
+                      <div>
+                        <p className={`mb-1 text-[10px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Personality</p>
+                        {charCardEditing ? (
+                          <input
+                            value={charCardDraft.personalityTags}
+                            onChange={e => setCharCardDraft(d => ({ ...d, personalityTags: e.target.value }))}
+                            placeholder="Comma-separated traits"
+                            className={`w-full rounded-[0.8rem] border px-3 py-2 text-sm outline-none ${isDark ? "border-white/10 bg-black/30 text-slate-200 placeholder:text-slate-600" : "border-stone-200 bg-stone-50 text-stone-800"}`}
+                          />
+                        ) : (
+                          <div className="flex flex-wrap gap-1.5">
+                            {(selectedCharCard.personality_tags ?? []).length > 0 ? selectedCharCard.personality_tags.map(tag => (
+                              <span key={tag} className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${isDark ? "bg-violet-500/15 text-violet-200" : "bg-violet-100 text-violet-700"}`}>{tag}</span>
+                            )) : <span className={`text-xs ${isDark ? "text-slate-500" : "text-stone-400"}`}>None recorded.</span>}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Motivations */}
+                      <div>
+                        <p className={`mb-1 text-[10px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Motivations</p>
+                        {charCardEditing ? (
+                          <input
+                            value={charCardDraft.motivations}
+                            onChange={e => setCharCardDraft(d => ({ ...d, motivations: e.target.value }))}
+                            placeholder="Comma-separated"
+                            className={`w-full rounded-[0.8rem] border px-3 py-2 text-sm outline-none ${isDark ? "border-white/10 bg-black/30 text-slate-200 placeholder:text-slate-600" : "border-stone-200 bg-stone-50 text-stone-800"}`}
+                          />
+                        ) : (
+                          <ul className="space-y-1">
+                            {(selectedCharCard.motivations ?? []).length > 0 ? selectedCharCard.motivations.map(m => (
+                              <li key={m} className={`text-sm leading-5 ${isDark ? "text-slate-300" : "text-stone-600"}`}>· {m}</li>
+                            )) : <li className={`text-xs ${isDark ? "text-slate-500" : "text-stone-400"}`}>None recorded.</li>}
+                          </ul>
+                        )}
+                      </div>
+
+                      {/* Fears */}
+                      <div>
+                        <p className={`mb-1 text-[10px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Fears</p>
+                        {charCardEditing ? (
+                          <input
+                            value={charCardDraft.fears}
+                            onChange={e => setCharCardDraft(d => ({ ...d, fears: e.target.value }))}
+                            placeholder="Comma-separated"
+                            className={`w-full rounded-[0.8rem] border px-3 py-2 text-sm outline-none ${isDark ? "border-white/10 bg-black/30 text-slate-200 placeholder:text-slate-600" : "border-stone-200 bg-stone-50 text-stone-800"}`}
+                          />
+                        ) : (
+                          <ul className="space-y-1">
+                            {(selectedCharCard.fears ?? []).length > 0 ? selectedCharCard.fears.map(f => (
+                              <li key={f} className={`text-sm leading-5 ${isDark ? "text-slate-300" : "text-stone-600"}`}>· {f}</li>
+                            )) : <li className={`text-xs ${isDark ? "text-slate-500" : "text-stone-400"}`}>None recorded.</li>}
+                          </ul>
+                        )}
+                      </div>
+
+                      {/* Growth events */}
+                      {(selectedCharCard.growth_events ?? []).length > 0 && (
+                        <div>
+                          <p className={`mb-1 text-[10px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Growth events</p>
+                          <div className="space-y-2">
+                            {selectedCharCard.growth_events!.map((ev, i) => (
+                              <div key={i} className={`rounded-[0.8rem] border px-3 py-2 text-xs ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
+                                {ev.chapter && <span className={`font-semibold ${isDark ? "text-indigo-300" : "text-violet-600"}`}>Ch. {ev.chapter} · </span>}
+                                <span className={isDark ? "text-slate-300" : "text-stone-700"}>{ev.event}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Save to notes */}
+                      <button
+                        onClick={() => {
+                          booksApi.saveBookNote(bookId, {
+                            chapterNumber: null,
+                            title: `Character note: ${selectedCharCard.name}`,
+                            body: [
+                              `**${selectedCharCard.name}** (${selectedCharCard.role ?? "background"})`,
+                              selectedCharCard.arc_summary ? `\nArc: ${selectedCharCard.arc_summary}` : "",
+                              selectedCharCard.personality_tags?.length ? `\nPersonality: ${selectedCharCard.personality_tags.join(", ")}` : "",
+                              selectedCharCard.motivations?.length ? `\nMotivations: ${selectedCharCard.motivations.join("; ")}` : "",
+                            ].filter(Boolean).join("\n"),
+                          }).then(saved => {
+                            setNotes(current => [saved, ...current.filter(n => n.id !== saved.id)])
+                            setStatusMessage(`Saved character note for ${selectedCharCard.name}.`)
+                          }).catch(() => setStatusMessage("Could not save note."))
+                        }}
+                        className={`w-full rounded-full border px-4 py-2 text-xs font-semibold transition ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`}
+                      >
+                        Save as note
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  /* Browse list */
+                  <div className="p-4">
+                    <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Characters</p>
+                    <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-400"}`}>Click a name to open their card.</p>
+                    <div className="mt-3 space-y-2">
+                      {characters.length === 0 ? (
+                        <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>No characters extracted yet.</p>
+                      ) : characters.map(char => (
+                        <button
+                          key={char.id}
+                          onClick={() => openCharCard(char)}
+                          className={`w-full rounded-[1rem] border px-3 py-3 text-left transition ${
+                            isDark ? "border-white/10 bg-white/[0.03] hover:bg-white/[0.07]" : "border-stone-200 bg-stone-50 hover:bg-white"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{char.name}</p>
+                            {char.role && (
+                              <span className={`text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full ${
+                                char.role === "mc" ? isDark ? "bg-indigo-500/20 text-indigo-300" : "bg-indigo-100 text-indigo-700"
+                                : char.role === "sc" ? isDark ? "bg-teal-500/20 text-teal-300" : "bg-teal-100 text-teal-700"
+                                : isDark ? "bg-white/10 text-slate-400" : "bg-stone-100 text-stone-500"
+                              }`}>{char.role}</span>
+                            )}
+                          </div>
+                          {char.arc_summary && (
+                            <p className={`mt-1 text-xs line-clamp-2 ${isDark ? "text-slate-400" : "text-stone-500"}`}>{char.arc_summary}</p>
+                          )}
+                          {char.personality_tags && char.personality_tags.length > 0 && (
+                            <div className="mt-1.5 flex flex-wrap gap-1">
+                              {char.personality_tags.slice(0, 3).map(t => (
+                                <span key={t} className={`text-[10px] rounded-full px-2 py-0.5 ${isDark ? "bg-white/8 text-slate-400" : "bg-stone-100 text-stone-500"}`}>{t}</span>
+                              ))}
+                            </div>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : null}
+
             {activeRightPane === "insights" ? (
               <>
             {editorMode === "book" ? (
@@ -1292,16 +1770,25 @@ export default function ManuscriptPage() {
                       placeholder="Note title"
                       className={`w-full rounded-[0.9rem] border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
                     />
-                    <textarea
-                      value={noteBody}
-                      onChange={(event) => setNoteBody(event.target.value)}
-                      placeholder={noteScope === "chapter" ? `Add a note for chapter ${activeChapterNumber}` : "Add a book-level note"}
-                      rows={6}
-                      className={`w-full rounded-[1rem] border px-3 py-3 text-sm leading-6 outline-none ${isDark ? "border-white/10 bg-black text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
-                    />
+                    <div className={`overflow-hidden rounded-[1rem] border ${isDark ? "border-white/10 bg-[#0b0f17]" : "border-stone-200 bg-white"}`}>
+                      <EditorToolbar isDark={isDark} compact characters={characters} />
+                      <RichTextEditor
+                        html={noteBody}
+                        onChange={(nextHtml, nextText) => {
+                          setNoteBody(nextHtml)
+                          setNoteBodyText(nextText)
+                        }}
+                        onCharacterClick={(characterName) => {
+                          const char = characters.find((c) => c.name === characterName || c.aliases?.includes(characterName))
+                          if (char) openCharCard(char)
+                        }}
+                        placeholder={noteScope === "chapter" ? `Add a note for chapter ${activeChapterNumber}` : "Add a book-level note"}
+                        className={`min-h-[11rem] px-4 py-4 text-sm leading-7 outline-none ${isDark ? "bg-black/40 text-slate-100 placeholder:text-slate-500" : "bg-white text-stone-900 placeholder:text-stone-400"}`}
+                      />
+                    </div>
                     <button
                       onClick={saveNote}
-                      disabled={savingNote || !noteBody.trim()}
+                      disabled={savingNote || !noteBodyText.trim()}
                       className="rounded-[1rem] bg-[linear-gradient(135deg,#d97706,#b45309)] px-4 py-3 text-sm font-semibold text-white transition disabled:opacity-40"
                     >
                       {savingNote ? "Saving..." : `Save ${noteScope === "chapter" ? "chapter" : "book"} note`}
@@ -1323,7 +1810,10 @@ export default function ManuscriptPage() {
                           </div>
                           <button onClick={() => removeNote(note.id)} className={`text-xs font-medium ${isDark ? "text-rose-300" : "text-rose-700"}`}>Delete</button>
                         </div>
-                        <p className={`mt-3 whitespace-pre-wrap text-sm leading-6 ${isDark ? "text-slate-200" : "text-stone-700"}`}>{note.body}</p>
+                        <div
+                          className={`note-rich-content mt-3 text-sm leading-6 ${isDark ? "text-slate-200" : "text-stone-700"}`}
+                          dangerouslySetInnerHTML={{ __html: renderRichTextHtml(note.body) }}
+                        />
                       </div>
                     ))}
                   </div>
@@ -1342,7 +1832,10 @@ export default function ManuscriptPage() {
                           </div>
                           <button onClick={() => removeNote(note.id)} className={`text-xs font-medium ${isDark ? "text-rose-300" : "text-rose-700"}`}>Delete</button>
                         </div>
-                        <p className={`mt-3 whitespace-pre-wrap text-sm leading-6 ${isDark ? "text-slate-200" : "text-stone-700"}`}>{note.body}</p>
+                        <div
+                          className={`note-rich-content mt-3 text-sm leading-6 ${isDark ? "text-slate-200" : "text-stone-700"}`}
+                          dangerouslySetInnerHTML={{ __html: renderRichTextHtml(note.body) }}
+                        />
                       </div>
                     ))}
                   </div>
@@ -1357,33 +1850,142 @@ export default function ManuscriptPage() {
   )
 }
 
-function EditorToolbar({ isDark, compact = false }: { isDark: boolean; compact?: boolean }) {
+function EditorToolbar({
+  isDark,
+  compact = false,
+  characters = [],
+}: {
+  isDark: boolean
+  compact?: boolean
+  characters?: Character[]
+}) {
+  const [showMentionPicker, setShowMentionPicker] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const selectionRef = useRef<Range | null>(null)
+
   const run = (command: string, value?: string) => {
     document.execCommand(command, false, value)
   }
 
-  const buttonClass = `rounded-md border px-3 py-2 text-xs font-medium transition ${isDark ? "border-white/10 bg-white/[0.03] text-slate-200 hover:bg-white/[0.08]" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`
+  const cacheSelection = () => {
+    const selection = window.getSelection()
+    if (!selection || selection.rangeCount === 0) return
+    selectionRef.current = selection.getRangeAt(0).cloneRange()
+  }
+
+  const restoreSelection = () => {
+    const selection = window.getSelection()
+    if (!selection || !selectionRef.current) return
+    selection.removeAllRanges()
+    selection.addRange(selectionRef.current)
+  }
+
+  const insertLink = () => {
+    const href = window.prompt("Enter a URL")
+    if (!href) return
+    const label = window.getSelection()?.toString().trim()
+    if (label) {
+      run("createLink", href)
+      return
+    }
+    run("insertHTML", `<a href="${escapeAttribute(href)}" target="_blank" rel="noreferrer noopener">${escapeHtml(href)}</a>`)
+  }
+
+  const insertImage = () => {
+    cacheSelection()
+    fileInputRef.current?.click()
+  }
+
+  const insertMention = (name: string) => {
+    run(
+      "insertHTML",
+      `<span class="mention-token" data-mention="${escapeAttribute(name)}">@${escapeHtml(name)}</span>&nbsp;`
+    )
+    setShowMentionPicker(false)
+  }
+
+  const shellClass = compact
+    ? `border-b px-3 py-2 ${isDark ? "border-white/10 bg-[#111827]" : "border-stone-200 bg-stone-50"}`
+    : ""
+  const groupClass = "flex flex-wrap items-center gap-1.5"
+  const buttonClass = `rounded-md px-2.5 py-2 text-[11px] font-semibold tracking-[0.08em] transition ${
+    isDark ? "text-slate-200 hover:bg-white/10" : "text-stone-700 hover:bg-stone-200/70"
+  }`
+  const dividerClass = isDark ? "h-5 w-px bg-white/10" : "h-5 w-px bg-stone-200"
+  const mentionableCharacters = characters.slice(0, 8)
 
   return (
-    <div className={`mb-5 flex flex-wrap items-center gap-x-6 gap-y-3 ${compact ? "justify-start" : "justify-between"}`}>
-      <div className="flex flex-wrap items-center gap-3">
-        <button type="button" title="Bold (Ctrl+B)" onClick={() => run("bold")} className={buttonClass}>Bold</button>
-        <button type="button" title="Italic (Ctrl+I)" onClick={() => run("italic")} className={buttonClass}>Italic</button>
-        <button type="button" title="Underline (Ctrl+U)" onClick={() => run("underline")} className={buttonClass}>Underline</button>
-        <button type="button" title="Strikethrough" onClick={() => run("strikeThrough")} className={buttonClass}>Strike</button>
-        <button type="button" title="Bulleted list" onClick={() => run("insertUnorderedList")} className={buttonClass}>Bullets</button>
-        <button type="button" title="Numbered list" onClick={() => run("insertOrderedList")} className={buttonClass}>Numbers</button>
-        <button type="button" title="Block quote" onClick={() => run("formatBlock", "<blockquote>")} className={buttonClass}>Quote</button>
+    <div className={`flex flex-wrap items-center justify-between gap-3 ${shellClass}`}>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(event) => {
+          const file = event.target.files?.[0]
+          if (!file) return
+          const reader = new FileReader()
+          reader.onload = () => {
+            const result = typeof reader.result === "string" ? reader.result : ""
+            if (!result) return
+            restoreSelection()
+            run("insertHTML", `<p><img src="${escapeAttribute(result)}" alt="${escapeAttribute(file.name || "Embedded image")}" /></p>`)
+            event.target.value = ""
+          }
+          reader.readAsDataURL(file)
+        }}
+      />
+      <div className={`${groupClass} ${compact ? "justify-start" : ""}`}>
+        <button type="button" title="Heading" onMouseDown={(event) => { event.preventDefault(); cacheSelection() }} onClick={() => run("formatBlock", "<h2>")} className={buttonClass}>H</button>
+        <button type="button" title="Bold (Ctrl+B)" onMouseDown={(event) => { event.preventDefault(); cacheSelection() }} onClick={() => run("bold")} className={buttonClass}>B</button>
+        <button type="button" title="Italic (Ctrl+I)" onMouseDown={(event) => { event.preventDefault(); cacheSelection() }} onClick={() => run("italic")} className={buttonClass}>I</button>
+        <span className={dividerClass} />
+        <button type="button" title="Bulleted list" onMouseDown={(event) => { event.preventDefault(); cacheSelection() }} onClick={() => run("insertUnorderedList")} className={buttonClass}>List</button>
+        <button type="button" title="Numbered list" onMouseDown={(event) => { event.preventDefault(); cacheSelection() }} onClick={() => run("insertOrderedList")} className={buttonClass}>1.</button>
+        <button type="button" title="Quote" onMouseDown={(event) => { event.preventDefault(); cacheSelection() }} onClick={() => run("formatBlock", "<blockquote>")} className={buttonClass}>Quote</button>
+        <span className={dividerClass} />
+        <button type="button" title="Insert link" onMouseDown={(event) => { event.preventDefault(); cacheSelection() }} onClick={insertLink} className={buttonClass}>Link</button>
+        <button type="button" title="Insert image" onMouseDown={(event) => { event.preventDefault(); cacheSelection() }} onClick={insertImage} className={buttonClass}>Image</button>
+        <div className="relative">
+          <button
+            type="button"
+            title="Mention character"
+            onMouseDown={(event) => { event.preventDefault(); cacheSelection() }}
+            onClick={() => setShowMentionPicker((current) => !current)}
+            className={buttonClass}
+          >
+            @
+          </button>
+          {showMentionPicker && mentionableCharacters.length > 0 ? (
+            <div
+              className={`absolute left-0 top-full z-20 mt-2 w-52 rounded-xl border p-1 shadow-[0_18px_50px_-24px_rgba(15,23,42,0.4)] ${
+                isDark ? "border-white/10 bg-[#0f172a]" : "border-stone-200 bg-white"
+              }`}
+            >
+              {mentionableCharacters.map((character) => (
+                <button
+                  key={character.id}
+                  type="button"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => insertMention(character.name)}
+                  className={`block w-full rounded-lg px-3 py-2 text-left text-sm transition ${
+                    isDark ? "text-slate-200 hover:bg-white/8" : "text-stone-700 hover:bg-stone-100"
+                  }`}
+                >
+                  @{character.name}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
       </div>
-      <div className="flex flex-wrap items-center gap-3">
-        <button type="button" title="Heading 1" onClick={() => run("formatBlock", "<h1>")} className={buttonClass}>H1</button>
-        <button type="button" title="Heading 2" onClick={() => run("formatBlock", "<h2>")} className={buttonClass}>H2</button>
-        <button type="button" title="Paragraph" onClick={() => run("formatBlock", "<p>")} className={buttonClass}>Body</button>
-        <button type="button" title="Align left" onClick={() => run("justifyLeft")} className={buttonClass}>Left</button>
-        <button type="button" title="Align center" onClick={() => run("justifyCenter")} className={buttonClass}>Center</button>
-        <button type="button" title="Align right" onClick={() => run("justifyRight")} className={buttonClass}>Right</button>
-        <button type="button" title="Undo (Ctrl+Z)" onClick={() => run("undo")} className={buttonClass}>Undo</button>
-        <button type="button" title="Redo (Ctrl+Y)" onClick={() => run("redo")} className={buttonClass}>Redo</button>
+      <div className={groupClass}>
+        <button type="button" title="Align left" onMouseDown={(event) => { event.preventDefault(); cacheSelection() }} onClick={() => run("justifyLeft")} className={buttonClass}>Left</button>
+        <button type="button" title="Align center" onMouseDown={(event) => { event.preventDefault(); cacheSelection() }} onClick={() => run("justifyCenter")} className={buttonClass}>Center</button>
+        <button type="button" title="Align right" onMouseDown={(event) => { event.preventDefault(); cacheSelection() }} onClick={() => run("justifyRight")} className={buttonClass}>Right</button>
+        <span className={dividerClass} />
+        <button type="button" title="Undo (Ctrl+Z)" onMouseDown={(event) => { event.preventDefault(); cacheSelection() }} onClick={() => run("undo")} className={buttonClass}>Undo</button>
+        <button type="button" title="Redo (Ctrl+Y)" onMouseDown={(event) => { event.preventDefault(); cacheSelection() }} onClick={() => run("redo")} className={buttonClass}>Redo</button>
       </div>
     </div>
   )
@@ -1395,12 +1997,20 @@ function RichTextEditor({
   placeholder,
   className,
   style,
+  contentClassName,
+  onFocus,
+  onBlur,
+  onCharacterClick,
 }: {
   html: string
   onChange: (html: string, text: string) => void
   placeholder?: string
   className?: string
   style?: CSSProperties
+  contentClassName?: string
+  onFocus?: () => void
+  onBlur?: () => void
+  onCharacterClick?: (characterName: string) => void
 }) {
   const ref = useRef<HTMLDivElement | null>(null)
 
@@ -1417,12 +2027,14 @@ function RichTextEditor({
       contentEditable
       suppressContentEditableWarning
       data-placeholder={placeholder}
+      onFocus={onFocus}
+      onBlur={onBlur}
       onInput={(event) => {
-        const nextHtml = sanitizeEditorHtml(event.currentTarget.innerHTML)
+        const nextHtml = sanitizeRichTextHtml(event.currentTarget.innerHTML, onCharacterClick)
         const nextText = htmlToPlainText(nextHtml)
         onChange(nextHtml, nextText)
       }}
-      className={`${className ?? ""} manuscript-editor`}
+      className={`${className ?? ""} ${contentClassName ?? ""} manuscript-editor`}
       style={style}
     />
   )
@@ -1464,44 +2076,13 @@ function textToHtml(text: string) {
     .join("")
 }
 
-function htmlToPlainText(html: string) {
-  if (typeof window === "undefined") return html.replace(/<[^>]+>/g, " ")
-  const container = document.createElement("div")
-  container.innerHTML = html
-  const blocks = Array.from(container.querySelectorAll("h1,h2,h3,p,blockquote,li,div"))
-    .map((node) => node.textContent?.trim() ?? "")
-    .filter(Boolean)
-  return blocks.length ? blocks.join("\n\n") : (container.textContent ?? "").trim()
-}
-
-function sanitizeEditorHtml(html: string) {
-  if (typeof window === "undefined") return html
-  const container = document.createElement("div")
-  container.innerHTML = html
-  for (const node of Array.from(container.querySelectorAll("*"))) {
-    const tag = node.tagName.toLowerCase()
-    if (!["p", "br", "strong", "b", "em", "i", "u", "s", "strike", "h1", "h2", "h3", "blockquote", "ul", "ol", "li", "div", "span"].includes(tag)) {
-      node.replaceWith(...Array.from(node.childNodes))
-      continue
-    }
-    Array.from(node.attributes).forEach((attribute) => {
-      if (attribute.name !== "style") {
-        node.removeAttribute(attribute.name)
-      }
-    })
-    const textAlign = (node as HTMLElement).style.textAlign
-    node.removeAttribute("style")
-    if (textAlign && ["left", "center", "right", "justify"].includes(textAlign)) {
-      ;(node as HTMLElement).style.textAlign = textAlign
-    }
-  }
-  const normalized = container.innerHTML.trim()
-  return normalized || "<p></p>"
-}
-
 function escapeHtml(value: string) {
   return value
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
+}
+
+function escapeAttribute(value: string) {
+  return escapeHtml(value).replaceAll('"', "&quot;")
 }

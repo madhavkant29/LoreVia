@@ -12,3 +12,4 @@ Key non-negotiables (repeated here for quick reference):
 - No commented-out code; preserve unrelated docstrings and comments
 - **Write tests for all new functions** in `backend/tests/unit/` for utility functions and `backend/tests/integration/` for API endpoints
 - **Consider edge cases** when writing tests: empty inputs, null values, boundary conditions, malformed data, and error scenarios
+- When adding or changing schema, update the SQLAlchemy model in `backend/app/models/...`, create a new Alembic revision, fill `upgrade()` and `downgrade()`, and push it after local verification
