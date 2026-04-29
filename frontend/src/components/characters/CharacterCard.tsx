@@ -6,6 +6,19 @@ import { CONFIDENCE_THRESHOLDS } from "@/lib/constants"
 import { useAuthStore } from "@/lib/stores/authStore"
 import type { Character } from "@/types/character"
 
+function eventChapterLabel(event: NonNullable<Character["growth_events"]>[number]) {
+  const chapter = event.chapter_number ?? event.chapter
+  return typeof chapter === "number" ? `Chapter ${chapter}` : null
+}
+
+function eventTitle(event: NonNullable<Character["growth_events"]>[number]) {
+  return event.event_title || event.event || "Untitled event"
+}
+
+function eventDescription(event: NonNullable<Character["growth_events"]>[number]) {
+  return event.description || event.impact || null
+}
+
 interface Props {
   character: Character
   bookId?: string
@@ -66,7 +79,7 @@ export function CharacterCard({ character, bookId, compact = false, editable = f
   const visible = Object.entries(traits).filter(([, t]) => t && t.confidence >= CONFIDENCE_THRESHOLDS.SHOW_IN_UI && t.value)
   const isDark = theme === "dark"
   const relationshipSummaries = character.relationship_summaries ?? []
-  const growthEvents = character.growth_events ?? []
+  const growthEvents = [...(character.growth_events ?? [])]
   const isPaid = user?.tier === "pro" || user?.tier === "power" || user?.tier === "admin"
   const advancedTraits = visible.filter(([key]) => !["hair", "eyes", "face", "build", "age", "distinguishing", "manual_description"].includes(key))
 
@@ -180,7 +193,7 @@ export function CharacterCard({ character, bookId, compact = false, editable = f
           onClick={() => setExpanded(false)}
         >
           <div 
-            className={`relative w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-2xl p-6 md:p-8 ${
+            className={`relative z-50 w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-2xl p-6 md:p-8 ${
               isDark ? "bg-slate-900 text-white shadow-xl shadow-black/50 border border-slate-800" : "bg-white text-slate-900 shadow-2xl border border-slate-200"
             }`}
             onClick={(e) => e.stopPropagation()}
@@ -386,13 +399,43 @@ export function CharacterCard({ character, bookId, compact = false, editable = f
                 <div>
                   <p className={isDark ? "text-xs font-semibold uppercase tracking-[0.22em] text-slate-500" : "text-xs font-semibold uppercase tracking-[0.22em] text-slate-400"}>Key growth events</p>
                   <div className="mt-3 space-y-3">
-                    {growthEvents.reverse().map((event, index) => (
+                    {growthEvents
+                      .slice()
+                      .sort((left, right) => (right.chapter_number ?? right.chapter ?? 0) - (left.chapter_number ?? left.chapter ?? 0))
+                      .map((event, index) => (
                       <div key={`${character.id}-growth-${index}`} className={`rounded-lg border px-5 py-4 text-base ${isDark ? "border-slate-800 bg-slate-900/50 text-slate-200" : "border-slate-200 bg-white text-slate-700"}`}>
                         <p className={isDark ? "font-medium text-white" : "font-medium text-slate-900"}>
-                          {typeof event.chapter === "number" ? `Chapter ${event.chapter}: ` : ""}
-                          {event.event}
+                          {eventChapterLabel(event) ? `${eventChapterLabel(event)}: ` : ""}
+                          {eventTitle(event)}
                         </p>
-                        {event.impact ? <p className={isDark ? "mt-2 text-sm leading-relaxed text-slate-300" : "mt-2 text-sm leading-relaxed text-slate-600"}>{event.impact}</p> : null}
+                        {eventDescription(event) ? <p className={isDark ? "mt-2 text-sm leading-relaxed text-slate-300" : "mt-2 text-sm leading-relaxed text-slate-600"}>{eventDescription(event)}</p> : null}
+                        <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
+                          {typeof event.impact_score === "number" ? (
+                            <span className={`rounded-full px-2.5 py-1 ${isDark ? "bg-slate-800 text-slate-300" : "bg-slate-100 text-slate-600"}`}>
+                              impact {event.impact_score}/10
+                            </span>
+                          ) : null}
+                          {event.growth_direction ? (
+                            <span className={`rounded-full px-2.5 py-1 capitalize ${isDark ? "bg-slate-800 text-slate-300" : "bg-slate-100 text-slate-600"}`}>
+                              {event.growth_direction}
+                            </span>
+                          ) : null}
+                          {typeof event.growth_magnitude === "number" ? (
+                            <span className={`rounded-full px-2.5 py-1 ${isDark ? "bg-slate-800 text-slate-300" : "bg-slate-100 text-slate-600"}`}>
+                              growth {event.growth_magnitude}/10
+                            </span>
+                          ) : null}
+                          {event.is_major ? (
+                            <span className={`rounded-full px-2.5 py-1 ${isDark ? "bg-amber-500/15 text-amber-300" : "bg-amber-100 text-amber-700"}`}>
+                              major
+                            </span>
+                          ) : null}
+                        </div>
+                        {event.accomplishments?.length ? (
+                          <p className={isDark ? "mt-3 text-xs leading-relaxed text-slate-400" : "mt-3 text-xs leading-relaxed text-slate-500"}>
+                            Accomplishments: {event.accomplishments.join(", ")}
+                          </p>
+                        ) : null}
                       </div>
                     ))}
                   </div>

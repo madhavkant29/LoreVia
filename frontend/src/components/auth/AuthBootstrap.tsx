@@ -5,45 +5,38 @@ import { authApi } from "@/lib/api/auth"
 import { useAuthStore } from "@/lib/stores/authStore"
 
 export function AuthBootstrap() {
-  const { user, setAuth, setUser, logout } = useAuthStore()
+  const { user, setUser, logout } = useAuthStore()
   const ran = useRef(false)
 
   useEffect(() => {
-    if (ran.current) return
+    if (ran.current || user) return
     ran.current = true
-
-    const accessToken = typeof window !== "undefined" ? localStorage.getItem("access_token") : null
-    const refreshToken = typeof window !== "undefined" ? localStorage.getItem("refresh_token") : null
-    if (!accessToken && !refreshToken) return
-    if (user) return
 
     const restore = async () => {
       try {
-        if (!accessToken && refreshToken) {
-          const refreshed = await authApi.refresh(refreshToken)
-          setAuth(refreshed.access_token, refreshed.refresh_token)
-        }
         const me = await authApi.me()
-        setUser(me)
-      } catch {
-        if (refreshToken) {
-          try {
-            const refreshed = await authApi.refresh(refreshToken)
-            setAuth(refreshed.access_token, refreshed.refresh_token)
-            const me = await authApi.me()
-            setUser(me)
-            return
-          } catch {
-            logout()
-          }
+        if (me) {
+          setUser(me)
+          return
+        }
+        const refreshed = await authApi.refresh()
+        if (!refreshed) {
+          logout()
+          return
+        }
+        const refreshedMe = await authApi.me()
+        if (refreshedMe) {
+          setUser(refreshedMe)
         } else {
           logout()
         }
+      } catch {
+        logout()
       }
     }
 
     restore()
-  }, [user, setAuth, setUser, logout])
+  }, [user, setUser, logout])
 
   return null
 }

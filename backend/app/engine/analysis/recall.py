@@ -11,14 +11,12 @@ They last read up to chapter {last_chapter} of "{title}" and are about to contin
 Write a grounded recap in natural prose.
 
 Rules:
-- Keep it to 3-5 sentences.
-- Do not say "Previously on", "as we dive back in", "meanwhile", "the overarching themes", or any TV-show style phrasing.
-- Do not sound promotional, mystical, or AI-generated.
+- Keep it to 2-3 sentences.
 - Use concrete names and events when they are available.
 - Preserve uncertainty when the source context is thin.
-- Mention at most one unresolved question near the end.
 - Never include spoilers past chapter {last_chapter}.
 - Avoid list formatting, headers, and quotation marks unless the source requires them.
+- Mention at most one unresolved question near the end.
 """
 
 

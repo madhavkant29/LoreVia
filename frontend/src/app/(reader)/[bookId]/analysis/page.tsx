@@ -1,12 +1,15 @@
 "use client"
 
+import { useEffect, useState } from "react"
 import type { Route } from "next"
 import Link from "next/link"
 import { useParams } from "next/navigation"
 
+import { booksApi } from "@/lib/api/books"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
+import type { Book } from "@/types/book"
 
-const ANALYSIS_TOOLS = [
+const ANALYSIS_TOOLS_BASE = [
   {
     href: "foreshadowing",
     eyebrow: "Signals and hints",
@@ -16,7 +19,7 @@ const ANALYSIS_TOOLS = [
   {
     href: "timeline",
     eyebrow: "Story structure",
-    title: "Major events",
+    title: "Arc timeline",
     description: "Follow the chapter-axis view of characters, thread movement, and relationship turns.",
   },
   {
@@ -32,10 +35,10 @@ const ANALYSIS_TOOLS = [
     description: "Track characters, relationships, plot threads, and continuity across each chapter.",
   },
   {
-    href: "cross-book-wiki",
-    eyebrow: "Series echoes",
-    title: "Cross-book wiki",
-    description: "Compare parallel names, world anchors, and recurring ideas across connected books.",
+    href: "series-ask",
+    eyebrow: "Series intelligence",
+    title: "Series ask",
+    description: "Ask about characters, continuity, or plot threads across all books in your series.",
   },
   {
     href: "relationship-evolution",
@@ -49,6 +52,29 @@ export default function AnalysisPage() {
   const { bookId } = useParams<{ bookId: string }>()
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
+  const [book, setBook] = useState<Book | null>(null)
+
+  useEffect(() => {
+    if (bookId) {
+      booksApi.get(bookId).then(setBook).catch(() => {})
+    }
+  }, [bookId])
+
+  const analysisTools = ANALYSIS_TOOLS_BASE.map((tool) => {
+    if (tool.href === "series-ask" && book?.primary_series_id) {
+      return { ...tool, href: `/series/${book.primary_series_id}/ask` }
+    }
+    if (tool.href === "series-ask") {
+      return {
+        ...tool,
+        href: `/${bookId}/ask`,
+        eyebrow: "Book intelligence",
+        title: "Ask LoreVia",
+        description: "This book is not attached to a series yet. Ask about this book directly instead.",
+      }
+    }
+    return tool
+  })
 
   return (
     <div className={`min-h-screen ${isDark ? "bg-[#0a0a0a] text-slate-100" : "bg-[#f5efe6] text-stone-950"}`}>
@@ -71,10 +97,10 @@ export default function AnalysisPage() {
         </div>
 
         <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {ANALYSIS_TOOLS.map((tool) => (
+          {analysisTools.map((tool: typeof ANALYSIS_TOOLS_BASE[0]) => (
             <Link
               key={tool.href}
-              href={`/${bookId}/${tool.href}` as Route}
+              href={tool.href.startsWith("/") ? tool.href as Route : `/${bookId}/${tool.href}` as Route}
               className={`group rounded-[1.5rem] border p-5 transition ${isDark ? "border-white/10 bg-white/[0.03] hover:bg-white/[0.06]" : "border-stone-200 bg-white/90 hover:bg-white"}`}
             >
               <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{tool.eyebrow}</p>

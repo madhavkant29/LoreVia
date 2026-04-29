@@ -22,14 +22,19 @@ def upgrade() -> None:
     if "characters" not in tables:
         return
 
-    # Add character_type column
-    op.add_column("characters", sa.Column("character_type", sa.String(), nullable=True))
-    
-    # Add character_type_score column
-    op.add_column("characters", sa.Column("character_type_score", sa.Integer(), nullable=True))
-    
-    # Add subtype_scores column
-    op.add_column("characters", sa.Column("subtype_scores", postgresql.JSONB(), nullable=True, server_default="{}"))
+    columns = {col["name"] for col in inspector.get_columns("characters")}
+
+    # Add character_type column if it doesn't exist
+    if "character_type" not in columns:
+        op.add_column("characters", sa.Column("character_type", sa.String(), nullable=True))
+
+    # Add character_type_score column if it doesn't exist
+    if "character_type_score" not in columns:
+        op.add_column("characters", sa.Column("character_type_score", sa.Integer(), nullable=True))
+
+    # Add subtype_scores column if it doesn't exist
+    if "subtype_scores" not in columns:
+        op.add_column("characters", sa.Column("subtype_scores", postgresql.JSONB(), nullable=True, server_default="{}"))
 
 
 def downgrade() -> None:

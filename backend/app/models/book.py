@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -19,6 +20,10 @@ class Book(Base):
     format: Mapped[str] = mapped_column(String, nullable=False)   # pdf | epub | screenplay
     s3_key: Mapped[str] = mapped_column(String, nullable=False)
     cover_s3_key: Mapped[str | None] = mapped_column(String)
+    cover_processed_url: Mapped[str | None] = mapped_column(String)
+    cover_edge_colors: Mapped[dict | None] = mapped_column(JSONB, default=dict)
+    cover_processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cover_crop_bounds: Mapped[dict | None] = mapped_column(JSONB, default=dict)
     isbn: Mapped[str | None] = mapped_column(String)
     language: Mapped[str] = mapped_column(String, default="en")
     status: Mapped[str] = mapped_column(String, default="pending", index=True)
@@ -45,9 +50,14 @@ class Book(Base):
     relationships = relationship("CharacterRelationship", back_populates="book", cascade="all, delete-orphan")
     plot_threads = relationship("PlotThread", back_populates="book", cascade="all, delete-orphan")
     wiki_entries = relationship("WikiEntry", back_populates="book", cascade="all, delete-orphan")
+    world_building_documents = relationship("WorldBuildingDocument", back_populates="book", cascade="all, delete-orphan")
+    world_elements = relationship("WorldElement", foreign_keys="WorldElement.book_id", back_populates="book", cascade="all, delete-orphan")
+    world_gap_analyses = relationship("WorldGapAnalysis", back_populates="book", cascade="all, delete-orphan")
+    world_notes = relationship("WorldNote", back_populates="book", cascade="all, delete-orphan")
     reading_progress = relationship("ReadingProgress", back_populates="book", cascade="all, delete-orphan")
     reading_sessions = relationship("ReadingSession", back_populates="book", cascade="all, delete-orphan")
     notes = relationship("BookNote", back_populates="book", cascade="all, delete-orphan")
+    obsidian_notes = relationship("ObsidianVaultNote", back_populates="book", cascade="all, delete-orphan")
     primary_series = relationship("Series", foreign_keys=[primary_series_id], back_populates="primary_books")
     series_memberships = relationship("SeriesBook", back_populates="book", cascade="all, delete-orphan")
     scenes = relationship("Scene", back_populates="book", cascade="all, delete-orphan")
@@ -102,6 +112,23 @@ class BookNote(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), index=True)
 
     book = relationship("Book", back_populates="notes")
+
+
+class ObsidianVaultNote(Base):
+    __tablename__ = "book_obsidian_notes"
+    __table_args__ = (
+        UniqueConstraint("user_id", "book_id", "path", name="uq_book_obsidian_notes_user_book_path"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    book_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
+    path: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), index=True)
+
+    book = relationship("Book", back_populates="obsidian_notes")
 
 
 class ChapterMedia(Base):

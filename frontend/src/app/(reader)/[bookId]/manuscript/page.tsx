@@ -18,7 +18,7 @@ import type { ChapterListResponse, PlotThread, SearchResult } from "@/types/read
 
 type EditorMode = "chapter" | "book"
 type BookDraftMap = Record<number, { title: string; text: string; html: string }>
-type RightPane = "insights" | "notes" | "character"
+type RightPane = "insights" | "notes"
 
 export default function ManuscriptPage() {
   const { bookId } = useParams<{ bookId: string }>()
@@ -60,20 +60,10 @@ export default function ManuscriptPage() {
   const [fontFamily, setFontFamily] = useState<"times" | "georgia" | "sans">("times")
   const [lineHeight, setLineHeight] = useState(1.8)
   const [showPageGuides, setShowPageGuides] = useState(true)
-  const [firstLineIndent, setFirstLineIndent] = useState(false)
+  const [firstLineIndent, setFirstLineIndent] = useState(true)
   const [showLeftRail, setShowLeftRail] = useState(false)
   const [showRightRail, setShowRightRail] = useState(false)
   const [activeRightPane, setActiveRightPane] = useState<RightPane>("insights")
-  const [selectedCharCard, setSelectedCharCard] = useState<Character | null>(null)
-  const [charCardEditing, setCharCardEditing] = useState(false)
-  const [charCardSaving, setCharCardSaving] = useState(false)
-  const [charCardDraft, setCharCardDraft] = useState<{
-    arcSummary: string
-    description: string
-    personalityTags: string
-    motivations: string
-    fears: string
-  }>({ arcSummary: "", description: "", personalityTags: "", motivations: "", fears: "" })
   const [showExportMenu, setShowExportMenu] = useState(false)
   const [showEditorSettings, setShowEditorSettings] = useState(false)
   const [activeEditorKey, setActiveEditorKey] = useState<string | null>(null)
@@ -193,40 +183,6 @@ export default function ManuscriptPage() {
     }
     setActiveRightPane(pane)
     setShowRightRail(true)
-  }
-
-  const openCharCard = (char: Character) => {
-    setSelectedCharCard(char)
-    setCharCardEditing(false)
-    setCharCardDraft({
-      arcSummary: char.arc_summary ?? "",
-      description: char.description ?? "",
-      personalityTags: (char.personality_tags ?? []).join(", "),
-      motivations: (char.motivations ?? []).join(", "),
-      fears: (char.fears ?? []).join(", "),
-    })
-    setActiveRightPane("character")
-    setShowRightRail(true)
-  }
-
-  const saveCharCard = async () => {
-    if (!selectedCharCard) return
-    setCharCardSaving(true)
-    try {
-      const updated = await booksApi.updateCharacter(bookId, selectedCharCard.id, {
-        arcSummary: charCardDraft.arcSummary.trim() || null,
-        description: charCardDraft.description.trim() || null,
-        personalityTags: charCardDraft.personalityTags.split(",").map(t => t.trim()).filter(Boolean),
-        motivations: charCardDraft.motivations.split(",").map(t => t.trim()).filter(Boolean),
-        fears: charCardDraft.fears.split(",").map(t => t.trim()).filter(Boolean),
-      })
-      setSelectedCharCard(updated)
-      setCharacters(prev => prev.map(c => c.id === updated.id ? updated : c))
-      setCharCardEditing(false)
-      setStatusMessage(`Character card for ${updated.name} saved.`)
-    } finally {
-      setCharCardSaving(false)
-    }
   }
 
   const markDraftDirty = (chapterNumber: number) => {
@@ -748,7 +704,6 @@ export default function ManuscriptPage() {
               <div className={`inline-flex rounded-full border p-1 ${isDark ? "border-white/10 bg-black/30" : "border-stone-200 bg-stone-100/80"}`}>
                 <Link href={`/${bookId}/advisor`} className={`rounded-full px-3 py-2 text-sm font-medium transition ${isDark ? "text-slate-200 hover:bg-white/10" : "text-stone-700 hover:bg-white"}`}>Story Advisor</Link>
                 <button onClick={() => openRightPane("insights")} className={`rounded-full px-3 py-2 text-sm font-medium transition ${showRightRail && activeRightPane === "insights" ? isDark ? "bg-white text-slate-950" : "bg-stone-900 text-white" : isDark ? "text-slate-300 hover:bg-white/10" : "text-stone-600 hover:bg-white"}`}>Insights</button>
-                <button onClick={() => openRightPane("character")} className={`rounded-full px-3 py-2 text-sm font-medium transition ${showRightRail && activeRightPane === "character" ? isDark ? "bg-white text-slate-950" : "bg-stone-900 text-white" : isDark ? "text-slate-300 hover:bg-white/10" : "text-stone-600 hover:bg-white"}`}>Characters</button>
                 <button onClick={() => openRightPane("notes")} className={`rounded-full px-3 py-2 text-sm font-medium transition ${showRightRail && activeRightPane === "notes" ? isDark ? "bg-white text-slate-950" : "bg-stone-900 text-white" : isDark ? "text-slate-300 hover:bg-white/10" : "text-stone-600 hover:bg-white"}`}>Notes</button>
               </div>
             </div>
@@ -1088,17 +1043,17 @@ export default function ManuscriptPage() {
 
             {editorMode === "chapter" ? (
               <div className="space-y-4">
-                <div className={`relative mx-auto w-full max-w-full rounded-[1.4rem] border shadow-[0_24px_80px_-55px_rgba(15,23,42,0.25)] ${isDark ? "border-white/10 bg-[#101010]" : "border-[#d8d0c4] bg-[#fdfcf9]"}`}>
+                <div className={`relative mx-auto w-full max-w-full overflow-hidden rounded-[1.4rem] border shadow-[0_24px_80px_-55px_rgba(15,23,42,0.25)] ${isDark ? "border-white/10 bg-[#101010]" : "border-[#d8d0c4] bg-[#fdfcf9]"}`}>
                   {showPageGuides ? (
                     <div
                       aria-hidden
-                      className={`pointer-events-none absolute inset-0 rounded-[1.4rem] ${isDark ? "opacity-20" : "opacity-35"}`}
+                      className={`pointer-events-none absolute inset-0 ${isDark ? "opacity-20" : "opacity-35"}`}
                       style={{
                         backgroundImage: `repeating-linear-gradient(to bottom, transparent 0, transparent calc(297mm - 1px), ${isDark ? "rgba(255,255,255,0.08)" : "rgba(15,23,42,0.08)"} calc(297mm - 1px), ${isDark ? "rgba(255,255,255,0.08)" : "rgba(15,23,42,0.08)"} 297mm)`,
                       }}
                     />
                   ) : null}
-                  <div className={`border-b rounded-t-[1.4rem] px-6 py-6 sm:px-8 ${isDark ? "border-white/10 bg-white/[0.02]" : "border-[#e6dfd4] bg-[#f7f3ed]"}`}>
+                  <div className={`border-b px-6 py-6 sm:px-8 ${isDark ? "border-white/10 bg-white/[0.02]" : "border-[#e6dfd4] bg-[#f7f3ed]"}`}>
                     <div className="flex items-start justify-between gap-4">
                       <div className="min-w-0 flex-1">
                         <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{selectedChapter === null ? "New chapter draft" : "Current chapter"}</p>
@@ -1162,10 +1117,6 @@ export default function ManuscriptPage() {
                     }}
                     onFocus={() => setActiveEditorKey(`chapter-${activeChapterNumber}`)}
                     onBlur={() => setActiveEditorKey((current) => current === `chapter-${activeChapterNumber}` ? null : current)}
-                    onCharacterClick={(characterName) => {
-                      const char = characters.find((c) => c.name === characterName || c.aliases?.includes(characterName))
-                      if (char) openCharCard(char)
-                    }}
                     placeholder="Write or paste the chapter here..."
                     style={{ ...sheetStyle, textIndent: firstLineIndent ? "1.5em" : "0" }}
                     className={`relative min-h-[297mm] w-full border-0 bg-transparent px-6 py-10 sm:px-[20mm] sm:py-[24mm] outline-none ${isDark ? "text-slate-100 placeholder:text-slate-500" : "text-stone-900 placeholder:text-stone-400"}`}
@@ -1184,18 +1135,18 @@ export default function ManuscriptPage() {
                       ref={(node) => {
                         chapterRefs.current[chapter.number] = node
                       }}
-                      className={`relative mx-auto w-full max-w-full rounded-[1.4rem] border shadow-[0_24px_80px_-55px_rgba(15,23,42,0.25)] ${jumpTarget === chapter.number ? isDark ? "border-teal-400/40 bg-[#101010]" : "border-teal-300 bg-[#fdfcf9]" : isDark ? "border-white/10 bg-[#101010]" : "border-[#d8d0c4] bg-[#fdfcf9]"}`}
+                      className={`relative mx-auto w-full max-w-full overflow-hidden rounded-[1.4rem] border shadow-[0_24px_80px_-55px_rgba(15,23,42,0.25)] ${jumpTarget === chapter.number ? isDark ? "border-teal-400/40 bg-[#101010]" : "border-teal-300 bg-[#fdfcf9]" : isDark ? "border-white/10 bg-[#101010]" : "border-[#d8d0c4] bg-[#fdfcf9]"}`}
                     >
                       {showPageGuides ? (
                         <div
                           aria-hidden
-                          className={`pointer-events-none absolute inset-0 rounded-[1.4rem] ${isDark ? "opacity-20" : "opacity-35"}`}
+                          className={`pointer-events-none absolute inset-0 ${isDark ? "opacity-20" : "opacity-35"}`}
                           style={{
                             backgroundImage: `repeating-linear-gradient(to bottom, transparent 0, transparent calc(297mm - 1px), ${isDark ? "rgba(255,255,255,0.08)" : "rgba(15,23,42,0.08)"} calc(297mm - 1px), ${isDark ? "rgba(255,255,255,0.08)" : "rgba(15,23,42,0.08)"} 297mm)`,
                           }}
                         />
                       ) : null}
-                      <div className={`border-b rounded-t-[1.4rem] px-6 py-6 sm:px-8 ${isDark ? "border-white/10 bg-white/[0.02]" : "border-[#e6dfd4] bg-[#f7f3ed]"}`}>
+                      <div className={`border-b px-6 py-6 sm:px-8 ${isDark ? "border-white/10 bg-white/[0.02]" : "border-[#e6dfd4] bg-[#f7f3ed]"}`}>
                         <div className="flex items-start justify-between gap-4">
                           <div className="min-w-0 flex-1">
                             <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Chapter {chapter.number}</p>
@@ -1242,7 +1193,7 @@ export default function ManuscriptPage() {
                           </div>
                         </div>
                       </div>
-                      <div className={`sticky top-3 z-10 border-b px-4 py-3 transition-all duration-200 translate-y-0 opacity-100 pointer-events-auto ${isDark ? "border-white/10 bg-[#0d1117]/95 backdrop-blur" : "border-[#e6dfd4] bg-[#f7f3ed]/95 backdrop-blur"}`}>
+                      <div className="hidden">
                         <EditorToolbar isDark={isDark} compact characters={characters} />
                       </div>
                       <RichTextEditor
@@ -1260,10 +1211,6 @@ export default function ManuscriptPage() {
                         }}
                         onFocus={() => setActiveEditorKey(`book-${chapter.number}`)}
                         onBlur={() => setActiveEditorKey((current) => current === `book-${chapter.number}` ? null : current)}
-                        onCharacterClick={(characterName) => {
-                          const char = characters.find((c) => c.name === characterName || c.aliases?.includes(characterName))
-                          if (char) openCharCard(char)
-                        }}
                         placeholder="Draft this chapter..."
                         style={{ ...sheetStyle, textIndent: firstLineIndent ? "1.5em" : "0" }}
                         className={`relative min-h-[240mm] w-full border-0 bg-transparent px-6 py-10 sm:px-[20mm] sm:py-[22mm] outline-none ${isDark ? "text-slate-100 placeholder:text-slate-500" : "text-stone-900 placeholder:text-stone-400"}`}
@@ -1296,244 +1243,6 @@ export default function ManuscriptPage() {
 
           {showRightRail ? (
           <aside className="space-y-4">
-
-            {/* ── Character Card pane ──────────────────────────── */}
-            {activeRightPane === "character" ? (
-              <div className={`rounded-[1.6rem] border ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white/80"}`}>
-                {/* Header: browse list or card header */}
-                {selectedCharCard ? (
-                  <>
-                    <div className={`flex items-center justify-between gap-3 border-b p-4 ${isDark ? "border-white/10" : "border-stone-200"}`}>
-                      <div>
-                        <button
-                          onClick={() => setSelectedCharCard(null)}
-                          className={`mb-1 text-[11px] font-semibold uppercase tracking-[0.18em] transition ${isDark ? "text-slate-500 hover:text-slate-300" : "text-stone-400 hover:text-stone-600"}`}
-                        >
-                          ← All characters
-                        </button>
-                        <p className={`text-base font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{selectedCharCard.name}</p>
-                        {selectedCharCard.aliases.length > 0 && (
-                          <p className={`text-xs ${isDark ? "text-slate-500" : "text-stone-400"}`}>aka {selectedCharCard.aliases.join(", ")}</p>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {charCardEditing ? (
-                          <>
-                            <button
-                              onClick={saveCharCard}
-                              disabled={charCardSaving}
-                              className="rounded-full bg-[linear-gradient(135deg,#4f46e5,#4338ca)] px-4 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
-                            >
-                              {charCardSaving ? "Saving…" : "Save"}
-                            </button>
-                            <button
-                              onClick={() => setCharCardEditing(false)}
-                              className={`rounded-full border px-3 py-1.5 text-xs font-medium ${isDark ? "border-white/10 text-slate-300" : "border-stone-200 text-stone-600"}`}
-                            >
-                              Cancel
-                            </button>
-                          </>
-                        ) : (
-                          <button
-                            onClick={() => setCharCardEditing(true)}
-                            className={`rounded-full border px-3 py-1.5 text-xs font-medium ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`}
-                          >
-                            Edit card
-                          </button>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="space-y-4 p-4">
-                      {/* Role + First chapter badges */}
-                      <div className="flex flex-wrap gap-2">
-                        {selectedCharCard.role && (
-                          <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] ${
-                            selectedCharCard.role === "mc" ? isDark ? "bg-indigo-500/20 text-indigo-200" : "bg-indigo-100 text-indigo-700"
-                            : selectedCharCard.role === "sc" ? isDark ? "bg-teal-500/20 text-teal-200" : "bg-teal-100 text-teal-700"
-                            : isDark ? "bg-white/10 text-slate-300" : "bg-stone-100 text-stone-600"
-                          }`}>{selectedCharCard.role === "mc" ? "Main" : selectedCharCard.role === "sc" ? "Supporting" : "Background"}</span>
-                        )}
-                        <span className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${isDark ? "bg-white/8 text-slate-400" : "bg-stone-100 text-stone-500"}`}>
-                          Ch. {selectedCharCard.first_chapter}{selectedCharCard.last_seen_chapter ? ` – ${selectedCharCard.last_seen_chapter}` : ""}
-                        </span>
-                        {selectedCharCard.archetype && (
-                          <span className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${isDark ? "bg-white/8 text-slate-400" : "bg-stone-100 text-stone-500"}`}>{selectedCharCard.archetype}</span>
-                        )}
-                        {selectedCharCard.character_type === "gag" && (
-                          <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${isDark ? "bg-amber-500/20 text-amber-300" : "bg-amber-100 text-amber-700"}`}>🎭 Gag</span>
-                        )}
-                      </div>
-
-                      {/* Description */}
-                      <div>
-                        <p className={`mb-1 text-[10px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Description</p>
-                        {charCardEditing ? (
-                          <textarea
-                            rows={3}
-                            value={charCardDraft.description}
-                            onChange={e => setCharCardDraft(d => ({ ...d, description: e.target.value }))}
-                            className={`w-full resize-none rounded-[0.8rem] border px-3 py-2 text-sm leading-6 outline-none ${isDark ? "border-white/10 bg-black/30 text-slate-200" : "border-stone-200 bg-stone-50 text-stone-800"}`}
-                          />
-                        ) : (
-                          <p className={`text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{selectedCharCard.description || <span className="opacity-40">No description yet.</span>}</p>
-                        )}
-                      </div>
-
-                      {/* Arc summary */}
-                      <div>
-                        <p className={`mb-1 text-[10px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Arc summary</p>
-                        {charCardEditing ? (
-                          <textarea
-                            rows={4}
-                            value={charCardDraft.arcSummary}
-                            onChange={e => setCharCardDraft(d => ({ ...d, arcSummary: e.target.value }))}
-                            className={`w-full resize-none rounded-[0.8rem] border px-3 py-2 text-sm leading-6 outline-none ${isDark ? "border-white/10 bg-black/30 text-slate-200" : "border-stone-200 bg-stone-50 text-stone-800"}`}
-                          />
-                        ) : (
-                          <p className={`text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{selectedCharCard.arc_summary || <span className="opacity-40">No arc summary yet.</span>}</p>
-                        )}
-                      </div>
-
-                      {/* Personality tags */}
-                      <div>
-                        <p className={`mb-1 text-[10px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Personality</p>
-                        {charCardEditing ? (
-                          <input
-                            value={charCardDraft.personalityTags}
-                            onChange={e => setCharCardDraft(d => ({ ...d, personalityTags: e.target.value }))}
-                            placeholder="Comma-separated traits"
-                            className={`w-full rounded-[0.8rem] border px-3 py-2 text-sm outline-none ${isDark ? "border-white/10 bg-black/30 text-slate-200 placeholder:text-slate-600" : "border-stone-200 bg-stone-50 text-stone-800"}`}
-                          />
-                        ) : (
-                          <div className="flex flex-wrap gap-1.5">
-                            {(selectedCharCard.personality_tags ?? []).length > 0 ? selectedCharCard.personality_tags.map(tag => (
-                              <span key={tag} className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${isDark ? "bg-violet-500/15 text-violet-200" : "bg-violet-100 text-violet-700"}`}>{tag}</span>
-                            )) : <span className={`text-xs ${isDark ? "text-slate-500" : "text-stone-400"}`}>None recorded.</span>}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Motivations */}
-                      <div>
-                        <p className={`mb-1 text-[10px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Motivations</p>
-                        {charCardEditing ? (
-                          <input
-                            value={charCardDraft.motivations}
-                            onChange={e => setCharCardDraft(d => ({ ...d, motivations: e.target.value }))}
-                            placeholder="Comma-separated"
-                            className={`w-full rounded-[0.8rem] border px-3 py-2 text-sm outline-none ${isDark ? "border-white/10 bg-black/30 text-slate-200 placeholder:text-slate-600" : "border-stone-200 bg-stone-50 text-stone-800"}`}
-                          />
-                        ) : (
-                          <ul className="space-y-1">
-                            {(selectedCharCard.motivations ?? []).length > 0 ? selectedCharCard.motivations.map(m => (
-                              <li key={m} className={`text-sm leading-5 ${isDark ? "text-slate-300" : "text-stone-600"}`}>· {m}</li>
-                            )) : <li className={`text-xs ${isDark ? "text-slate-500" : "text-stone-400"}`}>None recorded.</li>}
-                          </ul>
-                        )}
-                      </div>
-
-                      {/* Fears */}
-                      <div>
-                        <p className={`mb-1 text-[10px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Fears</p>
-                        {charCardEditing ? (
-                          <input
-                            value={charCardDraft.fears}
-                            onChange={e => setCharCardDraft(d => ({ ...d, fears: e.target.value }))}
-                            placeholder="Comma-separated"
-                            className={`w-full rounded-[0.8rem] border px-3 py-2 text-sm outline-none ${isDark ? "border-white/10 bg-black/30 text-slate-200 placeholder:text-slate-600" : "border-stone-200 bg-stone-50 text-stone-800"}`}
-                          />
-                        ) : (
-                          <ul className="space-y-1">
-                            {(selectedCharCard.fears ?? []).length > 0 ? selectedCharCard.fears.map(f => (
-                              <li key={f} className={`text-sm leading-5 ${isDark ? "text-slate-300" : "text-stone-600"}`}>· {f}</li>
-                            )) : <li className={`text-xs ${isDark ? "text-slate-500" : "text-stone-400"}`}>None recorded.</li>}
-                          </ul>
-                        )}
-                      </div>
-
-                      {/* Growth events */}
-                      {(selectedCharCard.growth_events ?? []).length > 0 && (
-                        <div>
-                          <p className={`mb-1 text-[10px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Growth events</p>
-                          <div className="space-y-2">
-                            {selectedCharCard.growth_events!.map((ev, i) => (
-                              <div key={i} className={`rounded-[0.8rem] border px-3 py-2 text-xs ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
-                                {ev.chapter && <span className={`font-semibold ${isDark ? "text-indigo-300" : "text-violet-600"}`}>Ch. {ev.chapter} · </span>}
-                                <span className={isDark ? "text-slate-300" : "text-stone-700"}>{ev.event}</span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Save to notes */}
-                      <button
-                        onClick={() => {
-                          booksApi.saveBookNote(bookId, {
-                            chapterNumber: null,
-                            title: `Character note: ${selectedCharCard.name}`,
-                            body: [
-                              `**${selectedCharCard.name}** (${selectedCharCard.role ?? "background"})`,
-                              selectedCharCard.arc_summary ? `\nArc: ${selectedCharCard.arc_summary}` : "",
-                              selectedCharCard.personality_tags?.length ? `\nPersonality: ${selectedCharCard.personality_tags.join(", ")}` : "",
-                              selectedCharCard.motivations?.length ? `\nMotivations: ${selectedCharCard.motivations.join("; ")}` : "",
-                            ].filter(Boolean).join("\n"),
-                          }).then(saved => {
-                            setNotes(current => [saved, ...current.filter(n => n.id !== saved.id)])
-                            setStatusMessage(`Saved character note for ${selectedCharCard.name}.`)
-                          }).catch(() => setStatusMessage("Could not save note."))
-                        }}
-                        className={`w-full rounded-full border px-4 py-2 text-xs font-semibold transition ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`}
-                      >
-                        Save as note
-                      </button>
-                    </div>
-                  </>
-                ) : (
-                  /* Browse list */
-                  <div className="p-4">
-                    <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Characters</p>
-                    <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-400"}`}>Click a name to open their card.</p>
-                    <div className="mt-3 space-y-2">
-                      {characters.length === 0 ? (
-                        <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>No characters extracted yet.</p>
-                      ) : characters.map(char => (
-                        <button
-                          key={char.id}
-                          onClick={() => openCharCard(char)}
-                          className={`w-full rounded-[1rem] border px-3 py-3 text-left transition ${
-                            isDark ? "border-white/10 bg-white/[0.03] hover:bg-white/[0.07]" : "border-stone-200 bg-stone-50 hover:bg-white"
-                          }`}
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                            <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{char.name}</p>
-                            {char.role && (
-                              <span className={`text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full ${
-                                char.role === "mc" ? isDark ? "bg-indigo-500/20 text-indigo-300" : "bg-indigo-100 text-indigo-700"
-                                : char.role === "sc" ? isDark ? "bg-teal-500/20 text-teal-300" : "bg-teal-100 text-teal-700"
-                                : isDark ? "bg-white/10 text-slate-400" : "bg-stone-100 text-stone-500"
-                              }`}>{char.role}</span>
-                            )}
-                          </div>
-                          {char.arc_summary && (
-                            <p className={`mt-1 text-xs line-clamp-2 ${isDark ? "text-slate-400" : "text-stone-500"}`}>{char.arc_summary}</p>
-                          )}
-                          {char.personality_tags && char.personality_tags.length > 0 && (
-                            <div className="mt-1.5 flex flex-wrap gap-1">
-                              {char.personality_tags.slice(0, 3).map(t => (
-                                <span key={t} className={`text-[10px] rounded-full px-2 py-0.5 ${isDark ? "bg-white/8 text-slate-400" : "bg-stone-100 text-stone-500"}`}>{t}</span>
-                              ))}
-                            </div>
-                          )}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            ) : null}
-
             {activeRightPane === "insights" ? (
               <>
             {editorMode === "book" ? (
@@ -1778,10 +1487,6 @@ export default function ManuscriptPage() {
                           setNoteBody(nextHtml)
                           setNoteBodyText(nextText)
                         }}
-                        onCharacterClick={(characterName) => {
-                          const char = characters.find((c) => c.name === characterName || c.aliases?.includes(characterName))
-                          if (char) openCharCard(char)
-                        }}
                         placeholder={noteScope === "chapter" ? `Add a note for chapter ${activeChapterNumber}` : "Add a book-level note"}
                         className={`min-h-[11rem] px-4 py-4 text-sm leading-7 outline-none ${isDark ? "bg-black/40 text-slate-100 placeholder:text-slate-500" : "bg-white text-stone-900 placeholder:text-stone-400"}`}
                       />
@@ -2000,7 +1705,6 @@ function RichTextEditor({
   contentClassName,
   onFocus,
   onBlur,
-  onCharacterClick,
 }: {
   html: string
   onChange: (html: string, text: string) => void
@@ -2010,7 +1714,6 @@ function RichTextEditor({
   contentClassName?: string
   onFocus?: () => void
   onBlur?: () => void
-  onCharacterClick?: (characterName: string) => void
 }) {
   const ref = useRef<HTMLDivElement | null>(null)
 
@@ -2030,7 +1733,7 @@ function RichTextEditor({
       onFocus={onFocus}
       onBlur={onBlur}
       onInput={(event) => {
-        const nextHtml = sanitizeRichTextHtml(event.currentTarget.innerHTML, onCharacterClick)
+        const nextHtml = sanitizeRichTextHtml(event.currentTarget.innerHTML)
         const nextText = htmlToPlainText(nextHtml)
         onChange(nextHtml, nextText)
       }}

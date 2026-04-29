@@ -1,5 +1,10 @@
 FROM python:3.12-slim
 WORKDIR /app
+# Run Celery/Flower as non-root (required for production hygiene).
+# Pre-create /app/storage with correct ownership so the named volume
+# inherits permissions on first create.
+RUN groupadd -g 10001 app && useradd -m -u 10001 -g 10001 -s /bin/bash app && \
+    mkdir -p /app/storage && chown -R app:app /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
@@ -8,8 +13,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN python -c "import tiktoken; tiktoken.encoding_for_model('gpt-4o-mini')"
 
 COPY . .
+USER app
 # CMD overridden per Railway service:
 # extraction: celery -A app.workers.celery_app worker -Q extraction -c 4
 # analysis:   celery -A app.workers.celery_app worker -Q analysis,embedding -c 2
 # intelligence: celery -A app.workers.celery_app worker -Q intelligence -c 1
-CMD ["celery", "-A", "app.workers.celery_app", "worker", "-Q", "extraction,analysis,embedding", "--loglevel=info", "-c", "2"]
+CMD ["celery", "-A", "app.workers.celery_app", "worker", "-Q", "extraction", "--loglevel=info", "-c", "4"]

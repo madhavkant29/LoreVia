@@ -76,7 +76,7 @@ The backend manages auth, uploads, parsing, progress tracking, book metadata, ch
 ### Background Processing
 
 - `Celery`
-- Single Celery worker (MVP) consuming extraction, analysis, embedding, and intelligence queues
+- Separate worker queues for extraction, analysis, embedding, and intelligence tasks
 
 Workers parse books, generate chunks, compute embeddings, extract characters and relationships, and produce derived reading features.
 
@@ -124,27 +124,22 @@ API_V1_PREFIX=/api/v1
 DATABASE_URL=postgresql://postgres:postgres@postgres:5432/lorevia
 REDIS_URL=redis://redis:6379/0
 
-# AI/ML Configuration
-# OPENAI_API_KEY=your_openai_api_key_here
-# OPENAI_EXTRACT_MODEL=gpt-4o-mini
-# OPENAI_INTEL_MODEL=gpt-4o
-# OPENAI_EMBED_MODEL=text-embedding-3-small
+OPENAI_API_KEY=your_openai_api_key_here
+OPENAI_EXTRACT_MODEL=gpt-4o-mini
+OPENAI_INTEL_MODEL=gpt-4o
+OPENAI_EMBED_MODEL=text-embedding-3-small
 
-# Storage Configuration
-# S3_BUCKET=local-dev
-# S3_ENDPOINT_URL=file:///app/storage
-# AWS_ACCESS_KEY_ID=local-dev
-# AWS_SECRET_ACCESS_KEY=local-dev
+S3_BUCKET=local-dev
+S3_ENDPOINT_URL=file:///app/storage
+AWS_ACCESS_KEY_ID=local-dev
+AWS_SECRET_ACCESS_KEY=local-dev
 
-# Security
-# JWT_SECRET=replace_with_a_long_random_secret
+JWT_SECRET=replace_with_a_long_random_secret
 
-# Payment (optional)
-# STRIPE_SECRET_KEY=sk_test_placeholder
-# STRIPE_WEBHOOK_SECRET=whsec_placeholder
+STRIPE_SECRET_KEY=sk_test_placeholder
+STRIPE_WEBHOOK_SECRET=whsec_placeholder
 
-# Email (optional)
-# RESEND_API_KEY=dummy
+RESEND_API_KEY=dummy
 SENTRY_DSN=
 CLOUDFLARE_TUNNEL_TOKEN=
 
@@ -174,21 +169,15 @@ From the project root:
 docker compose -f docker-compose-local.yml up --build
 ```
 
-This starts (MVP single-worker mode):
+This starts:
 
 - `api`
-- `worker`
+- `worker-extraction`
+- `worker-analysis`
+- `worker-intelligence`
 - `postgres`
 - `redis`
 - `flower`
-
-#### Rollback (full multi-worker isolation)
-
-If you want the original queue isolation (or you hit user-facing latency issues), use:
-
-```bash
-docker compose -f docker-compose-local.multiworkers.yml up --build
-```
 
 ### 4. Open the app
 

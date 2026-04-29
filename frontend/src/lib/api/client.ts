@@ -1,33 +1,56 @@
 import axios from "axios"
 import { API_BASE } from "@/lib/constants"
+import { useAuthStore } from "@/lib/stores/authStore"
+import { clearAuthTokens, getStoredAccessToken, getStoredRefreshToken, persistAuthTokens } from "./tokenStore"
 
 export const apiClient = axios.create({
   baseURL: API_BASE,
+  withCredentials: true,
   headers: { "Content-Type": "application/json" },
 })
 
-let refreshPromise: Promise<string | null> | null = null
+let refreshPromise: Promise<boolean> | null = null
+const NON_REFRESHABLE_AUTH_PATHS = [
+  "/auth/login",
+  "/auth/register",
+  "/auth/oauth/supabase",
+  "/auth/forgot-password",
+  "/auth/reset-password",
+  "/auth/refresh",
+  "/auth/logout",
+  "/auth/me",
+  "/auth/tier-limits",
+]
 
-async function refreshAccessToken(): Promise<string | null> {
-  const refreshToken = typeof window !== "undefined" ? localStorage.getItem("refresh_token") : null
-  if (!refreshToken) return null
+function requestPath(url: string, baseURL?: string): string {
+  try {
+    return new URL(url, baseURL ?? API_BASE).pathname
+  } catch {
+    return url.startsWith("/") ? url : `/${url}`
+  }
+}
 
+apiClient.interceptors.request.use((config) => {
+  const accessToken = getStoredAccessToken()
+  if (accessToken) {
+    config.headers = config.headers ?? {}
+    config.headers.Authorization = `Bearer ${accessToken}`
+  }
+  return config
+})
+
+async function refreshSession(): Promise<boolean> {
   if (!refreshPromise) {
-    refreshPromise = axios
-      .post(`${API_BASE}/auth/refresh`, { refresh_token: refreshToken })
+    const refreshToken = getStoredRefreshToken()
+    refreshPromise = apiClient
+      .post("/auth/refresh", refreshToken ? { refresh_token: refreshToken } : undefined)
       .then((response) => {
-        const nextAccess = response.data?.access_token as string | undefined
-        const nextRefresh = response.data?.refresh_token as string | undefined
-        if (!nextAccess || !nextRefresh) return null
-        localStorage.setItem("access_token", nextAccess)
-        localStorage.setItem("refresh_token", nextRefresh)
-        return nextAccess
+        if (response.data?.access_token && response.data?.refresh_token) {
+          persistAuthTokens(response.data)
+        }
+        return true
       })
-      .catch(() => {
-        localStorage.removeItem("access_token")
-        localStorage.removeItem("refresh_token")
-        return null
-      })
+      .catch(() => false)
       .finally(() => {
         refreshPromise = null
       })
@@ -36,29 +59,28 @@ async function refreshAccessToken(): Promise<string | null> {
   return refreshPromise
 }
 
-apiClient.interceptors.request.use((config) => {
-  const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null
-  if (token) config.headers.Authorization = `Bearer ${token}`
-  return config
-})
-
 apiClient.interceptors.response.use(
-  (r) => r,
+  (response) => response,
   async (error) => {
     const originalRequest = error.config
-    if (error.response?.status === 401 && !originalRequest?._retry) {
+    const path = requestPath(originalRequest?.url ?? "", originalRequest?.baseURL)
+    const isNonRefreshableAuthRequest = NON_REFRESHABLE_AUTH_PATHS.includes(path)
+    if (error.response?.status === 401 && !originalRequest?._retry && !isNonRefreshableAuthRequest) {
       originalRequest._retry = true
-      const nextAccess = await refreshAccessToken()
-      if (nextAccess) {
-        originalRequest.headers = originalRequest.headers ?? {}
-        originalRequest.headers.Authorization = `Bearer ${nextAccess}`
+      const refreshed = await refreshSession()
+      if (refreshed) {
+        const accessToken = getStoredAccessToken()
+        if (accessToken) {
+          originalRequest.headers = originalRequest.headers ?? {}
+          originalRequest.headers.Authorization = `Bearer ${accessToken}`
+        }
         return apiClient(originalRequest)
       }
       if (typeof window !== "undefined") {
-        localStorage.removeItem("access_token")
-        localStorage.removeItem("refresh_token")
-        localStorage.removeItem("lorevia-auth")
+        useAuthStore.getState().logout()
+        clearAuthTokens()
         window.location.replace("/login")
+        return new Promise(() => {})
       }
     }
     return Promise.reject(error)

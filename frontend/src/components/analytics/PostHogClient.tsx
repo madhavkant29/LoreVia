@@ -45,8 +45,8 @@ export function PostHogClientProvider({ children }: { children: React.ReactNode 
         <CookieConsent
           cookieName="lorevia_analytics_consent"
           enableDeclineButton
-          declineButtonText="Decline"
-          buttonText="Accept"
+          declineButtonText="Not now"
+          buttonText="Yes, for analytics"
           onAccept={enable}
           style={{
             background: "rgba(0,0,0,0.92)",
@@ -70,8 +70,7 @@ export function PostHogClientProvider({ children }: { children: React.ReactNode 
             padding: "10px 14px",
           }}
         >
-          We use PostHog analytics (EU region) to understand which features are useful. This stores a consent cookie and may
-          use localStorage for analytics identifiers. See our{" "}
+          Want to allow cookies for analytics? We use them to see which features people use and to improve the app. See our{" "}
           <a href="/privacy" className="underline underline-offset-4">
             Privacy Policy
           </a>

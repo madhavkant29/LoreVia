@@ -107,10 +107,10 @@ export function ChapterText({
         : '"Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
 
   return (
-    <div className="mx-auto w-full px-4 pb-28 pt-8 sm:px-8 lg:px-10" onMouseUp={handleMouseUp} style={{ maxWidth: "1500px" }}>
-      <div className="grid gap-8 xl:grid-cols-[minmax(0,1fr)_19rem] xl:items-start">
+    <div className="mx-auto w-full px-4 pb-28 pt-8 sm:px-8 lg:px-10" onMouseUp={handleMouseUp} style={{ maxWidth: "1000px" }}>
+      <div className="grid gap-8 xl:grid-cols-[minmax(0,1fr)] xl:items-start">
         <section className={`overflow-hidden rounded-[2rem] border shadow-[0_28px_100px_-68px_rgba(79,70,229,0.38)] ${cardTone.shell}`}>
-          <div className="mx-auto max-w-[72ch] px-6 py-10 sm:px-10 sm:py-14">
+          <div className="mx-auto max-w-[82ch] px-6 py-10 sm:px-10 sm:py-14">
             <p className={`text-center text-[12px] italic tracking-[0.02em] ${cardTone.helper}`} style={{ fontFamily: "var(--reader-label)" }}>
               Tap any word or select text for instant context
             </p>
@@ -184,46 +184,38 @@ export function ChapterText({
           </div>
         </section>
 
-        <aside className="hidden xl:block">
-          <div className={`sticky top-40 rounded-[1.75rem] border p-5 ${cardTone.aside}`}>
-            <p className="text-[11px] uppercase tracking-[0.32em] text-stone-400" style={{ fontFamily: "var(--reader-label)" }}>
-              Reading note
-            </p>
-            <p className={`mt-3 text-2xl leading-9 ${cardTone.heading}`} style={{ fontFamily: "var(--reader-display)" }}>
-              {quoteModeEnabled && canUseQuoteMode
-                ? selected
-                  ? "Your selected passage is ready for the context rail."
-                  : "Quote mode is on. Select a passage to send it into the character panel."
-                : "Character names remain lightly marked so context can open without pulling you out of the chapter."}
-            </p>
-            <div className={`mt-5 rounded-[1.25rem] px-4 py-4 ${cardTone.asideBox}`}>
-              <p className="text-xs uppercase tracking-[0.22em]" style={{ fontFamily: "var(--reader-label)" }}>
-                Navigation
-              </p>
-              <div className="mt-3 flex flex-wrap gap-2">
+        <div className="mx-auto mt-8 max-w-[72ch]">
+          <div className={`rounded-[1.5rem] border p-4 ${cardTone.aside}`}>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${cardTone.helper}`}>Continue reading</p>
+                <p className={`mt-1 text-sm ${cardTone.helper}`}>
+                  {totalChapters ? `Chapter ${chapterNum} of ${totalChapters}` : `Chapter ${chapterNum}`}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
                 <Link prefetch={false} href={`/${bookId}`} className={`rounded-full border px-4 py-2 text-sm font-medium transition ${cardTone.nav}`}>
-                  Book overview
+                  Back to book
                 </Link>
                 {chapterNum > 1 ? (
                   <Link prefetch={false} href={`/${bookId}/chapter/${chapterNum - 1}`} className={`rounded-full border px-4 py-2 text-sm font-medium transition ${cardTone.nav}`}>
-                    Previous
+                    Previous chapter
                   </Link>
                 ) : null}
                 {totalChapters === null || chapterNum < totalChapters ? (
                   <Link prefetch={false} href={`/${bookId}/chapter/${chapterNum + 1}`} className={`rounded-full border px-4 py-2 text-sm font-medium transition ${cardTone.nav}`}>
-                    Next
+                    Next chapter
                   </Link>
                 ) : null}
               </div>
             </div>
           </div>
-        </aside>
-      </div>
+        </div>
 
-      <div className="mx-auto mt-8 max-w-[72ch]">
-        <div className={`rounded-[1.5rem] border p-4 ${cardTone.aside}`}>
+        <div className={`mx-auto mt-8 max-w-[72ch] rounded-[1.5rem] border p-4 xl:hidden ${cardTone.aside}`}>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
+              <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${cardTone.helper}`}>Chapter navigation</p>
               <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${cardTone.helper}`}>Continue reading</p>
               <p className={`mt-1 text-sm ${cardTone.helper}`}>
                 {totalChapters ? `Chapter ${chapterNum} of ${totalChapters}` : `Chapter ${chapterNum}`}
@@ -314,12 +306,13 @@ function annotate(text: string, characters: ChapterCharacter[]): Segment[] {
 
   const segments: Segment[] = []
   let remaining = text
+  let lowerText = text.toLowerCase()
 
   while (remaining.length > 0) {
     let earliest = -1
     let matchedName = ""
     for (const name of names) {
-      const index = remaining.indexOf(name)
+      const index = lowerText.indexOf(name.toLowerCase())
       if (index !== -1 && (earliest === -1 || index < earliest)) {
         earliest = index
         matchedName = name
@@ -334,6 +327,7 @@ function annotate(text: string, characters: ChapterCharacter[]): Segment[] {
     if (earliest > 0) segments.push({ type: "text", content: remaining.slice(0, earliest) })
     segments.push({ type: "mention", content: matchedName })
     remaining = remaining.slice(earliest + matchedName.length)
+    lowerText = remaining.toLowerCase()
   }
 
   return segments

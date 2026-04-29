@@ -139,14 +139,20 @@ export default function BookOverviewPage() {
       { label: "Search passages", href: `/${bookId}/search` },
       { label: "Relationships", action: openRelationships },
       { label: "Summary", href: `/${bookId}/summaries` },
-      ...(activeBookMode === "author" ? [{ label: "Notes", href: `/notes` }] : []),
     ],
-    [activeBookMode, bookId]
+    [bookId]
   )
 
   const featureTools = useMemo(
     () => [
-      { label: "Analysis", meta: "All advanced tools", onClick: () => navigateWithMemory(`/${bookId}/analysis`) },
+      { label: "Foreshadowing", meta: "Signals and hints", onClick: () => navigateWithMemory(`/${bookId}/foreshadowing`) },
+      { label: "Timeline", meta: "Story structure", onClick: () => navigateWithMemory(`/${bookId}/timeline`) },
+      { label: "Plot threads", meta: "Open arcs and notes", onClick: () => navigateWithMemory(`/${bookId}/plot-threads`) },
+      { label: "Reports", meta: "Chapter-by-chapter checks", onClick: () => navigateWithMemory(`/${bookId}/reports`) },
+      { label: "Cross-book wiki", meta: "Series echoes", onClick: () => navigateWithMemory(`/${bookId}/cross-book-wiki`) },
+      { label: "Relationship evolution", meta: "Shifts over time", onClick: () => navigateWithMemory(`/${bookId}/relationship-evolution`) },
+      { label: "Quotes", meta: "Saved lines", onClick: () => navigateWithMemory("/quotes") },
+      { label: "Story Advisor", meta: "Chat · plotholes · opportunities", onClick: () => navigateWithMemory(`/${bookId}/advisor`) },
     ],
     [bookId]
   )
@@ -277,6 +283,42 @@ export default function BookOverviewPage() {
                   ) : null}
                 </div>
 
+                <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+                  <button
+                    onClick={continueReading}
+                    className="inline-flex items-center justify-center rounded-[1.2rem] bg-[linear-gradient(135deg,#4f46e5,#4338ca)] px-6 py-4 text-lg font-semibold text-white shadow-[0_22px_46px_-28px_rgba(79,70,229,0.78)] transition hover:translate-y-[-1px]"
+                  >
+                    {continueChapter > 1 ? `Continue - Chapter ${continueChapter}` : "Get started"}
+                  </button>
+                  <Link
+                    href={`/${bookId}/summaries`}
+                    className={`inline-flex items-center justify-center rounded-[1.2rem] border px-6 py-4 text-lg font-medium transition ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-stone-200 bg-white/85 text-stone-700 hover:bg-white"}`}
+                  >
+                    Open summary
+                  </Link>
+                </div>
+
+                <div className="mt-5 grid grid-cols-2 gap-3">
+                  {quickTools.map((tool) =>
+                    "href" in tool ? (
+                      <Link
+                        key={tool.label}
+                        href={tool.href as Route}
+                        className={`rounded-[1.05rem] border px-4 py-3 text-center text-sm font-medium transition ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-stone-200 bg-white/72 text-stone-700 hover:bg-white"}`}
+                      >
+                        {tool.label}
+                      </Link>
+                    ) : (
+                      <button
+                        key={tool.label}
+                        onClick={tool.action}
+                        className={`rounded-[1.05rem] border px-4 py-3 text-center text-sm font-medium transition ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-stone-200 bg-white/72 text-stone-700 hover:bg-white"}`}
+                      >
+                        {tool.label}
+                      </button>
+                    )
+                  )}
+                </div>
               </div>
 
               <div className="order-1 flex justify-center lg:order-2 lg:justify-end">
@@ -342,122 +384,23 @@ export default function BookOverviewPage() {
                 Open full chapter list
               </button>
             </div>
-
-            <div className={`rounded-[1.8rem] border p-5 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200/80 bg-white/78"}`}>
-              <p className={`text-[11px] font-semibold uppercase tracking-[0.28em] ${isDark ? "text-emerald-300" : "text-emerald-600"}`}>Workspace actions</p>
-              <div className="mt-4 grid gap-3">
-                <button
-                  onClick={continueReading}
-                  className="inline-flex items-center justify-center rounded-[1.15rem] bg-[linear-gradient(135deg,#4f46e5,#4338ca)] px-5 py-4 text-base font-semibold text-white shadow-[0_22px_46px_-28px_rgba(79,70,229,0.78)] transition hover:translate-y-[-1px]"
-                >
-                  {continueChapter > 1 ? `Continue - Chapter ${continueChapter}` : "Get started"}
-                </button>
-                <Link
-                  href={`/${bookId}/summaries`}
-                  className={`inline-flex items-center justify-center rounded-[1.15rem] border px-5 py-4 text-base font-medium transition ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-stone-200 bg-white text-stone-700 hover:bg-white"}`}
-                >
-                  Open summary
-                </Link>
-              </div>
-
-              <div className="mt-4 grid grid-cols-2 gap-2">
-                {quickTools.map((tool) =>
-                  "href" in tool ? (
-                    <Link
-                      key={tool.label}
-                      href={tool.href as Route}
-                      className={`w-full text-center rounded-lg border px-4 py-2 text-sm font-medium transition ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-stone-200 bg-white text-stone-700 hover:bg-white"}`}
-                    >
-                      {tool.label}
-                    </Link>
-                  ) : (
-                    <button
-                      key={tool.label}
-                      onClick={tool.action}
-                      className={`w-full text-center rounded-lg border px-4 py-2 text-sm font-medium transition ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-stone-200 bg-white text-stone-700 hover:bg-white"}`}
-                    >
-                      {tool.label}
-                    </button>
-                  )
-                )}
-              </div>
-            </div>
           </aside>
         </div>
 
         <div className="mt-8">
           <div className="space-y-6">
-            {bookMode === "author" ? (
-              <section className={`rounded-[1.8rem] border p-6 ${isDark ? "border-white/10 bg-white/5" : "border-white/70 bg-white/82"}`}>
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-                  <div>
-                    <p className={`text-[11px] font-semibold uppercase tracking-[0.28em] ${isDark ? "text-indigo-300" : "text-violet-500"}`}>Writing tools</p>
-                    <h2 className={`mt-2 font-serif text-3xl ${isDark ? "text-white" : "text-stone-950"}`}>Write, ask, and export</h2>
-                  </div>
-                  <p className={`max-w-xl text-sm leading-7 ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-                    Reference exports and continuity support for authors.
-                  </p>
-                </div>
+            <section className={`rounded-[1.8rem] border p-6 ${isDark ? "border-white/10 bg-white/5" : "border-white/70 bg-white/82"}`}>
+              <h2 className={`font-serif text-3xl ${isDark ? "text-white" : "text-stone-950"}`}>World Mechanics</h2>
+              <p className={`mt-4 max-w-3xl text-lg leading-9 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{worldNote}</p>
+            </section>
 
-                <div className="mt-5 grid gap-3 md:grid-cols-2">
-                  <div className={`rounded-[1.2rem] border p-5 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-stone-50"}`}>
-                    <p className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-emerald-300" : "text-emerald-600"}`}>Writing</p>
-                    <p className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>Manuscript editor</p>
-                    <p className={`mt-2 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
-                      Draft chapters with continuity and thread side panels.
-                    </p>
-                    <button
-                      onClick={() => navigateWithMemory(`/${bookId}/manuscript`)}
-                      className="mt-4 inline-flex items-center justify-center rounded-[1rem] bg-[linear-gradient(135deg,#059669,#047857)] px-5 py-3 text-sm font-semibold text-white shadow-[0_16px_36px_-22px_rgba(5,150,105,0.75)] transition hover:translate-y-[-1px]"
-                    >
-                      Open Manuscript Editor
-                    </button>
-                  </div>
-
-                  <div className={`rounded-[1.2rem] border p-5 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-stone-50"}`}>
-                    <p className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-indigo-300" : "text-violet-500"}`}>Author Intelligence</p>
-                    <p className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>Story Advisor</p>
-                    <p className={`mt-2 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
-                      Ask about plotholes, threads, and arcs. Every answer is grounded in your manuscript.
-                    </p>
-                    <button
-                      onClick={() => navigateWithMemory(`/${bookId}/advisor`)}
-                      className="mt-4 inline-flex items-center justify-center rounded-[1rem] bg-[linear-gradient(135deg,#4f46e5,#4338ca)] px-5 py-3 text-sm font-semibold text-white shadow-[0_16px_36px_-22px_rgba(79,70,229,0.75)] transition hover:translate-y-[-1px]"
-                    >
-                      Open Story Advisor
-                    </button>
-                  </div>
-
-                  <div className={`rounded-[1.2rem] border p-5 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-stone-50"}`}>
-                    <p className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Export</p>
-                    <p className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>Character Bible</p>
-                    <p className={`mt-2 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
-                      Download character roles, tags, motivations, and relationships.
-                    </p>
-                    <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center">
-                      <select
-                        value={bibleFormat}
-                        onChange={(e) => setBibleFormat(e.target.value as "md" | "pdf" | "docx")}
-                        className={`w-full rounded-[1rem] border px-4 py-3 text-sm outline-none transition sm:w-[15rem] ${
-                          isDark ? "border-white/20 bg-stone-800 text-white" : "border-stone-200 bg-white text-stone-900"
-                        }`}
-                      >
-                        <option value="md">Markdown (.md)</option>
-                        <option value="pdf">PDF (.pdf)</option>
-                        <option value="docx">Word (.docx)</option>
-                      </select>
-                    <button
-                      onClick={exportCharacterBible}
-                      disabled={exportingBible}
-                      className="mt-4 inline-flex items-center justify-center rounded-[1rem] bg-[linear-gradient(135deg,#4f46e5,#4338ca)] px-5 py-3 text-sm font-semibold text-white shadow-[0_16px_36px_-22px_rgba(79,70,229,0.75)] transition disabled:opacity-60"
-                    >
-                      {exportingBible ? "Preparing..." : "Download"}
-                    </button>
-                    </div>
-                  </div>
-                </div>
-              </section>
-            ) : null}
+            <section className={`rounded-[1.8rem] border p-6 ${isDark ? "border-white/10 bg-white/5" : "border-white/70 bg-white/82"}`}>
+              <h2 className={`font-serif text-3xl ${isDark ? "text-white" : "text-stone-950"}`}>Recent Theories</h2>
+              <div className={`mt-4 rounded-[1.35rem] p-5 ${isDark ? "bg-white/5" : "bg-stone-50"}`}>
+                <p className={`text-lg italic leading-9 ${isDark ? "text-slate-300" : "text-stone-600"}`}>“{theoryNote}”</p>
+                <p className={`mt-4 text-sm ${isDark ? "text-slate-500" : "text-stone-500"}`}>LoreVia story model</p>
+              </div>
+            </section>
 
             <section className={`rounded-[1.8rem] border p-6 ${isDark ? "border-white/10 bg-white/5" : "border-white/70 bg-white/82"}`}>
               <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
@@ -483,7 +426,7 @@ export default function BookOverviewPage() {
               </div>
             </section>
 
-            {false && bookMode === "author" ? (
+            {bookMode === "author" ? (
               <section className={`rounded-[1.8rem] border p-6 ${isDark ? "border-white/10 bg-white/5" : "border-white/70 bg-white/82"}`}>
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                   <div>

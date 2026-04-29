@@ -60,13 +60,13 @@ function GoogleIcon() {
 
 export default function RegisterPage() {
   const [email, setEmail] = useState("")
+  const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
   const [acceptedTerms, setAcceptedTerms] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const router = useRouter()
   const user = useAuthStore(s => s.user)
-  const setAuth = useAuthStore(s => s.setAuth)
   const setUser = useAuthStore(s => s.setUser)
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
@@ -85,14 +85,12 @@ export default function RegisterPage() {
     setLoading(true)
     setError(null)
     try {
-      const res = await authApi.register(email, password, acceptedTerms)
-      setAuth(res.access_token, res.refresh_token)
-      if (res.user) {
-        setUser(res.user)
-      } else {
-        const me = await authApi.me()
-        setUser(me)
+      const res = await authApi.register(email, username, password, acceptedTerms)
+      const me = res.user ?? await authApi.me()
+      if (!me) {
+        throw new Error("Could not load your profile after creating the account.")
       }
+      setUser(me)
       router.push("/library")
     } catch {
       setError("Registration failed. Email may already be taken.")
@@ -163,6 +161,18 @@ export default function RegisterPage() {
             isDark ? "border-white/10 bg-white/5 text-slate-100 placeholder:text-slate-500" : "border-stone-300 bg-white text-stone-900 placeholder:text-stone-400"
           }`}
           required
+        />
+        <input
+          type="text"
+          placeholder="Username"
+          value={username}
+          onChange={e => setUsername(e.target.value)}
+          className={`rounded-xl border px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
+            isDark ? "border-white/10 bg-white/5 text-slate-100 placeholder:text-slate-500" : "border-stone-300 bg-white text-stone-900 placeholder:text-stone-400"
+          }`}
+          required
+          minLength={3}
+          maxLength={32}
         />
         <div className="space-y-3">
           <input

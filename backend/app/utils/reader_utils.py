@@ -14,7 +14,8 @@ from fastapi import HTTPException
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import effective_tier
+from app.core.config import effective_tier, settings
+from app.core.security import create_asset_token
 from app.core.storage import download_book, get_presigned_url
 from app.engine.character.deduplicator import names_equivalent
 from app.engine.character.entity_filters import (
@@ -414,22 +415,25 @@ async def chapter_intelligence_map(db: AsyncSession, book: Book, current_user) -
 
 async def serialize_chapter_media(db: AsyncSession, chapter_id: uuid.UUID) -> list[dict]:
     rows = (await db.execute(
-        select(ChapterMedia)
+        select(ChapterMedia, Book.user_id)
+        .join(Book, Book.id == ChapterMedia.book_id)
         .where(ChapterMedia.chapter_id == chapter_id)
         .order_by(ChapterMedia.sort_order, ChapterMedia.created_at)
-    )).scalars().all()
+    )).all()
     items: list[dict] = []
-    for row in rows:
+    for row, user_id in rows:
+        token = create_asset_token(str(user_id), f"chapter-media:{row.id}", expires_minutes=120)
         item = {
+            "id": str(row.id),
             "marker": row.marker,
             "asset_type": row.asset_type,
             "content_type": row.content_type,
             "caption": row.caption,
             "sort_order": row.sort_order,
-            "url": get_presigned_url(row.storage_key),
+            "url": f"{settings.API_V1_PREFIX}/reader/media/{row.id}?token={token}",
             "content_base64": None,
         }
-        if item["url"] is None:
+        if get_presigned_url(row.storage_key) is None:
             try:
                 item["content_base64"] = base64.b64encode(download_book(row.storage_key)).decode("ascii")
             except Exception:

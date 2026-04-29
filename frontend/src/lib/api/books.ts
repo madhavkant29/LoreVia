@@ -1,6 +1,6 @@
 import { apiClient } from "./client"
 import { cachedGet, invalidateCachedGets } from "./requestCache"
-import type { Book, BookNote, BookSeries, ChapterConsistencyReport, ChapterVersion, PreWritingCheck, PublicBook, PublicBookDetail, PublicChapter, SavedQuote, UserStats } from "@/types/book"
+import type { Book, BookEvents, BookNote, BookSeries, ChapterConsistencyReport, ChapterVersion, ObsidianPreview, ObsidianVaultNote, ObsidianVaultNoteSaveResult, PreWritingCheck, PublicBook, PublicBookDetail, PublicChapter, SavedQuote, UserStats } from "@/types/book"
 import type { Character, CharacterShareResponse } from "@/types/character"
 
 export interface ManuscriptImportResponse {
@@ -52,6 +52,14 @@ export const booksApi = {
     cachedGet(bookCacheKey(id, "characters"), 45 * 1000, () =>
       apiClient.get<Character[]>(`/books/${id}/characters`).then(r => r.data)
     ),
+  getEvents: (id: string) =>
+    cachedGet(bookCacheKey(id, "events"), 20 * 1000, () =>
+      apiClient.get<BookEvents>(`/books/${id}/events`).then(r => r.data)
+    ),
+  getReaderEvents: (id: string, chapter?: number) =>
+    cachedGet(bookCacheKey(id, `reader-events:${chapter ?? "auto"}`), 20 * 1000, () =>
+      apiClient.get<BookEvents>(`/books/${id}/events/reader`, { params: typeof chapter === "number" ? { chapter } : undefined }).then(r => r.data)
+    ),
   updateCharacter: (
     bookId: string,
     characterId: string,
@@ -102,8 +110,14 @@ export const booksApi = {
     apiClient.post<CharacterShareResponse>(`/books/${bookId}/characters/${characterId}/share`).then(r => r.data),
   exportCharacterCard: (bookId: string, characterId: string, format: "md" | "pdf" | "docx" = "pdf") =>
     apiClient.get<Blob>(`/books/${bookId}/characters/${characterId}/export`, { params: { format }, responseType: "blob" }).then(r => r.data),
-  exportCharacterBible: (id: string, format: "md" | "pdf" | "docx" = "md") =>
+  exportCharacterBible: (id: string, format: "md" | "pdf" | "docx" | "obsidian_folder" = "md") =>
     apiClient.get<Blob>(`/books/${id}/export/character-bible`, { params: { format }, responseType: "blob" }).then(r => r.data),
+  previewCharacterBibleObsidian: (id: string) =>
+    apiClient.get<ObsidianPreview>(`/books/${id}/export/character-bible/preview`).then(r => r.data),
+  listCharacterBibleObsidianNotes: (id: string) =>
+    apiClient.get<ObsidianVaultNote[]>(`/books/${id}/export/character-bible/notes`).then(r => r.data),
+  saveCharacterBibleObsidianNote: (id: string, payload: { path: string; content: string }) =>
+    apiClient.put<ObsidianVaultNoteSaveResult>(`/books/${id}/export/character-bible/notes`, payload).then(r => r.data),
   saveBookNote: (
     id: string,
     payload: { noteId?: string | null; chapterNumber?: number | null; title?: string | null; body: string }

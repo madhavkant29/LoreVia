@@ -46,6 +46,13 @@ COMMON_NON_NAME_WORDS = {
     "who", "why", "with", "without", "you", "your",
 }
 
+NON_NAME_PATTERNS = (
+    re.compile(r"^(on|in|at|by|for|of|to|from)\s+\w+$", re.IGNORECASE),
+    re.compile(r"^(the|a|an)\s+\w+$", re.IGNORECASE),
+    re.compile(r"^(chapter|part|section)\s+\d+$", re.IGNORECASE),
+    re.compile(r"^(he|she|it|they)\s+\w+$", re.IGNORECASE),
+)
+
 
 def entity_words(name: str | None) -> list[str]:
     return re.findall(r"[A-Za-z][A-Za-z'-]*", name or "")
@@ -55,6 +62,13 @@ def normalize_entity_name(name: str | None) -> str:
     if not name:
         return ""
     return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9\s-]", " ", name.lower())).strip()
+
+
+def matches_non_name_pattern(name: str | None) -> bool:
+    normalized = normalize_entity_name(name)
+    if not normalized:
+        return False
+    return any(pattern.match(normalized) for pattern in NON_NAME_PATTERNS)
 
 
 def person_name_shape_score(name: str | None) -> int:
@@ -150,28 +164,20 @@ def is_displayable_character_entity(
     trait_state: dict | None = None,
     relationship_count: int = 0,
 ) -> bool:
-    words = entity_words(name)
-    if not words:
-        return False
-
-    shape_score = person_name_shape_score(name)
-    evidence_score = profile_evidence_score(
+    score = character_visibility_score(
+        name,
         role=role,
         aliases=aliases,
+        arc_summary=None,
         personality_tags=personality_tags,
         motivations=motivations,
         fears=fears,
         archetype=archetype,
         trait_state=trait_state,
         relationship_count=relationship_count,
+        stopwords=frozenset(COMMON_NON_NAME_WORDS),
     )
-
-    if len(words) == 1:
-        # Single-token names are the hardest to disambiguate from sentence-start capitalization.
-        # Require stronger supporting evidence (traits/tags/aliases/role/etc) to avoid noise like "From", "Now", "Then".
-        return shape_score >= 1 and evidence_score >= 2
-
-    return shape_score >= 2 and (evidence_score >= 1 or shape_score >= 3)
+    return score >= VISIBILITY_THRESHOLD
 
 
 # ─── spaCy NER layer (optional, lazy-loaded) ──────────────────────────────────
@@ -247,6 +253,7 @@ def ner_entity_score(name: str) -> int:
 STOPWORD_PENALTY = -3       # name is a known common / noise word  (soft — NER can override)
 KNOWN_CONCEPT_PENALTY = -4  # name is in the exact-match concept blocklist
 SUFFIX_CONCEPT_PENALTY = -2 # name ends with a known concept suffix (e.g. " Association")
+NON_NAME_PATTERN_PENALTY = -4
 ARC_EVIDENCE_BONUS = 1      # character has an arc_summary on record
 SINGLE_PROPER_NAME_BONUS = 1  # title-cased single word ≥4 chars, not a common word
                                # rescues short CJK-origin names (Ling, Shen, Yuki) that
@@ -268,9 +275,10 @@ def character_visibility_score(
     archetype: str | None = None,
     trait_state: dict | None = None,
     relationship_count: int = 0,
-    stopwords: frozenset[str] = frozenset(),
+    stopwords: frozenset[str] = frozenset(COMMON_NON_NAME_WORDS),
     exact_blocklist: frozenset[str] = frozenset(),
     concept_suffixes: tuple[str, ...] = (),
+    non_name_patterns: tuple[re.Pattern[str], ...] = NON_NAME_PATTERNS,
     use_ner: bool = True,
 ) -> int:
     """Composite score for whether an entity should be treated as a visible
@@ -345,6 +353,9 @@ def character_visibility_score(
     #    signal can overcome it.  Stopwords are NOT a hard gate here.
     if normalized in stopwords:
         score += STOPWORD_PENALTY
+
+    if matches_non_name_pattern(title_name) or any(pattern.match(normalized) for pattern in non_name_patterns):
+        score += NON_NAME_PATTERN_PENALTY
 
     # 7. Exact concept blocklist — known non-person proper nouns
     if title_name in exact_blocklist:

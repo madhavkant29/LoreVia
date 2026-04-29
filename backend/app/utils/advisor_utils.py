@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.book import Book, Chapter
 from app.models.character import Character
-from app.models.intelligence import ChapterSummary, PlotThread
+from app.models.intelligence import ChapterSummary, PlotThread, WorldElement
 
 
 # ─── Advisor response cache ───────────────────────────────────────────────────
@@ -377,9 +377,16 @@ async def build_story_context(db: AsyncSession, book_id: uuid.UUID, total_ch: in
             motives = "; ".join((c.motivations or [])[:2])
             growth = ""
             if isinstance(c.growth_events, list) and c.growth_events:
-                latest_growth = next((item for item in reversed(c.growth_events) if isinstance(item, dict) and item.get("event")), None)
+                latest_growth = next(
+                    (
+                        item for item in reversed(c.growth_events)
+                        if isinstance(item, dict) and (item.get("event") or item.get("event_title"))
+                    ),
+                    None,
+                )
                 if latest_growth:
-                    growth = f"Recent growth beat: {latest_growth.get('event')}."
+                    growth_title = latest_growth.get("event") or latest_growth.get("event_title")
+                    growth = f"Recent growth beat: {growth_title}."
             trait_bits: list[str] = []
             if isinstance(c.trait_state, dict):
                 for trait_k in ("eyes", "hair", "build", "age_descriptor"):
@@ -415,6 +422,67 @@ async def build_story_context(db: AsyncSession, book_id: uuid.UUID, total_ch: in
                 f"  • [{t.status.upper()}] {t.title} (importance {t.importance}/10, "
                 f"introduced ch.{t.introduced_at}). {desc}"
             )
+
+    world_reference_rows = (
+        await db.execute(
+            select(WorldElement.name, WorldElement.element_type, WorldElement.description)
+            .where(WorldElement.book_id == book_id, WorldElement.source_scope == "worldbuilding")
+            .order_by(WorldElement.usage_count.desc(), WorldElement.name.asc())
+            .limit(10)
+        )
+    ).all()
+    if world_reference_rows:
+        lines.append("\nWORLD REFERENCE CORPUS (author-supplied lore):")
+        for name, element_type, description in world_reference_rows:
+            snippet = (description[:120] + "...") if description and len(description) > 120 else (description or "")
+            lines.append(f"  • {name} [{element_type}] {snippet}")
+
+    event_rows = (
+        await db.execute(
+            select(Chapter.number, Chapter.title, ChapterSummary.key_events)
+            .join(ChapterSummary, ChapterSummary.chapter_id == Chapter.id)
+            .where(
+                Chapter.book_id == book_id,
+                ChapterSummary.mode == "detailed",
+                ChapterSummary.key_events.isnot(None),
+            )
+            .order_by(Chapter.number.desc())
+            .limit(8)
+        )
+    ).all()
+    event_lines: list[str] = []
+    for chapter_num, chapter_title, key_events in event_rows:
+        if not isinstance(key_events, list):
+            continue
+        for item in key_events[:3]:
+            if not isinstance(item, dict):
+                continue
+            title = " ".join(str(item.get("event_title") or item.get("event") or "").split()).strip()
+            if not title:
+                continue
+            chapter_label = f"ch.{chapter_num}"
+            if chapter_title:
+                chapter_label += f" ({chapter_title})"
+            event_lines.append(f"  - {title} [{chapter_label}]")
+    if event_lines:
+        lines.append("\nMAJOR EVENTS (extracted from manuscript):")
+        lines.extend(event_lines[:12])
+
+    world_rows = (
+        await db.execute(
+            select(WorldElement.name, WorldElement.element_type, WorldElement.description, WorldElement.usage_count)
+            .where(WorldElement.book_id == book_id)
+            .order_by(WorldElement.usage_count.desc(), WorldElement.created_at.desc())
+            .limit(12)
+        )
+    ).all()
+    if world_rows:
+        lines.append("\nWORLD ELEMENTS (extracted from manuscript):")
+        for row in world_rows:
+            desc = " ".join(str(row.description or "").split()).strip()
+            if len(desc) > 100:
+                desc = desc[:100] + "..."
+            lines.append(f"  - {row.name} [{row.element_type}] usage={row.usage_count}. {desc}")
 
     theme_rows = (
         await db.execute(

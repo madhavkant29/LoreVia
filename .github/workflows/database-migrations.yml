@@ -145,6 +145,8 @@ jobs:
     - name: Run database migrations
       env:
         DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        ALEMBIC_DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        ALEMBIC_CONFIRM_REMOTE: YES_I_AM_SURE
         REDIS_URL: redis://localhost:6379/0
         S3_BUCKET: test-bucket
         AWS_ACCESS_KEY_ID: test-key
@@ -159,6 +161,8 @@ jobs:
     - name: Verify migration success
       env:
         DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        ALEMBIC_DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        ALEMBIC_CONFIRM_REMOTE: YES_I_AM_SURE
         REDIS_URL: redis://localhost:6379/0
         S3_BUCKET: test-bucket
         AWS_ACCESS_KEY_ID: test-key

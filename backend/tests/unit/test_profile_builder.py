@@ -26,6 +26,10 @@ def test_build_description_uses_archetype_when_sparse():
     assert "japanese" in desc.lower() or "school" in desc.lower()
 
 
+def test_build_description_omits_placeholder_when_no_traits_or_archetype():
+    assert build_description({}, None) == ""
+
+
 def test_build_description_uses_traits():
     trait_state = {
         "hair": {"value": "black", "confidence": 0.9, "type": "objective"},

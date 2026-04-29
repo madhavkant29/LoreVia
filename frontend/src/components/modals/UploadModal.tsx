@@ -1,9 +1,12 @@
 "use client"
 import { useEffect, useRef, useState } from "react"
+import axios from "axios"
 import { booksApi } from "@/lib/api/books"
+import { authApi } from "@/lib/api/auth"
 import { intelligenceApi } from "@/lib/api/intelligence"
 import { readerApi } from "@/lib/api/reader"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
+import { useAuthStore } from "@/lib/stores/authStore"
 import { useBookModeStore, type BookMode } from "@/lib/stores/bookModeStore"
 import { GENRE_TAGS } from "@/lib/constants/genreTags"
 import { capture } from "@/lib/analytics/posthog"
@@ -12,6 +15,24 @@ import type { AdvisorSuggestion, EditorialReview, EditorialReviewPassage, Manusc
 import type { PlotThread } from "@/types/reader"
 
 const MAX_TAGS = 8
+const TAG_SUGGESTION_LIMIT = 18
+
+function errorMessage(error: unknown, fallback: string) {
+  if (axios.isAxiosError(error)) {
+    const detail = error.response?.data?.detail
+    if (typeof detail === "string" && detail.trim()) return detail
+    if (Array.isArray(detail) && detail.length > 0) {
+      const first = detail[0]
+      if (typeof first === "string" && first.trim()) return first
+      if (first && typeof first === "object" && "msg" in first && typeof first.msg === "string") {
+        return first.msg
+      }
+    }
+    if (typeof error.message === "string" && error.message.trim()) return error.message
+  }
+  if (error instanceof Error && error.message.trim()) return error.message
+  return fallback
+}
 
 export function UploadModal({ onClose }: { onClose: () => void }) {
   const [title, setTitle] = useState("")
@@ -30,6 +51,9 @@ export function UploadModal({ onClose }: { onClose: () => void }) {
   const [files, setFiles] = useState<File[]>([])
   const [autoExtractCover, setAutoExtractCover] = useState(true)
   const [coverFile, setCoverFile] = useState<File | null>(null)
+  const [usernameInput, setUsernameInput] = useState("")
+  const [usernameError, setUsernameError] = useState<string | null>(null)
+  const [settingUsername, setSettingUsername] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [uploadStage, setUploadStage] = useState<"idle" | "uploading" | "processing">("idle")
@@ -44,16 +68,54 @@ export function UploadModal({ onClose }: { onClose: () => void }) {
   const inputRef = useRef<HTMLInputElement>(null)
   const coverInputRef = useRef<HTMLInputElement>(null)
   const { theme } = usePreferencesStore()
+  const user = useAuthStore((state) => state.user)
   const setBookMode = useBookModeStore((state) => state.setMode)
   const isDark = theme === "dark"
   const visibility: "private" = "private"
   const genre = selectedTags.join(", ")
-  const suggestedTags = GENRE_TAGS.filter((tag) => !selectedTags.includes(tag)).slice(0, 18)
+  const trimmedCustomTag = customTag.trim()
+  const shouldShowTagSuggestions = trimmedCustomTag.length >= 2
+  const suggestedTags = GENRE_TAGS
+    .filter((tag) => !selectedTags.includes(tag))
+    .filter((tag) => (shouldShowTagSuggestions ? tagSimilarity(tag, trimmedCustomTag) >= 0.34 : false))
+    .sort((a, b) => tagSimilarity(b, trimmedCustomTag) - tagSimilarity(a, trimmedCustomTag))
+    .slice(0, TAG_SUGGESTION_LIMIT)
 
   useEffect(() => {
     booksApi.listSeries().then(setSeries).catch(() => {})
     booksApi.list(true).then(setBooks).catch(() => {})
   }, [])
+
+  // Set autoExtractCover based on file type: enabled by default for PDFs
+  useEffect(() => {
+    if (files.length === 0) return
+    const primaryFile = files[0]
+    const isPdf = primaryFile.name.toLowerCase().endsWith(".pdf")
+    setAutoExtractCover(isPdf)
+  }, [files])
+
+  // Auto-set author to email when in author mode
+  useEffect(() => {
+    if (mode === "author" && !author) {
+      const preferred = user?.username || user?.email
+      if (preferred) setAuthor(preferred)
+    }
+  }, [mode, user, author])
+
+  async function handleSetUsername() {
+    if (!usernameInput.trim()) return
+    setSettingUsername(true)
+    setUsernameError(null)
+    try {
+      const updatedUser = await authApi.setUsername(usernameInput.trim())
+      useAuthStore.getState().setUser(updatedUser)
+      setUsernameInput("")
+    } catch (error) {
+      setUsernameError(errorMessage(error, "Username already taken or invalid"))
+    } finally {
+      setSettingUsername(false)
+    }
+  }
 
   const addTag = (rawTag: string) => {
     const tag = normalizeTag(rawTag)
@@ -62,10 +124,6 @@ export function UploadModal({ onClose }: { onClose: () => void }) {
       if (current.includes(tag) || current.length >= MAX_TAGS) return current
       return [...current, tag]
     })
-  }
-
-  const removeTag = (tag: string) => {
-    setSelectedTags((current) => current.filter((item) => item !== tag))
   }
 
   const addCustomTag = () => {
@@ -83,6 +141,7 @@ export function UploadModal({ onClose }: { onClose: () => void }) {
 
   const existingAuthorBooks = books.filter((book) => book.mode === "author" && !book.hidden_at)
   const isManagingExisting = mode === "author" && !!existingBookId
+  const needsUsername = mode === "author" && !user?.username
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -129,8 +188,8 @@ export function UploadModal({ onClose }: { onClose: () => void }) {
             const chapterData = await readerApi.getChapter(response.book_id, importedChapter)
             const recoveredText = chapterData.text_content || ""
             await loadPostImportReview(response.book_id, importedChapter, recoveredText)
-          } catch {
-            setError("Chapter imported, but the inline continuity review could not be loaded.")
+          } catch (error) {
+            setError(errorMessage(error, "Chapter imported, but the inline continuity review could not be loaded."))
           }
         }
         setUploadStage("processing")
@@ -165,8 +224,8 @@ export function UploadModal({ onClose }: { onClose: () => void }) {
       setUploadStage("processing")
       setUploadProgress(100)
       onClose()
-    } catch {
-      setError("Upload failed. Please try again.")
+    } catch (error) {
+      setError(errorMessage(error, "Upload failed. Please try again."))
     } finally {
       setUploading(false)
       setUploadStage("idle")
@@ -193,11 +252,11 @@ export function UploadModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-md p-4">
       <div
         className={`flex max-h-[90vh] w-full ${postImportReview ? "max-w-5xl" : "max-w-md"} flex-col overflow-hidden rounded-2xl border p-6 shadow-2xl transition-colors ${
           isDark
-            ? "border-white/10 bg-[#0f172a] text-slate-100"
+            ? "border-white/10 bg-[#0B0B0B]/90 backdrop-blur-xl text-slate-100 shadow-[0_30px_80px_-35px_rgba(0,0,0,0.9)]"
             : "border-black/5 bg-white text-slate-950"
         }`}
       >
@@ -280,6 +339,32 @@ export function UploadModal({ onClose }: { onClose: () => void }) {
                 )
               })}
             </div>
+            {mode === "author" && !user?.username ? (
+              <div className={`mt-4 rounded-xl border p-4 ${isDark ? "border-amber-500/30 bg-amber-500/10" : "border-amber-300 bg-amber-50"}`}>
+                <p className={`text-sm font-medium mb-2 ${isDark ? "text-amber-200" : "text-amber-800"}`}>Set your username to use Author mode</p>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="username"
+                    value={usernameInput}
+                    onChange={(e) => setUsernameInput(e.target.value)}
+                    className={`flex-1 rounded-lg border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-100" : "border-gray-300 bg-white text-slate-950"}`}
+                    minLength={3}
+                    maxLength={32}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleSetUsername}
+                    disabled={settingUsername || usernameInput.length < 3}
+                    className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-700 disabled:opacity-50"
+                  >
+                    {settingUsername ? "Saving..." : "Set"}
+                  </button>
+                </div>
+                {usernameError && <p className="mt-2 text-xs text-red-400">{usernameError}</p>}
+                <p className={`mt-2 text-xs ${isDark ? "text-amber-300/70" : "text-amber-600"}`}>Username can only be set once and cannot be changed later.</p>
+              </div>
+            ) : null}
             {mode === "author" && existingAuthorBooks.length > 0 ? (
               <div className="mt-4">
                 <label className={`mb-2 block text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
@@ -299,63 +384,59 @@ export function UploadModal({ onClose }: { onClose: () => void }) {
             ) : null}
           </div>
 
-          <div className={`rounded-xl border p-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-gray-300 bg-gray-50"}`}>
-            <div className="flex items-center justify-between gap-3">
-              <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>Genres and tags</p>
-              <span className={`text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>{selectedTags.length}/{MAX_TAGS}</span>
-            </div>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {selectedTags.length > 0 ? selectedTags.map((tag) => (
-                <button
-                  key={tag}
-                  type="button"
-                  onClick={() => removeTag(tag)}
-                  className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${isDark ? "bg-indigo-400/15 text-indigo-100 hover:bg-indigo-400/25" : "bg-indigo-100 text-indigo-800 hover:bg-indigo-200"}`}
-                >
-                  {tag} ×
-                </button>
-              )) : (
-                <p className={`text-sm ${isDark ? "text-slate-500" : "text-slate-400"}`}>Pick suggested tags or add your own.</p>
-              )}
-            </div>
-            <div className="mt-4 flex gap-2">
+          {/* 2. The Input & Dynamic Suggestion Area */}
+          <div className={`group relative rounded-xl border p-1 transition-all ${
+            isDark ? "border-white/10 bg-white/5 focus-within:border-indigo-500/50" : "border-gray-300 bg-white"
+          }`}>
+            <div className="flex items-center gap-2 px-2 py-1">
               <input
                 type="text"
-                list="genre-tags"
                 value={customTag}
                 onChange={e => setCustomTag(e.target.value)}
-                placeholder="Add custom genre or mood"
-                className={`flex-1 rounded-lg border px-3 py-2.5 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
-                  isDark
-                    ? "border-white/10 bg-white/5 text-slate-100 placeholder:text-slate-500"
-                    : "border-gray-300 bg-white text-slate-950 placeholder:text-slate-400"
-                }`}
+                placeholder="Add genres or moods..."
+                className="flex-1 bg-transparent py-1.5 text-sm outline-none placeholder:text-slate-500"
               />
-              <button
-                type="button"
-                onClick={addCustomTag}
-                className={`rounded-lg px-3 py-2 text-sm font-medium transition ${isDark ? "bg-white/10 text-white hover:bg-white/15" : "bg-slate-900 text-white hover:bg-slate-800"}`}
-              >
-                Add
-              </button>
-            </div>
-            <datalist id="genre-tags">
-              {GENRE_TAGS.map((tag) => (
-                <option key={tag} value={tag} />
-              ))}
-            </datalist>
-            <div className="mt-4 flex flex-wrap gap-2">
-              {suggestedTags.map((tag) => (
+              {customTag.trim().length > 0 && (
                 <button
-                  key={tag}
                   type="button"
-                  onClick={() => addTag(tag)}
-                  className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${isDark ? "border-white/10 text-slate-300 hover:bg-white/5" : "border-slate-300 text-slate-700 hover:bg-white"}`}
+                  onClick={addCustomTag}
+                  className="rounded-lg bg-indigo-600 px-3 py-1 text-xs font-medium text-white transition hover:bg-indigo-700"
                 >
-                  + {tag}
+                  Add
                 </button>
-              ))}
+              )}
             </div>
+
+            {/* Suggestions dropdown - Triggers at 2 characters */}
+            {shouldShowTagSuggestions && suggestedTags.length > 0 && (
+              <div className={`mt-1 border-t ${isDark ? "border-white/10" : "border-gray-100"}`}>
+                <div className="px-3 pt-3">
+                  <p className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? "text-slate-500" : "text-slate-500"}`}>
+                    Suggestions
+                  </p>
+                </div>
+                <div className="max-h-40 overflow-y-auto px-2 pb-2 pt-2">
+                  {suggestedTags.map((tag) => (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() => {
+                        addTag(tag)
+                        setCustomTag("")
+                      }}
+                      className={`mb-1 flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left text-xs font-medium transition ${
+                        isDark
+                          ? "border-white/10 text-slate-200 hover:bg-white/10"
+                          : "border-slate-200 text-slate-700 hover:bg-slate-50"
+                      }`}
+                    >
+                      <span>{tag}</span>
+                      <span className={isDark ? "text-slate-400" : "text-slate-400"}>Add</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           <div className={`rounded-xl border px-4 py-3 text-sm ${isDark ? "border-white/10 bg-white/[0.03] text-slate-300" : "border-gray-200 bg-gray-50 text-slate-600"}`}>
@@ -459,12 +540,48 @@ export function UploadModal({ onClose }: { onClose: () => void }) {
 
           {!isManagingExisting ? (
           <div className={`rounded-xl border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-gray-200 bg-gray-50"}`}>
-            <label className="flex items-start gap-3">
+            {/* Separate Cover Upload - Always visible */}
+            <div className="mb-4">
+              <input
+                ref={coverInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0] ?? null
+                  setCoverFile(file)
+                  if (file) {
+                    setAutoExtractCover(false)
+                  }
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => coverInputRef.current?.click()}
+                className={`w-full rounded-lg border px-3 py-2.5 text-sm transition ${
+                  isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-gray-300 bg-white text-slate-700 hover:bg-gray-50"
+                }`}
+              >
+                {coverFile ? `Cover selected: ${coverFile.name}` : "Upload separate cover image"}
+              </button>
+              <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                Select a separate cover image file (PNG, JPEG, WebP)
+              </p>
+            </div>
+
+            {/* Auto-extract checkbox - disabled when cover file is uploaded */}
+            <label className={`flex items-start gap-3 ${coverFile ? "opacity-50" : ""}`}>
               <input
                 type="checkbox"
                 checked={autoExtractCover}
-                onChange={(e) => setAutoExtractCover(e.target.checked)}
-                className="mt-1 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                onChange={(e) => {
+                  setAutoExtractCover(e.target.checked)
+                  if (e.target.checked) {
+                    setCoverFile(null)
+                  }
+                }}
+                disabled={!!coverFile}
+                className="mt-1 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:cursor-not-allowed"
               />
               <div>
                 <p className={`text-sm font-medium ${isDark ? "text-slate-100" : "text-slate-900"}`}>Use the first PDF page as the book cover</p>
@@ -473,27 +590,6 @@ export function UploadModal({ onClose }: { onClose: () => void }) {
                 </p>
               </div>
             </label>
-
-            {!autoExtractCover ? (
-              <div className="mt-4">
-                <input
-                  ref={coverInputRef}
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp"
-                  className="hidden"
-                  onChange={(e) => setCoverFile(e.target.files?.[0] ?? null)}
-                />
-                <button
-                  type="button"
-                  onClick={() => coverInputRef.current?.click()}
-                  className={`w-full rounded-lg border px-3 py-2.5 text-sm transition ${
-                    isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-gray-300 bg-white text-slate-700 hover:bg-gray-50"
-                  }`}
-                >
-                  {coverFile ? `Cover selected: ${coverFile.name}` : "Upload separate cover image"}
-                </button>
-              </div>
-            ) : null}
           </div>
           ) : null}
 
@@ -529,14 +625,16 @@ export function UploadModal({ onClose }: { onClose: () => void }) {
 
           <button
             type="submit"
-            disabled={uploading}
+            disabled={uploading || needsUsername}
             className="rounded-lg bg-indigo-600 py-2.5 text-sm font-medium text-white transition-colors hover:bg-indigo-700 disabled:opacity-50"
           >
             {uploading
               ? uploadStage === "uploading"
                 ? "Uploading..."
                 : "Starting processing..."
-              : "Upload & Process"}
+              : needsUsername
+                ? "Set username to continue"
+                : "Upload & Process"}
           </button>
 
           {chapterReports.length > 0 ? (
@@ -731,6 +829,34 @@ function normalizeTag(rawTag: string): string {
     .trim()
     .toLowerCase()
     .replace(/\s+/g, " ")
+}
+
+function normalizeKeywords(input: string) {
+  return input
+    .toLowerCase()
+    .split(/[^a-z0-9]+/i)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 2)
+}
+
+function tagSimilarity(tag: string, query: string) {
+  const trimmed = query.trim()
+  if (!trimmed) return 0
+
+  const tagLower = tag.toLowerCase()
+  const queryLower = trimmed.toLowerCase()
+  if (tagLower.includes(queryLower) || queryLower.includes(tagLower)) return 1
+
+  const aTokens = new Set(normalizeKeywords(tag))
+  const bTokens = new Set(normalizeKeywords(trimmed))
+  if (aTokens.size === 0 || bTokens.size === 0) return 0
+
+  let intersection = 0
+  for (const token of aTokens) {
+    if (bTokens.has(token)) intersection += 1
+  }
+  const union = aTokens.size + bTokens.size - intersection
+  return union === 0 ? 0 : intersection / union
 }
 
 function ReportList({

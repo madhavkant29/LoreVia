@@ -24,7 +24,7 @@ export function ReaderView({ bookId, chapterNum }: Props) {
   const [showSummary, setShowSummary] = useState(false)
   const [selectedQuote, setSelectedQuote] = useState<string | null>(null)
   const [theme, setTheme] = useState<ReaderTheme>(appTheme)
-  const [fontSize, setFontSize] = useState(18)
+  const [fontSize, setFontSize] = useState(20)
   const [fontFamily, setFontFamily] = useState<"serif" | "sans" | "mono">("serif")
   const [quoteModeEnabled, setQuoteModeEnabled] = useState(false)
   const [canUseQuoteMode, setCanUseQuoteMode] = useState(false)

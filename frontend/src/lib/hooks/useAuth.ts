@@ -1,20 +1,17 @@
 import { useEffect } from "react"
 import { useAuthStore } from "@/lib/stores/authStore"
-import { authApi } from "@/lib/api/auth"
 import { useRouter } from "next/navigation"
 
 export function useAuth(requireAuth = false) {
-  const { user, accessToken, setUser, logout } = useAuthStore()
+  const { user, hydrated } = useAuthStore()
   const router = useRouter()
 
   useEffect(() => {
-    if (accessToken && !user) {
-      authApi.me().then(setUser).catch(() => logout())
-    }
-    if (requireAuth && !accessToken) {
+    if (!hydrated) return
+    if (requireAuth && !user) {
       router.push("/login")
     }
-  }, [accessToken, user, requireAuth])
+  }, [hydrated, user, requireAuth, router])
 
-  return { user, isLoggedIn: !!accessToken }
+  return { user, isLoggedIn: hydrated && !!user, hydrated }
 }

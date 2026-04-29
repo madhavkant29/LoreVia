@@ -32,8 +32,17 @@ export interface Character {
   subtype_scores?: Record<string, number>
   growth_events?: Array<{
     chapter?: number | null
-    event: string
+    chapter_number?: number | null
+    event?: string
+    event_title?: string
+    description?: string | null
     impact?: string | null
+    impact_score?: number | null
+    role?: string | null
+    accomplishments?: string[]
+    growth_direction?: string | null
+    growth_magnitude?: number | null
+    is_major?: boolean
     tone?: string | null
   }>
   relationship_summaries?: string[]

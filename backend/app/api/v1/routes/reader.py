@@ -5,14 +5,15 @@ Smart tap, summaries, relationship graph, memory recall, progress.
 import uuid
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import desc, or_, select
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from sqlalchemy import and_, delete, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps.auth import get_current_user
 from app.api.deps.rate_limit import rate_limit_search, rate_limit_summary
 from app.core.config import is_local_mode, settings
 from app.core.database import get_db
+from app.core.security import decode_token
 from app.core.redis import (
     cache_get,
     cache_set,
@@ -26,7 +27,7 @@ from app.engine.analysis.recall import generate_recall
 from app.engine.character.consolidator import consolidate_characters
 from app.engine.character.profile_builder import build_description
 from app.engine.search.semantic import build_search_result, find_context_for_tap, semantic_search
-from app.models.book import Book, Chapter
+from app.models.book import Book, Chapter, ChapterMedia
 from app.models.character import Character, CharacterState
 from app.models.intelligence import (
     BookChunk,
@@ -42,6 +43,7 @@ from app.schemas.reader import (
     TimelineResponseOut,
     UpdatePlotThreadBody,
 )
+from app.schemas.books import BookEventsOut, CharacterEventOut, MajorEventOut
 from app.services.summary_service import get_or_generate_summary
 from app.utils.book_utils import deserialize_manuscript_content
 
@@ -74,7 +76,68 @@ from app.utils.reader_utils import (
 router = APIRouter()
 
 
+def _normalize_reader_major_event(chapter_number: int, chapter_title: str | None, event: dict, names_by_id: dict[str, str]) -> dict:
+    involved_ids = [str(item).strip() for item in (event.get("involved_characters") or []) if str(item).strip()]
+    return {
+        "chapter_number": chapter_number,
+        "chapter_title": chapter_title,
+        "event_title": str(event.get("event_title") or event.get("event") or "").strip(),
+        "description": str(event.get("description") or event.get("impact") or "").strip(),
+        "importance": int(event.get("importance") or 5),
+        "involved_characters": involved_ids or None,
+        "involved_character_names": [names_by_id.get(item, item) for item in involved_ids] or None,
+        "event_type": event.get("event_type"),
+    }
+
+
+def _normalize_reader_character_event(character: Character, event: dict) -> dict:
+    return {
+        "character_id": str(character.id),
+        "character_name": character.name,
+        "chapter_number": int(event.get("chapter_number") or character.first_chapter),
+        "event_title": str(event.get("event_title") or event.get("event") or "").strip(),
+        "description": str(event.get("description") or event.get("impact") or "").strip(),
+        "impact_score": int(event.get("impact_score") or event.get("importance") or 5),
+        "role": event.get("role") or character.role,
+        "accomplishments": [str(item).strip() for item in (event.get("accomplishments") or []) if str(item).strip()],
+        "growth_direction": str(event.get("growth_direction") or "neutral"),
+        "growth_magnitude": int(event.get("growth_magnitude") or event.get("impact_score") or 0),
+        "is_major": bool(event.get("is_major", False)),
+    }
+
+
 # ─── Endpoints ────────────────────────────────────────────────────────────────
+
+@router.get("/media/{media_id}")
+async def get_chapter_media_public(
+    media_id: uuid.UUID,
+    token: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+):
+    media = await db.get(ChapterMedia, media_id)
+    if not media:
+        raise HTTPException(404, "Chapter media not found")
+
+    book = await db.get(Book, media.book_id)
+    if not book:
+        raise HTTPException(404, "Book not found")
+
+    payload = decode_token(token)
+    if (
+        not payload
+        or payload.get("type") != "asset"
+        or payload.get("sub") != str(book.user_id)
+        or payload.get("res") != f"chapter-media:{media.id}"
+    ):
+        raise HTTPException(401, "Invalid chapter media token")
+
+    try:
+        raw = download_book(media.storage_key)
+    except Exception:
+        raise HTTPException(404, "Chapter media not found")
+
+    return Response(content=raw, media_type=media.content_type or "application/octet-stream")
+
 
 @router.get("/{book_id}/chapter/{chapter_num}")
 async def get_chapter(
@@ -205,6 +268,15 @@ async def smart_tap(
     book = await db.get(Book, book_id)
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
+    
+    # Check if book has embeddings (processing complete)
+    chunk_count = await db.scalar(
+        select(func.count()).select_from(BookChunk).where(BookChunk.book_id == book_id)
+    )
+    if chunk_count == 0:
+        # Book still processing, return empty results
+        return {"type": "search", "results": []}
+    
     await consolidate_characters(db, book_id, up_to_chapter=chapter)
 
     char = (await db.execute(
@@ -220,9 +292,15 @@ async def smart_tap(
 
         rels = (await db.execute(
             select(CharacterRelationship).where(
-                (CharacterRelationship.character_a_id == char.id) | (CharacterRelationship.character_b_id == char.id),
+                or_(
+                    CharacterRelationship.character_a_id == char.id,
+                    CharacterRelationship.character_b_id == char.id
+                ),
                 CharacterRelationship.from_chapter <= chapter,
-                (CharacterRelationship.to_chapter is None) | (CharacterRelationship.to_chapter >= chapter),
+                or_(
+                    CharacterRelationship.to_chapter is None,
+                    CharacterRelationship.to_chapter >= chapter
+                ),
             )
         )).scalars().all()
 
@@ -303,6 +381,53 @@ async def get_summary(
     data = normalize_summary_response(data["content"], data.get("key_events"), data.get("char_changes"), data.get("clues"))
     await cache_set(key_chapter_summary(str(chapter.id), mode), data, settings.REDIS_TTL_SUMMARY)
     return data
+
+
+@router.get("/{book_id}/events", response_model=BookEventsOut)
+async def get_reader_events(
+    book_id: uuid.UUID,
+    chapter: int | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await db.get(Book, book_id)
+    if not book or book.user_id != current_user.id:
+        raise HTTPException(404)
+
+    progress = (
+        await db.execute(
+            select(ReadingProgress).where(ReadingProgress.user_id == current_user.id, ReadingProgress.book_id == book_id)
+        )
+    ).scalar()
+    read_set = set(progress.chapters_read or []) if progress else set()
+    max_visible_chapter = chapter or (max(read_set) if read_set else (progress.current_chapter if progress else 1))
+
+    chapter_rows = (
+        await db.execute(
+            select(Chapter.number, Chapter.title, ChapterSummary.key_events)
+            .join(ChapterSummary, ChapterSummary.chapter_id == Chapter.id)
+            .where(Chapter.book_id == book_id, ChapterSummary.mode == "detailed", Chapter.number <= max_visible_chapter)
+            .order_by(Chapter.number)
+        )
+    ).all()
+    characters = (
+        await db.execute(select(Character).where(Character.book_id == book_id))
+    ).scalars().all()
+    names_by_id = {str(character.id): character.name for character in characters}
+
+    major_events: list[MajorEventOut] = []
+    for chapter_number, chapter_title, key_events in chapter_rows:
+        for event in key_events or []:
+            if isinstance(event, dict):
+                major_events.append(MajorEventOut(**_normalize_reader_major_event(chapter_number, chapter_title, event, names_by_id)))
+
+    character_events: list[CharacterEventOut] = []
+    for character in characters:
+        for event in character.growth_events or []:
+            if isinstance(event, dict) and int(event.get("chapter_number") or 0) <= max_visible_chapter:
+                character_events.append(CharacterEventOut(**_normalize_reader_character_event(character, event)))
+
+    return BookEventsOut(major_events=major_events, character_events=character_events)
 
 
 @router.get("/{book_id}/relationships")

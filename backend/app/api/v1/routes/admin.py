@@ -11,7 +11,7 @@ from app.models.book import Book
 from app.models.character import Character
 from app.models.intelligence import BookChunk, ChapterSummary
 from app.models.user import User, UserRateLimitOverride
-from app.schemas.admin import RateLimitOverrideBody
+from app.schemas.admin import RateLimitOverrideBody, UpdateUserTierBody
 
 router = APIRouter()
 
@@ -94,3 +94,23 @@ async def upsert_rate_limit_override(
     override.api_per_minute = body.api_per_minute
     await db.commit()
     return {"ok": True, "user_id": str(user_id)}
+
+
+@router.put("/users/{user_id}/tier")
+async def update_user_tier(
+    user_id: uuid.UUID,
+    body: UpdateUserTierBody,
+    db: AsyncSession = Depends(get_db),
+    _=Depends(get_admin),
+):
+    valid_tiers = {"free", "pro", "power", "admin"}
+    if body.tier not in valid_tiers:
+        raise HTTPException(400, f"Invalid tier. Must be one of: {', '.join(valid_tiers)}")
+
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(404, "User not found")
+
+    user.tier = body.tier
+    await db.commit()
+    return {"ok": True, "user_id": str(user_id), "tier": body.tier}

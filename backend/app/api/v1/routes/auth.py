@@ -4,7 +4,7 @@ import uuid
 from datetime import UTC, datetime
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -41,10 +41,17 @@ from app.schemas.auth import (
     RegisterBody,
     ResetPasswordBody,
     SupabaseOAuthBody,
+    TierLimitsOut,
     TokenOut,
     UserOut,
 )
 from app.services.email_service import deliver_password_reset_email, send_onboarding_email
+from app.utils.auth_cookies import (
+    REFRESH_TOKEN_COOKIE_NAME,
+    clear_auth_cookies,
+    get_auth_token,
+    set_auth_cookies,
+)
 
 router = APIRouter()
 log = logging.getLogger("lorevia.auth")
@@ -90,20 +97,32 @@ async def _mint_token_pair(user_id: str, user: User | None = None) -> TokenOut:
     )
 
 
+def _token_response_with_cookies(response: Response, token_out: TokenOut) -> TokenOut:
+    set_auth_cookies(response, token_out.access_token, token_out.refresh_token)
+    return token_out
+
+
 @router.post("/register", response_model=TokenOut, status_code=201)
 async def register(
     body: RegisterBody,
+    response: Response,
     db: AsyncSession = Depends(get_db),
     _: None = Depends(rate_limit_auth_register),
 ):
     email = _normalize_email(body.email)
+    username = (body.username or "").strip()
     if not body.accepted_terms:
         raise HTTPException(400, "You must accept the Terms, Compliance notice, and EULA to create an account.")
     _validate_password(body.password, email)
     if (await db.execute(select(User).where(func.lower(User.email) == email))).scalar():
         raise HTTPException(400, "Email already registered")
+    if not username:
+        raise HTTPException(400, "Username is required")
+    if (await db.execute(select(User).where(func.lower(User.username) == username.lower()))).scalar():
+        raise HTTPException(400, "Username already taken")
     user = User(
         email=email,
+        username=username,
         password_hash=hash_password(body.password),
         legal_accepted_at=datetime.now(UTC),
         legal_version=LEGAL_VERSION,
@@ -112,12 +131,14 @@ async def register(
     await db.commit()
     await db.refresh(user)
     await send_onboarding_email(user.email)
-    return await _mint_token_pair(str(user.id), user)
+    token_out = await _mint_token_pair(str(user.id), user)
+    return _token_response_with_cookies(response, token_out)
 
 
 @router.post("/login", response_model=TokenOut)
 async def login(
     body: LoginBody,
+    response: Response,
     db: AsyncSession = Depends(get_db),
     _: None = Depends(rate_limit_auth_login),
 ):
@@ -131,12 +152,14 @@ async def login(
         valid = False
     if not valid:
         raise HTTPException(401, "Invalid credentials")
-    return await _mint_token_pair(str(user.id), user)
+    token_out = await _mint_token_pair(str(user.id), user)
+    return _token_response_with_cookies(response, token_out)
 
 
 @router.post("/oauth/supabase", response_model=TokenOut)
 async def oauth_supabase(
     body: SupabaseOAuthBody,
+    response: Response,
     db: AsyncSession = Depends(get_db),
     _: None = Depends(rate_limit_auth_login),
 ):
@@ -144,7 +167,7 @@ async def oauth_supabase(
         raise HTTPException(503, "Supabase OAuth is not configured")
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
-            response = await client.get(
+            verification_response = await client.get(
                 f"{settings.SUPABASE_URL.rstrip('/')}/auth/v1/user",
                 headers={
                     "apikey": settings.SUPABASE_SERVICE_KEY,
@@ -155,16 +178,16 @@ async def oauth_supabase(
         log.exception("Supabase OAuth verification request failed")
         raise HTTPException(503, "Supabase OAuth verification is unavailable")
 
-    if response.status_code != 200:
+    if verification_response.status_code != 200:
         log.warning(
             "Supabase OAuth verification failed with status=%s body=%s",
-            response.status_code,
-            response.text[:500],
+            verification_response.status_code,
+            verification_response.text[:500],
         )
-        raise HTTPException(401, f"Invalid Supabase token ({response.status_code})")
+        raise HTTPException(401, f"Invalid Supabase token ({verification_response.status_code})")
 
     try:
-        sb_user = response.json()
+        sb_user = verification_response.json()
     except ValueError:
         raise HTTPException(503, "Supabase OAuth verification returned invalid data")
 
@@ -191,7 +214,8 @@ async def oauth_supabase(
     if created:
         await send_onboarding_email(existing.email)
 
-    return await _mint_token_pair(str(existing.id))
+    token_out = await _mint_token_pair(str(existing.id), existing)
+    return _token_response_with_cookies(response, token_out)
 
 
 @router.post("/forgot-password")
@@ -243,11 +267,15 @@ async def reset_password(
 
 @router.post("/refresh", response_model=TokenOut)
 async def refresh(
-    body: RefreshBody,
+    request: Request,
+    response: Response,
+    body: RefreshBody | None = None,
     db: AsyncSession = Depends(get_db),
     _: None = Depends(rate_limit_auth_refresh),
 ):
-    refresh_token = body.refresh_token
+    refresh_token = body.refresh_token if body and body.refresh_token else get_auth_token(request, cookie_name=REFRESH_TOKEN_COOKIE_NAME)
+    if not refresh_token:
+        raise HTTPException(401, "Invalid refresh token")
     payload = decode_token(refresh_token)
     if not payload or payload.get("type") != "refresh":
         raise HTTPException(401, "Invalid refresh token")
@@ -266,12 +294,14 @@ async def refresh(
     if not user:
         raise HTTPException(401, "User not found")
     await revoke_refresh_session(payload["sub"], session_id)
-    return await _mint_token_pair(str(user.id))
+    token_out = await _mint_token_pair(str(user.id))
+    return _token_response_with_cookies(response, token_out)
 
 
 @router.post("/logout")
-async def logout(current_user: User = Depends(get_current_user)):
+async def logout(response: Response, current_user: User = Depends(get_current_user)):
     await bump_token_version(str(current_user.id))
+    clear_auth_cookies(response)
     return {"ok": True}
 
 
@@ -280,6 +310,7 @@ async def me(current_user: User = Depends(get_current_user)):
     return UserOut(
         id=current_user.id,
         email=current_user.email,
+        username=current_user.username,
         tier=effective_tier(current_user.tier),
         reading_mode=current_user.reading_mode,
         created_at=current_user.created_at,
@@ -297,3 +328,65 @@ async def set_reading_mode(
     current_user.reading_mode = mode
     await db.commit()
     return {"reading_mode": mode}
+
+
+@router.get("/tier-limits", response_model=TierLimitsOut)
+async def get_tier_limits():
+    """Return configured tier limits from backend config."""
+    return TierLimitsOut(
+        free_max_books=settings.FREE_MAX_BOOKS,
+        free_total_token_budget=settings.FREE_TOTAL_TOKEN_BUDGET,
+        free_search_per_hour=settings.FREE_SEARCH_PER_HOUR,
+        free_summary_per_hour=settings.FREE_SUMMARY_PER_HOUR,
+        free_chat_per_day=settings.FREE_CHAT_PER_DAY,
+        free_advisor_per_day=settings.FREE_ADVISOR_PER_DAY,
+        free_advisor_per_week=settings.FREE_ADVISOR_PER_WEEK,
+        free_advisor_per_month=settings.FREE_ADVISOR_PER_MONTH,
+        pro_chat_per_day=settings.PRO_CHAT_PER_DAY,
+        pro_advisor_per_day=settings.PRO_ADVISOR_PER_DAY,
+        pro_advisor_per_week=settings.PRO_ADVISOR_PER_WEEK,
+        pro_advisor_per_month=settings.PRO_ADVISOR_PER_MONTH,
+        power_advisor_per_day=settings.POWER_ADVISOR_PER_DAY,
+        power_advisor_per_week=settings.POWER_ADVISOR_PER_WEEK,
+        power_advisor_per_month=settings.POWER_ADVISOR_PER_MONTH,
+        free_continuity_per_minute=settings.FREE_CONTINUITY_PER_MINUTE,
+        pro_continuity_per_minute=settings.PRO_CONTINUITY_PER_MINUTE,
+        power_continuity_per_minute=settings.POWER_CONTINUITY_PER_MINUTE,
+    )
+
+
+@router.patch("/me/username", response_model=UserOut)
+async def set_username(
+    username: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Set username for existing users. Username cannot be changed once set."""
+    if current_user.username:
+        raise HTTPException(400, "Username already set")
+
+    username = (username or "").strip().lower()
+    if not username or len(username) < 3 or len(username) > 32:
+        raise HTTPException(400, "Username must be 3-32 characters")
+
+    # Check for valid characters (alphanumeric, underscore, hyphen)
+    if not all(c.isalnum() or c in "_-" for c in username):
+        raise HTTPException(400, "Username can only contain letters, numbers, underscores, and hyphens")
+
+    # Check uniqueness
+    existing = (await db.execute(select(User).where(func.lower(User.username) == username))).scalar()
+    if existing:
+        raise HTTPException(400, "Username already taken")
+
+    current_user.username = username
+    await db.commit()
+    await db.refresh(current_user)
+
+    return UserOut(
+        id=current_user.id,
+        email=current_user.email,
+        username=current_user.username,
+        tier=effective_tier(current_user.tier),
+        reading_mode=current_user.reading_mode,
+        created_at=current_user.created_at,
+    )

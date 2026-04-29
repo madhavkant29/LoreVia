@@ -82,6 +82,9 @@ LoreVia2/
 - Test both happy paths and error paths.
 - Use descriptive test names that clearly indicate what is being tested.
 - Maintain test coverage for critical paths.
+- When running backend tests locally, prefer `backend\.venv\Scripts\python.exe -m pytest` so the repo's pinned test environment is used.
+- If tests need app settings, seed safe local dummy env vars instead of changing production config.
+- For DB-backed tests, confirm the local test database and required extensions are available before running the suite.
 
 ---
 
@@ -100,3 +103,44 @@ When adding a new table or changing schema:
 2. Create a new Alembic revision.
 3. Fill in the migration’s `upgrade()` and `downgrade()` functions.
 4. Push the branch after verifying the migration locally.
+
+### Migration Best Practices
+
+**Always handle edge cases and prevent duplication:**
+
+- **Check if tables exist before creating them:**
+  ```python
+  bind = op.get_bind()
+  inspector = sa.inspect(bind)
+  tables = set(inspector.get_table_names())
+  if "table_name" not in tables:
+      op.create_table("table_name", ...)
+  ```
+
+- **Check if columns exist before adding them:**
+  ```python
+  columns = {col["name"] for col in inspector.get_columns("table_name")}
+  if "column_name" not in columns:
+      op.add_column("table_name", sa.Column("column_name", ...))
+  ```
+
+- **Check if indexes exist before creating them:**
+  ```python
+  indexes = {idx["name"] for idx in inspector.get_indexes("table_name")}
+  if "index_name" not in indexes:
+      op.create_index("index_name", "table_name", ["column_name"])
+  ```
+
+- **Make migrations idempotent** — they should be safe to run multiple times without errors.
+
+**Other production migration practices:**
+
+- **Always write both `upgrade()` and `downgrade()`** — migrations must be reversible.
+- **Use nullable=True for new columns** on existing tables, then backfill data in a separate migration if needed.
+- **Add server_default for new non-nullable columns** to avoid blocking writes during migration.
+- **Batch large data migrations** — use `op.execute()` with LIMIT/OFFSET for updates on large tables to avoid long locks.
+- **Test migrations locally** on a fresh database before pushing.
+- **Always verify a newly generated migration file before applying it.** If you did not explicitly intend to delete something, treat `drop_table`, `drop_column`, `drop_index`, `drop_constraint`, or `cascade` usage as a red flag and remove those lines from the script before running Alembic.
+- **Never let Alembic infer a remote database from app settings.** For non-local databases, set `ALEMBIC_DATABASE_URL` explicitly, confirm the target, and refuse to run if an upgrade block contains destructive operations unless you intentionally set the destructive override.
+- **Use descriptive revision IDs** — e.g., `20260426_add_character_classification` instead of generic IDs.
+- **Document breaking changes** in the migration docstring if the migration cannot be fully reversed.

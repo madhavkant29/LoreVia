@@ -1,0 +1,78 @@
+import { apiClient } from "./client"
+import type {
+  WorldBuildingDocument,
+  WorldBuildingDocumentDetail,
+  WorldGapResult,
+  WorldIntegrationResult,
+  WorldNote,
+} from "@/types/world-building"
+
+export const worldBuildingApi = {
+  listDocuments: (bookId: string, includeInactive = false) =>
+    apiClient.get<WorldBuildingDocument[]>(`/intelligence/${bookId}/world-building/documents`, {
+      params: includeInactive ? { include_inactive: true } : undefined,
+    }).then(r => r.data),
+  uploadDocuments: (
+    bookId: string,
+    payload: {
+      title?: string
+      text?: string
+      html?: string
+      replaceExisting?: boolean
+      files?: File[]
+    }
+  ) => {
+    const form = new FormData()
+    if (payload.title) form.append("title", payload.title)
+    if (payload.text) form.append("text", payload.text)
+    if (payload.html) form.append("html", payload.html)
+    if (payload.replaceExisting) form.append("replace_existing", "true")
+    payload.files?.forEach((file) => form.append("files", file))
+    return apiClient.post<WorldBuildingDocument[]>(`/intelligence/${bookId}/world-building/documents`, form, {
+      headers: { "Content-Type": "multipart/form-data" },
+    }).then(r => r.data)
+  },
+  getDocument: (bookId: string, documentId: string) =>
+    apiClient.get<WorldBuildingDocumentDetail>(`/intelligence/${bookId}/world-building/documents/${documentId}`).then(r => r.data),
+  updateDocument: (
+    bookId: string,
+    documentId: string,
+    payload: { title?: string | null; text: string; html?: string | null }
+  ) =>
+    apiClient.patch<WorldBuildingDocumentDetail>(`/intelligence/${bookId}/world-building/documents/${documentId}`, payload).then(r => r.data),
+  deleteDocument: (bookId: string, documentId: string) =>
+    apiClient.delete(`/intelligence/${bookId}/world-building/documents/${documentId}`).then(() => undefined),
+  analyze: (bookId: string, payload: { mode?: string | null; query?: string | null; auto_create_notes?: boolean }) =>
+    apiClient.post<WorldGapResult | WorldIntegrationResult>(`/intelligence/${bookId}/world-building/analyze`, payload).then(r => r.data),
+  getGaps: (bookId: string) =>
+    apiClient.get<WorldGapResult>(`/intelligence/${bookId}/world-building/gaps`).then(r => r.data),
+  getIntegration: (bookId: string) =>
+    apiClient.get<WorldIntegrationResult>(`/intelligence/${bookId}/world-building/integration`).then(r => r.data),
+  query: (bookId: string, payload: { query: string; mode?: string | null }) =>
+    apiClient.post(`/intelligence/${bookId}/world-building/query`, payload).then(r => r.data),
+  getSeriesAnalysis: (seriesId: string) =>
+    apiClient.get(`/intelligence/series/${seriesId}/world-building/series-analysis`).then(r => r.data),
+  listNotes: (bookId: string) =>
+    apiClient.get<WorldNote[]>(`/intelligence/${bookId}/world-building/notes`).then(r => r.data),
+  createNote: (
+    bookId: string,
+    payload: {
+      world_element_id?: string | null
+      world_document_id?: string | null
+      note_type?: string
+      chapter_number?: number | null
+      title?: string | null
+      body: string
+      priority?: string
+      status?: string
+      linked_gap_id?: string | null
+      linked_integration_id?: string | null
+      context_label?: string | null
+      suggested_fix?: string | null
+    }
+  ) => apiClient.post<WorldNote>(`/intelligence/${bookId}/world-building/notes`, payload).then(r => r.data),
+  updateNoteStatus: (bookId: string, noteId: string, status: string) =>
+    apiClient.patch<WorldNote>(`/intelligence/${bookId}/world-building/notes/${noteId}/status`, { status }).then(r => r.data),
+  deleteNote: (bookId: string, noteId: string) =>
+    apiClient.delete(`/intelligence/${bookId}/world-building/notes/${noteId}`).then(r => r.data),
+}

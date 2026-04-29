@@ -16,7 +16,7 @@ from app.core.database import get_db
 from app.core.redis import cache_get, cache_set, key_grounded_answer
 from app.engine.intelligence.character_chat import chat_as_character
 from app.engine.search.semantic import semantic_search
-from app.models.book import Book, SeriesBook
+from app.models.book import Book, Series, SeriesBook
 from app.models.character import Character
 from app.models.intelligence import WikiEntry
 from app.schemas.intelligence import ChatRequest, GroundedAnswerOut, QARequest
@@ -163,7 +163,10 @@ async def cross_book_intelligence(
         raise HTTPException(404)
 
     comparison_books = [book]
+    series_name = None
     if book.primary_series_id:
+        series = await db.get(Series, book.primary_series_id)
+        series_name = series.name if series else None
         series_book_rows = (
             await db.execute(
                 select(Book)
@@ -230,7 +233,7 @@ async def cross_book_intelligence(
     character_matches.sort(key=lambda item: item["similarity"], reverse=True)
     wiki_matches.sort(key=lambda item: item["similarity"], reverse=True)
     return {
-        "series_name": book.series_name,
+        "series_name": series_name,
         "comparison_book_ids": [str(item.id) for item in comparison_books],
         "character_matches": character_matches[:20],
         "wiki_matches": wiki_matches[:20],

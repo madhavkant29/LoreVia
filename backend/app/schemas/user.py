@@ -18,7 +18,8 @@ class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    email: str
+    email: EmailStr
+    username: str | None = None
     tier: str
     reading_mode: str
     created_at: datetime

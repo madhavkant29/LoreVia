@@ -1,7 +1,7 @@
 import logging
 import uuid
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,19 +9,25 @@ from app.core.database import get_db
 from app.core.redis import get_token_version
 from app.core.security import decode_token
 from app.models.user import User
+from app.utils.auth_cookies import get_auth_token
 
-bearer = HTTPBearer()
+bearer = HTTPBearer(auto_error=False)
 log = logging.getLogger("lorevia.auth")
 
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(bearer),
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer),
     db: AsyncSession = Depends(get_db),
 ) -> User:
-    # Decode the JWT — only catch unexpected decode failures here.
+    token = get_auth_token(request, credentials.credentials if credentials else None)
+    if not token:
+        raise HTTPException(401, "Invalid or expired token")
+
+    # Decode the JWT â€” only catch unexpected decode failures here.
     # All intentional 401s are raised directly so they are never swallowed.
     try:
-        payload = decode_token(credentials.credentials)
+        payload = decode_token(token)
     except Exception:
         raise HTTPException(401, "Invalid or expired token")
 
@@ -41,7 +47,7 @@ async def get_current_user(
         raise HTTPException(503, "Authentication service temporarily unavailable")
 
     if int(claimed_version) != current_version:
-        # Do NOT bump the version here — bumping on every mismatch causes the
+        # Do NOT bump the version here â€” bumping on every mismatch causes the
         # stored version to drift away from valid tokens (e.g., after a Redis
         # restart) and permanently locks users out on each retry.
         # Version is bumped only on explicit logout / password change.

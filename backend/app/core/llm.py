@@ -18,11 +18,12 @@ async def complete_with_fallback(
     temperature: float = 0.2,
     max_tokens: int = 1200,
     response_format: dict[str, Any] | None = None,
+    openai_client: AsyncOpenAI | None = None,
 ) -> str:
     openai_error: Exception | None = None
 
     if settings.OPENAI_API_KEY:
-        client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+        client = openai_client or AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
         try:
             request_kwargs = cast(
                 dict[str, Any],
@@ -45,7 +46,8 @@ async def complete_with_fallback(
         except Exception as exc:  # pragma: no cover - network/provider path
             openai_error = exc
         finally:
-            await client.close()
+            if openai_client is None:
+                await client.close()
 
     if settings.GEMINI_API_KEY and gemini_model:
         try:

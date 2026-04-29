@@ -6,6 +6,7 @@ Create Date: 2026-04-25 00:00:00.000000
 """
 
 from collections.abc import Sequence
+import os
 
 from alembic import op
 
@@ -27,5 +28,10 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    if os.getenv("ALLOW_DESTRUCTIVE_DOWNGRADE") != "1":
+        raise RuntimeError(
+            "Refusing to drop the full schema without ALLOW_DESTRUCTIVE_DOWNGRADE=1"
+        )
+
     bind = op.get_bind()
     Base.metadata.drop_all(bind=bind)

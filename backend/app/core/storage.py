@@ -42,7 +42,18 @@ def upload_book(file: BinaryIO, user_id: str, filename: str) -> str:
     key = f"books/{user_id}/{uuid.uuid4()}/{safe_name}"
     if is_local_storage():
         path = _local_path(key)
-        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+        except PermissionError:
+            # Fallback: create directories with 777 permissions if initial mkdir fails
+            import os
+            parent = path.parent
+            while parent != _local_storage_root() and not parent.exists():
+                try:
+                    parent.mkdir(parents=True, exist_ok=True, mode=0o777)
+                except PermissionError:
+                    parent = parent.parent
+            path.parent.mkdir(parents=True, exist_ok=True, mode=0o777)
         path.write_bytes(file.read())
     else:
         s3 = _get_s3_client()
@@ -55,7 +66,17 @@ def upload_book_bytes(raw: bytes, user_id: str, filename: str) -> str:
     key = f"books/{user_id}/{uuid.uuid4()}/{safe_name}"
     if is_local_storage():
         path = _local_path(key)
-        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+        except PermissionError:
+            import os
+            parent = path.parent
+            while parent != _local_storage_root() and not parent.exists():
+                try:
+                    parent.mkdir(parents=True, exist_ok=True, mode=0o777)
+                except PermissionError:
+                    parent = parent.parent
+            path.parent.mkdir(parents=True, exist_ok=True, mode=0o777)
         path.write_bytes(raw)
     else:
         s3 = _get_s3_client()
@@ -70,7 +91,17 @@ def upload_book_bytes(raw: bytes, user_id: str, filename: str) -> str:
 def upload_binary(key: str, raw: bytes, content_type: str | None = None) -> str:
     if is_local_storage():
         path = _local_path(key)
-        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+        except PermissionError:
+            import os
+            parent = path.parent
+            while parent != _local_storage_root() and not parent.exists():
+                try:
+                    parent.mkdir(parents=True, exist_ok=True, mode=0o777)
+                except PermissionError:
+                    parent = parent.parent
+            path.parent.mkdir(parents=True, exist_ok=True, mode=0o777)
         path.write_bytes(raw)
     else:
         s3 = _get_s3_client()
@@ -84,7 +115,17 @@ def upload_binary(key: str, raw: bytes, content_type: str | None = None) -> str:
 def upload_text(key: str, content: str) -> str:
     if is_local_storage():
         path = _local_path(key)
-        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+        except PermissionError:
+            import os
+            parent = path.parent
+            while parent != _local_storage_root() and not parent.exists():
+                try:
+                    parent.mkdir(parents=True, exist_ok=True, mode=0o777)
+                except PermissionError:
+                    parent = parent.parent
+            path.parent.mkdir(parents=True, exist_ok=True, mode=0o777)
         path.write_text(content, encoding="utf-8")
     else:
         s3 = _get_s3_client()

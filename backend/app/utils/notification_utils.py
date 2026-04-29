@@ -74,3 +74,40 @@ def build_continuity_risk_notifications(
             )
         )
     return notifications
+
+
+def build_upload_processing_notification(
+    book: Book,
+    mode: str,
+    file_size_bytes: int,
+) -> Notification:
+    """Build a notification to inform users about upload processing time."""
+    # Estimate processing time based on file size
+    size_mb = file_size_bytes / (1024 * 1024)
+    if size_mb < 5:
+        estimated_minutes = 5
+    elif size_mb < 20:
+        estimated_minutes = 7
+    else:
+        estimated_minutes = "10-15"
+
+    if mode == "author":
+        title = "Your novel is being processed"
+        body = f"This will take approximately {estimated_minutes} minute{'s' if isinstance(estimated_minutes, int) and estimated_minutes != 1 else ''}. Sit back and relax!"
+    else:
+        title = "Your book is being processed"
+        body = f"This will take approximately {estimated_minutes} minute{'s' if isinstance(estimated_minutes, int) and estimated_minutes != 1 else ''}. Sit back and relax!"
+
+    return Notification(
+        user_id=book.user_id,
+        book_id=book.id,
+        kind="upload_processing",
+        title=title,
+        body=body,
+        data={
+            "book_title": book.title,
+            "mode": mode,
+            "estimated_minutes": estimated_minutes,
+            "file_size_mb": round(size_mb, 2),
+        },
+    )

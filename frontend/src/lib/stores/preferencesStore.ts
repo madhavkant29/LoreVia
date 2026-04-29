@@ -9,12 +9,16 @@ interface PreferencesStore {
   theme: AppTheme
   setTheme: (theme: AppTheme) => void
   toggleTheme: () => void
+  timelineCollapsedSections: Record<string, boolean>
+  setTimelineCollapsedSection: (sectionId: string, collapsed: boolean) => void
+  setTimelineAllCollapsed: (collapsed: boolean) => void
 }
 
 export const usePreferencesStore = create<PreferencesStore>()(
   persist(
     (set, get) => ({
-      theme: "light",
+      theme: "dark",
+      timelineCollapsedSections: { characters: true, plotThreads: true, relationships: true },
       setTheme: (theme) => {
         if (typeof window !== "undefined") {
           window.localStorage.setItem("app-theme", theme)
@@ -41,6 +45,16 @@ export const usePreferencesStore = create<PreferencesStore>()(
           }
         }
         set({ theme: next })
+      },
+      setTimelineCollapsedSection: (sectionId, collapsed) => {
+        set((state) => ({
+          timelineCollapsedSections: { ...state.timelineCollapsedSections, [sectionId]: collapsed },
+        }))
+      },
+      setTimelineAllCollapsed: (collapsed) => {
+        set({
+          timelineCollapsedSections: { characters: collapsed, plotThreads: collapsed, relationships: collapsed },
+        })
       },
     }),
     {

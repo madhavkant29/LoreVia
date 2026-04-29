@@ -71,18 +71,26 @@ from app.engine.character.consolidator import consolidate_characters
 from app.engine.character.profile_builder import build_description
 from app.models.book import Book, Chapter, Series, SeriesBook
 from app.models.character import Character
-from app.models.intelligence import CharacterRelationship, PlotThread, QuoteEntry
+from app.models.intelligence import ChapterSummary, CharacterRelationship, PlotThread, QuoteEntry
 from app.models.progress import ReadingProgress
 from app.schemas.books import (
     BookModeBody,
+    BookEventsOut,
     BookNoteBody,
     BookNoteOut,
     BookOut,
+    CharacterEventOut,
     ChapterConsistencyReport,
     ChapterVersionOut,
+    CharacterMergeBody,
     CharacterShareOut,
     CharacterUpdateBody,
     ManuscriptImportResult,
+    MajorEventOut,
+    ObsidianPreviewOut,
+    ObsidianVaultNoteBody,
+    ObsidianVaultNoteOut,
+    ObsidianVaultNoteSaveOut,
     PreWritingCheckOut,
     PrivateUserStats,
     PublicUserStats,
@@ -111,11 +119,15 @@ from app.utils.book_utils import (
     list_chapter_consistency_reports,
     list_chapter_versions,
     list_user_notes,
+    list_obsidian_vault_notes,
+    load_obsidian_vault_overrides,
     next_chapter_number,
     normalize_imported_chapters,
     parse_import_upload,
+    process_and_store_book_cover,
     resolve_owned_series_ids,
     save_book_note,
+    save_obsidian_vault_note,
     snapshot_chapter_version,
 )
 
@@ -128,12 +140,16 @@ from app.utils.character_utils import (
     clean_string_list,
     dedupe_preserve_order,
     is_displayable_character,
+    merge_characters,
     merge_description_with_relationships,
     relationship_summary_for_character,
 )
 from app.utils.export_utils import (
     character_bible_docx,
     character_bible_markdown,
+    build_character_bible_obsidian_context,
+    character_bible_obsidian_folder,
+    character_bible_obsidian_preview,
     character_bible_pdf,
     character_card_docx,
     character_card_markdown,
@@ -144,12 +160,50 @@ from app.utils.export_utils import (
 from app.utils.notification_utils import (
     build_chapter_report_notification,
     build_continuity_risk_notifications,
+    build_upload_processing_notification,
 )
 from app.workers.consumers.analysis_consumer import analyse_chapter
 from app.workers.consumers.extraction_consumer import _process_chapter
 from app.workers.tasks.extraction_tasks import process_book_task
 
 router = APIRouter()
+
+
+def _normalize_book_major_event(
+    *,
+    chapter_number: int,
+    chapter_title: str | None,
+    event: dict,
+    character_names_by_id: dict[str, str],
+) -> dict:
+    involved_ids = [str(item).strip() for item in (event.get("involved_characters") or []) if str(item).strip()]
+    involved_names = [character_names_by_id.get(item, item) for item in involved_ids]
+    return {
+        "chapter_number": chapter_number,
+        "chapter_title": chapter_title,
+        "event_title": str(event.get("event_title") or event.get("event") or "").strip(),
+        "description": str(event.get("description") or event.get("impact") or "").strip(),
+        "importance": int(event.get("importance") or 5),
+        "involved_characters": involved_ids or None,
+        "involved_character_names": involved_names or None,
+        "event_type": event.get("event_type"),
+    }
+
+
+def _normalize_book_character_event(*, character: Character, event: dict) -> dict:
+    return {
+        "character_id": str(character.id),
+        "character_name": character.name,
+        "chapter_number": int(event.get("chapter_number") or character.first_chapter),
+        "event_title": str(event.get("event_title") or event.get("event") or "").strip(),
+        "description": str(event.get("description") or event.get("impact") or "").strip(),
+        "impact_score": int(event.get("impact_score") or event.get("importance") or 5),
+        "role": event.get("role") or character.role,
+        "accomplishments": [str(item).strip() for item in (event.get("accomplishments") or []) if str(item).strip()],
+        "growth_direction": str(event.get("growth_direction") or "neutral"),
+        "growth_magnitude": int(event.get("growth_magnitude") or event.get("impact_score") or 0),
+        "is_major": bool(event.get("is_major", False)),
+    }
 
 
 # ─── Upload ───────────────────────────────────────────────────────────────────
@@ -204,6 +258,7 @@ async def upload_book_endpoint(
         raise HTTPException(400, "Uploaded file is empty")
     s3_key = upload_book_bytes(raw, str(current_user.id), file.filename)
     cover_s3_key = None
+    cover_raw = None
     if not as_bool(auto_extract_cover) and cover_file is not None and cover_file.filename:
         cover_raw = await _read_upload_bounded(cover_file, MAX_COVER_UPLOAD_BYTES, "Cover image")
         if cover_raw:
@@ -230,6 +285,8 @@ async def upload_book_endpoint(
     )
     db.add(book)
     await db.flush()
+    if cover_s3_key and cover_raw:
+        await process_and_store_book_cover(db, book, cover_raw)
     for index, series in enumerate(selected_series):
         membership = SeriesBook(series_id=series.id, book_id=book.id)
         db.add(membership)
@@ -240,6 +297,11 @@ async def upload_book_endpoint(
 
     await db.commit()
     await db.refresh(book)
+
+    # Send processing notification
+    notification = build_upload_processing_notification(book, mode, len(raw))
+    db.add(notification)
+    await db.commit()
 
     process_book_task.apply_async(args=[str(book.id)], queue="extraction")
     return {"book_id": str(book.id), "status": "processing",
@@ -263,6 +325,74 @@ async def update_book_mode(
     await db.commit()
     await db.refresh(book)
     return await book_out(db, book, current_user.id)
+
+
+@router.get("/{book_id}/events", response_model=BookEventsOut)
+async def get_book_events(
+    book_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    chapter_rows = (
+        await db.execute(
+            select(Chapter.number, Chapter.title, ChapterSummary.key_events)
+            .join(ChapterSummary, ChapterSummary.chapter_id == Chapter.id)
+            .where(Chapter.book_id == book.id, ChapterSummary.mode == "detailed")
+            .order_by(Chapter.number)
+        )
+    ).all()
+    characters = (
+        await db.execute(select(Character).where(Character.book_id == book.id).order_by(Character.name))
+    ).scalars().all()
+    character_names_by_id = {str(character.id): character.name for character in characters}
+
+    major_events: list[dict] = []
+    for chapter_number, chapter_title, key_events in chapter_rows:
+        for event in key_events or []:
+            if isinstance(event, dict):
+                major_events.append(
+                    _normalize_book_major_event(
+                        chapter_number=chapter_number,
+                        chapter_title=chapter_title,
+                        event=event,
+                        character_names_by_id=character_names_by_id,
+                    )
+                )
+
+    character_events: list[dict] = []
+    for character in characters:
+        for event in character.growth_events or []:
+            if isinstance(event, dict):
+                character_events.append(_normalize_book_character_event(character=character, event=event))
+
+    major_events.sort(key=lambda item: (item["chapter_number"], item["event_title"].lower()))
+    character_events.sort(key=lambda item: (item["chapter_number"], item["character_name"].lower(), item["event_title"].lower()))
+    return BookEventsOut(
+        major_events=[MajorEventOut(**item) for item in major_events],
+        character_events=[CharacterEventOut(**item) for item in character_events],
+    )
+
+
+@router.get("/{book_id}/events/reader", response_model=BookEventsOut)
+async def get_reader_safe_book_events(
+    book_id: uuid.UUID,
+    chapter: int | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    progress = (
+        await db.execute(
+            select(ReadingProgress).where(ReadingProgress.user_id == current_user.id, ReadingProgress.book_id == book.id)
+        )
+    ).scalar()
+    max_visible_chapter = chapter or (progress.current_chapter if progress else 1)
+    payload = await get_book_events(book_id=book_id, db=db, current_user=current_user)
+    return BookEventsOut(
+        major_events=[event for event in payload.major_events if event.chapter_number <= max_visible_chapter],
+        character_events=[event for event in payload.character_events if event.chapter_number <= max_visible_chapter],
+    )
 
 
 @router.post("/{book_id}/manuscript/import", response_model=ManuscriptImportResult)
@@ -291,6 +421,9 @@ async def import_manuscript_content(
     split_flag = as_bool(split_into_chapters)
 
     cleaned_html = clean_manuscript_html(html) if html else None
+    
+    # Track total file size for notification
+    total_file_size = 0
 
     if text and text.strip():
         import_jobs.extend(
@@ -315,6 +448,7 @@ async def import_manuscript_content(
         raw = await _read_upload_bounded(upload, MAX_MANUSCRIPT_BYTES, "Manuscript file")
         if not raw:
             continue
+        total_file_size += len(raw)
         parsed = await parse_import_upload(upload.filename, raw, split_flag)
         base_number = chapter_number if replace_flag and chapter_number else next_number
         import_jobs.extend(
@@ -365,6 +499,39 @@ async def import_manuscript_content(
     book.source_kind = "chapter_wise" if len(import_jobs) == 1 and not files else "batch_upload"
     await db.commit()
     await db.refresh(book)
+
+    # Send processing notification for manuscript import
+    if total_file_size > 0:
+        notification = build_upload_processing_notification(book, "author", total_file_size)
+        db.add(notification)
+        await db.commit()
+
+    # For author mode, mark all chapters as read
+    if book.mode == "author" and total_chapters > 0:
+        progress = (
+            await db.execute(
+                select(ReadingProgress).where(
+                    ReadingProgress.user_id == current_user.id,
+                    ReadingProgress.book_id == book.id
+                )
+            )
+        ).scalar()
+        
+        chapters_read = list(range(1, total_chapters + 1))
+        if progress is None:
+            progress = ReadingProgress(
+                user_id=current_user.id,
+                book_id=book.id,
+                current_chapter=total_chapters,
+                scroll_pct=1.0,
+                chapters_read=chapters_read,
+            )
+            db.add(progress)
+        else:
+            progress.current_chapter = total_chapters
+            progress.scroll_pct = 1.0
+            progress.chapters_read = chapters_read
+        await db.commit()
 
     chapter_reports: list[ChapterConsistencyReport] = []
     for number in imported_numbers:
@@ -857,6 +1024,51 @@ async def get_book_cover_public(book_id: uuid.UUID, token: str = Query(...), db:
     return Response(content=raw, media_type=media_type)
 
 
+@router.get("/{book_id}/cover/processed")
+async def get_book_cover_processed_public(book_id: uuid.UUID, token: str = Query(...), db: AsyncSession = Depends(get_db)):
+    book = await db.get(Book, book_id)
+    if not book:
+        raise HTTPException(404, "Book not found")
+
+    payload = decode_token(token)
+    if (
+        not payload
+        or payload.get("type") != "asset"
+        or payload.get("sub") != str(book.user_id)
+        or payload.get("res") != f"book-cover-processed:{book.id}"
+    ):
+        raise HTTPException(401, "Invalid cover token")
+
+    await ensure_book_cover(db, book)
+    target_key = book.cover_processed_url or book.cover_s3_key
+    if not target_key:
+        raise HTTPException(404, "Cover not found")
+
+    import mimetypes
+
+    try:
+        raw = await asyncio.to_thread(download_book, target_key)
+    except Exception:
+        if target_key != book.cover_s3_key and book.cover_s3_key:
+            raw = await asyncio.to_thread(download_book, book.cover_s3_key)
+            target_key = book.cover_s3_key
+        else:
+            raise HTTPException(404, "Cover not found")
+    media_type = mimetypes.guess_type(target_key)[0] or "image/png"
+    return Response(content=raw, media_type=media_type)
+
+
+@router.post("/{book_id}/process-cover", response_model=BookOut)
+async def process_book_cover_endpoint(
+    book_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    await ensure_book_cover(db, book, force=True)
+    return await book_out(db, book, current_user.id)
+
+
 @router.put("/{book_id}/archive", response_model=BookOut)
 async def archive_book(
     book_id: uuid.UUID,
@@ -950,6 +1162,27 @@ async def get_book_characters(book_id: uuid.UUID, db: AsyncSession = Depends(get
         }
         for char in characters
     ]
+
+
+@router.post("/{book_id}/characters/merge")
+async def merge_book_characters(
+    book_id: uuid.UUID,
+    body: CharacterMergeBody,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    primary = await db.get(Character, body.primary_id)
+    secondary = await db.get(Character, body.secondary_id)
+    if not primary or not secondary or primary.book_id != book.id or secondary.book_id != book.id:
+        raise HTTPException(404, "Character not found")
+    if primary.id == secondary.id:
+        return {"merged": str(primary.id)}
+
+    merged = await merge_characters(db, primary.id, secondary.id, book.id)
+    await db.commit()
+    await db.refresh(merged)
+    return {"merged": str(merged.id)}
 
 
 @router.put("/{book_id}/characters/{character_id}")
@@ -1110,10 +1343,62 @@ async def export_character_card(
 @router.get("/{book_id}/export/character-bible")
 async def export_character_bible(
     book_id: uuid.UUID,
-    format: str = Query("md", pattern="^(md|pdf|docx)$"),
+    format: str = Query("md", pattern="^(md|pdf|docx|obsidian_folder)$"),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    context = await build_character_bible_obsidian_context(db, book_id)
+    book = context.get("book")
+    if not book or book.user_id != current_user.id:
+        raise HTTPException(404)
+
+    characters = [char for char in context["characters"] if is_displayable_character(char)]
+    relationships = context["relationships"]
+    plot_threads = context["plot_threads"]
+    wiki_entries = context["wiki_entries"]
+    chapter_rows = context["chapter_rows"]
+    chapter_events = context["chapter_events"]
+    rel_summaries = context["rel_summaries"]
+    thread_summaries = context["thread_summaries"]
+
+    title = f"{book.title} - Character Bible" if book.title else "LoreVia - Character Bible"
+
+    if format == "obsidian_folder":
+        overrides = await load_obsidian_vault_overrides(db, book, current_user.id)
+        zip_data, filename_base = character_bible_obsidian_folder(
+            book=book,
+            characters=characters,
+            relationships=relationships,
+            plot_threads=plot_threads,
+            wiki_entries=wiki_entries,
+            chapter_rows=chapter_rows,
+            chapter_events=chapter_events,
+            rel_summaries=rel_summaries,
+            thread_summaries=thread_summaries,
+            overrides=overrides,
+        )
+        return Response(content=zip_data, media_type="application/zip",
+                        headers={"Content-Disposition": f'attachment; filename="{filename_base}-character-bible.zip"'})
+
+    markdown, filename_base = character_bible_markdown(
+        book=book,
+        characters=characters,
+        rel_summaries=rel_summaries,
+        thread_summaries=thread_summaries,
+    )
+
+    if format == "md":
+        return Response(content=markdown, media_type="text/markdown; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="{filename_base}-character-bible.md"'})
+    if format == "pdf":
+        raw = character_bible_pdf(markdown=markdown, title=title)
+        return Response(content=raw, media_type="application/pdf",
+                        headers={"Content-Disposition": f'attachment; filename="{filename_base}-character-bible.pdf"'})
+    raw = character_bible_docx(markdown=markdown, title=title)
+    return Response(content=raw,
+                    media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    headers={"Content-Disposition": f'attachment; filename="{filename_base}-character-bible.docx"'})
+
     book = await db.get(Book, book_id)
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
@@ -1156,13 +1441,24 @@ async def export_character_bible(
                 + (f" — note: {thread.note}" if thread.note else "")
             )
 
+    title = f"{book.title} — Character Bible" if book.title else "LoreVia — Character Bible"
+
+    if format == "obsidian_folder":
+        zip_data, filename_base = character_bible_obsidian_folder(
+            book=book,
+            characters=characters,
+            rel_summaries=rel_summaries,
+            thread_summaries=thread_summaries,
+        )
+        return Response(content=zip_data, media_type="application/zip",
+                        headers={"Content-Disposition": f'attachment; filename="{filename_base}-character-bible.zip"'})
+
     markdown, filename_base = character_bible_markdown(
         book=book,
         characters=characters,
         rel_summaries=rel_summaries,
         thread_summaries=thread_summaries,
     )
-    title = f"{book.title} — Character Bible" if book.title else "LoreVia — Character Bible"
 
     if format == "md":
         return Response(content=markdown, media_type="text/markdown; charset=utf-8",
@@ -1175,6 +1471,60 @@ async def export_character_bible(
     return Response(content=raw,
                     media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     headers={"Content-Disposition": f'attachment; filename="{filename_base}-character-bible.docx"'})
+
+
+@router.get("/{book_id}/export/character-bible/preview", response_model=ObsidianPreviewOut)
+async def preview_character_bible_obsidian(
+    book_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    context = await build_character_bible_obsidian_context(db, book_id)
+    book = context.get("book")
+    if not book or book.user_id != current_user.id:
+        raise HTTPException(404)
+
+    characters = [char for char in context["characters"] if is_displayable_character(char)]
+    overrides = await load_obsidian_vault_overrides(db, book, current_user.id)
+    return character_bible_obsidian_preview(
+        book=book,
+        characters=characters,
+        relationships=context["relationships"],
+        plot_threads=context["plot_threads"],
+        wiki_entries=context["wiki_entries"],
+        chapter_rows=context["chapter_rows"],
+        chapter_events=context["chapter_events"],
+        rel_summaries=context["rel_summaries"],
+        thread_summaries=context["thread_summaries"],
+        overrides=overrides,
+    )
+
+
+@router.get("/{book_id}/export/character-bible/notes", response_model=list[ObsidianVaultNoteOut])
+async def list_character_bible_obsidian_notes(
+    book_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    return await list_obsidian_vault_notes(db, book, current_user.id)
+
+
+@router.put("/{book_id}/export/character-bible/notes", response_model=ObsidianVaultNoteSaveOut)
+async def save_character_bible_obsidian_note(
+    book_id: uuid.UUID,
+    body: ObsidianVaultNoteBody,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    return await save_obsidian_vault_note(
+        db,
+        book=book,
+        user_id=current_user.id,
+        path=body.path,
+        content=body.content,
+    )
 
 
 async def get_book_character_card_public(

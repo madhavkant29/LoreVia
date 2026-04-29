@@ -2,6 +2,7 @@ import asyncio
 
 from app.workers.celery_app import celery_app
 from app.workers.consumers.extraction_consumer import _process_chapter, process_book
+from app.utils.ingestion_utils import extract_queue_wait_ms
 
 
 def _run_coro(coro):
@@ -21,14 +22,15 @@ def _run_coro(coro):
                  queue="extraction", max_retries=3)
 def process_book_task(self, book_id: str):
     try:
-        return _run_coro(process_book(book_id))
+        queue_wait_ms = extract_queue_wait_ms(getattr(self.request, "headers", None))
+        return _run_coro(process_book(book_id, queue_wait_ms=queue_wait_ms))
     except Exception as exc:
         raise self.retry(exc=exc)
 
 
 @celery_app.task(bind=True, name="extraction_tasks.process_chapter",
                  queue="extraction", max_retries=3)
-def process_chapter_task(self, book_id: str, chapter_num: int, title: str, text: str):
+def process_chapter_task(self, book_id: str, chapter_num: int):
     async def _run():
         import uuid
 
@@ -40,26 +42,31 @@ def process_chapter_task(self, book_id: str, chapter_num: int, title: str, text:
         from app.parsers.epub_parser import parse_epub
         from app.parsers.pdf_parser import parse_pdf
         from app.utils.book_utils import deserialize_manuscript_content
+        queue_wait_ms = extract_queue_wait_ms(getattr(self.request, "headers", None))
         async with AsyncSessionLocal() as db:
             book = await db.get(Book, uuid.UUID(book_id))
             if not book:
                 return
 
-            chapter_title = title
-            chapter_text = text
+            chapter_row = (
+                await db.execute(
+                    select(Chapter).where(Chapter.book_id == book.id, Chapter.number == chapter_num)
+                )
+            ).scalar()
+            chapter_title = chapter_row.title if chapter_row is not None else ""
+            chapter_text = ""
 
-            if not chapter_text.strip():
-                chapter_row = (
-                    await db.execute(
-                        select(Chapter).where(Chapter.book_id == book.id, Chapter.number == chapter_num)
+            if chapter_row and chapter_row.s3_key:
+                try:
+                    chapter_text = str(
+                        deserialize_manuscript_content(
+                            await asyncio.to_thread(download_book, chapter_row.s3_key)
+                        ).get("text")
+                        or ""
                     )
-                ).scalar()
-                if chapter_row and chapter_row.s3_key:
-                    try:
-                        chapter_text = str(deserialize_manuscript_content(await asyncio.to_thread(download_book, chapter_row.s3_key)).get("text") or "")
-                        chapter_title = chapter_row.title or title
-                    except Exception:
-                        chapter_text = ""
+                    chapter_title = chapter_row.title or ""
+                except Exception:
+                    chapter_text = ""
 
             if not chapter_text.strip():
                 raw = await asyncio.to_thread(download_book, book.s3_key)
@@ -67,7 +74,7 @@ def process_chapter_task(self, book_id: str, chapter_num: int, title: str, text:
                 chapter_data = next((ch for ch in chapters if ch["number"] == chapter_num), None)
                 if not chapter_data:
                     return
-                chapter_title = chapter_data.get("title") or title
+                chapter_title = chapter_data.get("title") or chapter_title
                 chapter_text = chapter_data.get("text") or ""
 
             if chapter_text.strip():
@@ -75,6 +82,7 @@ def process_chapter_task(self, book_id: str, chapter_num: int, title: str, text:
                     db,
                     book,
                     {"number": chapter_num, "title": chapter_title, "text": chapter_text},
+                    queue_wait_ms=queue_wait_ms,
                 )
     try:
         _run_coro(_run())

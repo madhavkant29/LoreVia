@@ -34,9 +34,9 @@ class ChunkingConfig:
     - overlap_ratio: derived overlap proportion of target_tokens when overlap_tokens is None
     """
 
-    target_tokens: int = 900
-    max_tokens: int = 1200
-    min_tokens: int = 260
+    target_tokens: int = 4000
+    max_tokens: int = 7000
+    min_tokens: int = 1000
     overlap_tokens: int | None = None
     overlap_ratio: float = 0.07
 

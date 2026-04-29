@@ -6,10 +6,7 @@ import json
 from openai import AsyncOpenAI
 
 from app.core.config import settings
-
-
-def get_client() -> AsyncOpenAI:
-    return AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+from app.core.llm import complete_with_fallback
 
 PLOT_SYSTEM = """Analyse this chapter for meaningful plot threads. Return JSON only:
 {
@@ -33,21 +30,24 @@ Rules:
 - Return [] if nothing significant."""
 
 
-async def extract_plot_threads(chapter_text: str, chapter_num: int) -> list[dict]:
-    client = get_client()
+async def extract_plot_threads(
+    chapter_text: str,
+    chapter_num: int,
+    *,
+    openai_client: AsyncOpenAI | None = None,
+) -> list[dict]:
     try:
-        r = await client.chat.completions.create(
-            model=settings.OPENAI_EXTRACT_MODEL,
-            messages=[
-                {"role": "system", "content": PLOT_SYSTEM},
-                {"role": "user", "content": chapter_text[:5000]},
-            ],
+        content = await complete_with_fallback(
+            system=PLOT_SYSTEM,
+            user=chapter_text[:5000],
+            openai_model=settings.OPENAI_EXTRACT_MODEL,
+            gemini_model=settings.GEMINI_EXTRACT_MODEL,
             temperature=0.1,
             max_tokens=1000,
             response_format={"type": "json_object"},
+            openai_client=openai_client,
         )
         try:
-            content = r.choices[0].message.content or ""
             data = json.loads(_strip_json_fence(content))
             threads = data.get("threads", [])
             for t in threads:
@@ -55,8 +55,8 @@ async def extract_plot_threads(chapter_text: str, chapter_num: int) -> list[dict
             return threads
         except Exception:
             return []
-    finally:
-        await client.close()
+    except Exception:
+        return []
 
 
 def _strip_json_fence(content: str) -> str:

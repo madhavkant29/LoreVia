@@ -10,6 +10,10 @@ export interface Book {
   mode: "reader" | "author"
   source_kind?: string
   cover_url?: string | null
+  cover_processed_url?: string | null
+  cover_edge_colors?: Record<string, string> | null
+  cover_processed_at?: string | null
+  cover_crop_bounds?: { x: number; y: number; width: number; height: number } | null
   total_chapters: number | null
   total_tokens?: number | null
   is_truncated?: boolean
@@ -51,6 +55,7 @@ export interface PublicBook {
   format: "pdf" | "epub" | "manual"
   status: BookStatus
   cover_url?: string | null
+  cover_processed_url?: string | null
   total_chapters: number | null
   copyright_warning?: boolean
   created_at?: string
@@ -94,6 +99,33 @@ export interface BookNote {
   body: string
   created_at: string
   updated_at: string
+}
+
+export interface ObsidianPreviewFile {
+  path: string
+  content: string
+}
+
+export interface ObsidianPreview {
+  root_folder: string
+  files: ObsidianPreviewFile[]
+}
+
+export interface ObsidianVaultNote {
+  id: string
+  book_id: string
+  path: string
+  content: string
+  created_at: string
+  updated_at: string
+}
+
+export interface ObsidianVaultNoteSaveResult {
+  path: string
+  content: string
+  persisted: boolean
+  created_at: string | null
+  updated_at: string | null
 }
 
 export interface UserStats {
@@ -172,4 +204,34 @@ export interface ChapterVersion {
   word_count: number | null
   note: string | null
   created_at: string
+}
+
+export interface MajorEvent {
+  chapter_number: number
+  chapter_title: string | null
+  event_title: string
+  description: string
+  importance: number
+  involved_characters?: string[] | null
+  involved_character_names?: string[] | null
+  event_type?: string | null
+}
+
+export interface CharacterEvent {
+  character_id: string
+  character_name: string
+  chapter_number: number
+  event_title: string
+  description: string
+  impact_score: number
+  role?: string | null
+  accomplishments: string[]
+  growth_direction: string
+  growth_magnitude: number
+  is_major: boolean
+}
+
+export interface BookEvents {
+  major_events: MajorEvent[]
+  character_events: CharacterEvent[]
 }

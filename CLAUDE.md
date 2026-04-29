@@ -12,3 +12,12 @@ Key non-negotiables (repeated here for quick reference):
 - No commented-out code; preserve unrelated docstrings and comments
 - **Write tests for all new functions** in `backend/tests/unit/` for utility functions and `backend/tests/integration/` for API endpoints
 - **Consider edge cases** when writing tests: empty inputs, null values, boundary conditions, malformed data, and error scenarios
+
+**Migration Best Practices (see AGENTS.md for full details):**
+- Always check if tables, columns, and indexes exist before creating them to prevent duplication
+- Make migrations idempotent — safe to run multiple times without errors
+- Always write both `upgrade()` and `downgrade()` — migrations must be reversible
+- Use nullable=True for new columns on existing tables
+- Add server_default for new non-nullable columns to avoid blocking writes
+- Batch large data migrations with LIMIT/OFFSET to avoid long locks
+- Test migrations locally on a fresh database before pushing

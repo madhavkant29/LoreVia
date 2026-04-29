@@ -40,6 +40,7 @@ def mock_storage_uploads(monkeypatch):
     monkeypatch.setattr("app.core.storage.upload_book_bytes", lambda raw, owner, filename: f"uploads/{owner}/{filename}", raising=False)
     monkeypatch.setattr("app.core.storage.upload_binary", lambda key, raw, content_type=None: key, raising=False)
     monkeypatch.setattr("app.core.storage.upload_book", lambda *args, **kwargs: "books/mock.pdf", raising=False)
+    monkeypatch.setattr("app.core.storage.upload_text", lambda key, content: key, raising=False)
 
 
 @pytest.fixture(autouse=True)
@@ -125,6 +126,7 @@ async def setup_db(setup_engine):
     async with engine_test.begin() as conn:
         # Enable pgvector extension for vector columns
         await conn.execute(sa.text("CREATE EXTENSION IF NOT EXISTS vector"))
+        await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
     yield
     async with engine_test.begin() as conn:
@@ -162,7 +164,12 @@ async def client(db):
 @pytest_asyncio.fixture
 async def auth_headers(client):
     import uuid
-    r = await client.post("/api/v1/auth/register", json={"email": f"user-{uuid.uuid4()}@lorevia.app", "password": "SecurePass456!@#", "accepted_terms": True})
+    uid = str(uuid.uuid4())[:8]
+    email = f"user-{uid}@lorevia.app"
+    r = await client.post(
+        "/api/v1/auth/register",
+        json={"email": email, "username": f"user{uid}", "password": "SecurePass456!@#", "accepted_terms": True},
+    )
     if r.status_code != 201:
         raise Exception(f"Registration failed: {r.status_code} - {r.text}")
     return {"Authorization": f"Bearer {r.json()['access_token']}"}

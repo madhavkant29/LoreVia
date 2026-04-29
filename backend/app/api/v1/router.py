@@ -13,6 +13,7 @@ from app.api.v1.routes import (
     public,
     reader,
     webhooks,
+    world_building,
 )
 
 api_router = APIRouter()
@@ -31,6 +32,12 @@ api_router.add_api_route(
     methods=["GET"],
     dependencies=[Depends(rate_limit_public_asset)],
 )
+api_router.add_api_route(
+    "/reader/media/{media_id}",
+    reader.get_chapter_media_public,
+    methods=["GET"],
+    dependencies=[Depends(rate_limit_public_asset)],
+)
 
 api_router.include_router(books.router,         prefix="/books",         tags=["books"], dependencies=[Depends(rate_limit_api)])
 api_router.include_router(public.router,        prefix="/public",        tags=["public"], dependencies=[Depends(rate_limit_public)])
@@ -41,4 +48,5 @@ api_router.include_router(reader.router,        prefix="/reader",        tags=["
 api_router.include_router(notifications.router, prefix="/notifications", tags=["notifications"], dependencies=[Depends(rate_limit_api)])
 api_router.include_router(intelligence.router,  prefix="/intelligence",  tags=["intelligence"], dependencies=[Depends(rate_limit_api)])
 api_router.include_router(advisor.router,       prefix="/intelligence",  tags=["advisor"],      dependencies=[Depends(rate_limit_api)])
+api_router.include_router(world_building.router, prefix="/intelligence", tags=["world-building"], dependencies=[Depends(rate_limit_api)])
 api_router.include_router(admin.router,         prefix="/admin",         tags=["admin"], dependencies=[Depends(rate_limit_api)])

@@ -123,21 +123,6 @@ const targetAudiences = [
   "Writers working on multi-book series",
 ]
 
-const heroHeadlineVariants = [
-  {
-    audience: "For readers",
-    accent: "Remember every thread.",
-    title: "Pick up any story.",
-    body: "Character memory, clue recall, and spoiler-safe context whenever you return.",
-  },
-  {
-    audience: "For authors",
-    accent: "Catch every contradiction.",
-    title: "Draft with full recall.",
-    body: "Continuity, character memory, and story intelligence while you build the manuscript.",
-  },
-] as const
-
 const comparisonCompetitors = [
   {
     name: "Fandom Wiki",
@@ -155,7 +140,7 @@ const comparisonCompetitors = [
       "Relationship graph": true,
       "Works on unpublished novels": false,
     },
-    bestFor: "Readers of big-name series who just want a quick refresher (and don’t mind spoilers or gaps).",
+    bestFor: "Fans reading popular series who want a quick reference.",
     verdictType: "bad" as const,
   },
   {
@@ -174,7 +159,7 @@ const comparisonCompetitors = [
       "Relationship graph": false,
       "Works on unpublished novels": false,
     },
-    bestFor: "Kindle-only reading when you just need a lightweight “who’s this again?” lookup.",
+    bestFor: "Kindle readers who want lightweight character lookups.",
     verdictType: "bad" as const,
   },
   {
@@ -193,7 +178,7 @@ const comparisonCompetitors = [
       "Relationship graph": true,
       "Works on unpublished novels": true,
     },
-    bestFor: "Worldbuilding and planning when you prefer filling in structured templates by hand.",
+    bestFor: "Worldbuilders who like structured templates and planning.",
     verdictType: "neutral" as const,
   },
   {
@@ -212,7 +197,7 @@ const comparisonCompetitors = [
       "Relationship graph": false,
       "Works on unpublished novels": true,
     },
-    bestFor: "Drafting and revision workflows when you want a powerful writing studio (not auto-extracted story memory).",
+    bestFor: "Authors focused on drafting, revising, and manuscript structure.",
     verdictType: "neutral" as const,
   },
   {
@@ -231,7 +216,7 @@ const comparisonCompetitors = [
       "Relationship graph": true,
       "Works on unpublished novels": true,
     },
-    bestFor: "Authors (and returning readers) who want spoiler-safe recall, auto-built character bibles, and continuity checks—grounded in the exact chapters.",
+    bestFor: "Writers who want auto character bibles, spoiler-safe recall, and continuity checks.",
     verdictType: "lorevia" as const,
   },
 ]
@@ -296,8 +281,8 @@ function AnimatedCard({
     <div
       ref={ref}
       style={{ transitionDelay: `${delay}ms` }}
-      className={`transition-opacity duration-300 ease-out ${
-        inView ? "opacity-100" : "opacity-0"
+      className={`transition-all duration-700 ${
+        inView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6"
       } ${className}`}
     >
       {children}
@@ -311,7 +296,7 @@ function ComparisonSection({
   ctaHref,
   isDark,
 }: {
-  ctaHref: "/library" | "/login"
+  ctaHref: "/library" | "/register"
   isDark: boolean
 }) {
   const [activeTooltip, setActiveTooltip] = useState<string | null>(null)
@@ -320,15 +305,15 @@ function ComparisonSection({
     <Section id="comparison">
       <div className="mx-auto max-w-6xl">
         <div className="text-center">
-          <p className={`text-xs font-bold uppercase tracking-[0.32em] ${isDark ? "text-red-400" : "text-red-600"}`}>
+          <p className={`text-xs font-bold uppercase tracking-[0.32em] ${isDark ? "text-neutral-300" : "text-violet-600"}`}>
             Why LoreVia
           </p>
-          <h2 className={`mt-4 font-semibold text-4xl leading-tight md:text-5xl ${isDark ? "text-white" : "text-slate-900"}`}>
+          <h2 className={`mt-4 font-serif text-4xl leading-tight md:text-5xl ${isDark ? "text-white" : "text-stone-950"}`}>
             Every other tool makes you
             <br />
             do the work yourself.
           </h2>
-          <p className={`mx-auto mt-5 max-w-2xl text-base leading-7 ${isDark ? "text-slate-400" : "text-slate-600"}`}>
+          <p className={`mx-auto mt-5 max-w-2xl text-base leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
             Wikis spoil you. Campfire makes you fill it in. Kindle X-Ray stays shallow. LoreVia reads your book so
             you don&apos;t have to remember everything.
           </p>
@@ -336,8 +321,8 @@ function ComparisonSection({
 
         <AnimatedCard>
           <div
-            className={`mt-14 overflow-hidden rounded-lg border ${
-              isDark ? "border-slate-800 bg-slate-900" : "border-slate-200 bg-white"
+            className={`mt-14 overflow-hidden rounded-[2rem] border shadow-[0_24px_70px_-35px_rgba(15,23,42,0.45)] ${
+              isDark ? "border-white/10 bg-[#080808]" : "border-stone-200 bg-white"
             }`}
           >
             <div className="overflow-x-auto">
@@ -346,7 +331,7 @@ function ComparisonSection({
                   <tr>
                     <th
                       className={`sticky left-0 z-10 border-b px-6 py-6 text-left align-bottom ${
-                        isDark ? "border-slate-800 bg-slate-900" : "border-slate-200 bg-white"
+                        isDark ? "border-white/[0.06] bg-[#080808]" : "border-stone-100 bg-white"
                       }`}
                     >
                       <span className={`text-[11px] font-bold uppercase tracking-[0.26em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>
@@ -362,29 +347,29 @@ function ComparisonSection({
                           className={`relative border-b px-4 pb-5 pt-6 text-center align-bottom ${
                             isLoreVia
                               ? isDark
-                                ? "border-slate-700 bg-slate-800"
-                                : "border-slate-300 bg-slate-50"
+                                ? "border-violet-400/20 bg-violet-500/[0.08]"
+                                : "border-violet-100 bg-violet-50/70"
                               : isDark
-                                ? "border-slate-800"
-                                : "border-slate-200"
+                                ? "border-white/[0.06]"
+                                : "border-stone-100"
                           }`}
                         >
-                          {isLoreVia ? <div className="absolute inset-x-0 top-0 h-0.5 bg-red-600 dark:bg-red-400" /> : null}
+                          {isLoreVia ? <div className="absolute inset-x-0 top-0 h-1 bg-violet-500" /> : null}
                           <div className="flex flex-col items-center gap-3">
                             <div
-                              className={`flex h-12 w-12 items-center justify-center rounded-lg border text-xl ${
+                              className={`flex h-12 w-12 items-center justify-center rounded-2xl border text-xl ${
                                 isLoreVia
-                                  ? "border-red-500/50 bg-red-500/10 dark:border-red-400/50 dark:bg-red-400/10"
+                                  ? "border-violet-400/50 bg-violet-500 shadow-[0_10px_30px_-12px_rgba(139,92,246,0.9)]"
                                   : isDark
-                                    ? "border-slate-700 bg-slate-800"
-                                    : "border-slate-200 bg-slate-50"
+                                    ? "border-white/10 bg-white/[0.04]"
+                                    : "border-stone-200 bg-stone-50"
                               }`}
                               title={competitor.description}
                             >
                               {isLoreVia ? <LoreViaMark /> : competitor.icon}
                             </div>
                             <div>
-                              <p className={`text-sm font-semibold ${isLoreVia ? "text-red-600 dark:text-red-400" : isDark ? "text-white" : "text-slate-900"}`}>
+                              <p className={`text-sm font-semibold ${isLoreVia ? "text-violet-400" : isDark ? "text-white" : "text-stone-900"}`}>
                                 {competitor.name}
                               </p>
                               <p className={`mt-1 max-w-[11rem] text-[11px] leading-4 ${isDark ? "text-slate-500" : "text-stone-400"}`}>
@@ -399,10 +384,10 @@ function ComparisonSection({
                 </thead>
                 <tbody>
                   {comparisonFeatureList.map((feature) => (
-                    <tr key={feature} className={isDark ? "hover:bg-slate-800/50" : "hover:bg-slate-50"}>
+                    <tr key={feature} className={isDark ? "hover:bg-white/[0.02]" : "hover:bg-stone-50/80"}>
                       <td
                         className={`sticky left-0 z-[1] border-b px-6 py-4 text-left ${
-                          isDark ? "border-slate-800 bg-slate-900" : "border-slate-200 bg-white"
+                          isDark ? "border-white/[0.06] bg-[#080808]" : "border-stone-100 bg-white"
                         }`}
                       >
                         <div
@@ -416,10 +401,10 @@ function ComparisonSection({
                           <button
                             type="button"
                             aria-label={`More about ${feature}`}
-                            className={`flex h-5 w-5 items-center justify-center rounded-md text-[10px] font-bold transition-colors ${
+                            className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold transition ${
                               isDark
-                                ? "bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-slate-200"
-                                : "bg-slate-100 text-slate-400 hover:bg-slate-200 hover:text-slate-600"
+                                ? "bg-white/[0.06] text-slate-400 hover:bg-white/[0.1] hover:text-slate-200"
+                                : "bg-stone-100 text-stone-400 hover:bg-stone-200 hover:text-stone-600"
                             }`}
                             onFocus={() => setActiveTooltip(feature)}
                             onBlur={() => setActiveTooltip(null)}
@@ -428,8 +413,8 @@ function ComparisonSection({
                           </button>
                           {activeTooltip === feature ? (
                             <div
-                              className={`absolute left-0 bottom-full z-50 mb-2 max-w-xs rounded-lg px-3 py-2 text-xs leading-5 shadow-lg ${
-                                isDark ? "bg-slate-800 text-slate-100 border border-slate-700" : "bg-slate-900 text-white border border-slate-700"
+                              className={`absolute left-0 bottom-full z-50 mb-2 max-w-xs rounded-xl px-3 py-2 text-xs leading-5 shadow-xl ${
+                                isDark ? "bg-white text-stone-950" : "bg-stone-950 text-white"
                               }`}
                             >
                               {comparisonFeatureDescriptions[feature]}
@@ -446,11 +431,11 @@ function ComparisonSection({
                             className={`border-b px-4 py-4 text-center ${
                               isLoreVia
                                 ? isDark
-                                  ? "border-red-500/30 bg-red-500/5"
-                                  : "border-red-300 bg-red-50"
+                                  ? "border-violet-400/20 bg-violet-500/[0.05]"
+                                  : "border-violet-100 bg-violet-50/50"
                                 : isDark
-                                  ? "border-slate-800"
-                                  : "border-slate-200"
+                                  ? "border-white/[0.06]"
+                                  : "border-stone-100"
                             }`}
                           >
                             <div className="flex justify-center">
@@ -462,10 +447,10 @@ function ComparisonSection({
                     </tr>
                   ))}
 
-                  <tr className={isDark ? "bg-slate-800/30" : "bg-slate-50"}>
+                  <tr className={isDark ? "bg-white/[0.03]" : "bg-stone-50/70"}>
                     <td
                       className={`sticky left-0 z-[1] border-b px-6 py-4 text-left ${
-                        isDark ? "border-slate-800 bg-slate-800/50" : "border-slate-200 bg-slate-50"
+                        isDark ? "border-white/[0.06] bg-[#0d0d0d]" : "border-stone-100 bg-stone-50/70"
                       }`}
                     >
                       <span className={`text-[11px] font-bold uppercase tracking-[0.26em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>
@@ -476,11 +461,11 @@ function ComparisonSection({
                       const isLoreVia = competitor.verdictType === "lorevia"
                       const badgeClass = isLoreVia
                         ? isDark
-                          ? "bg-red-500/20 text-red-100"
-                          : "bg-red-100 text-red-900"
+                          ? "bg-violet-500/15 text-violet-100"
+                          : "bg-violet-100 text-violet-900"
                         : isDark
-                          ? "bg-slate-800 text-slate-200"
-                          : "bg-slate-100 text-slate-800"
+                          ? "bg-white/[0.06] text-slate-200"
+                          : "bg-stone-100 text-stone-800"
 
                       return (
                         <td
@@ -488,14 +473,14 @@ function ComparisonSection({
                           className={`border-b px-4 py-4 text-center align-top ${
                             isLoreVia
                               ? isDark
-                                ? "border-red-500/30 bg-red-500/5"
-                                : "border-red-300 bg-red-50"
+                                ? "border-violet-400/20 bg-violet-500/[0.08]"
+                                : "border-violet-100 bg-violet-50/70"
                               : isDark
-                                ? "border-slate-800"
-                                : "border-slate-200"
+                                ? "border-white/[0.06]"
+                                : "border-stone-100"
                           }`}
                         >
-                          <span className={`inline-block rounded-md px-3 py-2 text-left text-xs leading-5 ${badgeClass}`}>
+                          <span className={`inline-block rounded-xl px-3 py-2 text-left text-xs leading-5 ${badgeClass}`}>
                             {competitor.bestFor}
                           </span>
                         </td>
@@ -511,10 +496,10 @@ function ComparisonSection({
         <div className="mt-10 text-center">
           <Link
             href={ctaHref}
-            className={`inline-flex items-center justify-center rounded-lg px-7 py-3 text-sm font-semibold transition-colors duration-150 ${
+            className={`inline-flex items-center justify-center rounded-[1rem] px-7 py-3.5 text-sm font-semibold transition hover:-translate-y-[1px] active:translate-y-0 ${
               isDark
-                ? "bg-white text-slate-900 hover:bg-slate-100"
-                : "bg-slate-900 text-white hover:bg-slate-800"
+                ? "bg-white text-black shadow-[0_20px_40px_-18px_rgba(255,255,255,0.25)] hover:bg-stone-100"
+                : "bg-stone-950 text-white shadow-[0_20px_40px_-18px_rgba(0,0,0,0.35)] hover:bg-stone-800"
             }`}
           >
             Upload Manuscript
@@ -531,8 +516,8 @@ function ComparisonSection({
 function ComparisonCheck() {
   return (
     <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-      <circle cx="9" cy="9" r="9" fill="currentColor" fillOpacity="0.1" className="text-slate-900 dark:text-white" />
-      <path d="M5 9.5L8 12.5L13 6.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="text-slate-900 dark:text-white" />
+      <circle cx="9" cy="9" r="9" fill="#8b5cf6" fillOpacity="0.14" />
+      <path d="M5 9.5L8 12.5L13 6.5" stroke="#8b5cf6" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   )
 }
@@ -540,8 +525,8 @@ function ComparisonCheck() {
 function ComparisonCross({ isDark }: { isDark: boolean }) {
   return (
     <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-      <circle cx="9" cy="9" r="9" fill="currentColor" fillOpacity="0.05" className={isDark ? "text-slate-400" : "text-slate-400"} />
-      <path d="M6 6L12 12M12 6L6 12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" className={isDark ? "text-slate-500" : "text-slate-400"} />
+      <circle cx="9" cy="9" r="9" fill={isDark ? "rgba(255,255,255,0.08)" : "#f5f5f4"} />
+      <path d="M6 6L12 12M12 6L6 12" stroke={isDark ? "#64748b" : "#a8a29e"} strokeWidth="1.8" strokeLinecap="round" />
     </svg>
   )
 }
@@ -571,72 +556,63 @@ export default function HomePage() {
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
   const [activeDemo, setActiveDemo] = useState(0)
-  const [activeHeroHeadline, setActiveHeroHeadline] = useState(0)
-  const [heroHeadlineVisible, setHeroHeadlineVisible] = useState(true)
-  const heroSwapTimeoutRef = useRef<number | null>(null)
 
-  const ctaHref = user ? "/library" : "/login"
+  const ctaHref = user ? "/library" : "/register"
 
   useEffect(() => {
     const t = setInterval(() => setActiveDemo((p) => (p + 1) % demoQueries.length), 5200)
     return () => clearInterval(t)
   }, [])
 
-  useEffect(() => {
-    const interval = window.setInterval(() => {
-      setHeroHeadlineVisible(false)
-      heroSwapTimeoutRef.current = window.setTimeout(() => {
-        setActiveHeroHeadline((current) => (current + 1) % heroHeadlineVariants.length)
-        setHeroHeadlineVisible(true)
-      }, 180)
-    }, 4000)
-
-    return () => {
-      window.clearInterval(interval)
-      if (heroSwapTimeoutRef.current !== null) {
-        window.clearTimeout(heroSwapTimeoutRef.current)
-      }
-    }
-  }, [])
-
-  const currentHeroHeadline = heroHeadlineVariants[activeHeroHeadline]
-
   return (
     <main
       className={`min-h-screen transition-colors ${
         isDark
           ? "bg-[linear-gradient(180deg,#000000_0%,#050505_42%,#0b0b0b_100%)] text-slate-100"
-          : "bg-white text-slate-900"
+          : "bg-[linear-gradient(180deg,#fbf7ef_0%,#f7f2eb_48%,#f3efe9_100%)] text-stone-950"
       }`}
     >
+
+      {/* ── Noise texture overlay ─────────────────────────────────────────────
+          Subtle grain layer used by Linear, Raycast, Vercel. Pointer-events-none
+          so it never blocks interactions. Renders above everything via z-[9999]. */}
+      <div
+        aria-hidden
+        className="pointer-events-none fixed inset-0 z-[9999] opacity-[0.032]"
+        style={{
+          backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E")`,
+          backgroundRepeat: "repeat",
+          backgroundSize: "200px 200px",
+        }}
+      />
 
       {/* ══ NAVBAR ═══════════════════════════════════════════════════════════════ */}
       <nav
         className={`sticky top-0 z-50 border-b backdrop-blur-md ${
           isDark
             ? "border-white/[0.06] bg-black/75"
-            : "border-slate-200 bg-white"
+            : "border-stone-200/70 bg-white/80"
         }`}
       >
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4 lg:px-10">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-3.5 lg:px-10">
           <img src="/logoandtext.png" alt="LoreVia" className="h-8 w-auto" />
 
           <div
             className={`hidden md:flex items-center gap-8 text-sm font-medium ${
-              isDark ? "text-slate-400" : "text-slate-500"
+              isDark ? "text-slate-400" : "text-stone-500"
             }`}
           >
-            <a href="#how"      className={`transition-colors hover:${isDark ? "text-white" : "text-slate-900"}`}>How it works</a>
-            <a href="#features" className={`transition-colors hover:${isDark ? "text-white" : "text-slate-900"}`}>Features</a>
-            <a href="#faq"      className={`transition-colors hover:${isDark ? "text-white" : "text-slate-900"}`}>FAQ</a>
+            <a href="#how"      className={`transition hover:${isDark ? "text-white" : "text-stone-900"}`}>How it works</a>
+            <a href="#features" className={`transition hover:${isDark ? "text-white" : "text-stone-900"}`}>Features</a>
+            <a href="#faq"      className={`transition hover:${isDark ? "text-white" : "text-stone-900"}`}>FAQ</a>
           </div>
 
           <Link
             href={ctaHref}
-            className={`rounded-lg px-5 py-2 text-sm font-semibold transition-colors duration-150 ${
+            className={`rounded-xl px-5 py-2.5 text-sm font-semibold transition hover:-translate-y-[1px] active:translate-y-0 ${
               isDark
-                ? "bg-white text-slate-900 hover:bg-slate-100"
-                : "bg-slate-900 text-white hover:bg-slate-800"
+                ? "bg-white text-black hover:bg-stone-100"
+                : "bg-stone-950 text-white hover:bg-stone-800"
             }`}
           >
             Get started
@@ -647,16 +623,16 @@ export default function HomePage() {
       {/* ══ 1. HERO ══════════════════════════════════════════════════════════════ */}
       <section className="relative mx-auto max-w-7xl px-6 pb-16 pt-20 lg:px-10 lg:pb-20 lg:pt-28">
 
-        {/* Dramatic layered ambient glow with red */}
+        {/* Dramatic layered ambient glow — replaces the old single radial gradient */}
         <div className="pointer-events-none absolute inset-0 overflow-hidden">
           <div
             className={`absolute -top-40 left-1/2 -translate-x-1/2 h-[600px] w-[900px] rounded-full blur-[120px] ${
-              isDark ? "opacity-[0.18] bg-red-600" : "opacity-[0.22] bg-red-300"
+              isDark ? "opacity-[0.18] bg-violet-600" : "opacity-[0.22] bg-violet-300"
             }`}
           />
           <div
             className={`absolute -top-20 left-1/3 h-[400px] w-[500px] rounded-full blur-[100px] ${
-              isDark ? "opacity-[0.10] bg-orange-400" : "opacity-[0.14] bg-orange-200"
+              isDark ? "opacity-[0.10] bg-indigo-400" : "opacity-[0.14] bg-indigo-200"
             }`}
           />
         </div>
@@ -667,51 +643,52 @@ export default function HomePage() {
           <div>
             <img src="/logoandtext.png" alt="LoreVia" className="mb-8 h-12 w-auto object-contain sm:h-14" />
 
-            <div className="mb-6 flex flex-wrap items-center gap-4">
+            {/* Single static badge — no audience rotation */}
+            <div className="mb-7 flex flex-wrap items-center gap-4">
               <div
-                className={`inline-flex min-w-[10rem] items-center justify-center rounded-md border px-4 py-1.5 text-[11px] font-bold uppercase tracking-[0.32em] ${
+                className={`inline-flex min-w-[10rem] items-center justify-center rounded-full border px-4 py-1.5 text-[11px] font-bold uppercase tracking-[0.32em] ${
                   isDark
-                    ? "border-white/10 bg-white/[0.04] text-red-400"
-                    : "border-slate-200 bg-slate-100 text-slate-600"
+                    ? "border-white/10 bg-white/[0.04] text-neutral-200"
+                    : "border-violet-200 bg-violet-50 text-violet-600"
                 }`}
               >
-                {currentHeroHeadline.audience}
+                For writers
               </div>
               <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-                {currentHeroHeadline.body}
+                Continuity, character memory, and story intelligence.
               </p>
             </div>
 
-            <div className="relative min-h-[10rem] sm:min-h-[12rem] md:min-h-[13.5rem]">
-              <h1
-                className={`font-semibold text-[3.2rem] leading-[1.2] tracking-tight transition-opacity duration-200 sm:text-[4.2rem] md:text-[4.8rem] ${
-                  isDark ? "text-white" : "text-slate-900"
-                } ${heroHeadlineVisible ? "opacity-100" : "opacity-0"}`}
-              >
-                {currentHeroHeadline.title}
-                <br />
-                <span className={isDark ? "text-red-400" : "text-slate-600"}>
-                  {currentHeroHeadline.accent}
-                </span>
-              </h1>
-            </div>
+            <h1
+              className={`font-serif text-[3.2rem] leading-[1.04] tracking-[-0.03em] sm:text-[4.2rem] md:text-[4.8rem] ${
+                isDark ? "text-white" : "text-stone-950"
+              }`}
+            >
+              Your story.
+              <br />
+              <span className={isDark ? "text-neutral-200" : "text-violet-600"}>
+                Fully searchable.
+              </span>
+              <br />
+              No rereading required.
+            </h1>
 
             <p
-              className={`mt-6 max-w-[480px] text-base leading-7 ${
-                isDark ? "text-slate-400" : "text-slate-600"
+              className={`mt-7 max-w-[480px] text-lg leading-8 ${
+                isDark ? "text-slate-300" : "text-stone-600"
               }`}
             >
               Upload your manuscript and ask anything about your characters, relationships, or past
               events — with answers grounded in exact chapters and passages.
             </p>
 
-            <div className="mt-8 flex flex-col gap-4 sm:flex-row sm:items-center">
+            <div className="mt-10 flex flex-col gap-4 sm:flex-row sm:items-center">
               <Link
                 href={ctaHref}
-                className={`inline-flex items-center justify-center rounded-lg px-8 py-3 text-base font-semibold transition-colors duration-150 ${
+                className={`inline-flex items-center justify-center rounded-[1.1rem] px-8 py-4 text-base font-semibold transition hover:-translate-y-[1px] active:translate-y-0 ${
                   isDark
-                    ? "bg-white text-slate-900 hover:bg-slate-100"
-                    : "bg-slate-900 text-white hover:bg-slate-800"
+                    ? "bg-white text-black shadow-[0_20px_40px_-18px_rgba(255,255,255,0.25)] hover:bg-stone-100"
+                    : "bg-stone-950 text-white shadow-[0_20px_40px_-18px_rgba(0,0,0,0.35)] hover:bg-stone-800"
                 }`}
               >
                 Upload Manuscript
@@ -731,32 +708,37 @@ export default function HomePage() {
             </p>
           </div>
 
-          {/* Right — demo card */}
+          {/* Right — demo card with gradient border ring */}
           <div
-            className={`rounded-lg border ${
+            className={`relative p-[1px] rounded-[1.85rem] ${
               isDark
-                ? "border-slate-800 bg-slate-900"
-                : "border-slate-200 bg-white"
+                ? "bg-gradient-to-b from-white/[0.12] via-white/[0.04] to-white/[0.01]"
+                : "bg-gradient-to-b from-violet-200/60 via-stone-200/30 to-stone-200/10"
             }`}
           >
+            <div
+              className={`relative overflow-hidden rounded-[1.8rem] shadow-[0_48px_120px_-40px_rgba(15,23,42,0.55)] ${
+                isDark ? "bg-[#080808]" : "bg-white"
+              }`}
+            >
               {/* Window chrome */}
               <div
-                className={`flex items-center gap-2 border-b px-5 py-3 ${
-                  isDark ? "border-slate-800 bg-slate-800/50" : "border-slate-200 bg-slate-50"
+                className={`flex items-center gap-2 border-b px-5 py-3.5 ${
+                  isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-stone-100 bg-stone-50/80"
                 }`}
               >
-                <span className="h-2.5 w-2.5 rounded-full bg-red-400" />
-                <span className="h-2.5 w-2.5 rounded-full bg-amber-400" />
-                <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
-                <span className={`ml-2 text-[11px] font-medium ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                <span className="h-2.5 w-2.5 rounded-full bg-red-400/60" />
+                <span className="h-2.5 w-2.5 rounded-full bg-amber-400/60" />
+                <span className="h-2.5 w-2.5 rounded-full bg-emerald-400/60" />
+                <span className={`ml-2 text-[11px] font-medium ${isDark ? "text-slate-500" : "text-stone-400"}`}>
                   manuscript.epub — workspace
                 </span>
               </div>
 
               {/* "This is real" legitimacy signal */}
-              <div className="px-6 pt-4 pb-1">
+              <div className="px-6 pt-5 pb-1">
                 <p className={`text-xs font-semibold uppercase tracking-[0.28em] ${
-                  isDark ? "text-slate-500" : "text-slate-500"
+                  isDark ? "text-neutral-400" : "text-stone-500"
                 }`}>
                   Example output from a real manuscript
                 </p>
@@ -767,25 +749,25 @@ export default function HomePage() {
                 {demoQueries.map((demo, i) => (
                   <div
                     key={i}
-                    className={`transition-opacity duration-300 ease-out ${
-                      activeDemo === i ? "opacity-100" : "opacity-50"
+                    className={`transition-all duration-700 ${
+                      activeDemo === i ? "opacity-100 translate-y-0" : "opacity-50"
                     }`}
                   >
                     <div className="mb-3 flex items-start gap-2.5">
-                      <span className={`mt-px text-sm font-bold ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                      <span className={`mt-px text-sm font-bold ${isDark ? "text-neutral-300" : "text-violet-500"}`}>
                         ›
                       </span>
-                      <p className={`text-sm font-medium ${isDark ? "text-slate-200" : "text-slate-800"}`}>
+                      <p className={`text-sm font-medium ${isDark ? "text-slate-200" : "text-stone-800"}`}>
                         {demo.q}
                       </p>
                     </div>
                     <div
-                      className={`ml-5 rounded-lg border px-4 py-4 ${
-                        isDark ? "border-slate-800 bg-slate-800/50" : "border-slate-200 bg-slate-50"
+                      className={`ml-5 rounded-[1rem] border px-4 py-4 ${
+                        isDark ? "border-white/[0.06] bg-white/[0.05]" : "border-stone-100 bg-stone-50"
                       }`}
                     >
                       <p className={`text-[11px] font-bold uppercase tracking-[0.26em] mb-2 ${
-                        isDark ? "text-slate-400" : "text-slate-600"
+                        isDark ? "text-neutral-300" : "text-violet-600"
                       }`}>
                         {demo.chapter}
                       </p>
@@ -805,7 +787,7 @@ export default function HomePage() {
                   <span className={`flex-1 text-sm ${isDark ? "text-slate-600" : "text-stone-400"}`}>
                     Ask anything about your story…
                   </span>
-                  <span className={`h-[14px] w-px ${isDark ? "bg-white/30" : "bg-red-300"}`} />
+                  <span className={`h-[14px] w-px ${isDark ? "bg-white/30" : "bg-violet-300"}`} />
                 </div>
               </div>
 
@@ -817,12 +799,13 @@ export default function HomePage() {
                     onClick={() => setActiveDemo(i)}
                     className={`h-1.5 rounded-full transition-all duration-300 ${
                       activeDemo === i
-                        ? isDark ? "w-5 bg-white" : "w-5 bg-red-500"
+                        ? isDark ? "w-5 bg-white" : "w-5 bg-violet-500"
                         : isDark ? "w-1.5 bg-white/20" : "w-1.5 bg-stone-300"
                     }`}
                   />
                 ))}
               </div>
+            </div>
           </div>
         </div>
       </section>
@@ -871,7 +854,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* ══ 4. HOW IT WORKS ════════════════════════════════════════════════════════ */}
+      {/* ══ 4. HOW IT WORKS ══════════════════════════════════════════════════════ */}
       <Section id="how">
         <SectionHeader eyebrow="How it works" title="Three steps. That's it." body="" isDark={isDark} />
 
@@ -935,116 +918,114 @@ export default function HomePage() {
       <ComparisonSection ctaHref={ctaHref} isDark={isDark} />
 
       <Section id="proof">
-        <div>
-          <SectionHeader
-            eyebrow="Example output"
-            title="Here's what comes back from a 120-chapter manuscript."
-            body=""
-            isDark={isDark}
-          />
+        <SectionHeader
+          eyebrow="Example output"
+          title="Here's what comes back from a 120-chapter manuscript."
+          body=""
+          isDark={isDark}
+        />
 
-          <AnimatedCard>
+        <AnimatedCard>
+          <div
+            className={`mt-12 overflow-hidden rounded-[2rem] border ${
+              isDark ? "border-white/10 bg-[#080808]" : "border-stone-200 bg-white"
+            }`}
+          >
+            {/* Scan header */}
             <div
-              className={`mt-12 overflow-hidden rounded-[2rem] border ${
-                isDark ? "border-white/10 bg-[#080808]" : "border-stone-200 bg-white"
+              className={`flex flex-wrap items-center justify-between gap-5 border-b px-7 py-6 ${
+                isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-stone-100 bg-stone-50"
               }`}
             >
-              {/* Scan header */}
-              <div
-                className={`flex flex-wrap items-center justify-between gap-5 border-b px-7 py-6 ${
-                  isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-stone-100 bg-stone-50"
-                }`}
-              >
-                <div>
-                  <p className={`text-[11px] font-bold uppercase tracking-[0.32em] ${isDark ? "text-neutral-300" : "text-violet-600"}`}>
-                    Scan results
-                  </p>
-                  <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-                    From a 120-chapter epic fantasy manuscript • processed in seconds
-                  </p>
-                </div>
-                <div className="flex gap-3">
-                  {proofStats.map(({ value, label }) => (
-                    <div
-                      key={label}
-                      className={`rounded-[1rem] border px-4 py-3 text-center ${
-                        isDark ? "border-white/[0.07] bg-white/[0.04]" : "border-stone-100 bg-stone-50"
-                      }`}
-                    >
-                      <p className={`font-serif text-2xl font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>
-                        {value}
-                      </p>
-                      <p className={`mt-0.5 text-[11px] ${isDark ? "text-slate-500" : "text-stone-400"}`}>
-                        {label}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Output rows */}
-              <div className="space-y-2.5 p-7">
-                {proofOutputs.map(({ severity, text, sub }) => (
-                  <div
-                    key={text}
-                    className={`flex items-start gap-4 rounded-[1.2rem] border px-5 py-4 ${
-                      severity === "warning"
-                        ? isDark ? "border-amber-500/25 bg-amber-500/[0.07]" : "border-amber-200 bg-amber-50"
-                        : isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-stone-100 bg-stone-50"
-                    }`}
-                  >
-                    <span className="mt-0.5 shrink-0 text-base">
-                      {severity === "warning" ? "⚠️" : "ℹ️"}
-                    </span>
-                    <div>
-                      <p className={`text-sm font-medium ${isDark ? "text-slate-100" : "text-stone-800"}`}>
-                        {text}
-                      </p>
-                      <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-400"}`}>
-                        {sub}
-                      </p>
-                    </div>
-                  </div>
-                ))}
-                <p className={`pt-2 text-xs font-medium ${isDark ? "text-slate-600" : "text-stone-400"}`}>
-                  Each finding links back to the exact chapter and passage.
+              <div>
+                <p className={`text-[11px] font-bold uppercase tracking-[0.32em] ${isDark ? "text-neutral-300" : "text-violet-600"}`}>
+                  Scan results
+                </p>
+                <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+                  From a 120-chapter epic fantasy manuscript • processed in seconds
                 </p>
               </div>
+              <div className="flex gap-3">
+                {proofStats.map(({ value, label }) => (
+                  <div
+                    key={label}
+                    className={`rounded-[1rem] border px-4 py-3 text-center ${
+                      isDark ? "border-white/[0.07] bg-white/[0.04]" : "border-stone-100 bg-stone-50"
+                    }`}
+                  >
+                    <p className={`font-serif text-2xl font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>
+                      {value}
+                    </p>
+                    <p className={`mt-0.5 text-[11px] ${isDark ? "text-slate-500" : "text-stone-400"}`}>
+                      {label}
+                    </p>
+                  </div>
+                ))}
+              </div>
             </div>
-          </AnimatedCard>
 
-          {/* Capacity note */}
-          <AnimatedCard delay={100}>
-            <blockquote
-              className={`mt-8 rounded-[2rem] border p-8 ${
-                isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white"
-              }`}
-            >
-              <p className={`font-serif text-xl leading-relaxed ${
-                isDark ? "text-slate-200" : "text-stone-700"
-              }`}>
-                Built to handle long manuscripts, multi-book series, and chapter-linked answers without mixing contexts.
-              </p>
-              <footer className="mt-6 flex items-center gap-3">
+            {/* Output rows */}
+            <div className="space-y-2.5 p-7">
+              {proofOutputs.map(({ severity, text, sub }) => (
                 <div
-                  className={`h-9 w-9 rounded-full flex items-center justify-center text-sm font-bold ${
-                    isDark ? "bg-violet-500/30 text-violet-300" : "bg-violet-100 text-violet-600"
+                  key={text}
+                  className={`flex items-start gap-4 rounded-[1.2rem] border px-5 py-4 ${
+                    severity === "warning"
+                      ? isDark ? "border-amber-500/25 bg-amber-500/[0.07]" : "border-amber-200 bg-amber-50"
+                      : isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-stone-100 bg-stone-50"
                   }`}
                 >
-                  12K
+                  <span className="mt-0.5 shrink-0 text-base">
+                    {severity === "warning" ? "⚠️" : "ℹ️"}
+                  </span>
+                  <div>
+                    <p className={`text-sm font-medium ${isDark ? "text-slate-100" : "text-stone-800"}`}>
+                      {text}
+                    </p>
+                    <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-400"}`}>
+                      {sub}
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>
-                    Scale-ready, not launch-padded
-                  </p>
-                  <p className={`text-xs ${isDark ? "text-slate-500" : "text-stone-400"}`}>
-                    Designed for large libraries and series workflows
-                  </p>
-                </div>
-              </footer>
-            </blockquote>
-          </AnimatedCard>
-        </div>
+              ))}
+              <p className={`pt-2 text-xs font-medium ${isDark ? "text-slate-600" : "text-stone-400"}`}>
+                Each finding links back to the exact chapter and passage.
+              </p>
+            </div>
+          </div>
+        </AnimatedCard>
+
+        {/* Capacity note */}
+        <AnimatedCard delay={100}>
+          <blockquote
+            className={`mt-8 rounded-[2rem] border p-8 ${
+              isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white"
+            }`}
+          >
+            <p className={`font-serif text-xl leading-relaxed ${
+              isDark ? "text-slate-200" : "text-stone-700"
+            }`}>
+              Built to handle long manuscripts, multi-book series, and chapter-linked answers without mixing contexts.
+            </p>
+            <footer className="mt-6 flex items-center gap-3">
+              <div
+                className={`h-9 w-9 rounded-full flex items-center justify-center text-sm font-bold ${
+                  isDark ? "bg-violet-500/30 text-violet-300" : "bg-violet-100 text-violet-600"
+                }`}
+              >
+                12K
+              </div>
+              <div>
+                <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>
+                  Scale-ready, not launch-padded
+                </p>
+                <p className={`text-xs ${isDark ? "text-slate-500" : "text-stone-400"}`}>
+                  Designed for large libraries and series workflows
+                </p>
+              </div>
+            </footer>
+          </blockquote>
+        </AnimatedCard>
       </Section>
 
       {/* ══ 7. BUILT FOR ═════════════════════════════════════════════════════════ */}

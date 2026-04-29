@@ -57,6 +57,9 @@ export function SiteFooter() {
             <Link href="/compliance" className={footerLinkClass}>
               Compliance
             </Link>
+            <Link href="/refund" className={footerLinkClass}>
+              Refund
+            </Link>
             <Link href="/eula" className={footerLinkClass}>
               EULA
             </Link>

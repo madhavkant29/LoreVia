@@ -9,6 +9,7 @@ import asyncio
 import json
 import os
 import uuid
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import bleach  # type: ignore[import-untyped]
@@ -20,11 +21,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.security import create_asset_token
 from app.core.storage import download_book, get_presigned_url, upload_binary
-from app.models.book import Book, BookNote, Chapter, ChapterVersion, Series
+from app.models.book import Book, BookNote, Chapter, ChapterVersion, ObsidianVaultNote, Series
 from app.models.character import Character, CharacterState
 from app.models.intelligence import ChapterSummary, CharacterRelationship, PlotThread
 from app.models.progress import ReadingProgress
 from app.schemas.books import BookOut, ChapterConsistencyReport, ChapterReportCharacter
+from app.utils.cover_processor import ProcessedCover, process_cover
 
 if TYPE_CHECKING:
     pass
@@ -136,6 +138,79 @@ async def list_user_notes(db: AsyncSession, user_id: uuid.UUID) -> list[dict]:
         }
         for note, book_title, chapter_title in rows
     ]
+
+
+async def list_obsidian_vault_notes(db: AsyncSession, book: Book, user_id: uuid.UUID) -> list[dict]:
+    rows = (
+        await db.execute(
+            select(ObsidianVaultNote)
+            .where(ObsidianVaultNote.book_id == book.id, ObsidianVaultNote.user_id == user_id)
+            .order_by(ObsidianVaultNote.path.asc())
+        )
+    ).scalars().all()
+    return [
+        {
+            "id": str(note.id),
+            "book_id": str(note.book_id),
+            "path": note.path,
+            "content": note.content,
+            "created_at": note.created_at,
+            "updated_at": note.updated_at,
+        }
+        for note in rows
+    ]
+
+
+async def load_obsidian_vault_overrides(db: AsyncSession, book: Book, user_id: uuid.UUID) -> dict[str, str]:
+    rows = (
+        await db.execute(
+            select(ObsidianVaultNote.path, ObsidianVaultNote.content)
+            .where(ObsidianVaultNote.book_id == book.id, ObsidianVaultNote.user_id == user_id)
+        )
+    ).all()
+    return {path: content for path, content in rows}
+
+
+async def save_obsidian_vault_note(
+    db: AsyncSession,
+    *,
+    book: Book,
+    user_id: uuid.UUID,
+    path: str,
+    content: str,
+) -> dict:
+    normalized_path = (path or "").replace("\\", "/").strip()
+    if not normalized_path:
+        raise HTTPException(400, "Path is required")
+
+    normalized_content = content.replace("\r\n", "\n")
+
+    note: ObsidianVaultNote | None = (
+        await db.execute(
+            select(ObsidianVaultNote).where(
+                ObsidianVaultNote.book_id == book.id,
+                ObsidianVaultNote.user_id == user_id,
+                ObsidianVaultNote.path == normalized_path,
+            )
+        )
+    ).scalars().first()
+
+    if note is None:
+        note = ObsidianVaultNote(user_id=user_id, book_id=book.id, path=normalized_path, content=normalized_content)
+        db.add(note)
+    else:
+        note.path = normalized_path
+        note.content = normalized_content
+
+    await db.commit()
+    await db.refresh(note)
+    return {
+        "path": note.path,
+        "content": note.content,
+        "persisted": True,
+        "created_at": note.created_at,
+        "updated_at": note.updated_at,
+    }
 
 
 async def save_book_note(
@@ -279,6 +354,10 @@ async def book_out(db: AsyncSession, book: Book, user_id: uuid.UUID) -> BookOut:
         mode=book.mode or "reader",
         source_kind=book.source_kind or "single_upload",
         cover_url=cover_url,
+        cover_processed_url=processed_cover_url_for_book(book),
+        cover_edge_colors=book.cover_edge_colors or None,
+        cover_processed_at=book.cover_processed_at,
+        cover_crop_bounds=book.cover_crop_bounds or None,
         total_chapters=book.total_chapters,
         total_tokens=book.total_tokens,
         is_truncated=book.is_truncated,
@@ -299,35 +378,6 @@ async def book_out(db: AsyncSession, book: Book, user_id: uuid.UUID) -> BookOut:
 
 # ─── Cover helpers ────────────────────────────────────────────────────────────
 
-async def ensure_book_cover(db: AsyncSession, book: Book) -> None:
-    if book.cover_s3_key or book.format != "pdf":
-        return
-    if not book.s3_key:
-        return
-
-    from app.parsers.pdf_parser import extract_first_page_cover
-
-    try:
-        raw = await asyncio.to_thread(download_book, book.s3_key)
-    except Exception:
-        # Book file doesn't exist in S3, skip cover extraction
-        return
-
-    cover = await asyncio.to_thread(extract_first_page_cover, raw)
-    if not cover:
-        return
-
-    cover_bytes, content_type = cover
-    book.cover_s3_key = await asyncio.to_thread(
-        upload_binary,
-        f"covers/{book.user_id}/{uuid.uuid4()}.png",
-        cover_bytes,
-        content_type,
-    )
-    await db.commit()
-    await db.refresh(book)
-
-
 def cover_url_for_book(book: Book) -> str | None:
     if not book.cover_s3_key:
         return None
@@ -336,6 +386,79 @@ def cover_url_for_book(book: Book) -> str | None:
         return presigned
     token = create_asset_token(str(book.user_id), f"book-cover:{book.id}", expires_minutes=120)
     return f"{settings.API_V1_PREFIX}/books/{book.id}/cover?token={token}"
+
+
+def processed_cover_url_for_book(book: Book) -> str | None:
+    if not book.cover_s3_key:
+        return None
+    token = create_asset_token(str(book.user_id), f"book-cover-processed:{book.id}", expires_minutes=120)
+    return f"{settings.API_V1_PREFIX}/books/{book.id}/cover/processed?token={token}"
+
+
+async def process_and_store_book_cover(
+    db: AsyncSession,
+    book: Book,
+    cover_bytes: bytes,
+) -> ProcessedCover | None:
+    if not cover_bytes:
+        return None
+    try:
+        processed = await asyncio.to_thread(process_cover, cover_bytes)
+        processed_key = await asyncio.to_thread(
+            upload_binary,
+            f"covers/{book.user_id}/{book.id}/processed/{uuid.uuid4()}.png",
+            processed.image_bytes,
+            processed.mime_type,
+        )
+    except Exception:
+        return None
+
+    book.cover_processed_url = processed_key
+    book.cover_edge_colors = processed.edge_colors
+    book.cover_processed_at = datetime.now(UTC)
+    book.cover_crop_bounds = processed.crop_bounds
+    await db.flush()
+    return processed
+
+
+async def ensure_book_cover(db: AsyncSession, book: Book, *, force: bool = False) -> None:
+    if book.format == "pdf" and not book.cover_s3_key and book.s3_key:
+        from app.parsers.pdf_parser import extract_first_page_cover
+
+        try:
+            raw_book = await asyncio.to_thread(download_book, book.s3_key)
+        except Exception:
+            raw_book = None
+
+        if raw_book:
+            cover = await asyncio.to_thread(extract_first_page_cover, raw_book)
+            if cover:
+                cover_bytes, content_type = cover
+                try:
+                    book.cover_s3_key = await asyncio.to_thread(
+                        upload_binary,
+                        f"covers/{book.user_id}/{uuid.uuid4()}.png",
+                        cover_bytes,
+                        content_type,
+                    )
+                    await db.flush()
+                except Exception:
+                    return
+
+    if not book.cover_s3_key or (book.cover_processed_url and not force):
+        return
+
+    try:
+        raw = await asyncio.to_thread(download_book, book.cover_s3_key)
+    except Exception:
+        return
+
+    try:
+        await process_and_store_book_cover(db, book, raw)
+        await db.commit()
+        await db.refresh(book)
+    except Exception:
+        return
 
 
 # ─── Progress / word-count helpers ───────────────────────────────────────────
@@ -384,7 +507,73 @@ async def chapter_word_count(db: AsyncSession, book_id: uuid.UUID, chapter_numbe
 
 
 def clean_markdown_asterisks_str(text: str) -> str:
+    """Remove asterisks for word counting only - does not strip markdown syntax for display."""
+    if not text:
+        return ""
     return text.replace("**", "").replace("*", "")
+
+
+def markdown_to_html(markdown_text: str) -> str:
+    """Convert markdown text to HTML using markdown-it-py."""
+    if not markdown_text:
+        return ""
+    try:
+        from markdown_it import MarkdownIt
+
+        md = MarkdownIt()
+        html = md.render(markdown_text)
+        # Clean the HTML to ensure it only contains allowed tags
+        return clean_manuscript_html(html)
+    except ImportError:
+        # Fallback if markdown-it-py is not installed
+        # Basic conversion for common markdown elements
+        lines = markdown_text.split("\n")
+        html_parts = []
+        in_paragraph = False
+
+        for line in lines:
+            line = line.strip()
+            if not line:
+                if in_paragraph:
+                    html_parts.append("</p>")
+                    in_paragraph = False
+                continue
+
+            # Headers
+            if line.startswith("#"):
+                if in_paragraph:
+                    html_parts.append("</p>")
+                    in_paragraph = False
+                level = len(line) - len(line.lstrip("#"))
+                if level <= 6:
+                    content = line.lstrip("#").strip()
+                    html_parts.append(f"<h{level}>{content}</h{level}>")
+                else:
+                    html_parts.append(f"<p>{line}</p>")
+            # Lists
+            elif line.startswith("- ") or line.startswith("* "):
+                if in_paragraph:
+                    html_parts.append("</p>")
+                    in_paragraph = False
+                content = line[2:].strip()
+                html_parts.append(f"<li>{content}</li>")
+            # Bold/italic
+            else:
+                if not in_paragraph:
+                    html_parts.append("<p>")
+                    in_paragraph = True
+                # Simple bold/italic replacement
+                line = line.replace("**", "<strong>").replace("*", "<em>")
+                line = line.replace("<strong>", "<strong>", 1).replace("<em>", "<em>", 1)
+                # Close tags (simplified)
+                line = line.replace("<strong>", "<strong>", line.count("<strong>"))
+                line = line.replace("<em>", "<em>", line.count("<em>"))
+                html_parts.append(line)
+
+        if in_paragraph:
+            html_parts.append("</p>")
+
+        return clean_manuscript_html("".join(html_parts))
 
 
 def manuscript_text_to_html(text: str) -> str:
@@ -511,8 +700,29 @@ async def parse_import_upload(filename: str, raw: bytes, split_into_chapters: bo
         doc = Document(BytesIO(raw))
         text = "\n".join(paragraph.text for paragraph in doc.paragraphs if paragraph.text.strip())
         return [{"title": stem, "text": text, "number": 1}]
+    if lower.endswith(".doc"):
+        # Legacy .doc format requires additional system dependencies (antiword/textract)
+        # For now, we'll attempt to use python-docx which may work for some .doc files
+        # that are actually .docx with wrong extension
+        try:
+            from io import BytesIO
+
+            from docx import Document
+            doc = Document(BytesIO(raw))
+            text = "\n".join(paragraph.text for paragraph in doc.paragraphs if paragraph.text.strip())
+            return [{"title": stem, "text": text, "number": 1}]
+        except Exception:
+            raise HTTPException(
+                400,
+                "Legacy .doc files require additional system dependencies. Please convert to .docx format."
+            )
     if lower.endswith(".txt") or lower.endswith(".md") or lower.endswith(".fountain"):
-        return [{"title": stem, "text": raw.decode("utf-8", errors="ignore"), "number": 1}]
+        text = raw.decode("utf-8", errors="ignore")
+        if lower.endswith(".md"):
+            # Convert markdown to HTML for proper rendering
+            html = markdown_to_html(text)
+            return [{"title": stem, "text": text, "html": html, "number": 1}]
+        return [{"title": stem, "text": text, "number": 1}]
     raise HTTPException(400, f"Unsupported manuscript import file: {filename}")
 
 

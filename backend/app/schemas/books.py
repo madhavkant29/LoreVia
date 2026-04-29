@@ -18,6 +18,10 @@ class BookOut(BaseModel):
     mode: str
     source_kind: str
     cover_url: str | None = None
+    cover_processed_url: str | None = None
+    cover_edge_colors: dict[str, str] | None = None
+    cover_processed_at: datetime | None = None
+    cover_crop_bounds: dict[str, int] | None = None
     total_chapters: int | None
     total_tokens: int | None
     is_truncated: bool
@@ -90,6 +94,11 @@ class CharacterShareOut(BaseModel):
     expires_in_minutes: int
 
 
+class CharacterMergeBody(BaseModel):
+    primary_id: uuid.UUID
+    secondary_id: uuid.UUID
+
+
 class ChapterReportCharacter(BaseModel):
     id: str
     name: str
@@ -147,6 +156,36 @@ class AuthorAlertOut(BaseModel):
     chapter_ref: int | None = None
 
 
+class MajorEventOut(BaseModel):
+    chapter_number: int
+    chapter_title: str | None = None
+    event_title: str
+    description: str
+    importance: int
+    involved_characters: list[str] | None = None
+    involved_character_names: list[str] | None = None
+    event_type: str | None = None
+
+
+class CharacterEventOut(BaseModel):
+    character_id: str
+    character_name: str
+    chapter_number: int
+    event_title: str
+    description: str
+    impact_score: int
+    role: str | None = None
+    accomplishments: list[str] = []
+    growth_direction: str = "neutral"
+    growth_magnitude: int = 0
+    is_major: bool = False
+
+
+class BookEventsOut(BaseModel):
+    major_events: list[MajorEventOut]
+    character_events: list[CharacterEventOut]
+
+
 class PreWritingCheckOut(BaseModel):
     upcoming_chapter: int
     active_characters: list[PreWritingCharacterOut]
@@ -181,6 +220,38 @@ class BookNoteOut(BaseModel):
     body: str
     created_at: datetime
     updated_at: datetime
+
+
+class ObsidianPreviewFileOut(BaseModel):
+    path: str
+    content: str
+
+
+class ObsidianPreviewOut(BaseModel):
+    root_folder: str
+    files: list[ObsidianPreviewFileOut]
+
+
+class ObsidianVaultNoteBody(BaseModel):
+    path: str
+    content: str
+
+
+class ObsidianVaultNoteOut(BaseModel):
+    id: str
+    book_id: str
+    path: str
+    content: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class ObsidianVaultNoteSaveOut(BaseModel):
+    path: str
+    content: str
+    persisted: bool
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 class PublicUserStats(BaseModel):

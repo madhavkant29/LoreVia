@@ -224,7 +224,7 @@ def _normalize_chapters(chapters: list[dict]) -> list[dict]:
             text = _assemble_text_parts(text_parts_part)
             if not text and not chapter["images"]:
                 continue
-            title = chapter["title"] or f"Chapter {next_number}"
+            title = f"Chapter {next_number}"
             if len(split_parts) > 1:
                 title = f"{title} - Part {part_index}"
             normalized.append(

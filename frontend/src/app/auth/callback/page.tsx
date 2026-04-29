@@ -10,7 +10,6 @@ import { useAuthStore } from "@/lib/stores/authStore"
 
 export default function AuthCallbackPage() {
   const router = useRouter()
-  const setAuth = useAuthStore((state) => state.setAuth)
   const setUser = useAuthStore((state) => state.setUser)
 
   useEffect(() => {
@@ -55,9 +54,12 @@ export default function AuthCallbackPage() {
         const tokens = await authApi.loginWithSupabaseToken(session.access_token, acceptedTerms)
         if (!active) return
 
-        setAuth(tokens.access_token, tokens.refresh_token)
-        const me = await authApi.me()
+        const me = tokens.user ?? await authApi.me()
         if (!active) return
+        if (!me) {
+          fail("Could not load your profile after Google sign-in.")
+          return
+        }
         setUser(me)
         router.replace("/library")
       } catch (error) {
@@ -81,7 +83,7 @@ export default function AuthCallbackPage() {
     return () => {
       active = false
     }
-  }, [router, setAuth, setUser])
+  }, [router, setUser])
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-white px-4">

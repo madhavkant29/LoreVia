@@ -16,7 +16,7 @@ const CELL_WIDTH = 68
 export default function TimelinePage() {
   const { bookId } = useParams<{ bookId: string }>()
   const router = useRouter()
-  const { theme } = usePreferencesStore()
+  const { theme, timelineCollapsedSections, setTimelineCollapsedSection, setTimelineAllCollapsed } = usePreferencesStore()
   const isDark = theme === "dark"
 
   const [book, setBook] = useState<Book | null>(null)
@@ -43,13 +43,13 @@ export default function TimelinePage() {
   }, [chapters])
 
   return (
-    <div className={`min-h-screen px-4 py-8 transition-colors ${isDark ? "bg-[linear-gradient(180deg,#000000_0%,#060606_44%,#0d0d0d_100%)] text-slate-100" : "bg-[linear-gradient(180deg,#fcf7ef_0%,#f8f3ec_46%,#f5f0ea_100%)] text-stone-950"}`}>
-      <div className="mx-auto max-w-[92rem]">
+    <div className={`min-h-screen px-8 py-10 transition-colors ${isDark ? "bg-[linear-gradient(180deg,#000000_0%,#060606_44%,#0d0d0d_100%)] text-slate-100" : "bg-[linear-gradient(180deg,#fcf7ef_0%,#f8f3ec_46%,#f5f0ea_100%)] text-stone-950"}`}>
+      <div className="mx-auto max-w-[1600px]">
         <button onClick={() => router.back()} className={`text-sm font-medium transition ${isDark ? "text-slate-400 hover:text-white" : "text-stone-500 hover:text-stone-900"}`}>{"<- Back"}</button>
-        <h1 className={`mt-4 font-serif text-5xl ${isDark ? "text-white" : "text-stone-950"}`}>{isAuthor ? "Arc timeline" : "Major events"}</h1>
-        <p className={`mt-3 max-w-4xl text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
+        <h1 className={`mt-6 font-serif text-6xl ${isDark ? "text-white" : "text-stone-950"}`}>{isAuthor ? "Arc Timeline" : "Major Events"}</h1>
+        <p className={`mt-4 max-w-4xl text-base leading-relaxed ${isDark ? "text-slate-300" : "text-stone-600"}`}>
           {isAuthor
-            ? "A true chapter-axis view of your manuscript. Track when characters enter the story, how long threads stay active, and where relationships shift."
+            ? "Character presence, thread duration, and narrative transitions across your entire manuscript."
             : "A spoiler-safe structural map of the story so far."}
         </p>
 
@@ -59,20 +59,28 @@ export default function TimelinePage() {
 
         {chapterCount > 0 ? (
           <>
-            <div className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="mt-10 grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
               <MetricCard label="Chapters mapped" value={String(chapterCount)} isDark={isDark} />
               <MetricCard label="Character tracks" value={String(timeline?.character_tracks.length ?? 0)} isDark={isDark} />
               <MetricCard label="Plot threads" value={String(timeline?.thread_tracks.length ?? 0)} isDark={isDark} />
               <MetricCard label="Relationship shifts" value={String(timeline?.relationship_markers.length ?? 0)} isDark={isDark} />
             </div>
 
-            <div className={`mt-8 overflow-x-auto rounded-[1.8rem] border ${isDark ? "border-white/10 bg-black/70" : "border-stone-200 bg-white/90"}`}>
+            <div className={`mt-10 overflow-x-auto rounded-[2rem] border ${isDark ? "border-white/[0.06] bg-black/70" : "border-stone-200 bg-white/90"}`}>
               <div className="min-w-max">
                 <ChapterHeader chapters={chapters} isDark={isDark} />
                 <TimelineSection
+                  sectionId="characters"
                   title="Characters"
                   subtitle="Who is active across which chapters"
                   isDark={isDark}
+                  isCollapsed={timelineCollapsedSections.characters ?? false}
+                  onToggle={(collapsed) => {
+                    setTimelineCollapsedSection("characters", collapsed)
+                    if (collapsed) {
+                      setTimelineAllCollapsed(true)
+                    }
+                  }}
                   rows={timeline?.character_tracks ?? []}
                   renderRow={(track) => (
                     <TrackRow
@@ -90,9 +98,17 @@ export default function TimelinePage() {
                   )}
                 />
                 <TimelineSection
+                  sectionId="plotThreads"
                   title="Plot Threads"
                   subtitle="Open and resolved arcs over time"
                   isDark={isDark}
+                  isCollapsed={timelineCollapsedSections.plotThreads ?? false}
+                  onToggle={(collapsed) => {
+                    setTimelineCollapsedSection("plotThreads", collapsed)
+                    if (collapsed) {
+                      setTimelineAllCollapsed(true)
+                    }
+                  }}
                   rows={timeline?.thread_tracks ?? []}
                   renderRow={(track) => (
                     <TrackRow
@@ -104,16 +120,24 @@ export default function TimelinePage() {
                       startChapter={track.start_chapter}
                       endChapter={track.end_chapter}
                       chapterIndex={chapterIndex}
-                      colorClass={track.status === "resolved" ? (isDark ? "bg-stone-300/90" : "bg-stone-500") : (isDark ? "bg-cyan-400/90" : "bg-cyan-600")}
+                      colorClass={track.status === "resolved" ? (isDark ? "bg-stone-300/90" : "bg-stone-500") : (isDark ? "bg-violet-400/90" : "bg-violet-600")}
                       isDark={isDark}
                     />
                   )}
                 />
                 <RelationshipSection
+                  sectionId="relationships"
                   chapters={chapters}
                   markers={timeline?.relationship_markers ?? []}
                   chapterIndex={chapterIndex}
                   isDark={isDark}
+                  isCollapsed={timelineCollapsedSections.relationships ?? false}
+                  onToggle={(collapsed) => {
+                    setTimelineCollapsedSection("relationships", collapsed)
+                    if (collapsed) {
+                      setTimelineAllCollapsed(true)
+                    }
+                  }}
                 />
               </div>
             </div>
@@ -126,27 +150,27 @@ export default function TimelinePage() {
 
 function MetricCard({ label, value, isDark }: { label: string; value: string; isDark: boolean }) {
   return (
-    <div className={`rounded-[1.4rem] border p-4 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-white/90"}`}>
-      <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>{label}</p>
-      <p className={`mt-2 text-3xl font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{value}</p>
+    <div className={`rounded-3xl border px-7 py-6 ${isDark ? "border-white/[0.06] bg-zinc-950" : "border-stone-200 bg-white/90"}`}>
+      <p className={`text-xs font-semibold uppercase tracking-[0.28em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>{label}</p>
+      <p className={`mt-3 text-5xl font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{value}</p>
     </div>
   )
 }
 
 function ChapterHeader({ chapters, isDark }: { chapters: TimelineChapter[]; isDark: boolean }) {
   return (
-    <div className={`sticky top-0 z-10 flex border-b ${isDark ? "border-white/10 bg-[#050505]" : "border-stone-200 bg-[#fcf7ef]"}`}>
-      <div className={`sticky left-0 z-10 w-72 shrink-0 border-r px-5 py-4 ${isDark ? "border-white/10 bg-[#050505]" : "border-stone-200 bg-[#fcf7ef]"}`}>
-        <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Major-event lanes</p>
+    <div className={`sticky top-0 z-10 flex border-b ${isDark ? "border-white/[0.06] bg-[#050505]" : "border-stone-200 bg-[#fcf7ef]"}`}>
+      <div className={`sticky left-0 z-10 w-80 shrink-0 border-r px-6 py-5 ${isDark ? "border-white/[0.06] bg-[#050505]" : "border-stone-200 bg-[#fcf7ef]"}`}>
+        <p className={`text-xs font-semibold uppercase tracking-[0.28em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Major-event lanes</p>
       </div>
       <div className="flex">
-        {chapters.map((chapter) => (
+        {chapters.map((chapter, idx) => (
           <div
             key={chapter.number}
-            className={`shrink-0 border-r px-2 py-4 text-center ${isDark ? "border-white/10 text-slate-300" : "border-stone-200 text-stone-600"}`}
+            className={`shrink-0 border-r px-2 py-5 text-center ${isDark ? `border-white/[0.06] text-slate-300 ${idx % 2 === 0 ? 'bg-white/[0.015]' : ''}` : `border-stone-200 text-stone-600 ${idx % 2 === 0 ? 'bg-stone-50/50' : ''}`}`}
             style={{ width: CELL_WIDTH }}
           >
-            <p className="text-xs font-semibold">Ch. {chapter.number}</p>
+            <p className="text-sm font-semibold">Ch. {chapter.number}</p>
           </div>
         ))}
       </div>
@@ -155,25 +179,47 @@ function ChapterHeader({ chapters, isDark }: { chapters: TimelineChapter[]; isDa
 }
 
 function TimelineSection<T extends { id: string }>({
+  sectionId,
   title,
   subtitle,
   rows,
   renderRow,
   isDark,
+  isCollapsed,
+  onToggle,
 }: {
+  sectionId: string
   title: string
   subtitle: string
   rows: T[]
   renderRow: (row: T) => ReactNode
   isDark: boolean
+  isCollapsed: boolean
+  onToggle: (collapsed: boolean) => void
 }) {
   return (
-    <section className="border-b last:border-b-0 border-white/10">
-      <div className={`sticky left-0 z-[1] border-b px-5 py-4 ${isDark ? "border-white/10 bg-black/85" : "border-stone-200 bg-white/90"}`}>
-        <p className={`text-xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>{title}</p>
-        <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>{subtitle}</p>
-      </div>
-      {rows.map(renderRow)}
+    <section className="border-b last:border-b-0 border-white/[0.06]">
+      <button
+        onClick={() => onToggle(!isCollapsed)}
+        className={`sticky left-0 z-[1] w-full border-b px-6 py-5 text-left transition-colors ${isDark ? "border-white/[0.06] bg-black/85 hover:bg-black/95" : "border-stone-200 bg-white/90 hover:bg-white"}`}
+      >
+        <div className="flex items-center gap-3">
+          {isCollapsed ? (
+            <svg className={`h-5 w-5 ${isDark ? "text-slate-400" : "text-stone-400"}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+          ) : (
+            <svg className={`h-5 w-5 ${isDark ? "text-slate-400" : "text-stone-400"}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          )}
+          <div>
+            <p className={`text-xs font-semibold uppercase tracking-[0.28em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>{title}</p>
+            <p className={`mt-1 text-base ${isDark ? "text-slate-400" : "text-stone-500"}`}>{subtitle}</p>
+          </div>
+        </div>
+      </button>
+      {!isCollapsed && rows.map(renderRow)}
     </section>
   )
 }
@@ -204,18 +250,18 @@ function TrackRow({
   const width = Math.max(1, end - start + 1) * CELL_WIDTH - 12
 
   return (
-    <div className={`flex border-b ${isDark ? "border-white/5" : "border-stone-200/70"}`}>
-      <div className={`sticky left-0 z-[1] w-72 shrink-0 border-r px-5 py-4 ${isDark ? "border-white/10 bg-black/85" : "border-stone-200 bg-white/90"}`}>
-        <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{label}</p>
-        <p className={`mt-1 text-[11px] uppercase tracking-[0.16em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{meta}</p>
-        {detail ? <p className={`mt-2 text-xs leading-5 ${isDark ? "text-slate-400" : "text-stone-500"}`}>{detail}</p> : null}
+    <div className={`flex border-b ${isDark ? "border-white/[0.06]" : "border-stone-200/70"}`}>
+      <div className={`sticky left-0 z-[1] w-80 shrink-0 border-r px-6 py-5 ${isDark ? "border-white/[0.06] bg-black/85" : "border-stone-200 bg-white/90"}`}>
+        <p className={`text-base font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{label}</p>
+        <p className={`mt-1 text-xs uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{meta}</p>
+        {detail ? <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-400" : "text-stone-500"}`}>{detail}</p> : null}
       </div>
       <div className="relative flex">
-        {chapters.map((chapter) => (
-          <div key={chapter.number} className={`relative shrink-0 border-r ${isDark ? "border-white/5" : "border-stone-200/60"}`} style={{ width: CELL_WIDTH, minHeight: 96 }} />
+        {chapters.map((chapter, idx) => (
+          <div key={chapter.number} className={`relative shrink-0 border-r ${isDark ? `border-white/[0.06] ${idx % 2 === 0 ? 'bg-white/[0.015]' : ''}` : `border-stone-200/60 ${idx % 2 === 0 ? 'bg-stone-50/50' : ''}`}`} style={{ width: CELL_WIDTH, minHeight: 100 }} />
         ))}
         <div
-          className={`absolute top-1/2 h-4 -translate-y-1/2 rounded-full ${colorClass} shadow-[0_0_0_1px_rgba(255,255,255,0.08)]`}
+          className={`absolute top-1/2 h-4 -translate-y-1/2 rounded-full ${colorClass} shadow-[0_0_14px_rgba(16,185,129,0.35)]`}
           style={{ left: start * CELL_WIDTH + 6, width }}
         />
       </div>
@@ -224,35 +270,57 @@ function TrackRow({
 }
 
 function RelationshipSection({
+  sectionId,
   chapters,
   markers,
   chapterIndex,
   isDark,
+  isCollapsed,
+  onToggle,
 }: {
+  sectionId: string
   chapters: TimelineChapter[]
   markers: RelationshipTimelineMarker[]
   chapterIndex: Record<number, number>
   isDark: boolean
+  isCollapsed: boolean
+  onToggle: (collapsed: boolean) => void
 }) {
   return (
     <section>
-      <div className={`sticky left-0 z-[1] border-b px-5 py-4 ${isDark ? "border-white/10 bg-black/85" : "border-stone-200 bg-white/90"}`}>
-        <p className={`text-xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Relationship Shifts</p>
-        <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>Markers for turning points between characters</p>
-      </div>
-      {markers.map((marker) => (
-        <div key={marker.id} className={`flex border-b ${isDark ? "border-white/5" : "border-stone-200/70"}`}>
-          <div className={`sticky left-0 z-[1] w-72 shrink-0 border-r px-5 py-4 ${isDark ? "border-white/10 bg-black/85" : "border-stone-200 bg-white/90"}`}>
-            <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{marker.title}</p>
-            {marker.detail ? <p className={`mt-2 text-xs leading-5 ${isDark ? "text-slate-400" : "text-stone-500"}`}>{marker.detail}</p> : null}
+      <button
+        onClick={() => onToggle(!isCollapsed)}
+        className={`sticky left-0 z-[1] w-full border-b px-6 py-5 text-left transition-colors ${isDark ? "border-white/[0.06] bg-black/85 hover:bg-black/95" : "border-stone-200 bg-white/90 hover:bg-white"}`}
+      >
+        <div className="flex items-center gap-3">
+          {isCollapsed ? (
+            <svg className={`h-5 w-5 ${isDark ? "text-slate-400" : "text-stone-400"}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+          ) : (
+            <svg className={`h-5 w-5 ${isDark ? "text-slate-400" : "text-stone-400"}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          )}
+          <div>
+            <p className={`text-xs font-semibold uppercase tracking-[0.28em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Relationship Shifts</p>
+            <p className={`mt-1 text-base ${isDark ? "text-slate-400" : "text-stone-500"}`}>Markers for turning points between characters</p>
+          </div>
+        </div>
+      </button>
+      {!isCollapsed && markers.map((marker) => (
+        <div key={marker.id} className={`flex border-b ${isDark ? "border-white/[0.06]" : "border-stone-200/70"}`}>
+          <div className={`sticky left-0 z-[1] w-80 shrink-0 border-r px-6 py-5 ${isDark ? "border-white/[0.06] bg-black/85" : "border-stone-200 bg-white/90"}`}>
+            <p className={`text-base font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{marker.title}</p>
+            {marker.detail ? <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-400" : "text-stone-500"}`}>{marker.detail}</p> : null}
           </div>
           <div className="relative flex">
-            {chapters.map((chapter) => (
-              <div key={chapter.number} className={`relative shrink-0 border-r ${isDark ? "border-white/5" : "border-stone-200/60"}`} style={{ width: CELL_WIDTH, minHeight: 88 }} />
+            {chapters.map((chapter, idx) => (
+              <div key={chapter.number} className={`relative shrink-0 border-r ${isDark ? `border-white/[0.06] ${idx % 2 === 0 ? 'bg-white/[0.015]' : ''}` : `border-stone-200/60 ${idx % 2 === 0 ? 'bg-stone-50/50' : ''}`}`} style={{ width: CELL_WIDTH, minHeight: 100 }} />
             ))}
             <div
-              className={`absolute top-1/2 h-5 w-5 -translate-y-1/2 rounded-full ${isDark ? "bg-amber-300" : "bg-amber-500"}`}
-              style={{ left: (chapterIndex[marker.chapter_number] ?? 0) * CELL_WIDTH + CELL_WIDTH / 2 - 10 }}
+              className={`absolute top-1/2 h-6 w-6 -translate-y-1/2 rounded-full shadow-[0_0_14px_rgba(251,191,36,0.35)] ${isDark ? "bg-amber-400" : "bg-amber-500"}`}
+              style={{ left: (chapterIndex[marker.chapter_number] ?? 0) * CELL_WIDTH + CELL_WIDTH / 2 - 12 }}
             />
           </div>
         </div>
