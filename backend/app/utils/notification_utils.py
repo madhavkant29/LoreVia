@@ -3,9 +3,25 @@ Notification utility helpers for building and storing in-app notifications.
 """
 from __future__ import annotations
 
-from app.models.book import Book
+from dataclasses import dataclass
+
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.book import Book, Chapter
+from app.models.character import Character
 from app.models.intelligence import Notification
+from app.models.intelligence import CharacterRelationship, PlotThread
 from app.schemas.books import ChapterConsistencyReport
+from app.utils.book_utils import detect_chapter_continuity_flags
+
+
+@dataclass(frozen=True)
+class BookReadyStats:
+    character_count: int
+    relationship_count: int
+    plot_thread_count: int
+    continuity_issue_count: int
 
 
 def build_chapter_report_notification(
@@ -109,5 +125,67 @@ def build_upload_processing_notification(
             "mode": mode,
             "estimated_minutes": estimated_minutes,
             "file_size_mb": round(size_mb, 2),
+        },
+    )
+
+
+async def collect_book_ready_stats(db: AsyncSession, book: Book) -> BookReadyStats:
+    character_count = int(
+        (
+            await db.execute(
+                select(func.count()).select_from(Character).where(Character.book_id == book.id)
+            )
+        ).scalar_one()
+    )
+    relationship_count = int(
+        (
+            await db.execute(
+                select(func.count()).select_from(CharacterRelationship).where(CharacterRelationship.book_id == book.id)
+            )
+        ).scalar_one()
+    )
+    plot_thread_count = int(
+        (
+            await db.execute(
+                select(func.count()).select_from(PlotThread).where(PlotThread.book_id == book.id)
+            )
+        ).scalar_one()
+    )
+
+    continuity_issue_count = 0
+    chapter_rows = (
+        await db.execute(
+            select(Chapter.number)
+            .where(Chapter.book_id == book.id)
+            .order_by(Chapter.number)
+        )
+    ).all()
+    for (chapter_number,) in chapter_rows:
+        continuity_issue_count += len(await detect_chapter_continuity_flags(db, book.id, chapter_number))
+
+    return BookReadyStats(
+        character_count=character_count,
+        relationship_count=relationship_count,
+        plot_thread_count=plot_thread_count,
+        continuity_issue_count=continuity_issue_count,
+    )
+
+
+def build_book_ready_notification(book: Book, stats: BookReadyStats) -> Notification:
+    return Notification(
+        user_id=book.user_id,
+        book_id=book.id,
+        kind="book_ready",
+        title=f"{book.title} is ready",
+        body=(
+            f"We found {stats.character_count} characters, mapped {stats.relationship_count} relationships, "
+            f"identified {stats.plot_thread_count} plot threads, and flagged {stats.continuity_issue_count} continuity issues."
+        ),
+        data={
+            "book_title": book.title,
+            "character_count": stats.character_count,
+            "relationship_count": stats.relationship_count,
+            "plot_thread_count": stats.plot_thread_count,
+            "continuity_issue_count": stats.continuity_issue_count,
         },
     )

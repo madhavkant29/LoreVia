@@ -1,14 +1,17 @@
 import time
 import uuid
 from contextlib import asynccontextmanager
+from typing import cast
 
 import sentry_sdk
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse, Response
 from sentry_sdk.integrations.celery import CeleryIntegration
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 from sqlalchemy import text
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -29,8 +32,10 @@ if settings.SENTRY_DSN and not settings.DEBUG:
         profiles_sample_rate=0.1,
     )
 
-from app.utils.logging.logger import get_logger
+from app.utils.logging.errors import public_error_message, request_log_context, sanitize_validation_errors
+from app.utils.logging.logger import configure_logging, get_logger
 
+configure_logging()
 log = get_logger("lorevia.http")
 
 
@@ -52,6 +57,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins(),
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$",
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Accept", "Origin"],
@@ -149,6 +155,44 @@ app.add_middleware(SecurityHeadersMiddleware)
 app.include_router(api_router, prefix=settings.API_V1_PREFIX)
 
 
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    log.warning(
+        "http_exception",
+        extra=request_log_context(
+            request,
+            status_code=exc.status_code,
+            detail=exc.detail,
+        ),
+    )
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": public_error_message(exc.status_code)},
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    log.warning(
+        "request_validation_failed",
+        extra=request_log_context(
+            request,
+            status_code=422,
+            errors=sanitize_validation_errors(cast(list[dict[str, object]], list(exc.errors()))),
+        ),
+    )
+    return JSONResponse(status_code=422, content={"detail": public_error_message(422)})
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    log.exception(
+        "unhandled_exception",
+        extra=request_log_context(request, status_code=500),
+    )
+    return JSONResponse(status_code=500, content={"detail": public_error_message(500)})
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok", "app": "LoreVia", "version": "2.0.0"}
@@ -162,5 +206,6 @@ async def ready():
         r = await get_redis()
         await r.ping()
     except Exception:
+        log.exception("readiness_check_failed")
         return Response(status_code=503, content="not ready")
     return {"status": "ready"}

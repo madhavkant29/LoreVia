@@ -1,6 +1,7 @@
 "use client"
 import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
+import { renderRichTextHtml } from "@/lib/utils/richText"
 import type { ChapterCharacter, ChapterMedia } from "@/types/reader"
 
 interface Props {
@@ -10,6 +11,7 @@ interface Props {
   totalChapters: number | null
   textUrl: string | null
   textContent: string | null
+  htmlContent: string | null
   media: ChapterMedia[]
   characters: ChapterCharacter[]
   onTap: (word: string) => void
@@ -28,6 +30,7 @@ export function ChapterText({
   totalChapters,
   textUrl,
   textContent,
+  htmlContent,
   media,
   characters,
   onTap,
@@ -60,7 +63,7 @@ export function ChapterText({
     }
   }, [canUseQuoteMode, onQuoteSelect, quoteModeEnabled])
 
-  if (!text) {
+  if (!text && !htmlContent) {
     return (
       <div className="mx-auto max-w-2xl px-6 py-12">
         <div className="flex justify-center">
@@ -70,6 +73,8 @@ export function ChapterText({
     )
   }
 
+  const hasHtmlImages = Boolean(htmlContent && /<img\b/i.test(htmlContent))
+  const shouldRenderHtml = Boolean(htmlContent && (hasHtmlImages || !text))
   const blocks = annotateWithMedia(text, characters, media)
   const mentionClass = theme === "dark"
     ? "cursor-pointer rounded border-b border-dashed border-indigo-200/45 px-0.5 text-stone-100 transition-colors hover:bg-indigo-200/10 hover:text-white"
@@ -125,54 +130,70 @@ export function ChapterText({
               <div className={`mt-6 h-[2px] w-16 ${cardTone.divider}`} />
             </header>
 
-            <div
-              className={`reader-text whitespace-pre-wrap ${cardTone.prose}`}
-              style={{
-                fontFamily: fontStack,
-                fontSize: `${fontSize}px`,
-                lineHeight: fontFamily === "sans" ? "1.88" : "1.96",
-                maxWidth: "100%",
-                wordBreak: "normal",
-                overflowWrap: "normal",
-                hyphens: "none",
-              }}
-            >
-              {blocks.map((block, index) =>
-                block.type === "media" ? (
-                  mediaSrc(block.item) ? (
-                    <figure key={`media-${index}`} className={`my-10 overflow-hidden rounded-[1.5rem] border p-3 ${cardTone.media}`}>
-                      <div className="flex justify-center py-4">
-                        <img
-                          src={mediaSrc(block.item)}
-                          alt={block.item.caption ?? `Inline chapter image ${block.item.sort_order + 1}`}
-                          className="max-h-[28rem] w-auto rounded-[1rem] object-contain"
-                        />
-                      </div>
-                      <figcaption className={`px-3 pb-3 text-center text-xs italic ${cardTone.helper}`} style={{ fontFamily: "var(--reader-label)" }}>
-                        {block.item.caption ?? "Image from the source material, preserved in the reading flow."}
-                      </figcaption>
-                    </figure>
-                  ) : null
-                ) : (
-                  <p key={`block-${index}`} className="mb-8">
-                    {block.segments.map((segment, segmentIndex) =>
-                      segment.type === "text" ? (
-                        <span key={`text-${index}-${segmentIndex}`}>{segment.content}</span>
-                      ) : (
-                        <span
-                          key={`mention-${index}-${segmentIndex}`}
-                          className={mentionClass}
-                          onClick={() => onTap(segment.content)}
-                          title={`Tap for context: ${segment.content}`}
-                        >
-                          {segment.content}
-                        </span>
-                      )
-                    )}
-                  </p>
-                )
-              )}
-            </div>
+            {shouldRenderHtml ? (
+              <div
+                className={`reader-text note-rich-content ${cardTone.prose}`}
+                style={{
+                  fontFamily: fontStack,
+                  fontSize: `${fontSize}px`,
+                  lineHeight: fontFamily === "sans" ? "1.88" : "1.96",
+                  maxWidth: "100%",
+                  wordBreak: "normal",
+                  overflowWrap: "normal",
+                  hyphens: "none",
+                }}
+                dangerouslySetInnerHTML={{ __html: renderRichTextHtml(htmlContent || text) }}
+              />
+            ) : (
+              <div
+                className={`reader-text whitespace-pre-wrap ${cardTone.prose}`}
+                style={{
+                  fontFamily: fontStack,
+                  fontSize: `${fontSize}px`,
+                  lineHeight: fontFamily === "sans" ? "1.88" : "1.96",
+                  maxWidth: "100%",
+                  wordBreak: "normal",
+                  overflowWrap: "normal",
+                  hyphens: "none",
+                }}
+              >
+                {blocks.map((block, index) =>
+                  block.type === "media" ? (
+                    mediaSrc(block.item) ? (
+                      <figure key={`media-${index}`} className={`my-10 overflow-hidden rounded-[1.5rem] border p-3 ${cardTone.media}`}>
+                        <div className="flex justify-center py-4">
+                          <img
+                            src={mediaSrc(block.item)}
+                            alt={block.item.caption ?? `Inline chapter image ${block.item.sort_order + 1}`}
+                            className="max-h-[28rem] w-auto rounded-[1rem] object-contain"
+                          />
+                        </div>
+                        <figcaption className={`px-3 pb-3 text-center text-xs italic ${cardTone.helper}`} style={{ fontFamily: "var(--reader-label)" }}>
+                          {block.item.caption ?? "Image from the source material, preserved in the reading flow."}
+                        </figcaption>
+                      </figure>
+                    ) : null
+                  ) : (
+                    <p key={`block-${index}`} className="mb-8">
+                      {block.segments.map((segment, segmentIndex) =>
+                        segment.type === "text" ? (
+                          <span key={`text-${index}-${segmentIndex}`}>{segment.content}</span>
+                        ) : (
+                          <span
+                            key={`mention-${index}-${segmentIndex}`}
+                            className={mentionClass}
+                            onClick={() => onTap(segment.content)}
+                            title={`Tap for context: ${segment.content}`}
+                          >
+                            {segment.content}
+                          </span>
+                        )
+                      )}
+                    </p>
+                  )
+                )}
+              </div>
+            )}
 
             <footer
               className={`mt-20 flex flex-col gap-3 border-t pt-8 text-sm italic sm:flex-row sm:items-center sm:justify-between ${theme === "dark" ? "border-white/10 text-stone-400" : "border-stone-200 text-stone-500"}`}

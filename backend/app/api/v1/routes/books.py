@@ -1,6 +1,7 @@
 import asyncio
 import uuid
 from datetime import UTC, datetime
+from typing import Any, cast
 
 import bleach  # type: ignore[import-untyped]
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
@@ -23,10 +24,21 @@ _COVER_MAGIC: dict[bytes, tuple[str, str]] = {
     b"RIFF": ("webp", "image/webp"),   # bytes [8:12] must be b"WEBP"
 }
 
+BLEACH_EMPTY_TAGS: Any = frozenset()
+
+
+def _clean_text(value: object | None) -> str:
+    return str(bleach.clean(str(value or "").strip(), tags=BLEACH_EMPTY_TAGS, strip=True))
+
+
+def _clean_optional_text(value: str | None) -> str | None:
+    cleaned = _clean_text(value)
+    return cleaned or None
+
 
 async def _read_upload_bounded(upload: UploadFile, max_bytes: int, label: str) -> bytes:
     """Read an UploadFile in chunks, raising 413 if the size cap is exceeded."""
-    parts = []
+    parts: list[bytes] = []
     total = 0
 
     while True:
@@ -70,6 +82,7 @@ from app.core.storage import download_book, upload_binary, upload_book_bytes
 from app.engine.character.consolidator import consolidate_characters
 from app.engine.character.profile_builder import build_description
 from app.models.book import Book, Chapter, Series, SeriesBook
+from app.models.book import ObsidianVaultNoteSource
 from app.models.character import Character
 from app.models.intelligence import ChapterSummary, CharacterRelationship, PlotThread, QuoteEntry
 from app.models.progress import ReadingProgress
@@ -79,21 +92,27 @@ from app.schemas.books import (
     BookNoteBody,
     BookNoteOut,
     BookOut,
+    CorkboardCardOut,
     CharacterEventOut,
     ChapterConsistencyReport,
     ChapterVersionOut,
     CharacterMergeBody,
     CharacterShareOut,
     CharacterUpdateBody,
+    EmotionalArcOverviewOut,
     ManuscriptImportResult,
     MajorEventOut,
     ObsidianPreviewOut,
+    ObsidianGraphOut,
+    ObsidianNoteLinkListOut,
     ObsidianVaultNoteBody,
     ObsidianVaultNoteOut,
     ObsidianVaultNoteSaveOut,
     PreWritingCheckOut,
     PrivateUserStats,
     PublicUserStats,
+    ReadabilityMetricsOut,
+    ReadabilityRequestBody,
     RelationshipUpdateBody,
     SeriesBody,
     SeriesBookStatusBody,
@@ -101,27 +120,39 @@ from app.schemas.books import (
     SeriesMembershipBody,
     SeriesOut,
     UserStatsOut,
+    WriterWorkspaceBody,
+    WriterWorkspaceOut,
 )
 from app.utils.book_utils import (
     as_bool,
     book_out,
     build_chapter_consistency_report,
     build_character_card_payload,
+    build_emotional_arc_payload,
+    build_writer_workspace_payload,
+    build_obsidian_graph,
     build_prewriting_check,
     clean_manuscript_html,
     compute_words_read_for_book,
+    delete_obsidian_note,
     delete_book_note,
     deserialize_manuscript_content,
     ensure_book_cover,
+    export_obsidian_notes_zip,
     get_owned_book,
     get_owned_series,
+    import_obsidian_notes_zip,
     list_book_notes,
     list_chapter_consistency_reports,
     list_chapter_versions,
+    list_obsidian_note_relations,
+    list_obsidian_notes,
     list_user_notes,
     list_obsidian_vault_notes,
     load_obsidian_vault_overrides,
     next_chapter_number,
+    estimate_readability,
+    normalize_writer_workspace,
     normalize_imported_chapters,
     parse_import_upload,
     process_and_store_book_cover,
@@ -155,6 +186,7 @@ from app.utils.export_utils import (
     character_card_markdown,
     character_card_pdf,
     manuscript_docx,
+    manuscript_epub,
     manuscript_pdf,
 )
 from app.utils.notification_utils import (
@@ -220,17 +252,18 @@ async def upload_book_endpoint(
     description: str | None = Form(None),
     mode: str = Form("reader"),
     auto_extract_cover: str = Form("true"),
+    preserve_chapter_numbers: str = Form("false"),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
     _=Depends(check_upload_limit),
 ):
-    title = bleach.clean(title, tags=[], strip=True) if title else ""
+    title = _clean_text(title) if title else ""
     if author:
-        author = bleach.clean(author, tags=[], strip=True)
+        author = _clean_text(author)
     if genre:
-        genre = bleach.clean(genre, tags=[], strip=True)
+        genre = _clean_text(genre)
     if description:
-        description = bleach.clean(description, tags=[], strip=True)
+        description = _clean_text(description)
     if not file.filename:
         raise HTTPException(400, "No file")
     if visibility not in {"private", "public"}:
@@ -282,6 +315,7 @@ async def upload_book_endpoint(
         public_description=description,
         mode=mode,
         source_kind="single_upload",
+        preserve_chapter_numbers=as_bool(preserve_chapter_numbers),
     )
     db.add(book)
     await db.flush()
@@ -342,9 +376,8 @@ async def get_book_events(
             .order_by(Chapter.number)
         )
     ).all()
-    characters = (
-        await db.execute(select(Character).where(Character.book_id == book.id).order_by(Character.name))
-    ).scalars().all()
+    characters_result = await db.execute(select(Character).where(Character.book_id == book.id).order_by(Character.name))
+    characters = list(characters_result.scalars().all())
     character_names_by_id = {str(character.id): character.name for character in characters}
 
     major_events: list[dict] = []
@@ -382,11 +415,10 @@ async def get_reader_safe_book_events(
     current_user=Depends(get_current_user),
 ):
     book = await get_owned_book(db, book_id, current_user.id)
-    progress = (
-        await db.execute(
-            select(ReadingProgress).where(ReadingProgress.user_id == current_user.id, ReadingProgress.book_id == book.id)
-        )
-    ).scalar()
+    progress_result = await db.execute(
+        select(ReadingProgress).where(ReadingProgress.user_id == current_user.id, ReadingProgress.book_id == book.id)
+    )
+    progress = progress_result.scalar()
     max_visible_chapter = chapter or (progress.current_chapter if progress else 1)
     payload = await get_book_events(book_id=book_id, db=db, current_user=current_user)
     return BookEventsOut(
@@ -413,8 +445,8 @@ async def import_manuscript_content(
     if not text and not files:
         raise HTTPException(400, "Provide text or one or more files")
 
-    import_jobs: list[dict] = []
-    normalized_title = bleach.clean((title or "").strip(), tags=[], strip=True) or None
+    import_jobs: list[dict[str, object]] = []
+    normalized_title = _clean_optional_text(title)
     next_number = await next_chapter_number(db, book.id)
     replace_flag = as_bool(replace_existing)
     chunk_flag = as_bool(chunk_long_documents)
@@ -460,23 +492,27 @@ async def import_manuscript_content(
                 chunk_long_documents=chunk_flag,
             )
         )
-        next_number = max(next_number, max((job["number"] for job in import_jobs), default=next_number) + 1)
+        next_number = max(
+            next_number,
+            max((int(cast(Any, job["number"])) for job in import_jobs), default=next_number) + 1,
+        )
 
     if not import_jobs:
         raise HTTPException(400, "No importable manuscript content was found")
 
     imported_numbers: list[int] = []
     for job in import_jobs:
+        job_number = int(cast(Any, job["number"]))
         if replace_flag:
             existing = (
-                await db.execute(select(Chapter).where(Chapter.book_id == book.id, Chapter.number == job["number"]))
+                await db.execute(select(Chapter).where(Chapter.book_id == book.id, Chapter.number == job_number))
             ).scalar()
             if existing is not None:
                 await snapshot_chapter_version(
                     db,
                     book,
                     existing,
-                    note=f"Snapshot before replacing Chapter {job['number']}",
+                    note=f"Snapshot before replacing Chapter {job_number}",
                 )
                 await db.delete(existing)
                 await db.flush()
@@ -484,14 +520,14 @@ async def import_manuscript_content(
             db,
             book,
             {
-                "number": job["number"],
+                "number": job_number,
                 "title": job.get("title"),
                 "text": job.get("text", ""),
                 "html": job.get("html"),
                 "images": [],
             },
         )
-        imported_numbers.append(job["number"])
+        imported_numbers.append(job_number)
 
     total_chapters = await db.scalar(select(func.count()).select_from(Chapter).where(Chapter.book_id == book.id)) or 0
     book.total_chapters = total_chapters
@@ -581,7 +617,7 @@ async def update_book_series(
     if not book or book.user_id != current_user.id:
         raise HTTPException(404, "Book not found")
 
-    series_name = bleach.clean((body.series_name or "").strip(), tags=[], strip=True)
+    series_name = _clean_text(body.series_name)
     if body.series_order is not None and body.series_order < 1:
         raise HTTPException(400, "Series order must be at least 1")
 
@@ -636,13 +672,12 @@ async def list_series(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    rows = (
-        await db.execute(
-            select(Series)
-            .where(Series.user_id == current_user.id)
-            .order_by(Series.created_at.desc(), Series.name)
-        )
-    ).scalars().all()
+    rows_result = await db.execute(
+        select(Series)
+        .where(Series.user_id == current_user.id)
+        .order_by(Series.created_at.desc(), Series.name)
+    )
+    rows = list(rows_result.scalars().all())
     output: list[SeriesOut] = []
     for series in rows:
         memberships = (
@@ -653,7 +688,7 @@ async def list_series(
                 .order_by(SeriesBook.position, Book.created_at)
             )
         ).all()
-        books = []
+        books: list[BookOut] = []
         for membership, book in memberships:
             enriched = await book_out(db, book, current_user.id)
             enriched.marked_complete_in_series = membership.marked_complete
@@ -668,8 +703,8 @@ async def create_series(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    name = bleach.clean(body.name.strip(), tags=[], strip=True)
-    description = bleach.clean((body.description or "").strip(), tags=[], strip=True) or None
+    name = _clean_text(body.name)
+    description = _clean_optional_text(body.description)
     if not name:
         raise HTTPException(400, "Series name is required")
 
@@ -787,7 +822,7 @@ async def list_books(
     if not include_hidden:
         stmt = stmt.where(Book.hidden_at.is_(None))
     result = await db.execute(stmt.order_by(Book.created_at.desc()))
-    books = result.scalars().all()
+    books = list(result.scalars().all())
     return [await book_out(db, book, current_user.id) for book in books]
 
 
@@ -796,13 +831,11 @@ async def get_user_stats(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    books = (
-        await db.execute(select(Book).where(Book.user_id == current_user.id).order_by(Book.created_at.desc()))
-    ).scalars().all()
+    books_result = await db.execute(select(Book).where(Book.user_id == current_user.id).order_by(Book.created_at.desc()))
+    books = list(books_result.scalars().all())
 
-    progress_rows = (
-        await db.execute(select(ReadingProgress).where(ReadingProgress.user_id == current_user.id))
-    ).scalars().all()
+    progress_rows_result = await db.execute(select(ReadingProgress).where(ReadingProgress.user_id == current_user.id))
+    progress_rows = list(progress_rows_result.scalars().all())
     progress_by_book = {progress.book_id: progress for progress in progress_rows}
 
     total_books_read = 0
@@ -916,6 +949,130 @@ async def remove_book_note(
     return Response(status_code=204)
 
 
+@router.get("/{book_id}/notes/obsidian", response_model=list[ObsidianVaultNoteOut])
+async def list_book_obsidian_notes(
+    book_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    return await list_obsidian_notes(
+        db,
+        book=book,
+        user_id=current_user.id,
+        source=ObsidianVaultNoteSource.USER_NOTES.value,
+    )
+
+
+@router.put("/{book_id}/notes/obsidian", response_model=ObsidianVaultNoteSaveOut)
+async def save_book_obsidian_note(
+    book_id: uuid.UUID,
+    body: ObsidianVaultNoteBody,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    return await save_obsidian_vault_note(
+        db,
+        book=book,
+        user_id=current_user.id,
+        path=body.path,
+        content=body.content,
+        source=ObsidianVaultNoteSource.USER_NOTES.value,
+    )
+
+
+@router.delete("/{book_id}/notes/obsidian/{path:path}", status_code=204)
+async def delete_book_obsidian_note(
+    book_id: uuid.UUID,
+    path: str,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    await delete_obsidian_note(
+        db,
+        book=book,
+        user_id=current_user.id,
+        path=path,
+        source=ObsidianVaultNoteSource.USER_NOTES.value,
+    )
+    return Response(status_code=204)
+
+
+@router.post("/{book_id}/notes/obsidian/import", response_model=list[ObsidianVaultNoteSaveOut])
+async def import_book_obsidian_notes(
+    book_id: uuid.UUID,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    archive_bytes = await _read_upload_bounded(file, 25 * 1024 * 1024, "ZIP file")
+    return await import_obsidian_notes_zip(
+        db,
+        book=book,
+        user_id=current_user.id,
+        archive_bytes=archive_bytes,
+        source=ObsidianVaultNoteSource.USER_NOTES.value,
+    )
+
+
+@router.get("/{book_id}/notes/obsidian/export")
+async def export_book_obsidian_notes(
+    book_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    notes = await list_obsidian_notes(
+        db,
+        book=book,
+        user_id=current_user.id,
+        source=ObsidianVaultNoteSource.USER_NOTES.value,
+    )
+    zip_data = export_obsidian_notes_zip(notes=notes)
+    safe_title = _clean_text(book.title or "notes").strip() or "notes"
+    filename = f"{safe_title.replace(' ', '-')}-obsidian-notes.zip"
+    return Response(
+        content=zip_data,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/{book_id}/notes/obsidian/graph", response_model=ObsidianGraphOut)
+async def get_book_obsidian_graph(
+    book_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    notes = await list_obsidian_notes(
+        db,
+        book=book,
+        user_id=current_user.id,
+        source=ObsidianVaultNoteSource.USER_NOTES.value,
+    )
+    return build_obsidian_graph(notes)
+
+
+@router.get("/{book_id}/notes/obsidian/relations", response_model=ObsidianNoteLinkListOut)
+async def get_book_obsidian_note_relations(
+    book_id: uuid.UUID,
+    path: str = Query(..., min_length=1),
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    return await list_obsidian_note_relations(
+        db,
+        book=book,
+        user_id=current_user.id,
+        path=path,
+    )
+
+
 @router.get("/{book_id}/pre-writing-check", response_model=PreWritingCheckOut)
 async def get_prewriting_check(
     book_id: uuid.UUID,
@@ -951,10 +1108,66 @@ async def get_book_chapter_versions(
     return await list_chapter_versions(db, book, chapter_number, limit)
 
 
+@router.get("/{book_id}/writer-workspace", response_model=WriterWorkspaceOut)
+async def get_writer_workspace(
+    book_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    return WriterWorkspaceOut(**build_writer_workspace_payload(book))
+
+
+@router.put("/{book_id}/writer-workspace", response_model=WriterWorkspaceOut)
+async def update_writer_workspace(
+    book_id: uuid.UUID,
+    body: WriterWorkspaceBody,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    next_payload = normalize_writer_workspace(
+        {
+            **build_writer_workspace_payload(book),
+            **body.model_dump(exclude_none=True),
+        }
+    )
+    book.writer_workspace = next_payload
+    await db.commit()
+    await db.refresh(book)
+    return WriterWorkspaceOut(**build_writer_workspace_payload(book))
+
+
+@router.post("/{book_id}/manuscript/readability", response_model=ReadabilityMetricsOut)
+async def manuscript_readability(
+    book_id: uuid.UUID,
+    body: ReadabilityRequestBody,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    _ = book
+    return ReadabilityMetricsOut(**estimate_readability(body.text))
+
+
+@router.get("/{book_id}/emotional-arc", response_model=EmotionalArcOverviewOut)
+async def get_emotional_arc(
+    book_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    characters = (
+        await db.execute(select(Character).where(Character.book_id == book.id).order_by(Character.mention_count.desc(), Character.name))
+    ).scalars().all()
+    return EmotionalArcOverviewOut(**build_emotional_arc_payload(list(characters)))
+
+
 @router.get("/{book_id}/manuscript/export")
 async def export_manuscript(
     book_id: uuid.UUID,
-    format: str = Query("docx", pattern="^(pdf|docx)$"),
+    format: str = Query("docx", pattern="^(pdf|docx|epub)$"),
+    preset: str = Query("standard_manuscript", pattern="^(standard_manuscript|trade_paperback|kdp_paperback)$"),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -985,14 +1198,21 @@ async def export_manuscript(
 
     filename_base = "".join(ch for ch in (book.title or "lorevia") if ch.isalnum() or ch in {" ", "-", "_"}).strip().replace(" ", "-") or "lorevia"
     if format == "pdf":
-        raw = manuscript_pdf(title=book.title or "LoreVia Manuscript", chapters=chapters)
+        raw = manuscript_pdf(title=book.title or "LoreVia Manuscript", chapters=chapters, preset=preset)
         return Response(
             content=raw,
             media_type="application/pdf",
             headers={"Content-Disposition": f'attachment; filename="{filename_base}-manuscript.pdf"'},
         )
+    if format == "epub":
+        raw = manuscript_epub(title=book.title or "LoreVia Manuscript", chapters=chapters, preset=preset)
+        return Response(
+            content=raw,
+            media_type="application/epub+zip",
+            headers={"Content-Disposition": f'attachment; filename="{filename_base}-manuscript.epub"'},
+        )
 
-    raw = manuscript_docx(title=book.title or "LoreVia Manuscript", chapters=chapters)
+    raw = manuscript_docx(title=book.title or "LoreVia Manuscript", chapters=chapters, preset=preset)
     return Response(
         content=raw,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -1114,7 +1334,7 @@ async def get_book_characters(book_id: uuid.UUID, db: AsyncSession = Depends(get
     result = await db.execute(select(Character).where(Character.book_id == book_id).order_by(Character.first_chapter, Character.name))
     characters = [char for char in result.scalars().all() if is_displayable_character(char)]
     rel_result = await db.execute(select(CharacterRelationship).where(CharacterRelationship.book_id == book_id))
-    relationships = rel_result.scalars().all()
+    relationships = list(rel_result.scalars().all())
     # Plot threads data available if needed later
 
     char_by_id = {char.id: char for char in characters}
@@ -1201,17 +1421,17 @@ async def update_book_character(
         raise HTTPException(400, "Character editing is only available in author mode")
 
     if body.name is not None:
-        cleaned_name = bleach.clean(body.name, tags=[], strip=True).strip()
+        cleaned_name = _clean_text(body.name).strip()
         if not cleaned_name:
             raise HTTPException(400, "Character name cannot be empty")
-        character.name = cleaned_name
+        cast(Any, character).name = cleaned_name
     if body.aliases is not None:
         character.aliases = clean_string_list(body.aliases)
     if body.role is not None:
-        role = bleach.clean(body.role, tags=[], strip=True).strip().lower() or None
+        role = _clean_text(body.role).strip().lower() or None
         if role not in {None, "mc", "sc", "background"}:
             raise HTTPException(400, "Invalid role")
-        character.role = role
+        cast(Any, character).role = role
     if body.description is not None:
         apply_manual_character_description(character, body.description)
     if body.arc_summary is not None:
@@ -1248,6 +1468,25 @@ async def update_book_character(
     }
 
 
+@router.delete("/{book_id}/characters/{character_id}")
+async def delete_book_character(
+    book_id: uuid.UUID,
+    character_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    character = await db.get(Character, character_id)
+    if not character or character.book_id != book.id:
+        raise HTTPException(404, "Character not found")
+    if book.mode != "author":
+        raise HTTPException(400, "Character correction is only available in author mode")
+
+    await db.delete(character)
+    await db.commit()
+    return {"deleted": str(character_id)}
+
+
 @router.put("/{book_id}/relationships/{relationship_id}")
 async def update_book_relationship(
     book_id: uuid.UUID,
@@ -1263,7 +1502,7 @@ async def update_book_relationship(
     if book.mode != "author":
         raise HTTPException(400, "Relationship editing is only available in author mode")
 
-    rel_type = bleach.clean(body.rel_type or "", tags=[], strip=True).strip().lower().replace(" ", "_")
+    rel_type = _clean_text(body.rel_type).strip().lower().replace(" ", "_")
     if not rel_type:
         raise HTTPException(400, "Relationship type is required")
     if body.sentiment is not None and not -1.0 <= body.sentiment <= 1.0:
@@ -1275,7 +1514,7 @@ async def update_book_relationship(
     if body.from_chapter is not None and body.to_chapter is not None and body.to_chapter < body.from_chapter:
         raise HTTPException(400, "to_chapter cannot be earlier than from_chapter")
 
-    relationship.rel_type = rel_type
+    cast(Any, relationship).rel_type = rel_type
     relationship.sentiment = body.sentiment
     relationship.description = clean_optional_text(body.description)
     if body.from_chapter is not None:
@@ -1410,10 +1649,10 @@ async def export_character_bible(
     characters = [char for char in result.scalars().all() if is_displayable_character(char)]
 
     rel_result = await db.execute(select(CharacterRelationship).where(CharacterRelationship.book_id == book_id))
-    relationships = rel_result.scalars().all()
+    relationships = list(rel_result.scalars().all())
 
     plot_result = await db.execute(select(PlotThread).where(PlotThread.book_id == book_id))
-    plot_threads = plot_result.scalars().all()
+    plot_threads = list(plot_result.scalars().all())
 
     char_by_id = {char.id: char for char in characters}
     rel_summaries: dict[str, list[str]] = {}
@@ -1524,6 +1763,7 @@ async def save_character_bible_obsidian_note(
         user_id=current_user.id,
         path=body.path,
         content=body.content,
+        source=ObsidianVaultNoteSource.CHARACTER_BIBLE.value,
     )
 
 

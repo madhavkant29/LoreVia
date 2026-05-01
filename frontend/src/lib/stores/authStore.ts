@@ -5,6 +5,7 @@ interface AuthStore {
   user: User | null
   hydrated: boolean
   setUser: (user: User) => void
+  setHydrated: () => void
   logout: () => void
 }
 
@@ -12,5 +13,11 @@ export const useAuthStore = create<AuthStore>()((set) => ({
   user: null,
   hydrated: false,
   setUser: (user) => set({ user, hydrated: true }),
-  logout: () => set({ user: null, hydrated: true }),
+  setHydrated: () => set({ hydrated: true }),
+  logout: () => {
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem("lorevia-auth")
+    }
+    set({ user: null, hydrated: true })
+  },
 }))

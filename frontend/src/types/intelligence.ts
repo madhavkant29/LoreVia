@@ -203,3 +203,23 @@ export interface VoiceConsistencyResponse {
   retrieved_passages: EditorialReviewPassage[]
   characters_reviewed: string[]
 }
+
+export interface ProseTightenResponse {
+  tightened_text: string
+  rationale: string[]
+  changed: boolean
+}
+
+export interface InlineContinuityIssue {
+  severity: string
+  title: string
+  snippet: string
+  explanation: string
+  suggestion: string
+}
+
+export interface InlineContinuityResponse {
+  issues: InlineContinuityIssue[]
+  memory_bank: string[]
+  overall_verdict: string
+}

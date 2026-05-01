@@ -2,7 +2,7 @@
 Grounded intelligence routes: contextual Q&A + character chat.
 """
 import uuid
-from typing import Any, TypedDict, cast
+from typing import Any, Literal, NotRequired, TypedDict, cast
 
 from fastapi import APIRouter, Depends, HTTPException
 from openai import AsyncOpenAI
@@ -19,19 +19,19 @@ from app.engine.search.semantic import semantic_search
 from app.models.book import Book, Series, SeriesBook
 from app.models.character import Character
 from app.models.intelligence import WikiEntry
-from app.schemas.intelligence import ChatRequest, GroundedAnswerOut, QARequest
+from app.schemas.intelligence import ChatRequest, GroundedAnswerOut, GroundedCitationOut, QARequest
 from app.utils.intelligence_utils import build_grounded_qa_context
 
 router = APIRouter()
 
 
-class CrossBookMatch(TypedDict, total=False):
+class CrossBookMatch(TypedDict):
     left_book_id: str
     left_name: str
     right_book_id: str
     right_name: str
     similarity: float
-    entry_type: str | None
+    entry_type: NotRequired[str | None]
 
 
 def get_client() -> AsyncOpenAI:
@@ -55,7 +55,19 @@ async def qa_endpoint(
         cached_payload = cast(dict[str, Any], cached)
         return GroundedAnswerOut(
             answer=str(cached_payload["answer"]),
-            citations=list(cached_payload.get("citations") or []),
+            citations=[
+                GroundedCitationOut(
+                    chapter_num=int(cast(Any, citation["chapter_num"])),
+                    chapter_title=cast(str | None, citation.get("chapter_title")),
+                    excerpt=str(cast(Any, citation["excerpt"])),
+                    source_type=cast(
+                        Literal["summary", "passage"],
+                        cast(Any, citation["source_type"]),
+                    ),
+                    relevance=cast(float | None, citation.get("relevance")),
+                )
+                for citation in cast(list[dict[str, Any]], cached_payload.get("citations") or [])
+            ],
             cached=True,
         )
 
@@ -94,7 +106,22 @@ async def qa_endpoint(
         answer = (response.choices[0].message.content or "").strip()
         payload = {"answer": answer, "citations": citations}
         await cache_set(cache_key, payload, settings.REDIS_TTL_SUMMARY)
-        return GroundedAnswerOut(answer=answer, citations=citations)
+        return GroundedAnswerOut(
+            answer=answer,
+            citations=[
+                GroundedCitationOut(
+                    chapter_num=int(cast(Any, citation["chapter_num"])),
+                    chapter_title=cast(str | None, citation.get("chapter_title")),
+                    excerpt=str(cast(Any, citation["excerpt"])),
+                    source_type=cast(
+                        Literal["summary", "passage"],
+                        cast(Any, citation["source_type"]),
+                    ),
+                    relevance=cast(float | None, citation.get("relevance")),
+                )
+                for citation in citations
+            ],
+        )
     finally:
         await client.close()
 
@@ -167,35 +194,32 @@ async def cross_book_intelligence(
     if book.primary_series_id:
         series = await db.get(Series, book.primary_series_id)
         series_name = series.name if series else None
-        series_book_rows = (
-            await db.execute(
-                select(Book)
-                .join(SeriesBook, SeriesBook.book_id == Book.id)
-                .where(
-                    SeriesBook.series_id == book.primary_series_id,
-                    Book.user_id == current_user.id,
-                )
+        series_book_rows_result = await db.execute(
+            select(Book)
+            .join(SeriesBook, SeriesBook.book_id == Book.id)
+            .where(
+                SeriesBook.series_id == book.primary_series_id,
+                Book.user_id == current_user.id,
             )
-        ).scalars().all()
+        )
+        series_book_rows = series_book_rows_result.scalars().all()
         comparison_books = list(series_book_rows) or [book]
 
     book_ids = [item.id for item in comparison_books]
-    characters = (
-        await db.execute(
-            select(Character).where(
-                Character.book_id.in_(book_ids),
-                Character.embedding.is_not(None),
-            )
+    characters_result = await db.execute(
+        select(Character).where(
+            Character.book_id.in_(book_ids),
+            Character.embedding.is_not(None),
         )
-    ).scalars().all()
-    wikis = (
-        await db.execute(
-            select(WikiEntry).where(
-                WikiEntry.book_id.in_(book_ids),
-                WikiEntry.embedding.is_not(None),
-            )
+    )
+    characters = characters_result.scalars().all()
+    wikis_result = await db.execute(
+        select(WikiEntry).where(
+            WikiEntry.book_id.in_(book_ids),
+            WikiEntry.embedding.is_not(None),
         )
-    ).scalars().all()
+    )
+    wikis = wikis_result.scalars().all()
 
     character_matches: list[CrossBookMatch] = []
     for idx, left in enumerate(characters):

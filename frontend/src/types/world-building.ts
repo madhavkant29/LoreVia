@@ -97,6 +97,32 @@ export interface WorldIntegrationResult {
   dependency_graph?: Record<string, unknown>[]
 }
 
+export interface WorldQueryResponse {
+  mode: string
+  answer: string
+  citations: Array<Record<string, unknown>>
+  suggestions: Array<Record<string, unknown>>
+  logic_alerts: Array<Record<string, unknown>>
+  simulation_steps: string[]
+}
+
+export interface WikiEntry {
+  id: string
+  book_id: string
+  entry_type: string
+  name: string
+  description?: string | null
+  first_mention?: number | null
+  related_char_ids?: string[] | null
+  created_at: string
+}
+
+export interface WikiGenerationResponse {
+  generated_count: number
+  updated_names: string[]
+  entries: WikiEntry[]
+}
+
 export interface WorldNote {
   id: string
   book_id: string

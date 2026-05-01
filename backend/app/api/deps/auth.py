@@ -1,62 +1,112 @@
 import logging
 import uuid
 
-from fastapi import Depends, HTTPException, Request
+from fastapi import Depends, HTTPException, Request, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.redis import get_token_version
-from app.core.security import decode_token
+from app.core.redis import get_token_version, refresh_session_active
+from app.core.security import create_access_token, decode_token
 from app.models.user import User
-from app.utils.auth_cookies import get_auth_token
+from app.utils.auth_cookies import (
+    REFRESH_TOKEN_COOKIE_NAME,
+    get_auth_token,
+    set_access_cookie,
+)
 
 bearer = HTTPBearer(auto_error=False)
 log = logging.getLogger("lorevia.auth")
 
 
-async def get_current_user(
-    request: Request,
-    credentials: HTTPAuthorizationCredentials | None = Depends(bearer),
-    db: AsyncSession = Depends(get_db),
-) -> User:
-    token = get_auth_token(request, credentials.credentials if credentials else None)
-    if not token:
+def _claim_version(payload: dict) -> int:
+    try:
+        return int(payload.get("ver"))
+    except (TypeError, ValueError):
         raise HTTPException(401, "Invalid or expired token")
 
-    # Decode the JWT â€” only catch unexpected decode failures here.
-    # All intentional 401s are raised directly so they are never swallowed.
+
+def _decode_access_payload(token: str | None) -> dict | None:
+    if not token:
+        return None
     try:
         payload = decode_token(token)
     except Exception:
-        raise HTTPException(401, "Invalid or expired token")
+        return None
+    if not payload:
+        return None
+    if payload.get("type") != "access":
+        return None
+    return payload
 
-    if not payload or payload.get("type") != "access":
-        raise HTTPException(401, "Invalid or expired token")
 
-    claimed_version = payload.get("ver")
-    if claimed_version is None:
-        raise HTTPException(401, "Invalid or expired token")
+def _decode_refresh_payload(token: str | None) -> dict | None:
+    if not token:
+        return None
+    try:
+        payload = decode_token(token)
+    except Exception:
+        return None
+    if not payload:
+        return None
+    if payload.get("type") != "refresh":
+        return None
+    return payload
 
-    user_id = payload["sub"]
 
+async def _load_user_from_claims(user_id: str, claimed_version: int, db: AsyncSession) -> User:
     try:
         current_version = await get_token_version(user_id)
     except Exception:
         log.exception("redis_unavailable_during_auth", extra={"user_id": user_id})
         raise HTTPException(503, "Authentication service temporarily unavailable")
 
-    if int(claimed_version) != current_version:
-        # Do NOT bump the version here â€” bumping on every mismatch causes the
-        # stored version to drift away from valid tokens (e.g., after a Redis
-        # restart) and permanently locks users out on each retry.
-        # Version is bumped only on explicit logout / password change.
+    if claimed_version != current_version:
+        # Do NOT bump the version here — bumping on every mismatch causes the
+        # stored version to drift away from valid tokens and can permanently
+        # lock users out on retry.
         raise HTTPException(401, "Session expired. Please sign in again.")
 
     user = await db.get(User, uuid.UUID(user_id))
     if not user:
         raise HTTPException(401, "User not found")
+    return user
 
+
+async def get_current_user(
+    request: Request,
+    response: Response,
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    access_token = get_auth_token(request, credentials.credentials if credentials else None)
+    access_payload = _decode_access_payload(access_token)
+    if access_payload:
+        return await _load_user_from_claims(access_payload["sub"], _claim_version(access_payload), db)
+
+    refresh_token = get_auth_token(request, cookie_name=REFRESH_TOKEN_COOKIE_NAME)
+    refresh_payload = _decode_refresh_payload(refresh_token)
+    if not refresh_payload:
+        raise HTTPException(401, "Invalid or expired token")
+
+    claimed_version = _claim_version(refresh_payload)
+    session_id = refresh_payload.get("sid")
+    if not session_id:
+        raise HTTPException(401, "Invalid or expired token")
+
+    user_id = refresh_payload["sub"]
+    user = await _load_user_from_claims(user_id, claimed_version, db)
+
+    try:
+        session_active = await refresh_session_active(user_id, session_id)
+    except Exception:
+        log.exception("redis_unavailable_during_auth", extra={"user_id": user_id, "session_id": session_id})
+        raise HTTPException(503, "Authentication service temporarily unavailable")
+
+    if not session_active:
+        raise HTTPException(401, "Session expired. Please sign in again.")
+
+    set_access_cookie(response, create_access_token(user_id, claimed_version))
     return user
 
 

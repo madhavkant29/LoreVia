@@ -30,7 +30,7 @@ export default function TimelinePage() {
     setLoading(true)
     readerApi.getTimeline(bookId)
       .then(setTimeline)
-      .catch((e) => setError(e.response?.data?.detail ?? "Major events unavailable"))
+      .catch(() => setError("Major events unavailable"))
       .finally(() => setLoading(false))
   }, [bookId])
 

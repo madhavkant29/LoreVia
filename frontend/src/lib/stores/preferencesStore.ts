@@ -17,7 +17,7 @@ interface PreferencesStore {
 export const usePreferencesStore = create<PreferencesStore>()(
   persist(
     (set, get) => ({
-      theme: "dark",
+      theme: "light",
       timelineCollapsedSections: { characters: true, plotThreads: true, relationships: true },
       setTheme: (theme) => {
         if (typeof window !== "undefined") {

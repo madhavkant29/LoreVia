@@ -163,6 +163,7 @@ async def client(db):
 
 @pytest_asyncio.fixture
 async def auth_headers(client):
+    from app.core.security import create_access_token
     import uuid
     uid = str(uuid.uuid4())[:8]
     email = f"user-{uid}@lorevia.app"
@@ -172,4 +173,5 @@ async def auth_headers(client):
     )
     if r.status_code != 201:
         raise Exception(f"Registration failed: {r.status_code} - {r.text}")
-    return {"Authorization": f"Bearer {r.json()['access_token']}"}
+    access_token = create_access_token(str(r.json()["id"]))
+    return {"Cookie": f"lorevia_access_token={access_token}"}

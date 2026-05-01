@@ -9,6 +9,7 @@ export interface Book {
   status: BookStatus
   mode: "reader" | "author"
   source_kind?: string
+  preserve_chapter_numbers?: boolean
   cover_url?: string | null
   cover_processed_url?: string | null
   cover_edge_colors?: Record<string, string> | null
@@ -115,6 +116,7 @@ export interface ObsidianVaultNote {
   id: string
   book_id: string
   path: string
+  source: string
   content: string
   created_at: string
   updated_at: string
@@ -122,10 +124,71 @@ export interface ObsidianVaultNote {
 
 export interface ObsidianVaultNoteSaveResult {
   path: string
+  source: string
   content: string
   persisted: boolean
   created_at: string | null
   updated_at: string | null
+}
+
+export interface ObsidianNoteLink {
+  id: string
+  book_id: string
+  source_note_id: string
+  source_note_path: string
+  target_note_id: string
+  target_note_path: string
+  link_type: string
+  target_label?: string | null
+  created_at: string
+}
+
+export interface ObsidianNoteTag {
+  id: string
+  book_id: string
+  note_id: string
+  note_path: string
+  tag_name: string
+  created_at: string
+}
+
+export interface ObsidianNoteSeriesLink {
+  id: string
+  series_id: string
+  source_book_id: string
+  target_book_id: string
+  source_note_id: string
+  source_note_path: string
+  target_note_id: string
+  target_note_path: string
+  link_type: string
+  created_at: string
+}
+
+export interface ObsidianNoteRelations {
+  links: ObsidianNoteLink[]
+  backlinks: ObsidianNoteLink[]
+  tags: ObsidianNoteTag[]
+  series_links: ObsidianNoteSeriesLink[]
+}
+
+export interface ObsidianGraphNode {
+  id: string
+  path: string
+  title: string
+  folder: string
+  link_count: number
+}
+
+export interface ObsidianGraphEdge {
+  source: string
+  target: string
+  label?: string | null
+}
+
+export interface ObsidianGraph {
+  nodes: ObsidianGraphNode[]
+  edges: ObsidianGraphEdge[]
 }
 
 export interface UserStats {
@@ -204,6 +267,77 @@ export interface ChapterVersion {
   word_count: number | null
   note: string | null
   created_at: string
+}
+
+export interface WordCountGoals {
+  chapter_target?: number | null
+  book_target?: number | null
+  session_target?: number | null
+}
+
+export interface CorkboardCard {
+  id: string
+  title: string
+  description: string
+  status: string
+  lane: string
+  chapter_number?: number | null
+  template_id?: string | null
+}
+
+export interface WritingTemplate {
+  id: string
+  kind: string
+  title: string
+  description: string
+  content: string
+}
+
+export interface PublishingPreset {
+  active_preset: "standard_manuscript" | "trade_paperback" | "kdp_paperback"
+  trim_size: string
+  include_title_page: boolean
+  mirror_margins: boolean
+}
+
+export interface WriterWorkspace {
+  word_count_goals: WordCountGoals
+  corkboard_cards: CorkboardCard[]
+  templates: WritingTemplate[]
+  publishing: PublishingPreset
+}
+
+export interface ReadabilityMetrics {
+  words: number
+  sentences: number
+  paragraphs: number
+  average_sentence_length: number
+  reading_ease: number
+  grade_level: number
+  label: string
+}
+
+export interface EmotionalArcPoint {
+  chapter_number: number
+  label: string
+  sentiment: number
+  impact_score: number
+  growth_direction: string
+}
+
+export interface EmotionalArcCharacter {
+  character_id: string
+  character_name: string
+  role?: string | null
+  arc_summary?: string | null
+  trajectory_score: number
+  points: EmotionalArcPoint[]
+}
+
+export interface EmotionalArcOverview {
+  focus_character_count: number
+  latest_turning_points: string[]
+  characters: EmotionalArcCharacter[]
 }
 
 export interface MajorEvent {

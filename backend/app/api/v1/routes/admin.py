@@ -6,12 +6,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps.auth import get_admin
 from app.core.database import get_db
-from app.core.redis import get_redis
+import app.core.redis
 from app.models.book import Book
 from app.models.character import Character
 from app.models.intelligence import BookChunk, ChapterSummary
 from app.models.user import User, UserRateLimitOverride
 from app.schemas.admin import RateLimitOverrideBody, UpdateUserTierBody
+from app.utils.redis_utils import maybe_await
 
 router = APIRouter()
 
@@ -23,7 +24,7 @@ async def metrics(db: AsyncSession = Depends(get_db), _=Depends(get_admin)):
     chars = (await db.execute(select(func.count()).select_from(Character))).scalar()
     chunks = (await db.execute(select(func.count()).select_from(BookChunk))).scalar()
     summaries = (await db.execute(select(func.count()).select_from(ChapterSummary))).scalar()
-    r = await get_redis()
+    r = await app.core.redis.get_redis()
     mem = await r.info("memory")
     return {
         "users": users, "books": books, "characters": chars,
@@ -34,12 +35,12 @@ async def metrics(db: AsyncSession = Depends(get_db), _=Depends(get_admin)):
 
 @router.get("/queue-depth")
 async def queue_depth(_=Depends(get_admin)):
-    r = await get_redis()
+    r = await app.core.redis.get_redis()
     return {
-        "extraction": await r.llen("extraction"),
-        "analysis": await r.llen("analysis"),
-        "embedding": await r.llen("embedding"),
-        "intelligence": await r.llen("intelligence"),
+        "extraction": await maybe_await(r.llen("extraction")),
+        "analysis": await maybe_await(r.llen("analysis")),
+        "embedding": await maybe_await(r.llen("embedding")),
+        "intelligence": await maybe_await(r.llen("intelligence")),
     }
 
 

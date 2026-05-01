@@ -85,8 +85,8 @@ async def _complete_with_gemini(
     except Exception as exc:  # pragma: no cover - optional dependency
         raise RuntimeError("Gemini fallback requested but google-genai is not installed") from exc
 
-    client = genai.Client(api_key=settings.GEMINI_API_KEY)
-    config = types.GenerateContentConfig(
+    client = cast(Any, genai).Client(api_key=settings.GEMINI_API_KEY)
+    config = cast(Any, types).GenerateContentConfig(
         temperature=temperature,
         max_output_tokens=max_tokens,
         system_instruction=system,

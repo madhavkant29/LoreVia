@@ -1,7 +1,11 @@
 import time
 
 from app.engine.analysis.summariser import derive_summary_modes_from_detailed
-from app.utils.ingestion_utils import build_chapter_dispatch_plan, extract_queue_wait_ms
+from app.utils.ingestion_utils import (
+    apply_chapter_number_strategy,
+    build_chapter_dispatch_plan,
+    extract_queue_wait_ms,
+)
 
 
 def test_build_chapter_dispatch_plan_staggers_non_eager_chapters():
@@ -52,3 +56,38 @@ def test_derive_summary_modes_from_detailed_prefers_key_events():
     assert "Aoi confronts Ren" in derived["short"]["content"]
     assert "1. Archive confrontation: Aoi corners Ren over the missing ledger." in derived["key_points"]["content"]
     assert "2. Ledger discovery: They find the sealed ledger behind a false wall." in derived["key_points"]["content"]
+
+
+def test_apply_chapter_number_strategy_preserves_clean_contiguous_numbers():
+    chapters = [
+        {"number": 1, "source_number": 1, "title": "Chapter 1", "text": "One"},
+        {"number": 2, "source_number": 2, "title": "Chapter 2", "text": "Two"},
+        {"number": 3, "source_number": 3, "title": "Chapter 3", "text": "Three"},
+    ]
+
+    normalized = apply_chapter_number_strategy(chapters, preserve_chapter_numbers=True)
+
+    assert [chapter["number"] for chapter in normalized] == [1, 2, 3]
+
+
+def test_apply_chapter_number_strategy_falls_back_for_gaps():
+    chapters = [
+        {"number": 1, "source_number": 1, "title": "Chapter 1", "text": "One"},
+        {"number": 2, "source_number": 3, "title": "Chapter 3", "text": "Three"},
+    ]
+
+    normalized = apply_chapter_number_strategy(chapters, preserve_chapter_numbers=True)
+
+    assert [chapter["number"] for chapter in normalized] == [1, 2]
+
+
+def test_apply_chapter_number_strategy_preserves_letter_derived_sequence():
+    chapters = [
+        {"number": 1, "source_number": 1, "title": "Chapter A", "text": "One"},
+        {"number": 2, "source_number": 2, "title": "Chapter B", "text": "Two"},
+        {"number": 3, "source_number": 3, "title": "Chapter C", "text": "Three"},
+    ]
+
+    normalized = apply_chapter_number_strategy(chapters, preserve_chapter_numbers=True)
+
+    assert [chapter["number"] for chapter in normalized] == [1, 2, 3]

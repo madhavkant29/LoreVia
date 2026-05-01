@@ -1,12 +1,13 @@
 """Integration tests for the Obsidian export preview endpoint."""
 
-import uuid
+import io
+import zipfile
 
 import pytest
 
 from app.api.deps.auth import get_current_user
 from app.main import app
-from app.models.book import Book, Chapter
+from app.models.book import Book, Chapter, NoteSeriesLink, ObsidianVaultNote, Series
 from app.models.character import Character
 from app.models.intelligence import ChapterSummary, PlotThread, WikiEntry
 from app.models.user import User
@@ -100,6 +101,69 @@ async def _build_obsidian_preview_book(db):
     return user, book
 
 
+async def _build_obsidian_series_link(db):
+    user = User(
+        email="obsidian-series@lorevia.app",
+        username="obsidian-series",
+        password_hash="hash",
+    )
+    db.add(user)
+    await db.flush()
+
+    source_book = Book(
+        user_id=user.id,
+        title="Source Book",
+        format="pdf",
+        s3_key="books/source.pdf",
+        status="ready",
+    )
+    target_book = Book(
+        user_id=user.id,
+        title="Target Book",
+        format="pdf",
+        s3_key="books/target.pdf",
+        status="ready",
+    )
+    series = Series(
+        user_id=user.id,
+        name="Series One",
+    )
+    db.add_all([source_book, target_book, series])
+    await db.flush()
+
+    source_note = ObsidianVaultNote(
+        user_id=user.id,
+        book_id=source_book.id,
+        path="Characters/Aria.md",
+        source="user_notes",
+        content="# Aria",
+    )
+    target_note = ObsidianVaultNote(
+        user_id=user.id,
+        book_id=target_book.id,
+        path="Characters/Blaire.md",
+        source="user_notes",
+        content="# Blaire",
+    )
+    db.add_all([source_note, target_note])
+    await db.flush()
+
+    link = NoteSeriesLink(
+        user_id=user.id,
+        series_id=series.id,
+        source_book_id=source_book.id,
+        target_book_id=target_book.id,
+        source_note_id=source_note.id,
+        target_note_id=target_note.id,
+        link_type="reference",
+    )
+    db.add(link)
+    await db.commit()
+    await db.refresh(source_book)
+    await db.refresh(target_book)
+    return source_book, target_book, link
+
+
 @pytest.mark.asyncio
 async def test_obsidian_bible_preview_returns_folder_manifest(client, db):
     user, book = await _build_obsidian_preview_book(db)
@@ -120,6 +184,16 @@ async def test_obsidian_bible_preview_returns_folder_manifest(client, db):
     assert any(file["path"].endswith("Characters/Aria.md") for file in payload["files"])
     assert any(file["path"].endswith("Major Events/Aria-arrives.md") for file in payload["files"])
     assert any("[[Characters/Blaire|Blaire]]" in file["content"] for file in payload["files"] if file["path"].endswith("Characters/Aria.md"))
+
+
+@pytest.mark.asyncio
+async def test_obsidian_note_series_links_are_bound_to_source_book(db):
+    source_book, target_book, link = await _build_obsidian_series_link(db)
+
+    assert len(source_book.obsidian_note_series_links) == 1
+    assert source_book.obsidian_note_series_links[0].id == link.id
+    assert source_book.obsidian_note_series_links[0].source_book_id == source_book.id
+    assert target_book.obsidian_note_series_links == []
 
 
 @pytest.mark.asyncio
@@ -155,5 +229,87 @@ async def test_obsidian_bible_notes_save_is_visible_in_preview_and_notes_list(cl
         assert len(notes) == 1
         assert notes[0]["path"] == target_path
         assert "Edited in app" in notes[0]["content"]
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+
+@pytest.mark.asyncio
+async def test_user_obsidian_notes_crud_graph_and_export(client, db):
+    user, book = await _build_obsidian_preview_book(db)
+
+    async def override_current_user():
+        return user
+
+    app.dependency_overrides[get_current_user] = override_current_user
+    try:
+        save_one = await client.put(
+            f"/api/v1/books/{book.id}/notes/obsidian",
+            json={"path": "Characters/Aria.md", "content": "# Aria\n\nLinks to [[Blaire]]."},
+        )
+        assert save_one.status_code == 200
+        assert save_one.json()["source"] == "user_notes"
+
+        save_two = await client.put(
+            f"/api/v1/books/{book.id}/notes/obsidian",
+            json={"path": "Characters/Blaire.md", "content": "# Blaire"},
+        )
+        assert save_two.status_code == 200
+
+        list_response = await client.get(f"/api/v1/books/{book.id}/notes/obsidian")
+        assert list_response.status_code == 200
+        notes = list_response.json()
+        assert len(notes) == 2
+
+        graph_response = await client.get(f"/api/v1/books/{book.id}/notes/obsidian/graph")
+        assert graph_response.status_code == 200
+        graph = graph_response.json()
+        assert len(graph["nodes"]) == 2
+        assert graph["edges"][0]["source"] == "Characters/Aria.md"
+        assert graph["edges"][0]["target"] == "Characters/Blaire.md"
+
+        relations_response = await client.get(
+            f"/api/v1/books/{book.id}/notes/obsidian/relations",
+            params={"path": "Characters/Aria.md"},
+        )
+        assert relations_response.status_code == 200
+        relations = relations_response.json()
+        assert len(relations["links"]) == 1
+        assert relations["links"][0]["target_note_path"] == "Characters/Blaire.md"
+        assert relations["tags"] == []
+
+        export_response = await client.get(f"/api/v1/books/{book.id}/notes/obsidian/export")
+        assert export_response.status_code == 200
+        with zipfile.ZipFile(io.BytesIO(export_response.content)) as archive:
+            assert sorted(archive.namelist()) == ["Characters/Aria.md", "Characters/Blaire.md"]
+
+        delete_response = await client.delete(f"/api/v1/books/{book.id}/notes/obsidian/Characters/Blaire.md")
+        assert delete_response.status_code == 204
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+
+@pytest.mark.asyncio
+async def test_user_obsidian_notes_import_zip(client, db):
+    user, book = await _build_obsidian_preview_book(db)
+
+    async def override_current_user():
+        return user
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("Plot/Thread.md", "# Thread\n\n[[Characters]]")
+        archive.writestr("Characters.md", "# Characters")
+
+    app.dependency_overrides[get_current_user] = override_current_user
+    try:
+        response = await client.post(
+            f"/api/v1/books/{book.id}/notes/obsidian/import",
+            files={"file": ("vault.zip", buffer.getvalue(), "application/zip")},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert len(payload) == 2
+        assert {item["path"] for item in payload} == {"Plot/Thread.md", "Characters.md"}
+        assert all(item["source"] == "user_notes" for item in payload)
     finally:
         app.dependency_overrides.pop(get_current_user, None)

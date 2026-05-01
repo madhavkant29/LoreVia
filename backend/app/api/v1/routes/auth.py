@@ -42,7 +42,6 @@ from app.schemas.auth import (
     ResetPasswordBody,
     SupabaseOAuthBody,
     TierLimitsOut,
-    TokenOut,
     UserOut,
 )
 from app.services.email_service import deliver_password_reset_email, send_onboarding_email
@@ -81,7 +80,7 @@ def _validate_password(password: str, email: str) -> None:
         )
 
 
-async def _mint_token_pair(user_id: str, user: User | None = None) -> TokenOut:
+async def _mint_token_pair(user_id: str, user: User | None = None) -> tuple[UserOut | None, str, str]:
     version = await get_token_version(user_id)
     session_id = str(uuid.uuid4())
     await store_refresh_session(
@@ -90,19 +89,19 @@ async def _mint_token_pair(user_id: str, user: User | None = None) -> TokenOut:
         settings.JWT_REFRESH_EXPIRE_DAYS * 24 * 60 * 60,
     )
     user_out = UserOut.model_validate(user) if user else None
-    return TokenOut(
-        access_token=create_access_token(user_id, version),
-        refresh_token=create_refresh_token(user_id, version, session_id),
-        user=user_out,
+    return (
+        user_out,
+        create_access_token(user_id, version),
+        create_refresh_token(user_id, version, session_id),
     )
 
 
-def _token_response_with_cookies(response: Response, token_out: TokenOut) -> TokenOut:
-    set_auth_cookies(response, token_out.access_token, token_out.refresh_token)
-    return token_out
+def _user_response_with_cookies(response: Response, user_out: UserOut | None, access_token: str, refresh_token: str) -> UserOut | None:
+    set_auth_cookies(response, access_token, refresh_token)
+    return user_out
 
 
-@router.post("/register", response_model=TokenOut, status_code=201)
+@router.post("/register", response_model=UserOut, status_code=201)
 async def register(
     body: RegisterBody,
     response: Response,
@@ -131,11 +130,11 @@ async def register(
     await db.commit()
     await db.refresh(user)
     await send_onboarding_email(user.email)
-    token_out = await _mint_token_pair(str(user.id), user)
-    return _token_response_with_cookies(response, token_out)
+    user_out, access_token, refresh_token = await _mint_token_pair(str(user.id), user)
+    return _user_response_with_cookies(response, user_out, access_token, refresh_token)
 
 
-@router.post("/login", response_model=TokenOut)
+@router.post("/login", response_model=UserOut)
 async def login(
     body: LoginBody,
     response: Response,
@@ -152,11 +151,11 @@ async def login(
         valid = False
     if not valid:
         raise HTTPException(401, "Invalid credentials")
-    token_out = await _mint_token_pair(str(user.id), user)
-    return _token_response_with_cookies(response, token_out)
+    user_out, access_token, refresh_token = await _mint_token_pair(str(user.id), user)
+    return _user_response_with_cookies(response, user_out, access_token, refresh_token)
 
 
-@router.post("/oauth/supabase", response_model=TokenOut)
+@router.post("/oauth/supabase", response_model=UserOut)
 async def oauth_supabase(
     body: SupabaseOAuthBody,
     response: Response,
@@ -180,9 +179,8 @@ async def oauth_supabase(
 
     if verification_response.status_code != 200:
         log.warning(
-            "Supabase OAuth verification failed with status=%s body=%s",
+            "Supabase OAuth verification failed",
             verification_response.status_code,
-            verification_response.text[:500],
         )
         raise HTTPException(401, f"Invalid Supabase token ({verification_response.status_code})")
 
@@ -214,8 +212,8 @@ async def oauth_supabase(
     if created:
         await send_onboarding_email(existing.email)
 
-    token_out = await _mint_token_pair(str(existing.id), existing)
-    return _token_response_with_cookies(response, token_out)
+    user_out, access_token, refresh_token = await _mint_token_pair(str(existing.id), existing)
+    return _user_response_with_cookies(response, user_out, access_token, refresh_token)
 
 
 @router.post("/forgot-password")
@@ -265,7 +263,7 @@ async def reset_password(
     return {"ok": True}
 
 
-@router.post("/refresh", response_model=TokenOut)
+@router.post("/refresh", response_model=UserOut)
 async def refresh(
     request: Request,
     response: Response,
@@ -294,8 +292,8 @@ async def refresh(
     if not user:
         raise HTTPException(401, "User not found")
     await revoke_refresh_session(payload["sub"], session_id)
-    token_out = await _mint_token_pair(str(user.id))
-    return _token_response_with_cookies(response, token_out)
+    user_out, access_token, refresh_token = await _mint_token_pair(str(user.id), user)
+    return _user_response_with_cookies(response, user_out, access_token, refresh_token)
 
 
 @router.post("/logout")
@@ -374,7 +372,7 @@ async def set_username(
         raise HTTPException(400, "Username can only contain letters, numbers, underscores, and hyphens")
 
     # Check uniqueness
-    existing = (await db.execute(select(User).where(func.lower(User.username) == username))).scalar()
+    existing = (await db.execute(select(User).where(func.lower(User.username) == username.lower()))).scalar()
     if existing:
         raise HTTPException(400, "Username already taken")
 

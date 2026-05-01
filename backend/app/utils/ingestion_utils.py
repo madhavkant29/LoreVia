@@ -106,3 +106,40 @@ def chunked(items: Iterable[str], batch_size: int) -> list[list[str]]:
         batches.append(current_batch)
 
     return batches
+
+
+def apply_chapter_number_strategy(
+    chapters: Sequence[Mapping[str, Any]],
+    *,
+    preserve_chapter_numbers: bool,
+) -> list[dict[str, Any]]:
+    normalized = [dict(chapter) for chapter in chapters]
+    if not normalized:
+        return []
+
+    if not preserve_chapter_numbers:
+        return _renumber_sequentially(normalized)
+
+    source_numbers: list[int] = []
+    for chapter in normalized:
+        source_number = chapter.get("source_number")
+        if not isinstance(source_number, int) or source_number < 1:
+            return _renumber_sequentially(normalized)
+        source_numbers.append(source_number)
+
+    expected_numbers = list(range(1, len(source_numbers) + 1))
+    if source_numbers != expected_numbers:
+        return _renumber_sequentially(normalized)
+
+    for chapter, source_number in zip(normalized, source_numbers):
+        chapter["number"] = source_number
+    return normalized
+
+
+def _renumber_sequentially(chapters: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for index, chapter in enumerate(chapters, start=1):
+        next_chapter = dict(chapter)
+        next_chapter["number"] = index
+        normalized.append(next_chapter)
+    return normalized

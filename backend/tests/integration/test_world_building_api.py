@@ -7,15 +7,17 @@ from app.utils.book_utils import serialize_manuscript_content
 
 
 async def _register_user(client, email: str) -> tuple[dict[str, str], uuid.UUID]:
+    from app.core.security import create_access_token
     response = await client.post(
         "/api/v1/auth/register",
         json={"email": email, "username": email.split("@")[0][:24], "password": "StrongPass123!@#", "accepted_terms": True},
     )
     assert response.status_code == 201
-    token = response.json()["access_token"]
-    me = await client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
+    token = create_access_token(str(response.json()["id"]))
+    assert token
+    me = await client.get("/api/v1/auth/me", headers={"Cookie": f"lorevia_access_token={token}"})
     assert me.status_code == 200
-    return {"Authorization": f"Bearer {token}"}, uuid.UUID(me.json()["id"])
+    return {"Cookie": f"lorevia_access_token={token}"}, uuid.UUID(me.json()["id"])
 
 
 @pytest.mark.asyncio

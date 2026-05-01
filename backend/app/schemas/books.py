@@ -17,6 +17,7 @@ class BookOut(BaseModel):
     status: str
     mode: str
     source_kind: str
+    preserve_chapter_numbers: bool = False
     cover_url: str | None = None
     cover_processed_url: str | None = None
     cover_edge_colors: dict[str, str] | None = None
@@ -203,6 +204,119 @@ class ChapterVersionOut(BaseModel):
     created_at: datetime
 
 
+class WordCountGoalsOut(BaseModel):
+    chapter_target: int | None = None
+    book_target: int | None = None
+    session_target: int | None = None
+
+
+class CorkboardCardOut(BaseModel):
+    id: str
+    title: str
+    description: str = ""
+    status: str = "planned"
+    lane: str = "ideas"
+    chapter_number: int | None = None
+    template_id: str | None = None
+
+
+class WritingTemplateOut(BaseModel):
+    id: str
+    kind: str
+    title: str
+    description: str
+    content: str
+
+
+class PublishingPresetOut(BaseModel):
+    active_preset: str = "standard_manuscript"
+    trim_size: str = "6x9"
+    include_title_page: bool = True
+    mirror_margins: bool = True
+
+
+class WriterWorkspaceOut(BaseModel):
+    word_count_goals: WordCountGoalsOut
+    corkboard_cards: list[CorkboardCardOut]
+    templates: list[WritingTemplateOut]
+    publishing: PublishingPresetOut
+
+
+class WordCountGoalsBody(BaseModel):
+    chapter_target: int | None = None
+    book_target: int | None = None
+    session_target: int | None = None
+
+
+class CorkboardCardBody(BaseModel):
+    id: str | None = None
+    title: str
+    description: str = ""
+    status: str = "planned"
+    lane: str = "ideas"
+    chapter_number: int | None = None
+    template_id: str | None = None
+
+
+class WritingTemplateBody(BaseModel):
+    id: str
+    kind: str
+    title: str
+    description: str
+    content: str
+
+
+class PublishingPresetBody(BaseModel):
+    active_preset: str = "standard_manuscript"
+    trim_size: str = "6x9"
+    include_title_page: bool = True
+    mirror_margins: bool = True
+
+
+class WriterWorkspaceBody(BaseModel):
+    word_count_goals: WordCountGoalsBody | None = None
+    corkboard_cards: list[CorkboardCardBody] | None = None
+    templates: list[WritingTemplateBody] | None = None
+    publishing: PublishingPresetBody | None = None
+
+
+class ReadabilityMetricsOut(BaseModel):
+    words: int
+    sentences: int
+    paragraphs: int
+    average_sentence_length: float
+    reading_ease: float
+    grade_level: float
+    label: str
+
+
+class ReadabilityRequestBody(BaseModel):
+    text: str
+
+
+class EmotionalArcPointOut(BaseModel):
+    chapter_number: int
+    label: str
+    sentiment: float
+    impact_score: int
+    growth_direction: str = "neutral"
+
+
+class EmotionalArcCharacterOut(BaseModel):
+    character_id: str
+    character_name: str
+    role: str | None = None
+    arc_summary: str | None = None
+    trajectory_score: float
+    points: list[EmotionalArcPointOut]
+
+
+class EmotionalArcOverviewOut(BaseModel):
+    focus_character_count: int
+    latest_turning_points: list[str]
+    characters: list[EmotionalArcCharacterOut]
+
+
 class BookNoteBody(BaseModel):
     note_id: str | None = None
     chapter_number: int | None = None
@@ -237,10 +351,18 @@ class ObsidianVaultNoteBody(BaseModel):
     content: str
 
 
+class ObsidianNoteLinkBody(BaseModel):
+    source_path: str
+    target_path: str
+    link_type: str = "reference"
+    target_label: str | None = None
+
+
 class ObsidianVaultNoteOut(BaseModel):
     id: str
     book_id: str
     path: str
+    source: str
     content: str
     created_at: datetime
     updated_at: datetime
@@ -248,10 +370,71 @@ class ObsidianVaultNoteOut(BaseModel):
 
 class ObsidianVaultNoteSaveOut(BaseModel):
     path: str
+    source: str
     content: str
     persisted: bool
     created_at: datetime | None = None
     updated_at: datetime | None = None
+
+
+class ObsidianNoteTagOut(BaseModel):
+    id: str
+    book_id: str
+    note_id: str
+    note_path: str
+    tag_name: str
+    created_at: datetime
+
+
+class ObsidianNoteLinkOut(BaseModel):
+    id: str
+    book_id: str
+    source_note_id: str
+    source_note_path: str
+    target_note_id: str
+    target_note_path: str
+    link_type: str
+    target_label: str | None = None
+    created_at: datetime
+
+
+class ObsidianNoteSeriesLinkOut(BaseModel):
+    id: str
+    series_id: str
+    source_book_id: str
+    target_book_id: str
+    source_note_id: str
+    source_note_path: str
+    target_note_id: str
+    target_note_path: str
+    link_type: str
+    created_at: datetime
+
+
+class ObsidianNoteLinkListOut(BaseModel):
+    links: list[ObsidianNoteLinkOut]
+    backlinks: list[ObsidianNoteLinkOut]
+    tags: list[ObsidianNoteTagOut]
+    series_links: list[ObsidianNoteSeriesLinkOut]
+
+
+class ObsidianGraphNodeOut(BaseModel):
+    id: str
+    path: str
+    title: str
+    folder: str
+    link_count: int = 0
+
+
+class ObsidianGraphEdgeOut(BaseModel):
+    source: str
+    target: str
+    label: str | None = None
+
+
+class ObsidianGraphOut(BaseModel):
+    nodes: list[ObsidianGraphNodeOut]
+    edges: list[ObsidianGraphEdgeOut]
 
 
 class PublicUserStats(BaseModel):

@@ -70,7 +70,7 @@ export function PostHogClientProvider({ children }: { children: React.ReactNode 
             padding: "10px 14px",
           }}
         >
-          Want to allow cookies for analytics? We use them to see which features people use and to improve the app. See our{" "}
+          Want to allow cookies for analytics? We use them to see which features people use and improve the app. See our{" "}
           <a href="/privacy" className="underline underline-offset-4">
             Privacy Policy
           </a>

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
+from typing import Any, cast
 
 from app.engine.character.profile_builder import build_description
 from app.models.book import Book
@@ -22,16 +23,16 @@ from app.utils.character_utils import (
 )
 
 
-def _clean_line(value: str | None) -> str:
-    return " ".join((value or "").split()).strip()
+def _clean_line(value: object | None) -> str:
+    return " ".join(str(value or "").split()).strip()
 
 
-def _safe_name(value: str | None) -> str:
+def _safe_name(value: object | None) -> str:
     cleaned = _clean_line(value)
     return "".join(ch for ch in cleaned if ch.isalnum() or ch in {" ", "-", "_", "(", ")"}).strip().replace(" ", "-")
 
 
-def _obsidian_note_title(value: str | None) -> str:
+def _obsidian_note_title(value: object | None) -> str:
     cleaned = _clean_line(value)
     return cleaned or "Untitled"
 
@@ -40,8 +41,23 @@ def _obsidian_link(title: str) -> str:
     return f"[[{title}]]"
 
 
-def _normalize_lookup(value: str) -> str:
-    return re.sub(r"\s+", " ", value).strip().lower()
+def _normalize_lookup(value: object) -> str:
+    return re.sub(r"\s+", " ", str(value)).strip().lower()
+
+
+def _to_int(value: object | None, default: int = 0) -> int:
+    try:
+        if value is None:
+            return default
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            return int(value)
+        if isinstance(value, str):
+            return int(value)
+        return default
+    except (TypeError, ValueError):
+        return default
 
 
 def _build_link_targets(characters: list[Character]) -> dict[str, str]:
@@ -125,7 +141,7 @@ def _format_chapter_label(chapter_number: int | None, fallback: str = "-") -> st
 
 
 def _format_growth_event_line(event: dict) -> str:
-    chapter_number = event.get("chapter_number") or event.get("chapter")
+    chapter_number = _to_int(event.get("chapter_number") or event.get("chapter"), 0)
     chapter_label = f"Chapter {chapter_number}: " if chapter_number else ""
     title = _clean_line(str(event.get("event_title") or event.get("event") or ""))
     description = _clean_line(str(event.get("description") or event.get("impact") or ""))
@@ -317,9 +333,9 @@ def _build_obsidian_manifest(
         a_name = _obsidian_note_title(_obj_value(rel, "character_a_name") or characters_by_id.get(str(_obj_value(rel, "character_a_id") or ""), "Unknown"))
         b_name = _obsidian_note_title(_obj_value(rel, "character_b_name") or characters_by_id.get(str(_obj_value(rel, "character_b_id") or ""), "Unknown"))
         rel_type = _clean_line(str(_obj_value(rel, "rel_type") or "neutral")).replace("_", " ").title()
-        chapter_range = f"{_format_chapter_label(_obj_value(rel, 'from_chapter'))}"
+        chapter_range = f"{_format_chapter_label(_to_int(_obj_value(rel, 'from_chapter') or 0) or None)}"
         if _obj_value(rel, "to_chapter"):
-            chapter_range += f" to {_format_chapter_label(_obj_value(rel, 'to_chapter'))}"
+            chapter_range += f" to {_format_chapter_label(_to_int(_obj_value(rel, 'to_chapter') or 0) or None)}"
         else:
             chapter_range += " onward"
         note = relink(_clean_line(str(_obj_value(rel, "description") or "")), skip=a_name)
@@ -336,7 +352,7 @@ def _build_obsidian_manifest(
         plot_threads,
         key=lambda thread: (
             _obj_value(thread, "introduced_at") if _obj_value(thread, "introduced_at") is not None else 10**9,
-            -int(_obj_value(thread, "importance") or 0),
+            -_to_int(_obj_value(thread, "importance") or 0),
             _clean_line(str(_obj_value(thread, "title") or "")).lower(),
         ),
     )
@@ -351,12 +367,12 @@ def _build_obsidian_manifest(
 
     for thread in sorted_threads:
         title = _obsidian_note_title(_obj_value(thread, "title"))
-        notes = relink(_obj_value(thread, "note"), skip=title)
-        description = relink(_obj_value(thread, "description"), skip=title)
+        notes = relink(cast(str | None, _obj_value(thread, "note")), skip=title)
+        description = relink(cast(str | None, _obj_value(thread, "description")), skip=title)
         char_ids = _obj_value(thread, "character_ids") or []
         linked_chars = _extract_related_character_names(char_ids, characters_by_id, link_targets)
-        intro = _format_chapter_label(_obj_value(thread, "introduced_at"), "Unknown start")
-        resolved = _obj_value(thread, "resolved_at")
+        intro = _format_chapter_label(_to_int(_obj_value(thread, "introduced_at") or 0) or None, "Unknown start")
+        resolved = cast(int | None, _obj_value(thread, "resolved_at"))
         lines = [
             f"# {title}",
             "",
@@ -413,14 +429,14 @@ def _build_obsidian_manifest(
             "concept": "Concepts",
         }.get(entry_type, "Concepts")
         name = _obsidian_note_title(_obj_value(entry, "name"))
-        desc = relink(_obj_value(entry, "description"))
+        desc = relink(cast(str | None, _obj_value(entry, "description")))
         related_ids = _obj_value(entry, "related_char_ids")
         related_characters = _extract_related_character_names(related_ids, characters_by_id, link_targets)
         lines = [
             f"# {name}",
             "",
             f"- Type: {entry_type}",
-            f"- First mention: {_format_chapter_label(_obj_value(entry, 'first_mention'))}",
+            f"- First mention: {_format_chapter_label(cast(int | None, _obj_value(entry, 'first_mention')))}",
             "",
         ]
         if desc:
@@ -450,7 +466,7 @@ def _build_obsidian_manifest(
     for row in sorted_chapters:
         chapter_number = int(row["number"])
         chapter_title = row.get("title") or f"Chapter {chapter_number}"
-        summary_text = relink(row.get("content"))
+        summary_text = relink(cast(str | None, row.get("content")))
         key_events = events_by_chapter.get(chapter_number, [])
         lines = [
             f"# Chapter {chapter_number} Summary",
@@ -493,7 +509,7 @@ def _build_obsidian_manifest(
         lines = [
             f"# {title}",
             "",
-            f"- Chapter: {_format_chapter_label(event['chapter_number'])}",
+            f"- Chapter: {_format_chapter_label(cast(int | None, event['chapter_number']))}",
         ]
         if event.get("importance") is not None:
             lines.append(f"- Importance: {event['importance']}/10")
@@ -506,7 +522,7 @@ def _build_obsidian_manifest(
             lines.append(f"- {' | '.join(links)}")
         lines.append("")
         if event.get("description"):
-            lines.extend([relink(event["description"]), ""])
+            lines.extend([relink(cast(str | None, event["description"])), ""])
         involved = _extract_related_character_names(event.get("involved_characters"), characters_by_id, link_targets)
         if involved:
             lines.extend(["## Involved Characters", "", *[f"- {item}" for item in involved], ""])
@@ -532,21 +548,17 @@ async def build_character_bible_obsidian_context(db, book_id) -> dict:
 
     await consolidate_characters(db, book_id)
 
-    characters = (
-        await db.execute(
-            select(Character).where(Character.book_id == book_id).order_by(Character.first_chapter, Character.name)
-        )
-    ).scalars().all()
+    characters_result = await db.execute(
+        select(Character).where(Character.book_id == book_id).order_by(Character.first_chapter, Character.name)
+    )
+    characters = characters_result.scalars().all()
 
-    relationships = (
-        await db.execute(select(CharacterRelationship).where(CharacterRelationship.book_id == book_id))
-    ).scalars().all()
-    plot_threads = (
-        await db.execute(select(PlotThread).where(PlotThread.book_id == book_id))
-    ).scalars().all()
-    wiki_entries = (
-        await db.execute(select(WikiEntry).where(WikiEntry.book_id == book_id))
-    ).scalars().all()
+    relationships_result = await db.execute(select(CharacterRelationship).where(CharacterRelationship.book_id == book_id))
+    relationships = relationships_result.scalars().all()
+    plot_threads_result = await db.execute(select(PlotThread).where(PlotThread.book_id == book_id))
+    plot_threads = plot_threads_result.scalars().all()
+    wiki_entries_result = await db.execute(select(WikiEntry).where(WikiEntry.book_id == book_id))
+    wiki_entries = wiki_entries_result.scalars().all()
     chapter_rows = (
         await db.execute(
             select(Chapter.number, Chapter.title, ChapterSummary.content, ChapterSummary.key_events)
@@ -868,8 +880,8 @@ def character_bible_markdown(
     rel_summaries: dict[str, list[str]],
     thread_summaries: dict[str, list[str]],
 ) -> tuple[bytes, str]:
-    def _clean_line(value: str | None) -> str:
-        return " ".join((value or "").split()).strip()
+    def _clean_line(value: object | None) -> str:
+        return " ".join(str(value or "").split()).strip()
 
     def _bullets(items: list[str]) -> str:
         cleaned = [item.strip() for item in items if item and item.strip()]
@@ -1138,14 +1150,41 @@ def character_bible_obsidian_preview(
     }
 
 
-def manuscript_docx(*, title: str, chapters: list[dict]) -> bytes:
+def _manuscript_export_preset(preset: str) -> dict[str, Any]:
+    normalized = " ".join((preset or "").split()).strip().lower()
+    if normalized == "kdp_paperback":
+        return {
+            "docx_font": "Garamond",
+            "docx_font_size": 11,
+            "pdf_page_size": "LETTER",
+            "pdf_margins": (0.88, 0.75, 0.8, 0.8),
+            "title": "Amazon KDP paperback",
+        }
+    if normalized == "trade_paperback":
+        return {
+            "docx_font": "Garamond",
+            "docx_font_size": 11,
+            "pdf_page_size": "A5",
+            "pdf_margins": (0.8, 0.8, 0.75, 0.75),
+            "title": "Trade paperback",
+        }
+    return {
+        "docx_font": "Times New Roman",
+        "docx_font_size": 12,
+        "pdf_page_size": "A4",
+        "pdf_margins": (0.9, 0.9, 0.8, 0.8),
+        "title": "Standard manuscript",
+    }
+
+
+def manuscript_docx(*, title: str, chapters: list[dict], preset: str = "standard_manuscript") -> bytes:
     from io import BytesIO
 
     from bs4 import BeautifulSoup
     from docx import Document
     from docx.shared import Pt
 
-    def add_html_block(doc: Document, html: str | None, fallback_text: str) -> None:
+    def add_html_block(doc: Any, html: str | None, fallback_text: str) -> None:
         cleaned_html = clean_manuscript_html(html)
         if not cleaned_html:
             for block in fallback_text.splitlines():
@@ -1167,12 +1206,14 @@ def manuscript_docx(*, title: str, chapters: list[dict]) -> bytes:
             if node.name == "blockquote":
                 paragraph.style = "Intense Quote"
 
+    export_preset = _manuscript_export_preset(preset)
     doc = Document()
-    normal_style = doc.styles["Normal"]
-    normal_style.font.name = "Times New Roman"
-    normal_style.font.size = Pt(12)
+    normal_style = cast(Any, doc.styles["Normal"])
+    normal_style.font.name = str(export_preset["docx_font"])
+    normal_style.font.size = Pt(int(export_preset["docx_font_size"]))
 
     doc.add_heading(title or "LoreVia Manuscript Export", level=1)
+    doc.add_paragraph(f"Preset: {export_preset['title']}")
     for chapter in chapters:
         doc.add_page_break()
         chapter_number = chapter.get("number")
@@ -1187,11 +1228,11 @@ def manuscript_docx(*, title: str, chapters: list[dict]) -> bytes:
     return buffer.getvalue()
 
 
-def manuscript_pdf(*, title: str, chapters: list[dict]) -> bytes:
+def manuscript_pdf(*, title: str, chapters: list[dict], preset: str = "standard_manuscript") -> bytes:
     from io import BytesIO
 
     from bs4 import BeautifulSoup
-    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.pagesizes import A4, A5, LETTER
     from reportlab.lib.styles import getSampleStyleSheet
     from reportlab.lib.units import inch
     from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer
@@ -1225,14 +1266,17 @@ def manuscript_pdf(*, title: str, chapters: list[dict]) -> bytes:
             else:
                 yield Spacer(1, 0.12 * inch)
 
+    export_preset = _manuscript_export_preset(preset)
+    page_size = {"A4": A4, "A5": A5, "LETTER": LETTER}[str(export_preset["pdf_page_size"])]
+    left_margin, right_margin, top_margin, bottom_margin = cast(tuple[float, float, float, float], export_preset["pdf_margins"])
     buffer = BytesIO()
     doc = SimpleDocTemplate(
         buffer,
-        pagesize=A4,
-        leftMargin=0.9 * inch,
-        rightMargin=0.9 * inch,
-        topMargin=0.8 * inch,
-        bottomMargin=0.8 * inch,
+        pagesize=page_size,
+        leftMargin=left_margin * inch,
+        rightMargin=right_margin * inch,
+        topMargin=top_margin * inch,
+        bottomMargin=bottom_margin * inch,
     )
     styles = getSampleStyleSheet()
     body = styles["BodyText"]
@@ -1240,7 +1284,11 @@ def manuscript_pdf(*, title: str, chapters: list[dict]) -> bytes:
     body.leading = 18
     heading_styles = {"h1": styles["Heading1"], "h2": styles["Heading2"], "h3": styles["Heading3"]}
 
-    story = [Paragraph(title or "LoreVia Manuscript Export", styles["Heading1"]), Spacer(1, 0.2 * inch)]
+    story = [
+        Paragraph(title or "LoreVia Manuscript Export", styles["Heading1"]),
+        Paragraph(f"Preset: {export_preset['title']}", styles["BodyText"]),
+        Spacer(1, 0.2 * inch),
+    ]
     for index, chapter in enumerate(chapters):
         if index > 0:
             story.append(PageBreak())
@@ -1254,3 +1302,60 @@ def manuscript_pdf(*, title: str, chapters: list[dict]) -> bytes:
 
     doc.build(story)
     return buffer.getvalue()
+
+
+def manuscript_epub(*, title: str, chapters: list[dict], preset: str = "standard_manuscript") -> bytes:
+    from ebooklib import epub
+    import os
+    import tempfile
+
+    book = epub.EpubBook()
+    safe_title = _clean_line(title) or "LoreVia Manuscript Export"
+    export_preset = _manuscript_export_preset(preset)
+    book.set_identifier(_safe_name(safe_title) or "lorevia-manuscript")
+    book.set_title(safe_title)
+    book.set_language("en")
+    book.add_author("LoreVia")
+
+    spine: list[Any] = ["nav"]
+    toc_entries: list[Any] = []
+    stylesheet = epub.EpubItem(
+        uid="style_nav",
+        file_name="styles/main.css",
+        media_type="text/css",
+        content=(
+            "body { font-family: serif; line-height: 1.6; margin: 5%; } "
+            "h1, h2 { page-break-after: avoid; } "
+            ".preset-note { font-size: 0.85em; color: #555; }"
+        ).encode("utf-8"),
+    )
+    book.add_item(stylesheet)
+
+    for chapter in chapters:
+        chapter_number = chapter.get("number")
+        chapter_title = _clean_line(chapter.get("title")) or f"Chapter {chapter_number}"
+        chapter_html = clean_manuscript_html(chapter.get("html")) or f"<p>{_clean_line(chapter.get('text'))}</p>"
+        item = epub.EpubHtml(
+            title=chapter_title,
+            file_name=f"chapter-{chapter_number}.xhtml",
+            lang="en",
+        )
+        item.content = (
+            f"<h1>{chapter_title}</h1>"
+            f"<p class='preset-note'>Preset: {export_preset['title']}</p>"
+            f"{chapter_html}"
+        )
+        item.add_item(stylesheet)
+        book.add_item(item)
+        spine.append(item)
+        toc_entries.append(item)
+
+    book.toc = tuple(toc_entries)
+    book.spine = spine
+    book.add_item(epub.EpubNcx())
+    book.add_item(epub.EpubNav())
+    with tempfile.TemporaryDirectory() as tmpdir:
+        target = os.path.join(tmpdir, "manuscript.epub")
+        epub.write_epub(target, book, {})
+        with open(target, "rb") as handle:
+            return handle.read()

@@ -1,7 +1,6 @@
 import asyncio
 import os
 import sys
-from logging.config import fileConfig
 from pathlib import Path
 
 from alembic import context
@@ -12,21 +11,24 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from app.core.config import settings
 from app.db.base import Base  # noqa
 from app.utils.migration_utils import (
+    destructive_downgrade_revisions,
     destructive_upgrade_revisions,
     is_local_database_url,
     redact_database_target,
     resolve_alembic_database_url,
 )
+from app.utils.logging import get_logger
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 config = context.config
+log = get_logger("alembic")
 db_url, _explicit_url = resolve_alembic_database_url(
     os.getenv("ALEMBIC_DATABASE_URL"),
     settings.DATABASE_URL,
 )
-print(f"Alembic target: {redact_database_target(db_url)}", file=sys.stderr)
+log.info("alembic_target", extra={"database": redact_database_target(db_url)})
 if not is_local_database_url(db_url) and os.getenv("ALEMBIC_CONFIRM_REMOTE") != "YES_I_AM_SURE":
     raise RuntimeError(
         "Refusing to run Alembic against a remote database without explicit confirmation. "
@@ -41,13 +43,22 @@ if offending_revisions and os.getenv("ALEMBIC_ALLOW_DESTRUCTIVE_UPGRADES") != "1
         f"{offending_paths}. Remove them or set ALEMBIC_ALLOW_DESTRUCTIVE_UPGRADES=1 only if you "
         "explicitly intend to drop data."
     )
+
+if any(arg == "downgrade" for arg in sys.argv[1:]):
+    destructive_downgrades = destructive_downgrade_revisions(Path(__file__).resolve().parent / "versions")
+    if destructive_downgrades and os.getenv("ALEMBIC_ALLOW_DESTRUCTIVE_DOWNGRADES") != "1":
+        offending_paths = ", ".join(str(path.name) for path in destructive_downgrades)
+        raise RuntimeError(
+            "Refusing to run Alembic downgrade because destructive operations were found in "
+            "downgrade() blocks: "
+            f"{offending_paths}. Downgrades that drop tables, columns, or indexes are disabled by "
+            "default to protect the database. Set ALEMBIC_ALLOW_DESTRUCTIVE_DOWNGRADES=1 only if you "
+            "explicitly intend to remove data."
+        )
 config.set_main_option(
     "sqlalchemy.url",
     db_url.replace("%", "%%").replace("postgresql://", "postgresql+psycopg://"),
 )
-
-if config.config_file_name:
-    fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
 

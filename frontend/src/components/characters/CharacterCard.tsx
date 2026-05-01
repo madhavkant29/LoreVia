@@ -25,6 +25,7 @@ interface Props {
   compact?: boolean
   editable?: boolean
   onUpdated?: (character: Character) => void
+  onDeleted?: (characterId: string) => void
   theme?: "light" | "dark"
 }
 
@@ -56,11 +57,12 @@ function stringToList(value: string) {
     .filter(Boolean)
 }
 
-export function CharacterCard({ character, bookId, compact = false, editable = false, onUpdated, theme = "light" }: Props) {
+export function CharacterCard({ character, bookId, compact = false, editable = false, onUpdated, onDeleted, theme = "light" }: Props) {
   const [expanded, setExpanded] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const [shareState, setShareState] = useState<"idle" | "copied" | "error">("idle")
   const [exporting, setExporting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -143,6 +145,23 @@ export function CharacterCard({ character, bookId, compact = false, editable = f
       URL.revokeObjectURL(url)
     } finally {
       setExporting(false)
+    }
+  }
+
+  async function handleDelete() {
+    if (!bookId) return
+    const confirmed = window.confirm(`Delete ${character.name} from this book? This is best for false positives and cannot be undone.`)
+    if (!confirmed) return
+    setDeleting(true)
+    setError(null)
+    try {
+      await booksApi.deleteCharacter(bookId, character.id)
+      setExpanded(false)
+      onDeleted?.(character.id)
+    } catch {
+      setError("Could not delete this character.")
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -264,6 +283,17 @@ export function CharacterCard({ character, bookId, compact = false, editable = f
                       className={`rounded-md px-3 py-1.5 text-xs font-medium ${isDark ? "border border-slate-700 text-slate-200 hover:bg-slate-800" : "border border-slate-300 text-slate-700 hover:bg-slate-100"}`}
                     >
                       {shareState === "copied" ? "Link copied" : shareState === "error" ? "Share failed" : "Share"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        void handleDelete()
+                      }}
+                      disabled={deleting}
+                      className={`rounded-md px-3 py-1.5 text-xs font-medium ${isDark ? "border border-red-500/40 text-red-200 hover:bg-red-500/10 disabled:opacity-60" : "border border-red-300 text-red-700 hover:bg-red-50 disabled:opacity-60"}`}
+                    >
+                      {deleting ? "Deleting..." : "Delete"}
                     </button>
                   </>
                 ) : null}
@@ -403,11 +433,11 @@ export function CharacterCard({ character, bookId, compact = false, editable = f
                       .slice()
                       .sort((left, right) => (right.chapter_number ?? right.chapter ?? 0) - (left.chapter_number ?? left.chapter ?? 0))
                       .map((event, index) => (
-                      <div key={`${character.id}-growth-${index}`} className={`rounded-lg border px-5 py-4 text-base ${isDark ? "border-slate-800 bg-slate-900/50 text-slate-200" : "border-slate-200 bg-white text-slate-700"}`}>
-                        <p className={isDark ? "font-medium text-white" : "font-medium text-slate-900"}>
-                          {eventChapterLabel(event) ? `${eventChapterLabel(event)}: ` : ""}
-                          {eventTitle(event)}
-                        </p>
+                        <div key={`${character.id}-growth-${index}`} className={`rounded-lg border px-5 py-4 text-base ${isDark ? "border-slate-800 bg-slate-900/50 text-slate-200" : "border-slate-200 bg-white text-slate-700"}`}>
+                          <p className={isDark ? "font-medium text-white" : "font-medium text-slate-900"}>
+                            {eventChapterLabel(event) ? `${eventChapterLabel(event)}: ` : ""}
+                            {eventTitle(event)}
+                          </p>
                         {eventDescription(event) ? <p className={isDark ? "mt-2 text-sm leading-relaxed text-slate-300" : "mt-2 text-sm leading-relaxed text-slate-600"}>{eventDescription(event)}</p> : null}
                         <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
                           {typeof event.impact_score === "number" ? (

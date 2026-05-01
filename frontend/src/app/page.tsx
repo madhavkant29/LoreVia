@@ -1,15 +1,12 @@
 "use client"
 
 import Link from "next/link"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, type ReactNode } from "react"
 import { useAuthStore } from "@/lib/stores/authStore"
-import { usePreferencesStore } from "@/lib/stores/preferencesStore"
-
-// ─── Static data ──────────────────────────────────────────────────────────────
 
 const trustStats = [
-  { value: "EPUB & PDF", label: "supported formats" },
-  { value: "Any length", label: "no chapter limit" },
+  { value: "EPUB + PDF", label: "supported formats" },
+  { value: "Any length", label: "built for long manuscripts" },
   { value: "Zero edits", label: "your text is never changed" },
 ]
 
@@ -17,116 +14,86 @@ const painPoints = [
   "You forget when a character last appeared",
   "You contradict something from 100 chapters ago",
   "You waste hours searching your own text",
-  "Readers catch your inconsistencies before you do",
+  "Readers catch inconsistencies before you do",
 ]
 
-const steps = [
+const workflowSteps = [
   {
     num: "01",
-    title: "Upload your manuscript",
-    body: "Drop in your EPUB or PDF. Any length, any genre.",
+    title: "Upload the manuscript",
+    body: "Drop in an EPUB or PDF. LoreVia reads the story structure without asking you to format it first.",
   },
   {
     num: "02",
-    title: "We structure your story",
-    body: "Every character, relationship, and event — extracted and organised from your text.",
+    title: "Build the story map",
+    body: "Characters, relationships, chapters, and threads are organized into a usable reference layer.",
   },
   {
     num: "03",
-    title: "Ask anything. Get cited answers.",
-    body: "Every answer references the exact chapter it came from. No hallucinations.",
+    title: "Ask and verify",
+    body: "Every answer comes back with chapter-linked context, so you can trust the result and trace it fast.",
   },
 ]
 
-const features = [
+const featureCards = [
   {
-    icon: "🔍",
-    title: "Find anything instantly",
-    body: "\"When did this character last appear?\" \"What's the relationship between X and Y?\"",
-    checks: ["Instant answers", "With chapter references"],
+    title: "Instant recall",
+    body: "Find where a person appeared, what changed, and which chapter contains the source.",
   },
   {
-    icon: "📖",
-    title: "Your character bible—generated automatically",
-    body: "Every character, their roles, and relationships — generated directly from your manuscript.",
-    checks: ["Roles and arc summaries", "Relationship map"],
+    title: "Character bible",
+    body: "Profiles, roles, relationships, and arc notes generated from the text itself.",
   },
   {
-    icon: "🗂️",
-    title: "Manage entire series without confusion",
-    body: "Keep each book separate. Search stays scoped to the active book.",
-    checks: ["Series stay isolated", "Book-scoped search"],
+    title: "Series-safe structure",
+    body: "Keep books isolated so a large series stays organized instead of blending together.",
   },
   {
-    icon: "⚠️",
-    title: "Catch continuity errors early",
-    body: "Catch inconsistencies before your readers do. Contradictions, dropped threads, missing appearances.",
-    checks: ["Conflicting descriptions flagged", "Dropped threads surfaced"],
+    title: "Continuity checks",
+    body: "Surface contradictions, missing returns, and loose threads before readers do.",
   },
 ]
 
-const proofStats = [
-  { value: "58", label: "characters detected" },
-  { value: "3",  label: "unresolved threads" },
-  { value: "1",  label: "continuity issue" },
-]
-
-const proofOutputs = [
+const audienceCards = [
   {
-    severity: "warning",
-    text: "Conflicting eye description: Aria",
-    sub: "\"blue\" (Ch. 12) → \"green\" (Ch. 64) — no character state change recorded",
+    title: "Screenwriters",
+    body: "Track scenes, dialogue beats, and character continuity across script drafts.",
   },
   {
-    severity: "warning",
-    text: "Character hasn't appeared in 87 chapters",
-    sub: "Last seen: Ch. 14 — \"The Northern Gate\" — 87 chapters of silence",
+    title: "Authors",
+    body: "Keep character arcs, timelines, and references consistent across long manuscripts.",
   },
   {
-    severity: "info",
-    text: "Unresolved plot thread introduced in Chapter 8",
-    sub: "\"The sealed letter\" — mentioned 4 times, still open",
+    title: "Webnovel writers",
+    body: "Upload chapter by chapter and keep the story memory intact as the series grows.",
+  },
+  {
+    title: "Book series",
+    body: "Separate each book while still comparing recurring characters and story threads.",
   },
 ]
 
-const objections = [
+const proofItems = [
   {
-    q: "Will this rewrite my story?",
-    a: "No. LoreVia only reads and analyses your text. It never changes a single word.",
+    tone: "warning",
+    title: "Conflicting eye color for Aria",
+    body: '"blue" in Chapter 12, "green" in Chapter 64. No state change recorded.',
   },
   {
-    q: "Is my manuscript safe?",
-    a: "Your content is private and never used for training or shared with anyone.",
+    tone: "warning",
+    title: "A character disappeared for 87 chapters",
+    body: "Last seen in Chapter 14. The gap is now visible instead of hidden.",
   },
   {
-    q: "How accurate is it?",
-    a: "Every answer is grounded in your actual text with chapter references. If it's not in your manuscript, it won't appear here.",
+    tone: "info",
+    title: "An unresolved thread stays open",
+    body: "The sealed letter is mentioned repeatedly, but never closed out.",
   },
-]
-
-const demoQueries = [
-  {
-    q: "When did Arthur last appear?",
-    chapter: "Chapter 42 — The Council Scene",
-    excerpt: "\"Arthur stood at the back of the hall, his expression unreadable as the votes were cast...\"",
-  },
-  {
-    q: "What's the relationship between Sara and Kai?",
-    chapter: "Estranged siblings",
-    excerpt: "First appeared together in Chapter 7. Relationship deteriorated by Ch. 31. No reconciliation recorded.",
-  },
-]
-
-const targetAudiences = [
-  "Novelists writing long-form fiction",
-  "Fantasy & sci-fi authors managing complex worlds",
-  "Writers working on multi-book series",
 ]
 
 const comparisonCompetitors = [
   {
     name: "Fandom Wiki",
-    icon: "📖",
     description: "Community-maintained wikis for popular series",
     features: {
       "Works on any book": false,
@@ -140,12 +107,11 @@ const comparisonCompetitors = [
       "Relationship graph": true,
       "Works on unpublished novels": false,
     },
-    bestFor: "Fans reading popular series who want a quick reference.",
+    bestFor: "Readers of big-name series who want a quick refresher.",
     verdictType: "bad" as const,
   },
   {
     name: "Kindle X-Ray",
-    icon: "📱",
     description: "Amazon's built-in character lookup feature",
     features: {
       "Works on any book": false,
@@ -159,12 +125,11 @@ const comparisonCompetitors = [
       "Relationship graph": false,
       "Works on unpublished novels": false,
     },
-    bestFor: "Kindle readers who want lightweight character lookups.",
+    bestFor: "Kindle-only reading when you need a lightweight lookup.",
     verdictType: "bad" as const,
   },
   {
     name: "Campfire Write",
-    icon: "🏕️",
     description: "Modular writing tool for authors",
     features: {
       "Works on any book": true,
@@ -178,12 +143,11 @@ const comparisonCompetitors = [
       "Relationship graph": true,
       "Works on unpublished novels": true,
     },
-    bestFor: "Worldbuilders who like structured templates and planning.",
+    bestFor: "Worldbuilding and planning with manual templates.",
     verdictType: "neutral" as const,
   },
   {
     name: "Scrivener",
-    icon: "✍️",
     description: "Professional manuscript editor for authors",
     features: {
       "Works on any book": true,
@@ -197,12 +161,11 @@ const comparisonCompetitors = [
       "Relationship graph": false,
       "Works on unpublished novels": true,
     },
-    bestFor: "Authors focused on drafting, revising, and manuscript structure.",
+    bestFor: "Drafting and revision workflows for serious writers.",
     verdictType: "neutral" as const,
   },
   {
     name: "LoreVia",
-    icon: null,
     description: "AI that reads your book so you don't have to remember everything",
     features: {
       "Works on any book": true,
@@ -216,7 +179,7 @@ const comparisonCompetitors = [
       "Relationship graph": true,
       "Works on unpublished novels": true,
     },
-    bestFor: "Writers who want auto character bibles, spoiler-safe recall, and continuity checks.",
+    bestFor: "Readers and authors who want spoiler-safe recall and continuity checks.",
     verdictType: "lorevia" as const,
   },
 ]
@@ -235,54 +198,131 @@ const comparisonFeatureList = [
 ] as const
 
 const comparisonFeatureDescriptions: Record<(typeof comparisonFeatureList)[number], string> = {
-  "Works on any book": "Not just bestsellers or popular series",
-  "Zero spoiler risk": "Never shows content past where you've read",
-  "No manual data entry": "Extracts everything from your text automatically",
-  "Tracks your reading position": "Knows exactly where you are in the story",
-  "Automatic character extraction": "Reads the manuscript and builds profiles itself",
-  "Finds plotholes": "Detects contradictions across hundreds of chapters",
-  "Author writing tools": "Continuity checker, character bible, and story advisor",
-  "Memory recall on return": "\"Previously on...\" when you come back after a break",
-  "Relationship graph": "Visual map of every character connection",
-  "Works on unpublished novels": "Your drafts, your WIPs, your private manuscripts",
+  "Works on any book": "Not limited to popular titles or public wikis",
+  "Zero spoiler risk": "Never shows content beyond your reading position",
+  "No manual data entry": "Extracts the story automatically from the text",
+  "Tracks your reading position": "Keeps the context anchored to where you are",
+  "Automatic character extraction": "Reads the manuscript and builds profiles",
+  "Finds plotholes": "Flags contradictions and missing story threads",
+  "Author writing tools": "Character bible, feedback, and continuity help",
+  "Memory recall on return": "Brings you back up to speed after a break",
+  "Relationship graph": "Visual map of how characters connect",
+  "Works on unpublished novels": "Works on drafts and private work in progress",
 }
 
-// ─── useInView hook ───────────────────────────────────────────────────────────
+const pricingTiers = [
+  {
+    name: "Starter",
+    priceMonthly: 0,
+    priceAnnual: 0,
+    subtitle: "For trying the product on a small library.",
+    bullets: [
+      "Track up to 2 books",
+      "Basic summaries and recall",
+      "Tap character names for context",
+      "A lightweight way to explore the product",
+    ],
+    highlight: false,
+    cta: "Start free",
+  },
+  {
+    name: "Reader",
+    priceMonthly: 12,
+    priceAnnual: 120,
+    subtitle: "For dedicated readers who come back to long books.",
+    bullets: [
+      "Everything in Starter, plus",
+      "Unlimited books",
+      "Multi-mode story summaries",
+      "Ask unlimited questions about your story",
+    ],
+    highlight: false,
+    cta: "Go Reader",
+  },
+  {
+    name: "Author",
+    priceMonthly: 24,
+    priceAnnual: 240,
+    subtitle: "For manuscript builders who need continuity support.",
+    bullets: [
+      "Everything in Reader, plus",
+      "Catch continuity errors automatically",
+      "Chapter and manuscript feedback",
+      "Auto-generated character reference sheets",
+      "Visual relationship maps",
+    ],
+    highlight: true,
+    cta: "Start drafting",
+  },
+  {
+    name: "Architect",
+    priceMonthly: 36,
+    priceAnnual: 360,
+    subtitle: "For series and world-builders at scale.",
+    bullets: [
+      "Everything in Author, plus",
+      "Faster processing for large files",
+      "Deeper continuity analysis",
+      "Analyze multiple books together",
+      "Early access to new features",
+    ],
+    highlight: false,
+    cta: "Build your world",
+  },
+]
+
+const faqItems = [
+  {
+    q: "Does it rewrite my manuscript?",
+    a: "No. LoreVia analyzes the text and leaves the source untouched.",
+  },
+  {
+    q: "Will it work on long books?",
+    a: "Yes. The page is designed around long-form manuscripts and series workflows.",
+  },
+  {
+    q: "Is the answer grounded in my book?",
+    a: "Yes. Results are tied back to chapter and passage context so you can verify them quickly.",
+  },
+]
 
 function useInView(threshold = 0.12) {
   const ref = useRef<HTMLDivElement>(null)
   const [inView, setInView] = useState(false)
 
   useEffect(() => {
-    const obs = new IntersectionObserver(
-      ([entry]) => { if (entry.isIntersecting) setInView(true) },
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) setInView(true)
+      },
       { threshold }
     )
-    if (ref.current) obs.observe(ref.current)
-    return () => obs.disconnect()
+
+    if (ref.current) observer.observe(ref.current)
+
+    return () => observer.disconnect()
   }, [threshold])
 
   return { ref, inView }
 }
 
-// ─── AnimatedCard — scroll-triggered fade-up wrapper ─────────────────────────
-
-function AnimatedCard({
+function Reveal({
   children,
   delay = 0,
   className = "",
 }: {
-  children: React.ReactNode
+  children: ReactNode
   delay?: number
   className?: string
 }) {
   const { ref, inView } = useInView()
+
   return (
     <div
       ref={ref}
       style={{ transitionDelay: `${delay}ms` }}
-      className={`transition-all duration-700 ${
-        inView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6"
+      className={`transform-gpu transition-all duration-700 ease-out ${
+        inView ? "translate-y-0 opacity-100" : "translate-y-6 opacity-0"
       } ${className}`}
     >
       {children}
@@ -290,837 +330,17 @@ function AnimatedCard({
   )
 }
 
-// ─── Main page ────────────────────────────────────────────────────────────────
-
-function ComparisonSection({
-  ctaHref,
-  isDark,
-}: {
-  ctaHref: "/library" | "/register"
-  isDark: boolean
-}) {
-  const [activeTooltip, setActiveTooltip] = useState<string | null>(null)
-
-  return (
-    <Section id="comparison">
-      <div className="mx-auto max-w-6xl">
-        <div className="text-center">
-          <p className={`text-xs font-bold uppercase tracking-[0.32em] ${isDark ? "text-neutral-300" : "text-violet-600"}`}>
-            Why LoreVia
-          </p>
-          <h2 className={`mt-4 font-serif text-4xl leading-tight md:text-5xl ${isDark ? "text-white" : "text-stone-950"}`}>
-            Every other tool makes you
-            <br />
-            do the work yourself.
-          </h2>
-          <p className={`mx-auto mt-5 max-w-2xl text-base leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
-            Wikis spoil you. Campfire makes you fill it in. Kindle X-Ray stays shallow. LoreVia reads your book so
-            you don&apos;t have to remember everything.
-          </p>
-        </div>
-
-        <AnimatedCard>
-          <div
-            className={`mt-14 overflow-hidden rounded-[2rem] border shadow-[0_24px_70px_-35px_rgba(15,23,42,0.45)] ${
-              isDark ? "border-white/10 bg-[#080808]" : "border-stone-200 bg-white"
-            }`}
-          >
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[980px] border-separate border-spacing-0">
-                <thead>
-                  <tr>
-                    <th
-                      className={`sticky left-0 z-10 border-b px-6 py-6 text-left align-bottom ${
-                        isDark ? "border-white/[0.06] bg-[#080808]" : "border-stone-100 bg-white"
-                      }`}
-                    >
-                      <span className={`text-[11px] font-bold uppercase tracking-[0.26em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>
-                        Features
-                      </span>
-                    </th>
-                    {comparisonCompetitors.map((competitor) => {
-                      const isLoreVia = competitor.verdictType === "lorevia"
-
-                      return (
-                        <th
-                          key={competitor.name}
-                          className={`relative border-b px-4 pb-5 pt-6 text-center align-bottom ${
-                            isLoreVia
-                              ? isDark
-                                ? "border-violet-400/20 bg-violet-500/[0.08]"
-                                : "border-violet-100 bg-violet-50/70"
-                              : isDark
-                                ? "border-white/[0.06]"
-                                : "border-stone-100"
-                          }`}
-                        >
-                          {isLoreVia ? <div className="absolute inset-x-0 top-0 h-1 bg-violet-500" /> : null}
-                          <div className="flex flex-col items-center gap-3">
-                            <div
-                              className={`flex h-12 w-12 items-center justify-center rounded-2xl border text-xl ${
-                                isLoreVia
-                                  ? "border-violet-400/50 bg-violet-500 shadow-[0_10px_30px_-12px_rgba(139,92,246,0.9)]"
-                                  : isDark
-                                    ? "border-white/10 bg-white/[0.04]"
-                                    : "border-stone-200 bg-stone-50"
-                              }`}
-                              title={competitor.description}
-                            >
-                              {isLoreVia ? <LoreViaMark /> : competitor.icon}
-                            </div>
-                            <div>
-                              <p className={`text-sm font-semibold ${isLoreVia ? "text-violet-400" : isDark ? "text-white" : "text-stone-900"}`}>
-                                {competitor.name}
-                              </p>
-                              <p className={`mt-1 max-w-[11rem] text-[11px] leading-4 ${isDark ? "text-slate-500" : "text-stone-400"}`}>
-                                {competitor.description}
-                              </p>
-                            </div>
-                          </div>
-                        </th>
-                      )
-                    })}
-                  </tr>
-                </thead>
-                <tbody>
-                  {comparisonFeatureList.map((feature) => (
-                    <tr key={feature} className={isDark ? "hover:bg-white/[0.02]" : "hover:bg-stone-50/80"}>
-                      <td
-                        className={`sticky left-0 z-[1] border-b px-6 py-4 text-left ${
-                          isDark ? "border-white/[0.06] bg-[#080808]" : "border-stone-100 bg-white"
-                        }`}
-                      >
-                        <div
-                          className="relative inline-flex items-center gap-2"
-                          onMouseEnter={() => setActiveTooltip(feature)}
-                          onMouseLeave={() => setActiveTooltip(null)}
-                        >
-                          <span className={`text-sm font-medium ${isDark ? "text-slate-200" : "text-stone-700"}`}>
-                            {feature}
-                          </span>
-                          <button
-                            type="button"
-                            aria-label={`More about ${feature}`}
-                            className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold transition ${
-                              isDark
-                                ? "bg-white/[0.06] text-slate-400 hover:bg-white/[0.1] hover:text-slate-200"
-                                : "bg-stone-100 text-stone-400 hover:bg-stone-200 hover:text-stone-600"
-                            }`}
-                            onFocus={() => setActiveTooltip(feature)}
-                            onBlur={() => setActiveTooltip(null)}
-                          >
-                            ?
-                          </button>
-                          {activeTooltip === feature ? (
-                            <div
-                              className={`absolute left-0 bottom-full z-50 mb-2 max-w-xs rounded-xl px-3 py-2 text-xs leading-5 shadow-xl ${
-                                isDark ? "bg-white text-stone-950" : "bg-stone-950 text-white"
-                              }`}
-                            >
-                              {comparisonFeatureDescriptions[feature]}
-                            </div>
-                          ) : null}
-                        </div>
-                      </td>
-                      {comparisonCompetitors.map((competitor) => {
-                        const isLoreVia = competitor.verdictType === "lorevia"
-
-                        return (
-                          <td
-                            key={`${competitor.name}-${feature}`}
-                            className={`border-b px-4 py-4 text-center ${
-                              isLoreVia
-                                ? isDark
-                                  ? "border-violet-400/20 bg-violet-500/[0.05]"
-                                  : "border-violet-100 bg-violet-50/50"
-                                : isDark
-                                  ? "border-white/[0.06]"
-                                  : "border-stone-100"
-                            }`}
-                          >
-                            <div className="flex justify-center">
-                              {competitor.features[feature] ? <ComparisonCheck /> : <ComparisonCross isDark={isDark} />}
-                            </div>
-                          </td>
-                        )
-                      })}
-                    </tr>
-                  ))}
-
-                  <tr className={isDark ? "bg-white/[0.03]" : "bg-stone-50/70"}>
-                    <td
-                      className={`sticky left-0 z-[1] border-b px-6 py-4 text-left ${
-                        isDark ? "border-white/[0.06] bg-[#0d0d0d]" : "border-stone-100 bg-stone-50/70"
-                      }`}
-                    >
-                      <span className={`text-[11px] font-bold uppercase tracking-[0.26em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>
-                        Best for
-                      </span>
-                    </td>
-                    {comparisonCompetitors.map((competitor) => {
-                      const isLoreVia = competitor.verdictType === "lorevia"
-                      const badgeClass = isLoreVia
-                        ? isDark
-                          ? "bg-violet-500/15 text-violet-100"
-                          : "bg-violet-100 text-violet-900"
-                        : isDark
-                          ? "bg-white/[0.06] text-slate-200"
-                          : "bg-stone-100 text-stone-800"
-
-                      return (
-                        <td
-                          key={`${competitor.name}-verdict`}
-                          className={`border-b px-4 py-4 text-center align-top ${
-                            isLoreVia
-                              ? isDark
-                                ? "border-violet-400/20 bg-violet-500/[0.08]"
-                                : "border-violet-100 bg-violet-50/70"
-                              : isDark
-                                ? "border-white/[0.06]"
-                                : "border-stone-100"
-                          }`}
-                        >
-                          <span className={`inline-block rounded-xl px-3 py-2 text-left text-xs leading-5 ${badgeClass}`}>
-                            {competitor.bestFor}
-                          </span>
-                        </td>
-                      )
-                    })}
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </AnimatedCard>
-
-        <div className="mt-10 text-center">
-          <Link
-            href={ctaHref}
-            className={`inline-flex items-center justify-center rounded-[1rem] px-7 py-3.5 text-sm font-semibold transition hover:-translate-y-[1px] active:translate-y-0 ${
-              isDark
-                ? "bg-white text-black shadow-[0_20px_40px_-18px_rgba(255,255,255,0.25)] hover:bg-stone-100"
-                : "bg-stone-950 text-white shadow-[0_20px_40px_-18px_rgba(0,0,0,0.35)] hover:bg-stone-800"
-            }`}
-          >
-            Upload Manuscript
-          </Link>
-          <p className={`mt-3 text-xs font-medium ${isDark ? "text-slate-500" : "text-stone-400"}`}>
-            Built for readers and authors working with real books, not prefilled templates.
-          </p>
-        </div>
-      </div>
-    </Section>
-  )
-}
-
-function ComparisonCheck() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-      <circle cx="9" cy="9" r="9" fill="#8b5cf6" fillOpacity="0.14" />
-      <path d="M5 9.5L8 12.5L13 6.5" stroke="#8b5cf6" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  )
-}
-
-function ComparisonCross({ isDark }: { isDark: boolean }) {
-  return (
-    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-      <circle cx="9" cy="9" r="9" fill={isDark ? "rgba(255,255,255,0.08)" : "#f5f5f4"} />
-      <path d="M6 6L12 12M12 6L6 12" stroke={isDark ? "#64748b" : "#a8a29e"} strokeWidth="1.8" strokeLinecap="round" />
-    </svg>
-  )
-}
-
-function LoreViaMark() {
-  return (
-    <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">
-      <circle cx="14" cy="14" r="4" fill="white" />
-      <circle cx="5" cy="8" r="2.5" fill="white" fillOpacity="0.7" />
-      <circle cx="23" cy="8" r="2.5" fill="white" fillOpacity="0.7" />
-      <circle cx="5" cy="20" r="2.5" fill="white" fillOpacity="0.7" />
-      <circle cx="23" cy="20" r="2.5" fill="white" fillOpacity="0.7" />
-      <circle cx="14" cy="3" r="2" fill="white" fillOpacity="0.5" />
-      <circle cx="14" cy="25" r="2" fill="white" fillOpacity="0.5" />
-      <line x1="14" y1="14" x2="5" y2="8" stroke="white" strokeWidth="1" strokeOpacity="0.6" />
-      <line x1="14" y1="14" x2="23" y2="8" stroke="white" strokeWidth="1" strokeOpacity="0.6" />
-      <line x1="14" y1="14" x2="5" y2="20" stroke="white" strokeWidth="1" strokeOpacity="0.6" />
-      <line x1="14" y1="14" x2="23" y2="20" stroke="white" strokeWidth="1" strokeOpacity="0.6" />
-      <line x1="14" y1="14" x2="14" y2="3" stroke="white" strokeWidth="1" strokeOpacity="0.4" />
-      <line x1="14" y1="14" x2="14" y2="25" stroke="white" strokeWidth="1" strokeOpacity="0.4" />
-    </svg>
-  )
-}
-
-export default function HomePage() {
-  const user = useAuthStore((s) => s.user)
-  const { theme } = usePreferencesStore()
-  const isDark = theme === "dark"
-  const [activeDemo, setActiveDemo] = useState(0)
-
-  const ctaHref = user ? "/library" : "/register"
-
-  useEffect(() => {
-    const t = setInterval(() => setActiveDemo((p) => (p + 1) % demoQueries.length), 5200)
-    return () => clearInterval(t)
-  }, [])
-
-  return (
-    <main
-      className={`min-h-screen transition-colors ${
-        isDark
-          ? "bg-[linear-gradient(180deg,#000000_0%,#050505_42%,#0b0b0b_100%)] text-slate-100"
-          : "bg-[linear-gradient(180deg,#fbf7ef_0%,#f7f2eb_48%,#f3efe9_100%)] text-stone-950"
-      }`}
-    >
-
-      {/* ── Noise texture overlay ─────────────────────────────────────────────
-          Subtle grain layer used by Linear, Raycast, Vercel. Pointer-events-none
-          so it never blocks interactions. Renders above everything via z-[9999]. */}
-      <div
-        aria-hidden
-        className="pointer-events-none fixed inset-0 z-[9999] opacity-[0.032]"
-        style={{
-          backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E")`,
-          backgroundRepeat: "repeat",
-          backgroundSize: "200px 200px",
-        }}
-      />
-
-      {/* ══ NAVBAR ═══════════════════════════════════════════════════════════════ */}
-      <nav
-        className={`sticky top-0 z-50 border-b backdrop-blur-md ${
-          isDark
-            ? "border-white/[0.06] bg-black/75"
-            : "border-stone-200/70 bg-white/80"
-        }`}
-      >
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-3.5 lg:px-10">
-          <img src="/logoandtext.png" alt="LoreVia" className="h-8 w-auto" />
-
-          <div
-            className={`hidden md:flex items-center gap-8 text-sm font-medium ${
-              isDark ? "text-slate-400" : "text-stone-500"
-            }`}
-          >
-            <a href="#how"      className={`transition hover:${isDark ? "text-white" : "text-stone-900"}`}>How it works</a>
-            <a href="#features" className={`transition hover:${isDark ? "text-white" : "text-stone-900"}`}>Features</a>
-            <a href="#faq"      className={`transition hover:${isDark ? "text-white" : "text-stone-900"}`}>FAQ</a>
-          </div>
-
-          <Link
-            href={ctaHref}
-            className={`rounded-xl px-5 py-2.5 text-sm font-semibold transition hover:-translate-y-[1px] active:translate-y-0 ${
-              isDark
-                ? "bg-white text-black hover:bg-stone-100"
-                : "bg-stone-950 text-white hover:bg-stone-800"
-            }`}
-          >
-            Get started
-          </Link>
-        </div>
-      </nav>
-
-      {/* ══ 1. HERO ══════════════════════════════════════════════════════════════ */}
-      <section className="relative mx-auto max-w-7xl px-6 pb-16 pt-20 lg:px-10 lg:pb-20 lg:pt-28">
-
-        {/* Dramatic layered ambient glow — replaces the old single radial gradient */}
-        <div className="pointer-events-none absolute inset-0 overflow-hidden">
-          <div
-            className={`absolute -top-40 left-1/2 -translate-x-1/2 h-[600px] w-[900px] rounded-full blur-[120px] ${
-              isDark ? "opacity-[0.18] bg-violet-600" : "opacity-[0.22] bg-violet-300"
-            }`}
-          />
-          <div
-            className={`absolute -top-20 left-1/3 h-[400px] w-[500px] rounded-full blur-[100px] ${
-              isDark ? "opacity-[0.10] bg-indigo-400" : "opacity-[0.14] bg-indigo-200"
-            }`}
-          />
-        </div>
-
-        <div className="relative grid gap-14 lg:grid-cols-2 lg:items-center">
-
-          {/* Left — copy */}
-          <div>
-            <img src="/logoandtext.png" alt="LoreVia" className="mb-8 h-12 w-auto object-contain sm:h-14" />
-
-            {/* Single static badge — no audience rotation */}
-            <div className="mb-7 flex flex-wrap items-center gap-4">
-              <div
-                className={`inline-flex min-w-[10rem] items-center justify-center rounded-full border px-4 py-1.5 text-[11px] font-bold uppercase tracking-[0.32em] ${
-                  isDark
-                    ? "border-white/10 bg-white/[0.04] text-neutral-200"
-                    : "border-violet-200 bg-violet-50 text-violet-600"
-                }`}
-              >
-                For writers
-              </div>
-              <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-                Continuity, character memory, and story intelligence.
-              </p>
-            </div>
-
-            <h1
-              className={`font-serif text-[3.2rem] leading-[1.04] tracking-[-0.03em] sm:text-[4.2rem] md:text-[4.8rem] ${
-                isDark ? "text-white" : "text-stone-950"
-              }`}
-            >
-              Your story.
-              <br />
-              <span className={isDark ? "text-neutral-200" : "text-violet-600"}>
-                Fully searchable.
-              </span>
-              <br />
-              No rereading required.
-            </h1>
-
-            <p
-              className={`mt-7 max-w-[480px] text-lg leading-8 ${
-                isDark ? "text-slate-300" : "text-stone-600"
-              }`}
-            >
-              Upload your manuscript and ask anything about your characters, relationships, or past
-              events — with answers grounded in exact chapters and passages.
-            </p>
-
-            <div className="mt-10 flex flex-col gap-4 sm:flex-row sm:items-center">
-              <Link
-                href={ctaHref}
-                className={`inline-flex items-center justify-center rounded-[1.1rem] px-8 py-4 text-base font-semibold transition hover:-translate-y-[1px] active:translate-y-0 ${
-                  isDark
-                    ? "bg-white text-black shadow-[0_20px_40px_-18px_rgba(255,255,255,0.25)] hover:bg-stone-100"
-                    : "bg-stone-950 text-white shadow-[0_20px_40px_-18px_rgba(0,0,0,0.35)] hover:bg-stone-800"
-                }`}
-              >
-                Upload Manuscript
-              </Link>
-              <button
-                onClick={() => document.getElementById("proof")?.scrollIntoView({ behavior: "smooth" })}
-                className={`text-sm font-medium transition ${
-                  isDark ? "text-slate-400 hover:text-slate-200" : "text-stone-500 hover:text-stone-800"
-                }`}
-              >
-                See example report →
-              </button>
-            </div>
-
-            <p className={`mt-4 text-xs font-medium ${isDark ? "text-slate-600" : "text-stone-400"}`}>
-              Free • No credit card required
-            </p>
-          </div>
-
-          {/* Right — demo card with gradient border ring */}
-          <div
-            className={`relative p-[1px] rounded-[1.85rem] ${
-              isDark
-                ? "bg-gradient-to-b from-white/[0.12] via-white/[0.04] to-white/[0.01]"
-                : "bg-gradient-to-b from-violet-200/60 via-stone-200/30 to-stone-200/10"
-            }`}
-          >
-            <div
-              className={`relative overflow-hidden rounded-[1.8rem] shadow-[0_48px_120px_-40px_rgba(15,23,42,0.55)] ${
-                isDark ? "bg-[#080808]" : "bg-white"
-              }`}
-            >
-              {/* Window chrome */}
-              <div
-                className={`flex items-center gap-2 border-b px-5 py-3.5 ${
-                  isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-stone-100 bg-stone-50/80"
-                }`}
-              >
-                <span className="h-2.5 w-2.5 rounded-full bg-red-400/60" />
-                <span className="h-2.5 w-2.5 rounded-full bg-amber-400/60" />
-                <span className="h-2.5 w-2.5 rounded-full bg-emerald-400/60" />
-                <span className={`ml-2 text-[11px] font-medium ${isDark ? "text-slate-500" : "text-stone-400"}`}>
-                  manuscript.epub — workspace
-                </span>
-              </div>
-
-              {/* "This is real" legitimacy signal */}
-              <div className="px-6 pt-5 pb-1">
-                <p className={`text-xs font-semibold uppercase tracking-[0.28em] ${
-                  isDark ? "text-neutral-400" : "text-stone-500"
-                }`}>
-                  Example output from a real manuscript
-                </p>
-              </div>
-
-              {/* Demo queries */}
-              <div className="space-y-5 p-6 pt-3">
-                {demoQueries.map((demo, i) => (
-                  <div
-                    key={i}
-                    className={`transition-all duration-700 ${
-                      activeDemo === i ? "opacity-100 translate-y-0" : "opacity-50"
-                    }`}
-                  >
-                    <div className="mb-3 flex items-start gap-2.5">
-                      <span className={`mt-px text-sm font-bold ${isDark ? "text-neutral-300" : "text-violet-500"}`}>
-                        ›
-                      </span>
-                      <p className={`text-sm font-medium ${isDark ? "text-slate-200" : "text-stone-800"}`}>
-                        {demo.q}
-                      </p>
-                    </div>
-                    <div
-                      className={`ml-5 rounded-[1rem] border px-4 py-4 ${
-                        isDark ? "border-white/[0.06] bg-white/[0.05]" : "border-stone-100 bg-stone-50"
-                      }`}
-                    >
-                      <p className={`text-[11px] font-bold uppercase tracking-[0.26em] mb-2 ${
-                        isDark ? "text-neutral-300" : "text-violet-600"
-                      }`}>
-                        {demo.chapter}
-                      </p>
-                      <p className={`text-xs leading-5 ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-                        {demo.excerpt}
-                      </p>
-                    </div>
-                  </div>
-                ))}
-
-                {/* Fake input bar — static cursor (no pulse) */}
-                <div
-                  className={`flex items-center gap-3 rounded-[0.9rem] border px-4 py-3 ${
-                    isDark ? "border-white/[0.06] bg-white/[0.04]" : "border-stone-200 bg-stone-50"
-                  }`}
-                >
-                  <span className={`flex-1 text-sm ${isDark ? "text-slate-600" : "text-stone-400"}`}>
-                    Ask anything about your story…
-                  </span>
-                  <span className={`h-[14px] w-px ${isDark ? "bg-white/30" : "bg-violet-300"}`} />
-                </div>
-              </div>
-
-              {/* Pagination dots */}
-              <div className="flex justify-center gap-1.5 pb-5">
-                {demoQueries.map((_, i) => (
-                  <button
-                    key={i}
-                    onClick={() => setActiveDemo(i)}
-                    className={`h-1.5 rounded-full transition-all duration-300 ${
-                      activeDemo === i
-                        ? isDark ? "w-5 bg-white" : "w-5 bg-violet-500"
-                        : isDark ? "w-1.5 bg-white/20" : "w-1.5 bg-stone-300"
-                    }`}
-                  />
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ══ 2. TRUST STATS BAR ═══════════════════════════════════════════════════ */}
-      <section
-        className={`border-y py-10 ${
-          isDark ? "border-white/[0.06] bg-white/[0.02]" : "border-stone-200 bg-stone-50"
-        }`}
-      >
-        <div className="mx-auto max-w-5xl px-6 grid grid-cols-3 gap-8 text-center lg:px-10">
-          {trustStats.map(({ value, label }, i) => (
-            <AnimatedCard key={label} delay={i * 80}>
-              <p className={`font-serif text-3xl font-semibold sm:text-4xl ${isDark ? "text-white" : "text-stone-950"}`}>
-                {value}
-              </p>
-              <p className={`mt-1 text-sm ${isDark ? "text-slate-500" : "text-stone-500"}`}>
-                {label}
-              </p>
-            </AnimatedCard>
-          ))}
-        </div>
-      </section>
-
-      {/* ══ 3. PAIN ══════════════════════════════════════════════════════════════ */}
-      <section className={`py-20 ${isDark ? "bg-[#040404]" : "bg-stone-950"}`}>
-        <div className="mx-auto max-w-5xl px-6 lg:px-10">
-          <h2 className="font-serif text-3xl leading-tight text-white sm:text-4xl md:text-[2.8rem]">
-            Long stories break your memory.
-          </h2>
-
-          <div className="mt-10 grid gap-3 sm:grid-cols-2">
-            {painPoints.map((point, i) => (
-              <AnimatedCard key={point} delay={i * 60}>
-                <div className="flex items-start gap-3 rounded-[1.2rem] border border-white/[0.07] bg-white/[0.04] px-5 py-4">
-                  <span className="mt-0.5 shrink-0 text-amber-400 text-sm">✗</span>
-                  <p className="text-sm leading-6 text-slate-300">{point}</p>
-                </div>
-              </AnimatedCard>
-            ))}
-          </div>
-
-          <p className="mt-9 text-base font-medium text-slate-500">
-            You're solving this manually. You shouldn't have to.
-          </p>
-        </div>
-      </section>
-
-      {/* ══ 4. HOW IT WORKS ══════════════════════════════════════════════════════ */}
-      <Section id="how">
-        <SectionHeader eyebrow="How it works" title="Three steps. That's it." body="" isDark={isDark} />
-
-        <div className="mt-12 grid gap-5 md:grid-cols-2 xl:grid-cols-4">
-          {steps.map((step, i) => (
-            <AnimatedCard key={step.num} delay={i * 80}>
-              <article
-                className={`rounded-[2rem] border p-7 h-full ${
-                  isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-white"
-                }`}
-              >
-                <span className={`block font-serif text-[3rem] leading-none ${isDark ? "text-white/20" : "text-violet-200"}`}>
-                  {step.num}
-                </span>
-                <h3 className={`mt-5 text-lg font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>
-                  {step.title}
-                </h3>
-                <p className={`mt-3 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
-                  {step.body}
-                </p>
-              </article>
-            </AnimatedCard>
-          ))}
-        </div>
-      </Section>
-
-      {/* ══ 5. FEATURES ══════════════════════════════════════════════════════════ */}
-      <Section id="features">
-        <SectionHeader eyebrow="Features" title="Four things. Done right." body="" isDark={isDark} />
-
-        <div className="mt-12 grid gap-6 md:grid-cols-2 xl:grid-cols-4">
-          {features.map((f, i) => (
-            <AnimatedCard key={f.title} delay={i * 80}>
-              <article
-                className={`rounded-[2rem] border p-7 h-full ${
-                  isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-white"
-                }`}
-              >
-                <span className="text-2xl">{f.icon}</span>
-                <h3 className={`mt-5 text-lg font-semibold leading-snug ${isDark ? "text-white" : "text-stone-950"}`}>
-                  {f.title}
-                </h3>
-                <p className={`mt-3 text-sm leading-7 ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-                  {f.body}
-                </p>
-                <ul className="mt-5 space-y-2">
-                  {f.checks.map((c) => (
-                    <li key={c} className="flex items-center gap-2">
-                      <span className={`text-xs font-extrabold ${isDark ? "text-teal-400" : "text-teal-600"}`}>✔</span>
-                      <span className={`text-sm font-medium ${isDark ? "text-slate-200" : "text-stone-700"}`}>{c}</span>
-                    </li>
-                  ))}
-                </ul>
-              </article>
-            </AnimatedCard>
-          ))}
-        </div>
-      </Section>
-
-      {/* ══ 6. PROOF ═════════════════════════════════════════════════════════════ */}
-      <ComparisonSection ctaHref={ctaHref} isDark={isDark} />
-
-      <Section id="proof">
-        <SectionHeader
-          eyebrow="Example output"
-          title="Here's what comes back from a 120-chapter manuscript."
-          body=""
-          isDark={isDark}
-        />
-
-        <AnimatedCard>
-          <div
-            className={`mt-12 overflow-hidden rounded-[2rem] border ${
-              isDark ? "border-white/10 bg-[#080808]" : "border-stone-200 bg-white"
-            }`}
-          >
-            {/* Scan header */}
-            <div
-              className={`flex flex-wrap items-center justify-between gap-5 border-b px-7 py-6 ${
-                isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-stone-100 bg-stone-50"
-              }`}
-            >
-              <div>
-                <p className={`text-[11px] font-bold uppercase tracking-[0.32em] ${isDark ? "text-neutral-300" : "text-violet-600"}`}>
-                  Scan results
-                </p>
-                <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-                  From a 120-chapter epic fantasy manuscript • processed in seconds
-                </p>
-              </div>
-              <div className="flex gap-3">
-                {proofStats.map(({ value, label }) => (
-                  <div
-                    key={label}
-                    className={`rounded-[1rem] border px-4 py-3 text-center ${
-                      isDark ? "border-white/[0.07] bg-white/[0.04]" : "border-stone-100 bg-stone-50"
-                    }`}
-                  >
-                    <p className={`font-serif text-2xl font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>
-                      {value}
-                    </p>
-                    <p className={`mt-0.5 text-[11px] ${isDark ? "text-slate-500" : "text-stone-400"}`}>
-                      {label}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Output rows */}
-            <div className="space-y-2.5 p-7">
-              {proofOutputs.map(({ severity, text, sub }) => (
-                <div
-                  key={text}
-                  className={`flex items-start gap-4 rounded-[1.2rem] border px-5 py-4 ${
-                    severity === "warning"
-                      ? isDark ? "border-amber-500/25 bg-amber-500/[0.07]" : "border-amber-200 bg-amber-50"
-                      : isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-stone-100 bg-stone-50"
-                  }`}
-                >
-                  <span className="mt-0.5 shrink-0 text-base">
-                    {severity === "warning" ? "⚠️" : "ℹ️"}
-                  </span>
-                  <div>
-                    <p className={`text-sm font-medium ${isDark ? "text-slate-100" : "text-stone-800"}`}>
-                      {text}
-                    </p>
-                    <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-400"}`}>
-                      {sub}
-                    </p>
-                  </div>
-                </div>
-              ))}
-              <p className={`pt-2 text-xs font-medium ${isDark ? "text-slate-600" : "text-stone-400"}`}>
-                Each finding links back to the exact chapter and passage.
-              </p>
-            </div>
-          </div>
-        </AnimatedCard>
-
-        {/* Capacity note */}
-        <AnimatedCard delay={100}>
-          <blockquote
-            className={`mt-8 rounded-[2rem] border p-8 ${
-              isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white"
-            }`}
-          >
-            <p className={`font-serif text-xl leading-relaxed ${
-              isDark ? "text-slate-200" : "text-stone-700"
-            }`}>
-              Built to handle long manuscripts, multi-book series, and chapter-linked answers without mixing contexts.
-            </p>
-            <footer className="mt-6 flex items-center gap-3">
-              <div
-                className={`h-9 w-9 rounded-full flex items-center justify-center text-sm font-bold ${
-                  isDark ? "bg-violet-500/30 text-violet-300" : "bg-violet-100 text-violet-600"
-                }`}
-              >
-                12K
-              </div>
-              <div>
-                <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>
-                  Scale-ready, not launch-padded
-                </p>
-                <p className={`text-xs ${isDark ? "text-slate-500" : "text-stone-400"}`}>
-                  Designed for large libraries and series workflows
-                </p>
-              </div>
-            </footer>
-          </blockquote>
-        </AnimatedCard>
-      </Section>
-
-      {/* ══ 7. BUILT FOR ═════════════════════════════════════════════════════════ */}
-      <Section id="built-for">
-        <SectionHeader eyebrow="Built for" title="Writers working with complex stories" body="" isDark={isDark} />
-
-        <div className="mt-10 grid gap-4 md:grid-cols-3">
-          {targetAudiences.map((item, i) => (
-            <AnimatedCard key={item} delay={i * 80}>
-              <div
-                className={`rounded-[1.6rem] border px-6 py-5 ${
-                  isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-white"
-                }`}
-              >
-                <p className={`text-base font-medium leading-snug ${isDark ? "text-slate-100" : "text-stone-800"}`}>
-                  {item}
-                </p>
-              </div>
-            </AnimatedCard>
-          ))}
-        </div>
-      </Section>
-
-      {/* ══ 8. OBJECTIONS / FAQ ══════════════════════════════════════════════════ */}
-      <Section id="faq">
-        <SectionHeader eyebrow="Before you upload" title="Three questions authors always ask." body="" isDark={isDark} />
-
-        <div className="mt-10 grid gap-5 md:grid-cols-3">
-          {objections.map(({ q, a }, i) => (
-            <AnimatedCard key={q} delay={i * 80}>
-              <article
-                className={`rounded-[2rem] border p-7 h-full ${
-                  isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-white"
-                }`}
-              >
-                <h3 className={`text-base font-semibold leading-snug ${isDark ? "text-white" : "text-stone-950"}`}>
-                  "{q}"
-                </h3>
-                <p className={`mt-4 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
-                  {a}
-                </p>
-              </article>
-            </AnimatedCard>
-          ))}
-        </div>
-      </Section>
-
-      {/* ══ 9. FINAL CTA ═════════════════════════════════════════════════════════ */}
-      <section className={`py-24 ${isDark ? "bg-[#040404]" : "bg-stone-950"}`}>
-        <div className="mx-auto max-w-3xl px-6 text-center lg:px-10">
-          <p className="text-[11px] font-bold uppercase tracking-[0.36em] text-indigo-400">
-            Get started
-          </p>
-          <h2 className="mt-5 font-serif text-4xl leading-tight text-white sm:text-5xl">
-            Stop rereading.
-            <br />
-            Start querying.
-          </h2>
-          <p className="mt-5 text-base text-slate-400">
-            Upload your manuscript. Get answers in seconds.
-          </p>
-          <div className="mt-10 flex flex-col items-center gap-3">
-            <Link
-              href={ctaHref}
-              className="inline-flex items-center justify-center rounded-[1.1rem] bg-white px-10 py-4 text-lg font-semibold text-black shadow-[0_20px_40px_-18px_rgba(255,255,255,0.3)] transition hover:bg-stone-100 hover:-translate-y-[1px] active:translate-y-0"
-            >
-              Upload Manuscript
-            </Link>
-            <p className="text-sm text-slate-600">Free • No credit card required</p>
-          </div>
-        </div>
-      </section>
-
-      
-
-      {/* Footer is rendered globally via SiteFooter */}
-
-
-    </main>
-  )
-}
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
 function Section({
-  children,
   id,
+  children,
   className = "",
 }: {
-  children: React.ReactNode
   id?: string
+  children: ReactNode
   className?: string
 }) {
   return (
-    <section id={id} className={`mx-auto max-w-7xl px-6 py-24 lg:px-10 lg:py-32 ${className}`}>
+    <section id={id} className={`mx-auto max-w-7xl px-6 py-20 md:px-8 md:py-28 ${className}`}>
       {children}
     </section>
   )
@@ -1134,22 +354,851 @@ function SectionHeader({
 }: {
   eyebrow: string
   title: string
-  body: string
+  body?: string
   isDark: boolean
 }) {
   return (
     <div className="max-w-3xl">
-      <p className={`text-xs font-bold uppercase tracking-[0.32em] ${isDark ? "text-neutral-300" : "text-violet-600"}`}>
+      <p className={`text-xs font-semibold uppercase tracking-[0.34em] ${isDark ? "text-cyan-300" : "text-cyan-700"}`}>
         {eyebrow}
       </p>
-      <h2 className={`mt-4 font-serif text-4xl leading-tight md:text-5xl ${isDark ? "text-white" : "text-stone-950"}`}>
+      <h2 className={`mt-4 text-3xl font-semibold tracking-tight md:text-5xl ${isDark ? "text-white" : "text-slate-950"}`}>
         {title}
       </h2>
       {body ? (
-        <p className={`mt-5 max-w-xl text-base leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
+        <p className={`mt-5 max-w-2xl text-base leading-8 md:text-lg ${isDark ? "text-slate-300" : "text-slate-600"}`}>
           {body}
         </p>
       ) : null}
     </div>
+  )
+}
+
+function LogoMark() {
+  return (
+    <div className="flex items-center gap-3">
+      <img src="/image.png" alt="LoreVia" className="h-12 w-12 rounded-2xl object-cover shadow-[0_18px_40px_-20px_rgba(15,23,42,0.6)]" />
+      <div>
+        <p className="text-sm font-semibold tracking-[0.3em]">LOREVIA</p>
+        <p className="text-xs text-slate-500">Manuscript intelligence</p>
+      </div>
+    </div>
+  )
+}
+
+function getButtonClass(isDark: boolean, variant: "primary" | "secondary" = "primary") {
+  if (variant === "primary") {
+    return isDark
+      ? "inline-flex items-center justify-center rounded-full bg-white px-7 py-4 text-base font-semibold text-slate-950 shadow-[0_20px_55px_-25px_rgba(255,255,255,0.45)] transition hover:-translate-y-0.5 hover:bg-slate-100"
+      : "inline-flex items-center justify-center rounded-full bg-slate-950 px-7 py-4 text-base font-semibold text-white shadow-[0_20px_55px_-25px_rgba(15,23,42,0.45)] transition hover:-translate-y-0.5 hover:bg-slate-800"
+  }
+
+  return isDark
+    ? "inline-flex items-center justify-center rounded-full border border-white/12 bg-white/6 px-7 py-4 text-base font-semibold text-white transition hover:border-white/20 hover:bg-white/10"
+  : "inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-7 py-4 text-base font-semibold text-slate-900 transition hover:border-slate-300 hover:bg-slate-50"
+}
+
+function ComparisonCheck({ isDark }: { isDark: boolean }) {
+  return (
+    <span className={`inline-flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold ${
+      isDark ? "bg-emerald-400/15 text-emerald-300" : "bg-emerald-50 text-emerald-700"
+    }`}>
+      +
+    </span>
+  )
+}
+
+function ComparisonCross({ isDark }: { isDark: boolean }) {
+  return (
+    <span className={`inline-flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold ${
+      isDark ? "bg-white/6 text-slate-500" : "bg-slate-100 text-slate-400"
+    }`}>
+      -
+    </span>
+  )
+}
+
+function ComparisonSection({ ctaHref, isDark }: { ctaHref: "/library" | "/login"; isDark: boolean }) {
+  const [activeTooltip, setActiveTooltip] = useState<string | null>(null)
+
+  return (
+    <Section id="comparison">
+        <div className="mx-auto max-w-6xl">
+          <div className="text-center">
+            <p className={`text-xs font-semibold uppercase tracking-[0.34em] ${isDark ? "text-cyan-300" : "text-cyan-700"}`}>
+              Why LoreVia
+            </p>
+            <h2 className={`mt-4 text-3xl font-semibold tracking-tight md:text-5xl ${isDark ? "text-white" : "text-slate-950"}`}>
+              Other tools still make you
+              <br />
+              do the work yourself.
+            </h2>
+            <p className={`mx-auto mt-5 max-w-2xl text-base leading-8 ${isDark ? "text-slate-300" : "text-slate-600"}`}>
+            Wikis help if the story already has a page. Campfire and Scrivener help you build. LoreVia reads the
+            manuscript and keeps the recall, continuity, and relationships in one place.
+          </p>
+        </div>
+
+        <Reveal>
+          <div
+            className={`mt-12 overflow-hidden rounded-[2rem] border shadow-[0_24px_70px_-35px_rgba(15,23,42,0.4)] ${
+              isDark ? "border-white/10 bg-white/[0.03]" : "border-slate-200 bg-white"
+            }`}
+          >
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[920px] border-separate border-spacing-0">
+                <thead>
+                  <tr>
+                    <th
+                      className={`sticky left-0 z-10 border-b px-8 py-7 text-left align-bottom ${
+                        isDark ? "border-white/10 bg-[#060b14]" : "border-slate-100 bg-white"
+                      }`}
+                    >
+                      <span className={`text-[11px] font-semibold uppercase tracking-[0.32em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                        Feature
+                      </span>
+                    </th>
+                    {comparisonCompetitors.map((competitor) => {
+                      const isLoreVia = competitor.verdictType === "lorevia"
+                      return (
+                        <th
+                          key={competitor.name}
+                          className={`relative border-b px-4 pb-6 pt-7 text-center align-bottom ${
+                            isLoreVia
+                              ? isDark
+                                ? "border-cyan-300/20 bg-cyan-400/[0.06]"
+                                : "border-cyan-100 bg-cyan-50/70"
+                              : isDark
+                                ? "border-white/10"
+                                : "border-slate-100"
+                          }`}
+                          >
+                            {isLoreVia ? <div className="absolute inset-x-0 top-0 h-1 bg-cyan-400" /> : null}
+                            <div className="flex flex-col items-center gap-3">
+                              <div
+                                className={`flex h-12 w-12 items-center justify-center rounded-2xl border text-sm font-semibold tracking-[0.14em] ${
+                                  isLoreVia
+                                    ? "border-cyan-300/40 bg-cyan-400/15"
+                                    : isDark
+                                      ? "border-white/10 bg-white/[0.04]"
+                                      : "border-slate-200 bg-slate-50"
+                                }`}
+                                title={competitor.description}
+                              >
+                                {isLoreVia ? "LV" : competitor.name === "Campfire Write" ? "CW" : competitor.name === "Scrivener" ? "SC" : competitor.name === "Kindle X-Ray" ? "KX" : "FW"}
+                              </div>
+                              <div>
+                                <p className={`text-sm font-semibold ${isLoreVia ? "text-cyan-700 dark:text-cyan-200" : isDark ? "text-white" : "text-slate-900"}`}>
+                                  {competitor.name}
+                                </p>
+                                <p className={`mt-1 max-w-[11rem] text-[11px] leading-5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                                  {competitor.description}
+                                </p>
+                              </div>
+                            </div>
+                        </th>
+                      )
+                    })}
+                  </tr>
+                </thead>
+                <tbody>
+                  {comparisonFeatureList.map((feature) => (
+                    <tr key={feature} className={isDark ? "hover:bg-white/[0.025]" : "hover:bg-slate-50/80"}>
+                      <td
+                        className={`sticky left-0 z-[1] border-b px-8 py-5 text-left ${
+                          isDark ? "border-white/10 bg-[#060b14]" : "border-slate-100 bg-white"
+                        }`}
+                      >
+                        <div
+                          className="relative inline-flex max-w-[14rem] items-start gap-3"
+                          onMouseEnter={() => setActiveTooltip(feature)}
+                          onMouseLeave={() => setActiveTooltip(null)}
+                        >
+                          <div>
+                            <p className={`text-sm font-medium leading-6 ${isDark ? "text-slate-100" : "text-slate-800"}`}>
+                              {feature}
+                            </p>
+                            <p className={`mt-1 text-[11px] leading-5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                              {comparisonFeatureDescriptions[feature]}
+                            </p>
+                          </div>
+                          {activeTooltip === feature ? (
+                            <div
+                              className={`absolute left-0 bottom-full z-50 mb-2 max-w-xs rounded-xl px-3 py-2 text-xs leading-5 shadow-xl ${
+                                isDark ? "bg-white text-slate-950" : "bg-slate-950 text-white"
+                              }`}
+                            >
+                              {comparisonFeatureDescriptions[feature]}
+                            </div>
+                          ) : null}
+                        </div>
+                      </td>
+                      {comparisonCompetitors.map((competitor) => {
+                        const isLoreVia = competitor.verdictType === "lorevia"
+                        return (
+                          <td
+                            key={`${competitor.name}-${feature}`}
+                            className={`border-b px-4 py-5 text-center ${
+                              isLoreVia
+                                ? isDark
+                                  ? "border-cyan-300/20 bg-cyan-400/[0.04]"
+                                  : "border-cyan-100 bg-cyan-50/50"
+                                : isDark
+                                  ? "border-white/10"
+                                  : "border-slate-100"
+                            }`}
+                          >
+                            <div className="flex justify-center">
+                              {competitor.features[feature] ? <ComparisonCheck isDark={isDark} /> : <ComparisonCross isDark={isDark} />}
+                            </div>
+                          </td>
+                        )
+                      })}
+                    </tr>
+                  ))}
+                  <tr className={isDark ? "bg-white/[0.02]" : "bg-slate-50/70"}>
+                    <td
+                      className={`sticky left-0 z-[1] border-b px-8 py-5 text-left ${
+                        isDark ? "border-white/10 bg-[#090f19]" : "border-slate-100 bg-slate-50/70"
+                      }`}
+                    >
+                      <span className={`text-[11px] font-semibold uppercase tracking-[0.28em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                        Best for
+                      </span>
+                    </td>
+                    {comparisonCompetitors.map((competitor) => {
+                      const isLoreVia = competitor.verdictType === "lorevia"
+                      return (
+                        <td
+                          key={`${competitor.name}-bestfor`}
+                          className={`border-b px-4 py-5 text-center align-top ${
+                            isLoreVia
+                              ? isDark
+                                ? "border-cyan-300/20 bg-cyan-400/[0.06]"
+                                : "border-cyan-100 bg-cyan-50/70"
+                              : isDark
+                                ? "border-white/10"
+                                : "border-slate-100"
+                          }`}
+                        >
+                          <span
+                            className={`inline-flex min-h-[4.5rem] items-center rounded-2xl px-3 py-2 text-left text-xs leading-5 ${
+                              isLoreVia
+                                ? isDark
+                                  ? "bg-cyan-400/15 text-cyan-100"
+                                  : "bg-cyan-100 text-cyan-900"
+                                : isDark
+                                  ? "bg-white/[0.05] text-slate-200"
+                                  : "bg-slate-100 text-slate-700"
+                            }`}
+                          >
+                            {competitor.bestFor}
+                          </span>
+                        </td>
+                      )
+                    })}
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </Reveal>
+
+        <div className="mt-10 text-center">
+          <Link
+            href={ctaHref}
+            className={`inline-flex items-center justify-center rounded-full px-7 py-4 text-sm font-semibold transition hover:-translate-y-[1px] ${
+              isDark
+                ? "bg-white text-slate-950 hover:bg-slate-100"
+                : "bg-slate-950 text-white hover:bg-slate-800"
+            }`}
+          >
+            Upload manuscript
+          </Link>
+          <p className={`mt-3 text-xs font-medium ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+            Built for readers and authors working with real books, not prefilled templates.
+          </p>
+        </div>
+      </div>
+    </Section>
+  )
+}
+
+export default function LandingPage() {
+  const { user } = useAuthStore()
+  const isDark = true
+  const [billingCycle, setBillingCycle] = useState<"monthly" | "annual">("monthly")
+
+  const ctaHref = user ? "/library" : "/login"
+  const secondaryCtaHref = user ? "/pricing" : "/login"
+
+  const shellClass = isDark
+    ? "min-h-screen bg-[#040814] text-white"
+    : "min-h-screen bg-[#f7f3ee] text-slate-950"
+
+  return (
+    <main className={`relative overflow-hidden ${shellClass}`}>
+      <div
+        className={`pointer-events-none absolute inset-0 ${
+          isDark
+            ? "bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.14),transparent_38%),radial-gradient(circle_at_top_right,rgba(168,85,247,0.12),transparent_35%),linear-gradient(to_bottom,rgba(255,255,255,0.03),transparent_24%)]"
+            : "bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.14),transparent_36%),radial-gradient(circle_at_top_right,rgba(15,23,42,0.06),transparent_28%),linear-gradient(to_bottom,rgba(255,255,255,0.55),transparent_28%)]"
+        }`}
+      />
+      <div className="pointer-events-none absolute left-1/2 top-32 h-[32rem] w-[32rem] -translate-x-1/2 rounded-full bg-cyan-400/10 blur-3xl" />
+      <div className="pointer-events-none absolute -right-32 top-[22rem] h-[28rem] w-[28rem] rounded-full bg-indigo-500/10 blur-3xl" />
+
+      <header className="relative z-10">
+        <nav className="mx-auto flex max-w-7xl items-center justify-between px-6 py-6 md:px-8 md:py-8">
+          <LogoMark />
+          <div className="hidden items-center gap-8 lg:flex">
+            <a href="#product" className={`text-sm font-medium transition ${isDark ? "text-slate-300 hover:text-white" : "text-slate-600 hover:text-slate-950"}`}>
+              Product
+            </a>
+            <a href="#workflow" className={`text-sm font-medium transition ${isDark ? "text-slate-300 hover:text-white" : "text-slate-600 hover:text-slate-950"}`}>
+              How it works
+            </a>
+            <a href="#pricing" className={`text-sm font-medium transition ${isDark ? "text-slate-300 hover:text-white" : "text-slate-600 hover:text-slate-950"}`}>
+              Pricing
+            </a>
+            <a href="#faq" className={`text-sm font-medium transition ${isDark ? "text-slate-300 hover:text-white" : "text-slate-600 hover:text-slate-950"}`}>
+              FAQ
+            </a>
+          </div>
+          <Link href={ctaHref} className={getButtonClass(isDark, "primary")}>
+            {user ? "Open library" : "Get started"}
+          </Link>
+        </nav>
+      </header>
+
+      <section className="relative z-10">
+        <div className="mx-auto grid max-w-7xl gap-10 px-6 pb-16 pt-6 md:px-8 md:pb-24 lg:grid-cols-[1.05fr_0.95fr] lg:items-center lg:gap-16 lg:pt-10">
+          <div>
+            <Reveal>
+              <div className={`inline-flex items-center rounded-full border px-4 py-2 text-xs font-semibold tracking-[0.26em] ${isDark ? "border-white/10 bg-white/6 text-cyan-200" : "border-slate-200 bg-white text-cyan-800"}`}>
+                FOR READERS AND AUTHORS
+              </div>
+            </Reveal>
+
+            <Reveal delay={60}>
+              <h1 className={`mt-6 max-w-3xl text-5xl font-semibold leading-[0.95] tracking-tight md:text-7xl ${isDark ? "text-white" : "text-slate-950"}`}>
+                Pick up any story.
+                <span className={`block ${isDark ? "text-slate-300" : "text-slate-600"}`}>
+                  Remember every thread.
+                </span>
+              </h1>
+            </Reveal>
+
+            <Reveal delay={120}>
+              <p className={`mt-6 max-w-2xl text-lg leading-8 md:text-xl ${isDark ? "text-slate-300" : "text-slate-600"}`}>
+                LoreVia reads your manuscript and turns it into a structured reference layer, so you can ask about
+                characters, relationships, and past events without hunting through the text yourself.
+              </p>
+            </Reveal>
+
+            <Reveal delay={180}>
+              <div className="mt-8 flex flex-wrap gap-4">
+                <Link href={ctaHref} className={getButtonClass(isDark, "primary")}>
+                  Upload manuscript
+                </Link>
+                <Link href={secondaryCtaHref} className={getButtonClass(isDark, "secondary")}>
+                  View pricing
+                </Link>
+              </div>
+            </Reveal>
+
+            <Reveal delay={240}>
+              <div className="mt-8 flex flex-wrap gap-3">
+                {trustStats.map((item) => (
+                  <div
+                    key={item.label}
+                    className={`rounded-2xl border px-4 py-3 ${isDark ? "border-white/10 bg-white/6" : "border-slate-200 bg-white"} `}
+                  >
+                    <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-950"}`}>{item.value}</p>
+                    <p className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>{item.label}</p>
+                  </div>
+                ))}
+              </div>
+            </Reveal>
+          </div>
+
+          <Reveal delay={120} className="relative">
+            <div
+              className={`relative overflow-hidden rounded-[2rem] border p-5 shadow-[0_30px_120px_-40px_rgba(15,23,42,0.5)] md:p-7 ${
+                isDark ? "border-white/10 bg-white/5" : "border-slate-200 bg-white"
+              }`}
+            >
+              <div className={`absolute inset-0 ${isDark ? "bg-[linear-gradient(135deg,rgba(255,255,255,0.04),transparent_36%)]" : "bg-[linear-gradient(135deg,rgba(15,23,42,0.02),transparent_36%)]"}`} />
+              <div className="relative">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className={`text-[11px] font-semibold uppercase tracking-[0.32em] ${isDark ? "text-cyan-200" : "text-cyan-700"}`}>
+                      Manuscript workspace
+                    </p>
+                    <p className={`mt-2 text-base ${isDark ? "text-slate-300" : "text-slate-600"}`}>
+                      A cleaner view into a 120-chapter story
+                    </p>
+                  </div>
+                  <div className={`rounded-full px-4 py-2 text-sm font-semibold ${isDark ? "bg-cyan-400/15 text-cyan-200" : "bg-cyan-50 text-cyan-800"}`}>
+                    Live analysis
+                  </div>
+                </div>
+
+                <div className="mt-6 grid items-start gap-4 md:grid-cols-[1.1fr_0.9fr]">
+                  <div className={`rounded-[1.6rem] border p-5 ${isDark ? "border-white/10 bg-slate-950/30" : "border-slate-200 bg-slate-50"}`}>
+                    <p className={`text-xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                      Ask anything
+                    </p>
+                    <div className="mt-4 space-y-4">
+                      <div className={`rounded-2xl border px-4 py-4 ${isDark ? "border-white/10 bg-white/6" : "border-slate-200 bg-white"}`}>
+                        <p className={`text-sm font-medium ${isDark ? "text-white" : "text-slate-950"}`}>
+                          Which clue ties the sealed letter to the council vote, and where does the timeline break?
+                        </p>
+                        <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-slate-600"}`}>
+                          LoreVia traces every mention of the letter, connects it to the vote, and flags the gap before the
+                          reveal in Chapter 42.
+                        </p>
+                      </div>
+                      <div className={`rounded-2xl border px-4 py-4 ${isDark ? "border-white/10 bg-white/6" : "border-slate-200 bg-white"}`}>
+                        <p className={`text-sm font-medium ${isDark ? "text-white" : "text-slate-950"}`}>
+                          Where does the rebellion arc actually turn from alliance into distrust?
+                        </p>
+                        <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-slate-600"}`}>
+                          It spots the exact chapters where the relationship shifts, then links the turning points back to the
+                          scenes that caused them.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4">
+                      <div className={`rounded-[1.6rem] border p-5 ${isDark ? "border-white/10 bg-white/6" : "border-slate-200 bg-white"}`}>
+                        <p className={`text-xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                          Story health
+                        </p>
+                        <div className="mt-5 space-y-3">
+                          {[
+                            ["58", "characters detected"],
+                            ["3", "open threads"],
+                            ["1", "continuity issue"],
+                          ].map(([value, label]) => (
+                            <div
+                              key={label}
+                              className={`flex items-center justify-between rounded-2xl border px-4 py-3 ${
+                                isDark ? "border-white/10 bg-slate-950/30" : "border-slate-200 bg-slate-50"
+                              }`}
+                            >
+                              <div>
+                                <p className={`text-2xl font-semibold ${isDark ? "text-white" : "text-slate-950"}`}>{value}</p>
+                                <p className={`mt-1 text-[11px] uppercase tracking-[0.2em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                                  {label}
+                                </p>
+                              </div>
+                              <span className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                                isDark ? "bg-white/10 text-slate-200" : "bg-white text-slate-700"
+                              }`}>
+                                live
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                    <div className={`rounded-[1.6rem] border p-5 ${isDark ? "border-cyan-400/20 bg-cyan-400/8" : "border-cyan-200 bg-cyan-50"}`}>
+                      <p className={`text-xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-cyan-200" : "text-cyan-800"}`}>
+                        Answer quality
+                      </p>
+                      <p className={`mt-3 text-sm leading-7 ${isDark ? "text-slate-200" : "text-slate-700"}`}>
+                        Chapter-linked answers, character context, and continuity checks are presented together instead
+                        of as separate tiny widgets.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </Reveal>
+        </div>
+      </section>
+
+      <Section id="product">
+        <SectionHeader
+          eyebrow="Why it feels different"
+          title="Built like a real workspace, not a thin marketing page."
+          body="The visual language is intentionally larger, calmer, and more substantial so the product feels credible at first glance."
+          isDark={isDark}
+        />
+
+        <div className="mt-10 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {featureCards.map((card, index) => (
+            <Reveal key={card.title} delay={index * 70}>
+              <article
+                className={`h-full rounded-[1.8rem] border p-6 shadow-[0_18px_60px_-40px_rgba(15,23,42,0.45)] ${
+                  isDark ? "border-white/10 bg-white/5" : "border-slate-200 bg-white"
+                }`}
+              >
+                <div className={`inline-flex h-12 w-12 items-center justify-center rounded-2xl text-base font-semibold ${
+                  isDark ? "bg-cyan-400/15 text-cyan-200" : "bg-cyan-50 text-cyan-800"
+                }`}>
+                  {String(index + 1).padStart(2, "0")}
+                </div>
+                <h3 className={`mt-5 text-xl font-semibold ${isDark ? "text-white" : "text-slate-950"}`}>{card.title}</h3>
+                <p className={`mt-3 text-base leading-7 ${isDark ? "text-slate-300" : "text-slate-600"}`}>{card.body}</p>
+              </article>
+            </Reveal>
+          ))}
+        </div>
+
+        <div className="mt-10 grid gap-4 lg:grid-cols-[1fr_1fr]">
+          <Reveal>
+            <div className={`rounded-[2rem] border p-7 ${isDark ? "border-white/10 bg-white/5" : "border-slate-200 bg-white"}`}>
+              <p className={`text-sm font-semibold uppercase tracking-[0.28em] ${isDark ? "text-cyan-300" : "text-cyan-700"}`}>
+                The problem
+              </p>
+              <div className="mt-6 space-y-4">
+                {painPoints.map((item) => (
+                  <div key={item} className={`rounded-2xl border px-5 py-4 ${isDark ? "border-white/10 bg-slate-950/30" : "border-slate-200 bg-slate-50"}`}>
+                    <p className={`text-base leading-7 ${isDark ? "text-slate-200" : "text-slate-700"}`}>{item}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </Reveal>
+
+          <Reveal delay={90}>
+            <div className={`rounded-[2rem] border p-7 ${isDark ? "border-cyan-400/20 bg-cyan-400/8" : "border-cyan-200 bg-cyan-50"}`}>
+              <p className={`text-sm font-semibold uppercase tracking-[0.28em] ${isDark ? "text-cyan-200" : "text-cyan-800"}`}>
+                The fix
+              </p>
+              <h3 className={`mt-6 text-2xl font-semibold ${isDark ? "text-white" : "text-slate-950"}`}>
+                Give the story a memory layer.
+              </h3>
+              <p className={`mt-4 text-base leading-8 ${isDark ? "text-slate-200" : "text-slate-700"}`}>
+                LoreVia turns raw chapters into a cleaner reference system: larger surfaces, clearer hierarchy, and
+                enough visual weight to feel like software built for serious manuscript work.
+              </p>
+              <div className="mt-8 flex flex-wrap gap-3">
+                <span className={`rounded-full border px-4 py-2 text-sm font-medium ${isDark ? "border-white/10 bg-white/10 text-white" : "border-slate-200 bg-white text-slate-700"}`}>
+                  chapter-linked answers
+                </span>
+                <span className={`rounded-full border px-4 py-2 text-sm font-medium ${isDark ? "border-white/10 bg-white/10 text-white" : "border-slate-200 bg-white text-slate-700"}`}>
+                  character bible
+                </span>
+                <span className={`rounded-full border px-4 py-2 text-sm font-medium ${isDark ? "border-white/10 bg-white/10 text-white" : "border-slate-200 bg-white text-slate-700"}`}>
+                  continuity checks
+                </span>
+              </div>
+            </div>
+          </Reveal>
+        </div>
+      </Section>
+
+      <Section id="workflow">
+        <SectionHeader
+          eyebrow="How it works"
+          title="Three steps, but the experience feels much larger."
+          body="The interface should feel like a real product, so the workflow panels are intentionally broad and readable."
+          isDark={isDark}
+        />
+
+        <div className="mt-10 grid gap-5 lg:grid-cols-3">
+          {workflowSteps.map((step, index) => (
+            <Reveal key={step.num} delay={index * 80}>
+              <article
+                className={`h-full rounded-[2rem] border p-7 ${isDark ? "border-white/10 bg-white/5" : "border-slate-200 bg-white"}`}
+              >
+                <p className={`text-sm font-semibold uppercase tracking-[0.32em] ${isDark ? "text-cyan-300" : "text-cyan-700"}`}>
+                  {step.num}
+                </p>
+                <h3 className={`mt-5 text-2xl font-semibold ${isDark ? "text-white" : "text-slate-950"}`}>{step.title}</h3>
+                <p className={`mt-4 text-base leading-8 ${isDark ? "text-slate-300" : "text-slate-600"}`}>{step.body}</p>
+              </article>
+            </Reveal>
+          ))}
+        </div>
+        </Section>
+
+      <Section>
+        <SectionHeader
+          eyebrow="Who it's for"
+          title="Built for screenwriters and authors working across formats."
+          body="Scripts, novels, chapter-wise webnovels, and book series all need different kinds of memory. LoreVia keeps them organized without forcing a single workflow."
+          isDark={isDark}
+        />
+
+        <div className="mt-10 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {audienceCards.map((card, index) => (
+            <Reveal key={card.title} delay={index * 70}>
+              <article
+                className={`h-full rounded-[1.8rem] border p-6 shadow-[0_18px_60px_-40px_rgba(15,23,42,0.45)] ${
+                  isDark ? "border-white/10 bg-white/5" : "border-slate-200 bg-white"
+                }`}
+              >
+                <p className={`text-[11px] font-semibold uppercase tracking-[0.28em] ${isDark ? "text-cyan-300" : "text-cyan-700"}`}>
+                  {String(index + 1).padStart(2, "0")}
+                </p>
+                <h3 className={`mt-4 text-xl font-semibold ${isDark ? "text-white" : "text-slate-950"}`}>{card.title}</h3>
+                <p className={`mt-3 text-base leading-7 ${isDark ? "text-slate-300" : "text-slate-600"}`}>{card.body}</p>
+              </article>
+            </Reveal>
+          ))}
+        </div>
+      </Section>
+
+        <ComparisonSection ctaHref={ctaHref} isDark={isDark} />
+
+        <Section>
+        <SectionHeader
+          eyebrow="Example output"
+          title="What a real scan looks like."
+          body="The goal is to make the result feel concrete, legible, and worth trusting."
+          isDark={isDark}
+        />
+
+        <div className="mt-10 grid gap-6 lg:grid-cols-[1.05fr_0.95fr]">
+          <Reveal>
+            <div className={`rounded-[2rem] border p-7 ${isDark ? "border-white/10 bg-white/5" : "border-slate-200 bg-white"}`}>
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className={`text-xs font-semibold uppercase tracking-[0.28em] ${isDark ? "text-cyan-300" : "text-cyan-700"}`}>
+                    Scan results
+                  </p>
+                  <p className={`mt-2 text-base ${isDark ? "text-slate-300" : "text-slate-600"}`}>
+                    A 120-chapter epic fantasy manuscript processed in seconds.
+                  </p>
+                </div>
+                <div className={`rounded-full border px-4 py-2 text-sm font-semibold ${isDark ? "border-white/10 bg-white/8 text-white" : "border-slate-200 bg-slate-50 text-slate-800"}`}>
+                  Ready to review
+                </div>
+              </div>
+
+              <div className="mt-6 space-y-4">
+                {proofItems.map((item) => (
+                  <div
+                    key={item.title}
+                    className={`rounded-2xl border px-5 py-4 ${
+                      item.tone === "warning"
+                        ? isDark
+                          ? "border-amber-400/20 bg-amber-400/8"
+                          : "border-amber-200 bg-amber-50"
+                        : isDark
+                          ? "border-white/10 bg-white/6"
+                          : "border-slate-200 bg-slate-50"
+                    }`}
+                  >
+                    <p className={`text-base font-semibold ${isDark ? "text-white" : "text-slate-950"}`}>{item.title}</p>
+                    <p className={`mt-2 text-sm leading-7 ${isDark ? "text-slate-300" : "text-slate-600"}`}>{item.body}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </Reveal>
+
+          <Reveal delay={100}>
+            <div className={`rounded-[2rem] border p-7 ${isDark ? "border-white/10 bg-white/5" : "border-slate-200 bg-white"}`}>
+              <p className={`text-xs font-semibold uppercase tracking-[0.28em] ${isDark ? "text-cyan-300" : "text-cyan-700"}`}>
+                Output summary
+              </p>
+              <div className="mt-6 grid gap-4 sm:grid-cols-3">
+                {[
+                  ["58", "characters detected"],
+                  ["3", "open threads"],
+                  ["1", "issue flagged"],
+                ].map(([value, label]) => (
+                  <div key={label} className={`rounded-2xl border p-4 text-center ${isDark ? "border-white/10 bg-slate-950/30" : "border-slate-200 bg-slate-50"}`}>
+                    <p className={`text-3xl font-semibold ${isDark ? "text-white" : "text-slate-950"}`}>{value}</p>
+                    <p className={`mt-2 text-xs uppercase tracking-[0.2em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>{label}</p>
+                  </div>
+                ))}
+              </div>
+
+              <blockquote className={`mt-6 rounded-2xl border-l-4 px-5 py-5 ${isDark ? "border-cyan-300 bg-cyan-400/8 text-slate-200" : "border-cyan-600 bg-cyan-50 text-slate-700"}`}>
+                Built to handle long manuscripts, multi-book series, and chapter-linked answers without mixing contexts.
+              </blockquote>
+            </div>
+          </Reveal>
+        </div>
+      </Section>
+
+      <Section id="pricing">
+        <div className="flex flex-col gap-10 lg:flex-row lg:items-end lg:justify-between">
+          <div className="max-w-2xl">
+            <SectionHeader
+              eyebrow="Pricing"
+              title="Pick a tier that matches your pace."
+              body="Monthly billing is shown by default. Every signup gets a short trial window so people can explore the workspace before committing."
+              isDark={isDark}
+            />
+          </div>
+
+          <div className={`relative inline-flex items-center rounded-full p-1 ${isDark ? "bg-white/10" : "bg-slate-950"}`}>
+            <div
+              className="absolute left-1 top-1 h-[calc(100%-8px)] w-[calc(50%-4px)] rounded-full bg-white transition-transform duration-300 ease-out"
+              style={{ transform: billingCycle === "annual" ? "translateX(100%)" : "translateX(0)" }}
+            />
+            <button
+              type="button"
+              onClick={() => setBillingCycle("monthly")}
+              className={`relative z-10 rounded-full px-5 py-2.5 text-sm font-semibold transition-colors duration-200 ${
+                billingCycle === "monthly"
+                  ? "text-slate-950"
+                  : isDark
+                    ? "text-slate-300 hover:text-white"
+                    : "text-slate-300 hover:text-slate-100"
+              }`}
+            >
+              Monthly
+            </button>
+            <button
+              type="button"
+              onClick={() => setBillingCycle("annual")}
+              className={`relative z-10 rounded-full px-5 py-2.5 text-sm font-semibold transition-colors duration-200 ${
+                billingCycle === "annual"
+                  ? "text-slate-950"
+                  : isDark
+                    ? "text-slate-300 hover:text-white"
+                    : "text-slate-300 hover:text-slate-100"
+              }`}
+            >
+              Annual
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-14 grid gap-5 md:grid-cols-2 lg:grid-cols-4">
+          {pricingTiers.map((tier, index) => {
+            const price = billingCycle === "annual" ? tier.priceAnnual : tier.priceMonthly
+            const suffix = tier.name === "Starter" ? "" : billingCycle === "annual" ? "/yr" : "/mo"
+
+            return (
+              <Reveal key={tier.name} delay={index * 70} className="h-full">
+                <article
+                  className={`group relative flex h-full flex-col rounded-[2rem] p-8 transition-all duration-300 hover:-translate-y-1 ${
+                    tier.highlight
+                      ? isDark
+                        ? "border border-cyan-300/20 bg-cyan-400/[0.08] shadow-[0_24px_70px_-35px_rgba(34,211,238,0.22)]"
+                        : "border border-cyan-200 bg-cyan-50/80 shadow-[0_24px_70px_-35px_rgba(14,165,233,0.18)]"
+                      : isDark
+                        ? "border border-white/10 bg-white/[0.04]"
+                        : "border border-slate-200 bg-white"
+                  }`}
+                >
+                  <div className="mb-8 flex items-center justify-between">
+                    <span className={`text-[10px] font-semibold uppercase tracking-[0.24em] ${
+                      tier.highlight
+                        ? isDark
+                          ? "text-cyan-200"
+                          : "text-cyan-700"
+                        : isDark
+                          ? "text-slate-500"
+                          : "text-slate-400"
+                    }`}>
+                      {tier.name}
+                    </span>
+                    {tier.highlight ? (
+                      <div className={`h-2 w-2 rounded-full ${isDark ? "bg-cyan-300" : "bg-cyan-600"}`} />
+                    ) : null}
+                  </div>
+
+                  <div className="flex items-baseline gap-1">
+                    <span className={`text-5xl font-semibold tracking-tight ${isDark ? "text-white" : "text-slate-950"}`}>
+                      {tier.name === "Starter" ? "$0" : `$${price}`}
+                    </span>
+                    <span className={`text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>{suffix}</span>
+                  </div>
+
+                  <p className={`mt-3 text-sm ${isDark ? "text-slate-300" : "text-slate-600"}`}>{tier.subtitle}</p>
+
+                  <ul className="mb-8 mt-8 space-y-4">
+                    {tier.bullets.map((bullet) => (
+                      <li key={bullet} className="flex items-start gap-3 text-sm leading-relaxed">
+                        <span
+                          className={`mt-0.5 text-base font-bold ${
+                            tier.highlight
+                              ? isDark
+                                ? "text-cyan-200"
+                                : "text-cyan-700"
+                              : isDark
+                                ? "text-slate-500"
+                                : "text-slate-400"
+                          }`}
+                        >
+                          •
+                        </span>
+                        <span className={isDark ? "text-slate-200" : "text-slate-700"}>{bullet}</span>
+                      </li>
+                    ))}
+                  </ul>
+
+                  <div className="mt-auto">
+                    <Link
+                      href={ctaHref}
+                      className={`inline-flex w-full items-center justify-center rounded-full py-3.5 text-sm font-semibold transition-all duration-200 ${
+                        tier.highlight
+                          ? isDark
+                            ? "bg-white text-slate-950 hover:bg-slate-100"
+                            : "bg-slate-950 text-white hover:bg-slate-800"
+                          : isDark
+                            ? "border border-white/10 bg-white/[0.04] text-slate-200 hover:border-white/20 hover:bg-white/10"
+                            : "border border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-900"
+                      }`}
+                    >
+                      {tier.cta}
+                    </Link>
+                  </div>
+                </article>
+              </Reveal>
+            )
+          })}
+        </div>
+      </Section>
+
+      <Section id="faq">
+        <SectionHeader
+          eyebrow="FAQ"
+          title="The common questions, answered plainly."
+          isDark={isDark}
+        />
+
+        <div className="mt-10 grid gap-5 md:grid-cols-3">
+          {faqItems.map((item, index) => (
+            <Reveal key={item.q} delay={index * 80}>
+              <article className={`h-full rounded-[1.8rem] border p-7 ${isDark ? "border-white/10 bg-white/5" : "border-slate-200 bg-white"}`}>
+                <h3 className={`text-xl font-semibold ${isDark ? "text-white" : "text-slate-950"}`}>{item.q}</h3>
+                <p className={`mt-4 text-base leading-8 ${isDark ? "text-slate-300" : "text-slate-600"}`}>{item.a}</p>
+              </article>
+            </Reveal>
+          ))}
+        </div>
+      </Section>
+
+      <section className={`relative z-10 border-t ${isDark ? "border-white/10 bg-[#02050d]" : "border-slate-200 bg-slate-950"}`}>
+        <div className="mx-auto max-w-7xl px-6 py-20 md:px-8 md:py-24">
+          <div className="grid gap-8 lg:grid-cols-[1.05fr_0.95fr] lg:items-center">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.34em] text-cyan-300">
+                Ready when you are
+              </p>
+              <h2 className="mt-5 text-4xl font-semibold tracking-tight text-white md:text-6xl">
+                Stop rereading.
+                <span className="block text-slate-300">Start querying.</span>
+              </h2>
+              <p className="mt-5 max-w-2xl text-lg leading-8 text-slate-400">
+                Upload your manuscript and get a clearer, more professional way to work with the story.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-4 sm:flex-row sm:justify-end">
+              <Link href={ctaHref} className="inline-flex items-center justify-center rounded-full bg-white px-8 py-4 text-base font-semibold text-slate-950 transition hover:bg-slate-100">
+                Upload manuscript
+              </Link>
+              <Link href={secondaryCtaHref} className="inline-flex items-center justify-center rounded-full border border-white/15 px-8 py-4 text-base font-semibold text-white transition hover:border-white/30 hover:bg-white/8">
+                Explore pricing
+              </Link>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
   )
 }

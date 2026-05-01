@@ -6,50 +6,46 @@ for all existing characters in the database using the new scoring system.
 
 Run with: python scripts/backfill_character_classification.py
 """
+from __future__ import annotations
+
 import asyncio
-import subprocess
-import sys
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-
-
-def main() -> int:
-    command = [
-        sys.executable,
-        "-c",
-        """
-import asyncio
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-from app.core.database import async_engine
+
+from app.core.database import AsyncSessionLocal
 from app.models.character import Character
 from app.utils.character_utils import update_character_classification
+from app.utils.logging import get_logger
 
-async def backfill():
-    async with AsyncSession(async_engine) as db:
+log = get_logger("lorevia.backfill.character_classification")
+
+
+async def backfill() -> None:
+    async with AsyncSessionLocal() as db:
         result = await db.execute(select(Character))
         characters = result.scalars().all()
-        print(f"Found {len(characters)} characters to backfill...")
+        log.info("backfill_started", extra={"character_count": len(characters)})
+
         updated_count = 0
-        for char in characters:
+        for character in characters:
             try:
-                update_character_classification(char)
+                update_character_classification(character)
                 updated_count += 1
                 if updated_count % 100 == 0:
-                    print(f"Processed {updated_count}/{len(characters)} characters...")
-            except Exception as e:
-                print(f"Error processing character {char.name}: {e}")
+                    log.info(
+                        "backfill_progress",
+                        extra={"processed": updated_count, "total": len(characters)},
+                    )
+            except Exception:
+                log.exception(
+                    "backfill_character_failed",
+                    extra={"character_id": str(character.id), "character_name": character.name},
+                )
                 continue
-        await db.commit()
-        print(f"Successfully backfilled {updated_count} characters.")
 
-asyncio.run(backfill())
-"""
-    ]
-    completed = subprocess.run(command, cwd=ROOT, check=False)
-    return completed.returncode
+        await db.commit()
+        log.info("backfill_completed", extra={"updated_count": updated_count})
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    asyncio.run(backfill())

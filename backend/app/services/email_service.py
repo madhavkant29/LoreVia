@@ -34,6 +34,33 @@ async def send_processing_complete(email: str, book_title: str) -> None:
     })
 
 
+async def send_processing_complete_with_stats(
+    email: str,
+    *,
+    book_title: str,
+    character_count: int,
+    relationship_count: int,
+    plot_thread_count: int,
+    continuity_issue_count: int,
+) -> None:
+    _send({
+        "from": settings.EMAIL_FROM,
+        "to": email,
+        "subject": f"Your book is ready - {book_title}",
+        "html": f"""
+        <h2>LoreVia - Processing Complete</h2>
+        <p><strong>{book_title}</strong> has been processed.</p>
+        <p>
+          We found <strong>{character_count} characters</strong>,
+          mapped <strong>{relationship_count} relationships</strong>,
+          identified <strong>{plot_thread_count} plot threads</strong>,
+          and flagged <strong>{continuity_issue_count} continuity issues</strong>.
+        </p>
+        <p><a href="{settings.APP_URL.rstrip('/')}/library">Open your library</a></p>
+        """,
+    })
+
+
 async def send_subscription_confirmation(email: str, plan: str) -> None:
     _send({
         "from": settings.EMAIL_FROM,

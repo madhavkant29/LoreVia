@@ -11,14 +11,14 @@ import { readerApi } from "@/lib/api/reader"
 import { htmlToPlainText, renderRichTextHtml, sanitizeRichTextHtml } from "@/lib/utils/richText"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { capture } from "@/lib/analytics/posthog"
-import type { Book, BookNote, ChapterVersion, PreWritingCheck } from "@/types/book"
+import type { Book, BookNote, ChapterVersion, CorkboardCard, EmotionalArcOverview, PreWritingCheck, ReadabilityMetrics, WriterWorkspace, WritingTemplate } from "@/types/book"
 import type { Character } from "@/types/character"
-import type { AdvisorSuggestion, EditorialReview, EditorialReviewPassage, ManuscriptSynopsis, VoiceConsistencyReview } from "@/types/intelligence"
+import type { AdvisorSuggestion, EditorialReview, EditorialReviewPassage, InlineContinuityResponse, ManuscriptSynopsis, VoiceConsistencyReview } from "@/types/intelligence"
 import type { ChapterListResponse, PlotThread, SearchResult } from "@/types/reader"
 
 type EditorMode = "chapter" | "book"
 type BookDraftMap = Record<number, { title: string; text: string; html: string }>
-type RightPane = "insights" | "notes"
+type RightPane = "insights" | "notes" | "character"
 
 export default function ManuscriptPage() {
   const { bookId } = useParams<{ bookId: string }>()
@@ -45,10 +45,19 @@ export default function ManuscriptPage() {
   const [reviewPassages, setReviewPassages] = useState<EditorialReviewPassage[]>([])
   const [voiceReview, setVoiceReview] = useState<VoiceConsistencyReview | null>(null)
   const [voiceCharacters, setVoiceCharacters] = useState<string[]>([])
+  const [inlineContinuity, setInlineContinuity] = useState<InlineContinuityResponse | null>(null)
   const [suggestions, setSuggestions] = useState<AdvisorSuggestion[]>([])
   const [plotThreads, setPlotThreads] = useState<PlotThread[]>([])
   const [preWritingCheck, setPreWritingCheck] = useState<PreWritingCheck | null>(null)
   const [chapterVersions, setChapterVersions] = useState<ChapterVersion[]>([])
+  const [writerWorkspace, setWriterWorkspace] = useState<WriterWorkspace | null>(null)
+  const [workspaceSaving, setWorkspaceSaving] = useState(false)
+  const [readability, setReadability] = useState<ReadabilityMetrics | null>(null)
+  const [readabilityLoading, setReadabilityLoading] = useState(false)
+  const [emotionalArc, setEmotionalArc] = useState<EmotionalArcOverview | null>(null)
+  const [logicSelectionText, setLogicSelectionText] = useState("")
+  const [tighteningSelection, setTighteningSelection] = useState(false)
+  const [continuityLoading, setContinuityLoading] = useState(false)
   const [recallQuery, setRecallQuery] = useState("")
   const [recallResults, setRecallResults] = useState<SearchResult[]>([])
   const [recallCharacter, setRecallCharacter] = useState<Character | null>(null)
@@ -60,16 +69,26 @@ export default function ManuscriptPage() {
   const [fontFamily, setFontFamily] = useState<"times" | "georgia" | "sans">("times")
   const [lineHeight, setLineHeight] = useState(1.8)
   const [showPageGuides, setShowPageGuides] = useState(true)
-  const [firstLineIndent, setFirstLineIndent] = useState(true)
+  const [firstLineIndent, setFirstLineIndent] = useState(false)
   const [showLeftRail, setShowLeftRail] = useState(false)
   const [showRightRail, setShowRightRail] = useState(false)
   const [activeRightPane, setActiveRightPane] = useState<RightPane>("insights")
+  const [selectedCharCard, setSelectedCharCard] = useState<Character | null>(null)
+  const [charCardEditing, setCharCardEditing] = useState(false)
+  const [charCardSaving, setCharCardSaving] = useState(false)
+  const [charCardDraft, setCharCardDraft] = useState<{
+    arcSummary: string
+    description: string
+    personalityTags: string
+    motivations: string
+    fears: string
+  }>({ arcSummary: "", description: "", personalityTags: "", motivations: "", fears: "" })
   const [showExportMenu, setShowExportMenu] = useState(false)
   const [showEditorSettings, setShowEditorSettings] = useState(false)
   const [activeEditorKey, setActiveEditorKey] = useState<string | null>(null)
   const [fullBookLoading, setFullBookLoading] = useState(false)
   const [bookDrafts, setBookDrafts] = useState<BookDraftMap>({})
-  const [exporting, setExporting] = useState<"pdf" | "docx" | null>(null)
+  const [exporting, setExporting] = useState<"pdf" | "docx" | "epub" | null>(null)
   const [jumpTarget, setJumpTarget] = useState<number | null>(null)
   const [activeFindIndex, setActiveFindIndex] = useState(0)
   const [replaceQuery, setReplaceQuery] = useState("")
@@ -86,6 +105,11 @@ export default function ManuscriptPage() {
   const [noteBody, setNoteBody] = useState("")
   const [noteBodyText, setNoteBodyText] = useState("")
   const [dirtyDrafts, setDirtyDrafts] = useState<number[]>([])
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null)
+  const [editNoteTitle, setEditNoteTitle] = useState("")
+  const [editNoteBody, setEditNoteBody] = useState("")
+  const [editingNoteSaving, setEditingNoteSaving] = useState(false)
+  const [newCorkboardTitle, setNewCorkboardTitle] = useState("")
 
   const chapterRefs = useRef<Record<number, HTMLDivElement | null>>({})
   const searchInputRef = useRef<HTMLInputElement | null>(null)
@@ -109,6 +133,16 @@ export default function ManuscriptPage() {
   const chapterApproxPages = useMemo(() => Math.max(1, Math.ceil(chapterWordCount / 500)), [chapterWordCount])
   const fullBookWordCount = useMemo(() => Object.values(bookDrafts).reduce((sum, draft) => sum + countWords(draft.text), 0), [bookDrafts])
   const fullBookApproxPages = useMemo(() => Math.max(1, Math.ceil(fullBookWordCount / 500)), [fullBookWordCount])
+  const chapterGoalProgress = useMemo(() => {
+    const target = writerWorkspace?.word_count_goals.chapter_target ?? 0
+    if (!target) return null
+    return Math.min(100, Math.round((chapterWordCount / target) * 100))
+  }, [chapterWordCount, writerWorkspace])
+  const bookGoalProgress = useMemo(() => {
+    const target = writerWorkspace?.word_count_goals.book_target ?? 0
+    if (!target) return null
+    return Math.min(100, Math.round((fullBookWordCount / target) * 100))
+  }, [fullBookWordCount, writerWorkspace])
   const desktopLayoutClass = showLeftRail && showRightRail
     ? "xl:grid-cols-[17rem_minmax(0,1fr)_21rem]"
     : showLeftRail
@@ -183,6 +217,136 @@ export default function ManuscriptPage() {
     }
     setActiveRightPane(pane)
     setShowRightRail(true)
+  }
+
+  const openCharCard = (char: Character) => {
+    setSelectedCharCard(char)
+    setCharCardEditing(false)
+    setCharCardDraft({
+      arcSummary: char.arc_summary ?? "",
+      description: char.description ?? "",
+      personalityTags: (char.personality_tags ?? []).join(", "),
+      motivations: (char.motivations ?? []).join(", "),
+      fears: (char.fears ?? []).join(", "),
+    })
+    setActiveRightPane("character")
+    setShowRightRail(true)
+  }
+
+  const saveCharCard = async () => {
+    if (!selectedCharCard) return
+    setCharCardSaving(true)
+    try {
+      const updated = await booksApi.updateCharacter(bookId, selectedCharCard.id, {
+        arcSummary: charCardDraft.arcSummary.trim() || null,
+        description: charCardDraft.description.trim() || null,
+        personalityTags: charCardDraft.personalityTags.split(",").map(t => t.trim()).filter(Boolean),
+        motivations: charCardDraft.motivations.split(",").map(t => t.trim()).filter(Boolean),
+        fears: charCardDraft.fears.split(",").map(t => t.trim()).filter(Boolean),
+      })
+      setSelectedCharCard(updated)
+      setCharacters(prev => prev.map(c => c.id === updated.id ? updated : c))
+      setCharCardEditing(false)
+      setStatusMessage(`Character card for ${updated.name} saved.`)
+    } finally {
+      setCharCardSaving(false)
+    }
+  }
+
+  const saveWorkspace = async (patch: Partial<WriterWorkspace>, options?: { silent?: boolean }) => {
+    setWorkspaceSaving(true)
+    try {
+      const updated = await booksApi.updateWriterWorkspace(bookId, patch)
+      setWriterWorkspace(updated)
+      if (!options?.silent) setStatusMessage("Workspace preferences saved.")
+    } catch {
+      if (!options?.silent) setStatusMessage("Workspace save failed. Please try again.")
+    } finally {
+      setWorkspaceSaving(false)
+    }
+  }
+
+  const addCorkboardCard = async () => {
+    if (!newCorkboardTitle.trim() || !writerWorkspace) return
+    const card: CorkboardCard = {
+      id: `card-${Date.now()}`,
+      title: newCorkboardTitle.trim(),
+      description: "",
+      lane: "ideas",
+      status: "planned",
+      chapter_number: activeChapterNumber,
+      template_id: null,
+    }
+    await saveWorkspace({
+      corkboard_cards: [...writerWorkspace.corkboard_cards, card],
+    })
+    setNewCorkboardTitle("")
+  }
+
+  const updateCardLane = async (cardId: string, lane: string) => {
+    if (!writerWorkspace) return
+    await saveWorkspace({
+      corkboard_cards: writerWorkspace.corkboard_cards.map((card) => card.id === cardId ? { ...card, lane } : card),
+    }, { silent: true })
+  }
+
+  const applyTemplateToChapter = (template: WritingTemplate) => {
+    const nextText = text.trim() ? `${text.trim()}\n\n${template.content}` : template.content
+    const nextHtml = textToHtml(nextText)
+    setText(nextText)
+    setHtml(nextHtml)
+    markDraftDirty(activeChapterNumber)
+    setBookDrafts((current) => ({
+      ...current,
+      [activeChapterNumber]: { title: chapterTitle, text: nextText, html: nextHtml },
+    }))
+    setStatusMessage(`Inserted ${template.title} into chapter ${activeChapterNumber}.`)
+  }
+
+  const tightenSelectedText = async () => {
+    if (editorMode !== "chapter") {
+      setStatusMessage("Selected-text tightening is available in chapter view.")
+      return
+    }
+    const editor = document.querySelector<HTMLElement>(`[data-editor-key="chapter-${activeChapterNumber}"]`)
+    if (!editor) {
+      setStatusMessage("Click into the chapter editor first, then select the passage you want tightened.")
+      return
+    }
+    const selection = window.getSelection()
+    const selectedText = selection?.toString().trim() ?? ""
+    if (!selectedText) {
+      setStatusMessage("Select the passage you want tightened first.")
+      return
+    }
+    const cachedRange = selection && selection.rangeCount > 0 ? selection.getRangeAt(0).cloneRange() : null
+    setLogicSelectionText(selectedText)
+    setTighteningSelection(true)
+    try {
+      const payload = await intelligenceApi.proseTighten(bookId, selectedText, activeChapterNumber)
+      if (!payload.tightened_text || payload.tightened_text === selectedText) {
+        setStatusMessage("No tighter rewrite was needed for the selected passage.")
+        return
+      }
+      if (cachedRange) {
+        const liveSelection = window.getSelection()
+        liveSelection?.removeAllRanges()
+        liveSelection?.addRange(cachedRange)
+        document.execCommand("insertText", false, payload.tightened_text)
+      }
+      const nextHtml = sanitizeRichTextHtml(editor.innerHTML || html)
+      const nextText = htmlToPlainText(nextHtml)
+      setText(nextText)
+      setHtml(nextHtml)
+      markDraftDirty(activeChapterNumber)
+      setBookDrafts((current) => ({
+        ...current,
+        [activeChapterNumber]: { title: chapterTitle, text: nextText, html: nextHtml },
+      }))
+      setStatusMessage(payload.rationale[0] || "Tightened the selected prose.")
+    } finally {
+      setTighteningSelection(false)
+    }
   }
 
   const markDraftDirty = (chapterNumber: number) => {
@@ -274,6 +438,8 @@ export default function ManuscriptPage() {
     setNotesLoaded(false)
     setNotesLoading(false)
     booksApi.getCharacters(bookId).then(setCharacters).catch(() => setCharacters([]))
+    booksApi.getWriterWorkspace(bookId).then(setWriterWorkspace).catch(() => setWriterWorkspace(null))
+    booksApi.getEmotionalArc(bookId).then(setEmotionalArc).catch(() => setEmotionalArc(null))
     intelligenceApi.synopsis(bookId, "minimal").then(setSynopsis).catch(() => setSynopsis(null))
   }, [bookId])
 
@@ -337,6 +503,12 @@ export default function ManuscriptPage() {
     }, 180)
     return () => window.clearTimeout(handle)
   }, [activeChapterNumber, bookId, loading])
+
+  useEffect(() => {
+    if (!statusMessage) return
+    const handle = window.setTimeout(() => setStatusMessage(null), 3200)
+    return () => window.clearTimeout(handle)
+  }, [statusMessage])
 
   useEffect(() => {
     if (!showLeftRail || selectedChapter === null) {
@@ -445,13 +617,38 @@ export default function ManuscriptPage() {
     setActiveFindIndex(0)
   }, [recallResults.length, recallQuery])
 
+  useEffect(() => {
+    const trimmed = text.trim()
+    if (!trimmed) {
+      setReadability(null)
+      setInlineContinuity(null)
+      setReadabilityLoading(false)
+      setContinuityLoading(false)
+      return
+    }
+    const handle = window.setTimeout(() => {
+      setReadabilityLoading(true)
+      setContinuityLoading(true)
+      booksApi.getReadability(bookId, trimmed)
+        .then(setReadability)
+        .catch(() => setReadability(null))
+        .finally(() => setReadabilityLoading(false))
+      intelligenceApi.inlineContinuity(bookId, trimmed, activeChapterNumber)
+        .then(setInlineContinuity)
+        .catch(() => setInlineContinuity(null))
+        .finally(() => setContinuityLoading(false))
+    }, 500)
+    return () => window.clearTimeout(handle)
+  }, [activeChapterNumber, bookId, text])
+
   const runAutomaticChecks = async (chapterNum: number, content: string) => {
-    const [editorial, voice, suggestionResult, threads, synopsisResult] = await Promise.all([
+    const [editorial, voice, suggestionResult, threads, synopsisResult, emotionalArcResult] = await Promise.all([
       intelligenceApi.editorialReview(bookId, content, chapterNum),
       intelligenceApi.voiceConsistencyReview(bookId, content, chapterNum),
       intelligenceApi.advisorSuggestions(bookId),
       readerApi.getPlotThreads(bookId, chapterNum),
       intelligenceApi.synopsis(bookId, "minimal").catch(() => null),
+      booksApi.getEmotionalArc(bookId).catch(() => null),
     ])
     setReview(editorial.review)
     setReviewPassages(editorial.retrieved_passages)
@@ -460,6 +657,7 @@ export default function ManuscriptPage() {
     setSuggestions(suggestionResult.suggestions.filter((item) => item.chapter_ref === null || item.chapter_ref <= chapterNum).slice(0, 6))
     setPlotThreads(threads.filter((thread) => thread.status !== "resolved").slice(0, 8))
     if (synopsisResult) setSynopsis(synopsisResult)
+    if (emotionalArcResult) setEmotionalArc(emotionalArcResult)
   }
 
   const saveChapterDraft = async (chapterNumber: number, draft?: { title: string; text: string; html: string }) => {
@@ -577,10 +775,11 @@ export default function ManuscriptPage() {
     jumpToChapter(result.chapter_num)
   }
 
-  const exportManuscript = async (format: "pdf" | "docx") => {
+  const exportManuscript = async (format: "pdf" | "docx" | "epub") => {
     setExporting(format)
     try {
-      const blob = await booksApi.exportManuscript(bookId, format)
+      const preset = writerWorkspace?.publishing.active_preset ?? "standard_manuscript"
+      const blob = await booksApi.exportManuscript(bookId, format, preset)
       const url = URL.createObjectURL(blob)
       const link = document.createElement("a")
       link.href = url
@@ -592,28 +791,93 @@ export default function ManuscriptPage() {
     }
   }
 
-  const saveNote = async () => {
-    if (!noteBodyText.trim()) return
+  const persistNote = async (payload?: {
+    noteId?: string | null
+    chapterNumber?: number | null
+    title?: string | null
+    body: string
+  }) => {
+    const nextBody = payload?.body ?? noteBody
+    const nextText = htmlToPlainText(nextBody)
+    if (!nextText.trim()) return null
     setSavingNote(true)
     try {
       const saved = await booksApi.saveBookNote(bookId, {
-        chapterNumber: noteScope === "chapter" ? activeChapterNumber : null,
-        title: noteTitle.trim() || null,
-        body: noteBody,
+        noteId: payload?.noteId ?? null,
+        chapterNumber: payload?.chapterNumber ?? (noteScope === "chapter" ? activeChapterNumber : null),
+        title: payload?.title ?? (noteTitle.trim() || null),
+        body: nextBody,
       })
       setNotes((current) => [saved, ...current.filter((note) => note.id !== saved.id)])
-      setNoteTitle("")
-      setNoteBody("")
-      setNoteBodyText("")
       setStatusMessage(`Saved note${saved.chapter_number ? ` for chapter ${saved.chapter_number}` : ""}.`)
+      return saved
     } finally {
       setSavingNote(false)
     }
   }
 
+  const saveNote = async () => {
+    const saved = await persistNote()
+    if (!saved) return
+    setNoteTitle("")
+    setNoteBody("")
+    setNoteBodyText("")
+  }
+
   const removeNote = async (noteId: string) => {
     await booksApi.deleteBookNote(bookId, noteId)
     setNotes((current) => current.filter((note) => note.id !== noteId))
+  }
+
+  const startEditingNote = (note: BookNote) => {
+    setEditingNoteId(note.id)
+    setEditNoteTitle(note.title || "")
+    setEditNoteBody(note.body)
+  }
+
+  const cancelEditingNote = () => {
+    setEditingNoteId(null)
+    setEditNoteTitle("")
+    setEditNoteBody("")
+  }
+
+  const saveEditedNote = async () => {
+    if (!editingNoteId) return
+    setEditingNoteSaving(true)
+    try {
+      const updated = await booksApi.saveBookNote(bookId, {
+        noteId: editingNoteId,
+        title: editNoteTitle.trim() || null,
+        body: editNoteBody,
+      })
+      setNotes((current) => current.map((note) => note.id === updated.id ? updated : note))
+      cancelEditingNote()
+      setStatusMessage("Note updated.")
+    } finally {
+      setEditingNoteSaving(false)
+    }
+  }
+
+  const saveContinuityIssueAsNote = async (issue: { title: string; description: string; suggestion?: string }) => {
+    const noteBody = `**Continuity Issue: ${issue.title}**\n\n${issue.description}${issue.suggestion ? `\n\n**Suggestion:** ${issue.suggestion}` : ""}`
+    const noteTitle = `Continuity: ${issue.title}`
+    await persistNote({
+      chapterNumber: activeChapterNumber,
+      title: noteTitle,
+      body: noteBody,
+    })
+    openRightPane("notes")
+  }
+
+  const saveVoiceIssueAsNote = async (issue: { character_name: string; title: string; description: string; severity?: string; evidence?: string; suggestion?: string }) => {
+    const noteBody = `**Voice Issue: ${issue.character_name} - ${issue.title}**\n\n${issue.description}${issue.evidence ? `\n\n**Evidence:** ${issue.evidence}` : ""}${issue.suggestion ? `\n\n**Suggestion:** ${issue.suggestion}` : ""}${issue.severity ? `\n\n**Severity:** ${issue.severity}` : ""}`
+    const noteTitle = `Voice: ${issue.character_name} - ${issue.title}`
+    await persistNote({
+      chapterNumber: activeChapterNumber,
+      title: noteTitle,
+      body: noteBody,
+    })
+    openRightPane("notes")
   }
 
   const printManuscript = () => {
@@ -691,10 +955,31 @@ export default function ManuscriptPage() {
                   Export
                 </button>
                 {showExportMenu ? (
-                  <div className={`absolute right-0 top-full z-20 mt-2 w-48 rounded-2xl border p-1.5 shadow-[0_18px_50px_-24px_rgba(15,23,42,0.4)] ${isDark ? "border-white/10 bg-[#0f1117]" : "border-stone-200 bg-white"}`}>
+                  <div className={`absolute right-0 top-full z-20 mt-2 w-64 rounded-2xl border p-1.5 shadow-[0_18px_50px_-24px_rgba(15,23,42,0.4)] ${isDark ? "border-white/10 bg-[#0f1117]" : "border-stone-200 bg-white"}`}>
+                    <div className="px-3 py-2">
+                      <p className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Publishing preset</p>
+                      <select
+                        value={writerWorkspace?.publishing.active_preset ?? "standard_manuscript"}
+                        onChange={(event) => {
+                          const nextPreset = event.target.value as WriterWorkspace["publishing"]["active_preset"]
+                          void saveWorkspace({
+                            publishing: {
+                              ...(writerWorkspace?.publishing ?? { trim_size: "6x9", include_title_page: true, mirror_margins: true }),
+                              active_preset: nextPreset,
+                            },
+                          }, { silent: true })
+                        }}
+                        className={`mt-2 w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
+                      >
+                        <option value="standard_manuscript">Standard manuscript</option>
+                        <option value="trade_paperback">Trade paperback</option>
+                        <option value="kdp_paperback">Amazon KDP paperback</option>
+                      </select>
+                    </div>
                     <button onClick={() => { setShowExportMenu(false); printManuscript() }} className={`block w-full rounded-xl px-3 py-2 text-left text-sm ${isDark ? "text-slate-200 hover:bg-white/10" : "text-stone-700 hover:bg-stone-100"}`}>Print</button>
-                    <button onClick={() => { setShowExportMenu(false); void exportManuscript("docx") }} disabled={!!exporting} className={`block w-full rounded-xl px-3 py-2 text-left text-sm disabled:opacity-40 ${isDark ? "text-slate-200 hover:bg-white/10" : "text-stone-700 hover:bg-stone-100"}`}>{exporting === "docx" ? "Exporting Word..." : "Download Word"}</button>
-                    <button onClick={() => { setShowExportMenu(false); void exportManuscript("pdf") }} disabled={!!exporting} className={`block w-full rounded-xl px-3 py-2 text-left text-sm disabled:opacity-40 ${isDark ? "text-slate-200 hover:bg-white/10" : "text-stone-700 hover:bg-stone-100"}`}>{exporting === "pdf" ? "Exporting PDF..." : "Download PDF"}</button>
+                    <button onClick={() => { setShowExportMenu(false); void exportManuscript("docx") }} disabled={!!exporting} className={`block w-full rounded-xl px-3 py-2 text-left text-sm disabled:opacity-40 ${isDark ? "text-slate-200 hover:bg-white/10" : "text-stone-700 hover:bg-stone-100"}`}>{exporting === "docx" ? "Exporting Word..." : "Download Word / DOCX"}</button>
+                    <button onClick={() => { setShowExportMenu(false); void exportManuscript("pdf") }} disabled={!!exporting} className={`block w-full rounded-xl px-3 py-2 text-left text-sm disabled:opacity-40 ${isDark ? "text-slate-200 hover:bg-white/10" : "text-stone-700 hover:bg-stone-100"}`}>{exporting === "pdf" ? "Exporting PDF..." : "Download Print PDF"}</button>
+                    <button onClick={() => { setShowExportMenu(false); void exportManuscript("epub") }} disabled={!!exporting} className={`block w-full rounded-xl px-3 py-2 text-left text-sm disabled:opacity-40 ${isDark ? "text-slate-200 hover:bg-white/10" : "text-stone-700 hover:bg-stone-100"}`}>{exporting === "epub" ? "Exporting EPUB..." : "Download EPUB"}</button>
                   </div>
                 ) : null}
               </div>
@@ -704,10 +989,203 @@ export default function ManuscriptPage() {
               <div className={`inline-flex rounded-full border p-1 ${isDark ? "border-white/10 bg-black/30" : "border-stone-200 bg-stone-100/80"}`}>
                 <Link href={`/${bookId}/advisor`} className={`rounded-full px-3 py-2 text-sm font-medium transition ${isDark ? "text-slate-200 hover:bg-white/10" : "text-stone-700 hover:bg-white"}`}>Story Advisor</Link>
                 <button onClick={() => openRightPane("insights")} className={`rounded-full px-3 py-2 text-sm font-medium transition ${showRightRail && activeRightPane === "insights" ? isDark ? "bg-white text-slate-950" : "bg-stone-900 text-white" : isDark ? "text-slate-300 hover:bg-white/10" : "text-stone-600 hover:bg-white"}`}>Insights</button>
+                <button onClick={() => openRightPane("character")} className={`rounded-full px-3 py-2 text-sm font-medium transition ${showRightRail && activeRightPane === "character" ? isDark ? "bg-white text-slate-950" : "bg-stone-900 text-white" : isDark ? "text-slate-300 hover:bg-white/10" : "text-stone-600 hover:bg-white"}`}>Characters</button>
                 <button onClick={() => openRightPane("notes")} className={`rounded-full px-3 py-2 text-sm font-medium transition ${showRightRail && activeRightPane === "notes" ? isDark ? "bg-white text-slate-950" : "bg-stone-900 text-white" : isDark ? "text-slate-300 hover:bg-white/10" : "text-stone-600 hover:bg-white"}`}>Notes</button>
               </div>
             </div>
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <span className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Workspace</span>
+              <div className={`inline-flex overflow-hidden rounded-full border p-1 ${isDark ? "border-white/10 bg-black/30" : "border-stone-200 bg-stone-100/80"}`}>
+                <Link
+                  href={`/${bookId}/manuscript`}
+                  className={`rounded-full px-3 py-2 text-sm font-medium transition ${isDark ? "bg-white text-slate-950" : "bg-stone-900 text-white"}`}
+                >
+                  Story manuscript
+                </Link>
+                <Link
+                  href={`/${bookId}/world-gap`}
+                  className={`rounded-full px-3 py-2 text-sm font-medium transition ${isDark ? "text-slate-300 hover:bg-white/10" : "text-stone-600 hover:bg-white"}`}
+                >
+                  Worldbuilding manuscript
+                </Link>
+              </div>
+              <p className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Keep story and world reference docs separate, then compare them when you need a consistency pass.</p>
+            </div>
           </div>
+        </div>
+
+        <div className="mt-6 grid gap-5 xl:grid-cols-[1.2fr_1fr]">
+          <section className={`rounded-[1.7rem] border p-5 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-white/90"}`}>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-emerald-300" : "text-emerald-700"}`}>Writer dashboard</p>
+                <h2 className={`mt-2 text-2xl font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>Goals, templates, and live readability</h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => void tightenSelectedText()}
+                disabled={tighteningSelection}
+                className="rounded-full bg-[linear-gradient(135deg,#0f766e,#115e59)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                {tighteningSelection ? "Tightening..." : "Tighten selected text"}
+              </button>
+            </div>
+            <p className={`mt-3 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>
+              {editorMode === "chapter"
+                ? "Highlight a passage inside the active chapter editor to tighten only that selection."
+                : "Switch to chapter view to tighten a selected passage without touching the rest of the manuscript."}
+            </p>
+            <div className="mt-5 grid gap-4 md:grid-cols-3">
+              <MetricCard
+                label="Chapter goal"
+                value={writerWorkspace?.word_count_goals.chapter_target ? `${chapterWordCount.toLocaleString()} / ${writerWorkspace.word_count_goals.chapter_target.toLocaleString()}` : `${chapterWordCount.toLocaleString()} words`}
+                note={chapterGoalProgress !== null ? `${chapterGoalProgress}% of target` : "Set a chapter target below"}
+                isDark={isDark}
+              />
+              <MetricCard
+                label="Book goal"
+                value={writerWorkspace?.word_count_goals.book_target ? `${fullBookWordCount.toLocaleString()} / ${writerWorkspace.word_count_goals.book_target.toLocaleString()}` : `${fullBookWordCount.toLocaleString()} words`}
+                note={bookGoalProgress !== null ? `${bookGoalProgress}% of target` : "Set a manuscript target below"}
+                isDark={isDark}
+              />
+              <MetricCard
+                label="Readability"
+                value={readabilityLoading ? "Scoring..." : readability ? `${readability.label} (${Math.round(readability.reading_ease)})` : "Waiting..."}
+                note={readability ? `${readability.average_sentence_length} words/sentence · grade ${readability.grade_level}` : "Live score updates while you write"}
+                isDark={isDark}
+              />
+            </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              <ProgressStrip
+                label="Chapter progress"
+                progress={chapterGoalProgress}
+                fallback={`${chapterApproxPages} page${chapterApproxPages === 1 ? "" : "s"} in the current chapter draft`}
+                isDark={isDark}
+              />
+              <ProgressStrip
+                label="Book progress"
+                progress={bookGoalProgress}
+                fallback={`${fullBookApproxPages.toLocaleString()} estimated manuscript pages`}
+                isDark={isDark}
+              />
+            </div>
+            <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+              <div className={`rounded-[1.2rem] border p-4 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50/80"}`}>
+                <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Word count goals</p>
+                <div className="mt-3 grid gap-3 md:grid-cols-3">
+                  <input
+                    type="number"
+                    value={writerWorkspace?.word_count_goals.chapter_target ?? ""}
+                    onChange={(event) => setWriterWorkspace((current) => current ? { ...current, word_count_goals: { ...current.word_count_goals, chapter_target: Number(event.target.value) || null } } : current)}
+                    placeholder="Chapter"
+                    className={`rounded-[0.95rem] border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
+                  />
+                  <input
+                    type="number"
+                    value={writerWorkspace?.word_count_goals.book_target ?? ""}
+                    onChange={(event) => setWriterWorkspace((current) => current ? { ...current, word_count_goals: { ...current.word_count_goals, book_target: Number(event.target.value) || null } } : current)}
+                    placeholder="Book"
+                    className={`rounded-[0.95rem] border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
+                  />
+                  <input
+                    type="number"
+                    value={writerWorkspace?.word_count_goals.session_target ?? ""}
+                    onChange={(event) => setWriterWorkspace((current) => current ? { ...current, word_count_goals: { ...current.word_count_goals, session_target: Number(event.target.value) || null } } : current)}
+                    placeholder="Session"
+                    className={`rounded-[0.95rem] border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => writerWorkspace && void saveWorkspace({ word_count_goals: writerWorkspace.word_count_goals })}
+                  disabled={!writerWorkspace || workspaceSaving}
+                  className="mt-3 rounded-full bg-[linear-gradient(135deg,#2563eb,#1d4ed8)] px-4 py-2 text-xs font-semibold text-white disabled:opacity-50"
+                >
+                  {workspaceSaving ? "Saving..." : "Save goals"}
+                </button>
+              </div>
+              <div className={`rounded-[1.2rem] border p-4 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50/80"}`}>
+                <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Templates</p>
+                <div className="mt-3 space-y-3">
+                  {(writerWorkspace?.templates ?? []).map((template) => (
+                    <article key={template.id} className={`rounded-[1rem] border p-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-white bg-white"}`}>
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{template.title}</p>
+                          <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{template.kind} template</p>
+                        </div>
+                        <button onClick={() => applyTemplateToChapter(template)} className={`rounded-full px-3 py-1.5 text-xs font-semibold ${isDark ? "bg-emerald-500/10 text-emerald-200" : "bg-emerald-50 text-emerald-700"}`}>Insert</button>
+                      </div>
+                      <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-700"}`}>{template.description}</p>
+                    </article>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className={`rounded-[1.7rem] border p-5 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-white/90"}`}>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-amber-300" : "text-amber-700"}`}>Planning board</p>
+                <h2 className={`mt-2 text-2xl font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>Corkboard and emotional arc</h2>
+              </div>
+            </div>
+            <div className="mt-4 flex gap-2">
+              <input
+                value={newCorkboardTitle}
+                onChange={(event) => setNewCorkboardTitle(event.target.value)}
+                placeholder="New corkboard card"
+                className={`flex-1 rounded-[1rem] border px-4 py-3 text-sm ${isDark ? "border-white/10 bg-black/30 text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-stone-50 text-stone-900 placeholder:text-stone-400"}`}
+              />
+              <button onClick={() => void addCorkboardCard()} disabled={!writerWorkspace || !newCorkboardTitle.trim()} className="rounded-[1rem] bg-[linear-gradient(135deg,#d97706,#b45309)] px-4 py-3 text-sm font-semibold text-white disabled:opacity-50">Add</button>
+            </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              {["ideas", "drafting", "revised"].map((lane) => (
+                <div key={lane} className={`rounded-[1.1rem] border p-3 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50/80"}`}>
+                  <p className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>{lane}</p>
+                  <div className="mt-3 space-y-2">
+                    {(writerWorkspace?.corkboard_cards ?? []).filter((card) => card.lane === lane).map((card) => (
+                      <article key={card.id} className={`rounded-[0.95rem] border p-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-white bg-white"}`}>
+                        <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{card.title}</p>
+                        {card.chapter_number ? <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Chapter {card.chapter_number}</p> : null}
+                        <div className="mt-3 flex gap-2">
+                          {lane !== "ideas" ? <button onClick={() => void updateCardLane(card.id, "ideas")} className={`text-xs ${isDark ? "text-slate-300" : "text-stone-600"}`}>Ideas</button> : null}
+                          {lane !== "drafting" ? <button onClick={() => void updateCardLane(card.id, "drafting")} className={`text-xs ${isDark ? "text-slate-300" : "text-stone-600"}`}>Drafting</button> : null}
+                          {lane !== "revised" ? <button onClick={() => void updateCardLane(card.id, "revised")} className={`text-xs ${isDark ? "text-slate-300" : "text-stone-600"}`}>Revised</button> : null}
+                        </div>
+                      </article>
+                    ))}
+                    {(writerWorkspace?.corkboard_cards ?? []).filter((card) => card.lane === lane).length === 0 ? <p className={`text-sm ${isDark ? "text-slate-500" : "text-stone-500"}`}>No cards yet.</p> : null}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className={`mt-5 rounded-[1.2rem] border p-4 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50/80"}`}>
+              <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Emotional arc tracking</p>
+              {emotionalArc?.characters.length ? (
+                <div className="mt-3 space-y-3">
+                  {emotionalArc.characters.slice(0, 4).map((character) => (
+                    <article key={character.character_id} className={`rounded-[1rem] border p-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-white bg-white"}`}>
+                      <div className="flex items-center justify-between gap-3">
+                        <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{character.character_name}</p>
+                        <span className={`text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>trajectory {character.trajectory_score > 0 ? "+" : ""}{character.trajectory_score}</span>
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {character.points.slice(-4).map((point) => (
+                          <span key={`${character.character_id}-${point.chapter_number}-${point.label}`} className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${point.sentiment >= 0 ? isDark ? "bg-emerald-500/10 text-emerald-200" : "bg-emerald-50 text-emerald-700" : isDark ? "bg-rose-500/10 text-rose-200" : "bg-rose-50 text-rose-700"}`}>
+                            Ch. {point.chapter_number}: {point.label}
+                          </span>
+                        ))}
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <p className={`mt-3 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>Emotional arc tracking will populate as character growth events become available.</p>
+              )}
+            </div>
+          </section>
         </div>
 
         <div className={`mt-8 grid gap-5 ${desktopLayoutClass}`}>
@@ -1041,19 +1519,60 @@ export default function ManuscriptPage() {
               ) : null}
             </div>
 
+            {inlineContinuity ? (
+              <div className={`mb-8 rounded-[1.4rem] border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white/90"}`}>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-rose-300" : "text-rose-700"}`}>Chapter memory continuity checker</p>
+                    <p className={`mt-2 text-sm ${isDark ? "text-slate-300" : "text-stone-700"}`}>{inlineContinuity.overall_verdict}</p>
+                  </div>
+                  {logicSelectionText ? <p className={`max-w-sm text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Last tightened selection: {logicSelectionText.slice(0, 100)}</p> : null}
+                </div>
+                <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                  <div className={`rounded-[1rem] border p-3 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50"}`}>
+                    <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Inline issues</p>
+                    <div className="mt-3 space-y-3">
+                      {continuityLoading ? <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>Refreshing continuity memory…</p> : null}
+                      {inlineContinuity.issues.length === 0 ? <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>No chapter-memory contradictions surfaced in this pass.</p> : null}
+                      {inlineContinuity.issues.slice(0, 6).map((issue, index) => (
+                        <article key={`${issue.title}-${index}`} className={`rounded-[0.95rem] border p-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-white bg-white"}`}>
+                          <div className="flex items-center justify-between gap-3">
+                            <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{issue.title}</p>
+                            <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${issue.severity === "critical" ? isDark ? "bg-rose-500/10 text-rose-200" : "bg-rose-50 text-rose-700" : isDark ? "bg-amber-500/10 text-amber-200" : "bg-amber-50 text-amber-700"}`}>{issue.severity}</span>
+                          </div>
+                          <p className={`mt-2 text-xs italic ${isDark ? "text-slate-400" : "text-stone-500"}`}>"{issue.snippet}"</p>
+                          <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-700"}`}>{issue.explanation}</p>
+                          {issue.suggestion ? <p className={`mt-2 text-xs ${isDark ? "text-emerald-300" : "text-emerald-700"}`}>Fix: {issue.suggestion}</p> : null}
+                        </article>
+                      ))}
+                    </div>
+                  </div>
+                  <div className={`rounded-[1rem] border p-3 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50"}`}>
+                    <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Memory bank</p>
+                    <div className="mt-3 space-y-2">
+                      {inlineContinuity.memory_bank.map((item) => (
+                        <p key={item} className={`text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-700"}`}>{item}</p>
+                      ))}
+                      {inlineContinuity.memory_bank.length === 0 ? <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>No retrieval notes were needed for this pass.</p> : null}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
             {editorMode === "chapter" ? (
               <div className="space-y-4">
-                <div className={`relative mx-auto w-full max-w-full overflow-hidden rounded-[1.4rem] border shadow-[0_24px_80px_-55px_rgba(15,23,42,0.25)] ${isDark ? "border-white/10 bg-[#101010]" : "border-[#d8d0c4] bg-[#fdfcf9]"}`}>
+                <div className={`relative mx-auto w-full max-w-full rounded-[1.4rem] border shadow-[0_24px_80px_-55px_rgba(15,23,42,0.25)] ${isDark ? "border-white/10 bg-[#101010]" : "border-[#d8d0c4] bg-[#fdfcf9]"}`}>
                   {showPageGuides ? (
                     <div
                       aria-hidden
-                      className={`pointer-events-none absolute inset-0 ${isDark ? "opacity-20" : "opacity-35"}`}
+                      className={`pointer-events-none absolute inset-0 rounded-[1.4rem] ${isDark ? "opacity-20" : "opacity-35"}`}
                       style={{
                         backgroundImage: `repeating-linear-gradient(to bottom, transparent 0, transparent calc(297mm - 1px), ${isDark ? "rgba(255,255,255,0.08)" : "rgba(15,23,42,0.08)"} calc(297mm - 1px), ${isDark ? "rgba(255,255,255,0.08)" : "rgba(15,23,42,0.08)"} 297mm)`,
                       }}
                     />
                   ) : null}
-                  <div className={`border-b px-6 py-6 sm:px-8 ${isDark ? "border-white/10 bg-white/[0.02]" : "border-[#e6dfd4] bg-[#f7f3ed]"}`}>
+                  <div className={`border-b rounded-t-[1.4rem] px-6 py-6 sm:px-8 ${isDark ? "border-white/10 bg-white/[0.02]" : "border-[#e6dfd4] bg-[#f7f3ed]"}`}>
                     <div className="flex items-start justify-between gap-4">
                       <div className="min-w-0 flex-1">
                         <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{selectedChapter === null ? "New chapter draft" : "Current chapter"}</p>
@@ -1117,6 +1636,11 @@ export default function ManuscriptPage() {
                     }}
                     onFocus={() => setActiveEditorKey(`chapter-${activeChapterNumber}`)}
                     onBlur={() => setActiveEditorKey((current) => current === `chapter-${activeChapterNumber}` ? null : current)}
+                    onCharacterClick={(characterName) => {
+                      const char = characters.find((c) => c.name === characterName || c.aliases?.includes(characterName))
+                      if (char) openCharCard(char)
+                    }}
+                    editorKey={`chapter-${activeChapterNumber}`}
                     placeholder="Write or paste the chapter here..."
                     style={{ ...sheetStyle, textIndent: firstLineIndent ? "1.5em" : "0" }}
                     className={`relative min-h-[297mm] w-full border-0 bg-transparent px-6 py-10 sm:px-[20mm] sm:py-[24mm] outline-none ${isDark ? "text-slate-100 placeholder:text-slate-500" : "text-stone-900 placeholder:text-stone-400"}`}
@@ -1135,18 +1659,18 @@ export default function ManuscriptPage() {
                       ref={(node) => {
                         chapterRefs.current[chapter.number] = node
                       }}
-                      className={`relative mx-auto w-full max-w-full overflow-hidden rounded-[1.4rem] border shadow-[0_24px_80px_-55px_rgba(15,23,42,0.25)] ${jumpTarget === chapter.number ? isDark ? "border-teal-400/40 bg-[#101010]" : "border-teal-300 bg-[#fdfcf9]" : isDark ? "border-white/10 bg-[#101010]" : "border-[#d8d0c4] bg-[#fdfcf9]"}`}
+                      className={`relative mx-auto w-full max-w-full rounded-[1.4rem] border shadow-[0_24px_80px_-55px_rgba(15,23,42,0.25)] ${jumpTarget === chapter.number ? isDark ? "border-teal-400/40 bg-[#101010]" : "border-teal-300 bg-[#fdfcf9]" : isDark ? "border-white/10 bg-[#101010]" : "border-[#d8d0c4] bg-[#fdfcf9]"}`}
                     >
                       {showPageGuides ? (
                         <div
                           aria-hidden
-                          className={`pointer-events-none absolute inset-0 ${isDark ? "opacity-20" : "opacity-35"}`}
+                          className={`pointer-events-none absolute inset-0 rounded-[1.4rem] ${isDark ? "opacity-20" : "opacity-35"}`}
                           style={{
                             backgroundImage: `repeating-linear-gradient(to bottom, transparent 0, transparent calc(297mm - 1px), ${isDark ? "rgba(255,255,255,0.08)" : "rgba(15,23,42,0.08)"} calc(297mm - 1px), ${isDark ? "rgba(255,255,255,0.08)" : "rgba(15,23,42,0.08)"} 297mm)`,
                           }}
                         />
                       ) : null}
-                      <div className={`border-b px-6 py-6 sm:px-8 ${isDark ? "border-white/10 bg-white/[0.02]" : "border-[#e6dfd4] bg-[#f7f3ed]"}`}>
+                      <div className={`border-b rounded-t-[1.4rem] px-6 py-6 sm:px-8 ${isDark ? "border-white/10 bg-white/[0.02]" : "border-[#e6dfd4] bg-[#f7f3ed]"}`}>
                         <div className="flex items-start justify-between gap-4">
                           <div className="min-w-0 flex-1">
                             <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Chapter {chapter.number}</p>
@@ -1193,7 +1717,7 @@ export default function ManuscriptPage() {
                           </div>
                         </div>
                       </div>
-                      <div className="hidden">
+                      <div className={`sticky top-3 z-10 border-b px-4 py-3 transition-all duration-200 translate-y-0 opacity-100 pointer-events-auto ${isDark ? "border-white/10 bg-[#0d1117]/95 backdrop-blur" : "border-[#e6dfd4] bg-[#f7f3ed]/95 backdrop-blur"}`}>
                         <EditorToolbar isDark={isDark} compact characters={characters} />
                       </div>
                       <RichTextEditor
@@ -1211,6 +1735,11 @@ export default function ManuscriptPage() {
                         }}
                         onFocus={() => setActiveEditorKey(`book-${chapter.number}`)}
                         onBlur={() => setActiveEditorKey((current) => current === `book-${chapter.number}` ? null : current)}
+                        onCharacterClick={(characterName) => {
+                          const char = characters.find((c) => c.name === characterName || c.aliases?.includes(characterName))
+                          if (char) openCharCard(char)
+                        }}
+                        editorKey={`book-${chapter.number}`}
                         placeholder="Draft this chapter..."
                         style={{ ...sheetStyle, textIndent: firstLineIndent ? "1.5em" : "0" }}
                         className={`relative min-h-[240mm] w-full border-0 bg-transparent px-6 py-10 sm:px-[20mm] sm:py-[22mm] outline-none ${isDark ? "text-slate-100 placeholder:text-slate-500" : "text-stone-900 placeholder:text-stone-400"}`}
@@ -1243,6 +1772,281 @@ export default function ManuscriptPage() {
 
           {showRightRail ? (
           <aside className="space-y-4">
+
+            {/* ── Character Card pane ──────────────────────────── */}
+            {activeRightPane === "character" ? (
+              <div className={`rounded-[1.6rem] border ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white/80"}`}>
+                {/* Header: browse list or card header */}
+                {selectedCharCard ? (
+                  <>
+                    <div className={`flex items-center justify-between gap-3 border-b p-4 ${isDark ? "border-white/10" : "border-stone-200"}`}>
+                      <div>
+                        <button
+                          onClick={() => setSelectedCharCard(null)}
+                          className={`mb-1 text-[11px] font-semibold uppercase tracking-[0.18em] transition ${isDark ? "text-slate-500 hover:text-slate-300" : "text-stone-400 hover:text-stone-600"}`}
+                        >
+                          ← All characters
+                        </button>
+                        <p className={`text-base font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{selectedCharCard.name}</p>
+                        {selectedCharCard.aliases.length > 0 && (
+                          <p className={`text-xs ${isDark ? "text-slate-500" : "text-stone-400"}`}>aka {selectedCharCard.aliases.join(", ")}</p>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {charCardEditing ? (
+                          <>
+                            <button
+                              onClick={saveCharCard}
+                              disabled={charCardSaving}
+                              className="rounded-full bg-[linear-gradient(135deg,#4f46e5,#4338ca)] px-4 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                            >
+                              {charCardSaving ? "Saving…" : "Save"}
+                            </button>
+                            <button
+                              onClick={() => setCharCardEditing(false)}
+                              className={`rounded-full border px-3 py-1.5 text-xs font-medium ${isDark ? "border-white/10 text-slate-300" : "border-stone-200 text-stone-600"}`}
+                            >
+                              Cancel
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            onClick={() => setCharCardEditing(true)}
+                            className={`rounded-full border px-3 py-1.5 text-xs font-medium ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`}
+                          >
+                            Edit card
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="space-y-4 p-4">
+                      {/* Role + First chapter badges */}
+                      <div className="flex flex-wrap gap-2">
+                        {selectedCharCard.role && (
+                          <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] ${
+                            selectedCharCard.role === "mc" ? isDark ? "bg-indigo-500/20 text-indigo-200" : "bg-indigo-100 text-indigo-700"
+                            : selectedCharCard.role === "sc" ? isDark ? "bg-teal-500/20 text-teal-200" : "bg-teal-100 text-teal-700"
+                            : isDark ? "bg-white/10 text-slate-300" : "bg-stone-100 text-stone-600"
+                          }`}>{selectedCharCard.role === "mc" ? "Main" : selectedCharCard.role === "sc" ? "Supporting" : "Background"}</span>
+                        )}
+                        <span className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${isDark ? "bg-white/8 text-slate-400" : "bg-stone-100 text-stone-500"}`}>
+                          Ch. {selectedCharCard.first_chapter}{selectedCharCard.last_seen_chapter ? ` – ${selectedCharCard.last_seen_chapter}` : ""}
+                        </span>
+                        {selectedCharCard.archetype && (
+                          <span className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${isDark ? "bg-white/8 text-slate-400" : "bg-stone-100 text-stone-500"}`}>{selectedCharCard.archetype}</span>
+                        )}
+                        {selectedCharCard.character_type === "gag" && (
+                          <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${isDark ? "bg-amber-500/20 text-amber-300" : "bg-amber-100 text-amber-700"}`}>🎭 Gag</span>
+                        )}
+                      </div>
+
+                      {/* Description */}
+                      <div>
+                        <p className={`mb-1 text-[10px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Description</p>
+                        {charCardEditing ? (
+                          <textarea
+                            rows={3}
+                            value={charCardDraft.description}
+                            onChange={e => setCharCardDraft(d => ({ ...d, description: e.target.value }))}
+                            className={`w-full resize-none rounded-[0.8rem] border px-3 py-2 text-sm leading-6 outline-none ${isDark ? "border-white/10 bg-black/30 text-slate-200" : "border-stone-200 bg-stone-50 text-stone-800"}`}
+                          />
+                        ) : (
+                          <p className={`text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{selectedCharCard.description || <span className="opacity-40">No description yet.</span>}</p>
+                        )}
+                      </div>
+
+                      {/* Arc summary */}
+                      <div>
+                        <p className={`mb-1 text-[10px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Arc summary</p>
+                        {charCardEditing ? (
+                          <textarea
+                            rows={4}
+                            value={charCardDraft.arcSummary}
+                            onChange={e => setCharCardDraft(d => ({ ...d, arcSummary: e.target.value }))}
+                            className={`w-full resize-none rounded-[0.8rem] border px-3 py-2 text-sm leading-6 outline-none ${isDark ? "border-white/10 bg-black/30 text-slate-200" : "border-stone-200 bg-stone-50 text-stone-800"}`}
+                          />
+                        ) : (
+                          <p className={`text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{selectedCharCard.arc_summary || <span className="opacity-40">No arc summary yet.</span>}</p>
+                        )}
+                      </div>
+
+                      {/* Personality tags */}
+                      <div>
+                        <p className={`mb-1 text-[10px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Personality</p>
+                        {charCardEditing ? (
+                          <input
+                            value={charCardDraft.personalityTags}
+                            onChange={e => setCharCardDraft(d => ({ ...d, personalityTags: e.target.value }))}
+                            placeholder="Comma-separated traits"
+                            className={`w-full rounded-[0.8rem] border px-3 py-2 text-sm outline-none ${isDark ? "border-white/10 bg-black/30 text-slate-200 placeholder:text-slate-600" : "border-stone-200 bg-stone-50 text-stone-800"}`}
+                          />
+                        ) : (
+                          <div className="flex flex-wrap gap-1.5">
+                            {(selectedCharCard.personality_tags ?? []).length > 0 ? selectedCharCard.personality_tags.map(tag => (
+                              <span key={tag} className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${isDark ? "bg-violet-500/15 text-violet-200" : "bg-violet-100 text-violet-700"}`}>{tag}</span>
+                            )) : <span className={`text-xs ${isDark ? "text-slate-500" : "text-stone-400"}`}>None recorded.</span>}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Motivations */}
+                      <div>
+                        <p className={`mb-1 text-[10px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Motivations</p>
+                        {charCardEditing ? (
+                          <input
+                            value={charCardDraft.motivations}
+                            onChange={e => setCharCardDraft(d => ({ ...d, motivations: e.target.value }))}
+                            placeholder="Comma-separated"
+                            className={`w-full rounded-[0.8rem] border px-3 py-2 text-sm outline-none ${isDark ? "border-white/10 bg-black/30 text-slate-200 placeholder:text-slate-600" : "border-stone-200 bg-stone-50 text-stone-800"}`}
+                          />
+                        ) : (
+                          <ul className="space-y-1">
+                            {(selectedCharCard.motivations ?? []).length > 0 ? selectedCharCard.motivations.map(m => (
+                              <li key={m} className={`text-sm leading-5 ${isDark ? "text-slate-300" : "text-stone-600"}`}>· {m}</li>
+                            )) : <li className={`text-xs ${isDark ? "text-slate-500" : "text-stone-400"}`}>None recorded.</li>}
+                          </ul>
+                        )}
+                      </div>
+
+                      {/* Fears */}
+                      <div>
+                        <p className={`mb-1 text-[10px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Fears</p>
+                        {charCardEditing ? (
+                          <input
+                            value={charCardDraft.fears}
+                            onChange={e => setCharCardDraft(d => ({ ...d, fears: e.target.value }))}
+                            placeholder="Comma-separated"
+                            className={`w-full rounded-[0.8rem] border px-3 py-2 text-sm outline-none ${isDark ? "border-white/10 bg-black/30 text-slate-200 placeholder:text-slate-600" : "border-stone-200 bg-stone-50 text-stone-800"}`}
+                          />
+                        ) : (
+                          <ul className="space-y-1">
+                            {(selectedCharCard.fears ?? []).length > 0 ? selectedCharCard.fears.map(f => (
+                              <li key={f} className={`text-sm leading-5 ${isDark ? "text-slate-300" : "text-stone-600"}`}>· {f}</li>
+                            )) : <li className={`text-xs ${isDark ? "text-slate-500" : "text-stone-400"}`}>None recorded.</li>}
+                          </ul>
+                        )}
+                      </div>
+
+                      {/* Growth events */}
+                      {(selectedCharCard.growth_events ?? []).length > 0 && (
+                        <div>
+                          <p className={`mb-1 text-[10px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Growth events</p>
+                          <div className="space-y-2">
+                            {selectedCharCard.growth_events!
+                              .slice()
+                              .sort((left, right) => (right.chapter_number ?? right.chapter ?? 0) - (left.chapter_number ?? left.chapter ?? 0))
+                              .map((ev, i) => (
+                              <div key={i} className={`rounded-[0.8rem] border px-3 py-2 text-xs ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
+                                {(ev.chapter_number ?? ev.chapter) ? (
+                                  <span className={`font-semibold ${isDark ? "text-indigo-300" : "text-violet-600"}`}>
+                                    Ch. {ev.chapter_number ?? ev.chapter} ·{" "}
+                                  </span>
+                                ) : null}
+                                <span className={isDark ? "text-slate-300" : "text-stone-700"}>{ev.event_title || ev.event || "Untitled event"}</span>
+                                {(ev.description || ev.impact) ? (
+                                  <p className={`mt-1 leading-5 ${isDark ? "text-slate-400" : "text-stone-500"}`}>{ev.description || ev.impact}</p>
+                                ) : null}
+                                <div className="mt-2 flex flex-wrap gap-1.5">
+                                  {typeof ev.impact_score === "number" ? (
+                                    <span className={`rounded-full px-2 py-0.5 ${isDark ? "bg-white/10 text-slate-300" : "bg-stone-200 text-stone-600"}`}>
+                                      impact {ev.impact_score}/10
+                                    </span>
+                                  ) : null}
+                                  {ev.growth_direction ? (
+                                    <span className={`rounded-full px-2 py-0.5 capitalize ${isDark ? "bg-white/10 text-slate-300" : "bg-stone-200 text-stone-600"}`}>
+                                      {ev.growth_direction}
+                                    </span>
+                                  ) : null}
+                                  {typeof ev.growth_magnitude === "number" ? (
+                                    <span className={`rounded-full px-2 py-0.5 ${isDark ? "bg-white/10 text-slate-300" : "bg-stone-200 text-stone-600"}`}>
+                                      growth {ev.growth_magnitude}/10
+                                    </span>
+                                  ) : null}
+                                  {ev.is_major ? (
+                                    <span className={`rounded-full px-2 py-0.5 ${isDark ? "bg-amber-500/15 text-amber-300" : "bg-amber-100 text-amber-700"}`}>
+                                      major
+                                    </span>
+                                  ) : null}
+                                </div>
+                                {ev.accomplishments?.length ? (
+                                  <p className={`mt-2 leading-5 ${isDark ? "text-slate-500" : "text-stone-500"}`}>
+                                    Accomplishments: {ev.accomplishments.join(", ")}
+                                  </p>
+                                ) : null}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Save to notes */}
+                      <button
+                        onClick={() => {
+                          booksApi.saveBookNote(bookId, {
+                            chapterNumber: null,
+                            title: `Character note: ${selectedCharCard.name}`,
+                            body: [
+                              `**${selectedCharCard.name}** (${selectedCharCard.role ?? "background"})`,
+                              selectedCharCard.arc_summary ? `\nArc: ${selectedCharCard.arc_summary}` : "",
+                              selectedCharCard.personality_tags?.length ? `\nPersonality: ${selectedCharCard.personality_tags.join(", ")}` : "",
+                              selectedCharCard.motivations?.length ? `\nMotivations: ${selectedCharCard.motivations.join("; ")}` : "",
+                            ].filter(Boolean).join("\n"),
+                          }).then(saved => {
+                            setNotes(current => [saved, ...current.filter(n => n.id !== saved.id)])
+                            setStatusMessage(`Saved character note for ${selectedCharCard.name}.`)
+                          }).catch(() => setStatusMessage("Could not save note."))
+                        }}
+                        className={`w-full rounded-full border px-4 py-2 text-xs font-semibold transition ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`}
+                      >
+                        Save as note
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  /* Browse list */
+                  <div className="p-4">
+                    <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Characters</p>
+                    <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-400"}`}>Click a name to open their card.</p>
+                    <div className="mt-3 space-y-2">
+                      {characters.length === 0 ? (
+                        <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>No characters extracted yet.</p>
+                      ) : characters.map(char => (
+                        <button
+                          key={char.id}
+                          onClick={() => openCharCard(char)}
+                          className={`w-full rounded-[1rem] border px-3 py-3 text-left transition ${
+                            isDark ? "border-white/10 bg-white/[0.03] hover:bg-white/[0.07]" : "border-stone-200 bg-stone-50 hover:bg-white"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{char.name}</p>
+                            {char.role && (
+                              <span className={`text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full ${
+                                char.role === "mc" ? isDark ? "bg-indigo-500/20 text-indigo-300" : "bg-indigo-100 text-indigo-700"
+                                : char.role === "sc" ? isDark ? "bg-teal-500/20 text-teal-300" : "bg-teal-100 text-teal-700"
+                                : isDark ? "bg-white/10 text-slate-400" : "bg-stone-100 text-stone-500"
+                              }`}>{char.role}</span>
+                            )}
+                          </div>
+                          {char.arc_summary && (
+                            <p className={`mt-1 text-xs line-clamp-2 ${isDark ? "text-slate-400" : "text-stone-500"}`}>{char.arc_summary}</p>
+                          )}
+                          {char.personality_tags && char.personality_tags.length > 0 && (
+                            <div className="mt-1.5 flex flex-wrap gap-1">
+                              {char.personality_tags.slice(0, 3).map(t => (
+                                <span key={t} className={`text-[10px] rounded-full px-2 py-0.5 ${isDark ? "bg-white/8 text-slate-400" : "bg-stone-100 text-stone-500"}`}>{t}</span>
+                              ))}
+                            </div>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : null}
+
             {activeRightPane === "insights" ? (
               <>
             {editorMode === "book" ? (
@@ -1335,9 +2139,19 @@ export default function ManuscriptPage() {
                   <p className={`text-sm font-medium ${isDark ? "text-white" : "text-stone-900"}`}>{review.overall_verdict}</p>
                   {review.continuity_issues.length > 0 ? review.continuity_issues.map((issue, index) => (
                     <div key={`${issue.title}-${index}`} className={`rounded-[1rem] border px-3 py-3 text-sm ${isDark ? "border-amber-500/20 bg-amber-500/10 text-slate-200" : "border-amber-200 bg-amber-50 text-stone-700"}`}>
-                      <p className="font-semibold">{issue.title}</p>
-                      <p className="mt-1 text-xs leading-5 opacity-80">{issue.description}</p>
-                      {issue.suggestion ? <p className="mt-2 text-xs font-medium opacity-90">{issue.suggestion}</p> : null}
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1">
+                          <p className="font-semibold">{issue.title}</p>
+                          <p className="mt-1 text-xs leading-5 opacity-80">{issue.description}</p>
+                          {issue.suggestion ? <p className="mt-2 text-xs font-medium opacity-90">{issue.suggestion}</p> : null}
+                        </div>
+                        <button
+                          onClick={() => void saveContinuityIssueAsNote(issue)}
+                          className={`shrink-0 rounded-full px-3 py-1.5 text-[11px] font-semibold transition ${isDark ? "bg-white/10 text-slate-200 hover:bg-white/20" : "bg-white text-stone-700 hover:bg-stone-100"}`}
+                        >
+                          Save as note
+                        </button>
+                      </div>
                     </div>
                   )) : (
                     <p className={`text-sm ${isDark ? "text-teal-300" : "text-teal-700"}`}>No continuity issues found in the latest save.</p>
@@ -1394,13 +2208,23 @@ export default function ManuscriptPage() {
                   ) : null}
                   {voiceReview.issues.length > 0 ? voiceReview.issues.map((issue, index) => (
                     <div key={`${issue.character_name}-${issue.title}-${index}`} className={`rounded-[1rem] border px-3 py-3 text-sm ${isDark ? "border-rose-500/20 bg-rose-500/10 text-slate-200" : "border-rose-200 bg-rose-50 text-stone-700"}`}>
-                      <div className="flex items-center justify-between gap-3">
-                        <p className="font-semibold">{issue.character_name}: {issue.title}</p>
-                        <span className={`rounded-full px-2 py-1 text-[10px] uppercase tracking-[0.16em] ${isDark ? "bg-white/10 text-slate-300" : "bg-white text-stone-600"}`}>{issue.severity}</span>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1">
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="font-semibold">{issue.character_name}: {issue.title}</p>
+                            <span className={`rounded-full px-2 py-1 text-[10px] uppercase tracking-[0.16em] ${isDark ? "bg-white/10 text-slate-300" : "bg-white text-stone-600"}`}>{issue.severity}</span>
+                          </div>
+                          <p className="mt-2 text-xs leading-5 opacity-90">{issue.description}</p>
+                          {issue.evidence ? <p className="mt-2 text-xs opacity-80">Evidence: {issue.evidence}</p> : null}
+                          {issue.suggestion ? <p className="mt-2 text-xs opacity-90">Suggestion: {issue.suggestion}</p> : null}
+                        </div>
+                        <button
+                          onClick={() => void saveVoiceIssueAsNote(issue)}
+                          className={`shrink-0 rounded-full px-3 py-1.5 text-[11px] font-semibold transition ${isDark ? "bg-white/10 text-slate-200 hover:bg-white/20" : "bg-white text-stone-700 hover:bg-stone-100"}`}
+                        >
+                          Save as note
+                        </button>
                       </div>
-                      <p className="mt-2 text-xs leading-5 opacity-90">{issue.description}</p>
-                      {issue.evidence ? <p className="mt-2 text-xs opacity-80">Evidence: {issue.evidence}</p> : null}
-                      {issue.suggestion ? <p className="mt-2 text-xs opacity-90">Suggestion: {issue.suggestion}</p> : null}
                     </div>
                   )) : (
                     <p className={`text-sm ${isDark ? "text-teal-300" : "text-teal-700"}`}>No character voice issues found in the latest save.</p>
@@ -1454,7 +2278,7 @@ export default function ManuscriptPage() {
                         Save quick author notes for this chapter or for the whole book.
                       </p>
                     </div>
-                    <Link href="/notes" className={`rounded-full px-3 py-1.5 text-xs font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}>All notes</Link>
+                    <Link href={`/${bookId}/notes`} className={`rounded-full px-3 py-1.5 text-xs font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}>All notes</Link>
                   </div>
 
                   <div className="mt-4 inline-flex rounded-full p-1 border border-white/10 bg-black/20">
@@ -1487,6 +2311,10 @@ export default function ManuscriptPage() {
                           setNoteBody(nextHtml)
                           setNoteBodyText(nextText)
                         }}
+                        onCharacterClick={(characterName) => {
+                          const char = characters.find((c) => c.name === characterName || c.aliases?.includes(characterName))
+                          if (char) openCharCard(char)
+                        }}
                         placeholder={noteScope === "chapter" ? `Add a note for chapter ${activeChapterNumber}` : "Add a book-level note"}
                         className={`min-h-[11rem] px-4 py-4 text-sm leading-7 outline-none ${isDark ? "bg-black/40 text-slate-100 placeholder:text-slate-500" : "bg-white text-stone-900 placeholder:text-stone-400"}`}
                       />
@@ -1508,17 +2336,55 @@ export default function ManuscriptPage() {
                     {!notesLoading && chapterLinkedNotes.length === 0 ? <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>No notes saved for this chapter yet.</p> : null}
                     {chapterLinkedNotes.map((note) => (
                       <div key={note.id} className={`rounded-[1rem] border px-3 py-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{note.title || `Chapter ${note.chapter_number} note`}</p>
-                            <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{new Date(note.updated_at).toLocaleString()}</p>
+                        {editingNoteId === note.id ? (
+                          <div className="space-y-3">
+                            <input
+                              value={editNoteTitle}
+                              onChange={(e) => setEditNoteTitle(e.target.value)}
+                              placeholder="Note title"
+                              className={`w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-slate-700 bg-slate-800 text-white" : "border-stone-300 bg-white text-stone-900"}`}
+                            />
+                            <textarea
+                              value={editNoteBody}
+                              onChange={(e) => setEditNoteBody(e.target.value)}
+                              placeholder="Note content (markdown supported)"
+                              rows={4}
+                              className={`w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-slate-700 bg-slate-800 text-white" : "border-stone-300 bg-white text-stone-900"}`}
+                            />
+                            <div className="flex gap-2">
+                              <button
+                                onClick={saveEditedNote}
+                                disabled={editingNoteSaving}
+                                className={`rounded-md px-3 py-1.5 text-xs font-semibold ${isDark ? "bg-emerald-600 text-white disabled:opacity-40" : "bg-emerald-600 text-white disabled:opacity-40"}`}
+                              >
+                                {editingNoteSaving ? "Saving..." : "Save"}
+                              </button>
+                              <button
+                                onClick={cancelEditingNote}
+                                className={`rounded-md px-3 py-1.5 text-xs font-semibold ${isDark ? "border border-slate-600 text-slate-300" : "border border-stone-300 text-stone-700"}`}
+                              >
+                                Cancel
+                              </button>
+                            </div>
                           </div>
-                          <button onClick={() => removeNote(note.id)} className={`text-xs font-medium ${isDark ? "text-rose-300" : "text-rose-700"}`}>Delete</button>
-                        </div>
-                        <div
-                          className={`note-rich-content mt-3 text-sm leading-6 ${isDark ? "text-slate-200" : "text-stone-700"}`}
-                          dangerouslySetInnerHTML={{ __html: renderRichTextHtml(note.body) }}
-                        />
+                        ) : (
+                          <>
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{note.title || `Chapter ${note.chapter_number} note`}</p>
+                                <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{new Date(note.updated_at).toLocaleString()}</p>
+                              </div>
+                              <div className="flex gap-2">
+                                <button onClick={() => startEditingNote(note)} className={`text-xs font-medium ${isDark ? "text-slate-300" : "text-stone-600"}`}>Edit</button>
+                                <button onClick={() => removeNote(note.id)} className={`text-xs font-medium ${isDark ? "text-rose-300" : "text-rose-700"}`}>Delete</button>
+                              </div>
+                            </div>
+                            <div
+                              className={`note-rich-content mt-3 text-sm leading-6 ${isDark ? "text-slate-200" : "text-stone-700"}`}
+                              dangerouslySetInnerHTML={{ __html: renderRichTextHtml(note.body) }}
+                            />
+                          </>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -1530,17 +2396,55 @@ export default function ManuscriptPage() {
                     {!notesLoading && generalNotes.length === 0 ? <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>No general notes saved yet.</p> : null}
                     {generalNotes.map((note) => (
                       <div key={note.id} className={`rounded-[1rem] border px-3 py-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{note.title || "General book note"}</p>
-                            <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{new Date(note.updated_at).toLocaleString()}</p>
+                        {editingNoteId === note.id ? (
+                          <div className="space-y-3">
+                            <input
+                              value={editNoteTitle}
+                              onChange={(e) => setEditNoteTitle(e.target.value)}
+                              placeholder="Note title"
+                              className={`w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-slate-700 bg-slate-800 text-white" : "border-stone-300 bg-white text-stone-900"}`}
+                            />
+                            <textarea
+                              value={editNoteBody}
+                              onChange={(e) => setEditNoteBody(e.target.value)}
+                              placeholder="Note content (markdown supported)"
+                              rows={4}
+                              className={`w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-slate-700 bg-slate-800 text-white" : "border-stone-300 bg-white text-stone-900"}`}
+                            />
+                            <div className="flex gap-2">
+                              <button
+                                onClick={saveEditedNote}
+                                disabled={editingNoteSaving}
+                                className={`rounded-md px-3 py-1.5 text-xs font-semibold ${isDark ? "bg-emerald-600 text-white disabled:opacity-40" : "bg-emerald-600 text-white disabled:opacity-40"}`}
+                              >
+                                {editingNoteSaving ? "Saving..." : "Save"}
+                              </button>
+                              <button
+                                onClick={cancelEditingNote}
+                                className={`rounded-md px-3 py-1.5 text-xs font-semibold ${isDark ? "border border-slate-600 text-slate-300" : "border border-stone-300 text-stone-700"}`}
+                              >
+                                Cancel
+                              </button>
+                            </div>
                           </div>
-                          <button onClick={() => removeNote(note.id)} className={`text-xs font-medium ${isDark ? "text-rose-300" : "text-rose-700"}`}>Delete</button>
-                        </div>
-                        <div
-                          className={`note-rich-content mt-3 text-sm leading-6 ${isDark ? "text-slate-200" : "text-stone-700"}`}
-                          dangerouslySetInnerHTML={{ __html: renderRichTextHtml(note.body) }}
-                        />
+                        ) : (
+                          <>
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{note.title || "General book note"}</p>
+                                <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{new Date(note.updated_at).toLocaleString()}</p>
+                              </div>
+                              <div className="flex gap-2">
+                                <button onClick={() => startEditingNote(note)} className={`text-xs font-medium ${isDark ? "text-slate-300" : "text-stone-600"}`}>Edit</button>
+                                <button onClick={() => removeNote(note.id)} className={`text-xs font-medium ${isDark ? "text-rose-300" : "text-rose-700"}`}>Delete</button>
+                              </div>
+                            </div>
+                            <div
+                              className={`note-rich-content mt-3 text-sm leading-6 ${isDark ? "text-slate-200" : "text-stone-700"}`}
+                              dangerouslySetInnerHTML={{ __html: renderRichTextHtml(note.body) }}
+                            />
+                          </>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -1703,8 +2607,10 @@ function RichTextEditor({
   className,
   style,
   contentClassName,
+  editorKey,
   onFocus,
   onBlur,
+  onCharacterClick,
 }: {
   html: string
   onChange: (html: string, text: string) => void
@@ -1712,8 +2618,10 @@ function RichTextEditor({
   className?: string
   style?: CSSProperties
   contentClassName?: string
+  editorKey?: string
   onFocus?: () => void
   onBlur?: () => void
+  onCharacterClick?: (characterName: string) => void
 }) {
   const ref = useRef<HTMLDivElement | null>(null)
 
@@ -1729,11 +2637,12 @@ function RichTextEditor({
       ref={ref}
       contentEditable
       suppressContentEditableWarning
+      data-editor-key={editorKey}
       data-placeholder={placeholder}
       onFocus={onFocus}
       onBlur={onBlur}
       onInput={(event) => {
-        const nextHtml = sanitizeRichTextHtml(event.currentTarget.innerHTML)
+        const nextHtml = sanitizeRichTextHtml(event.currentTarget.innerHTML, onCharacterClick)
         const nextText = htmlToPlainText(nextHtml)
         onChange(nextHtml, nextText)
       }}
@@ -1762,6 +2671,58 @@ function InfoList({
           <p key={item} className={`text-sm ${isDark ? "text-slate-200" : "text-stone-700"}`}>{item}</p>
         )) : <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>{emptyLabel}</p>}
       </div>
+    </div>
+  )
+}
+
+function MetricCard({
+  label,
+  value,
+  note,
+  isDark,
+}: {
+  label: string
+  value: string
+  note: string
+  isDark: boolean
+}) {
+  return (
+    <div className={`rounded-[1.2rem] border px-4 py-4 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50/80"}`}>
+      <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{label}</p>
+      <p className={`mt-3 text-2xl font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{value}</p>
+      <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>{note}</p>
+    </div>
+  )
+}
+
+function ProgressStrip({
+  label,
+  progress,
+  fallback,
+  isDark,
+}: {
+  label: string
+  progress: number | null
+  fallback: string
+  isDark: boolean
+}) {
+  const fill = Math.max(0, Math.min(100, progress ?? 0))
+
+  return (
+    <div className={`rounded-[1.1rem] border px-4 py-3 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50/80"}`}>
+      <div className="flex items-center justify-between gap-3">
+        <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{label}</p>
+        <p className={`text-xs font-semibold ${isDark ? "text-slate-300" : "text-stone-600"}`}>{progress !== null ? `${fill}%` : "No target"}</p>
+      </div>
+      <div className={`mt-3 h-2 overflow-hidden rounded-full ${isDark ? "bg-white/10" : "bg-stone-200"}`}>
+        <div
+          className="h-full rounded-full bg-[linear-gradient(135deg,#0891b2,#2563eb)] transition-[width]"
+          style={{ width: `${progress !== null ? fill : 18}%` }}
+        />
+      </div>
+      <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+        {progress !== null ? "You are moving toward the active target." : fallback}
+      </p>
     </div>
   )
 }

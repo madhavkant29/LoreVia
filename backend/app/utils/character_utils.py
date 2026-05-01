@@ -10,6 +10,7 @@ import math
 import uuid
 from collections import Counter
 from difflib import SequenceMatcher
+from typing import Any
 
 import bleach  # type: ignore[import-untyped]
 from sqlalchemy import or_, select
@@ -26,6 +27,8 @@ from app.engine.character.entity_filters import (
 from app.engine.character.profile_builder import merge_profile_fields
 from app.models.character import Character, CharacterState
 from app.models.intelligence import CharacterRelationship
+
+BLEACH_EMPTY_TAGS: Any = frozenset()
 
 # ─── Display filter ───────────────────────────────────────────────────────────
 
@@ -141,8 +144,8 @@ def merge_description_with_relationships(
 
 # ─── Text-cleaning helpers ────────────────────────────────────────────────────
 
-def clean_optional_text(value: str | None) -> str | None:
-    cleaned = bleach.clean((value or "").strip(), tags=[], strip=True)
+def clean_optional_text(value: object | None) -> str | None:
+    cleaned = str(bleach.clean(str(value or "").strip(), tags=BLEACH_EMPTY_TAGS, strip=True))
     return cleaned or None
 
 
@@ -150,7 +153,7 @@ def clean_string_list(values: list[str] | None) -> list[str]:
     cleaned: list[str] = []
     seen: set[str] = set()
     for raw in values or []:
-        item = bleach.clean((raw or "").strip(), tags=[], strip=True)
+        item = str(bleach.clean(str(raw or "").strip(), tags=BLEACH_EMPTY_TAGS, strip=True))
         key = item.casefold()
         if not item or key in seen:
             continue
@@ -346,9 +349,8 @@ async def merge_characters(
     if primary.embedding is None and secondary.embedding is not None:
         primary.embedding = secondary.embedding
 
-    state_rows = (
-        await db.execute(select(CharacterState).where(CharacterState.character_id == secondary.id))
-    ).scalars().all()
+    state_rows_result = await db.execute(select(CharacterState).where(CharacterState.character_id == secondary.id))
+    state_rows = state_rows_result.scalars().all()
     for state in state_rows:
         existing_state = (
             await db.execute(
@@ -370,17 +372,16 @@ async def merge_characters(
         else:
             state.character_id = primary.id
 
-    rels = (
-        await db.execute(
-            select(CharacterRelationship).where(
-                CharacterRelationship.book_id == book_id,
-                or_(
-                    CharacterRelationship.character_a_id == secondary.id,
-                    CharacterRelationship.character_b_id == secondary.id,
-                ),
-            )
+    rels_result = await db.execute(
+        select(CharacterRelationship).where(
+            CharacterRelationship.book_id == book_id,
+            or_(
+                CharacterRelationship.character_a_id == secondary.id,
+                CharacterRelationship.character_b_id == secondary.id,
+            ),
         )
-    ).scalars().all()
+    )
+    rels = rels_result.scalars().all()
     for rel in rels:
         if rel.character_a_id == secondary.id:
             rel.character_a_id = primary.id
@@ -397,9 +398,8 @@ async def merge_characters(
 
 
 async def _dedupe_relationships(db: AsyncSession, book_id: uuid.UUID) -> None:
-    rels = (
-        await db.execute(select(CharacterRelationship).where(CharacterRelationship.book_id == book_id))
-    ).scalars().all()
+    rels_result = await db.execute(select(CharacterRelationship).where(CharacterRelationship.book_id == book_id))
+    rels = rels_result.scalars().all()
     seen: set[tuple[str, str, str, int | None, int | None, str]] = set()
     for rel in rels:
         pair = sorted([str(rel.character_a_id), str(rel.character_b_id)])

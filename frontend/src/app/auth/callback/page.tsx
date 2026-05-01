@@ -2,7 +2,6 @@
 
 import { useEffect } from "react"
 import { useRouter } from "next/navigation"
-import axios from "axios"
 
 import { authApi } from "@/lib/api/auth"
 import { supabase } from "@/lib/supabase"
@@ -29,7 +28,7 @@ export default function AuthCallbackPage() {
         const code = url.searchParams.get("code")
 
         if (oauthError) {
-          fail(oauthError)
+          fail("Google sign-in failed. Please try again.")
           return
         }
 
@@ -38,7 +37,7 @@ export default function AuthCallbackPage() {
         if (!session && code) {
           const { data, error } = await supabase.auth.exchangeCodeForSession(code)
           if (error) {
-            fail(error.message || "Could not complete Google sign-in.")
+            fail("Could not complete Google sign-in.")
             return
           }
           session = data.session
@@ -51,28 +50,18 @@ export default function AuthCallbackPage() {
 
         const acceptedTerms = window.sessionStorage.getItem("lorevia-oauth-accepted-terms") === "true"
         window.sessionStorage.removeItem("lorevia-oauth-accepted-terms")
-        const tokens = await authApi.loginWithSupabaseToken(session.access_token, acceptedTerms)
+        const user = await authApi.loginWithSupabaseToken(session.access_token, acceptedTerms)
         if (!active) return
 
-        const me = tokens.user ?? await authApi.me()
-        if (!active) return
-        if (!me) {
+        if (!user) {
           fail("Could not load your profile after Google sign-in.")
           return
         }
-        setUser(me)
-        router.replace("/library")
+        setUser(user)
+        router.replace(user.username ? "/library" : "/complete-username")
       } catch (error) {
-        if (axios.isAxiosError(error)) {
-          const message =
-            typeof error.response?.data?.detail === "string"
-              ? error.response.data.detail
-              : error.message
-          fail(message || "OAuth sign-in failed.")
-          return
-        }
         if (error instanceof Error) {
-          fail(error.message || "OAuth sign-in failed.")
+          fail("OAuth sign-in failed.")
           return
         }
         fail("OAuth sign-in failed.")

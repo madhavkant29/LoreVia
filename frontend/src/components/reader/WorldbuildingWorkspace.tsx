@@ -10,6 +10,8 @@ import type {
   WorldGapItem,
   WorldGapResult,
   WorldNote,
+  WorldQueryResponse,
+  WikiEntry,
 } from "@/types/world-building"
 
 type WorkspaceFocus = "editor" | "gap"
@@ -38,6 +40,12 @@ export function WorldbuildingWorkspace({
   const [analysis, setAnalysis] = useState<WorldGapResult | null>(null)
   const [loadingAnalysis, setLoadingAnalysis] = useState(false)
   const [notes, setNotes] = useState<WorldNote[]>([])
+  const [wikiEntries, setWikiEntries] = useState<WikiEntry[]>([])
+  const [wikiLoading, setWikiLoading] = useState(false)
+  const [wikiGenerating, setWikiGenerating] = useState(false)
+  const [logicQuery, setLogicQuery] = useState("")
+  const [logicResult, setLogicResult] = useState<WorldQueryResponse | null>(null)
+  const [logicLoading, setLogicLoading] = useState(false)
   const [loadingNotes, setLoadingNotes] = useState(true)
   const [noteSavingId, setNoteSavingId] = useState<string | null>(null)
   const [noteStatusId, setNoteStatusId] = useState<string | null>(null)
@@ -60,6 +68,23 @@ export function WorldbuildingWorkspace({
     const addressed = notes.filter((note) => note.status === "addressed")
     return { open, addressed }
   }, [notes])
+  const wikiTypeSummary = useMemo(() => {
+    return wikiEntries.reduce<Record<string, number>>((summary, entry) => {
+      const key = entry.entry_type || "entry"
+      summary[key] = (summary[key] ?? 0) + 1
+      return summary
+    }, {})
+  }, [wikiEntries])
+
+  const loadWiki = async () => {
+    setWikiLoading(true)
+    try {
+      const payload = await worldBuildingApi.listWiki(bookId)
+      setWikiEntries(payload)
+    } finally {
+      setWikiLoading(false)
+    }
+  }
 
   const loadNotes = async () => {
     setLoadingNotes(true)
@@ -125,6 +150,10 @@ export function WorldbuildingWorkspace({
       setNotes([])
       setLoadingNotes(false)
     })
+    loadWiki().catch(() => {
+      setWikiEntries([])
+      setWikiLoading(false)
+    })
   }, [bookId])
 
   useEffect(() => {
@@ -135,6 +164,12 @@ export function WorldbuildingWorkspace({
     }
     runAnalysis().catch(() => setAnalysis(null))
   }, [documents.length, focus])
+
+  useEffect(() => {
+    if (!statusMessage) return
+    const handle = window.setTimeout(() => setStatusMessage(null), 3200)
+    return () => window.clearTimeout(handle)
+  }, [statusMessage])
 
   const saveDocument = async () => {
     if (!draftText.trim()) return
@@ -235,6 +270,33 @@ export function WorldbuildingWorkspace({
       setNotes((current) => current.map((note) => (note.id === updated.id ? updated : note)))
     } finally {
       setNoteStatusId(null)
+    }
+  }
+
+  const generateWiki = async () => {
+    setWikiGenerating(true)
+    try {
+      const payload = await worldBuildingApi.generateWiki(bookId)
+      setWikiEntries(payload.entries)
+      setStatusMessage(
+        payload.updated_names.length
+          ? `Generated or refreshed ${payload.generated_count} wiki entries from the manuscript, including ${payload.updated_names.slice(0, 3).join(", ")}.`
+          : `Generated or refreshed ${payload.generated_count} wiki entries from the manuscript.`
+      )
+    } finally {
+      setWikiGenerating(false)
+    }
+  }
+
+  const runLogicQuery = async (mode?: string) => {
+    if (!logicQuery.trim()) return
+    setLogicLoading(true)
+    try {
+      const payload = await worldBuildingApi.query(bookId, { query: logicQuery.trim(), mode: mode ?? "story_integration" })
+      setLogicResult(payload)
+      setStatusMessage(mode === "gap_detection" ? "Ran a canon stress test against the active world corpus." : "Ran the world logic simulator against the active canon.")
+    } finally {
+      setLogicLoading(false)
     }
   }
 
@@ -349,6 +411,141 @@ export function WorldbuildingWorkspace({
           >
             {loadingAnalysis ? "Checking gaps..." : "Run world gap detection"}
           </button>
+        </div>
+      </div>
+    </section>
+  )
+
+  const wikiPanel = (
+    <section className={`rounded-[1.7rem] border p-5 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-white/90"}`}>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-cyan-300" : "text-cyan-700"}`}>Auto wiki</p>
+          <h2 className={`mt-2 text-2xl font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>Generate wiki entries from manuscript text</h2>
+        </div>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => void loadWiki()}
+            className={`rounded-full border px-3 py-2 text-xs font-semibold ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-stone-50 text-stone-700"}`}
+          >
+            Refresh
+          </button>
+          <button
+            type="button"
+            onClick={() => void generateWiki()}
+            disabled={wikiGenerating}
+            className="rounded-full bg-[linear-gradient(135deg,#0891b2,#0e7490)] px-4 py-2 text-xs font-semibold text-white disabled:opacity-50"
+          >
+            {wikiGenerating ? "Generating..." : "Generate wiki"}
+          </button>
+        </div>
+      </div>
+      <div className="mt-5 grid gap-3 lg:grid-cols-2">
+        <div className={`rounded-[1.2rem] border p-4 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50/80"}`}>
+          <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>World logic engine</p>
+          <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+            Query the current canon, then inspect alerts, next moves, and source citations in one place.
+          </p>
+          <textarea
+            value={logicQuery}
+            onChange={(event) => setLogicQuery(event.target.value)}
+            rows={5}
+            placeholder="Ask how a kingdom, faction, culture, or world rule would react based on your current canon."
+            className={`mt-3 w-full rounded-[1rem] border px-4 py-3 text-sm leading-7 outline-none ${isDark ? "border-white/10 bg-black/30 text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
+          />
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button type="button" onClick={() => void runLogicQuery("story_integration")} disabled={logicLoading || !logicQuery.trim()} className="rounded-full bg-[linear-gradient(135deg,#059669,#047857)] px-4 py-2 text-xs font-semibold text-white disabled:opacity-50">
+              {logicLoading ? "Thinking..." : "Run simulator"}
+            </button>
+            <button type="button" onClick={() => void runLogicQuery("gap_detection")} disabled={logicLoading || !logicQuery.trim()} className={`rounded-full border px-4 py-2 text-xs font-semibold ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-stone-50 text-stone-700"} disabled:opacity-50`}>
+              Canon stress test
+            </button>
+          </div>
+          {logicResult ? (
+            <div className={`mt-4 rounded-[1rem] border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-white bg-white"}`}>
+              <div className="flex flex-wrap gap-2">
+                <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "bg-emerald-500/10 text-emerald-200" : "bg-emerald-50 text-emerald-700"}`}>
+                  {logicResult.mode === "gap_detection" ? "Canon stress test" : "Story integration"}
+                </span>
+                {logicResult.logic_alerts.length > 0 ? (
+                  <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${isDark ? "bg-rose-500/10 text-rose-200" : "bg-rose-50 text-rose-700"}`}>
+                    {logicResult.logic_alerts.length} alert{logicResult.logic_alerts.length === 1 ? "" : "s"}
+                  </span>
+                ) : null}
+                {logicResult.citations.length > 0 ? (
+                  <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${isDark ? "bg-cyan-500/10 text-cyan-200" : "bg-cyan-50 text-cyan-700"}`}>
+                    {logicResult.citations.length} citation{logicResult.citations.length === 1 ? "" : "s"}
+                  </span>
+                ) : null}
+              </div>
+              <p className={`text-sm leading-7 ${isDark ? "text-slate-200" : "text-stone-700"}`}>{logicResult.answer}</p>
+              {logicResult.simulation_steps.length > 0 ? (
+                <div className="mt-3 space-y-2">
+                  {logicResult.simulation_steps.map((step) => (
+                    <p key={step} className={`text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>{step}</p>
+                  ))}
+                </div>
+              ) : null}
+              {logicResult.logic_alerts.length > 0 ? (
+                <div className="mt-4 space-y-2">
+                  <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-rose-300" : "text-rose-700"}`}>Logic alerts</p>
+                  {logicResult.logic_alerts.map((alert, index) => (
+                    <div key={`alert-${index}`} className={`rounded-[0.9rem] border px-3 py-2 text-sm ${isDark ? "border-rose-400/20 bg-rose-500/10 text-rose-100" : "border-rose-200 bg-rose-50 text-rose-800"}`}>
+                      {summarizeRecord(alert)}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              {logicResult.suggestions.length > 0 ? (
+                <div className="mt-4 space-y-2">
+                  <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-amber-300" : "text-amber-700"}`}>Suggested next moves</p>
+                  {logicResult.suggestions.map((suggestion, index) => (
+                    <div key={`suggestion-${index}`} className={`rounded-[0.9rem] border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/30 text-slate-200" : "border-stone-200 bg-stone-50 text-stone-700"}`}>
+                      {summarizeRecord(suggestion)}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              {logicResult.citations.length > 0 ? (
+                <div className="mt-4 space-y-2">
+                  <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-cyan-300" : "text-cyan-700"}`}>Source citations</p>
+                  {logicResult.citations.slice(0, 4).map((citation, index) => (
+                    <div key={`citation-${index}`} className={`rounded-[0.9rem] border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/30 text-slate-300" : "border-stone-200 bg-stone-50 text-stone-700"}`}>
+                      {summarizeRecord(citation)}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+        <div className={`rounded-[1.2rem] border p-4 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50/80"}`}>
+          <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Generated entries</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${isDark ? "bg-white/8 text-slate-300" : "bg-white text-stone-600"}`}>
+              {wikiEntries.length} total
+            </span>
+            {Object.entries(wikiTypeSummary).slice(0, 3).map(([type, count]) => (
+              <span key={type} className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${isDark ? "bg-cyan-500/10 text-cyan-200" : "bg-cyan-50 text-cyan-700"}`}>
+                {count} {type}
+              </span>
+            ))}
+          </div>
+          <div className="mt-3 space-y-3">
+            {wikiLoading ? <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>Loading wiki entries...</p> : null}
+            {!wikiLoading && wikiEntries.length === 0 ? <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>No wiki entries yet. Generate them from the manuscript whenever you want a fresh lore index.</p> : null}
+            {wikiEntries.slice(0, 10).map((entry) => (
+              <article key={entry.id} className={`rounded-[1rem] border p-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-white bg-white"}`}>
+                <div className="flex items-center justify-between gap-3">
+                  <h4 className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{entry.name}</h4>
+                  <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${isDark ? "bg-white/8 text-slate-300" : "bg-stone-100 text-stone-600"}`}>{entry.entry_type}</span>
+                </div>
+                {entry.first_mention ? <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-400"}`}>First mention: chapter {entry.first_mention}</p> : null}
+                {entry.description ? <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-700"}`}>{entry.description}</p> : null}
+              </article>
+            ))}
+          </div>
         </div>
       </div>
     </section>
@@ -602,11 +799,13 @@ export function WorldbuildingWorkspace({
           {focus === "gap" ? (
             <>
               {analysisPanel}
+              {wikiPanel}
               {editorPanel}
             </>
           ) : (
             <>
               {editorPanel}
+              {wikiPanel}
               {analysisPanel}
             </>
           )}
@@ -635,6 +834,34 @@ function SummaryTile({
       <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>{note}</p>
     </div>
   )
+}
+
+function summarizeRecord(record: Record<string, unknown>) {
+  const preferredKeys = [
+    "title",
+    "label",
+    "name",
+    "description",
+    "summary",
+    "message",
+    "reason",
+    "excerpt",
+    "chapter_title",
+    "source",
+  ]
+
+  for (const key of preferredKeys) {
+    const value = record[key]
+    if (typeof value === "string" && value.trim()) {
+      return value.trim()
+    }
+  }
+
+  return Object.entries(record)
+    .filter(([, value]) => value !== null && value !== undefined && value !== "")
+    .slice(0, 3)
+    .map(([key, value]) => `${key.replaceAll("_", " ")}: ${String(value)}`)
+    .join(" · ")
 }
 
 function severityClass(severity: string, isDark: boolean) {

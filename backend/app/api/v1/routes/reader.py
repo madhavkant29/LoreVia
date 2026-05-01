@@ -4,7 +4,9 @@ Smart tap, summaries, relationship graph, memory recall, progress.
 """
 import uuid
 from datetime import UTC, datetime
+from typing import Any, cast
 
+import bleach  # type: ignore[import-untyped]
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import and_, delete, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -74,6 +76,12 @@ from app.utils.reader_utils import (
 )
 
 router = APIRouter()
+
+BLEACH_EMPTY_TAGS: Any = frozenset()
+
+
+def _clean_text(value: object | None) -> str:
+    return str(bleach.clean(str(value or "").strip(), tags=BLEACH_EMPTY_TAGS, strip=True))
 
 
 def _normalize_reader_major_event(chapter_number: int, chapter_title: str | None, event: dict, names_by_id: dict[str, str]) -> dict:
@@ -208,27 +216,30 @@ async def get_chapter(
                     if fallback_media:
                         stored_media = merge_media_items(stored_media, fallback_media)
 
-    chars = (await db.execute(
+    chars_result = await db.execute(
         select(Character)
         .where(Character.book_id == book_id, Character.first_chapter <= chapter_num)
         .order_by(Character.first_chapter)
-    )).scalars().all()
+    )
+    chars = chars_result.scalars().all()
 
     char_ids = [char.id for char in chars]
     states_by_character: dict[uuid.UUID, CharacterState] = {}
     if char_ids:
-        states = (await db.execute(
+        states_result = await db.execute(
             select(CharacterState)
             .where(CharacterState.character_id.in_(char_ids), CharacterState.at_chapter <= chapter_num)
             .order_by(CharacterState.character_id, desc(CharacterState.at_chapter))
-        )).scalars().all()
+        )
+        states = states_result.scalars().all()
         for state in states:
             states_by_character.setdefault(state.character_id, state)
 
     char_data = []
     for char in chars:
         char_state = states_by_character.get(char.id)
-        trait_snapshot = char_state.trait_snapshot if char_state else (char.trait_state or {})
+        trait_snapshot_raw = cast(dict[str, Any], char_state.trait_snapshot) if char_state else cast(dict[str, Any], char.trait_state or {})
+        trait_snapshot = dict(trait_snapshot_raw)
         char_data.append({
             "id": str(char.id),
             "name": char.name,
@@ -279,18 +290,22 @@ async def smart_tap(
     
     await consolidate_characters(db, book_id, up_to_chapter=chapter)
 
-    char = (await db.execute(
+    char_result = await db.execute(
         select(Character).where(Character.book_id == book_id, Character.name.ilike(f"%{q}%"), Character.first_chapter <= chapter)
-    )).scalar()
+    )
+    char = char_result.scalar()
 
     if char:
-        char_state = (await db.execute(
+        char_state_result = await db.execute(
             select(CharacterState)
             .where(CharacterState.character_id == char.id, CharacterState.at_chapter <= chapter)
             .order_by(CharacterState.at_chapter.desc()).limit(1)
-        )).scalar()
+        )
+        char_state = char_state_result.scalar()
+        trait_snapshot_raw = cast(dict[str, Any], char_state.trait_snapshot) if char_state else cast(dict[str, Any], char.trait_state or {})
+        trait_snapshot = dict(trait_snapshot_raw)
 
-        rels = (await db.execute(
+        rels_result = await db.execute(
             select(CharacterRelationship).where(
                 or_(
                     CharacterRelationship.character_a_id == char.id,
@@ -298,11 +313,12 @@ async def smart_tap(
                 ),
                 CharacterRelationship.from_chapter <= chapter,
                 or_(
-                    CharacterRelationship.to_chapter is None,
+                    CharacterRelationship.to_chapter.is_(None),
                     CharacterRelationship.to_chapter >= chapter
                 ),
             )
-        )).scalars().all()
+        )
+        rels = rels_result.scalars().all()
 
         return {
             "type": "character",
@@ -311,8 +327,8 @@ async def smart_tap(
                 "name": char.name,
                 "aliases": char.aliases or [],
                 "role": char.role,
-                "trait_state": char_state.trait_snapshot if char_state else char.trait_state,
-                "description": build_description(char_state.trait_snapshot if char_state else (char.trait_state or {}), char.archetype),
+                "trait_state": trait_snapshot,
+                "description": build_description(trait_snapshot, char.archetype),
                 "personality_tags": char.personality_tags or [],
                 "motivations": char.motivations or [],
                 "fears": char.fears or [],
@@ -394,11 +410,10 @@ async def get_reader_events(
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
 
-    progress = (
-        await db.execute(
-            select(ReadingProgress).where(ReadingProgress.user_id == current_user.id, ReadingProgress.book_id == book_id)
-        )
-    ).scalar()
+    progress_result = await db.execute(
+        select(ReadingProgress).where(ReadingProgress.user_id == current_user.id, ReadingProgress.book_id == book_id)
+    )
+    progress = progress_result.scalar()
     read_set = set(progress.chapters_read or []) if progress else set()
     max_visible_chapter = chapter or (max(read_set) if read_set else (progress.current_chapter if progress else 1))
 
@@ -410,9 +425,8 @@ async def get_reader_events(
             .order_by(Chapter.number)
         )
     ).all()
-    characters = (
-        await db.execute(select(Character).where(Character.book_id == book_id))
-    ).scalars().all()
+    characters_result = await db.execute(select(Character).where(Character.book_id == book_id))
+    characters = characters_result.scalars().all()
     names_by_id = {str(character.id): character.name for character in characters}
 
     major_events: list[MajorEventOut] = []
@@ -447,22 +461,24 @@ async def get_relationships(
     if cached:
         return cached
 
-    chars = (await db.execute(
+    chars_result = await db.execute(
         select(Character).where(Character.book_id == book_id, Character.first_chapter <= chapter)
-    )).scalars().all()
+    )
+    chars = chars_result.scalars().all()
     chars = [char for char in chars if is_graph_character_visible(char)]
     visible_ids = {str(char.id) for char in chars}
     chars, id_map = collapse_graph_characters(chars)
     canonical_ids = {str(char.id) for char in chars}
     char_names = {str(char.id): char.name for char in chars}
 
-    rels = (await db.execute(
+    rels_result = await db.execute(
         select(CharacterRelationship).where(
             CharacterRelationship.book_id == book_id,
             CharacterRelationship.from_chapter <= chapter,
-            (CharacterRelationship.to_chapter is None) | (CharacterRelationship.to_chapter >= chapter),
+            CharacterRelationship.to_chapter.is_(None) | (CharacterRelationship.to_chapter >= chapter),
         )
-    )).scalars().all()
+    )
+    rels = rels_result.scalars().all()
     rels = [
         rel for rel in rels
         if str(rel.character_a_id) in visible_ids and str(rel.character_b_id) in visible_ids
@@ -475,7 +491,8 @@ async def get_relationships(
         target = id_map.get(str(rel.character_b_id), str(rel.character_b_id))
         if source == target or source not in canonical_ids or target not in canonical_ids:
             continue
-        key = tuple(sorted([source, target])) + (rel.rel_type or "neutral",)
+        left_key, right_key = sorted((source, target))
+        key: tuple[str, str, str] = (left_key, right_key, rel.rel_type or "neutral")
         bucket = edge_map.setdefault(key, {
             "relationship_ids": [], "source": key[0], "target": key[1],
             "type": rel.rel_type or "neutral", "sentiment_values": [],
@@ -499,18 +516,20 @@ async def get_relationships(
 
     latest_states: dict[str, CharacterState] = {}
     if chars:
-        state_rows = (await db.execute(
+        state_rows_result = await db.execute(
             select(CharacterState)
             .where(CharacterState.character_id.in_([char.id for char in chars]), CharacterState.at_chapter <= chapter)
             .order_by(CharacterState.character_id, desc(CharacterState.at_chapter))
-        )).scalars().all()
+        )
+        state_rows = state_rows_result.scalars().all()
         for state in state_rows:
             latest_states.setdefault(str(state.character_id), state)
 
     chars_with_details = []
     for c in chars:
         latest_state = latest_states.get(str(c.id))
-        trait_snapshot = latest_state.trait_snapshot if latest_state else (c.trait_state or {})
+        trait_snapshot_raw = cast(dict[str, Any], latest_state.trait_snapshot) if latest_state else cast(dict[str, Any], c.trait_state or {})
+        trait_snapshot = dict(trait_snapshot_raw)
         chars_with_details.append({
             "id": str(c.id), "name": c.name, "role": c.role, "first_chapter": c.first_chapter,
             "description": relationship_node_description(c, trait_snapshot, rel_summaries.get(str(c.id), [])),
@@ -605,9 +624,10 @@ async def get_chapter_list(
     read_upto = progress.current_chapter if progress else 0
     read_set = set(progress.chapters_read or []) if progress else set()
 
-    chapters = (await db.execute(
+    chapters_result = await db.execute(
         select(Chapter).where(Chapter.book_id == book_id).order_by(Chapter.number)
-    )).scalars().all()
+    )
+    chapters = chapters_result.scalars().all()
     if not chapters and book.total_chapters:
         return {
             "read_upto": read_upto,
@@ -816,10 +836,8 @@ async def get_timeline(
         )
         .order_by(CharacterRelationship.from_chapter)
     )).all()
-    character_lookup = {
-        char.id: char.name
-        for char in (await db.execute(select(Character).where(Character.book_id == book_id))).scalars().all()
-    }
+    character_lookup_result = await db.execute(select(Character).where(Character.book_id == book_id))
+    character_lookup = {char.id: char.name for char in character_lookup_result.scalars().all()}
 
     events = []
     character_tracks = []
@@ -835,11 +853,10 @@ async def get_timeline(
             continue
         events.append({"chapter_number": first_chapter, "chapter_title": chapter_titles.get(first_chapter), "kind": "character_entry",
                         "title": name, "detail": timeline_character_detail(name, role, aliases, arc_summary)})
-    visible_characters = (
-        await db.execute(
-            select(Character).where(Character.book_id == book_id, Character.first_chapter.in_(sorted(read_set))).order_by(Character.first_chapter, Character.name)
-        )
-    ).scalars().all()
+    visible_characters_result = await db.execute(
+        select(Character).where(Character.book_id == book_id, Character.first_chapter.in_(sorted(read_set))).order_by(Character.first_chapter, Character.name)
+    )
+    visible_characters = visible_characters_result.scalars().all()
     for char in visible_characters:
         if not is_valid_timeline_character(char.name, char.role, char.aliases, char.arc_summary):
             continue
@@ -972,14 +989,16 @@ async def get_relationship_evolution(
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
 
-    rels = (await db.execute(
+    rels_result = await db.execute(
         select(CharacterRelationship).where(
             CharacterRelationship.book_id == book_id,
             CharacterRelationship.from_chapter <= chapter,
         ).order_by(CharacterRelationship.from_chapter, CharacterRelationship.character_a_id, CharacterRelationship.character_b_id)
-    )).scalars().all()
+    )
+    rels = rels_result.scalars().all()
 
-    chars = (await db.execute(select(Character).where(Character.book_id == book_id))).scalars().all()
+    chars_result = await db.execute(select(Character).where(Character.book_id == book_id))
+    chars = chars_result.scalars().all()
     name_by_id = {char.id: char.name for char in chars}
 
     grouped: dict[tuple[str, str], list[dict]] = {}
@@ -988,7 +1007,7 @@ async def get_relationship_evolution(
         b_name = name_by_id.get(rel.character_b_id)
         if not a_name or not b_name:
             continue
-        key = tuple(sorted([a_name, b_name]))
+        key = (a_name, b_name) if a_name <= b_name else (b_name, a_name)
         grouped.setdefault(key, []).append({
             "chapter": rel.from_chapter, "type": rel.rel_type,
             "description": rel.description, "sentiment": rel.sentiment,
@@ -1007,12 +1026,11 @@ async def save_quote(
     book = await db.get(Book, book_id)
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
-    import bleach  # type: ignore[import-untyped]
-    quote_text = bleach.clean((body.quote_text or "").strip(), tags=[], strip=True)
+    quote_text = _clean_text(body.quote_text)
     if not quote_text:
         raise HTTPException(400, "Quote text is required")
-    character_name = bleach.clean((body.character_name or "").strip(), tags=[], strip=True) or None
-    note_text = bleach.clean((body.note or "").strip(), tags=[], strip=True) or None
+    character_name = _clean_text(body.character_name) or None
+    note_text = _clean_text(body.note) or None
 
     quote = QuoteEntry(user_id=current_user.id, book_id=book_id, chapter_number=body.chapter_number,
                        character_name=character_name, quote_text=quote_text, note=note_text)
@@ -1068,36 +1086,39 @@ async def memory_recall(
     if cached:
         return {"recall": cached, "cached": True}
 
-    progress = (await db.execute(
+    progress_result = await db.execute(
         select(ReadingProgress).where(ReadingProgress.user_id == current_user.id, ReadingProgress.book_id == book_id)
-    )).scalar()
+    )
+    progress = progress_result.scalar()
     if not progress:
         return {"recall": None}
 
     last_chapter = progress.current_chapter
-    chapter = (await db.execute(
-        select(Chapter).where(Chapter.book_id == book_id, Chapter.number == last_chapter)
-    )).scalar()
+    chapter_result = await db.execute(select(Chapter).where(Chapter.book_id == book_id, Chapter.number == last_chapter))
+    chapter = chapter_result.scalar()
 
     recent_summary = ""
     if chapter:
-        summ = (await db.execute(
+        summ_result = await db.execute(
             select(ChapterSummary).where(ChapterSummary.chapter_id == chapter.id, ChapterSummary.mode == "short")
-        )).scalar()
+        )
+        summ = summ_result.scalar()
         if summ:
             recent_summary = summ.content
 
-    chars = (await db.execute(
+    chars_result = await db.execute(
         select(Character.name).where(Character.book_id == book_id, Character.first_chapter <= last_chapter).limit(8)
-    )).scalars().all()
+    )
+    chars = chars_result.scalars().all()
 
-    open_threads = (await db.execute(
+    open_threads_result = await db.execute(
         select(PlotThread.title).where(
             PlotThread.book_id == book_id,
             PlotThread.status.in_(["ongoing", "introduced"]),
             PlotThread.introduced_at <= last_chapter,
         ).limit(3)
-    )).scalars().all()
+    )
+    open_threads = open_threads_result.scalars().all()
 
     recall_text = await generate_recall(
         title=book.title,
@@ -1116,9 +1137,10 @@ async def get_progress(book_id: uuid.UUID, db: AsyncSession = Depends(get_db), c
     book = await db.get(Book, book_id)
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
-    p = (await db.execute(
+    p_result = await db.execute(
         select(ReadingProgress).where(ReadingProgress.user_id == current_user.id, ReadingProgress.book_id == book_id)
-    )).scalar()
+    )
+    p = p_result.scalar()
     total = book.total_chapters or 0
     chapters_read = sorted(set((p.chapters_read or []) if p else []))
     if not chapters_read and p and p.current_chapter:

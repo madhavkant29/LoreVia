@@ -7,8 +7,10 @@ from app.core.database import get_db
 from app.models.user import Subscription, User
 from app.schemas.billing import CheckoutBody
 from app.services.paddle_service import create_checkout_url, create_portal_url, paddle_is_configured
+from app.utils.logging import get_logger
 
 router = APIRouter()
+log = get_logger("lorevia.billing")
 
 
 @router.post("/checkout")
@@ -55,8 +57,9 @@ async def start_checkout(
             body.plan,
             existing_customer_id=existing.paddle_customer_id,
         )
-    except Exception as exc:
-        raise HTTPException(502, f"Unable to start Paddle checkout: {exc}")
+    except Exception:
+        log.exception("paddle_checkout_failed", extra={"user_id": str(current_user.id), "plan": body.plan})
+        raise HTTPException(502, "Unable to start Paddle checkout.")
 
     existing.paddle_customer_id = customer_id
     await db.commit()
@@ -91,6 +94,7 @@ async def open_portal(
             subscription.paddle_customer_id,
             [subscription.paddle_sub_id] if subscription.paddle_sub_id else None,
         )
-    except Exception as exc:
-        raise HTTPException(502, f"Unable to open Paddle portal: {exc}")
+    except Exception:
+        log.exception("paddle_portal_failed", extra={"user_id": str(current_user.id)})
+        raise HTTPException(502, "Unable to open Paddle portal.")
     return {"portal_url": portal_url, "billing_enabled": True}

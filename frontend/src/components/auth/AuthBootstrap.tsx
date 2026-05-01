@@ -1,34 +1,44 @@
 "use client"
 
 import { useEffect, useRef } from "react"
+import { usePathname } from "next/navigation"
 import { authApi } from "@/lib/api/auth"
 import { useAuthStore } from "@/lib/stores/authStore"
 
 export function AuthBootstrap() {
-  const { user, setUser, logout } = useAuthStore()
+  const { user, setUser, setHydrated, logout } = useAuthStore()
   const ran = useRef(false)
+  const pathname = usePathname()
 
   useEffect(() => {
-    if (ran.current || user) return
+    if (ran.current) return
     ran.current = true
+
+    if (
+      pathname === "/auth/callback" ||
+      pathname.startsWith("/login") ||
+      pathname.startsWith("/register") ||
+      pathname.startsWith("/complete-username") ||
+      pathname.startsWith("/forgot-password") ||
+      pathname.startsWith("/reset-password")
+    ) {
+      setHydrated()
+      return
+    }
+
+    if (user) return
 
     const restore = async () => {
       try {
-        const me = await authApi.me()
+        let me = await authApi.me()
+        if (!me) {
+          await authApi.refresh()
+          me = await authApi.me()
+        }
         if (me) {
           setUser(me)
-          return
-        }
-        const refreshed = await authApi.refresh()
-        if (!refreshed) {
-          logout()
-          return
-        }
-        const refreshedMe = await authApi.me()
-        if (refreshedMe) {
-          setUser(refreshedMe)
         } else {
-          logout()
+          setHydrated()
         }
       } catch {
         logout()
@@ -36,7 +46,7 @@ export function AuthBootstrap() {
     }
 
     restore()
-  }, [user, setUser, logout])
+  }, [pathname, user, setHydrated, setUser, logout])
 
   return null
 }

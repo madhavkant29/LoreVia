@@ -11,11 +11,14 @@ Also provides:
 from __future__ import annotations
 
 import asyncio
+import re
 import uuid
+from typing import Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from openai import AsyncOpenAI
+from openai.types.chat import ChatCompletionMessageParam
 from sqlalchemy import func, select
 from sqlalchemy import text as sql_text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,12 +36,18 @@ from app.models.intelligence import ChapterSummary, PlotThread
 from app.schemas.advisor import (
     AdvisorRequest,
     EditorialReviewRequest,
+    InlineContinuityRequest,
+    InlineContinuityResponse,
+    ProseTightenRequest,
+    ProseTightenResponse,
     VoiceConsistencyRequest,
 )
 from app.utils.advisor_utils import (
     ADVISOR_SYSTEM,
     EDITORIAL_SYSTEM,
     EDITORIAL_USER,
+    PROSE_TIGHTEN_SYSTEM,
+    PROSE_TIGHTEN_USER,
     SERIES_ADVISOR_SYSTEM,
     SERIES_CONTINUITY_SYSTEM,
     SYNOPSIS_SYSTEM,
@@ -58,10 +67,12 @@ from app.utils.advisor_utils import (
     make_advisor_cache_key,
     make_editorial_cache_key,
     normalize_editorial_review_result,
+    normalize_prose_tighten_result,
     normalize_series_continuity_result,
     normalize_synopsis_result,
     normalize_voice_consistency_result,
 )
+from app.utils.book_utils import detect_chapter_continuity_flags
 
 router = APIRouter()
 
@@ -76,6 +87,19 @@ def _safe_prompt_str(value: str | None) -> str:
     is always treated as a literal string by the template engine.
     """
     return (value or "").replace("{", "{{").replace("}", "}}")
+
+
+def _best_issue_snippet(text: str, description: str) -> str:
+    sentences = [item.strip() for item in re.split(r"(?<=[.!?])\s+", text or "") if item.strip()]
+    if not sentences:
+        return " ".join((text or "").split())[:220]
+    description_tokens = {token for token in re.findall(r"[a-z0-9']+", (description or "").lower()) if len(token) > 3}
+    ranked = sorted(
+        sentences,
+        key=lambda sentence: sum(1 for token in description_tokens if token in sentence.lower()),
+        reverse=True,
+    )
+    return ranked[0][:220]
 
 # ─── Main advisor conversation endpoint ──────────────────────────────────────
 
@@ -183,10 +207,12 @@ async def advisor_message(
             title=_safe_prompt_str(book.title),
             story_context=_safe_prompt_str(story_context),
         )
-        llm_messages: list[dict] = [{"role": "system", "content": system_prompt}]
+        llm_messages: list[ChatCompletionMessageParam] = [
+            cast(ChatCompletionMessageParam, {"role": "system", "content": system_prompt})
+        ]
         for msg in history[:-1]:
-            llm_messages.append({"role": msg.role, "content": msg.content})
-        llm_messages.append({"role": "user", "content": augmented_last})
+            llm_messages.append(cast(ChatCompletionMessageParam, {"role": msg.role, "content": msg.content}))
+        llm_messages.append(cast(ChatCompletionMessageParam, {"role": "user", "content": augmented_last}))
 
         # 6. Call GPT-4o-mini (main response)
         response = await client.chat.completions.create(
@@ -291,7 +317,7 @@ async def advisor_suggestions(
         )
     ).all()
 
-    char_state_map: dict[str, list] = {}
+    char_state_map: dict[str, list[Any]] = {}
     for row in all_states:
         key = str(row.character_id)
         if key not in char_state_map:
@@ -346,18 +372,17 @@ async def advisor_suggestions(
                     break
 
     # ── 1. Dropped plot threads ────────────────────────────────────────────────
-    dropped_threads = (
-        await db.execute(
-            select(PlotThread)
-            .where(
-                PlotThread.book_id == book_id,
-                PlotThread.status.in_(["introduced", "ongoing"]),
-                PlotThread.introduced_at <= total_ch - 30,
-            )
-            .order_by(PlotThread.importance.desc())
-            .limit(5)
+    dropped_threads_result = await db.execute(
+        select(PlotThread)
+        .where(
+            PlotThread.book_id == book_id,
+            PlotThread.status.in_(["introduced", "ongoing"]),
+            PlotThread.introduced_at <= total_ch - 30,
         )
-    ).scalars().all()
+        .order_by(PlotThread.importance.desc())
+        .limit(5)
+    )
+    dropped_threads = dropped_threads_result.scalars().all()
 
     for thread in dropped_threads:
         suggestions.append({
@@ -376,20 +401,19 @@ async def advisor_suggestions(
         })
 
     # ── 2. Characters absent 30+ chapters ─────────────────────────────────────
-    absent_chars: list = []
+    absent_chars: list[Character] = []
     try:
-        absent_chars = (
-            await db.execute(
-                select(Character)
-                .where(
-                    Character.book_id == book_id,
-                    Character.mention_count > 5,
-                    Character.last_seen_chapter <= total_ch - 30,
-                )
-                .order_by(Character.mention_count.desc())
-                .limit(5)
+        absent_chars_result = await db.execute(
+            select(Character)
+            .where(
+                Character.book_id == book_id,
+                Character.mention_count > 5,
+                Character.last_seen_chapter <= total_ch - 30,
             )
-        ).scalars().all()
+            .order_by(Character.mention_count.desc())
+            .limit(5)
+        )
+        absent_chars = list(absent_chars_result.scalars().all())
     except Exception:
         pass
 
@@ -410,18 +434,17 @@ async def advisor_suggestions(
         })
 
     # ── 3. Ongoing high-importance plot threads ────────────────────────────────
-    hot_threads = (
-        await db.execute(
-            select(PlotThread)
-            .where(
-                PlotThread.book_id == book_id,
-                PlotThread.status == "ongoing",
-                PlotThread.importance >= 7,
-            )
-            .order_by(PlotThread.importance.desc())
-            .limit(3)
+    hot_threads_result = await db.execute(
+        select(PlotThread)
+        .where(
+            PlotThread.book_id == book_id,
+            PlotThread.status == "ongoing",
+            PlotThread.importance >= 7,
         )
-    ).scalars().all()
+        .order_by(PlotThread.importance.desc())
+        .limit(3)
+    )
+    hot_threads = hot_threads_result.scalars().all()
 
     for thread in hot_threads:
         if thread.introduced_at and total_ch - thread.introduced_at > 15:
@@ -443,19 +466,18 @@ async def advisor_suggestions(
 
     # ── 3b. Future direction ──────────────────────────────────────────────────
     if total_ch >= 20:
-        late_threads = (
-            await db.execute(
-                select(PlotThread)
-                .where(
-                    PlotThread.book_id == book_id,
-                    PlotThread.status.in_(["ongoing", "introduced"]),
-                    PlotThread.introduced_at <= int(total_ch * 0.4),
-                    PlotThread.importance >= 5,
-                )
-                .order_by(PlotThread.importance.desc())
-                .limit(3)
+        late_threads_result = await db.execute(
+            select(PlotThread)
+            .where(
+                PlotThread.book_id == book_id,
+                PlotThread.status.in_(["ongoing", "introduced"]),
+                PlotThread.introduced_at <= int(total_ch * 0.4),
+                PlotThread.importance >= 5,
             )
-        ).scalars().all()
+            .order_by(PlotThread.importance.desc())
+            .limit(3)
+        )
+        late_threads = late_threads_result.scalars().all()
 
         for thread in late_threads:
             already_covered = any(s["id"] == f"arc-{thread.id}" for s in suggestions)
@@ -482,20 +504,19 @@ async def advisor_suggestions(
             })
 
     # ── 4. Underused minor characters ─────────────────────────────────────────
-    underused_chars: list = []
+    underused_chars: list[Character] = []
     try:
-        underused_chars = (
-            await db.execute(
-                select(Character)
-                .where(
-                    Character.book_id == book_id,
-                    Character.role == "minor",
-                    Character.mention_count > 8,
-                )
-                .order_by(Character.mention_count.desc())
-                .limit(3)
+        underused_chars_result = await db.execute(
+            select(Character)
+            .where(
+                Character.book_id == book_id,
+                Character.role == "minor",
+                Character.mention_count > 8,
             )
-        ).scalars().all()
+            .order_by(Character.mention_count.desc())
+            .limit(3)
+        )
+        underused_chars = list(underused_chars_result.scalars().all())
     except Exception:
         pass
 
@@ -660,6 +681,110 @@ async def editorial_review(
 
     finally:
         await client.close()
+
+
+@router.post("/{book_id}/advisor/prose-tighten", response_model=ProseTightenResponse)
+async def prose_tighten(
+    book_id: uuid.UUID,
+    body: ProseTightenRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _=Depends(rate_limit_continuity_checker),
+):
+    book = await db.get(Book, book_id)
+    if not book or book.user_id != current_user.id:
+        raise HTTPException(404)
+    if not body.text.strip():
+        raise HTTPException(400, detail="Selected text is required.")
+
+    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    try:
+        chapter_hint = (
+            f"This selection is from Chapter {body.chapter_num}."
+            if body.chapter_num else
+            "Chapter number not specified."
+        )
+        response = await client.chat.completions.create(
+            model=settings.OPENAI_INTEL_MODEL,
+            temperature=0.2,
+            max_tokens=700,
+            response_format={"type": "json_object"},
+            messages=[
+                {
+                    "role": "system",
+                    "content": PROSE_TIGHTEN_SYSTEM.format(title=_safe_prompt_str(book.title)),
+                },
+                {
+                    "role": "user",
+                    "content": PROSE_TIGHTEN_USER.format(chapter_hint=chapter_hint, text=body.text[:3500]),
+                },
+            ],
+        )
+        normalized = normalize_prose_tighten_result(response.choices[0].message.content or "{}", body.text)
+        return ProseTightenResponse(**normalized)
+    finally:
+        await client.close()
+
+
+@router.post("/{book_id}/advisor/inline-continuity", response_model=InlineContinuityResponse)
+async def inline_continuity_check(
+    book_id: uuid.UUID,
+    body: InlineContinuityRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _=Depends(rate_limit_continuity_checker),
+):
+    book = await db.get(Book, book_id)
+    if not book or book.user_id != current_user.id:
+        raise HTTPException(404)
+    if not body.text.strip():
+        raise HTTPException(400, detail="Passage text is required.")
+
+    review_payload = await editorial_review(
+        book_id=book_id,
+        body=EditorialReviewRequest(text=body.text, chapter_num=body.chapter_num),
+        db=db,
+        current_user=current_user,
+        _=_,
+    )
+    chapter_flags = (
+        await detect_chapter_continuity_flags(db, book_id, body.chapter_num)
+        if body.chapter_num is not None
+        else []
+    )
+
+    issues: list[dict[str, str]] = []
+    for issue in review_payload["review"].get("continuity_issues", [])[:8]:
+        description = str(issue.get("description") or "").strip()
+        issues.append(
+            {
+                "severity": str(issue.get("severity") or "moderate"),
+                "title": str(issue.get("title") or "Continuity check"),
+                "snippet": _best_issue_snippet(body.text, description),
+                "explanation": description,
+                "suggestion": str(issue.get("suggestion") or "").strip(),
+            }
+        )
+
+    for flag in chapter_flags[:4]:
+        issues.append(
+            {
+                "severity": "moderate",
+                "title": "Tracked character memory mismatch",
+                "snippet": _best_issue_snippet(body.text, flag),
+                "explanation": flag,
+                "suggestion": "Reconcile the chapter with the established character state or make the change explicit on page.",
+            }
+        )
+
+    memory_bank = [
+        f"Chapter {item['chapter_num']}: {item['excerpt']}"
+        for item in review_payload.get("retrieved_passages", [])[:4]
+    ]
+    overall_verdict = review_payload["review"].get("overall_verdict") or (
+        "No major continuity issues were surfaced in this inline pass." if not issues else "Inline continuity pass found issues worth checking before you lock the scene."
+    )
+    return InlineContinuityResponse(issues=issues, memory_bank=memory_bank, overall_verdict=overall_verdict)
 
 
 @router.get("/{book_id}/advisor/synopsis")
@@ -954,10 +1079,14 @@ async def series_advisor_message(
         story_context=_safe_prompt_str(story_context),
     )
 
-    llm_messages: list[dict] = [{"role": "system", "content": system_prompt}]
+    llm_messages: list[ChatCompletionMessageParam] = [
+        cast(ChatCompletionMessageParam, {"role": "system", "content": system_prompt})
+    ]
     for msg in history[:-1]:
-        llm_messages.append({"role": msg.role, "content": msg.content})
-    llm_messages.append({"role": "user", "content": last_user_msg})
+        llm_messages.append(
+            cast(ChatCompletionMessageParam, {"role": msg.role, "content": msg.content})
+        )
+    llm_messages.append(cast(ChatCompletionMessageParam, {"role": "user", "content": last_user_msg}))
 
     client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
     try:

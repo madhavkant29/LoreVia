@@ -4,6 +4,7 @@ Helper functions for grounded intelligence answers and citations.
 from __future__ import annotations
 
 import uuid
+from typing import Any, cast
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -80,7 +81,7 @@ async def build_grounded_qa_context(
         )
 
     for hit in semantic_hits:
-        chapter_num = int(hit["chapter_num"])
+        chapter_num = int(cast(Any, hit["chapter_num"]))
         chapter_title = hit.get("chapter_title")
         excerpt = str(hit.get("text") or "").strip()
         if not excerpt:
@@ -106,14 +107,10 @@ async def build_grounded_qa_context(
     seen: set[tuple[int, str, str]] = set()
     for citation in sorted(
         citations,
-        key=lambda item: (
-            0 if item["source_type"] == "passage" else 1,
-            -(float(item.get("relevance") or 0.0)),
-            -int(item["chapter_num"]),
-        ),
+        key=lambda item: _citation_sort_key(item),
     ):
         key = (
-            int(citation["chapter_num"]),
+            int(cast(Any, citation["chapter_num"])),
             str(citation["source_type"]),
             str(citation["excerpt"]),
         )
@@ -125,6 +122,16 @@ async def build_grounded_qa_context(
             break
 
     return context_blocks, deduped_citations
+
+
+def _citation_sort_key(item: dict[str, object]) -> tuple[int, float, int]:
+    relevance = cast(float, item.get("relevance") or 0.0)
+    chapter_num = cast(int, item["chapter_num"])
+    return (
+        0 if item["source_type"] == "passage" else 1,
+        -float(relevance),
+        -chapter_num,
+    )
 
 
 async def build_prior_series_context(db: AsyncSession, book: Book, user_id: uuid.UUID) -> list[str]:

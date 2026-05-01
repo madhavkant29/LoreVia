@@ -7,6 +7,7 @@ import logging
 import re
 import time
 import uuid
+from typing import Any, cast
 
 from sqlalchemy import delete, func, select
 from sqlalchemy import update as sa_update
@@ -27,16 +28,19 @@ from app.engine.character.profile_builder import build_character_profile, update
 from app.engine.embeddings.embedder import embed_batch
 from app.models.book import Book, Chapter, ChapterMedia
 from app.models.character import Character, CharacterState
-from app.models.intelligence import BookChunk, CharacterRelationship
+from app.models.intelligence import BookChunk, CharacterRelationship, Notification
 from app.parsers.chunker import ChunkingConfig, chunk_text, count_tokens
+from app.services.email_service import send_processing_complete_with_stats
 from app.utils.compliance.copyright_check import check_isbn
 from app.utils.external.isbn_lookup import extract_isbn_from_pdf
 from app.utils.ingestion_utils import (
+    apply_chapter_number_strategy,
     build_chapter_dispatch_plan,
     chunked,
     elapsed_ms,
     persist_chapter_payloads,
 )
+from app.utils.notification_utils import build_book_ready_notification, collect_book_ready_stats
 
 log = logging.getLogger("lorevia.extraction")
 AUTO_SAVE_CONFIDENCE = 0.78
@@ -93,12 +97,23 @@ async def process_book(book_id: str, queue_wait_ms: int | None = None) -> dict:
         if book.format == "pdf":
             from app.parsers.pdf_parser import parse_pdf
 
-            chapters = await asyncio.to_thread(parse_pdf, raw)
+            chapters = await asyncio.to_thread(
+                parse_pdf,
+                raw,
+                split_large_chapters=not book.preserve_chapter_numbers,
+            )
         else:
             from app.parsers.epub_parser import parse_epub
 
-            chapters = await asyncio.to_thread(parse_epub, raw)
-        all_chapters = chapters
+            chapters = await asyncio.to_thread(
+                parse_epub,
+                raw,
+                split_large_chapters=not book.preserve_chapter_numbers,
+            )
+        all_chapters = apply_chapter_number_strategy(
+            chapters,
+            preserve_chapter_numbers=book.preserve_chapter_numbers,
+        )
         log.info(
             "ingestion_timing stage=parse book_id=%s elapsed_ms=%s chapters=%s",
             book_id,
@@ -109,14 +124,13 @@ async def process_book(book_id: str, queue_wait_ms: int | None = None) -> dict:
         from app.models.user import User
 
         user = await db.get(User, book.user_id)
-        is_free_tier = user and effective_tier(user.tier) not in ("pro", "power", "admin", "premium")
 
         full_tokens = sum(count_tokens(ch["text"]) for ch in all_chapters)
         processed_tokens = full_tokens
         was_truncated = False
         ai_chapters = all_chapters
 
-        if is_free_tier:
+        if user and effective_tier(user.tier) not in ("pro", "power", "admin", "premium"):
             result = await db.execute(
                 select(func.sum(Book.total_tokens))
                 .where(Book.user_id == user.id, Book.id != book.id, Book.status != "error")
@@ -276,6 +290,7 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
             await db.flush()
         await _sync_chapter_media(db, book, chapter, ch_data)
 
+    assert chapter is not None
     await db.execute(delete(BookChunk).where(BookChunk.chapter_id == chapter.id))
 
     chunk_started = time.perf_counter()
@@ -345,6 +360,7 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
     for result in extraction_results:
         if isinstance(result, Exception):
             continue
+        result = cast(dict[str, Any], result)
 
         character_entities = [
             entity
@@ -477,14 +493,13 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
         if book.mode == "author" and book.total_chapters:
             from app.models.progress import ReadingProgress
 
-            progress = (
-                await db.execute(
-                    select(ReadingProgress).where(
-                        ReadingProgress.user_id == book.user_id,
-                        ReadingProgress.book_id == book.id,
-                    )
+            progress_result = await db.execute(
+                select(ReadingProgress).where(
+                    ReadingProgress.user_id == book.user_id,
+                    ReadingProgress.book_id == book.id,
                 )
-            ).scalar()
+            )
+            progress = progress_result.scalar()
 
             chapters_read = list(range(1, book.total_chapters + 1))
             if progress is None:
@@ -501,7 +516,33 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                 progress.scroll_pct = 1.0
                 progress.chapters_read = chapters_read
 
+        existing_ready_notification = (
+            await db.execute(
+                select(Notification).where(
+                    Notification.book_id == book.id,
+                    Notification.user_id == book.user_id,
+                    Notification.kind == "book_ready",
+                )
+            )
+        ).scalar()
+        ready_stats = await collect_book_ready_stats(db, book)
+        if existing_ready_notification is None:
+            db.add(build_book_ready_notification(book, ready_stats))
+
         await db.commit()
+
+        from app.models.user import User
+
+        user = await db.get(User, book.user_id)
+        if user and user.email and existing_ready_notification is None:
+            await send_processing_complete_with_stats(
+                user.email,
+                book_title=book.title,
+                character_count=ready_stats.character_count,
+                relationship_count=ready_stats.relationship_count,
+                plot_thread_count=ready_stats.plot_thread_count,
+                continuity_issue_count=ready_stats.continuity_issue_count,
+            )
 
     if chapter_number <= settings.LAZY_PROCESS_INITIAL_CHAPTERS:
         from app.workers.tasks.analysis_tasks import analyse_chapter_task
@@ -617,11 +658,11 @@ def _should_update_existing_character(entity: dict) -> bool:
     if confidence >= AUTO_SAVE_CONFIDENCE:
         return True
     evidence = _entity_evidence(entity)
-    return confidence >= MIN_EXISTING_UPDATE_CONFIDENCE and (
+    return bool(confidence >= MIN_EXISTING_UPDATE_CONFIDENCE and (
         evidence.get("has_dialogue_or_action")
         or evidence.get("has_physical_description")
         or evidence.get("appears_multiple_times")
-    )
+    ))
 
 
 def _can_auto_save_character(entity: dict) -> bool:
@@ -651,10 +692,10 @@ def _can_auto_save_character(entity: dict) -> bool:
 
 
 async def _book_processing_complete(db, book_id: uuid.UUID) -> bool:
-    remaining = await db.scalar(
+    remaining_count: int | None = await db.scalar(
         select(func.count()).select_from(Chapter).where(Chapter.book_id == book_id, Chapter.processed.is_(False))
     )
-    return not bool(remaining)
+    return (remaining_count or 0) == 0
 
 
 async def _should_consolidate_after_chapter(db, book: Book, chapter_number: int) -> bool:

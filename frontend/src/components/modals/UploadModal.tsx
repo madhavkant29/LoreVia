@@ -1,6 +1,5 @@
 "use client"
 import { useEffect, useRef, useState } from "react"
-import axios from "axios"
 import { booksApi } from "@/lib/api/books"
 import { authApi } from "@/lib/api/auth"
 import { intelligenceApi } from "@/lib/api/intelligence"
@@ -17,39 +16,37 @@ import type { PlotThread } from "@/types/reader"
 const MAX_TAGS = 8
 const TAG_SUGGESTION_LIMIT = 18
 
-function errorMessage(error: unknown, fallback: string) {
-  if (axios.isAxiosError(error)) {
-    const detail = error.response?.data?.detail
-    if (typeof detail === "string" && detail.trim()) return detail
-    if (Array.isArray(detail) && detail.length > 0) {
-      const first = detail[0]
-      if (typeof first === "string" && first.trim()) return first
-      if (first && typeof first === "object" && "msg" in first && typeof first.msg === "string") {
-        return first.msg
-      }
-    }
-    if (typeof error.message === "string" && error.message.trim()) return error.message
-  }
-  if (error instanceof Error && error.message.trim()) return error.message
-  return fallback
-}
-
-export function UploadModal({ onClose }: { onClose: () => void }) {
+export function UploadModal({
+  onClose,
+  initialMode = "reader",
+  initialExistingBookId = "",
+  presentation = "modal",
+}: {
+  onClose: () => void
+  initialMode?: BookMode
+  initialExistingBookId?: string
+  presentation?: "modal" | "inline"
+}) {
   const [title, setTitle] = useState("")
   const [author, setAuthor] = useState("")
-  const [mode, setMode] = useState<BookMode>("reader")
+  const [mode, setMode] = useState<BookMode>(initialMode)
   const [selectedTags, setSelectedTags] = useState<string[]>([])
   const [customTag, setCustomTag] = useState("")
   const [series, setSeries] = useState<BookSeries[]>([])
   const [books, setBooks] = useState<Book[]>([])
   const [selectedSeriesIds, setSelectedSeriesIds] = useState<string[]>([])
-  const [existingBookId, setExistingBookId] = useState("")
+  const [existingBookId, setExistingBookId] = useState(initialExistingBookId)
+  const [chapterSource, setChapterSource] = useState<"paste" | "upload">("paste")
   const [chapterNumber, setChapterNumber] = useState("")
+  const [chapterNumberDirty, setChapterNumberDirty] = useState(false)
+  const [chapterTitle, setChapterTitle] = useState("")
+  const [chapterText, setChapterText] = useState("")
   const [replaceExisting, setReplaceExisting] = useState(false)
   const [splitIntoChapters, setSplitIntoChapters] = useState(true)
   const [chunkLongDocuments, setChunkLongDocuments] = useState(false)
   const [files, setFiles] = useState<File[]>([])
   const [autoExtractCover, setAutoExtractCover] = useState(true)
+  const [preserveChapterNumbers, setPreserveChapterNumbers] = useState(false)
   const [coverFile, setCoverFile] = useState<File | null>(null)
   const [usernameInput, setUsernameInput] = useState("")
   const [usernameError, setUsernameError] = useState<string | null>(null)
@@ -86,6 +83,22 @@ export function UploadModal({ onClose }: { onClose: () => void }) {
     booksApi.list(true).then(setBooks).catch(() => {})
   }, [])
 
+  useEffect(() => {
+    setMode(initialMode)
+  }, [initialMode])
+
+  useEffect(() => {
+    setExistingBookId(initialExistingBookId)
+  }, [initialExistingBookId])
+
+  useEffect(() => {
+    setChapterNumberDirty(false)
+  }, [initialExistingBookId])
+
+  useEffect(() => {
+    resetImportFeedback()
+  }, [existingBookId, chapterSource])
+
   // Set autoExtractCover based on file type: enabled by default for PDFs
   useEffect(() => {
     if (files.length === 0) return
@@ -110,8 +123,8 @@ export function UploadModal({ onClose }: { onClose: () => void }) {
       const updatedUser = await authApi.setUsername(usernameInput.trim())
       useAuthStore.getState().setUser(updatedUser)
       setUsernameInput("")
-    } catch (error) {
-      setUsernameError(errorMessage(error, "Username already taken or invalid"))
+    } catch {
+      setUsernameError("Username already taken or invalid")
     } finally {
       setSettingUsername(false)
     }
@@ -140,19 +153,22 @@ export function UploadModal({ onClose }: { onClose: () => void }) {
   }
 
   const existingAuthorBooks = books.filter((book) => book.mode === "author" && !book.hidden_at)
+  const selectedExistingBook = existingAuthorBooks.find((book) => book.id === existingBookId) ?? null
   const isManagingExisting = mode === "author" && !!existingBookId
   const needsUsername = mode === "author" && !user?.username
+  const hasChapterText = chapterText.trim().length > 0
+  const hasChapterFiles = files.length > 0
+  const canSubmitExistingImport = chapterSource === "paste" ? hasChapterText : hasChapterFiles
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (files.length === 0) {
-      setError("Please select at least one file")
-      return
+  useEffect(() => {
+    if (!isManagingExisting || replaceExisting || chapterNumberDirty) return
+    const nextChapter = (selectedExistingBook?.total_chapters ?? 0) + 1
+    if (nextChapter > 0) {
+      setChapterNumber(String(nextChapter))
     }
+  }, [chapterNumberDirty, isManagingExisting, replaceExisting, selectedExistingBook])
 
-    setUploading(true)
-    setUploadProgress(0)
-    setUploadStage("uploading")
+  const resetImportFeedback = () => {
     setError(null)
     setPostImportReview(null)
     setPostImportPassages([])
@@ -161,22 +177,42 @@ export function UploadModal({ onClose }: { onClose: () => void }) {
     setPostImportSynopsis(null)
     setChapterReports([])
     setReportReady(null)
+  }
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (isManagingExisting && !canSubmitExistingImport) {
+      setError(chapterSource === "paste" ? "Paste a chapter before processing it." : "Please select a chapter file.")
+      return
+    }
+    if (!isManagingExisting && files.length === 0) {
+      setError("Please select at least one file")
+      return
+    }
+
+    setUploading(true)
+    setUploadProgress(0)
+    setUploadStage("uploading")
+    resetImportFeedback()
     try {
       let bookId: string | null = null
       if (isManagingExisting) {
         const response = await booksApi.importManuscript(existingBookId, {
+          text: chapterSource === "paste" ? chapterText.trim() : undefined,
+          title: chapterSource === "paste" ? chapterTitle.trim() || undefined : undefined,
           chapterNumber: chapterNumber ? parseInt(chapterNumber) : undefined,
           replaceExisting,
           splitIntoChapters,
           chunkLongDocuments,
-          files,
+          files: chapterSource === "upload" ? files : undefined,
         })
         bookId = response.book_id
         setBookMode(response.book_id, "author")
         capture("book_uploaded", {
           mode: "author",
-          kind: "manuscript_import",
-          file_count: files.length,
+          kind: chapterSource === "paste" ? "single_chapter_paste" : "manuscript_import",
+          file_count: chapterSource === "upload" ? files.length : 0,
+          chapter_source: chapterSource,
           replace_existing: replaceExisting,
           split_into_chapters: splitIntoChapters,
           chunk_long_documents: chunkLongDocuments,
@@ -185,11 +221,15 @@ export function UploadModal({ onClose }: { onClose: () => void }) {
         const importedChapter = response.imported_chapters[0]
         if (importedChapter) {
           try {
-            const chapterData = await readerApi.getChapter(response.book_id, importedChapter)
-            const recoveredText = chapterData.text_content || ""
-            await loadPostImportReview(response.book_id, importedChapter, recoveredText)
-          } catch (error) {
-            setError(errorMessage(error, "Chapter imported, but the inline continuity review could not be loaded."))
+            if (chapterSource === "paste" && chapterText.trim()) {
+              await loadPostImportReview(response.book_id, importedChapter, chapterText.trim())
+            } else {
+              const chapterData = await readerApi.getChapter(response.book_id, importedChapter)
+              const recoveredText = chapterData.text_content || ""
+              await loadPostImportReview(response.book_id, importedChapter, recoveredText)
+            }
+          } catch {
+            setError("Chapter imported, but the inline continuity review could not be loaded.")
           }
         }
         setUploadStage("processing")
@@ -204,6 +244,7 @@ export function UploadModal({ onClose }: { onClose: () => void }) {
           visibility,
           seriesIds: selectedSeriesIds,
           autoExtractCover,
+          preserveChapterNumbers,
           coverFile: autoExtractCover ? null : coverFile,
           mode,
           onProgress: (percent) => {
@@ -217,6 +258,7 @@ export function UploadModal({ onClose }: { onClose: () => void }) {
           kind: "new_upload",
           format,
           has_cover_file: Boolean(coverFile) && !autoExtractCover,
+          preserve_chapter_numbers: preserveChapterNumbers,
           tag_count: selectedTags.length,
           in_series: selectedSeriesIds.length > 0,
         })
@@ -224,8 +266,8 @@ export function UploadModal({ onClose }: { onClose: () => void }) {
       setUploadStage("processing")
       setUploadProgress(100)
       onClose()
-    } catch (error) {
-      setError(errorMessage(error, "Upload failed. Please try again."))
+    } catch {
+      setError("Upload failed. Please try again.")
     } finally {
       setUploading(false)
       setUploadStage("idle")
@@ -251,20 +293,24 @@ export function UploadModal({ onClose }: { onClose: () => void }) {
     setReportReady({ bookId, chapterNum, text: content })
   }
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-md p-4">
-      <div
-        className={`flex max-h-[90vh] w-full ${postImportReview ? "max-w-5xl" : "max-w-md"} flex-col overflow-hidden rounded-2xl border p-6 shadow-2xl transition-colors ${
-          isDark
-            ? "border-white/10 bg-[#0B0B0B]/90 backdrop-blur-xl text-slate-100 shadow-[0_30px_80px_-35px_rgba(0,0,0,0.9)]"
-            : "border-black/5 bg-white text-slate-950"
-        }`}
-      >
+  const isInline = presentation === "inline"
+  const shellClassName = `flex ${isInline ? "min-h-0" : "max-h-[90vh]"} w-full ${postImportReview || isManagingExisting ? "max-w-5xl" : "max-w-md"} flex-col overflow-hidden rounded-2xl border p-6 shadow-2xl transition-colors ${
+    isDark
+      ? isInline
+        ? "border-white/10 bg-[#0B0B0B] text-slate-100 shadow-[0_30px_80px_-35px_rgba(0,0,0,0.8)]"
+        : "border-white/10 bg-[#0B0B0B]/90 backdrop-blur-xl text-slate-100 shadow-[0_30px_80px_-35px_rgba(0,0,0,0.9)]"
+      : "border-black/5 bg-white text-slate-950"
+  }`
+
+  const content = (
+      <div className={shellClassName}>
         <div className="mb-5 flex items-center justify-between">
           <div>
-            <h2 className="text-lg font-semibold">Upload Book</h2>
+            <h2 className="text-lg font-semibold">{isManagingExisting ? "Add New Chapter" : "Upload Book"}</h2>
             <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-              Add a new book to your workspace.
+              {isManagingExisting
+                ? "Paste or upload one chapter, process it incrementally, and review what changed before moving on."
+                : "Add a new book to your workspace."}
             </p>
           </div>
           <button
@@ -372,7 +418,10 @@ export function UploadModal({ onClose }: { onClose: () => void }) {
                 </label>
                 <select
                   value={existingBookId}
-                  onChange={(e) => setExistingBookId(e.target.value)}
+                  onChange={(e) => {
+                    setExistingBookId(e.target.value)
+                    setChapterNumberDirty(false)
+                  }}
                   className={`w-full rounded-lg border px-3 py-2.5 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-100" : "border-gray-300 bg-white text-slate-950"}`}
                 >
                   <option value="">Create a new upload</option>
@@ -483,63 +532,233 @@ export function UploadModal({ onClose }: { onClose: () => void }) {
           ) : null}
 
           {isManagingExisting ? (
-            <div className={`rounded-xl border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-gray-200 bg-gray-50"}`}>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <input
-                  type="number"
-                  min={1}
-                  placeholder="Chapter number"
-                  value={chapterNumber}
-                  onChange={(e) => setChapterNumber(e.target.value)}
-                  className={`rounded-lg border px-3 py-2.5 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-100" : "border-gray-300 bg-white text-slate-950"}`}
-                />
-                <label className={`flex items-center gap-2 rounded-lg border px-3 py-2.5 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-300" : "border-gray-300 bg-white text-slate-700"}`}>
-                  <input type="checkbox" checked={replaceExisting} onChange={(e) => setReplaceExisting(e.target.checked)} />
-                  Replace chapter
-                </label>
+            <div className={`rounded-2xl border p-5 ${isDark ? "border-indigo-500/20 bg-[radial-gradient(circle_at_top_left,rgba(99,102,241,0.18),transparent_45%),rgba(255,255,255,0.03)]" : "border-indigo-200 bg-[radial-gradient(circle_at_top_left,rgba(224,231,255,0.9),transparent_45%),#f8fafc]"}`}>
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <p className={`text-xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-indigo-300" : "text-indigo-700"}`}>Single-chapter workflow</p>
+                  <p className={`mt-2 max-w-2xl text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
+                    LoreVia will attach this chapter to {selectedExistingBook ? `"${selectedExistingBook.title}"` : "your selected manuscript"}, update character memory and thread data, then surface continuity risks from the fresh ingest.
+                  </p>
+                </div>
+                <div className={`rounded-xl border px-4 py-3 text-xs ${isDark ? "border-white/10 bg-black/20 text-slate-300" : "border-white bg-white text-stone-600 shadow-sm"}`}>
+                  <p className="font-semibold">After processing</p>
+                  <p className="mt-1">You’ll get a chapter summary, new-character changes, thread movement, and continuity review.</p>
+                </div>
               </div>
-              <div className="mt-3 flex flex-wrap gap-3">
-                <label className={`flex items-center gap-2 text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                  <input type="checkbox" checked={splitIntoChapters} onChange={(e) => setSplitIntoChapters(e.target.checked)} />
-                  Split PDFs into chapters
-                </label>
-                <label className={`flex items-center gap-2 text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                  <input type="checkbox" checked={chunkLongDocuments} onChange={(e) => setChunkLongDocuments(e.target.checked)} />
-                  Chunk long files
-                </label>
+
+              <div className={`mt-4 inline-flex rounded-full p-1 ${isDark ? "border border-white/10 bg-white/5" : "border border-stone-200 bg-white/80"}`}>
+                {([
+                  { value: "paste", label: "Paste chapter" },
+                  { value: "upload", label: "Upload file" },
+                ] as const).map((option) => {
+                  const active = chapterSource === option.value
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => {
+                        setChapterSource(option.value)
+                        setError(null)
+                      }}
+                      className={`rounded-full px-4 py-2 text-sm font-medium transition ${
+                        active
+                          ? isDark ? "bg-white text-slate-950" : "bg-indigo-600 text-white shadow-sm"
+                          : isDark ? "text-slate-300 hover:bg-white/10" : "text-stone-600 hover:bg-stone-100"
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  )
+                })}
+              </div>
+
+              <div className="mt-4 grid gap-3 lg:grid-cols-[0.9fr_1.1fr]">
+                <div className="space-y-3">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <input
+                      type="number"
+                      min={1}
+                      placeholder="Chapter number"
+                      value={chapterNumber}
+                      onChange={(e) => {
+                        setChapterNumber(e.target.value)
+                        setChapterNumberDirty(true)
+                      }}
+                      className={`rounded-lg border px-3 py-2.5 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-100" : "border-gray-300 bg-white text-slate-950"}`}
+                    />
+                    <label className={`flex items-center gap-2 rounded-lg border px-3 py-2.5 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-300" : "border-gray-300 bg-white text-slate-700"}`}>
+                      <input type="checkbox" checked={replaceExisting} onChange={(e) => setReplaceExisting(e.target.checked)} />
+                      Replace chapter
+                    </label>
+                  </div>
+
+                  {chapterSource === "paste" ? (
+                    <>
+                      <input
+                        type="text"
+                        placeholder="Chapter title (optional)"
+                        value={chapterTitle}
+                        onChange={(e) => setChapterTitle(e.target.value)}
+                        className={`rounded-lg border px-3 py-2.5 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-100 placeholder:text-slate-500" : "border-gray-300 bg-white text-slate-950 placeholder:text-slate-400"}`}
+                      />
+                      <textarea
+                        value={chapterText}
+                        onChange={(e) => setChapterText(e.target.value)}
+                        placeholder="Paste one chapter here. LoreVia will save it into the manuscript, refresh character profiles, and immediately run continuity checks."
+                        rows={14}
+                        className={`min-h-[280px] rounded-xl border px-3 py-3 text-sm leading-6 outline-none transition ${isDark ? "border-white/10 bg-black/20 text-slate-100 placeholder:text-slate-500 focus:border-indigo-400/50" : "border-gray-300 bg-white text-slate-950 placeholder:text-slate-400 focus:border-indigo-400"}`}
+                      />
+                      <div className={`flex items-center justify-between text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+                        <span>{chapterText.trim() ? `${chapterText.trim().split(/\s+/).length} words ready` : "No chapter text pasted yet"}</span>
+                        <span>{replaceExisting ? "Will replace the selected chapter number" : "Will append if the chapter number is new"}</span>
+                      </div>
+                    </>
+                  ) : (
+                    <div
+                      onClick={() => inputRef.current?.click()}
+                      className={`cursor-pointer rounded-xl border-2 border-dashed p-6 text-center transition-colors ${
+                        isDark
+                          ? "border-white/15 bg-white/[0.03] hover:border-indigo-400"
+                          : "border-gray-300 bg-white hover:border-indigo-400"
+                      }`}
+                    >
+                      <input
+                        ref={inputRef}
+                        type="file"
+                        multiple
+                        accept=".pdf,.epub,.docx,.txt,.md"
+                        className="hidden"
+                        onChange={e => setFiles(Array.from(e.target.files ?? []))}
+                      />
+                      {files.length > 0 ? (
+                        <p className={`text-sm ${isDark ? "text-slate-100" : "text-slate-700"}`}>
+                          {files.length === 1 ? files[0].name : `${files.length} files selected`}
+                        </p>
+                      ) : (
+                        <p className={`text-sm ${isDark ? "text-slate-400" : "text-slate-400"}`}>
+                          Click to select a chapter file. Use PDF, EPUB, DOCX, TXT, or Markdown.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-3">
+                  <div className={`rounded-xl border p-4 ${isDark ? "border-white/10 bg-black/20" : "border-white bg-white shadow-sm"}`}>
+                    <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Processing options</p>
+                    <div className="mt-3 flex flex-wrap gap-3">
+                      <label className={`flex items-center gap-2 text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                        <input type="checkbox" checked={splitIntoChapters} onChange={(e) => setSplitIntoChapters(e.target.checked)} />
+                        Split PDFs into chapters
+                      </label>
+                      <label className={`flex items-center gap-2 text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                        <input type="checkbox" checked={chunkLongDocuments} onChange={(e) => setChunkLongDocuments(e.target.checked)} />
+                        Chunk long files
+                      </label>
+                    </div>
+                    <div className={`mt-4 rounded-lg border px-3 py-3 text-sm leading-6 ${isDark ? "border-white/10 bg-white/[0.03] text-slate-300" : "border-stone-200 bg-stone-50 text-stone-600"}`}>
+                      <p className="font-semibold">What LoreVia updates</p>
+                      <p className="mt-1">Character state, relationship extraction, plot-thread analysis, and chapter-level continuity flags are all rerun from this chapter ingest.</p>
+                      {!replaceExisting && selectedExistingBook ? (
+                        <p className="mt-2 text-xs opacity-80">
+                          Suggested next chapter: {(selectedExistingBook.total_chapters ?? 0) + 1}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  {chapterReports.length > 0 ? (
+                    <div className={`rounded-xl border p-4 ${isDark ? "border-teal-500/20 bg-teal-500/10" : "border-teal-200 bg-teal-50"}`}>
+                      <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-teal-200" : "text-teal-800"}`}>Latest chapter outcome</p>
+                      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                        {buildImportOutcomeCards(chapterReports).map((item) => (
+                          <div key={item.label} className={`rounded-lg border px-3 py-3 ${isDark ? "border-white/10 bg-black/20 text-slate-100" : "border-white bg-white text-stone-800"}`}>
+                            <p className="text-lg font-semibold">{item.value}</p>
+                            <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>{item.label}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className={`rounded-xl border p-4 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-white"}`}>
+                      <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Ready for incremental ingest</p>
+                      <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
+                        Choose a chapter number, paste or upload a single chapter, and LoreVia will return a focused report instead of making you dig through the whole manuscript again.
+                      </p>
+                    </div>
+                  )}
+
+                  {chapterReports.some((report) => report.continuity_flags.length > 0) ? (
+                    <div className={`rounded-xl border p-4 ${isDark ? "border-amber-500/20 bg-amber-500/10" : "border-amber-200 bg-amber-50"}`}>
+                      <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-amber-200" : "text-amber-800"}`}>Fresh chapter continuity flags</p>
+                      <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-200" : "text-stone-700"}`}>
+                        These were surfaced directly from the chapter you just imported, after LoreVia refreshed stored character and story state.
+                      </p>
+                      <div className="mt-3 space-y-2">
+                        {chapterReports.flatMap((report) =>
+                          report.continuity_flags.map((flag, index) => (
+                            <div key={`${report.chapter_number}-fresh-${index}`} className={`rounded-lg border px-3 py-3 text-sm leading-6 ${isDark ? "border-white/10 bg-black/20 text-slate-100" : "border-white bg-white text-stone-700"}`}>
+                              <p className="font-semibold">Chapter {report.chapter_number}{report.chapter_title ? ` - ${report.chapter_title}` : ""}</p>
+                              <p className="mt-1">{flag}</p>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
               </div>
             </div>
           ) : null}
 
-          <div
-            onClick={() => inputRef.current?.click()}
-            className={`cursor-pointer rounded-lg border-2 border-dashed p-6 text-center transition-colors ${
-              isDark
-                ? "border-white/15 bg-white/[0.03] hover:border-indigo-400"
-                : "border-gray-300 bg-white hover:border-indigo-400"
-            }`}
-          >
-            <input
-              ref={inputRef}
-              type="file"
-              multiple={isManagingExisting}
-              accept={isManagingExisting ? ".pdf,.epub,.docx,.txt,.md" : ".pdf,.epub"}
-              className="hidden"
-              onChange={e => setFiles(Array.from(e.target.files ?? []))}
-            />
-            {files.length > 0 ? (
-              <p className={`text-sm ${isDark ? "text-slate-100" : "text-slate-700"}`}>
-                {files.length === 1 ? files[0].name : `${files.length} files selected`}
-              </p>
-            ) : (
-              <p className={`text-sm ${isDark ? "text-slate-400" : "text-slate-400"}`}>
-                {isManagingExisting ? "Click to select chapter files or a folder batch" : "Click to select PDF or EPUB"}
-              </p>
-            )}
-          </div>
+          {!isManagingExisting ? (
+            <div
+              onClick={() => inputRef.current?.click()}
+              className={`cursor-pointer rounded-lg border-2 border-dashed p-6 text-center transition-colors ${
+                isDark
+                  ? "border-white/15 bg-white/[0.03] hover:border-indigo-400"
+                  : "border-gray-300 bg-white hover:border-indigo-400"
+              }`}
+            >
+              <input
+                ref={inputRef}
+                type="file"
+                multiple={false}
+                accept=".pdf,.epub"
+                className="hidden"
+                onChange={e => setFiles(Array.from(e.target.files ?? []))}
+              />
+              {files.length > 0 ? (
+                <p className={`text-sm ${isDark ? "text-slate-100" : "text-slate-700"}`}>
+                  {files[0].name}
+                </p>
+              ) : (
+                <p className={`text-sm ${isDark ? "text-slate-400" : "text-slate-400"}`}>
+                  Click to select PDF or EPUB
+                </p>
+              )}
+            </div>
+          ) : null}
 
           {!isManagingExisting ? (
           <div className={`rounded-xl border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-gray-200 bg-gray-50"}`}>
+            <div className="mb-4">
+              <label className="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  checked={preserveChapterNumbers}
+                  onChange={(e) => setPreserveChapterNumbers(e.target.checked)}
+                  className="mt-1 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                />
+                <div>
+                  <p className={`text-sm font-medium ${isDark ? "text-slate-100" : "text-slate-900"}`}>Preserve chapter numbers from the source file</p>
+                  <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                    Best for novels that already have clean Chapter 1, 2, 3 headings. LoreVia will keep whole detected chapters together and only fall back to the current sequential chunking path if the source numbering is inconsistent.
+                  </p>
+                </div>
+              </label>
+            </div>
+
             {/* Separate Cover Upload - Always visible */}
             <div className="mb-4">
               <input
@@ -618,23 +837,31 @@ export function UploadModal({ onClose }: { onClose: () => void }) {
               <p className={`mt-2 text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                 {uploadStage === "uploading"
                   ? "Large PDFs can take a bit depending on your network speed."
-                  : "Your book upload finished. Parsing and AI extraction continue in the background."}
+                  : isManagingExisting
+                    ? "Your chapter is in LoreVia. Incremental extraction and continuity review are being refreshed now."
+                    : "Your book upload finished. Parsing and AI extraction continue in the background."}
               </p>
             </div>
           ) : null}
 
           <button
             type="submit"
-            disabled={uploading || needsUsername}
+            disabled={uploading || needsUsername || (isManagingExisting && !canSubmitExistingImport)}
             className="rounded-lg bg-indigo-600 py-2.5 text-sm font-medium text-white transition-colors hover:bg-indigo-700 disabled:opacity-50"
           >
             {uploading
               ? uploadStage === "uploading"
-                ? "Uploading..."
+                ? isManagingExisting && chapterSource === "paste"
+                  ? "Saving chapter..."
+                  : "Uploading..."
                 : "Starting processing..."
               : needsUsername
                 ? "Set username to continue"
-                : "Upload & Process"}
+                : isManagingExisting
+                  ? replaceExisting
+                    ? "Update Chapter & Process"
+                    : "Add Chapter & Process"
+                  : "Upload & Process"}
           </button>
 
           {chapterReports.length > 0 ? (
@@ -749,7 +976,10 @@ export function UploadModal({ onClose }: { onClose: () => void }) {
                   ) : null}
 
                   <div>
-                    <p className={`mb-2 text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Continuity issues</p>
+                    <p className={`mb-2 text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Broader editorial continuity review</p>
+                    <p className={`mb-3 text-xs leading-5 ${isDark ? "text-slate-500" : "text-stone-500"}`}>
+                      These come from LoreVia&apos;s wider story-context review. Fresh chapter-specific flags appear above in the chapter report.
+                    </p>
                     {postImportReview.continuity_issues.length > 0 ? postImportReview.continuity_issues.map((issue, index) => (
                       <div key={`${issue.title}-${index}`} className={`mb-2 rounded-lg border px-3 py-3 text-sm ${isDark ? "border-amber-500/20 bg-amber-500/10 text-slate-200" : "border-amber-200 bg-amber-50 text-stone-700"}`}>
                         <p className="font-semibold">{issue.title}</p>
@@ -820,6 +1050,11 @@ export function UploadModal({ onClose }: { onClose: () => void }) {
           </div>
         </form>
       </div>
+  )
+
+  return isInline ? content : (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-md p-4">
+      {content}
     </div>
   )
 }
@@ -857,6 +1092,28 @@ function tagSimilarity(tag: string, query: string) {
   }
   const union = aTokens.size + bTokens.size - intersection
   return union === 0 ? 0 : intersection / union
+}
+
+function buildImportOutcomeCards(reports: ChapterConsistencyReport[]) {
+  const totals = reports.reduce(
+    (acc, report) => {
+      acc.chapters += 1
+      acc.characters += report.new_characters.length
+      acc.relationships += report.relationship_changes.length
+      acc.openThreads += report.plot_threads_opened.length
+      acc.continuity += report.continuity_flags.length
+      return acc
+    },
+    { chapters: 0, characters: 0, relationships: 0, openThreads: 0, continuity: 0 }
+  )
+
+  return [
+    { label: "Chapters processed", value: String(totals.chapters) },
+    { label: "New characters found", value: String(totals.characters) },
+    { label: "Relationship shifts", value: String(totals.relationships) },
+    { label: "Plot threads opened", value: String(totals.openThreads) },
+    { label: "Continuity flags surfaced", value: String(totals.continuity) },
+  ]
 }
 
 function ReportList({

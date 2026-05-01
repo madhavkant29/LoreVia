@@ -6,6 +6,7 @@ import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
 
 import { RecallCard } from "@/components/intelligence/RecallCard"
+import { ObsidianVaultPreview } from "@/components/reader/ObsidianVaultPreview"
 import { booksApi } from "@/lib/api/books"
 import { intelligenceApi } from "@/lib/api/intelligence"
 import { readerApi } from "@/lib/api/reader"
@@ -13,7 +14,7 @@ import { API_BASE } from "@/lib/constants"
 import { useRecall } from "@/lib/hooks/useRecall"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { useBookModeStore } from "@/lib/stores/bookModeStore"
-import type { Book } from "@/types/book"
+import type { Book, ObsidianPreview } from "@/types/book"
 import type { CrossBookIntelligence } from "@/types/intelligence"
 import type { ChapterListResponse, ReadingProgress } from "@/types/reader"
 
@@ -30,6 +31,32 @@ function coverSrc(coverUrl: string | null | undefined) {
   }
 }
 
+function resolveCoverAtmosphere(book: Book | null, isDark: boolean) {
+  if (!isDark) {
+    return {
+      background: "linear-gradient(180deg,#fcf7ef_0%,#f8f3ec_46%,#f5f0ea_100%)",
+      color: "#0c0a09",
+    }
+  }
+
+  const dominant = book?.cover_edge_colors?.dominant
+    || book?.cover_edge_colors?.top
+    || book?.cover_edge_colors?.left
+    || "#5b6c9a"
+  const top = book?.cover_edge_colors?.top || dominant
+  const right = book?.cover_edge_colors?.right || dominant
+
+  return {
+    background: [
+      `radial-gradient(circle at 14% 12%, ${top}33 0%, transparent 28%)`,
+      `radial-gradient(circle at 86% 10%, ${right}22 0%, transparent 24%)`,
+      `radial-gradient(circle at 50% 0%, ${dominant}18 0%, transparent 42%)`,
+      "linear-gradient(180deg, #000000 0%, #050505 42%, #0a0a0a 100%)",
+    ].join(", "),
+    color: "#f8fafc",
+  }
+}
+
 export default function BookOverviewPage() {
   const { bookId } = useParams<{ bookId: string }>()
   const [book, setBook] = useState<Book | null>(null)
@@ -37,7 +64,10 @@ export default function BookOverviewPage() {
   const [crossBook, setCrossBook] = useState<CrossBookIntelligence | null>(null)
   const [chapterList, setChapterList] = useState<ChapterListResponse | null>(null)
   const [exportingBible, setExportingBible] = useState(false)
-  const [bibleFormat, setBibleFormat] = useState<"md" | "pdf" | "docx">("pdf")
+  const [bibleFormat, setBibleFormat] = useState<"md" | "pdf" | "docx" | "obsidian_folder">("pdf")
+  const [showObsidianHelp, setShowObsidianHelp] = useState(false)
+  const [obsidianPreview, setObsidianPreview] = useState<ObsidianPreview | null>(null)
+  const [obsidianPreviewLoading, setObsidianPreviewLoading] = useState(false)
   const [modeSaving, setModeSaving] = useState(false)
   const router = useRouter()
   const { recall, lastChapter, show, dismiss } = useRecall(bookId)
@@ -61,13 +91,17 @@ export default function BookOverviewPage() {
   }, [book?.mode, bookId, setBookMode])
 
   useEffect(() => {
-    if (!book || book.status !== "processing") return
+    if (!book || book.status === "ready") return
 
-    const interval = window.setInterval(() => {
-      booksApi.get(bookId).then(setBook).catch(() => {})
-      readerApi.getProgress(bookId).then(setProgress).catch(() => {})
-      readerApi.getChapterList(bookId).then(setChapterList).catch(() => {})
-    }, 5000)
+    const interval = window.setInterval(async () => {
+      const updated = await booksApi.get(bookId)
+      if (updated.status === "ready") {
+        setBook(updated)
+        window.clearInterval(interval)
+      } else {
+        setBook(updated)
+      }
+    }, 3000)
 
     return () => window.clearInterval(interval)
   }, [book, bookId])
@@ -122,13 +156,32 @@ export default function BookOverviewPage() {
       const a = document.createElement("a")
       a.href = url
       const base = `${(book?.title ?? "lorevia").replace(/[^\w\s-]/g, "").trim().replace(/\s+/g, "-")}-character-bible`
-      a.download = `${base}.${bibleFormat === "md" ? "md" : bibleFormat}`
+      const extension = bibleFormat === "obsidian_folder" ? "zip" : bibleFormat === "md" ? "md" : bibleFormat
+      a.download = `${base}.${extension}`
       document.body.appendChild(a)
       a.click()
       a.remove()
       window.URL.revokeObjectURL(url)
+
+      // Show help modal for first-time obsidian_folder export
+      if (bibleFormat === "obsidian_folder") {
+        const hasSeenHelp = localStorage.getItem("obsidian-help-seen")
+        if (!hasSeenHelp) {
+          setShowObsidianHelp(true)
+        }
+      }
     } finally {
       setExportingBible(false)
+    }
+  }
+
+  const openObsidianPreview = async () => {
+    setObsidianPreviewLoading(true)
+    try {
+      const preview = await booksApi.previewCharacterBibleObsidian(bookId)
+      setObsidianPreview(preview)
+    } finally {
+      setObsidianPreviewLoading(false)
     }
   }
 
@@ -137,22 +190,22 @@ export default function BookOverviewPage() {
       { label: "Characters", href: `/${bookId}/characters` },
       { label: "Ask LoreVia", href: `/${bookId}/ask` },
       { label: "Search passages", href: `/${bookId}/search` },
+      { label: "Major events", href: `/${bookId}/timeline` },
       { label: "Relationships", action: openRelationships },
       { label: "Summary", href: `/${bookId}/summaries` },
+      ...(activeBookMode === "author"
+        ? [
+            { label: "Notes", href: `/${bookId}/notes` },
+            { label: "World gaps", href: `/${bookId}/world-gap` },
+          ]
+        : []),
     ],
-    [bookId]
+    [activeBookMode, bookId]
   )
 
   const featureTools = useMemo(
     () => [
-      { label: "Foreshadowing", meta: "Signals and hints", onClick: () => navigateWithMemory(`/${bookId}/foreshadowing`) },
-      { label: "Timeline", meta: "Story structure", onClick: () => navigateWithMemory(`/${bookId}/timeline`) },
-      { label: "Plot threads", meta: "Open arcs and notes", onClick: () => navigateWithMemory(`/${bookId}/plot-threads`) },
-      { label: "Reports", meta: "Chapter-by-chapter checks", onClick: () => navigateWithMemory(`/${bookId}/reports`) },
-      { label: "Cross-book wiki", meta: "Series echoes", onClick: () => navigateWithMemory(`/${bookId}/cross-book-wiki`) },
-      { label: "Relationship evolution", meta: "Shifts over time", onClick: () => navigateWithMemory(`/${bookId}/relationship-evolution`) },
-      { label: "Quotes", meta: "Saved lines", onClick: () => navigateWithMemory("/quotes") },
-      { label: "Story Advisor", meta: "Chat · plotholes · opportunities", onClick: () => navigateWithMemory(`/${bookId}/advisor`) },
+      { label: "Analysis", meta: "All advanced tools", onClick: () => navigateWithMemory(`/${bookId}/analysis`) },
     ],
     [bookId]
   )
@@ -165,6 +218,7 @@ export default function BookOverviewPage() {
     crossBook?.character_matches?.[0]
       ? `${crossBook.character_matches[0].left_name} and ${crossBook.character_matches[0].right_name} echo each other across connected books.`
       : "Character and continuity theories begin to surface once more of the story world has been processed."
+  const pageAtmosphere = resolveCoverAtmosphere(book, isDark)
 
   if (!book) {
     return <div className={`flex justify-center py-20 ${isDark ? "text-slate-400" : "text-stone-400"}`}>Loading...</div>
@@ -184,8 +238,8 @@ export default function BookOverviewPage() {
   }
 
   return (
-    <div className={`min-h-screen ${isDark ? "bg-[linear-gradient(180deg,#000000_0%,#060606_44%,#0d0d0d_100%)] text-slate-100" : "bg-[linear-gradient(180deg,#fcf7ef_0%,#f8f3ec_46%,#f5f0ea_100%)] text-stone-950"}`}>
-      <div className="sticky top-0 z-30 flex items-center justify-between gap-3 px-4 py-4 backdrop-blur-xl sm:px-6 lg:px-8" style={{ backgroundColor: isDark ? 'rgba(7, 17, 31, 0.8)' : 'rgba(252, 247, 239, 0.8)' }}>
+    <div className="min-h-screen text-slate-100" style={pageAtmosphere}>
+      <div className="sticky top-0 z-30 flex items-center justify-between gap-3 px-4 py-5 backdrop-blur-2xl bg-black/45 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-7xl flex items-center justify-between gap-3 w-full">
           <Link href="/library" className="transition hover:opacity-80">
             <img src="/image.png" alt="LoreVia" className="h-9 w-9 rounded-xl object-cover" />
@@ -252,100 +306,55 @@ export default function BookOverviewPage() {
           </div>
         ) : null}
 
-        <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1.05fr)_24rem]">
-          <section className={`rounded-[2rem] border p-5 shadow-[0_28px_100px_-60px_rgba(79,70,229,0.25)] sm:p-8 ${isDark ? "border-white/10 bg-[radial-gradient(circle_at_top,rgba(99,102,241,0.14),transparent_35%),linear-gradient(180deg,rgba(10,20,38,0.92),rgba(10,20,38,0.86))]" : "border-white/70 bg-[radial-gradient(circle_at_top,#f7f2ff,transparent_35%),linear-gradient(180deg,rgba(255,255,255,0.9),rgba(255,255,255,0.78))]"}`}>
-            <div className="grid gap-8 lg:grid-cols-[0.88fr_1fr] lg:items-start">
-              <div className="order-2 lg:order-1">
-                <p className={`text-[11px] font-semibold uppercase tracking-[0.34em] ${isDark ? "text-indigo-300" : "text-violet-500"}`}>Reading workspace</p>
-                <h1 className={`mt-4 max-w-[11ch] font-serif text-5xl leading-[0.94] tracking-tight sm:text-6xl ${isDark ? "text-white" : "text-stone-950"}`}>
-                  {book.title}
-                </h1>
-                {book.author ? <p className={`mt-3 text-2xl italic ${isDark ? "text-slate-400" : "text-stone-500"}`}>by {book.author}</p> : null}
+        <div className="mt-6 grid gap-10 lg:grid-cols-[minmax(0,1.05fr)_24rem]">
+          <section
+            className={`relative overflow-visible lg:overflow-hidden rounded-[26px] border min-h-[500px] sm:min-h-[600px] lg:min-h-[760px] transition-transform duration-[0.35s] ease hover:scale-[1.01] shadow-[0_10px_30px_rgba(0,0,0,.6)] ${
+              isDark
+                ? "border-white/10 bg-zinc-900/95"
+                : "border-stone-200 bg-zinc-50/95"
+            }`}
+          >
+            <BookCoverCard book={book} isDark={isDark} />
 
-                <div className={`mt-6 rounded-[1.5rem] border p-5 ${isDark ? "border-white/10 bg-white/5" : "border-violet-100 bg-[linear-gradient(180deg,#f5f4ff,#fbfbff)]"}`}>
-                  <p className={`text-[11px] font-semibold uppercase tracking-[0.26em] ${isDark ? "text-indigo-300" : "text-violet-500"}`}>
-                    {chaptersReadCount > 0 ? `Story so far • Ch. ${Math.max((lastChapter ?? continueChapter) - 1, 1)}` : "Start your reading"}
-                  </p>
-                  <p className={`mt-4 text-lg leading-8 ${isDark ? "text-slate-200" : "text-stone-600"}`}>
-                    {show && recall
-                      ? recall
-                      : chaptersReadCount > 0
-                        ? "LoreVia keeps prior chapters within reach so you can re-enter the book without losing the thread."
-                        : "Open the first chapter and LoreVia will begin building summaries, character recall, and continuity signals around your progress."}
-                  </p>
-                  {show && recall ? (
-                    <button
-                      onClick={dismiss}
-                      className={`mt-4 text-sm font-semibold transition ${isDark ? "text-indigo-300 hover:text-indigo-200" : "text-violet-700 hover:text-violet-800"}`}
-                    >
-                      Hide recap
-                    </button>
-                  ) : null}
-                </div>
+            <div className="absolute inset-0 pointer-events-none">
+              <div className="absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-black/50 to-transparent" />
+              <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-black/50 to-transparent" />
+              <div className="absolute inset-y-0 left-0 w-16 bg-gradient-to-r from-black/30 to-transparent" />
+              <div className="absolute inset-y-0 right-0 w-16 bg-gradient-to-l from-black/30 to-transparent" />
+            </div>
 
-                <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-                  <button
-                    onClick={continueReading}
-                    className="inline-flex items-center justify-center rounded-[1.2rem] bg-[linear-gradient(135deg,#4f46e5,#4338ca)] px-6 py-4 text-lg font-semibold text-white shadow-[0_22px_46px_-28px_rgba(79,70,229,0.78)] transition hover:translate-y-[-1px]"
-                  >
-                    {continueChapter > 1 ? `Continue - Chapter ${continueChapter}` : "Get started"}
-                  </button>
-                  <Link
-                    href={`/${bookId}/summaries`}
-                    className={`inline-flex items-center justify-center rounded-[1.2rem] border px-6 py-4 text-lg font-medium transition ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-stone-200 bg-white/85 text-stone-700 hover:bg-white"}`}
-                  >
-                    Open summary
-                  </Link>
-                </div>
+            <div className="absolute inset-x-0 bottom-0 z-10 p-6 lg:p-8 bg-gradient-to-t from-black/90 via-black/60 to-transparent text-center">
+              <h1 className="font-serif text-3xl lg:text-6xl tracking-tight text-white drop-shadow-lg uppercase">
+                {book.title}
+              </h1>
 
-                <div className="mt-5 grid grid-cols-2 gap-3">
-                  {quickTools.map((tool) =>
-                    "href" in tool ? (
-                      <Link
-                        key={tool.label}
-                        href={tool.href as Route}
-                        className={`rounded-[1.05rem] border px-4 py-3 text-center text-sm font-medium transition ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-stone-200 bg-white/72 text-stone-700 hover:bg-white"}`}
-                      >
-                        {tool.label}
-                      </Link>
-                    ) : (
-                      <button
-                        key={tool.label}
-                        onClick={tool.action}
-                        className={`rounded-[1.05rem] border px-4 py-3 text-center text-sm font-medium transition ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-stone-200 bg-white/72 text-stone-700 hover:bg-white"}`}
-                      >
-                        {tool.label}
-                      </button>
-                    )
-                  )}
-                </div>
-              </div>
-
-              <div className="order-1 flex justify-center lg:order-2 lg:justify-end">
-                <BookCoverCard book={book} isDark={isDark} />
-              </div>
+              {book.author ? (
+                <p className="mt-2 text-sm lg:text-base text-white/80">
+                  {book.author}
+                </p>
+              ) : null}
             </div>
           </section>
 
-          <aside className="space-y-5">
-            <div className={`rounded-[1.8rem] border p-5 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200/80 bg-white/78"}`}>
-              <p className={`text-[11px] font-semibold uppercase tracking-[0.28em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Reading progress</p>
-              <div className="mt-4 flex items-end justify-between gap-3">
+          <aside className="space-y-7">
+            <div className={`rounded-[1.8rem] border p-10 ${isDark ? "border-white/10 bg-zinc-900/70" : "border-stone-200/80 bg-zinc-50/70"}`}>
+              <p className={`text-xs font-semibold uppercase tracking-[0.28em] ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>Reading progress</p>
+              <div className="mt-6 flex items-end justify-between gap-3">
                 <div>
                   <p className={`text-4xl font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{percentComplete}%</p>
-                  <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>{chaptersReadCount} chapters read</p>
+                  <p className={`mt-2 text-base ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>{chaptersReadCount} chapters read</p>
                 </div>
                 <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-emerald-800">
                   {book.status}
                 </span>
               </div>
-              <div className={`mt-4 h-2 overflow-hidden rounded-full ${isDark ? "bg-white/10" : "bg-stone-200"}`}>
+              <div className={`mt-6 h-3 overflow-hidden rounded-full ${isDark ? "bg-white/10" : "bg-stone-200"}`}>
                 <div
-                  className="h-full rounded-full bg-[linear-gradient(90deg,#5b4cf0,#7c6cff)]"
+                  className="h-full rounded-full bg-[linear-gradient(90deg,#5b4cf0,#7c6cff)] transition-all duration-1000 ease-out"
                   style={{ width: `${Math.max(0, Math.min(percentComplete, 100))}%` }}
                 />
               </div>
-              <div className={`mt-5 grid grid-cols-2 gap-4 border-t pt-4 ${isDark ? "border-white/10" : "border-stone-200"}`}>
+              <div className={`mt-6 grid grid-cols-2 gap-5 border-t pt-6 ${isDark ? "border-white/10" : "border-stone-200"}`}>
                 <Metric label="Current chapter" value={`Ch. ${continueChapter}`} isDark={isDark} />
                 <Metric label="Chapters left" value={String(chaptersLeft)} isDark={isDark} />
                 <Metric label="Format" value={book.format.toUpperCase()} isDark={isDark} />
@@ -353,80 +362,212 @@ export default function BookOverviewPage() {
               </div>
             </div>
 
-            <div className={`rounded-[1.8rem] border p-5 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200/80 bg-white/78"}`}>
-              <p className={`text-[11px] font-semibold uppercase tracking-[0.28em] ${isDark ? "text-indigo-300" : "text-violet-500"}`}>Chapter rail</p>
-              <div className="mt-4 space-y-2">
+            <div className={`rounded-[1.5rem] border p-6 transition-all duration-300 hover:bg-opacity-60 ${isDark ? "border-white/5 bg-zinc-900/45 hover:bg-zinc-900/60" : "border-stone-200/60 bg-zinc-50/45 hover:bg-zinc-50/60"}`}>
+              <p className={`text-xs font-semibold uppercase tracking-[0.28em] ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>Chapters</p>
+              <div className="mt-3 space-y-1.5">
                 {topChapterItems.length > 0 ? (
                   topChapterItems.map((chapter) => (
                     <button
                       key={chapter.number}
                       onClick={() => navigateWithMemory(`/${bookId}/chapter/${chapter.number}`)}
-                      className={`flex w-full items-center justify-between rounded-[1rem] px-4 py-3 text-left transition ${
+                      className={`flex w-full items-center justify-between rounded-[1rem] px-4 py-3 text-left transition-all duration-300 relative overflow-hidden group ${
                         chapter.number === continueChapter
                           ? isDark ? "bg-indigo-500/15 text-indigo-100" : "bg-violet-50 text-violet-700"
                           : isDark ? "bg-white/5 text-slate-200 hover:bg-white/10" : "bg-stone-50 text-stone-700 hover:bg-stone-100"
                       }`}
                     >
-                      <span className="font-medium">Chapter {chapter.number}</span>
-                      <span className={`text-xs uppercase tracking-[0.16em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>
+                      <span className="font-medium text-base relative z-10">Chapter {chapter.number}</span>
+                      <span className={`text-xs uppercase tracking-[0.16em] relative z-10 ${isDark ? "text-slate-500" : "text-stone-400"}`}>
                         {chapter.read ? "Read" : "Unread"}
                       </span>
+                      <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700 ease-in-out" />
                     </button>
                   ))
                 ) : (
-                  <p className={`text-sm leading-7 ${isDark ? "text-slate-400" : "text-stone-500"}`}>Chapter indexing is still syncing.</p>
+                  <p className={`text-sm leading-7 ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>Chapter indexing is still syncing.</p>
                 )}
               </div>
               <button
                 onClick={() => navigateWithMemory(`/${bookId}/chapters`)}
-                className={`mt-4 w-full rounded-[1rem] border px-4 py-3 text-sm font-medium ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}
+                className={`mt-3 w-full rounded-[0.8rem] border px-3 py-2.5 text-xs font-medium transition hover:-translate-y-0.5 ${isDark ? "border-white/[0.08] bg-white/[0.03] text-white hover:bg-white/[0.06]" : "border-stone-200/60 bg-white/60 text-stone-600 hover:bg-white/70"}`}
               >
                 Open full chapter list
               </button>
+            </div>
+
+            <div className={`rounded-[1.5rem] border p-6 transition-all duration-300 hover:bg-opacity-60 ${isDark ? "border-white/5 bg-zinc-900/45 hover:bg-zinc-900/60" : "border-stone-200/60 bg-zinc-50/45 hover:bg-zinc-50/60"}`}>
+              <p className={`text-xs font-semibold uppercase tracking-[0.28em] ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>Workspace actions</p>
+              <div className="mt-3 grid gap-2.5">
+                <button
+                  onClick={continueReading}
+                  className="inline-flex items-center justify-center rounded-[1rem] bg-gradient-to-b from-violet-500 to-violet-700 px-4 py-3 text-sm font-semibold text-white shadow-[0_15px_40px_rgba(99,102,241,.35)] transition hover:translate-y-[-1px]"
+                >
+                  {continueChapter > 1 ? `Continue - Chapter ${continueChapter}` : "Get started"}
+                </button>
+                <Link
+                  href={`/${bookId}/summaries`}
+                  className={`inline-flex items-center justify-center rounded-[1rem] border px-4 py-3 text-sm font-medium transition hover:-translate-y-0.5 ${isDark ? "border-white/[0.08] bg-white/[0.03] text-white hover:bg-white/[0.06]" : "border-stone-200/60 bg-white/60 text-stone-600 hover:bg-white/70"}`}
+                >
+                  Open summary
+                </Link>
+              </div>
+
+              <div className="mt-3 grid grid-cols-2 gap-1.5">
+                {quickTools.map((tool) =>
+                  "href" in tool ? (
+                    <Link
+                      key={tool.label}
+                      href={tool.href as Route}
+                      className={`w-full text-center rounded-md border px-3 py-2 text-xs font-medium transition hover:-translate-y-0.5 ${isDark ? "border-white/[0.08] bg-white/[0.03] text-white hover:bg-white/[0.06]" : "border-stone-200/60 bg-white/60 text-stone-600 hover:bg-white/70"}`}
+                    >
+                      {tool.label}
+                    </Link>
+                  ) : (
+                    <button
+                      key={tool.label}
+                      onClick={tool.action}
+                      className={`w-full text-center rounded-md border px-3 py-2 text-xs font-medium transition hover:-translate-y-0.5 ${isDark ? "border-white/[0.08] bg-white/[0.03] text-white hover:bg-white/[0.06]" : "border-stone-200/60 bg-white/60 text-stone-600 hover:bg-white/70"}`}
+                    >
+                      {tool.label}
+                    </button>
+                  )
+                )}
+              </div>
             </div>
           </aside>
         </div>
 
         <div className="mt-8">
           <div className="space-y-6">
-            <section className={`rounded-[1.8rem] border p-6 ${isDark ? "border-white/10 bg-white/5" : "border-white/70 bg-white/82"}`}>
-              <h2 className={`font-serif text-3xl ${isDark ? "text-white" : "text-stone-950"}`}>World Mechanics</h2>
-              <p className={`mt-4 max-w-3xl text-lg leading-9 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{worldNote}</p>
-            </section>
+            {bookMode === "author" ? (
+              <section className={`rounded-[1.8rem] border p-6 ${isDark ? "border-white/10 bg-white/5" : "border-white/70 bg-white/82"}`}>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                  <div>
+                    <p className={`text-[11px] font-semibold uppercase tracking-[0.28em] ${isDark ? "text-indigo-300" : "text-violet-500"}`}>Writing tools</p>
+                    <h2 className={`mt-2 font-serif text-3xl ${isDark ? "text-white" : "text-stone-950"}`}>Write, ask, and export</h2>
+                  </div>
+                  <p className={`max-w-xl text-sm leading-7 ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+                    Reference exports and continuity support for authors.
+                  </p>
+                </div>
 
-            <section className={`rounded-[1.8rem] border p-6 ${isDark ? "border-white/10 bg-white/5" : "border-white/70 bg-white/82"}`}>
-              <h2 className={`font-serif text-3xl ${isDark ? "text-white" : "text-stone-950"}`}>Recent Theories</h2>
-              <div className={`mt-4 rounded-[1.35rem] p-5 ${isDark ? "bg-white/5" : "bg-stone-50"}`}>
-                <p className={`text-lg italic leading-9 ${isDark ? "text-slate-300" : "text-stone-600"}`}>“{theoryNote}”</p>
-                <p className={`mt-4 text-sm ${isDark ? "text-slate-500" : "text-stone-500"}`}>LoreVia story model</p>
-              </div>
-            </section>
+                <div className="mt-5 grid gap-3 md:grid-cols-2">
+                  <div className={`rounded-[1.2rem] border p-5 ${isDark ? "border-white/10 bg-zinc-900/45" : "border-stone-200 bg-zinc-50/45"}`}>
+                    <p className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-emerald-300" : "text-emerald-600"}`}>Writing</p>
+                    <p className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>Manuscript editor</p>
+                    <p className={`mt-2 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
+                      Draft chapters with continuity and thread side panels.
+                    </p>
+                    <button
+                      onClick={() => navigateWithMemory(`/${bookId}/manuscript`)}
+                      className="mt-4 inline-flex items-center justify-center rounded-[1rem] bg-gradient-to-b from-emerald-500 to-emerald-700 px-5 py-3 text-sm font-semibold text-white shadow-[0_15px_40px_rgba(16,185,129,.35)] transition hover:translate-y-[-1px]"
+                    >
+                      Open Manuscript Editor
+                    </button>
+                  </div>
 
-            <section className={`rounded-[1.8rem] border p-6 ${isDark ? "border-white/10 bg-white/5" : "border-white/70 bg-white/82"}`}>
+                  <div className={`rounded-[1.2rem] border p-5 ${isDark ? "border-white/10 bg-zinc-900/45" : "border-stone-200 bg-zinc-50/45"}`}>
+                    <p className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-indigo-300" : "text-violet-500"}`}>Author Intelligence</p>
+                    <p className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>Story Advisor</p>
+                    <p className={`mt-2 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
+                      Ask about plotholes, threads, and arcs. Every answer is grounded in your manuscript.
+                    </p>
+                    <button
+                      onClick={() => navigateWithMemory(`/${bookId}/advisor`)}
+                      className="mt-4 inline-flex items-center justify-center rounded-[1rem] bg-gradient-to-b from-violet-500 to-violet-700 px-5 py-3 text-sm font-semibold text-white shadow-[0_15px_40px_rgba(99,102,241,.35)] transition hover:translate-y-[-1px]"
+                    >
+                      Open Story Advisor
+                    </button>
+                  </div>
+
+                  
+
+                  <div className={`rounded-[1.2rem] border p-5 ${isDark ? "border-white/10 bg-zinc-900/45" : "border-stone-200 bg-zinc-50/45"}`}>
+                    <p className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Export</p>
+                    <p className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>Character Bible</p>
+                    <p className={`mt-2 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
+                      Download character roles, tags, motivations, and relationships.
+                    </p>
+                    <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center">
+                      <select
+                        value={bibleFormat}
+                        onChange={(e) => setBibleFormat(e.target.value as "md" | "pdf" | "docx" | "obsidian_folder")}
+                        className={`w-full rounded-[1rem] border px-4 py-3 text-sm outline-none transition sm:w-[15rem] ${
+                          isDark ? "border-white/20 bg-stone-800 text-white" : "border-stone-200 bg-white text-stone-900"
+                        }`}
+                      >
+                        <option value="md">Markdown (.md for Obsidian)</option>
+                        <option value="pdf">PDF (.pdf)</option>
+                        <option value="docx">Word (.docx)</option>
+                        <option value="obsidian_folder">Obsidian Vault (.zip)</option>
+                      </select>
+                      <button
+                      onClick={exportCharacterBible}
+                      disabled={exportingBible}
+                      className="mt-4 inline-flex items-center justify-center rounded-[1rem] bg-gradient-to-b from-violet-500 to-violet-700 px-5 py-3 text-sm font-semibold text-white shadow-[0_15px_40px_rgba(99,102,241,.35)] transition disabled:opacity-60"
+                    >
+                      {exportingBible ? "Preparing..." : "Download"}
+                      </button>
+                    </div>
+                    <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                      <button
+                        onClick={() => navigateWithMemory(`/${bookId}/notes`)}
+                        className={`inline-flex items-center justify-center rounded-[1rem] border px-4 py-2.5 text-sm font-semibold transition ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`}
+                      >
+                        Open notes workspace
+                      </button>
+                      <button
+                        onClick={() => void openObsidianPreview()}
+                        disabled={obsidianPreviewLoading}
+                        className={`inline-flex items-center justify-center rounded-[1rem] border px-4 py-2.5 text-sm font-semibold transition disabled:opacity-60 ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`}
+                      >
+                        {obsidianPreviewLoading ? "Loading preview..." : "View in Notes"}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className={`rounded-[1.2rem] border p-5 ${isDark ? "border-white/10 bg-zinc-900/45" : "border-stone-200 bg-zinc-50/45"}`}>
+                    <p className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-amber-300" : "text-amber-700"}`}>World building</p>
+                    <p className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>World Gap Detection</p>
+                    <p className={`mt-2 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
+                      Upload a separate worldbuilding manuscript, compare it to the story, and save inconsistencies as cleanup notes.
+                    </p>
+                    <button
+                      onClick={() => navigateWithMemory(`/${bookId}/world-gap`)}
+                      className="mt-4 inline-flex items-center justify-center rounded-[1rem] bg-gradient-to-b from-amber-500 to-amber-700 px-5 py-3 text-sm font-semibold text-white shadow-[0_15px_40px_rgba(245,158,11,.35)] transition hover:translate-y-[-1px]"
+                    >
+                      Open World Gap Detection
+                    </button>
+                  </div>
+                </div>
+              </section>
+            ) : null}
+
+            <section className={`rounded-[1.8rem] border p-6 ${isDark ? "border-white/10 bg-zinc-900/70" : "border-stone-200 bg-zinc-50/70"}`}>
               <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                 <div>
-                  <p className={`text-[11px] font-semibold uppercase tracking-[0.28em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Explore</p>
-                  <h2 className={`mt-2 font-serif text-3xl ${isDark ? "text-white" : "text-stone-950"}`}>Keep the current tools, but make them quieter.</h2>
+                  <p className={`text-[11px] font-semibold uppercase tracking-[0.28em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Explore</p>
+                  <h2 className={`mt-2 font-serif text-3xl ${isDark ? "text-white" : "text-stone-900"}`}>Keep the current tools, but make them quieter.</h2>
                 </div>
-                <p className={`max-w-xl text-sm leading-7 ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+                <p className={`max-w-xl text-sm leading-7 ${isDark ? "text-slate-400" : "text-stone-600"}`}>
                   Analysis remains available, but the primary experience starts with the book itself and expands only as needed.
                 </p>
               </div>
-              <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              <div className="mt-5">
                 {featureTools.map((tool) => (
                   <button
                     key={tool.label}
                     onClick={tool.onClick}
-                    className={`rounded-[1.2rem] border px-4 py-4 text-left transition ${isDark ? "border-white/10 bg-white/5 hover:bg-white/10" : "border-stone-200 bg-stone-50 hover:bg-white"}`}
+                    className={`w-full rounded-[1.2rem] border px-6 py-5 text-center transition flex flex-col items-center justify-center ${isDark ? "border-white/10 bg-zinc-900/45 hover:bg-zinc-900/55" : "border-stone-200 bg-zinc-50/45 hover:bg-zinc-50/55"}`}
                   >
-                    <p className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{tool.meta}</p>
-                    <p className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{tool.label}</p>
+                    <p className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>{tool.meta}</p>
+                    <p className={`mt-2 text-2xl font-serif font-semibold uppercase tracking-widest ${isDark ? "text-white" : "text-stone-900"}`}>{tool.label}</p>
                   </button>
                 ))}
               </div>
             </section>
 
-            {bookMode === "author" ? (
+            {false && bookMode === "author" ? (
               <section className={`rounded-[1.8rem] border p-6 ${isDark ? "border-white/10 bg-white/5" : "border-white/70 bg-white/82"}`}>
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                   <div>
@@ -439,7 +580,7 @@ export default function BookOverviewPage() {
                 </div>
 
                 <div className="mt-5 grid gap-3 md:grid-cols-2">
-                  <div className={`rounded-[1.2rem] border p-5 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-stone-50"}`}>
+                  <div className={`rounded-[1.2rem] border p-5 ${isDark ? "border-white/10 bg-zinc-900/45" : "border-stone-200 bg-zinc-50/45"}`}>
                     <p className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-emerald-300" : "text-emerald-600"}`}>Writing</p>
                     <p className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>Manuscript editor</p>
                     <p className={`mt-2 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
@@ -447,13 +588,13 @@ export default function BookOverviewPage() {
                     </p>
                     <button
                       onClick={() => navigateWithMemory(`/${bookId}/manuscript`)}
-                      className="mt-4 inline-flex items-center justify-center rounded-[1rem] bg-[linear-gradient(135deg,#059669,#047857)] px-5 py-3 text-sm font-semibold text-white shadow-[0_16px_36px_-22px_rgba(5,150,105,0.75)] transition hover:translate-y-[-1px]"
+                      className="mt-4 inline-flex items-center justify-center rounded-[1rem] bg-gradient-to-b from-emerald-500 to-emerald-700 px-5 py-3 text-sm font-semibold text-white shadow-[0_15px_40px_rgba(16,185,129,.35)] transition hover:translate-y-[-1px]"
                     >
                       Open Manuscript Editor
                     </button>
                   </div>
 
-                  <div className={`rounded-[1.2rem] border p-5 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-stone-50"}`}>
+                  <div className={`rounded-[1.2rem] border p-5 ${isDark ? "border-white/10 bg-zinc-900/45" : "border-stone-200 bg-zinc-50/45"}`}>
                     <p className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-indigo-300" : "text-violet-500"}`}>Author Intelligence</p>
                     <p className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>Story Advisor</p>
                     <p className={`mt-2 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
@@ -463,13 +604,13 @@ export default function BookOverviewPage() {
                     </p>
                     <button
                       onClick={() => navigateWithMemory(`/${bookId}/advisor`)}
-                      className="mt-4 inline-flex items-center justify-center rounded-[1rem] bg-[linear-gradient(135deg,#4f46e5,#4338ca)] px-5 py-3 text-sm font-semibold text-white shadow-[0_16px_36px_-22px_rgba(79,70,229,0.75)] transition hover:translate-y-[-1px]"
+                      className="mt-4 inline-flex items-center justify-center rounded-[1rem] bg-gradient-to-b from-violet-500 to-violet-700 px-5 py-3 text-sm font-semibold text-white shadow-[0_15px_40px_rgba(99,102,241,.35)] transition hover:translate-y-[-1px]"
                     >
                       Open Story Advisor
                     </button>
                   </div>
 
-                  <div className={`rounded-[1.2rem] border p-5 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-stone-50"}`}>
+                  <div className={`rounded-[1.2rem] border p-5 ${isDark ? "border-white/10 bg-zinc-900/45" : "border-stone-200 bg-zinc-50/45"}`}>
                     <p className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Export</p>
                     <p className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>Character Bible</p>
                     <p className={`mt-2 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
@@ -478,19 +619,20 @@ export default function BookOverviewPage() {
                     <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center">
                       <select
                         value={bibleFormat}
-                        onChange={(e) => setBibleFormat(e.target.value as "md" | "pdf" | "docx")}
+                        onChange={(e) => setBibleFormat(e.target.value as "md" | "pdf" | "docx" | "obsidian_folder")}
                         className={`w-full rounded-[1rem] border px-4 py-3 text-sm outline-none transition sm:w-[15rem] ${
                           isDark ? "border-white/20 bg-stone-800 text-white" : "border-stone-200 bg-white text-stone-900"
                         }`}
                       >
-                        <option value="md">Markdown (.md)</option>
+                        <option value="md">Markdown (.md for Obsidian)</option>
                         <option value="pdf">PDF (.pdf)</option>
                         <option value="docx">Word (.docx)</option>
+                        <option value="obsidian_folder">Obsidian Vault (.zip)</option>
                       </select>
                     <button
                       onClick={exportCharacterBible}
                       disabled={exportingBible}
-                      className="mt-4 inline-flex items-center justify-center rounded-[1rem] bg-[linear-gradient(135deg,#4f46e5,#4338ca)] px-5 py-3 text-sm font-semibold text-white shadow-[0_16px_36px_-22px_rgba(79,70,229,0.75)] transition disabled:opacity-60"
+                      className="mt-4 inline-flex items-center justify-center rounded-[1rem] bg-gradient-to-b from-violet-500 to-violet-700 px-5 py-3 text-sm font-semibold text-white shadow-[0_15px_40px_rgba(99,102,241,.35)] transition disabled:opacity-60"
                     >
                       {exportingBible ? "Preparing..." : "Download"}
                     </button>
@@ -513,6 +655,57 @@ export default function BookOverviewPage() {
           <Link href="/library" className="rounded-xl px-2 py-2">Library</Link>
         </div>
       </nav>
+
+      {showObsidianHelp && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className={`max-w-lg w-full rounded-2xl border p-6 shadow-2xl ${isDark ? "border-white/10 bg-[#0a1222]" : "border-stone-200 bg-white"}`}>
+              <h2 className={`text-2xl font-serif font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>How to use the Obsidian Vault</h2>
+            <div className={`mt-4 space-y-3 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
+              <p><strong>1. Download Obsidian:</strong> Get the free app from <a href="https://obsidian.md" target="_blank" rel="noopener noreferrer" className="text-indigo-500 hover:underline">obsidian.md</a></p>
+              <p><strong>2. Extract the ZIP:</strong> Unzip the downloaded file to any folder on your computer.</p>
+              <p><strong>3. Open as Vault:</strong> In Obsidian, click "Open folder as vault" and select the extracted folder.</p>
+              <p><strong>4. Navigate between characters:</strong> Click on any character name in <code className={`px-2 py-1 rounded ${isDark ? "bg-stone-700 text-stone-200" : "bg-stone-200 text-stone-800"}`}>[[brackets]]</code> to jump to their page. Relationships are linked automatically.</p>
+              <p><strong>5. Start at Index:</strong> Open <code className={`px-2 py-1 rounded ${isDark ? "bg-stone-700 text-stone-200" : "bg-stone-200 text-stone-800"}`}>00-Index.md</code> to see all characters listed.</p>
+            </div>
+            <div className="mt-6 flex items-center gap-3">
+              <label className={`flex items-center gap-2 text-sm cursor-pointer ${isDark ? "text-slate-300" : "text-stone-600"}`}>
+                <input
+                  type="checkbox"
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      localStorage.setItem("obsidian-help-seen", "true")
+                    }
+                  }}
+                  className="w-4 h-4 rounded border-stone-300"
+                />
+                Don't show this again
+              </label>
+            </div>
+            <button
+              onClick={() => setShowObsidianHelp(false)}
+              className="mt-4 w-full rounded-xl bg-[linear-gradient(135deg,#4f46e5,#4338ca)] px-5 py-3 text-sm font-semibold text-white shadow-lg transition hover:translate-y-[-1px]"
+            >
+              Got it
+            </button>
+          </div>
+        </div>
+      )}
+
+      {obsidianPreview ? (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/70 p-4 backdrop-blur-sm">
+          <div className="mx-auto max-w-6xl pt-8">
+            <div className="mb-4 flex justify-end">
+              <button
+                onClick={() => setObsidianPreview(null)}
+                className={`rounded-full px-4 py-2 text-sm font-medium ${isDark ? "bg-white/10 text-slate-200" : "bg-white text-stone-700"}`}
+              >
+                Close preview
+              </button>
+            </div>
+            <ObsidianVaultPreview bookId={bookId} preview={obsidianPreview} isDark={isDark} />
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -521,30 +714,23 @@ function BookCoverCard({ book, isDark }: { book: Book; isDark: boolean }) {
   const [failed, setFailed] = useState(false)
   const src = !failed ? coverSrc(book.cover_url) ?? book.cover_url ?? null : null
 
-  return (
-    <div className={`w-full max-w-[24rem] rounded-[1.8rem] border p-4 shadow-[0_28px_90px_-56px_rgba(0,0,0,0.55)] ${isDark ? "border-white/10 bg-[linear-gradient(180deg,#101a31,#0a1222)]" : "border-stone-200 bg-[linear-gradient(180deg,#151515,#25211d)]"}`}>
-      <div className={`overflow-hidden rounded-[1.25rem] ${isDark ? "bg-[#07101d]" : "bg-stone-950"}`}>
-        {src ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={src}
-            alt={`${book.title} cover`}
-            className={`aspect-[3/4] w-full ${book.format === "pdf" ? "bg-white object-contain p-4" : "object-cover object-top"}`}
-            onError={() => setFailed(true)}
-          />
-        ) : (
-          <div className={`flex aspect-[3/4] flex-col justify-between p-8 ${isDark ? "bg-[linear-gradient(180deg,#12203b,#0a1221)] text-white" : "bg-[linear-gradient(180deg,#1b1b1a,#0f0f0f)] text-white"}`}>
-            <div className="mx-auto h-full w-full border border-white/25 px-6 py-10 text-center">
-              <p className="text-xs uppercase tracking-[0.38em] text-white/45">LoreVia Edition</p>
-              <div className="mt-12">
-                <p className="text-5xl font-semibold leading-none">{book.title.slice(0, 1).toUpperCase()}</p>
-                <p className="mt-8 text-lg leading-8 text-white/70">{titleInitials(book.title)}</p>
-              </div>
-            </div>
-          </div>
-        )}
+  if (!src) {
+    return (
+      <div className={`absolute inset-0 flex items-center justify-center ${isDark ? "bg-gradient-to-br from-indigo-900 to-slate-800" : "bg-gradient-to-br from-violet-100 to-stone-200"}`}>
+        <span className={`font-serif text-8xl lg:text-[12rem] font-bold ${isDark ? "text-white/20" : "text-stone-400/40"}`}>
+          {titleInitials(book.title)}
+        </span>
       </div>
-    </div>
+    )
+  }
+
+  return (
+    <img
+      src={src}
+      alt={`${book.title} cover`}
+      onError={() => setFailed(true)}
+      className="absolute inset-0 h-full w-full object-cover object-center"
+    />
   )
 }
 

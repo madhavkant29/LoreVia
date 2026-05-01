@@ -70,7 +70,12 @@ def process_chapter_task(self, book_id: str, chapter_num: int):
 
             if not chapter_text.strip():
                 raw = await asyncio.to_thread(download_book, book.s3_key)
-                chapters = await asyncio.to_thread(parse_pdf if book.format == "pdf" else parse_epub, raw)
+                parser = parse_pdf if book.format == "pdf" else parse_epub
+                chapters = await asyncio.to_thread(
+                    parser,
+                    raw,
+                    split_large_chapters=not book.preserve_chapter_numbers,
+                )
                 chapter_data = next((ch for ch in chapters if ch["number"] == chapter_num), None)
                 if not chapter_data:
                     return

@@ -46,6 +46,12 @@ const ANALYSIS_TOOLS_BASE = [
     title: "Relationship evolution",
     description: "Track how pair dynamics change, where the turn happened, and what event caused it.",
   },
+  {
+    href: "world-gap",
+    eyebrow: "World consistency",
+    title: "World gap detection",
+    description: "Compare the story manuscript against the separate worldbuilding corpus and save inconsistencies as notes.",
+  },
 ]
 
 export default function AnalysisPage() {

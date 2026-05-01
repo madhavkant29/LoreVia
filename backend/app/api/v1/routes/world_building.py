@@ -10,12 +10,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps.auth import get_current_user
 from app.core.database import get_db
 from app.models.book import Book, Series, SeriesBook
-from app.models.intelligence import WorldBuildingDocument, WorldElement, WorldGapAnalysis, WorldNote
+from app.models.intelligence import WikiEntry, WorldBuildingDocument, WorldElement, WorldGapAnalysis, WorldNote
 from app.schemas.world_building import (
     GapAnalysisRequest,
     GapAnalysisResponse,
     IntegrationAnalysisResponse,
     SuggestionAcceptance,
+    WikiEntryOut,
+    WikiGenerationResponse,
     WorldBuildingDocumentDetailOut,
     WorldBuildingDocumentOut,
     WorldBuildingDocumentUpdateBody,
@@ -28,6 +30,7 @@ from app.schemas.world_building import (
 from app.utils.world_building_utils import (
     build_series_world_context,
     build_world_context,
+    build_world_logic_response,
     classify_world_intent,
     create_world_building_documents,
     delete_world_building_document,
@@ -35,6 +38,7 @@ from app.utils.world_building_utils import (
     detect_world_gaps,
     extract_world_elements,
     get_world_building_document,
+    generate_wiki_from_manuscript,
     list_world_building_documents,
     load_world_building_document_payload,
     prepare_world_building_uploads,
@@ -290,6 +294,61 @@ async def get_world_integration(
     return IntegrationAnalysisResponse(**payload)
 
 
+@router.get("/{book_id}/world-building/wiki", response_model=list[WikiEntryOut])
+async def list_auto_wiki(
+    book_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await _get_owned_book(db, book_id, current_user.id)
+    rows = (
+        await db.execute(
+            select(WikiEntry).where(WikiEntry.book_id == book.id).order_by(WikiEntry.entry_type.asc(), WikiEntry.name.asc())
+        )
+    ).scalars().all()
+    return [
+        WikiEntryOut(
+            id=str(item.id),
+            book_id=str(item.book_id),
+            entry_type=item.entry_type,
+            name=item.name,
+            description=item.description,
+            first_mention=item.first_mention,
+            related_char_ids=item.related_char_ids,
+            created_at=item.created_at,
+        )
+        for item in rows
+    ]
+
+
+@router.post("/{book_id}/world-building/wiki/generate", response_model=WikiGenerationResponse)
+async def generate_auto_wiki(
+    book_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await _get_owned_book(db, book_id, current_user.id)
+    generated = await generate_wiki_from_manuscript(db, book)
+    await db.commit()
+    return WikiGenerationResponse(
+        generated_count=len(generated),
+        updated_names=[item.name for item in generated[:20]],
+        entries=[
+            WikiEntryOut(
+                id=str(item.id),
+                book_id=str(item.book_id),
+                entry_type=item.entry_type,
+                name=item.name,
+                description=item.description,
+                first_mention=item.first_mention,
+                related_char_ids=item.related_char_ids,
+                created_at=item.created_at,
+            )
+            for item in generated[:40]
+        ],
+    )
+
+
 @router.post("/{book_id}/world-building/query", response_model=WorldQueryResponse)
 async def query_world_building(
     book_id: uuid.UUID,
@@ -299,32 +358,8 @@ async def query_world_building(
 ):
     book = await _get_owned_book(db, book_id, current_user.id)
     mode = body.mode or classify_world_intent(body.query)
-    elements = await extract_world_elements(db, book)
-    context = build_world_context(elements)
-    citations = [
-        {
-            "id": str(element.id),
-            "name": element.name,
-            "element_type": element.element_type,
-            "source_scope": element.source_scope,
-        }
-        for element in elements[:5]
-    ]
-    if mode == "story_integration":
-        analysis = await detect_integration_analysis(db, book)
-        suggestions = analysis["integration_opportunities"][:5]
-        answer = (
-            f"Story integration mode found {len(suggestions)} main opportunities. "
-            f"Focus on lore that exists in the world corpus but is still thin on the page.\n{context[:900]}"
-        )
-    else:
-        analysis = await detect_world_gaps(db, book)
-        suggestions = analysis["priority_gaps"][:5]
-        answer = (
-            f"Gap detection mode found {len(suggestions)} likely lore mismatches or missing coverage areas. "
-            f"Use the highest-priority items to tighten story-to-world consistency.\n{context[:900]}"
-        )
-    return WorldQueryResponse(mode=mode, answer=answer, citations=citations, suggestions=suggestions)
+    payload = await build_world_logic_response(db, book, body.query, mode)
+    return WorldQueryResponse(**payload)
 
 
 @router.get("/series/{series_id}/world-building/series-analysis")

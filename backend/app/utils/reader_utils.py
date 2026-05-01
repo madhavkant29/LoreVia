@@ -9,7 +9,9 @@ import base64
 import json
 import re
 import uuid
+from typing import Any
 
+import bleach  # type: ignore[import-untyped]
 from fastapi import HTTPException
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,6 +28,8 @@ from app.engine.character.profile_builder import build_description
 from app.models.book import Book, Chapter, ChapterMedia
 from app.models.character import Character
 from app.models.intelligence import ChapterSummary, PlotThread
+
+BLEACH_EMPTY_TAGS: Any = frozenset()
 
 # ─── Character stopwords / filter sets ───────────────────────────────────────
 
@@ -266,9 +270,27 @@ def collapse_graph_characters(chars: list[Character]) -> tuple[list[Character], 
             if alias and alias.strip() and alias.strip().lower() != primary.name.strip().lower()
         }
         primary.aliases = sorted(merged_aliases)
-        primary.personality_tags = list(dict.fromkeys([*(primary.personality_tags or []), *(duplicate.personality_tags or [])]))
-        primary.motivations = list(dict.fromkeys([*(primary.motivations or []), *(duplicate.motivations or [])]))
-        primary.fears = list(dict.fromkeys([*(primary.fears or []), *(duplicate.fears or [])]))
+        personality_tags: list[str] = []
+        motivations: list[str] = []
+        fears: list[str] = []
+        seen_personality_tags: set[str] = set()
+        seen_motivations: set[str] = set()
+        seen_fears: set[str] = set()
+        for tag in [*(primary.personality_tags or []), *(duplicate.personality_tags or [])]:
+            if tag and tag not in seen_personality_tags:
+                seen_personality_tags.add(tag)
+                personality_tags.append(tag)
+        for item in [*(primary.motivations or []), *(duplicate.motivations or [])]:
+            if item and item not in seen_motivations:
+                seen_motivations.add(item)
+                motivations.append(item)
+        for item in [*(primary.fears or []), *(duplicate.fears or [])]:
+            if item and item not in seen_fears:
+                seen_fears.add(item)
+                fears.append(item)
+        primary.personality_tags = personality_tags
+        primary.motivations = motivations
+        primary.fears = fears
         primary.role = primary.role or duplicate.role
         primary.arc_summary = primary.arc_summary or duplicate.arc_summary
         primary.archetype = primary.archetype or duplicate.archetype
@@ -548,11 +570,10 @@ async def list_plot_threads(
     query = select(PlotThread).where(PlotThread.book_id == book_id)
     if chapter is not None:
         query = query.where(PlotThread.introduced_at <= chapter)
-    threads = (
-        await db.execute(
-            query.order_by(PlotThread.importance.desc(), desc(PlotThread.introduced_at), PlotThread.title)
-        )
-    ).scalars().all()
+    threads_result = await db.execute(
+        query.order_by(PlotThread.importance.desc(), desc(PlotThread.introduced_at), PlotThread.title)
+    )
+    threads = threads_result.scalars().all()
     return [serialize_plot_thread(thread) for thread in threads]
 
 
@@ -570,8 +591,7 @@ async def update_plot_thread_note(
     if thread is None:
         return None
 
-    import bleach  # type: ignore[import-untyped]
-    cleaned = bleach.clean(" ".join((note or "").split()).strip(), tags=[], strip=True) or None
+    cleaned = str(bleach.clean(" ".join(str(note or "").split()).strip(), tags=BLEACH_EMPTY_TAGS, strip=True)) or None
     thread.note = cleaned
     await db.commit()
     await db.refresh(thread)

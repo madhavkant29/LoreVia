@@ -1,5 +1,6 @@
 from pathlib import Path
 from app.utils.migration_utils import (
+    destructive_downgrade_revisions,
     destructive_upgrade_revisions,
     is_local_database_url,
     redact_database_target,
@@ -87,3 +88,43 @@ def downgrade() -> None:
     )
 
     assert destructive_upgrade_revisions(tmp_path) == [migration]
+
+
+def test_destructive_downgrade_revisions_ignores_upgrade_only_drops(tmp_path: Path) -> None:
+    migration = tmp_path / "20260430_safe.py"
+    migration.write_text(
+        '''"""Safe migration.
+
+Revision ID: safe
+"""
+
+def upgrade() -> None:
+    op.drop_table("unsafe")
+
+def downgrade() -> None:
+    pass
+'''.strip(),
+        encoding="utf-8",
+    )
+
+    assert destructive_downgrade_revisions(tmp_path) == []
+
+
+def test_destructive_downgrade_revisions_detects_downgrade_drop_ops(tmp_path: Path) -> None:
+    migration = tmp_path / "20260430_bad.py"
+    migration.write_text(
+        '''"""Unsafe migration.
+
+Revision ID: unsafe
+"""
+
+def upgrade() -> None:
+    pass
+
+def downgrade() -> None:
+    op.drop_table("books")
+'''.strip(),
+        encoding="utf-8",
+    )
+
+    assert destructive_downgrade_revisions(tmp_path) == [migration]

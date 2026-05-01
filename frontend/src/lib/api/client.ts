@@ -1,56 +1,22 @@
 import axios from "axios"
 import { API_BASE } from "@/lib/constants"
-import { useAuthStore } from "@/lib/stores/authStore"
-import { clearAuthTokens, getStoredAccessToken, getStoredRefreshToken, persistAuthTokens } from "./tokenStore"
 
 export const apiClient = axios.create({
   baseURL: API_BASE,
-  withCredentials: true,
   headers: { "Content-Type": "application/json" },
+  withCredentials: true,
 })
 
 let refreshPromise: Promise<boolean> | null = null
-const NON_REFRESHABLE_AUTH_PATHS = [
-  "/auth/login",
-  "/auth/register",
-  "/auth/oauth/supabase",
-  "/auth/forgot-password",
-  "/auth/reset-password",
-  "/auth/refresh",
-  "/auth/logout",
-  "/auth/me",
-  "/auth/tier-limits",
-]
 
-function requestPath(url: string, baseURL?: string): string {
-  try {
-    return new URL(url, baseURL ?? API_BASE).pathname
-  } catch {
-    return url.startsWith("/") ? url : `/${url}`
-  }
-}
-
-apiClient.interceptors.request.use((config) => {
-  const accessToken = getStoredAccessToken()
-  if (accessToken) {
-    config.headers = config.headers ?? {}
-    config.headers.Authorization = `Bearer ${accessToken}`
-  }
-  return config
-})
-
-async function refreshSession(): Promise<boolean> {
+async function refreshAccessToken(): Promise<boolean> {
   if (!refreshPromise) {
-    const refreshToken = getStoredRefreshToken()
-    refreshPromise = apiClient
-      .post("/auth/refresh", refreshToken ? { refresh_token: refreshToken } : undefined)
-      .then((response) => {
-        if (response.data?.access_token && response.data?.refresh_token) {
-          persistAuthTokens(response.data)
-        }
-        return true
+    refreshPromise = axios
+      .post(`${API_BASE}/auth/refresh`, null, { withCredentials: true })
+      .then(() => true)
+      .catch(() => {
+        return false
       })
-      .catch(() => false)
       .finally(() => {
         refreshPromise = null
       })
@@ -59,28 +25,40 @@ async function refreshSession(): Promise<boolean> {
   return refreshPromise
 }
 
+apiClient.interceptors.request.use((config) => {
+  // Let the browser set the multipart boundary for FormData requests.
+  // Keeping a JSON default header here can make multipart bodies invalid and
+  // trigger FastAPI 422 validation/parsing errors.
+  if (typeof FormData !== "undefined" && config.data instanceof FormData) {
+    if (config.headers) {
+      delete config.headers["Content-Type"]
+      delete config.headers["content-type"]
+    }
+  }
+  return config
+})
+
 apiClient.interceptors.response.use(
-  (response) => response,
+  (r) => r,
   async (error) => {
     const originalRequest = error.config
-    const path = requestPath(originalRequest?.url ?? "", originalRequest?.baseURL)
-    const isNonRefreshableAuthRequest = NON_REFRESHABLE_AUTH_PATHS.includes(path)
-    if (error.response?.status === 401 && !originalRequest?._retry && !isNonRefreshableAuthRequest) {
+    const requestUrl = String(originalRequest?.url ?? "")
+    const requestPath = requestUrl.split("?")[0]
+    const isAuthEndpoint =
+      requestPath === "/auth/me" ||
+      requestPath === "/auth/refresh" ||
+      requestPath === "/auth/login" ||
+      requestPath === "/auth/register" ||
+      requestPath.startsWith("/auth/oauth/")
+    if (error.response?.status === 401 && !originalRequest?._retry && !isAuthEndpoint) {
       originalRequest._retry = true
-      const refreshed = await refreshSession()
+      const refreshed = await refreshAccessToken()
       if (refreshed) {
-        const accessToken = getStoredAccessToken()
-        if (accessToken) {
-          originalRequest.headers = originalRequest.headers ?? {}
-          originalRequest.headers.Authorization = `Bearer ${accessToken}`
-        }
         return apiClient(originalRequest)
       }
       if (typeof window !== "undefined") {
-        useAuthStore.getState().logout()
-        clearAuthTokens()
+        localStorage.removeItem("lorevia-auth")
         window.location.replace("/login")
-        return new Promise(() => {})
       }
     }
     return Promise.reject(error)

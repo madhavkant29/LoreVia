@@ -55,6 +55,7 @@ class SceneHeading(ScreenplayElement):
         self.location = location.strip()
         self.time_of_day = time_of_day.strip()
         self.scene_number = scene_number.strip() if scene_number else None
+        self.elements: list[ScreenplayElement] = []
 
 
 class Action(ScreenplayElement):
@@ -77,17 +78,23 @@ class DialogueElement(ScreenplayElement):
 
 class Parenthetical(ScreenplayElement):
     """Parenthetical element."""
-    pass
+    def __init__(self, text: str, line_number: int, content: str):
+        super().__init__(text, line_number)
+        self.content = content.strip()
 
 
 class Transition(ScreenplayElement):
     """Transition element."""
-    pass
+    def __init__(self, text: str, line_number: int, content: str):
+        super().__init__(text, line_number)
+        self.content = content.strip()
 
 
 class Shot(ScreenplayElement):
     """Shot element."""
-    pass
+    def __init__(self, text: str, line_number: int, content: str | None = None):
+        super().__init__(text, line_number)
+        self.content = content.strip() if content else None
 
 
 def parse_scene_heading(line: str, line_number: int) -> SceneHeading | None:

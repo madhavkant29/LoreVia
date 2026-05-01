@@ -4,6 +4,7 @@ import Link from "next/link"
 import type { Route } from "next"
 import { usePathname, useRouter } from "next/navigation"
 import { authApi } from "@/lib/api/auth"
+import { NotificationBell } from "@/components/layout/NotificationBell"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 
@@ -29,6 +30,7 @@ export function Navbar() {
 
   const navItems: Array<{ href: Route; label: string }> = [
     { href: "/library", label: "Library" },
+    { href: "/notes", label: "Notes" },
     { href: "/stats", label: "Stats" },
     { href: "/series", label: "Series" },
     { href: "/pricing", label: "Pricing" },
@@ -36,25 +38,22 @@ export function Navbar() {
   ]
 
   return (
-    <nav className="sticky top-0 z-30 border-b border-border bg-background/80 px-4 py-4 backdrop-blur-xl transition-all duration-300">
+    <nav className="sticky top-0 z-30 border-b border-border bg-background px-4 py-4 transition-colors duration-150">
       <div className="mx-auto flex max-w-7xl flex-col gap-4">
         <div className="flex items-center justify-between gap-4">
-          <Link href="/library" className="flex min-w-0 items-center gap-3 group">
+          <Link href="/library" className="group flex items-center">
             <img 
               src="/image.png" 
-              alt="LoreVia Logo" 
-              className="h-10 w-10 shrink-0 rounded-xl shadow-lg shadow-brand-500/20 group-hover:scale-105 transition-transform object-cover"
+              alt="LoreVia" 
+              className="h-10 w-10 rounded-lg object-cover transition-transform group-hover:scale-105"
             />
-            <div className="min-w-0">
-              <p className="truncate font-serif text-xl font-bold tracking-tight text-foreground">LoreVia</p>
-              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-muted-foreground/60">Workspace</p>
-            </div>
           </Link>
 
           <div className="flex items-center gap-2">
+            <NotificationBell />
             <button
               onClick={toggleTheme}
-              className="group relative flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-card hover:bg-muted transition-colors"
+              className="group relative flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-card hover:bg-muted transition-colors duration-150"
               aria-label="Toggle theme"
             >
               {isDark ? (
@@ -71,7 +70,7 @@ export function Navbar() {
             {user && (
               <button
                 onClick={handleLogout}
-                className="hidden sm:flex rounded-xl px-4 py-2 text-sm font-semibold text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+                className="hidden sm:flex rounded-lg px-4 py-2 text-sm font-semibold text-muted-foreground hover:text-foreground hover:bg-muted transition-colors duration-150"
               >
                 Sign out
               </button>
@@ -79,7 +78,7 @@ export function Navbar() {
 
             <button
               onClick={() => setMobileMenuOpen((v) => !v)}
-              className="lg:hidden flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-card text-foreground"
+              className="lg:hidden flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-card text-foreground"
             >
               <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={mobileMenuOpen ? "M6 18L18 6M6 6l12 12" : "M4 6h16M4 12h16M4 18h16"} />
@@ -95,15 +94,15 @@ export function Navbar() {
                 key={item.href}
                 href={item.href}
                 onClick={() => setMobileMenuOpen(false)}
-                className={`relative px-4 py-2 text-sm font-bold tracking-tight transition-all rounded-lg ${
+                className={`relative px-4 py-2 text-sm font-semibold tracking-tight transition-colors duration-150 rounded-md ${
                   pathname === item.href
-                    ? "text-brand-600 bg-brand-500/5 dark:text-brand-400"
+                    ? "text-slate-900 bg-slate-100 dark:text-white dark:bg-slate-800"
                     : "text-muted-foreground hover:text-foreground hover:bg-muted"
                 }`}
               >
                 {item.label}
                 {pathname === item.href && (
-                  <span className="absolute bottom-0 left-4 right-4 h-0.5 bg-brand-500 rounded-full" />
+                  <span className="absolute bottom-0 left-4 right-4 h-0.5 bg-slate-900 dark:bg-white rounded-full" />
                 )}
               </Link>
             ))}

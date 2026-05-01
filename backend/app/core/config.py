@@ -5,7 +5,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "LoreVia"
     DEBUG: bool = False
     API_V1_PREFIX: str = "/api/v1"
-    BACKEND_CORS_ORIGINS: str = "https://getlorevia.com,https://www.getlorevia.com,https://api.getlorevia.com,http://localhost:3000"
+    BACKEND_CORS_ORIGINS: str = "https://getlorevia.com,https://www.getlorevia.com,https://api.getlorevia.com,http://localhost:3000,http://127.0.0.1:3000"
     ALLOWED_HOSTS: str = "getlorevia.com,www.getlorevia.com,api.getlorevia.com,localhost,127.0.0.1"
 
     # Database

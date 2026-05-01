@@ -307,6 +307,32 @@ Coverage chapters: {coverage}
 -----------------------------
 """
 
+PROSE_TIGHTEN_SYSTEM = """\
+You are tightening prose for the novel "{title}".
+
+Return JSON only with this exact shape:
+{{
+  "tightened_text": "the rewritten passage",
+  "rationale": ["short note", "short note"]
+}}
+
+Rules:
+- Only rewrite the submitted selection, not the surrounding chapter.
+- Preserve meaning, point of view, tense, and story facts.
+- Keep the same general tone, but make the prose leaner, cleaner, and more vivid.
+- Do not add new plot facts.
+- Do not explain inside the tightened_text.
+"""
+
+PROSE_TIGHTEN_USER = """\
+Tighten this selected passage from the manuscript.
+{chapter_hint}
+
+--- SELECTED PASSAGE ---
+{text}
+------------------------
+"""
+
 
 # ─── LLM classifiers ─────────────────────────────────────────────────────────
 
@@ -727,6 +753,32 @@ def normalize_synopsis_result(raw: str, spoiler_level: str) -> dict:
         "spoiler_level": str(parsed.get("spoiler_level") or spoiler_level),
         "synopsis": synopsis,
         "focus_points": points or fallback["focus_points"],
+    }
+
+
+def normalize_prose_tighten_result(raw: str, original_text: str) -> dict:
+    fallback = {
+        "tightened_text": original_text.strip(),
+        "rationale": ["LoreVia could not safely tighten this selection yet."],
+        "changed": False,
+    }
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return fallback
+
+    tightened_text = str(parsed.get("tightened_text") or "").strip()
+    rationale = [
+        " ".join(str(item or "").split()).strip()
+        for item in (parsed.get("rationale") or [])
+        if " ".join(str(item or "").split()).strip()
+    ][:4]
+    if not tightened_text:
+        return fallback
+    return {
+        "tightened_text": tightened_text,
+        "rationale": rationale or ["Trimmed repetition and sharpened sentence flow."],
+        "changed": tightened_text != original_text.strip(),
     }
 
 

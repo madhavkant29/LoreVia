@@ -16,17 +16,19 @@ def _clean_name(value: str | None) -> str:
 def _normalize_major_event(raw_event: dict, *, chapter_number: int, character_ids: list[str], character_names: list[str]) -> dict:
     title = " ".join(str(raw_event.get("event_title") or raw_event.get("event") or "").split()).strip()
     description = " ".join(str(raw_event.get("description") or raw_event.get("impact") or "").split()).strip()
-    importance = raw_event.get("importance")
-    if not isinstance(importance, int):
+    importance_raw = raw_event.get("importance")
+    if isinstance(importance_raw, int):
+        importance = importance_raw
+    else:
         try:
-            importance = int(importance)
+            importance = int(importance_raw if importance_raw is not None else 5)
         except Exception:
             importance = 5
     return {
         "chapter_number": chapter_number,
         "event_title": title or f"Chapter {chapter_number} event",
         "description": description or "",
-        "importance": max(1, min(int(importance), 10)),
+        "importance": max(1, min(importance, 10)),
         "involved_characters": character_ids,
         "involved_character_names": character_names,
         "event_type": raw_event.get("event_type"),

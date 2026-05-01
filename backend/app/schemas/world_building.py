@@ -110,6 +110,8 @@ class WorldQueryResponse(BaseModel):
     answer: str
     citations: list[dict]
     suggestions: list[dict]
+    logic_alerts: list[dict] = Field(default_factory=list)
+    simulation_steps: list[str] = Field(default_factory=list)
 
 
 class SuggestionAcceptance(BaseModel):
@@ -154,3 +156,20 @@ class WorldNoteOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     addressed_at: datetime | None = None
+
+
+class WikiEntryOut(BaseModel):
+    id: str
+    book_id: str
+    entry_type: str
+    name: str
+    description: str | None = None
+    first_mention: int | None = None
+    related_char_ids: list[str] | None = None
+    created_at: datetime
+
+
+class WikiGenerationResponse(BaseModel):
+    generated_count: int
+    updated_names: list[str] = Field(default_factory=list)
+    entries: list[WikiEntryOut] = Field(default_factory=list)

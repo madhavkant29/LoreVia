@@ -8,9 +8,11 @@ import type {
   AdvisorGreeting,
   AdvisorSuggestionsResponse,
   EditorialReviewResponse,
+  InlineContinuityResponse,
   SeriesContinuityResponse,
   ManuscriptSynopsis,
   ContinuityReportFormat,
+  ProseTightenResponse,
   VoiceConsistencyResponse,
 } from "@/types/intelligence"
 
@@ -44,6 +46,16 @@ export const intelligenceApi = {
 
   editorialReview: (bookId: string, text: string, chapterNum?: number) =>
     apiClient.post<EditorialReviewResponse>(`/intelligence/${bookId}/advisor/editorial-review`, {
+      text,
+      chapter_num: chapterNum ?? null,
+    }).then(r => r.data),
+  proseTighten: (bookId: string, text: string, chapterNum?: number) =>
+    apiClient.post<ProseTightenResponse>(`/intelligence/${bookId}/advisor/prose-tighten`, {
+      text,
+      chapter_num: chapterNum ?? null,
+    }).then(r => r.data),
+  inlineContinuity: (bookId: string, text: string, chapterNum?: number) =>
+    apiClient.post<InlineContinuityResponse>(`/intelligence/${bookId}/advisor/inline-continuity`, {
       text,
       chapter_num: chapterNum ?? null,
     }).then(r => r.data),

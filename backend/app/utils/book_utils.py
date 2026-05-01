@@ -6,22 +6,39 @@ from the books route.
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import os
+import re
 import uuid
+import zipfile
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 import bleach  # type: ignore[import-untyped]
 from bleach.css_sanitizer import CSSSanitizer
 from fastapi import HTTPException
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.core.config import settings
 from app.core.security import create_asset_token
 from app.core.storage import download_book, get_presigned_url, upload_binary
-from app.models.book import Book, BookNote, Chapter, ChapterVersion, ObsidianVaultNote, Series
+from app.models.book import (
+    Book,
+    BookNote,
+    Chapter,
+    ChapterVersion,
+    NoteBacklink,
+    NoteLink,
+    NoteSeriesLink,
+    NoteTag,
+    ObsidianVaultNote,
+    ObsidianVaultNoteSource,
+    Series,
+    SeriesBook,
+)
 from app.models.character import Character, CharacterState
 from app.models.intelligence import ChapterSummary, CharacterRelationship, PlotThread
 from app.models.progress import ReadingProgress
@@ -51,6 +68,7 @@ MANUSCRIPT_ALLOWED_TAGS = [
     "li",
     "span",
     "div",
+    "img",
 ]
 MANUSCRIPT_ALLOWED_ATTRIBUTES = {
     "p": ["style", "class", "data-text-align"],
@@ -63,8 +81,207 @@ MANUSCRIPT_ALLOWED_ATTRIBUTES = {
     "ul": ["style", "class"],
     "ol": ["style", "class"],
     "li": ["style", "class"],
+    "img": ["src", "alt", "title", "width", "height"],
 }
 MANUSCRIPT_ALLOWED_STYLES = ["text-align"]
+MANUSCRIPT_ALLOWED_PROTOCOLS = ["http", "https", "mailto", "tel", "data"]
+OBSIDIAN_WIKI_LINK_RE = re.compile(r"\[\[([^\[\]\n]+)\]\]")
+OBSIDIAN_NOTE_REFERENCE_RE = re.compile(r"(!?)\[\[([^\[\]\n]+)\]\]")
+OBSIDIAN_TAG_RE = re.compile(r"(?<!\w)#([A-Za-z][A-Za-z0-9/_-]*)")
+OBSIDIAN_NOTE_SOURCES = {
+    ObsidianVaultNoteSource.CHARACTER_BIBLE.value,
+    ObsidianVaultNoteSource.USER_NOTES.value,
+}
+
+BLEACH_EMPTY_TAGS: Any = frozenset()
+
+
+def _clean_text(value: object | None) -> str:
+    return str(bleach.clean(str(value or "").strip(), tags=BLEACH_EMPTY_TAGS, strip=True))
+
+
+def _clean_optional_text(value: str | None) -> str | None:
+    cleaned = _clean_text(value)
+    return cleaned or None
+
+
+DEFAULT_WRITING_TEMPLATES = [
+    {
+        "id": "chapter-three-act",
+        "kind": "chapter",
+        "title": "Chapter Three-Beat",
+        "description": "Open with pressure, pivot in the middle, end on a story-moving turn.",
+        "content": (
+            "Opening beat\n"
+            "- What changes immediately in this chapter?\n\n"
+            "Middle escalation\n"
+            "- What complication or reversal raises the cost?\n\n"
+            "Closing turn\n"
+            "- What question, threat, or choice launches the next chapter?"
+        ),
+    },
+    {
+        "id": "scene-goal-conflict-disaster",
+        "kind": "scene",
+        "title": "Scene Goal / Conflict / Disaster",
+        "description": "Classic scene structure for momentum and tension.",
+        "content": (
+            "Goal\n"
+            "- What does the point-of-view character want right now?\n\n"
+            "Conflict\n"
+            "- Who or what blocks them?\n\n"
+            "Disaster / turn\n"
+            "- What goes wrong, changes, or costs more than expected?"
+        ),
+    },
+    {
+        "id": "story-five-pivots",
+        "kind": "story",
+        "title": "Story Five Pivots",
+        "description": "A compact scaffold for act structure and turning points.",
+        "content": (
+            "Setup promise\n"
+            "- What emotional and plot promise does the story make?\n\n"
+            "Inciting shift\n"
+            "- What forces the protagonist out of stasis?\n\n"
+            "Midpoint change\n"
+            "- What truth, reveal, or victory changes the meaning of the conflict?\n\n"
+            "Dark turn\n"
+            "- What loss or collapse strips away the easy path?\n\n"
+            "Climax and aftermath\n"
+            "- What final choice resolves the central pressure?"
+        ),
+    },
+]
+
+DEFAULT_WRITER_WORKSPACE = {
+    "word_count_goals": {
+        "chapter_target": 2500,
+        "book_target": 80000,
+        "session_target": 1000,
+    },
+    "corkboard_cards": [],
+    "templates": DEFAULT_WRITING_TEMPLATES,
+    "publishing": {
+        "active_preset": "standard_manuscript",
+        "trim_size": "6x9",
+        "include_title_page": True,
+        "mirror_margins": True,
+    },
+}
+
+
+def normalize_writer_workspace(raw: dict | None) -> dict:
+    payload = json.loads(json.dumps(DEFAULT_WRITER_WORKSPACE))
+    source = raw if isinstance(raw, dict) else {}
+
+    goals = source.get("word_count_goals")
+    if isinstance(goals, dict):
+        for key in ("chapter_target", "book_target", "session_target"):
+            value = goals.get(key)
+            payload["word_count_goals"][key] = int(value) if isinstance(value, (int, float)) and int(value) > 0 else None
+
+    cards: list[dict[str, Any]] = []
+    for card in source.get("corkboard_cards") or []:
+        if not isinstance(card, dict):
+            continue
+        title = " ".join(str(card.get("title") or "").split()).strip()
+        if not title:
+            continue
+        chapter_number = card.get("chapter_number")
+        cards.append(
+            {
+                "id": str(card.get("id") or uuid.uuid4()),
+                "title": title,
+                "description": str(card.get("description") or "").strip(),
+                "status": " ".join(str(card.get("status") or "planned").split()).strip() or "planned",
+                "lane": " ".join(str(card.get("lane") or "ideas").split()).strip() or "ideas",
+                "chapter_number": int(chapter_number) if isinstance(chapter_number, (int, float)) and int(chapter_number) > 0 else None,
+                "template_id": " ".join(str(card.get("template_id") or "").split()).strip() or None,
+            }
+        )
+    payload["corkboard_cards"] = cards
+
+    templates: list[dict[str, str]] = []
+    for template in source.get("templates") or DEFAULT_WRITING_TEMPLATES:
+        if not isinstance(template, dict):
+            continue
+        template_id = " ".join(str(template.get("id") or "").split()).strip()
+        kind = " ".join(str(template.get("kind") or "").split()).strip()
+        title = " ".join(str(template.get("title") or "").split()).strip()
+        content = str(template.get("content") or "").strip()
+        if not template_id or not kind or not title or not content:
+            continue
+        templates.append(
+            {
+                "id": template_id,
+                "kind": kind,
+                "title": title,
+                "description": " ".join(str(template.get("description") or "").split()).strip(),
+                "content": content,
+            }
+        )
+    payload["templates"] = templates or json.loads(json.dumps(DEFAULT_WRITING_TEMPLATES))
+
+    publishing = source.get("publishing")
+    if isinstance(publishing, dict):
+        payload["publishing"] = {
+            "active_preset": " ".join(str(publishing.get("active_preset") or "standard_manuscript").split()).strip() or "standard_manuscript",
+            "trim_size": " ".join(str(publishing.get("trim_size") or "6x9").split()).strip() or "6x9",
+            "include_title_page": bool(publishing.get("include_title_page", True)),
+            "mirror_margins": bool(publishing.get("mirror_margins", True)),
+        }
+
+    return payload
+
+
+def build_writer_workspace_payload(book: Book) -> dict:
+    return normalize_writer_workspace(book.writer_workspace if isinstance(book.writer_workspace, dict) else None)
+
+
+def estimate_readability(text: str) -> dict[str, Any]:
+    cleaned = " ".join((text or "").replace("\r", "\n").split())
+    paragraphs = len([part for part in re.split(r"\n{2,}", text or "") if part.strip()]) or (1 if cleaned else 0)
+    words = re.findall(r"[A-Za-z0-9']+", text or "")
+    sentences = [part for part in re.split(r"[.!?]+", text or "") if part.strip()]
+    word_count = len(words)
+    sentence_count = len(sentences) or (1 if word_count else 0)
+    syllables = sum(_estimate_syllables(word) for word in words)
+    average_sentence_length = round(word_count / sentence_count, 2) if sentence_count else 0.0
+    reading_ease = 206.835 - (1.015 * average_sentence_length) - (84.6 * ((syllables / word_count) if word_count else 0))
+    grade_level = 0.39 * average_sentence_length + 11.8 * ((syllables / word_count) if word_count else 0) - 15.59
+
+    if reading_ease >= 80:
+        label = "Very easy"
+    elif reading_ease >= 65:
+        label = "Easy"
+    elif reading_ease >= 50:
+        label = "Balanced"
+    elif reading_ease >= 35:
+        label = "Demanding"
+    else:
+        label = "Dense"
+
+    return {
+        "words": word_count,
+        "sentences": sentence_count,
+        "paragraphs": paragraphs,
+        "average_sentence_length": round(average_sentence_length, 2),
+        "reading_ease": round(reading_ease, 2),
+        "grade_level": round(max(0.0, grade_level), 2),
+        "label": label,
+    }
+
+
+def _estimate_syllables(word: str) -> int:
+    cleaned = re.sub(r"[^a-z]", "", word.lower())
+    if not cleaned:
+        return 1
+    groups = re.findall(r"[aeiouy]+", cleaned)
+    syllables = len(groups)
+    if cleaned.endswith("e") and syllables > 1:
+        syllables -= 1
+    return max(1, syllables)
 
 
 # ─── Ownership guards ─────────────────────────────────────────────────────────
@@ -144,7 +361,11 @@ async def list_obsidian_vault_notes(db: AsyncSession, book: Book, user_id: uuid.
     rows = (
         await db.execute(
             select(ObsidianVaultNote)
-            .where(ObsidianVaultNote.book_id == book.id, ObsidianVaultNote.user_id == user_id)
+            .where(
+                ObsidianVaultNote.book_id == book.id,
+                ObsidianVaultNote.user_id == user_id,
+                ObsidianVaultNote.source == ObsidianVaultNoteSource.CHARACTER_BIBLE.value,
+            )
             .order_by(ObsidianVaultNote.path.asc())
         )
     ).scalars().all()
@@ -153,6 +374,7 @@ async def list_obsidian_vault_notes(db: AsyncSession, book: Book, user_id: uuid.
             "id": str(note.id),
             "book_id": str(note.book_id),
             "path": note.path,
+            "source": note.source,
             "content": note.content,
             "created_at": note.created_at,
             "updated_at": note.updated_at,
@@ -161,14 +383,512 @@ async def list_obsidian_vault_notes(db: AsyncSession, book: Book, user_id: uuid.
     ]
 
 
-async def load_obsidian_vault_overrides(db: AsyncSession, book: Book, user_id: uuid.UUID) -> dict[str, str]:
+async def load_obsidian_vault_overrides(
+    db: AsyncSession,
+    book: Book,
+    user_id: uuid.UUID,
+    *,
+    source: str = ObsidianVaultNoteSource.CHARACTER_BIBLE.value,
+) -> dict[str, str]:
+    normalized_source = normalize_obsidian_note_source(source)
     rows = (
         await db.execute(
             select(ObsidianVaultNote.path, ObsidianVaultNote.content)
-            .where(ObsidianVaultNote.book_id == book.id, ObsidianVaultNote.user_id == user_id)
+            .where(
+                ObsidianVaultNote.book_id == book.id,
+                ObsidianVaultNote.user_id == user_id,
+                ObsidianVaultNote.source == normalized_source,
+            )
         )
     ).all()
     return {path: content for path, content in rows}
+
+
+def normalize_obsidian_note_source(source: str) -> str:
+    normalized = (source or "").strip().lower()
+    if normalized not in OBSIDIAN_NOTE_SOURCES:
+        raise HTTPException(400, "Invalid Obsidian note source")
+    return normalized
+
+
+def normalize_obsidian_note_path(path: str) -> str:
+    normalized_path = (path or "").replace("\\", "/").strip().strip("/")
+    if not normalized_path:
+        raise HTTPException(400, "Path is required")
+    segments = [segment.strip() for segment in normalized_path.split("/") if segment.strip()]
+    if not segments or any(segment in {".", ".."} for segment in segments):
+        raise HTTPException(400, "Invalid path")
+    return "/".join(segments)
+
+
+def obsidian_note_title(path: str) -> str:
+    filename = path.replace("\\", "/").split("/")[-1]
+    return os.path.splitext(filename)[0].strip() or filename.strip()
+
+
+def obsidian_note_folder(path: str) -> str:
+    normalized = path.replace("\\", "/")
+    if "/" not in normalized:
+        return "Root"
+    return normalized.rsplit("/", 1)[0] or "Root"
+
+
+def extract_obsidian_wiki_links(markdown: str) -> list[dict[str, str]]:
+    links: list[dict[str, str]] = []
+    for reference in extract_obsidian_note_references(markdown):
+        target = reference["target"]
+        alias = reference["alias"]
+        if not target:
+            continue
+        links.append({"target": target, "alias": alias or target})
+    return links
+
+
+def extract_obsidian_note_references(markdown: str) -> list[dict[str, str]]:
+    references: list[dict[str, str]] = []
+    for embed_prefix, raw_value in OBSIDIAN_NOTE_REFERENCE_RE.findall(markdown or ""):
+        raw_target, _, raw_alias = raw_value.partition("|")
+        target = raw_target.split("#", 1)[0].strip()
+        alias = raw_alias.strip() or target
+        if not target:
+            continue
+        references.append(
+            {
+                "target": target,
+                "alias": alias,
+                "link_type": "embed" if embed_prefix == "!" else "reference",
+            }
+        )
+    return references
+
+
+def extract_obsidian_tags(markdown: str) -> list[str]:
+    tags: list[str] = []
+    for match in OBSIDIAN_TAG_RE.findall(markdown or ""):
+        cleaned = normalize_obsidian_tag(match)
+        if cleaned:
+            tags.append(cleaned)
+    return list(dict.fromkeys(tags))
+
+
+def normalize_obsidian_tag(tag: str) -> str:
+    cleaned = " ".join((tag or "").replace("_", "-").split()).strip()
+    cleaned = cleaned.strip("#")
+    return cleaned.lower()
+
+
+def build_obsidian_graph(notes: list[dict[str, str]]) -> dict[str, list[dict[str, Any]]]:
+    notes_by_path = {note["path"]: note for note in notes}
+    title_to_path: dict[str, str] = {}
+    for path in sorted(notes_by_path):
+        title_to_path.setdefault(obsidian_note_title(path).lower(), path)
+
+    nodes: list[dict[str, str | int]] = []
+    link_counts = {path: 0 for path in notes_by_path}
+    edges: list[dict[str, str | None]] = []
+    edge_keys: set[tuple[str, str, str | None]] = set()
+
+    for path, note in notes_by_path.items():
+        for link in extract_obsidian_wiki_links(str(note.get("content") or "")):
+            target_path = title_to_path.get(link["target"].lower())
+            if not target_path:
+                continue
+            link_counts[path] += 1
+            edge_key = (path, target_path, link["alias"])
+            if edge_key in edge_keys:
+                continue
+            edge_keys.add(edge_key)
+            edges.append({"source": path, "target": target_path, "label": link["alias"]})
+
+    for path in sorted(notes_by_path):
+        nodes.append(
+            {
+                "id": path,
+                "path": path,
+                "title": obsidian_note_title(path),
+                "folder": obsidian_note_folder(path),
+                "link_count": link_counts[path],
+            }
+        )
+
+    return {"nodes": nodes, "edges": edges}
+
+
+async def _load_obsidian_scope_notes(
+    db: AsyncSession,
+    *,
+    book: Book,
+    user_id: uuid.UUID,
+    source: str,
+) -> tuple[list[ObsidianVaultNote], dict[str, Book]]:
+    normalized_source = normalize_obsidian_note_source(source)
+    scoped_books = {book.id: book}
+    if book.primary_series_id:
+        series_book_rows = (
+            await db.execute(
+                select(Book)
+                .join(SeriesBook, SeriesBook.book_id == Book.id)
+                .where(SeriesBook.series_id == book.primary_series_id, Book.user_id == user_id)
+            )
+        ).scalars().all()
+        for row in series_book_rows:
+            scoped_books[row.id] = row
+
+    notes = (
+        await db.execute(
+            select(ObsidianVaultNote)
+            .where(
+                ObsidianVaultNote.user_id == user_id,
+                ObsidianVaultNote.source == normalized_source,
+                ObsidianVaultNote.book_id.in_(list(scoped_books)),
+            )
+            .order_by(ObsidianVaultNote.book_id.asc(), ObsidianVaultNote.path.asc())
+        )
+    ).scalars().all()
+    return notes, scoped_books
+
+
+def _normalize_obsidian_note_path_key(path: str) -> str:
+    return normalize_obsidian_note_path(path).lower()
+
+
+def _resolve_obsidian_reference(reference: str, *, notes_by_path: dict[str, ObsidianVaultNote], notes_by_title: dict[str, ObsidianVaultNote]) -> ObsidianVaultNote | None:
+    normalized_path = reference.replace("\\", "/").strip().lower()
+    if normalized_path.endswith(".md"):
+        normalized_path = normalized_path[:-3]
+
+    for path_key, note in notes_by_path.items():
+        candidate_path = path_key.lower()
+        if candidate_path.endswith(".md"):
+            candidate_path = candidate_path[:-3]
+        if candidate_path == normalized_path:
+            return note
+
+    title_key = obsidian_note_title(reference).lower()
+    return notes_by_title.get(title_key)
+
+
+async def _get_obsidian_note_by_path(
+    db: AsyncSession,
+    *,
+    book: Book,
+    user_id: uuid.UUID,
+    path: str,
+    source: str = ObsidianVaultNoteSource.USER_NOTES.value,
+) -> ObsidianVaultNote:
+    normalized_source = normalize_obsidian_note_source(source)
+    normalized_path = normalize_obsidian_note_path(path).lower()
+    note = (
+        await db.execute(
+            select(ObsidianVaultNote).where(
+                ObsidianVaultNote.book_id == book.id,
+                ObsidianVaultNote.user_id == user_id,
+                ObsidianVaultNote.source == normalized_source,
+                func.lower(ObsidianVaultNote.path) == normalized_path,
+            )
+        )
+    ).scalars().first()
+    if note is None:
+        raise HTTPException(404, "Note not found")
+    return note
+
+
+def _serialize_obsidian_note_link(link: NoteLink, source_path: str, target_path: str) -> dict[str, Any]:
+    return {
+        "id": str(link.id),
+        "book_id": str(link.book_id),
+        "source_note_id": str(link.source_note_id),
+        "source_note_path": source_path,
+        "target_note_id": str(link.target_note_id),
+        "target_note_path": target_path,
+        "link_type": link.link_type,
+        "target_label": getattr(link, "target_label", None),
+        "created_at": link.created_at,
+    }
+
+
+def _serialize_obsidian_note_tag(tag: NoteTag, note_path: str) -> dict[str, Any]:
+    return {
+        "id": str(tag.id),
+        "book_id": str(tag.book_id),
+        "note_id": str(tag.note_id),
+        "note_path": note_path,
+        "tag_name": tag.tag_name,
+        "created_at": tag.created_at,
+    }
+
+
+def _serialize_obsidian_note_series_link(
+    link: NoteSeriesLink,
+    source_path: str,
+    target_path: str,
+) -> dict[str, Any]:
+    return {
+        "id": str(link.id),
+        "series_id": str(link.series_id),
+        "source_book_id": str(link.source_book_id),
+        "target_book_id": str(link.target_book_id),
+        "source_note_id": str(link.source_note_id),
+        "source_note_path": source_path,
+        "target_note_id": str(link.target_note_id),
+        "target_note_path": target_path,
+        "link_type": link.link_type,
+        "created_at": link.created_at,
+    }
+
+
+async def sync_obsidian_note_relations(
+    db: AsyncSession,
+    *,
+    book: Book,
+    user_id: uuid.UUID,
+    source: str = ObsidianVaultNoteSource.USER_NOTES.value,
+) -> dict[str, int]:
+    normalized_source = normalize_obsidian_note_source(source)
+    if normalized_source != ObsidianVaultNoteSource.USER_NOTES.value:
+        return {"links": 0, "backlinks": 0, "tags": 0, "series_links": 0}
+
+    notes, scoped_books = await _load_obsidian_scope_notes(db, book=book, user_id=user_id, source=normalized_source)
+    scoped_book_ids = list(scoped_books)
+
+    for table in (NoteLink, NoteBacklink, NoteTag):
+        await db.execute(
+            delete(table).where(
+                table.user_id == user_id,
+                table.book_id.in_(scoped_book_ids),
+            )
+        )
+    await db.execute(
+        delete(NoteSeriesLink).where(
+            NoteSeriesLink.user_id == user_id,
+            NoteSeriesLink.source_book_id.in_(scoped_book_ids),
+        )
+    )
+    await db.flush()
+
+    notes_by_path = {note.path.lower(): note for note in notes}
+    notes_by_title: dict[str, ObsidianVaultNote] = {}
+    for note in notes:
+        notes_by_title.setdefault(obsidian_note_title(note.path).lower(), note)
+
+    links_created = 0
+    backlinks_created = 0
+    tags_created = 0
+    series_links_created = 0
+
+    for note in notes:
+        references = extract_obsidian_note_references(note.content)
+        note_tags = extract_obsidian_tags(note.content)
+
+        for tag_name in note_tags:
+            db.add(
+                NoteTag(
+                    user_id=user_id,
+                    book_id=note.book_id,
+                    note_id=note.id,
+                    tag_name=tag_name,
+                )
+            )
+            tags_created += 1
+
+        for reference in references:
+            target_note = _resolve_obsidian_reference(reference["target"], notes_by_path=notes_by_path, notes_by_title=notes_by_title)
+            if target_note is None or target_note.id == note.id:
+                continue
+
+            db.add(
+                NoteLink(
+                    user_id=user_id,
+                    book_id=note.book_id,
+                    source_note_id=note.id,
+                    target_note_id=target_note.id,
+                    link_type=reference["link_type"],
+                    target_label=reference["alias"],
+                )
+            )
+            db.add(
+                NoteBacklink(
+                    user_id=user_id,
+                    book_id=target_note.book_id,
+                    source_note_id=note.id,
+                    target_note_id=target_note.id,
+                    link_type=reference["link_type"],
+                )
+            )
+            links_created += 1
+            backlinks_created += 1
+
+            if note.book_id != target_note.book_id and book.primary_series_id and target_note.book_id in scoped_books:
+                db.add(
+                    NoteSeriesLink(
+                        user_id=user_id,
+                        series_id=book.primary_series_id,
+                        source_book_id=note.book_id,
+                        target_book_id=target_note.book_id,
+                        source_note_id=note.id,
+                        target_note_id=target_note.id,
+                        link_type=reference["link_type"],
+                    )
+                )
+                series_links_created += 1
+
+    await db.flush()
+    await db.commit()
+    return {
+        "links": links_created,
+        "backlinks": backlinks_created,
+        "tags": tags_created,
+        "series_links": series_links_created,
+    }
+
+
+async def list_obsidian_note_links(
+    db: AsyncSession,
+    *,
+    book: Book,
+    user_id: uuid.UUID,
+    path: str,
+) -> list[dict[str, Any]]:
+    note = await _get_obsidian_note_by_path(db, book=book, user_id=user_id, path=path)
+    source_note = aliased(ObsidianVaultNote)
+    target_note = aliased(ObsidianVaultNote)
+    rows = (
+        await db.execute(
+            select(NoteLink, source_note.path, target_note.path)
+            .join(source_note, NoteLink.source_note_id == source_note.id)
+            .join(target_note, NoteLink.target_note_id == target_note.id)
+            .where(
+                NoteLink.user_id == user_id,
+                NoteLink.book_id == book.id,
+                NoteLink.source_note_id == note.id,
+            )
+            .order_by(NoteLink.created_at.asc())
+        )
+    ).all()
+    return [_serialize_obsidian_note_link(link, source_path, target_path) for link, source_path, target_path in rows]
+
+
+async def list_obsidian_note_backlinks(
+    db: AsyncSession,
+    *,
+    book: Book,
+    user_id: uuid.UUID,
+    path: str,
+) -> list[dict[str, Any]]:
+    note = await _get_obsidian_note_by_path(db, book=book, user_id=user_id, path=path)
+    source_note = aliased(ObsidianVaultNote)
+    target_note = aliased(ObsidianVaultNote)
+    rows = (
+        await db.execute(
+            select(NoteBacklink, source_note.path, target_note.path)
+            .join(source_note, NoteBacklink.source_note_id == source_note.id)
+            .join(target_note, NoteBacklink.target_note_id == target_note.id)
+            .where(
+                NoteBacklink.user_id == user_id,
+                NoteBacklink.book_id == book.id,
+                NoteBacklink.target_note_id == note.id,
+            )
+            .order_by(NoteBacklink.created_at.asc())
+        )
+    ).all()
+    return [_serialize_obsidian_note_link(link, source_path, target_path) for link, source_path, target_path in rows]
+
+
+async def list_obsidian_note_tags(
+    db: AsyncSession,
+    *,
+    book: Book,
+    user_id: uuid.UUID,
+    path: str,
+) -> list[dict[str, Any]]:
+    note = await _get_obsidian_note_by_path(db, book=book, user_id=user_id, path=path)
+    rows = (
+        await db.execute(
+            select(NoteTag, ObsidianVaultNote.path)
+            .join(ObsidianVaultNote, NoteTag.note_id == ObsidianVaultNote.id)
+            .where(
+                NoteTag.user_id == user_id,
+                NoteTag.book_id == book.id,
+                NoteTag.note_id == note.id,
+            )
+            .order_by(NoteTag.tag_name.asc())
+        )
+    ).all()
+    return [_serialize_obsidian_note_tag(tag, note_path) for tag, note_path in rows]
+
+
+async def list_obsidian_note_series_links(
+    db: AsyncSession,
+    *,
+    book: Book,
+    user_id: uuid.UUID,
+    path: str,
+) -> list[dict[str, Any]]:
+    note = await _get_obsidian_note_by_path(db, book=book, user_id=user_id, path=path)
+    source_note = aliased(ObsidianVaultNote)
+    target_note = aliased(ObsidianVaultNote)
+    rows = (
+        await db.execute(
+            select(NoteSeriesLink, source_note.path, target_note.path)
+            .join(source_note, NoteSeriesLink.source_note_id == source_note.id)
+            .join(target_note, NoteSeriesLink.target_note_id == target_note.id)
+            .where(
+                NoteSeriesLink.user_id == user_id,
+                NoteSeriesLink.source_book_id == book.id,
+                NoteSeriesLink.source_note_id == note.id,
+            )
+            .order_by(NoteSeriesLink.created_at.asc())
+        )
+    ).all()
+    return [_serialize_obsidian_note_series_link(link, source_path, target_path) for link, source_path, target_path in rows]
+
+
+async def list_obsidian_note_relations(
+    db: AsyncSession,
+    *,
+    book: Book,
+    user_id: uuid.UUID,
+    path: str,
+) -> dict[str, list[dict[str, Any]]]:
+    return {
+        "links": await list_obsidian_note_links(db, book=book, user_id=user_id, path=path),
+        "backlinks": await list_obsidian_note_backlinks(db, book=book, user_id=user_id, path=path),
+        "tags": await list_obsidian_note_tags(db, book=book, user_id=user_id, path=path),
+        "series_links": await list_obsidian_note_series_links(db, book=book, user_id=user_id, path=path),
+    }
+
+
+async def list_obsidian_notes(
+    db: AsyncSession,
+    *,
+    book: Book,
+    user_id: uuid.UUID,
+    source: str = ObsidianVaultNoteSource.USER_NOTES.value,
+) -> list[dict]:
+    normalized_source = normalize_obsidian_note_source(source)
+    rows = (
+        await db.execute(
+            select(ObsidianVaultNote)
+            .where(
+                ObsidianVaultNote.book_id == book.id,
+                ObsidianVaultNote.user_id == user_id,
+                ObsidianVaultNote.source == normalized_source,
+            )
+            .order_by(ObsidianVaultNote.path.asc())
+        )
+    ).scalars().all()
+    return [
+        {
+            "id": str(note.id),
+            "book_id": str(note.book_id),
+            "path": note.path,
+            "source": note.source,
+            "content": note.content,
+            "created_at": note.created_at,
+            "updated_at": note.updated_at,
+        }
+        for note in rows
+    ]
 
 
 async def save_obsidian_vault_note(
@@ -178,11 +898,11 @@ async def save_obsidian_vault_note(
     user_id: uuid.UUID,
     path: str,
     content: str,
+    source: str = ObsidianVaultNoteSource.CHARACTER_BIBLE.value,
+    sync_relations: bool = True,
 ) -> dict:
-    normalized_path = (path or "").replace("\\", "/").strip()
-    if not normalized_path:
-        raise HTTPException(400, "Path is required")
-
+    normalized_source = normalize_obsidian_note_source(source)
+    normalized_path = normalize_obsidian_note_path(path)
     normalized_content = content.replace("\r\n", "\n")
 
     note: ObsidianVaultNote | None = (
@@ -191,26 +911,117 @@ async def save_obsidian_vault_note(
                 ObsidianVaultNote.book_id == book.id,
                 ObsidianVaultNote.user_id == user_id,
                 ObsidianVaultNote.path == normalized_path,
+                ObsidianVaultNote.source == normalized_source,
             )
         )
     ).scalars().first()
 
     if note is None:
-        note = ObsidianVaultNote(user_id=user_id, book_id=book.id, path=normalized_path, content=normalized_content)
+        note = ObsidianVaultNote(
+            user_id=user_id,
+            book_id=book.id,
+            path=normalized_path,
+            source=normalized_source,
+            content=normalized_content,
+        )
         db.add(note)
     else:
-        note.path = normalized_path
-        note.content = normalized_content
+        note_any = cast(Any, note)
+        note_any.path = normalized_path
+        note_any.source = normalized_source
+        note_any.content = normalized_content
 
     await db.commit()
     await db.refresh(note)
+    if sync_relations and normalized_source == ObsidianVaultNoteSource.USER_NOTES.value:
+        await sync_obsidian_note_relations(db, book=book, user_id=user_id, source=normalized_source)
     return {
         "path": note.path,
+        "source": note.source,
         "content": note.content,
         "persisted": True,
         "created_at": note.created_at,
         "updated_at": note.updated_at,
     }
+
+
+async def delete_obsidian_note(
+    db: AsyncSession,
+    *,
+    book: Book,
+    user_id: uuid.UUID,
+    path: str,
+    source: str = ObsidianVaultNoteSource.USER_NOTES.value,
+) -> None:
+    normalized_source = normalize_obsidian_note_source(source)
+    normalized_path = normalize_obsidian_note_path(path)
+    deleted = await db.execute(
+        delete(ObsidianVaultNote).where(
+            ObsidianVaultNote.book_id == book.id,
+            ObsidianVaultNote.user_id == user_id,
+            ObsidianVaultNote.path == normalized_path,
+            ObsidianVaultNote.source == normalized_source,
+        )
+    )
+    if not deleted.rowcount:
+        raise HTTPException(404, "Note not found")
+    await db.commit()
+    if normalized_source == ObsidianVaultNoteSource.USER_NOTES.value:
+        await sync_obsidian_note_relations(db, book=book, user_id=user_id, source=normalized_source)
+
+
+async def import_obsidian_notes_zip(
+    db: AsyncSession,
+    *,
+    book: Book,
+    user_id: uuid.UUID,
+    archive_bytes: bytes,
+    source: str = ObsidianVaultNoteSource.USER_NOTES.value,
+) -> list[dict]:
+    normalized_source = normalize_obsidian_note_source(source)
+    if not archive_bytes:
+        raise HTTPException(400, "ZIP file is empty")
+
+    imported: list[dict] = []
+    try:
+        with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
+            members = [item for item in archive.infolist() if not item.is_dir()]
+            for member in members:
+                if member.filename.startswith("__MACOSX/"):
+                    continue
+                if not member.filename.lower().endswith(".md"):
+                    continue
+                normalized_path = normalize_obsidian_note_path(member.filename)
+                content = archive.read(member).decode("utf-8")
+                imported.append(
+                    await save_obsidian_vault_note(
+                        db,
+                        book=book,
+                        user_id=user_id,
+                        path=normalized_path,
+                        content=content,
+                        source=normalized_source,
+                        sync_relations=False,
+                    )
+                )
+    except zipfile.BadZipFile as exc:
+        raise HTTPException(400, "Invalid ZIP file") from exc
+    except UnicodeDecodeError as exc:
+        raise HTTPException(400, "ZIP contains a non-UTF-8 markdown file") from exc
+
+    if not imported:
+        raise HTTPException(400, "ZIP did not contain any markdown notes")
+    if normalized_source == ObsidianVaultNoteSource.USER_NOTES.value:
+        await sync_obsidian_note_relations(db, book=book, user_id=user_id, source=normalized_source)
+    return imported
+
+
+def export_obsidian_notes_zip(*, notes: list[dict[str, str]]) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for note in sorted(notes, key=lambda item: item["path"]):
+            archive.writestr(note["path"], str(note["content"] or "").replace("\r\n", "\n"))
+    return buffer.getvalue()
 
 
 async def save_book_note(
@@ -223,8 +1034,8 @@ async def save_book_note(
     title: str | None,
     body: str,
 ) -> dict:
-    normalized_title = bleach.clean(" ".join((title or "").split()).strip(), tags=[], strip=True) or None
-    normalized_body = bleach.clean(body.strip(), tags=[], strip=True)
+    normalized_title = _clean_optional_text(" ".join((title or "").split()).strip())
+    normalized_body = _clean_text(body)
     if not normalized_body:
         raise HTTPException(400, "Note body is required")
 
@@ -244,9 +1055,10 @@ async def save_book_note(
         note = BookNote(user_id=user_id, book_id=book.id)
         db.add(note)
 
-    note.chapter_number = chapter_number
-    note.title = normalized_title
-    note.body = normalized_body
+    note_any = cast(Any, note)
+    note_any.chapter_number = chapter_number
+    note_any.title = normalized_title
+    note_any.body = normalized_body
     await db.commit()
     await db.refresh(note)
 
@@ -353,6 +1165,7 @@ async def book_out(db: AsyncSession, book: Book, user_id: uuid.UUID) -> BookOut:
         status=book.status,
         mode=book.mode or "reader",
         source_kind=book.source_kind or "single_upload",
+        preserve_chapter_numbers=bool(book.preserve_chapter_numbers),
         cover_url=cover_url,
         cover_processed_url=processed_cover_url_for_book(book),
         cover_edge_colors=book.cover_edge_colors or None,
@@ -585,20 +1398,21 @@ def manuscript_text_to_html(text: str) -> str:
     for paragraph in paragraphs:
         if not paragraph:
             continue
-        lines = [bleach.clean(line, tags=[], strip=True) for line in paragraph.split("\n")]
+        lines = [_clean_text(line) for line in paragraph.split("\n")]
         html_parts.append(f"<p>{'<br>'.join(line for line in lines if line or len(lines) == 1)}</p>")
     return "".join(html_parts) or "<p></p>"
 
 
 def clean_manuscript_html(html: str | None) -> str:
-    cleaner = CSSSanitizer(allowed_css_properties=MANUSCRIPT_ALLOWED_STYLES)
-    return bleach.clean(
-        (html or "").strip(),
-        tags=MANUSCRIPT_ALLOWED_TAGS,
-        attributes=MANUSCRIPT_ALLOWED_ATTRIBUTES,
-        css_sanitizer=cleaner,
+    cleaner = CSSSanitizer(allowed_css_properties=cast(Any, MANUSCRIPT_ALLOWED_STYLES))
+    return str(bleach.clean(
+        str(html or "").strip(),
+        tags=cast(Any, MANUSCRIPT_ALLOWED_TAGS),
+        attributes=cast(Any, MANUSCRIPT_ALLOWED_ATTRIBUTES),
+        protocols=cast(Any, MANUSCRIPT_ALLOWED_PROTOCOLS),
+        css_sanitizer=cast(Any, cleaner),
         strip=True,
-    )
+    ))
 
 
 def manuscript_html_to_text(html: str | None) -> str:
@@ -639,10 +1453,12 @@ def serialize_manuscript_content(text: str, html: str | None = None) -> str:
     )
 
 
-def deserialize_manuscript_content(raw: str | bytes | None) -> dict[str, str | None]:
+def deserialize_manuscript_content(raw: str | bytes | memoryview | None) -> dict[str, str | None]:
     if raw is None:
         return {"format": "plain_text", "text": "", "html": None}
-    raw_text = raw.decode("utf-8", errors="ignore") if isinstance(raw, bytes) else raw
+    if isinstance(raw, memoryview):
+        raw = raw.tobytes()
+    raw_text: str = raw.decode("utf-8", errors="ignore") if isinstance(raw, bytes) else str(raw)
     trimmed = raw_text.strip()
     if not trimmed:
         return {"format": "plain_text", "text": "", "html": None}
@@ -788,7 +1604,7 @@ def normalize_imported_chapters(
         text = (chapter.get("text") or "").strip()
         if not text:
             continue
-        title = bleach.clean((" ".join(str(chapter.get("title") or "").split())).strip(), tags=[], strip=True) or None
+        title = _clean_optional_text(" ".join(str(chapter.get("title") or "").split()).strip())
         html = clean_manuscript_html(chapter.get("html")) if chapter.get("html") else None
         desired_number = chapter_number if replace_existing and chapter_number else running_number
         parts = split_long_document(text) if chunk_long_documents else [text]
@@ -1189,6 +2005,79 @@ async def list_chapter_versions(
         }
         for version in versions
     ]
+
+
+def build_emotional_arc_payload(characters: list[Character]) -> dict[str, Any]:
+    tracked: list[dict[str, Any]] = []
+    latest_turning_points: list[str] = []
+    direction_map = {
+        "positive": 1.0,
+        "up": 1.0,
+        "growth": 0.8,
+        "negative": -1.0,
+        "down": -1.0,
+        "collapse": -0.9,
+        "setback": -0.7,
+        "neutral": 0.0,
+    }
+
+    def direction_score(direction: str) -> float:
+        normalized = " ".join((direction or "").split()).strip().lower()
+        for key, score in direction_map.items():
+            if key in normalized:
+                return score
+        return 0.0
+
+    ordered_characters = sorted(
+        characters,
+        key=lambda item: (item.role not in {"mc", "sc"}, -(item.mention_count or 0), item.name.lower()),
+    )
+    for character in ordered_characters:
+        raw_events = [item for item in (character.growth_events or []) if isinstance(item, dict)]
+        if not raw_events:
+            continue
+        raw_events.sort(key=lambda item: int(item.get("chapter_number") or item.get("chapter") or 0))
+        points: list[dict[str, Any]] = []
+        trajectory_score = 0.0
+        for event in raw_events:
+            chapter_number = int(event.get("chapter_number") or event.get("chapter") or character.first_chapter or 0)
+            if chapter_number <= 0:
+                continue
+            label = " ".join(str(event.get("event_title") or event.get("event") or "").split()).strip() or f"Chapter {chapter_number} shift"
+            impact_score = int(event.get("impact_score") or event.get("importance") or 5)
+            growth_direction = " ".join(str(event.get("growth_direction") or "neutral").split()).strip() or "neutral"
+            sentiment = round(direction_score(growth_direction) * max(1, impact_score) / 10, 2)
+            trajectory_score += sentiment
+            points.append(
+                {
+                    "chapter_number": chapter_number,
+                    "label": label,
+                    "sentiment": sentiment,
+                    "impact_score": impact_score,
+                    "growth_direction": growth_direction,
+                }
+            )
+        if not points:
+            continue
+        latest = points[-1]
+        latest_turning_points.append(f"{character.name}: {latest['label']} (chapter {latest['chapter_number']})")
+        tracked.append(
+            {
+                "character_id": str(character.id),
+                "character_name": character.name,
+                "role": character.role,
+                "arc_summary": character.arc_summary,
+                "trajectory_score": round(trajectory_score, 2),
+                "points": points,
+            }
+        )
+
+    tracked.sort(key=lambda item: (item["role"] not in {"mc", "sc"}, -abs(item["trajectory_score"]), item["character_name"].lower()))
+    return {
+        "focus_character_count": len(tracked),
+        "latest_turning_points": latest_turning_points[:8],
+        "characters": tracked[:10],
+    }
 
 
 async def build_prewriting_check(

@@ -85,12 +85,12 @@ export default function RegisterPage() {
     setLoading(true)
     setError(null)
     try {
-      const res = await authApi.register(email, username, password, acceptedTerms)
-      const me = res.user ?? await authApi.me()
-      if (!me) {
-        throw new Error("Could not load your profile after creating the account.")
+      const user = await authApi.register(email, username, password, acceptedTerms)
+      if (!user) {
+        setError("Could not load your account. Please try again.")
+        return
       }
-      setUser(me)
+      setUser(user)
       router.push("/library")
     } catch {
       setError("Registration failed. Email may already be taken.")

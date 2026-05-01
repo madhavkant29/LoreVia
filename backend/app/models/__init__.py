@@ -1,4 +1,18 @@
-from app.models.book import Book, BookNote, Chapter, ChapterMedia, ChapterVersion, ObsidianVaultNote, Series, SeriesBook
+from app.models.book import (
+    Book,
+    BookNote,
+    Chapter,
+    ChapterMedia,
+    ChapterVersion,
+    ObsidianVaultNote,
+    ObsidianVaultNoteSource,
+    NoteBacklink,
+    NoteLink,
+    NoteSeriesLink,
+    NoteTag,
+    Series,
+    SeriesBook,
+)
 from app.models.character import Character, CharacterState
 from app.models.intelligence import (
     BookChunk,

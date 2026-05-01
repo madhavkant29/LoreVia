@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import ARRAY, DateTime, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy import ARRAY, DateTime, Float, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -15,6 +15,15 @@ from app.core.database import Base
 class BookChunk(Base):
     """Full-book text chunks + embeddings. Core of semantic search."""
     __tablename__ = "book_chunks"
+    __table_args__ = (
+        Index(
+            "ix_book_chunks_embedding_ivfflat",
+            "embedding",
+            postgresql_using="ivfflat",
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+            postgresql_with={"lists": 100},
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     book_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)

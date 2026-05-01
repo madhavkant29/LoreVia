@@ -158,5 +158,5 @@ def _median_hex(pixels: np.ndarray) -> str:
     return _hex_from_rgb(tuple(int(round(component)) for component in rgb))
 
 
-def _hex_from_rgb(rgb: tuple[int, int, int]) -> str:
-    return "#{:02x}{:02x}{:02x}".format(*(max(0, min(255, component)) for component in rgb))
+def _hex_from_rgb(rgb: tuple[int, ...]) -> str:
+    return "#{:02x}{:02x}{:02x}".format(*(max(0, min(255, component)) for component in rgb[:3]))

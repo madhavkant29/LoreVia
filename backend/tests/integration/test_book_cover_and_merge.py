@@ -20,19 +20,18 @@ def _register_user_payload(image_size: tuple[int, int] = (120, 180)) -> bytes:
 
 
 async def _register_user(client, email: str) -> tuple[dict[str, str], uuid.UUID]:
+    from app.core.security import create_access_token
     username = email.split("@")[0][:32]
     response = await client.post(
         "/api/v1/auth/register",
         json={"email": email, "username": username, "password": "TestPass123!@#", "accepted_terms": True},
     )
     assert response.status_code == 201
-    payload = response.json()
-    me_response = await client.get(
-        "/api/v1/auth/me",
-        headers={"Authorization": f"Bearer {payload['access_token']}"},
-    )
+    token = create_access_token(str(response.json()["id"]))
+    assert token
+    me_response = await client.get("/api/v1/auth/me", headers={"Cookie": f"lorevia_access_token={token}"})
     assert me_response.status_code == 200
-    return {"Authorization": f"Bearer {payload['access_token']}"}, uuid.UUID(me_response.json()["id"])
+    return {"Cookie": f"lorevia_access_token={token}"}, uuid.UUID(me_response.json()["id"])
 
 
 @pytest.mark.asyncio
@@ -131,3 +130,39 @@ async def test_merge_characters_endpoint_merges_duplicate_records(client, db):
     assert merged.mention_count == 6
     assert len(states) == 1
     assert relationships == []
+
+
+@pytest.mark.asyncio
+async def test_delete_character_endpoint_removes_false_positive(client, db):
+    headers, user_id = await _register_user(client, "delete-owner@lorevia.app")
+
+    book = Book(
+        user_id=user_id,
+        title="Delete Test",
+        format="pdf",
+        s3_key="books/delete-test.pdf",
+        status="ready",
+        mode="author",
+    )
+    db.add(book)
+    await db.flush()
+
+    false_positive = Character(
+        book_id=book.id,
+        name="Stairs",
+        aliases=[],
+        role="background",
+        first_chapter=1,
+        mention_count=1,
+    )
+    db.add(false_positive)
+    await db.commit()
+
+    response = await client.delete(
+        f"/api/v1/books/{book.id}/characters/{false_positive.id}",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["deleted"] == str(false_positive.id)
+    assert await db.get(Character, false_positive.id) is None

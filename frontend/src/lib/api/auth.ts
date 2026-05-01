@@ -1,7 +1,6 @@
-import axios from "axios"
 import { apiClient } from "./client"
-import { clearAuthTokens, persistAuthTokens } from "./tokenStore"
-import type { TokenResponse, User } from "@/types/user"
+import type { User } from "@/types/user"
+import axios from "axios"
 
 export interface TierLimits {
   free_max_books: number
@@ -24,53 +23,27 @@ export interface TierLimits {
   power_continuity_per_minute: number
 }
 
-function isUnauthorized(error: unknown): boolean {
-  return axios.isAxiosError(error) && error.response?.status === 401
-}
-
 export const authApi = {
   register: (email: string, username: string, password: string, accepted_terms: boolean) =>
-    apiClient.post<TokenResponse>("/auth/register", { email, username, password, accepted_terms }).then(r => {
-      persistAuthTokens(r.data)
-      return r.data
-    }),
+    apiClient.post<User>("/auth/register", { email, username, password, accepted_terms }).then(r => r.data),
   login: (email: string, password: string) =>
-    apiClient.post<TokenResponse>("/auth/login", { email, password }).then(r => {
-      persistAuthTokens(r.data)
-      return r.data
-    }),
+    apiClient.post<User>("/auth/login", { email, password }).then(r => r.data),
   loginWithSupabaseToken: (token: string, accepted_terms = false) =>
-    apiClient.post<TokenResponse>("/auth/oauth/supabase", { token, accepted_terms }).then(r => {
-      persistAuthTokens(r.data)
-      return r.data
-    }),
+    apiClient.post<User>("/auth/oauth/supabase", { token, accepted_terms }).then(r => r.data),
   forgotPassword: (email: string) =>
     apiClient.post("/auth/forgot-password", { email }).then(r => r.data),
   resetPassword: (token: string, password: string) =>
     apiClient.post("/auth/reset-password", { token, password }).then(r => r.data),
-  refresh: async () => {
-    try {
-      return await apiClient.post<TokenResponse>("/auth/refresh").then(r => {
-        persistAuthTokens(r.data)
-        return r.data
-      })
-    } catch (error) {
-      if (isUnauthorized(error)) return null
-      throw error
-    }
-  },
-  logout: () => apiClient.post("/auth/logout").then(r => {
-    clearAuthTokens()
-    return r.data
-  }).catch((error) => {
-    clearAuthTokens()
-    throw error
-  }),
+  refresh: () =>
+    apiClient.post<User>("/auth/refresh").then(r => r.data),
+  logout: () => apiClient.post("/auth/logout").then(r => r.data),
   me: async () => {
     try {
       return await apiClient.get<User>("/auth/me").then(r => r.data)
     } catch (error) {
-      if (isUnauthorized(error)) return null
+      if (axios.isAxiosError(error) && error.response?.status === 401) {
+        return null
+      }
       throw error
     }
   },

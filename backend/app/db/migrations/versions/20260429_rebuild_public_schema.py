@@ -22,9 +22,12 @@ def upgrade() -> None:
     bind = op.get_bind()
     op.execute("CREATE EXTENSION IF NOT EXISTS vector")
     op.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
+    op.execute("ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(128)")
     Base.metadata.create_all(bind=bind)
 
 
 def downgrade() -> None:
-    bind = op.get_bind()
-    Base.metadata.drop_all(bind=bind)
+    raise RuntimeError(
+        "Rebuild-public-schema downgrade is disabled because it would drop the full application "
+        "schema. Restore from backup or create a fresh database instead."
+    )

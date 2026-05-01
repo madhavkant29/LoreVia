@@ -38,6 +38,18 @@ def set_auth_cookies(response: Response, access_token: str, refresh_token: str) 
     )
 
 
+def set_access_cookie(response: Response, access_token: str) -> None:
+    response.set_cookie(
+        ACCESS_TOKEN_COOKIE_NAME,
+        access_token,
+        max_age=settings.JWT_EXPIRE_MINUTES * 60,
+        httponly=True,
+        secure=auth_cookie_secure(),
+        samesite="lax",
+        path=auth_cookie_path(),
+    )
+
+
 def clear_auth_cookies(response: Response) -> None:
     response.delete_cookie(ACCESS_TOKEN_COOKIE_NAME, path=auth_cookie_path())
     response.delete_cookie(REFRESH_TOKEN_COOKIE_NAME, path=auth_cookie_path())

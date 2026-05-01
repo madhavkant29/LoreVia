@@ -6,6 +6,7 @@ from app.utils.auth_cookies import (
     auth_cookie_secure,
     clear_auth_cookies,
     set_auth_cookies,
+    set_access_cookie,
 )
 
 
@@ -60,3 +61,22 @@ def test_clear_auth_cookies_sets_expired_headers(monkeypatch):
     assert len(set_cookie_headers) == 2
     assert any(ACCESS_TOKEN_COOKIE_NAME in header for header in set_cookie_headers)
     assert any(REFRESH_TOKEN_COOKIE_NAME in header for header in set_cookie_headers)
+
+
+def test_set_access_cookie_sets_only_the_access_token(monkeypatch):
+    monkeypatch.setattr("app.core.config.settings.APP_URL", "https://getlorevia.com", raising=False)
+    monkeypatch.setattr("app.core.config.settings.DEBUG", False, raising=False)
+
+    response = Response()
+    set_access_cookie(response, "access-token")
+
+    set_cookie_headers = [
+        value.decode() if isinstance(value, bytes) else value
+        for name, value in response.raw_headers
+        if name.lower() == b"set-cookie"
+    ]
+    assert len(set_cookie_headers) == 1
+    assert ACCESS_TOKEN_COOKIE_NAME in set_cookie_headers[0]
+    assert "httponly" in set_cookie_headers[0].lower()
+    assert "samesite=lax" in set_cookie_headers[0].lower()
+    assert "path=/api/v1" in set_cookie_headers[0].lower()

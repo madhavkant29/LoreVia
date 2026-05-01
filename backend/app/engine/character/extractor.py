@@ -6,6 +6,7 @@ import json
 import logging
 import re
 from collections import Counter
+from typing import cast
 
 from app.core.config import settings
 from app.core.llm import complete_with_fallback
@@ -494,7 +495,7 @@ def _clean_character_entries(characters: list[dict], candidate_names: list[str],
         if normalized in candidate_norms and person_name_shape_score(cleaned_name) < 1 and not _looks_like_character_name(cleaned_name, source_text):
             continue
 
-        traits = item.get("traits") if isinstance(item.get("traits"), dict) else {}
+        traits = cast(dict[str, object], item.get("traits") if isinstance(item.get("traits"), dict) else {})
         arc_summary = _sanitize_summary(item.get("arc_summary"))
         if not _should_keep_character(cleaned_name, confidence, source_text, traits, arc_summary):
             continue

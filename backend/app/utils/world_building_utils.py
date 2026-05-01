@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 from collections import defaultdict
 from datetime import UTC, datetime
+import re
 
 from fastapi import HTTPException
 from sqlalchemy import delete, select
@@ -14,7 +15,7 @@ from app.engine.world.extractor import extract_world_elements_from_text, infer_e
 from app.engine.world.gap_detector import detect_consistency_flags
 from app.models.book import Book, Chapter, SeriesBook
 from app.models.character import Character
-from app.models.intelligence import WorldBuildingDocument, WorldElement, WorldGapAnalysis, WorldNote
+from app.models.intelligence import ChapterSummary, WikiEntry, WorldBuildingDocument, WorldElement, WorldGapAnalysis, WorldNote
 from app.utils.book_utils import (
     clean_manuscript_html,
     deserialize_manuscript_content,
@@ -89,7 +90,7 @@ async def list_world_building_documents(
     if not include_inactive:
         stmt = stmt.where(WorldBuildingDocument.is_active.is_(True))
     stmt = stmt.order_by(WorldBuildingDocument.updated_at.desc(), WorldBuildingDocument.created_at.desc())
-    return (await db.execute(stmt)).scalars().all()
+    return list((await db.execute(stmt)).scalars().all())
 
 
 async def get_world_building_document(
@@ -248,14 +249,149 @@ async def delete_world_building_document(
 
 async def extract_world_elements(db: AsyncSession, book: Book) -> list[WorldElement]:
     await sync_world_document_elements(db, book)
-    rows = (
-        await db.execute(
-            select(WorldElement)
-            .where(WorldElement.book_id == book.id)
-            .order_by(WorldElement.source_scope.asc(), WorldElement.name.asc())
-        )
-    ).scalars().all()
+    rows = list(
+        (
+            await db.execute(
+                select(WorldElement)
+                .where(WorldElement.book_id == book.id)
+                .order_by(WorldElement.source_scope.asc(), WorldElement.name.asc())
+            )
+        ).scalars().all()
+    )
     return rows
+
+
+async def generate_wiki_from_manuscript(db: AsyncSession, book: Book) -> list[WikiEntry]:
+    elements = await _collect_story_elements(db, book)
+    summaries = (
+        await db.execute(
+            select(Chapter.number, Chapter.title, ChapterSummary.key_events)
+            .join(ChapterSummary, ChapterSummary.chapter_id == Chapter.id)
+            .where(Chapter.book_id == book.id, ChapterSummary.mode == "detailed")
+            .order_by(Chapter.number.asc())
+        )
+    ).all()
+    characters = (
+        await db.execute(select(Character.id, Character.name).where(Character.book_id == book.id))
+    ).all()
+    character_ids = [str(character_id) for character_id, _ in characters[:5]]
+
+    existing = (
+        await db.execute(select(WikiEntry).where(WikiEntry.book_id == book.id))
+    ).scalars().all()
+    by_name = {entry.name.strip().lower(): entry for entry in existing if entry.name}
+    touched: list[WikiEntry] = []
+
+    for element in elements:
+        key = element.name.strip().lower()
+        if not key:
+            continue
+        metadata = element.analysis_metadata or {}
+        entry = by_name.get(key)
+        description = (element.description or "").strip() or f"{element.name} appears in the manuscript and has not been summarized yet."
+        if entry is None:
+            entry = WikiEntry(
+                book_id=book.id,
+                entry_type=_map_element_to_wiki_type(element.element_type),
+                name=element.name.strip(),
+                description=description,
+                first_mention=int(metadata.get("chapter_number") or 0) or None,
+                related_char_ids=character_ids or None,
+            )
+            db.add(entry)
+            by_name[key] = entry
+        else:
+            entry.entry_type = _map_element_to_wiki_type(element.element_type)
+            entry.description = description if len(description) >= len(entry.description or "") else entry.description
+            entry.first_mention = entry.first_mention or (int(metadata.get("chapter_number") or 0) or None)
+            entry.related_char_ids = entry.related_char_ids or (character_ids or None)
+        touched.append(entry)
+
+    for chapter_number, chapter_title, key_events in summaries:
+        if not isinstance(key_events, list):
+            continue
+        for event in key_events[:3]:
+            if not isinstance(event, dict):
+                continue
+            name = " ".join(str(event.get("event_title") or event.get("event") or "").split()).strip()
+            if not name:
+                continue
+            key = name.lower()
+            entry = by_name.get(key)
+            description = " ".join(str(event.get("description") or event.get("impact") or "").split()).strip() or (
+                f"{name} is tracked as a chapter event in {chapter_title or f'chapter {chapter_number}'}."
+            )
+            if entry is None:
+                entry = WikiEntry(
+                    book_id=book.id,
+                    entry_type="event",
+                    name=name,
+                    description=description,
+                    first_mention=chapter_number,
+                    related_char_ids=character_ids or None,
+                )
+                db.add(entry)
+                by_name[key] = entry
+            else:
+                entry.entry_type = entry.entry_type or "event"
+                entry.description = description if len(description) >= len(entry.description or "") else entry.description
+                entry.first_mention = entry.first_mention or chapter_number
+            touched.append(entry)
+
+    await db.flush()
+    return sorted(touched, key=lambda item: (item.entry_type, item.name.lower()))
+
+
+async def build_world_logic_response(db: AsyncSession, book: Book, query: str, mode: str) -> dict:
+    elements = await extract_world_elements(db, book)
+    context = build_world_context(elements)
+    analysis = await detect_integration_analysis(db, book) if mode == "story_integration" else await detect_world_gaps(db, book)
+    logic_alerts = list((analysis.get("consistency_flags") or [])[:4])
+    suggestions = list(
+        (analysis.get("integration_opportunities") or analysis.get("priority_gaps") or [])[:5]
+    )
+
+    ranked_elements = _rank_world_elements_for_query(elements, query)
+    citations = [
+        {
+            "id": str(element.id),
+            "name": element.name,
+            "element_type": element.element_type,
+            "source_scope": element.source_scope,
+        }
+        for element in ranked_elements[:5]
+    ]
+    simulation_steps = [
+        f"Canon focus: {element.name} behaves as a {element.element_type} with {element.source_scope} support."
+        for element in ranked_elements[:3]
+    ]
+    if not simulation_steps:
+        simulation_steps.append("No direct lore entity matched the query, so the simulator is leaning on broader world context.")
+
+    if any(token in query.lower() for token in ("react", "response", "respond", "kingdom", "court", "faction")):
+        answer = (
+            f"World logic mode traced likely reactions from the strongest matching lore nodes. "
+            f"Start with {ranked_elements[0].name if ranked_elements else 'the current canon'}, then pressure-test whether each response matches the manuscript and world corpus.\n"
+            f"{context[:900]}"
+        )
+    elif mode == "story_integration":
+        answer = (
+            f"Integration simulation found {len(suggestions)} ways to move documented lore onto the page more clearly. "
+            f"Use the matched elements below to choose the cleanest insertion point.\n{context[:900]}"
+        )
+    else:
+        answer = (
+            f"World logic scan found {len(suggestions)} continuity or coverage issues that matter most for this question. "
+            f"Use the alerts to decide whether the manuscript or the lore corpus should be treated as canonical.\n{context[:900]}"
+        )
+    return {
+        "mode": mode,
+        "answer": answer,
+        "citations": citations,
+        "suggestions": suggestions,
+        "logic_alerts": logic_alerts,
+        "simulation_steps": simulation_steps,
+    }
 
 
 async def sync_world_document_elements(db: AsyncSession, book: Book) -> list[WorldElement]:
@@ -373,14 +509,18 @@ def build_world_context(elements: list[WorldElement]) -> str:
 
 
 async def build_series_world_context(db: AsyncSession, series_id: uuid.UUID) -> str:
-    book_ids = (
-        await db.execute(select(SeriesBook.book_id).where(SeriesBook.series_id == series_id))
-    ).scalars().all()
+    book_ids = list(
+        (
+            await db.execute(select(SeriesBook.book_id).where(SeriesBook.series_id == series_id))
+        ).scalars().all()
+    )
     if not book_ids:
         return ""
-    elements = (
-        await db.execute(select(WorldElement).where(WorldElement.book_id.in_(book_ids)))
-    ).scalars().all()
+    elements = list(
+        (
+            await db.execute(select(WorldElement).where(WorldElement.book_id.in_(book_ids)))
+        ).scalars().all()
+    )
     return build_world_context(elements)
 
 
@@ -532,11 +672,12 @@ async def detect_integration_analysis(db: AsyncSession, book: Book) -> dict:
 
     for element in document_elements:
         story_match = story_by_name.get(element.name.lower())
-        usage_count = int(story_match.get("usage_count") or 0) if story_match else 0
+        story_match_data = story_match or {}
+        usage_count = int(story_match_data.get("usage_count") or 0)
         if usage_count >= 2:
             continue
         metadata = element.analysis_metadata or {}
-        target_chapter = story_match.get("chapter_number") if story_match else None
+        target_chapter = story_match_data.get("chapter_number")
         integration_opportunities.append(
             {
                 "id": f"integration-{str(element.id)}",
@@ -548,7 +689,7 @@ async def detect_integration_analysis(db: AsyncSession, book: Book) -> dict:
                     f"Reference {element.name} in chapter summaries, dialogue, or setting description so it feels lived-in.",
                 ],
                 "target_chapter": target_chapter,
-                "target_chapter_title": story_match.get("chapter_title") if story_match else None,
+                "target_chapter_title": story_match_data.get("chapter_title"),
                 "priority": 8 if usage_count == 0 else 6,
                 "world_document_id": str(element.world_document_id) if element.world_document_id else None,
                 "world_document_title": metadata.get("world_document_title"),
@@ -661,14 +802,16 @@ def _serialize_world_element(element: WorldElement) -> dict:
 
 
 async def _collect_story_elements(db: AsyncSession, book: Book) -> list[WorldElement]:
-    rows = (
-        await db.execute(
-            select(WorldElement).where(
-                WorldElement.book_id == book.id,
-                WorldElement.source_scope == "story",
+    rows = list(
+        (
+            await db.execute(
+                select(WorldElement).where(
+                    WorldElement.book_id == book.id,
+                    WorldElement.source_scope == "story",
+                )
             )
-        )
-    ).scalars().all()
+        ).scalars().all()
+    )
     if rows:
         return rows
 
@@ -771,6 +914,30 @@ async def _collect_story_characters(db: AsyncSession, book: Book) -> list[dict]:
     return results
 
 
+def _map_element_to_wiki_type(element_type: str) -> str:
+    normalized = " ".join((element_type or "").split()).strip().lower()
+    if normalized in {"geography", "location", "city", "kingdom", "region"}:
+        return "location"
+    if normalized in {"faction", "religion", "culture", "government"}:
+        return "faction"
+    if normalized in {"artifact", "item", "technology", "weapon"}:
+        return "item"
+    if normalized in {"event", "history"}:
+        return "event"
+    return "concept"
+
+
+def _rank_world_elements_for_query(elements: list[WorldElement], query: str) -> list[WorldElement]:
+    tokens = {token for token in re.findall(r"[a-z0-9']+", (query or "").lower()) if token not in STOPWORDS}
+
+    def score(element: WorldElement) -> tuple[int, int, str]:
+        haystack = f"{element.name} {element.description or ''} {element.element_type}".lower()
+        overlap = sum(1 for token in tokens if token in haystack)
+        return (overlap, int(element.usage_count or 0), element.name.lower())
+
+    return sorted(elements, key=score, reverse=True)
+
+
 def _collapse_elements(items: list[dict]) -> dict[str, dict]:
     collapsed: dict[str, dict] = {}
     for item in items:
@@ -804,19 +971,37 @@ def _build_gap_item(
     world_item: dict | None = None,
     story_item: dict | None = None,
 ) -> dict:
+    if world_item is not None:
+        item_name = str(world_item.get("name") or "")
+        world_evidence = str(world_item.get("description") or "").strip() or None
+        world_document_id = str(world_item.get("world_document_id") or "") or None
+        world_document_title = str(world_item.get("world_document_title") or "").strip() or None
+    else:
+        item_name = str(story_item.get("name") or "") if story_item else ""
+        world_evidence = None
+        world_document_id = None
+        world_document_title = None
+    if story_item is not None:
+        story_evidence = str(story_item.get("description") or "").strip() or None
+        story_chapter_number = int(story_item.get("chapter_number") or 0) or None
+        story_chapter_title = str(story_item.get("chapter_title") or "").strip() or None
+    else:
+        story_evidence = None
+        story_chapter_number = None
+        story_chapter_title = None
     return {
-        "id": f"{category}-{str(world_item.get('name') if world_item else story_item.get('name')).lower().replace(' ', '-')}",
+        "id": f"{category}-{item_name.lower().replace(' ', '-')}",
         "category": category,
         "severity": severity,
         "title": title,
         "description": description,
         "suggested_fix": suggested_fix,
-        "world_evidence": str(world_item.get("description") or "").strip() or None if world_item else None,
-        "story_evidence": str(story_item.get("description") or "").strip() or None if story_item else None,
-        "world_document_id": str(world_item.get("world_document_id") or "") or None if world_item else None,
-        "world_document_title": str(world_item.get("world_document_title") or "").strip() or None if world_item else None,
-        "story_chapter_number": int(story_item.get("chapter_number") or 0) or None if story_item else None,
-        "story_chapter_title": str(story_item.get("chapter_title") or "").strip() or None if story_item else None,
+        "world_evidence": world_evidence,
+        "story_evidence": story_evidence,
+        "world_document_id": world_document_id,
+        "world_document_title": world_document_title,
+        "story_chapter_number": story_chapter_number,
+        "story_chapter_title": story_chapter_title,
         "character_name": None,
         "priority": priority,
     }

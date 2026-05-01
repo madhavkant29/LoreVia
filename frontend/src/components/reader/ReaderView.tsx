@@ -208,6 +208,7 @@ export function ReaderView({ bookId, chapterNum }: Props) {
             totalChapters={data.total_chapters ?? null}
             textUrl={data.text_url}
             textContent={data.text_content ?? null}
+            htmlContent={data.html_content ?? null}
             media={data.media ?? []}
             characters={data.characters}
             onTap={tap}

@@ -34,3 +34,33 @@ class EditorialReviewRequest(BaseModel):
 class VoiceConsistencyRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=MAX_PASSAGE_CHARS)
     chapter_num: int | None = Field(default=None, ge=1)
+
+
+class ProseTightenRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=4_000)
+    chapter_num: int | None = Field(default=None, ge=1)
+
+
+class InlineContinuityRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=MAX_PASSAGE_CHARS)
+    chapter_num: int | None = Field(default=None, ge=1)
+
+
+class ProseTightenResponse(BaseModel):
+    tightened_text: str
+    rationale: list[str] = Field(default_factory=list)
+    changed: bool = True
+
+
+class InlineContinuityIssueOut(BaseModel):
+    severity: str
+    title: str
+    snippet: str
+    explanation: str
+    suggestion: str
+
+
+class InlineContinuityResponse(BaseModel):
+    issues: list[InlineContinuityIssueOut] = Field(default_factory=list)
+    memory_bank: list[str] = Field(default_factory=list)
+    overall_verdict: str

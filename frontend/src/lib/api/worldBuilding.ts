@@ -5,6 +5,9 @@ import type {
   WorldGapResult,
   WorldIntegrationResult,
   WorldNote,
+  WorldQueryResponse,
+  WikiEntry,
+  WikiGenerationResponse,
 } from "@/types/world-building"
 
 export const worldBuildingApi = {
@@ -49,7 +52,11 @@ export const worldBuildingApi = {
   getIntegration: (bookId: string) =>
     apiClient.get<WorldIntegrationResult>(`/intelligence/${bookId}/world-building/integration`).then(r => r.data),
   query: (bookId: string, payload: { query: string; mode?: string | null }) =>
-    apiClient.post(`/intelligence/${bookId}/world-building/query`, payload).then(r => r.data),
+    apiClient.post<WorldQueryResponse>(`/intelligence/${bookId}/world-building/query`, payload).then(r => r.data),
+  listWiki: (bookId: string) =>
+    apiClient.get<WikiEntry[]>(`/intelligence/${bookId}/world-building/wiki`).then(r => r.data),
+  generateWiki: (bookId: string) =>
+    apiClient.post<WikiGenerationResponse>(`/intelligence/${bookId}/world-building/wiki/generate`).then(r => r.data),
   getSeriesAnalysis: (seriesId: string) =>
     apiClient.get(`/intelligence/series/${seriesId}/world-building/series-analysis`).then(r => r.data),
   listNotes: (bookId: string) =>

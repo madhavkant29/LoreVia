@@ -1,6 +1,6 @@
 import { apiClient } from "./client"
 import { cachedGet, invalidateCachedGets } from "./requestCache"
-import type { Book, BookEvents, BookNote, BookSeries, ChapterConsistencyReport, ChapterVersion, ObsidianPreview, ObsidianVaultNote, ObsidianVaultNoteSaveResult, PreWritingCheck, PublicBook, PublicBookDetail, PublicChapter, SavedQuote, UserStats } from "@/types/book"
+import type { Book, BookEvents, BookNote, BookSeries, ChapterConsistencyReport, ChapterVersion, EmotionalArcOverview, ObsidianGraph, ObsidianNoteRelations, ObsidianPreview, ObsidianVaultNote, ObsidianVaultNoteSaveResult, PreWritingCheck, PublicBook, PublicBookDetail, PublicChapter, ReadabilityMetrics, SavedQuote, UserStats, WriterWorkspace } from "@/types/book"
 import type { Character, CharacterShareResponse } from "@/types/character"
 
 export interface ManuscriptImportResponse {
@@ -48,10 +48,23 @@ export const booksApi = {
     cachedGet(bookCacheKey(id, `chapter-versions:${chapterNumber}:${limit}`), 30 * 1000, () =>
       apiClient.get<ChapterVersion[]>(`/books/${id}/chapter-versions`, { params: { chapter_number: chapterNumber, limit } }).then(r => r.data)
     ),
-  getCharacters: (id: string) =>
-    cachedGet(bookCacheKey(id, "characters"), 45 * 1000, () =>
-      apiClient.get<Character[]>(`/books/${id}/characters`).then(r => r.data)
+  getWriterWorkspace: (id: string) =>
+    cachedGet(bookCacheKey(id, "writer-workspace"), 10 * 1000, () =>
+      apiClient.get<WriterWorkspace>(`/books/${id}/writer-workspace`).then(r => r.data)
     ),
+  updateWriterWorkspace: (
+    id: string,
+    payload: Partial<WriterWorkspace>
+  ) => apiClient.put<WriterWorkspace>(`/books/${id}/writer-workspace`, payload).then(r => {
+    invalidateCachedGets(bookCacheKey(id, "writer-workspace"))
+    return r.data
+  }),
+  getEmotionalArc: (id: string) =>
+    cachedGet(bookCacheKey(id, "emotional-arc"), 20 * 1000, () =>
+      apiClient.get<EmotionalArcOverview>(`/books/${id}/emotional-arc`).then(r => r.data)
+    ),
+  getReadability: (id: string, text: string) =>
+    apiClient.post<ReadabilityMetrics>(`/books/${id}/manuscript/readability`, { text }).then(r => r.data),
   getEvents: (id: string) =>
     cachedGet(bookCacheKey(id, "events"), 20 * 1000, () =>
       apiClient.get<BookEvents>(`/books/${id}/events`).then(r => r.data)
@@ -59,6 +72,10 @@ export const booksApi = {
   getReaderEvents: (id: string, chapter?: number) =>
     cachedGet(bookCacheKey(id, `reader-events:${chapter ?? "auto"}`), 20 * 1000, () =>
       apiClient.get<BookEvents>(`/books/${id}/events/reader`, { params: typeof chapter === "number" ? { chapter } : undefined }).then(r => r.data)
+    ),
+  getCharacters: (id: string) =>
+    cachedGet(bookCacheKey(id, "characters"), 45 * 1000, () =>
+      apiClient.get<Character[]>(`/books/${id}/characters`).then(r => r.data)
     ),
   updateCharacter: (
     bookId: string,
@@ -86,6 +103,19 @@ export const booksApi = {
     invalidateBookCache(bookId)
     return r.data
   }),
+  mergeCharacters: (bookId: string, payload: { primaryId: string; secondaryId: string }) =>
+    apiClient.post<{ merged: string }>(`/books/${bookId}/characters/merge`, {
+      primary_id: payload.primaryId,
+      secondary_id: payload.secondaryId,
+    }).then(r => {
+      invalidateBookCache(bookId)
+      return r.data
+    }),
+  deleteCharacter: (bookId: string, characterId: string) =>
+    apiClient.delete<{ deleted: string }>(`/books/${bookId}/characters/${characterId}`).then(r => {
+      invalidateBookCache(bookId)
+      return r.data
+    }),
   updateRelationship: (
     bookId: string,
     relationshipId: string,
@@ -118,6 +148,43 @@ export const booksApi = {
     apiClient.get<ObsidianVaultNote[]>(`/books/${id}/export/character-bible/notes`).then(r => r.data),
   saveCharacterBibleObsidianNote: (id: string, payload: { path: string; content: string }) =>
     apiClient.put<ObsidianVaultNoteSaveResult>(`/books/${id}/export/character-bible/notes`, payload).then(r => r.data),
+  listObsidianNotes: (id: string) =>
+    cachedGet(bookCacheKey(id, "obsidian-notes"), 10 * 1000, () =>
+      apiClient.get<ObsidianVaultNote[]>(`/books/${id}/notes/obsidian`).then(r => r.data)
+    ),
+  getObsidianGraph: (id: string) =>
+    cachedGet(bookCacheKey(id, "obsidian-graph"), 10 * 1000, () =>
+      apiClient.get<ObsidianGraph>(`/books/${id}/notes/obsidian/graph`).then(r => r.data)
+    ),
+  getObsidianNoteRelations: (id: string, path: string) =>
+    cachedGet(bookCacheKey(id, `obsidian-relations:${path.toLowerCase()}`), 10 * 1000, () =>
+      apiClient.get<ObsidianNoteRelations>(`/books/${id}/notes/obsidian/relations`, { params: { path } }).then(r => r.data)
+    ),
+  saveObsidianNote: (id: string, payload: { path: string; content: string }) =>
+    apiClient.put<ObsidianVaultNoteSaveResult>(`/books/${id}/notes/obsidian`, payload).then(r => {
+      invalidateCachedGets(bookCacheKey(id, "obsidian-notes"))
+      invalidateCachedGets(bookCacheKey(id, "obsidian-graph"))
+      invalidateCachedGets(bookCacheKey(id, "obsidian-relations:"))
+      return r.data
+    }),
+  deleteObsidianNote: (id: string, path: string) =>
+    apiClient.delete(`/books/${id}/notes/obsidian/${encodeURIComponent(path)}`).then(() => {
+      invalidateCachedGets(bookCacheKey(id, "obsidian-notes"))
+      invalidateCachedGets(bookCacheKey(id, "obsidian-graph"))
+      invalidateCachedGets(bookCacheKey(id, "obsidian-relations:"))
+    }),
+  importObsidianNotes: (id: string, file: File) => {
+    const form = new FormData()
+    form.append("file", file)
+    return apiClient.post<ObsidianVaultNoteSaveResult[]>(`/books/${id}/notes/obsidian/import`, form).then(r => {
+      invalidateCachedGets(bookCacheKey(id, "obsidian-notes"))
+      invalidateCachedGets(bookCacheKey(id, "obsidian-graph"))
+      invalidateCachedGets(bookCacheKey(id, "obsidian-relations:"))
+      return r.data
+    })
+  },
+  exportObsidianNotes: (id: string) =>
+    apiClient.get<Blob>(`/books/${id}/notes/obsidian/export`, { responseType: "blob" }).then(r => r.data),
   saveBookNote: (
     id: string,
     payload: { noteId?: string | null; chapterNumber?: number | null; title?: string | null; body: string }
@@ -197,6 +264,7 @@ export const booksApi = {
       description?: string
       seriesIds?: string[]
       autoExtractCover?: boolean
+      preserveChapterNumbers?: boolean
       coverFile?: File | null
       mode?: "reader" | "author"
       onProgress?: (percent: number) => void
@@ -214,9 +282,9 @@ export const booksApi = {
     })
     if (options?.mode) form.append("mode", options.mode)
     form.append("auto_extract_cover", options?.autoExtractCover === false ? "false" : "true")
+    form.append("preserve_chapter_numbers", options?.preserveChapterNumbers ? "true" : "false")
     if (options?.coverFile) form.append("cover_file", options.coverFile)
     return apiClient.post("/books/upload", form, {
-      headers: { "Content-Type": "multipart/form-data" },
       onUploadProgress: (event) => {
         if (!options?.onProgress || !event.total) return
         const percent = Math.min(100, Math.max(0, Math.round((event.loaded / event.total) * 100)))
@@ -250,16 +318,18 @@ export const booksApi = {
     if (payload.chunkLongDocuments) form.append("chunk_long_documents", "true")
     if (payload.splitIntoChapters === false) form.append("split_into_chapters", "false")
     payload.files?.forEach((file) => form.append("files", file))
-    return apiClient.post<ManuscriptImportResponse>(`/books/${bookId}/manuscript/import`, form, {
-      headers: { "Content-Type": "multipart/form-data" },
-    }).then(r => {
+    return apiClient.post<ManuscriptImportResponse>(`/books/${bookId}/manuscript/import`, form).then(r => {
       invalidateBookCache(bookId)
       return r.data
     })
   },
-  exportManuscript: (bookId: string, format: "pdf" | "docx" = "docx") =>
+  exportManuscript: (
+    bookId: string,
+    format: "pdf" | "docx" | "epub" = "docx",
+    preset: "standard_manuscript" | "trade_paperback" | "kdp_paperback" = "standard_manuscript"
+  ) =>
     apiClient.get<Blob>(`/books/${bookId}/manuscript/export`, {
-      params: { format },
+      params: { format, preset },
       responseType: "blob",
     }).then(r => r.data),
   delete: (id: string) => apiClient.delete<Book>(`/books/${id}`).then(r => {

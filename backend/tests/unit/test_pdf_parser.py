@@ -1,6 +1,7 @@
 from app.parsers.pdf_parser import (
     _assemble_text_parts,
     _blocks_to_paragraphs,
+    _extract_source_number_from_heading,
     _drop_front_matter_text_parts,
     _extract_heading,
     _heading_remainder,
@@ -90,3 +91,28 @@ def test_should_merge_across_pages_for_unfinished_paragraph():
 
 def test_should_not_merge_across_pages_when_next_block_is_heading():
     assert not _should_merge_across_pages("The sentence carries over", "Chapter 3")
+
+
+def test_extract_source_number_from_heading_supports_roman_numerals():
+    assert _extract_source_number_from_heading("Chapter XIV") == 14
+
+
+def test_extract_source_number_from_heading_supports_number_words():
+    assert _extract_source_number_from_heading("Chapter Three") == 3
+
+
+def test_extract_source_number_from_heading_supports_compound_number_words():
+    assert _extract_source_number_from_heading("Chapter Twenty-One") == 21
+
+
+def test_extract_source_number_from_heading_supports_compound_ordinal_words():
+    assert _extract_source_number_from_heading("Chapter Thirty First") == 31
+
+
+def test_extract_source_number_from_heading_supports_letter_labels():
+    assert _extract_source_number_from_heading("Chapter C") == 3
+    assert _extract_source_number_from_heading("Chapter AA") == 27
+
+
+def test_extract_source_number_from_heading_supports_numeric_suffixes():
+    assert _extract_source_number_from_heading("Chapter 14A") == 14

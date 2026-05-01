@@ -3,15 +3,13 @@ from __future__ import annotations
 import re
 import uuid
 from collections import Counter
+from typing import Any, cast
 
 import fitz
 
 CHAPTER_RE = re.compile(
     r"^(?:(?:chapter|ch\.?|part|volume|vol\.?|book|act|episode|section|scene)\s+"
-    r"(?:\d+|[ivxlcdm]+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|"
-    r"thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|"
-    r"first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|"
-    r"eleventh|twelfth|thirteenth|fourteenth|fifteenth|sixteenth|seventeenth|eighteenth|nineteenth|twentieth)"
+    r"(?:\d+[a-z]?|[ivxlcdm]+|[a-z]{1,3}|[a-z]+(?:[-\s][a-z]+)*)"
     r"(?:\s*[:.\-]\s*.+)?|prologue|epilogue|interlude|afterword|appendix(?:\s+[a-z0-9]+)?)$",
     re.IGNORECASE,
 )
@@ -26,10 +24,74 @@ ORNAMENT_RE = re.compile(r"[\u2600-\u27ff\u3000-\u303f\uFF00-\uFFEF\U0001F000-\U
 MEDIA_MARKER_TEMPLATE = "[[IMAGE:{marker}]]"
 MEDIA_MARKER_RE = re.compile(r"\[\[IMAGE:[^\]]+\]\]")
 PARAGRAPH_SPLIT_MAX_WORDS = 4000
+NUMBER_WORDS = {
+    "zero": 0,
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+    "eleven": 11,
+    "twelve": 12,
+    "thirteen": 13,
+    "fourteen": 14,
+    "fifteen": 15,
+    "sixteen": 16,
+    "seventeen": 17,
+    "eighteen": 18,
+    "nineteen": 19,
+    "twenty": 20,
+    "thirty": 30,
+    "forty": 40,
+    "fifty": 50,
+    "sixty": 60,
+    "seventy": 70,
+    "eighty": 80,
+    "ninety": 90,
+}
+ORDINAL_WORDS = {
+    "first": 1,
+    "second": 2,
+    "third": 3,
+    "fourth": 4,
+    "fifth": 5,
+    "sixth": 6,
+    "seventh": 7,
+    "eighth": 8,
+    "ninth": 9,
+    "tenth": 10,
+    "eleventh": 11,
+    "twelfth": 12,
+    "thirteenth": 13,
+    "fourteenth": 14,
+    "fifteenth": 15,
+    "sixteenth": 16,
+    "seventeenth": 17,
+    "eighteenth": 18,
+    "nineteenth": 19,
+    "twentieth": 20,
+    "thirtieth": 30,
+    "fortieth": 40,
+    "fiftieth": 50,
+    "sixtieth": 60,
+    "seventieth": 70,
+    "eightieth": 80,
+    "ninetieth": 90,
+}
+LETTER_HEADING_RE = re.compile(r"^[a-z]{1,3}$", re.IGNORECASE)
+HEADING_NUMBER_RE = re.compile(
+    r"^(?:chapter|ch\.?|part|volume|vol\.?|book|act|episode|section|scene)\s+([a-z0-9ivxlcdm]+(?:[-\s][a-z0-9ivxlcdm]+)*)\b",
+    re.IGNORECASE,
+)
 
 
-def parse_pdf(raw_bytes: bytes) -> list[dict]:
-    doc = fitz.open(stream=raw_bytes, filetype="pdf")
+def parse_pdf(raw_bytes: bytes, *, split_large_chapters: bool = True) -> list[dict]:
+    doc = cast(Any, fitz).open(stream=raw_bytes, filetype="pdf")
     try:
         repeated_noise = _detect_repeated_headers(doc)
         stream = []
@@ -65,14 +127,14 @@ def parse_pdf(raw_bytes: bytes) -> list[dict]:
                     )
 
         chapters = _build_chapters(stream)
-        chapters = _normalize_chapters(chapters)
+        chapters = _normalize_chapters(chapters, split_large_chapters=split_large_chapters)
         return chapters or [{"number": 1, "title": "Full Text", "text": "", "images": []}]
     finally:
         doc.close()
 
 
 def extract_first_page_cover(raw_bytes: bytes) -> tuple[bytes, str] | None:
-    doc = fitz.open(stream=raw_bytes, filetype="pdf")
+    doc = cast(Any, fitz).open(stream=raw_bytes, filetype="pdf")
     try:
         if doc.page_count == 0:
             return None
@@ -84,9 +146,10 @@ def extract_first_page_cover(raw_bytes: bytes) -> tuple[bytes, str] | None:
 
 
 def _page_blocks(page: fitz.Page) -> list[dict]:
+    page_any = cast(Any, page)
     items: list[dict] = []
 
-    for block in page.get_text("blocks"):
+    for block in page_any.get_text("blocks"):
         if len(block) < 5:
             continue
         x0, y0, x1, y1, text = block[:5]
@@ -102,7 +165,7 @@ def _page_blocks(page: fitz.Page) -> list[dict]:
             }
         )
 
-    raw_dict = page.get_text("dict")
+    raw_dict = page_any.get_text("dict")
     for block in raw_dict.get("blocks", []):
         if block.get("type") != 1:
             continue
@@ -212,31 +275,110 @@ def _build_chapters(stream: list[dict]) -> list[dict]:
     return chapters
 
 
-def _normalize_chapters(chapters: list[dict]) -> list[dict]:
+def _normalize_chapters(chapters: list[dict], *, split_large_chapters: bool) -> list[dict]:
     normalized: list[dict] = []
     next_number = 1
     for chapter in chapters:
         text_parts = _drop_front_matter_text_parts(chapter["text_parts"])
         if not any(part.strip() for part in text_parts) and not chapter["images"]:
             continue
-        split_parts = _split_large_chapter_parts(text_parts)
+        split_parts = _split_large_chapter_parts(text_parts) if split_large_chapters else [text_parts]
+        chapter_title = chapter.get("title") or f"Chapter {next_number}"
+        source_number = _extract_source_number_from_heading(chapter.get("title"))
         for part_index, text_parts_part in enumerate(split_parts, start=1):
             text = _assemble_text_parts(text_parts_part)
             if not text and not chapter["images"]:
                 continue
-            title = f"Chapter {next_number}"
+            title = chapter_title
             if len(split_parts) > 1:
-                title = f"{title} - Part {part_index}"
+                title = f"{chapter_title} - Part {part_index}"
             normalized.append(
                 {
                     "number": next_number,
                     "title": title,
                     "text": text,
                     "images": _images_for_text_parts(text_parts_part, chapter["images"]),
+                    "source_number": source_number if len(split_parts) == 1 else None,
                 }
             )
             next_number += 1
     return normalized
+
+
+def _extract_source_number_from_heading(title: str | None) -> int | None:
+    if not title:
+        return None
+    match = HEADING_NUMBER_RE.match(title.strip())
+    if not match:
+        return None
+    raw_number = match.group(1).strip().lower().rstrip(".:-")
+    if raw_number.isdigit():
+        return int(raw_number)
+    digit_with_suffix = re.fullmatch(r"(\d+)[a-z]", raw_number)
+    if digit_with_suffix:
+        return int(digit_with_suffix.group(1))
+    if raw_number in NUMBER_WORDS:
+        return NUMBER_WORDS[raw_number]
+    if raw_number in ORDINAL_WORDS:
+        return ORDINAL_WORDS[raw_number]
+    word_number = _word_number_to_int(raw_number)
+    if word_number is not None:
+        return word_number
+    letter_number = _letter_sequence_to_int(raw_number)
+    if letter_number is not None:
+        return letter_number
+    roman_value = _roman_to_int(raw_number)
+    return roman_value if roman_value and roman_value > 0 else None
+
+
+def _word_number_to_int(value: str) -> int | None:
+    normalized = value.strip().lower().replace("-", " ")
+    parts = [part for part in normalized.split() if part]
+    if not parts:
+        return None
+    if len(parts) == 1:
+        if parts[0] in NUMBER_WORDS:
+            return NUMBER_WORDS[parts[0]]
+        if parts[0] in ORDINAL_WORDS:
+            return ORDINAL_WORDS[parts[0]]
+        return None
+    if len(parts) != 2:
+        return None
+
+    tens, ones = parts
+    if tens not in NUMBER_WORDS or NUMBER_WORDS[tens] < 20 or NUMBER_WORDS[tens] % 10 != 0:
+        return None
+    if ones in NUMBER_WORDS and 0 < NUMBER_WORDS[ones] < 10:
+        return NUMBER_WORDS[tens] + NUMBER_WORDS[ones]
+    if ones in ORDINAL_WORDS and 0 < ORDINAL_WORDS[ones] < 10:
+        return NUMBER_WORDS[tens] + ORDINAL_WORDS[ones]
+    return None
+
+
+def _letter_sequence_to_int(value: str) -> int | None:
+    normalized = value.strip().lower()
+    if not LETTER_HEADING_RE.fullmatch(normalized):
+        return None
+    total = 0
+    for char in normalized:
+        total = (total * 26) + (ord(char) - ord("a") + 1)
+    return total or None
+
+
+def _roman_to_int(value: str) -> int | None:
+    roman_map = {"i": 1, "v": 5, "x": 10, "l": 50, "c": 100, "d": 500, "m": 1000}
+    total = 0
+    previous = 0
+    for char in reversed(value.lower()):
+        current = roman_map.get(char)
+        if current is None:
+            return None
+        if current < previous:
+            total -= current
+        else:
+            total += current
+            previous = current
+    return total or None
 
 
 def _blank_chapter(number: int, title: str | None = None) -> dict:
@@ -253,10 +395,12 @@ def _chapter_has_content(chapter: dict) -> bool:
 
 
 def _detect_repeated_headers(doc: fitz.Document) -> set[str]:
+    doc_any = cast(Any, doc)
     seen: list[str] = []
-    for page in doc:
-        height = float(page.rect.height or 0)
-        for block in page.get_text("blocks"):
+    for page in doc_any:
+        page_any = cast(Any, page)
+        height = float(page_any.rect.height or 0)
+        for block in page_any.get_text("blocks"):
             if len(block) < 5:
                 continue
             x0, y0, x1, y1, text = block[:5]

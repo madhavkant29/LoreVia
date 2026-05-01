@@ -24,7 +24,7 @@ export default function ForeshadowingPage() {
       setItems(res.items)
       setError(null)
     }).catch((e) => {
-      setError(e.response?.data?.detail ?? "Foreshadowing unavailable")
+      setError("Foreshadowing unavailable")
     }).finally(() => setLoading(false))
   }, [bookId])
 
