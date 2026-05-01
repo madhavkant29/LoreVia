@@ -51,3 +51,11 @@ pytest tests/ -v
 | GET | /api/v1/reader/{id}/recall | Memory recall |
 | POST | /api/v1/intelligence/{id}/predict | Prediction engine |
 | POST | /api/v1/intelligence/{id}/chat/{char_id} | Character chat |
+
+
+## to run backend tests -->
+```bash
+cd backend
+.\.venv\Scripts\python.exe -m pytest tests -v  
+
+ ```

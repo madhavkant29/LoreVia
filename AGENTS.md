@@ -144,3 +144,42 @@ When adding a new table or changing schema:
 - **Never let Alembic infer a remote database from app settings.** For non-local databases, set `ALEMBIC_DATABASE_URL` explicitly, confirm the target, and refuse to run if an upgrade block contains destructive operations unless you intentionally set the destructive override.
 - **Use descriptive revision IDs** — e.g., `20260426_add_character_classification` instead of generic IDs.
 - **Document breaking changes** in the migration docstring if the migration cannot be fully reversed.
+
+### Alembic Safety Checklist
+
+Before any `alembic upgrade head` run, follow this exact sequence:
+
+1. Confirm you are using the repo venv and not a global Alembic install.
+   ```powershell
+   & .\.venv\Scripts\python.exe -m alembic --version
+   ```
+2. Inspect the target revision and current database state before upgrading.
+   ```powershell
+   & .\.venv\Scripts\python.exe -m alembic current
+   & .\.venv\Scripts\python.exe -m alembic heads
+   ```
+3. Set the database URL explicitly for the target database.
+   ```powershell
+   $env:ALEMBIC_DATABASE_URL="postgresql://<user>:<password>@<host>:5432/postgres?sslmode=require"
+   ```
+4. Confirm you really intend to run against a remote database.
+   ```powershell
+   $env:ALEMBIC_CONFIRM_REMOTE="YES_I_AM_SURE"
+   ```
+5. Re-open the migration file and scan for destructive operations before running it.
+   - Treat `drop_table`, `drop_column`, `drop_index`, `drop_constraint`, `TRUNCATE`, `CASCADE`, and schema rebuilds as a stop sign unless you explicitly planned them.
+   - If the migration changes tables that already contain production data, verify the `upgrade()` and `downgrade()` paths manually before proceeding.
+6. Run the upgrade with the repo interpreter.
+   ```powershell
+   & .\.venv\Scripts\python.exe -m alembic upgrade head
+   ```
+
+If there is any doubt about the target database, stop and verify the connection string, revision, and migration diff again before executing the upgrade.
+
+### Database Protection Rules
+
+- Never run CI, local migration scripts, or GitHub-pushed changes against a production database unless the target is explicitly named and confirmed.
+- Never let a migration infer production settings from `.env` alone.
+- Prefer local or staging verification first, then run production with an explicit `ALEMBIC_DATABASE_URL`.
+- After a schema change, verify `alembic current`, `alembic heads`, and the affected table list before considering the migration complete.
+- If a migration contains schema recreation, bulk deletes, or `CASCADE`, pause and get a second review before applying it.

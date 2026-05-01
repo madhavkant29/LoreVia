@@ -1,6 +1,7 @@
 """Integration tests for the Obsidian export preview endpoint."""
 
 import io
+import uuid
 import zipfile
 
 import pytest
@@ -14,9 +15,10 @@ from app.models.user import User
 
 
 async def _build_obsidian_preview_book(db):
+    suffix = uuid.uuid4().hex[:8]
     user = User(
-        email="obsidian-preview@lorevia.app",
-        username="obsidian-preview",
+        email=f"obsidian-preview-{suffix}@lorevia.app",
+        username=f"obsidian-preview-{suffix}",
         password_hash="hash",
     )
     db.add(user)
@@ -35,20 +37,24 @@ async def _build_obsidian_preview_book(db):
     aria = Character(
         book_id=book.id,
         name="Aria",
+        role="mc",
         first_chapter=1,
         mention_count=5,
         trait_state={},
         personality_tags=["curious"],
         motivations=["find the truth"],
         fears=["losing Blaire"],
+        arc_summary="Aria pushes toward the truth.",
     )
     blaire = Character(
         book_id=book.id,
         name="Blaire",
+        role="sc",
         first_chapter=2,
         mention_count=3,
         trait_state={},
         personality_tags=["calm"],
+        arc_summary="Blaire steadies the search.",
     )
     db.add_all([aria, blaire])
     await db.flush()
@@ -183,7 +189,7 @@ async def test_obsidian_bible_preview_returns_folder_manifest(client, db):
     assert payload["files"][0]["path"].endswith("000 - Index.md")
     assert any(file["path"].endswith("Characters/Aria.md") for file in payload["files"])
     assert any(file["path"].endswith("Major Events/Aria-arrives.md") for file in payload["files"])
-    assert any("[[Characters/Blaire|Blaire]]" in file["content"] for file in payload["files"] if file["path"].endswith("Characters/Aria.md"))
+    assert any("[[Blaire]]" in file["content"] for file in payload["files"] if file["path"].endswith("Characters/Aria.md"))
 
 
 @pytest.mark.asyncio

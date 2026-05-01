@@ -74,6 +74,7 @@ class Book(Base):
         foreign_keys="NoteSeriesLink.source_book_id",
         back_populates="source_book",
         cascade="all, delete-orphan",
+        lazy="selectin",
     )
     primary_series = relationship("Series", foreign_keys=[primary_series_id], back_populates="primary_books")
     series_memberships = relationship("SeriesBook", back_populates="book", cascade="all, delete-orphan")

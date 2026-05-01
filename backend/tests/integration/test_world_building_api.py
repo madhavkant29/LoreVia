@@ -44,7 +44,7 @@ async def test_world_building_documents_gap_detection_and_notes(client, db, monk
     monkeypatch.setattr("app.api.v1.routes.world_building.download_book", fake_download_book)
     monkeypatch.setattr("app.api.v1.routes.books.download_book", fake_download_book)
 
-    headers, user_id = await _register_user(client, "world-api@lorevia.app")
+    headers, user_id = await _register_user(client, f"world-api-{uuid.uuid4().hex[:8]}@lorevia.app")
     book = Book(user_id=user_id, title="Worldbook", format="pdf", s3_key="worldbook.pdf", status="ready", total_chapters=1, mode="author")
     db.add(book)
     await db.flush()

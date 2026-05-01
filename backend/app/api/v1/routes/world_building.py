@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps.auth import get_current_user
 from app.core.database import get_db
+from app.core.storage import download_book
 from app.models.book import Book, Series, SeriesBook
 from app.models.intelligence import WikiEntry, WorldBuildingDocument, WorldElement, WorldGapAnalysis, WorldNote
 from app.schemas.world_building import (

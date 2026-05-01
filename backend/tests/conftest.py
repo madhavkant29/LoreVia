@@ -44,6 +44,16 @@ def mock_storage_uploads(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def mock_email_delivery(monkeypatch):
+    """Prevent tests from consuming Resend quota."""
+    def _fake_send(*args, **kwargs):
+        return {"id": "test-email-id"}
+
+    monkeypatch.setattr("app.services.email_service._send", lambda payload: True, raising=False)
+    monkeypatch.setattr("resend.Emails.send", _fake_send, raising=False)
+
+
+@pytest.fixture(autouse=True)
 def mock_celery_tasks(monkeypatch):
     """Mock Celery tasks to avoid worker dependency in all tests."""
     class _FakeTask:

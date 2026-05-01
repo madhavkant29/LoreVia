@@ -1,5 +1,6 @@
 "use client"
 
+import { Suspense } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 
@@ -7,6 +8,14 @@ import { UploadModal } from "@/components/modals/UploadModal"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 
 export default function AddChapterPage() {
+  return (
+    <Suspense fallback={null}>
+      <AddChapterPageInner />
+    </Suspense>
+  )
+}
+
+function AddChapterPageInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const { theme } = usePreferencesStore()

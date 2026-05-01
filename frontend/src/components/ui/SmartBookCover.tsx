@@ -61,7 +61,6 @@ export function SmartBookCover({
       style={fallbackStyle}
     >
       {hasImage ? (
-        // eslint-disable-next-line @next/next/no-img-element
         <img
           src={imageSrc}
           alt={`${title} cover`}

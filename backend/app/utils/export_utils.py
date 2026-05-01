@@ -238,7 +238,7 @@ def _build_obsidian_manifest(
         "- [[Plot Threads/Index|Plot Threads]]",
         "- [[Wiki/Index|Wiki]]",
         "- [[Reading Log/Index|Reading Log]]",
-        "- [[Story Major Events/Index|Story Major Events]]",
+        "- [[Major Events/Index|Major Events]]",
         "",
     ]
     files.append({
@@ -486,12 +486,12 @@ def _build_obsidian_manifest(
             "content": "\n".join(lines),
         })
 
-    major_index_lines = ["# Story Major Events", ""]
+    major_index_lines = ["# Major Events", ""]
     for event in chapter_events:
         major_index_lines.append(f"- [[{event['title']}]]")
     major_index_lines.append("")
     files.append({
-        "path": f"{root_folder}/Story Major Events/Index.md",
+        "path": f"{root_folder}/Major Events/Index.md",
         "content": "\n".join(major_index_lines),
     })
 
@@ -527,7 +527,7 @@ def _build_obsidian_manifest(
         if involved:
             lines.extend(["## Involved Characters", "", *[f"- {item}" for item in involved], ""])
         files.append({
-            "path": f"{root_folder}/Story Major Events/{_safe_name(title)}.md",
+            "path": f"{root_folder}/Major Events/{_safe_name(title)}.md",
             "content": "\n".join(lines),
         })
 

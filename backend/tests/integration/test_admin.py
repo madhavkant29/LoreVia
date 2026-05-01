@@ -21,13 +21,25 @@ async def _register_user(client, email: str) -> tuple[dict[str, str], uuid.UUID]
 
 @pytest.mark.asyncio
 async def test_admin_queue_depth_reports_redis_lengths(client, db, monkeypatch):
-    headers, user_id = await _register_user(client, "admin-queue-depth@lorevia.app")
+    headers, user_id = await _register_user(client, f"admin-queue-depth-{uuid.uuid4().hex[:8]}@lorevia.app")
     user = await db.get(User, user_id)
     assert user is not None
     user.tier = "admin"
     await db.commit()
 
     class FakeRedis:
+        async def get(self, key: str):
+            return None
+
+        async def set(self, key: str, value, ex=None, nx=False):
+            return True
+
+        async def exists(self, *keys):
+            return 0
+
+        async def incr(self, key: str):
+            return 1
+
         async def llen(self, key: str) -> int:
             return {
                 "extraction": 7,

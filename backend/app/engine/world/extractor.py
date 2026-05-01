@@ -34,21 +34,37 @@ def extract_world_elements_from_text(text: str, *, chapter_number: int | None = 
 
     phrases = re.findall(r"\b(?:[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\b", cleaned)
     counts = Counter(phrases)
+    minimum_mentions = 1 if chapter_number is None else 2
     for phrase, count in counts.most_common(30):
-        if count < 2 or len(phrase) < 4:
+        if count < minimum_mentions or len(phrase) < 4:
             continue
         key = phrase.lower()
         if key in seen:
             continue
         seen.add(key)
         element_type = infer_element_type(phrase, cleaned[:800])
+        description = _sentence_snippet(cleaned, phrase)
+        if not description:
+            description = f"Mentioned {count} times in chapter {chapter_number}." if chapter_number else f"Mentioned {count} times."
         candidates.append(
             {
                 "name": phrase,
                 "element_type": element_type,
-                "description": f"Mentioned {count} times in chapter {chapter_number}." if chapter_number else f"Mentioned {count} times.",
+                "description": description,
                 "chapter_number": chapter_number,
                 "usage_count": count,
             }
         )
     return candidates
+
+
+def _sentence_snippet(text: str, phrase: str) -> str | None:
+    normalized_phrase = phrase.strip()
+    if not normalized_phrase:
+        return None
+
+    sentences = re.split(r"(?<=[.!?])\s+", text)
+    for sentence in sentences:
+        if normalized_phrase.lower() in sentence.lower():
+            return sentence.strip()
+    return None

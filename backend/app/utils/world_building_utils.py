@@ -831,7 +831,7 @@ async def _collect_story_elements(db: AsyncSession, book: Book) -> list[WorldEle
         except Exception:
             continue
         text = str(stored.get("text") or "")
-        for candidate in extract_world_elements_from_text(text, chapter_number=chapter_number):
+        for candidate in extract_world_elements_from_text(text):
             name = str(candidate.get("name") or "").strip()
             if not name:
                 continue

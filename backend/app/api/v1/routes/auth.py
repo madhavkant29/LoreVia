@@ -179,7 +179,7 @@ async def oauth_supabase(
 
     if verification_response.status_code != 200:
         log.warning(
-            "Supabase OAuth verification failed",
+            "Supabase OAuth verification failed: %s",
             verification_response.status_code,
         )
         raise HTTPException(401, f"Invalid Supabase token ({verification_response.status_code})")

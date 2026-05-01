@@ -324,6 +324,10 @@ def _extract_source_number_from_heading(title: str | None) -> int | None:
     word_number = _word_number_to_int(raw_number)
     if word_number is not None:
         return word_number
+    if len(raw_number) > 1 and re.fullmatch(r"[ivxlcdm]+", raw_number):
+        roman_value = _roman_to_int(raw_number)
+        if roman_value and roman_value > 0:
+            return roman_value
     letter_number = _letter_sequence_to_int(raw_number)
     if letter_number is not None:
         return letter_number

@@ -24,7 +24,7 @@ async def _register_user(client, email: str) -> tuple[dict[str, str], uuid.UUID]
 
 @pytest.mark.asyncio
 async def test_book_and_reader_events_endpoints_filter_by_progress(client, db):
-    headers, user_id = await _register_user(client, "events-api@lorevia.app")
+    headers, user_id = await _register_user(client, f"events-api-{uuid.uuid4().hex[:8]}@lorevia.app")
     book = Book(user_id=user_id, title="Eventful", format="pdf", s3_key="eventful.pdf", status="ready", total_chapters=4)
     db.add(book)
     await db.flush()
@@ -45,6 +45,12 @@ async def test_book_and_reader_events_endpoints_filter_by_progress(client, db):
             chapter1,
             chapter3,
             hero,
+            ReadingProgress(user_id=user_id, book_id=book.id, current_chapter=1, chapters_read=[1]),
+        ]
+    )
+    await db.flush()
+    db.add_all(
+        [
             ChapterSummary(
                 chapter_id=chapter1.id,
                 mode="detailed",
@@ -57,7 +63,6 @@ async def test_book_and_reader_events_endpoints_filter_by_progress(client, db):
                 content="Chapter three summary",
                 key_events=[{"event_title": "The break", "description": "Mira abandons the order", "importance": 9, "involved_characters": [str(hero.id)]}],
             ),
-            ReadingProgress(user_id=user_id, book_id=book.id, current_chapter=1, chapters_read=[1]),
         ]
     )
     await db.commit()
