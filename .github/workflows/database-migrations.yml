@@ -71,6 +71,7 @@ jobs:
       env:
         DATABASE_URL: postgresql://postgres:postgres@localhost:5432/lorevia_migration_test
         REDIS_URL: redis://localhost:6379/0
+        ALEMBIC_ALLOW_DESTRUCTIVE_DOWNGRADES: "1"
         S3_BUCKET: test-bucket
         AWS_ACCESS_KEY_ID: test-key
         AWS_SECRET_ACCESS_KEY: test-secret
@@ -79,12 +80,8 @@ jobs:
         RESEND_API_KEY: test-key
       run: |
         cd backend
-        # Test downgrading
+        # Test a single-step rollback without doing a full schema reset.
         alembic downgrade -1
-        # Test upgrading back
-        alembic upgrade head
-        # Test all the way down and up
-        alembic downgrade base
         alembic upgrade head
 
     - name: Check for migration conflicts

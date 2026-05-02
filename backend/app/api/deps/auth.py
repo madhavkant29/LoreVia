@@ -1,5 +1,6 @@
 import logging
 import uuid
+from typing import Any
 
 from fastapi import Depends, HTTPException, Request, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -19,14 +20,17 @@ bearer = HTTPBearer(auto_error=False)
 log = logging.getLogger("lorevia.auth")
 
 
-def _claim_version(payload: dict) -> int:
+def _claim_version(payload: dict[str, Any]) -> int:
     try:
-        return int(payload.get("ver"))
+        raw_version = payload.get("ver")
+        if raw_version is None:
+            raise ValueError("missing version")
+        return int(raw_version)
     except (TypeError, ValueError):
         raise HTTPException(401, "Invalid or expired token")
 
 
-def _decode_access_payload(token: str | None) -> dict | None:
+def _decode_access_payload(token: str | None) -> dict[str, Any] | None:
     if not token:
         return None
     try:
@@ -40,7 +44,7 @@ def _decode_access_payload(token: str | None) -> dict | None:
     return payload
 
 
-def _decode_refresh_payload(token: str | None) -> dict | None:
+def _decode_refresh_payload(token: str | None) -> dict[str, Any] | None:
     if not token:
         return None
     try:
@@ -82,7 +86,16 @@ async def get_current_user(
     access_token = get_auth_token(request, credentials.credentials if credentials else None)
     access_payload = _decode_access_payload(access_token)
     if access_payload:
-        return await _load_user_from_claims(access_payload["sub"], _claim_version(access_payload), db)
+        try:
+            return await _load_user_from_claims(access_payload["sub"], _claim_version(access_payload), db)
+        except HTTPException as exc:
+            # Some browsers can retain a stale access cookie alongside a newer
+            # refresh cookie when users switch accounts or a cookie path changes.
+            # If the access token resolves to a missing user, fall back to the
+            # refresh token before failing the request.
+            if exc.status_code != 401:
+                raise
+            log.debug("access_token_fallback_to_refresh", extra={"user_id": access_payload.get("sub")})
 
     refresh_token = get_auth_token(request, cookie_name=REFRESH_TOKEN_COOKIE_NAME)
     refresh_payload = _decode_refresh_payload(refresh_token)

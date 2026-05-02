@@ -19,6 +19,7 @@ from app.models.book import Book, Chapter
 from app.models.intelligence import ChapterSummary, PlotThread
 from app.services.event_linking_service import link_summary_events
 from app.utils.ingestion_utils import elapsed_ms
+from app.utils.ingestion_utils import is_book_hidden, mark_book_processing_cancelled
 from app.utils.world_building_utils import ingest_world_elements_from_chapter
 
 log = logging.getLogger("lorevia.analysis")
@@ -117,6 +118,18 @@ async def analyse_chapter(
             elapsed_ms(llm_started),
             pending_modes,
         )
+
+        if await is_book_hidden(db, book.id):
+            await mark_book_processing_cancelled(
+                db,
+                book,
+                stage="analysis",
+                queue_wait_ms=queue_wait_ms,
+                chapter_number=chapter.number,
+                chapter_title=chapter_title or chapter.title or "",
+                last_error="Book was removed while processing.",
+            )
+            return {"skipped": "book_hidden"}
 
         for mode in pending_modes:
             payload = summary_payloads.get(mode)

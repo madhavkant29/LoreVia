@@ -12,6 +12,7 @@ from app.models.book import Book, Chapter, NoteSeriesLink, ObsidianVaultNote, Se
 from app.models.character import Character
 from app.models.intelligence import ChapterSummary, PlotThread, WikiEntry
 from app.models.user import User
+from app.utils.export_utils import EXPORT_ATTRIBUTION
 
 
 async def _build_obsidian_preview_book(db):
@@ -186,9 +187,9 @@ async def test_obsidian_bible_preview_returns_folder_manifest(client, db):
     assert response.status_code == 200
     payload = response.json()
     assert payload["root_folder"] == "LoreVia Export - Preview-Story"
-    assert payload["files"][0]["path"].endswith("000 - Index.md")
     assert any(file["path"].endswith("Characters/Aria.md") for file in payload["files"])
-    assert any(file["path"].endswith("Major Events/Aria-arrives.md") for file in payload["files"])
+    assert any(file["path"].endswith("Major Events/Aria arrives.md") for file in payload["files"])
+    assert any(file["path"].endswith("Reading Log/Chapter 1 - Arrival.md") for file in payload["files"])
     assert any("[[Blaire]]" in file["content"] for file in payload["files"] if file["path"].endswith("Characters/Aria.md"))
 
 
@@ -228,6 +229,7 @@ async def test_obsidian_bible_notes_save_is_visible_in_preview_and_notes_list(cl
         updated = preview_after.json()
         updated_aria = next(file for file in updated["files"] if file["path"] == target_path)
         assert "Edited in app" in updated_aria["content"]
+        assert updated_aria["content"].rstrip().endswith(EXPORT_ATTRIBUTION)
 
         notes_response = await client.get(f"/api/v1/books/{book.id}/export/character-bible/notes")
         assert notes_response.status_code == 200
@@ -235,6 +237,7 @@ async def test_obsidian_bible_notes_save_is_visible_in_preview_and_notes_list(cl
         assert len(notes) == 1
         assert notes[0]["path"] == target_path
         assert "Edited in app" in notes[0]["content"]
+        assert not notes[0]["content"].rstrip().endswith(EXPORT_ATTRIBUTION)
     finally:
         app.dependency_overrides.pop(get_current_user, None)
 

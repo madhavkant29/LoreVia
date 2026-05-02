@@ -23,7 +23,8 @@ class Book(Base):
     title: Mapped[str] = mapped_column(String, nullable=False)
     author: Mapped[str | None] = mapped_column(String)
     genre: Mapped[str | None] = mapped_column(String)
-    format: Mapped[str] = mapped_column(String, nullable=False)   # pdf | epub | screenplay
+    format: Mapped[str] = mapped_column(String, nullable=False)   # pdf | epub | docx | fountain | txt | md | manual
+    work_type: Mapped[str] = mapped_column(String, nullable=False, default="novel", server_default="novel")
     s3_key: Mapped[str] = mapped_column(String, nullable=False)
     cover_s3_key: Mapped[str | None] = mapped_column(String)
     cover_processed_url: Mapped[str | None] = mapped_column(String)
@@ -79,6 +80,7 @@ class Book(Base):
     primary_series = relationship("Series", foreign_keys=[primary_series_id], back_populates="primary_books")
     series_memberships = relationship("SeriesBook", back_populates="book", cascade="all, delete-orphan")
     scenes = relationship("Scene", back_populates="book", cascade="all, delete-orphan")
+    novel_scenes = relationship("NovelScene", back_populates="book", cascade="all, delete-orphan")
 
 
 class Chapter(Base):
@@ -99,6 +101,7 @@ class Chapter(Base):
     summaries = relationship("ChapterSummary", back_populates="chapter", cascade="all, delete-orphan")
     media = relationship("ChapterMedia", back_populates="chapter", cascade="all, delete-orphan")
     versions = relationship("ChapterVersion", back_populates="chapter", cascade="all, delete-orphan")
+    novel_scenes = relationship("NovelScene", back_populates="chapter", cascade="all, delete-orphan")
 
 
 class ChapterVersion(Base):
@@ -112,9 +115,12 @@ class ChapterVersion(Base):
     s3_key: Mapped[str] = mapped_column(String, nullable=False)
     word_count: Mapped[int | None] = mapped_column(Integer)
     note: Mapped[str | None] = mapped_column(String)
+    snapshot_kind: Mapped[str] = mapped_column(String, nullable=False, default="manual", server_default="manual")
+    restored_from_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("chapter_versions.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
     chapter = relationship("Chapter", back_populates="versions")
+    restored_from = relationship("ChapterVersion", remote_side=[id])
 
 
 class BookNote(Base):
@@ -325,3 +331,26 @@ class Dialogue(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     scene = relationship("Scene", back_populates="dialogue")
+
+
+class NovelScene(Base):
+    __tablename__ = "novel_scenes"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    book_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
+    chapter_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("chapters.id", ondelete="SET NULL"), index=True)
+    chapter_number: Mapped[int | None] = mapped_column(Integer, index=True)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[str | None] = mapped_column(String)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    html_body: Mapped[str | None] = mapped_column(Text)
+    path: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="unassigned", server_default="unassigned", index=True)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    source: Mapped[str] = mapped_column(String, nullable=False, default="manual", server_default="manual")
+    origin_chapter_number: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), index=True)
+
+    book = relationship("Book", back_populates="novel_scenes")
+    chapter = relationship("Chapter", back_populates="novel_scenes")

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import Link from "next/link"
 import { useParams } from "next/navigation"
 
+import { AuthorToolsNav } from "@/components/layout/AuthorToolsNav"
 import { ObsidianNotesEditor } from "@/components/reader/ObsidianNotesEditor"
 import { booksApi } from "@/lib/api/books"
 import { renderRichTextHtml } from "@/lib/utils/richText"
@@ -18,26 +19,43 @@ export default function BookNotesPage() {
   const [bookNotes, setBookNotes] = useState<BookNote[]>([])
   const [notes, setNotes] = useState<ObsidianVaultNote[]>([])
   const [graph, setGraph] = useState<ObsidianGraph>({ nodes: [], edges: [] })
-  const [loading, setLoading] = useState(true)
+  const [notesLoading, setNotesLoading] = useState(true)
 
   useEffect(() => {
     let active = true
-    void Promise.all([
-      booksApi.get(bookId),
-      booksApi.getBookNotes(bookId),
-      booksApi.listObsidianNotes(bookId),
-      booksApi.getObsidianGraph(bookId),
-    ]).then(([bookData, bookNotesData, notesData, graphData]) => {
-      if (!active) return
-      setBook(bookData)
-      setBookNotes(bookNotesData)
-      setNotes(notesData)
-      setGraph(graphData)
-      setLoading(false)
-    }).catch(() => {
-      if (!active) return
-      setLoading(false)
-    })
+    setNotesLoading(true)
+
+    booksApi.get(bookId)
+      .then((bookData) => {
+        if (!active) return
+        setBook(bookData)
+      })
+      .catch(() => {})
+
+    booksApi.getBookNotes(bookId)
+      .then((bookNotesData) => {
+        if (!active) return
+        setBookNotes(bookNotesData)
+      })
+      .catch(() => {})
+
+    booksApi.listObsidianNotes(bookId)
+      .then((notesData) => {
+        if (!active) return
+        setNotes(notesData)
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (active) setNotesLoading(false)
+      })
+
+    booksApi.getObsidianGraph(bookId)
+      .then((graphData) => {
+        if (!active) return
+        setGraph(graphData)
+      })
+      .catch(() => {})
+
     return () => {
       active = false
     }
@@ -45,31 +63,41 @@ export default function BookNotesPage() {
 
   return (
     <div className={`min-h-screen ${isDark ? "bg-[linear-gradient(180deg,#010409_0%,#07111c_50%,#0b1523_100%)] text-slate-100" : "bg-[linear-gradient(180deg,#f6f3ea_0%,#eef5ef_50%,#eef3f8_100%)] text-stone-950"}`}>
-      <div className="mx-auto max-w-7xl px-4 pb-20 pt-8 sm:px-6 lg:px-8">
-        <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-          <div>
-              <p className={`text-[11px] font-semibold uppercase tracking-[0.3em] ${isDark ? "text-emerald-300" : "text-emerald-600"}`}>Obsidian Notes Workspace</p>
-              <h1 className={`mt-2 font-serif text-4xl tracking-tight ${isDark ? "text-white" : "text-stone-950"}`}>{book?.title || "Notes"}</h1>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Link href={`/${bookId}`} className={`rounded-full px-4 py-2 text-sm font-medium ${isDark ? "bg-white/5 text-slate-200" : "bg-white text-stone-700"}`}>Back to overview</Link>
-            <Link href={`/${bookId}/manuscript`} className={`rounded-full px-4 py-2 text-sm font-medium ${isDark ? "bg-white/10 text-white" : "bg-stone-900 text-white"}`}>Open manuscript</Link>
-          </div>
-        </div>
+      <div className="mx-auto max-w-[96rem] px-4 pb-20 pt-8 sm:px-6 lg:px-8">
+        <div className="grid gap-6 xl:grid-cols-[17rem_minmax(0,1fr)]">
+          <AuthorToolsNav
+            bookId={bookId}
+            active="notes"
+            isDark={isDark}
+            title="Notes workflow"
+            description="Keep the vault tree, manuscript, export studio, and continuity tools one click away while you edit."
+          />
 
-        {loading ? (
-            <div className={`rounded-[1.8rem] border border-dashed py-24 text-center ${isDark ? "border-white/10 text-slate-400" : "border-stone-300 text-stone-500"}`}>Loading Obsidian notes workspace...</div>
-        ) : (
           <div className="space-y-8">
-            <ObsidianNotesEditor
-              bookId={bookId}
-              bookTitle={book?.title || "book"}
-              initialNotes={notes}
-              initialGraph={graph}
-              isDark={isDark}
-            />
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className={`text-[11px] font-semibold uppercase tracking-[0.3em] ${isDark ? "text-emerald-300" : "text-emerald-600"}`}>Vault notes workspace</p>
+                <h1 className={`mt-2 font-serif text-4xl tracking-tight ${isDark ? "text-white" : "text-stone-950"}`}>{book?.title || "Notes"}</h1>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Link href={`/${bookId}`} className={`rounded-full px-4 py-2 text-sm font-medium ${isDark ? "bg-white/5 text-slate-200" : "bg-white text-stone-700"}`}>Back to overview</Link>
+                <Link href={`/${bookId}/export`} className={`rounded-full px-4 py-2 text-sm font-medium ${isDark ? "bg-white/10 text-white" : "bg-stone-900 text-white"}`}>Open export studio</Link>
+              </div>
+            </div>
 
-            <section className={`rounded-[1.8rem] border p-6 ${isDark ? "border-white/10 bg-white/5" : "border-white/70 bg-white/82"}`}>
+            {notesLoading ? (
+              <div className={`rounded-[1.8rem] border border-dashed py-24 text-center ${isDark ? "border-white/10 text-slate-400" : "border-stone-300 text-stone-500"}`}>Loading vault notes workspace...</div>
+            ) : (
+              <>
+                <ObsidianNotesEditor
+                  bookId={bookId}
+                  bookTitle={book?.title || "book"}
+                  initialNotes={notes}
+                  initialGraph={graph}
+                  isDark={isDark}
+                />
+
+                <section className={`rounded-[1.8rem] border p-6 ${isDark ? "border-white/10 bg-white/5" : "border-white/70 bg-white/82"}`}>
               <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
                 <div>
                   <p className={`text-[11px] font-semibold uppercase tracking-[0.28em] ${isDark ? "text-amber-300" : "text-amber-700"}`}>Existing notes</p>
@@ -131,9 +159,11 @@ export default function BookNotesPage() {
                   ))
                 )}
               </div>
-            </section>
+                </section>
+              </>
+            )}
           </div>
-        )}
+        </div>
       </div>
     </div>
   )

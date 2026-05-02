@@ -8,7 +8,7 @@ from ebooklib import epub
 
 from app.parsers.pdf_parser import _extract_source_number_from_heading
 
-PARAGRAPH_SPLIT_MAX_WORDS = 4000
+PARAGRAPH_SPLIT_TARGET_WORDS = 7000
 
 
 def parse_epub(raw_bytes: bytes, *, split_large_chapters: bool = True) -> list[dict]:
@@ -77,7 +77,7 @@ def _split_parts(parts: list[str]) -> list[list[str]]:
     current_words = 0
     for part in parts:
         part_words = len(re.findall(r"\b\w+\b", part))
-        if current and current_words + part_words > PARAGRAPH_SPLIT_MAX_WORDS and _can_close_section(current):
+        if current and current_words + part_words > PARAGRAPH_SPLIT_TARGET_WORDS and _can_close_section(current):
             sections.append(current)
             current = []
             current_words = 0

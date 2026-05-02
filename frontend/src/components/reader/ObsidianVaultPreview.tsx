@@ -205,7 +205,7 @@ export function ObsidianVaultPreview({
     <div className={`rounded-[2rem] border p-4 shadow-[0_30px_80px_-44px_rgba(15,23,42,0.75)] ${isDark ? "border-white/10 bg-[linear-gradient(180deg,rgba(10,10,12,0.95),rgba(17,24,39,0.9))]" : "border-stone-200 bg-[linear-gradient(180deg,rgba(255,255,255,0.94),rgba(248,250,252,0.9))]"}`}>
       <div className="flex flex-col gap-4 border-b border-white/10 pb-4 lg:flex-row lg:items-end lg:justify-between">
         <div className="max-w-3xl">
-            <p className={`text-[11px] font-semibold uppercase tracking-[0.34em] ${isDark ? "text-sky-300" : "text-sky-600"}`}>Obsidian Vault</p>
+            <p className={`text-[11px] font-semibold uppercase tracking-[0.34em] ${isDark ? "text-sky-300" : "text-sky-600"}`}>Vault export</p>
             <h3 className={`mt-2 font-serif text-3xl tracking-tight ${isDark ? "text-white" : "text-stone-950"}`}>Vault preview and editor</h3>
             <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-400" : "text-stone-600"}`}>
               Browse every exported note, edit the markdown in-app, and export a fresh vault ZIP when you're done.

@@ -31,7 +31,7 @@ from app.core.storage import download_book
 from app.engine.embeddings.embedder import embed_text
 from app.engine.search.semantic import semantic_search
 from app.models.book import Book, Chapter, Series, SeriesBook
-from app.models.character import Character, CharacterState
+from app.models.character import Character, CharacterState, CharacterVoiceProfile
 from app.models.intelligence import ChapterSummary, PlotThread
 from app.schemas.advisor import (
     AdvisorRequest,
@@ -73,6 +73,7 @@ from app.utils.advisor_utils import (
     normalize_voice_consistency_result,
 )
 from app.utils.book_utils import detect_chapter_continuity_flags
+from app.utils.intelligence_utils import compute_voice_metrics, extract_dialogue_samples_by_character, score_voice_match
 
 router = APIRouter()
 
@@ -903,6 +904,15 @@ async def voice_consistency_review(
             )
         ).mappings().all()
         relevant_characters = identify_character_mentions(body.text, [dict(row) for row in character_rows])
+        all_voice_profiles = (
+            await db.execute(
+                select(CharacterVoiceProfile).where(CharacterVoiceProfile.book_id == book_id)
+            )
+        ).scalars().all()
+        profiles_by_character_id = {profile.character_id: profile for profile in all_voice_profiles}
+        attributed_dialogue = extract_dialogue_samples_by_character(body.text, [dict(row) for row in character_rows])
+        if len(relevant_characters) == 1 and not attributed_dialogue.get(relevant_characters[0]["name"]):
+            attributed_dialogue[relevant_characters[0]["name"]] = [body.text[:4000]]
         character_context = build_character_voice_context(relevant_characters)
         chapter_hint = (
             f"This passage will appear in Chapter {body.chapter_num}."
@@ -934,6 +944,69 @@ async def voice_consistency_review(
 
         raw = response.choices[0].message.content or "{}"
         result = normalize_voice_consistency_result(raw)
+        character_matches: list[dict[str, Any]] = []
+        for character in relevant_characters:
+            char_id = character.get("id")
+            char_name = character.get("name")
+            profile = profiles_by_character_id.get(uuid.UUID(str(char_id))) if char_id else None
+            samples = attributed_dialogue.get(str(char_name), [])
+            sample_metrics = compute_voice_metrics(samples)
+            profile_payload = {
+                "sample_dialogue_count": profile.sample_dialogue_count if profile else 0,
+                "sample_word_count": profile.sample_word_count if profile else 0,
+                "avg_sentence_length": profile.avg_sentence_length if profile else 0,
+                "avg_word_length_x100": profile.avg_word_length_x100 if profile else 0,
+                "contraction_rate_x1000": profile.contraction_rate_x1000 if profile else 0,
+                "question_rate_x1000": profile.question_rate_x1000 if profile else 0,
+                "exclamation_rate_x1000": profile.exclamation_rate_x1000 if profile else 0,
+                "ellipsis_rate_x1000": profile.ellipsis_rate_x1000 if profile else 0,
+                "dash_rate_x1000": profile.dash_rate_x1000 if profile else 0,
+                "uppercase_rate_x1000": profile.uppercase_rate_x1000 if profile else 0,
+                "formality_score_x1000": profile.formality_score_x1000 if profile else 0,
+                "lexical_complexity_x1000": profile.lexical_complexity_x1000 if profile else 0,
+                "emotional_intensity_x1000": profile.emotional_intensity_x1000 if profile else 0,
+            }
+            score, signals = score_voice_match(profile_payload, sample_metrics)
+            closest_other_character = None
+            closest_other_score = -1
+            for candidate_profile in all_voice_profiles:
+                if profile is not None and candidate_profile.character_id == profile.character_id:
+                    continue
+                candidate_score, _ = score_voice_match(
+                    {
+                        "sample_dialogue_count": candidate_profile.sample_dialogue_count,
+                        "sample_word_count": candidate_profile.sample_word_count,
+                        "avg_sentence_length": candidate_profile.avg_sentence_length,
+                        "avg_word_length_x100": candidate_profile.avg_word_length_x100,
+                        "contraction_rate_x1000": candidate_profile.contraction_rate_x1000,
+                        "question_rate_x1000": candidate_profile.question_rate_x1000,
+                        "exclamation_rate_x1000": candidate_profile.exclamation_rate_x1000,
+                        "ellipsis_rate_x1000": candidate_profile.ellipsis_rate_x1000,
+                        "dash_rate_x1000": candidate_profile.dash_rate_x1000,
+                        "uppercase_rate_x1000": candidate_profile.uppercase_rate_x1000,
+                        "formality_score_x1000": candidate_profile.formality_score_x1000,
+                        "lexical_complexity_x1000": candidate_profile.lexical_complexity_x1000,
+                        "emotional_intensity_x1000": candidate_profile.emotional_intensity_x1000,
+                    },
+                    sample_metrics,
+                )
+                if candidate_score > closest_other_score:
+                    closest_other_score = candidate_score
+                    closest_other_character = next(
+                        (row["name"] for row in character_rows if str(row["id"]) == str(candidate_profile.character_id)),
+                        None,
+                    )
+            character_matches.append(
+                {
+                    "character_name": char_name,
+                    "match_score": score,
+                    "baseline_sample_size": int(profile.sample_dialogue_count if profile else 0),
+                    "sample_dialogue_count": int(sample_metrics.get("sample_dialogue_count") or 0),
+                    "strongest_signals": signals,
+                    "closest_other_character": closest_other_character,
+                    "closest_other_score": closest_other_score if closest_other_score >= 0 else None,
+                }
+            )
 
         return {
             "review": result,
@@ -948,6 +1021,7 @@ async def voice_consistency_review(
                 for h in hits[:4]
             ],
             "characters_reviewed": [character["name"] for character in relevant_characters],
+            "character_matches": character_matches,
         }
     finally:
         await client.close()

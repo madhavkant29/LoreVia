@@ -10,6 +10,11 @@ if [ -n "$CLOUDFLARE_TUNNEL_TOKEN" ]; then
   sleep 2
 fi
 
+if [ "${NORMALIZE_LOCAL_STORAGE_PERMISSIONS:-}" = "1" ] && [ "$(id -u)" = "0" ]; then
+  echo "Normalizing local storage permissions for local compose..."
+  python -c "from app.core.storage import ensure_local_storage_permissions; ensure_local_storage_permissions()"
+fi
+
 WEB_CONCURRENCY="${WEB_CONCURRENCY:-1}"
 
 if [ "${RUN_MIGRATIONS:-}" = "1" ]; then

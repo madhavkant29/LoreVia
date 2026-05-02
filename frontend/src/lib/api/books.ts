@@ -1,6 +1,7 @@
+import axios from "axios"
 import { apiClient } from "./client"
 import { cachedGet, invalidateCachedGets } from "./requestCache"
-import type { Book, BookEvents, BookNote, BookSeries, ChapterConsistencyReport, ChapterVersion, EmotionalArcOverview, ObsidianGraph, ObsidianNoteRelations, ObsidianPreview, ObsidianVaultNote, ObsidianVaultNoteSaveResult, PreWritingCheck, PublicBook, PublicBookDetail, PublicChapter, ReadabilityMetrics, SavedQuote, UserStats, WriterWorkspace } from "@/types/book"
+import type { Book, BookEvents, BookNote, BookSeries, BookWorkType, ChapterConsistencyReport, ChapterVersion, ChapterVersionDetail, EmotionalArcOverview, ManuscriptWorkspaceTree, NovelScene, ObsidianGraph, ObsidianNoteRelations, ObsidianPreview, ObsidianVaultNote, ObsidianVaultNoteSaveResult, PreWritingCheck, PublicBook, PublicBookDetail, PublicChapter, ReadabilityMetrics, SavedQuote, SeriesBible, UserStats, WriterWorkspace } from "@/types/book"
 import type { Character, CharacterShareResponse } from "@/types/character"
 
 export interface ManuscriptImportResponse {
@@ -48,6 +49,75 @@ export const booksApi = {
     cachedGet(bookCacheKey(id, `chapter-versions:${chapterNumber}:${limit}`), 30 * 1000, () =>
       apiClient.get<ChapterVersion[]>(`/books/${id}/chapter-versions`, { params: { chapter_number: chapterNumber, limit } }).then(r => r.data)
     ),
+  createChapterSnapshot: (id: string, chapterNumber: number, note?: string) =>
+    apiClient.post<ChapterVersion>(`/books/${id}/chapters/${chapterNumber}/snapshot`, null, { params: note ? { note } : undefined }).then(r => {
+      invalidateCachedGets(bookCacheKey(id, `chapter-versions:${chapterNumber}:`))
+      return r.data
+    }),
+  getChapterVersionDetail: (id: string, versionId: string) =>
+    apiClient.get<ChapterVersionDetail>(`/books/${id}/chapter-versions/${versionId}`).then(r => r.data),
+  restoreChapterVersion: (id: string, versionId: string) =>
+    apiClient.post<{
+      chapter_number: number
+      title: string | null
+      text: string
+      html: string | null
+      versions: ChapterVersion[]
+      scenes: NovelScene[]
+    }>(`/books/${id}/chapter-versions/${versionId}/restore`).then(r => {
+      invalidateBookCache(id)
+      return r.data
+    }),
+  getWorkspaceTree: (id: string) =>
+    cachedGet(bookCacheKey(id, "workspace-tree"), 10 * 1000, () =>
+      apiClient.get<ManuscriptWorkspaceTree>(`/books/${id}/workspace/tree`).then(r => r.data)
+    ),
+  listScenes: (id: string, params?: { chapterNumber?: number; status?: string; query?: string }) =>
+    cachedGet(bookCacheKey(id, `scenes:${params?.chapterNumber ?? "all"}:${params?.status ?? "all"}:${(params?.query ?? "").toLowerCase()}`), 10 * 1000, () =>
+      apiClient.get<NovelScene[]>(`/books/${id}/scenes`, {
+        params: {
+          chapter_number: params?.chapterNumber,
+          status: params?.status,
+          query: params?.query,
+        },
+      }).then(r => r.data)
+    ),
+  saveScene: (
+    id: string,
+    payload: {
+      id?: string
+      title: string
+      description?: string | null
+      body: string
+      html_body?: string | null
+      chapter_number?: number | null
+      status?: string | null
+      sort_order?: number | null
+    }
+  ) => {
+    const request = payload.id
+      ? apiClient.put<NovelScene>(`/books/${id}/scenes/${payload.id}`, payload)
+      : apiClient.post<NovelScene>(`/books/${id}/scenes`, payload)
+    return request.then(r => {
+      invalidateCachedGets(bookCacheKey(id, "workspace-tree"))
+      invalidateCachedGets(bookCacheKey(id, "scenes:"))
+      return r.data
+    })
+  },
+  deleteScene: (id: string, sceneId: string) =>
+    apiClient.delete(`/books/${id}/scenes/${sceneId}`).then(() => {
+      invalidateCachedGets(bookCacheKey(id, "workspace-tree"))
+      invalidateCachedGets(bookCacheKey(id, "scenes:"))
+    }),
+  getSceneInsertion: (id: string, sceneId: string, chapterNumber: number, position: "start" | "end" = "end") =>
+    apiClient.post<{
+      chapter_number: number
+      position: "start" | "end"
+      title: string
+      body: string
+      html_body?: string | null
+      scene_id: string
+    }>(`/books/${id}/scenes/${sceneId}/insert`, null, { params: { chapter_number: chapterNumber, position } }).then(r => r.data),
   getWriterWorkspace: (id: string) =>
     cachedGet(bookCacheKey(id, "writer-workspace"), 10 * 1000, () =>
       apiClient.get<WriterWorkspace>(`/books/${id}/writer-workspace`).then(r => r.data)
@@ -214,7 +284,11 @@ export const booksApi = {
       invalidateBookCache(id)
       return response.data
     } catch (error) {
-      if (!hidden) throw error
+      // Only fall back to DELETE when the server clearly does not support the
+      // hide endpoint. Network failures or auth issues should bubble up
+      // directly so we do not fire a second destructive request.
+      const status = axios.isAxiosError(error) ? error.response?.status : undefined
+      if (!hidden || (status !== 404 && status !== 405)) throw error
       const fallback = await apiClient.delete<Book>(`/books/${id}`)
       invalidateBookCache(id)
       return fallback.data
@@ -224,9 +298,14 @@ export const booksApi = {
     cachedGet("books:series", 20 * 1000, () =>
       apiClient.get<BookSeries[]>("/books/series").then(r => r.data)
     ),
+  getSeriesBible: (seriesId: string) =>
+    cachedGet(`books:series-bible:${seriesId}`, 20 * 1000, () =>
+      apiClient.get<SeriesBible>(`/books/series/${seriesId}/bible`).then(r => r.data)
+    ),
   createSeries: (payload: { name: string; description?: string | null }) =>
     apiClient.post<BookSeries>("/books/series", payload).then(r => {
       invalidateCachedGets("books:series")
+      invalidateCachedGets("books:series-bible:")
       return r.data
     }),
   setSeries: (id: string, payload: { series_name?: string | null; series_order?: number | null }) =>
@@ -237,11 +316,13 @@ export const booksApi = {
   addBookToSeries: (seriesId: string, bookId: string, payload: { position?: number | null }) =>
     apiClient.post<BookSeries>(`/books/series/${seriesId}/books/${bookId}`, payload).then(r => {
       invalidateBookCache(bookId)
+      invalidateCachedGets("books:series-bible:")
       return r.data
     }),
   removeBookFromSeries: (seriesId: string, bookId: string) =>
     apiClient.delete<BookSeries>(`/books/series/${seriesId}/books/${bookId}`).then(r => {
       invalidateBookCache(bookId)
+      invalidateCachedGets("books:series-bible:")
       return r.data
     }),
   setSeriesBookStatus: (seriesId: string, bookId: string, markedComplete = true) =>
@@ -265,6 +346,7 @@ export const booksApi = {
       seriesIds?: string[]
       autoExtractCover?: boolean
       preserveChapterNumbers?: boolean
+      workType?: BookWorkType
       coverFile?: File | null
       mode?: "reader" | "author"
       onProgress?: (percent: number) => void
@@ -280,6 +362,7 @@ export const booksApi = {
     options?.seriesIds?.forEach((seriesId) => {
       if (seriesId) form.append("series_ids", seriesId)
     })
+    if (options?.workType) form.append("work_type", options.workType)
     if (options?.mode) form.append("mode", options.mode)
     form.append("auto_extract_cover", options?.autoExtractCover === false ? "false" : "true")
     form.append("preserve_chapter_numbers", options?.preserveChapterNumbers ? "true" : "false")
@@ -306,6 +389,7 @@ export const booksApi = {
       replaceExisting?: boolean
       chunkLongDocuments?: boolean
       splitIntoChapters?: boolean
+      workType?: BookWorkType
       files?: File[]
     }
   ) => {
@@ -317,6 +401,7 @@ export const booksApi = {
     if (payload.replaceExisting) form.append("replace_existing", "true")
     if (payload.chunkLongDocuments) form.append("chunk_long_documents", "true")
     if (payload.splitIntoChapters === false) form.append("split_into_chapters", "false")
+    if (payload.workType) form.append("work_type", payload.workType)
     payload.files?.forEach((file) => form.append("files", file))
     return apiClient.post<ManuscriptImportResponse>(`/books/${bookId}/manuscript/import`, form).then(r => {
       invalidateBookCache(bookId)
@@ -325,7 +410,7 @@ export const booksApi = {
   },
   exportManuscript: (
     bookId: string,
-    format: "pdf" | "docx" | "epub" = "docx",
+    format: "pdf" | "docx" | "epub" | "obsidian" = "docx",
     preset: "standard_manuscript" | "trade_paperback" | "kdp_paperback" = "standard_manuscript"
   ) =>
     apiClient.get<Blob>(`/books/${bookId}/manuscript/export`, {

@@ -3,6 +3,7 @@ Helper functions for grounded intelligence answers and citations.
 """
 from __future__ import annotations
 
+import re
 import uuid
 from typing import Any, cast
 
@@ -267,3 +268,198 @@ def flatten_key_events(key_events: object) -> str:
                 flattened.append(str(value).strip())
         return "; ".join(flattened[:4])
     return ""
+
+
+VOICE_FORMALITY_WORDS = {
+    "indeed", "perhaps", "therefore", "however", "certainly", "shall", "must", "rather", "precisely", "quite",
+}
+VOICE_CONTRACTION_WORDS = {
+    "don't", "can't", "won't", "i'm", "it's", "you're", "we're", "they're", "didn't", "isn't", "wasn't",
+}
+VOICE_EMOTION_WORDS = {
+    "love", "hate", "fear", "angry", "furious", "joy", "grief", "sorry", "please", "damn", "hell",
+}
+QUOTE_RE = re.compile(r"[\"“](.+?)[\"”]", re.DOTALL)
+
+
+def build_character_name_candidates(character_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    for row in character_rows:
+        names = [str(row.get("name") or "").strip(), *[str(alias).strip() for alias in (row.get("aliases") or []) if str(alias).strip()]]
+        names = [name for name in names if name]
+        if names:
+            candidates.append({**row, "name_candidates": list(dict.fromkeys(names))})
+    return candidates
+
+
+def extract_dialogue_samples_by_character(text: str, character_rows: list[dict[str, Any]]) -> dict[str, list[str]]:
+    normalized_text = (text or "").replace("\r\n", "\n").replace("\r", "\n")
+    candidates = build_character_name_candidates(character_rows)
+    collected: dict[str, list[str]] = {}
+    for match in QUOTE_RE.finditer(normalized_text):
+        quote = " ".join(match.group(1).split()).strip()
+        if not quote:
+            continue
+        window = normalized_text[max(0, match.start() - 160): min(len(normalized_text), match.end() + 160)].casefold()
+        prefix_window = normalized_text[max(0, match.start() - 120): match.start()].casefold()
+        suffix_window = normalized_text[match.end(): min(len(normalized_text), match.end() + 120)].casefold()
+        best_name = None
+        best_score = 0
+        for row in candidates:
+            score = 0
+            nearest_distance: int | None = None
+            for candidate in row["name_candidates"]:
+                folded = candidate.casefold()
+                prefix_idx = prefix_window.rfind(folded)
+                suffix_idx = suffix_window.find(folded)
+                if prefix_idx >= 0:
+                    distance = len(prefix_window) - prefix_idx
+                    score += max(0, 320 - distance)
+                    nearest_distance = distance if nearest_distance is None else min(nearest_distance, distance)
+                if suffix_idx >= 0:
+                    distance = suffix_idx + 1
+                    score += max(0, 90 - distance)
+                    nearest_distance = distance if nearest_distance is None else min(nearest_distance, distance)
+                if f" {folded} " in f" {window} ":
+                    score += max(1, len(candidate.split()))
+            if nearest_distance is not None:
+                score += max(0, 60 - nearest_distance)
+            if score > best_score:
+                best_score = score
+                best_name = str(row.get("name") or "").strip()
+        if best_name and best_score > 0:
+            collected.setdefault(best_name, []).append(quote)
+    return collected
+
+
+def compute_voice_metrics(dialogues: list[str]) -> dict[str, Any]:
+    cleaned = [" ".join(dialogue.split()).strip() for dialogue in dialogues if " ".join(dialogue.split()).strip()]
+    if not cleaned:
+        return {
+            "sample_dialogue_count": 0,
+            "sample_word_count": 0,
+            "avg_sentence_length": 0,
+            "avg_word_length_x100": 0,
+            "contraction_rate_x1000": 0,
+            "question_rate_x1000": 0,
+            "exclamation_rate_x1000": 0,
+            "ellipsis_rate_x1000": 0,
+            "dash_rate_x1000": 0,
+            "uppercase_rate_x1000": 0,
+            "formality_score_x1000": 0,
+            "lexical_complexity_x1000": 0,
+            "emotional_intensity_x1000": 0,
+            "dominant_markers": {},
+            "signature_phrases": [],
+        }
+    words = re.findall(r"[A-Za-z0-9']+", " ".join(cleaned))
+    sentences = [part.strip() for dialogue in cleaned for part in re.split(r"[.!?]+", dialogue) if part.strip()]
+    lower_words = [word.lower() for word in words]
+    total_words = max(1, len(words))
+    unique_words = {word.lower() for word in words}
+    contractions = sum(1 for word in lower_words if word in VOICE_CONTRACTION_WORDS or "'" in word)
+    question_rate = sum(dialogue.count("?") for dialogue in cleaned)
+    exclamation_rate = sum(dialogue.count("!") for dialogue in cleaned)
+    ellipsis_rate = sum(dialogue.count("...") for dialogue in cleaned)
+    dash_rate = sum(dialogue.count("—") + dialogue.count("--") for dialogue in cleaned)
+    uppercase_rate = sum(1 for word in words if word.isupper() and len(word) > 1)
+    formal_rate = sum(1 for word in lower_words if word in VOICE_FORMALITY_WORDS)
+    emotional_rate = sum(1 for word in lower_words if word in VOICE_EMOTION_WORDS)
+    avg_sentence_length = int(round(sum(len(re.findall(r"[A-Za-z0-9']+", sentence)) for sentence in sentences) / max(1, len(sentences))))
+    avg_word_length = int(round((sum(len(word) for word in words) / total_words) * 100))
+    lexical_complexity = int(round((len(unique_words) / total_words) * 1000))
+    dominant_markers = {
+        "questions": question_rate,
+        "exclamations": exclamation_rate,
+        "ellipses": ellipsis_rate,
+        "dashes": dash_rate,
+        "formal_words": formal_rate,
+        "emotion_words": emotional_rate,
+    }
+    phrase_counts: dict[str, int] = {}
+    for dialogue in cleaned:
+        for phrase in re.findall(r"\b[a-z']+\s+[a-z']+\b", dialogue.lower()):
+            phrase_counts[phrase] = phrase_counts.get(phrase, 0) + 1
+    signature_phrases = [phrase for phrase, count in sorted(phrase_counts.items(), key=lambda item: (-item[1], item[0])) if count > 1][:5]
+    return {
+        "sample_dialogue_count": len(cleaned),
+        "sample_word_count": total_words,
+        "avg_sentence_length": avg_sentence_length,
+        "avg_word_length_x100": avg_word_length,
+        "contraction_rate_x1000": int(round((contractions / total_words) * 1000)),
+        "question_rate_x1000": int(round((question_rate / total_words) * 1000)),
+        "exclamation_rate_x1000": int(round((exclamation_rate / total_words) * 1000)),
+        "ellipsis_rate_x1000": int(round((ellipsis_rate / total_words) * 1000)),
+        "dash_rate_x1000": int(round((dash_rate / total_words) * 1000)),
+        "uppercase_rate_x1000": int(round((uppercase_rate / total_words) * 1000)),
+        "formality_score_x1000": int(round((formal_rate / total_words) * 1000)),
+        "lexical_complexity_x1000": lexical_complexity,
+        "emotional_intensity_x1000": int(round((emotional_rate / total_words) * 1000)),
+        "dominant_markers": dominant_markers,
+        "signature_phrases": signature_phrases,
+    }
+
+
+def merge_voice_profile_metrics(existing: dict[str, Any] | None, incoming: dict[str, Any]) -> dict[str, Any]:
+    current = existing if isinstance(existing, dict) else {}
+    old_count = int(current.get("sample_dialogue_count") or 0)
+    new_count = int(incoming.get("sample_dialogue_count") or 0)
+    total_count = old_count + new_count
+    if total_count <= 0:
+        return incoming
+    merged = dict(incoming)
+    for key in (
+        "avg_sentence_length",
+        "avg_word_length_x100",
+        "contraction_rate_x1000",
+        "question_rate_x1000",
+        "exclamation_rate_x1000",
+        "ellipsis_rate_x1000",
+        "dash_rate_x1000",
+        "uppercase_rate_x1000",
+        "formality_score_x1000",
+        "lexical_complexity_x1000",
+        "emotional_intensity_x1000",
+    ):
+        old_value = int(current.get(key) or 0)
+        new_value = int(incoming.get(key) or 0)
+        merged[key] = int(round(((old_value * old_count) + (new_value * new_count)) / total_count))
+    merged["sample_dialogue_count"] = total_count
+    merged["sample_word_count"] = int(current.get("sample_word_count") or 0) + int(incoming.get("sample_word_count") or 0)
+    merged["dominant_markers"] = incoming.get("dominant_markers") or current.get("dominant_markers") or {}
+    seen_phrases: list[str] = []
+    for phrase in [*(current.get("signature_phrases") or []), *(incoming.get("signature_phrases") or [])]:
+        if phrase and phrase not in seen_phrases:
+            seen_phrases.append(phrase)
+    merged["signature_phrases"] = seen_phrases[:6]
+    return merged
+
+
+def score_voice_match(profile: dict[str, Any], sample_metrics: dict[str, Any]) -> tuple[int, list[str]]:
+    if int(profile.get("sample_dialogue_count") or 0) <= 0 or int(sample_metrics.get("sample_dialogue_count") or 0) <= 0:
+        return 0, ["Not enough dialogue was attributed to score this voice yet."]
+    checks = [
+        ("avg_sentence_length", "sentence length"),
+        ("formality_score_x1000", "formality"),
+        ("contraction_rate_x1000", "contractions"),
+        ("question_rate_x1000", "question frequency"),
+        ("exclamation_rate_x1000", "exclamation use"),
+        ("ellipsis_rate_x1000", "ellipsis use"),
+        ("dash_rate_x1000", "dash use"),
+        ("lexical_complexity_x1000", "vocabulary complexity"),
+        ("emotional_intensity_x1000", "emotional register"),
+    ]
+    penalties = 0.0
+    signals: list[str] = []
+    for key, label in checks:
+        baseline = float(profile.get(key) or 0)
+        observed = float(sample_metrics.get(key) or 0)
+        difference = abs(observed - baseline)
+        tolerance = max(4.0, abs(baseline) * 0.25)
+        delta = difference / tolerance
+        penalties += min(1.5, delta)
+        if delta > 0.75:
+            direction = "higher" if observed > baseline else "lower"
+            signals.append(f"{label} is {direction} than the established baseline")
+    score = max(0, int(round(100 - min(85, penalties * 10))))
+    return score, signals[:4]

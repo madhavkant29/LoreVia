@@ -4,7 +4,7 @@ import uuid
 
 from app.models.book import Book
 from app.models.character import Character
-from app.utils.export_utils import character_bible_obsidian_manifest
+from app.utils.export_utils import EXPORT_ATTRIBUTION, character_bible_obsidian_manifest
 
 
 def test_character_bible_obsidian_manifest_builds_linked_vault_structure():
@@ -116,15 +116,55 @@ def test_character_bible_obsidian_manifest_builds_linked_vault_structure():
     paths = {file["path"]: file["content"] for file in files}
 
     assert root_folder == "LoreVia Export - Sample-Story"
-    assert f"{root_folder}/000 - Index.md" in paths
     assert f"{root_folder}/Characters/Aria.md" in paths
     assert f"{root_folder}/Characters/Blaire.md" in paths
     assert f"{root_folder}/Relationships/Relationship Map.md" in paths
-    assert f"{root_folder}/Major Events/Aria-arrives.md" in paths
-    assert f"{root_folder}/Major Events/Blaire-joins.md" in paths
+    assert f"{root_folder}/Major Events/Aria arrives.md" in paths
+    assert f"{root_folder}/Major Events/Blaire joins.md" in paths
+    assert f"{root_folder}/Plot Threads/The Hidden Map.md" in paths
+    assert f"{root_folder}/Reading Log/Chapter 1 - Arrival.md" in paths
 
     assert "[[Blaire]]" in paths[f"{root_folder}/Characters/Aria.md"]
     assert "[[Aria]]" in paths[f"{root_folder}/Characters/Blaire.md"]
-    assert "Next: [[Blaire joins]]" in paths[f"{root_folder}/Major Events/Aria-arrives.md"]
-    assert "Previous: [[Aria arrives]]" in paths[f"{root_folder}/Major Events/Blaire-joins.md"]
-    assert "[[The Capital]]" in paths[f"{root_folder}/Wiki/Index.md"]
+    assert "Next: [[Blaire joins]]" in paths[f"{root_folder}/Major Events/Aria arrives.md"]
+    assert "Previous: [[Aria arrives]]" in paths[f"{root_folder}/Major Events/Blaire joins.md"]
+    assert "## Connected Plot Threads" in paths[f"{root_folder}/Major Events/Aria arrives.md"]
+    assert "## Arc Movement" in paths[f"{root_folder}/Major Events/Aria arrives.md"]
+    assert "## Major Beats" in paths[f"{root_folder}/Plot Threads/The Hidden Map.md"]
+    assert all(content.rstrip().endswith(EXPORT_ATTRIBUTION) for content in paths.values())
+
+
+def test_character_bible_obsidian_manifest_preserves_spaces_in_character_note_paths():
+    book = Book(
+        id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        title="Bakemonogatari",
+        format="pdf",
+        s3_key="books/bakemonogatari.pdf",
+        status="ready",
+    )
+    mayoi = Character(
+        id=uuid.uuid4(),
+        book_id=book.id,
+        name="Mayoi Hachikuji",
+        first_chapter=1,
+        mention_count=2,
+        trait_state={},
+    )
+
+    root_folder, files = character_bible_obsidian_manifest(
+        book=book,
+        characters=[mayoi],
+        relationships=[],
+        plot_threads=[],
+        wiki_entries=[],
+        chapter_rows=[],
+        chapter_events=[],
+        rel_summaries={},
+        thread_summaries={},
+    )
+
+    paths = {file["path"] for file in files}
+
+    assert f"{root_folder}/Characters/Mayoi Hachikuji.md" in paths
+    assert f"{root_folder}/Characters/Mayoi-Hachikuji.md" not in paths

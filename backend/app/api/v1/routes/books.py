@@ -115,6 +115,7 @@ from app.schemas.books import (
     ReadabilityRequestBody,
     RelationshipUpdateBody,
     SeriesBody,
+    SeriesBibleOut,
     SeriesBookStatusBody,
     SeriesCreateBody,
     SeriesMembershipBody,
@@ -129,6 +130,7 @@ from app.utils.book_utils import (
     build_chapter_consistency_report,
     build_character_card_payload,
     build_emotional_arc_payload,
+    build_series_bible_payload,
     build_writer_workspace_payload,
     build_obsidian_graph,
     build_prewriting_check,
@@ -139,6 +141,7 @@ from app.utils.book_utils import (
     deserialize_manuscript_content,
     ensure_book_cover,
     export_obsidian_notes_zip,
+    extract_novel_scene_candidates,
     get_owned_book,
     get_owned_series,
     import_obsidian_notes_zip,
@@ -154,12 +157,18 @@ from app.utils.book_utils import (
     estimate_readability,
     normalize_writer_workspace,
     normalize_imported_chapters,
+    normalize_book_work_type,
     parse_import_upload,
+    parse_screenplay_upload,
     process_and_store_book_cover,
+    replace_chapter_novel_scenes,
+    refresh_screenplay_scene_rows,
     resolve_owned_series_ids,
+    resolve_upload_format_and_work_type,
     save_book_note,
     save_obsidian_vault_note,
     snapshot_chapter_version,
+    story_unit_name,
 )
 
 # ── Utils imports ──────────────────────────────────────────────────────────────
@@ -186,8 +195,9 @@ from app.utils.export_utils import (
     character_card_markdown,
     character_card_pdf,
     manuscript_docx,
-    manuscript_epub,
-    manuscript_pdf,
+    manuscript_epub_compiled,
+    manuscript_obsidian_vault_zip,
+    manuscript_pdf_compiled,
 )
 from app.utils.notification_utils import (
     build_chapter_report_notification,
@@ -247,6 +257,7 @@ async def upload_book_endpoint(
     title: str = Form(...),
     genre: str | None = Form(None),
     author: str | None = Form(None),
+    work_type: str | None = Form(None),
     series_ids: list[str] = Form(default=[]),
     visibility: str = Form("private"),
     description: str | None = Form(None),
@@ -273,13 +284,7 @@ async def upload_book_endpoint(
     if not title.strip():
         raise HTTPException(400, "Title is required")
 
-    filename = file.filename.lower()
-    if filename.endswith(".pdf"):
-        fmt = "pdf"
-    elif filename.endswith(".epub"):
-        fmt = "epub"
-    else:
-        raise HTTPException(400, "Only PDF and EPUB files are supported")
+    fmt, resolved_work_type = resolve_upload_format_and_work_type(file.filename, work_type)
 
     # Validate series ownership BEFORE expensive file operations
     selected_series = await resolve_owned_series_ids(db, current_user.id, series_ids)
@@ -308,6 +313,7 @@ async def upload_book_endpoint(
         genre=genre,
         author=author,
         format=fmt,
+        work_type=resolved_work_type,
         s3_key=s3_key,
         cover_s3_key=cover_s3_key,
         status="pending",
@@ -434,6 +440,7 @@ async def import_manuscript_content(
     text: str | None = Form(None),
     html: str | None = Form(None),
     title: str | None = Form(None),
+    work_type: str | None = Form(None),
     chapter_number: int | None = Form(None),
     replace_existing: str = Form("false"),
     chunk_long_documents: str = Form("false"),
@@ -446,11 +453,14 @@ async def import_manuscript_content(
         raise HTTPException(400, "Provide text or one or more files")
 
     import_jobs: list[dict[str, object]] = []
+    screenplay_batches: list[dict[str, object]] = []
     normalized_title = _clean_optional_text(title)
     next_number = await next_chapter_number(db, book.id)
     replace_flag = as_bool(replace_existing)
     chunk_flag = as_bool(chunk_long_documents)
     split_flag = as_bool(split_into_chapters)
+    resolved_book_work_type = normalize_book_work_type(work_type, default=book.work_type or "novel")
+    resolved_import_format: str | None = None
 
     cleaned_html = clean_manuscript_html(html) if html else None
     
@@ -458,20 +468,38 @@ async def import_manuscript_content(
     total_file_size = 0
 
     if text and text.strip():
-        import_jobs.extend(
-            normalize_imported_chapters(
-                [{
-                    "title": normalized_title or f"Chapter {chapter_number or next_number}",
-                    "text": text,
-                    "html": cleaned_html,
-                    "number": chapter_number or next_number,
-                }],
+        if resolved_book_work_type == "screenplay":
+            screenplay_payload = await parse_screenplay_upload("inline.fountain", text.encode("utf-8"))
+            new_jobs = normalize_imported_chapters(
+                screenplay_payload["chapters"],
                 chapter_number=chapter_number,
                 start_number=chapter_number or next_number,
                 replace_existing=replace_flag,
-                chunk_long_documents=chunk_flag,
+                chunk_long_documents=False,
             )
-        )
+            import_jobs.extend(new_jobs)
+            screenplay_batches.append(
+                {
+                    "parsed_scenes": screenplay_payload["scenes"],
+                    "starting_number": min(int(cast(Any, job["number"])) for job in new_jobs),
+                    "scene_numbers": {int(cast(Any, job["number"])) for job in new_jobs},
+                }
+            )
+        else:
+            import_jobs.extend(
+                normalize_imported_chapters(
+                    [{
+                        "title": normalized_title or f"{story_unit_name(book)} {chapter_number or next_number}",
+                        "text": text,
+                        "html": cleaned_html,
+                        "number": chapter_number or next_number,
+                    }],
+                    chapter_number=chapter_number,
+                    start_number=chapter_number or next_number,
+                    replace_existing=replace_flag,
+                    chunk_long_documents=chunk_flag,
+                )
+            )
 
     MAX_MANUSCRIPT_BYTES = 20 * 1024 * 1024  # 20 MB per file
     for upload in files or []:
@@ -481,17 +509,34 @@ async def import_manuscript_content(
         if not raw:
             continue
         total_file_size += len(raw)
-        parsed = await parse_import_upload(upload.filename, raw, split_flag)
-        base_number = chapter_number if replace_flag and chapter_number else next_number
-        import_jobs.extend(
-            normalize_imported_chapters(
-                parsed,
-                chapter_number=chapter_number,
-                start_number=base_number,
-                replace_existing=replace_flag and len(parsed) == 1,
-                chunk_long_documents=chunk_flag,
-            )
+        fmt, upload_work_type = resolve_upload_format_and_work_type(
+            upload.filename,
+            work_type if work_type is not None else book.work_type,
         )
+        resolved_import_format = resolved_import_format or fmt
+        if upload_work_type == "screenplay":
+            screenplay_payload = await parse_screenplay_upload(upload.filename, raw)
+            parsed = screenplay_payload["chapters"]
+        else:
+            parsed = await parse_import_upload(upload.filename, raw, split_flag)
+        base_number = chapter_number if replace_flag and chapter_number else next_number
+        new_jobs = normalize_imported_chapters(
+            parsed,
+            chapter_number=chapter_number,
+            start_number=base_number,
+            replace_existing=replace_flag and len(parsed) == 1,
+            chunk_long_documents=False if upload_work_type == "screenplay" else chunk_flag,
+        )
+        import_jobs.extend(new_jobs)
+        if upload_work_type == "screenplay":
+            screenplay_batches.append(
+                {
+                    "parsed_scenes": screenplay_payload["scenes"],
+                    "starting_number": min(int(cast(Any, job["number"])) for job in new_jobs),
+                    "scene_numbers": {int(cast(Any, job["number"])) for job in new_jobs},
+                }
+            )
+            resolved_book_work_type = "screenplay"
         next_number = max(
             next_number,
             max((int(cast(Any, job["number"])) for job in import_jobs), default=next_number) + 1,
@@ -513,6 +558,7 @@ async def import_manuscript_content(
                     book,
                     existing,
                     note=f"Snapshot before replacing Chapter {job_number}",
+                    snapshot_kind="pre_replace",
                 )
                 await db.delete(existing)
                 await db.flush()
@@ -524,14 +570,39 @@ async def import_manuscript_content(
                 "title": job.get("title"),
                 "text": job.get("text", ""),
                 "html": job.get("html"),
+                "description": job.get("description"),
                 "images": [],
             },
         )
+        if resolved_book_work_type != "screenplay":
+            extracted_scenes = extract_novel_scene_candidates(
+                text=str(job.get("text") or ""),
+                chapter_number=job_number,
+                source="extracted",
+            )
+            await replace_chapter_novel_scenes(
+                db,
+                book=book,
+                chapter_number=job_number,
+                scenes=extracted_scenes,
+            )
         imported_numbers.append(job_number)
+
+    for batch in screenplay_batches:
+        await refresh_screenplay_scene_rows(
+            db,
+            book=book,
+            parsed_scenes=cast(list[Any], batch["parsed_scenes"]),
+            starting_number=int(cast(Any, batch["starting_number"])),
+            replace_scene_numbers=cast(set[int], batch["scene_numbers"]),
+        )
 
     total_chapters = await db.scalar(select(func.count()).select_from(Chapter).where(Chapter.book_id == book.id)) or 0
     book.total_chapters = total_chapters
     book.mode = "author"
+    book.work_type = resolved_book_work_type
+    if resolved_import_format:
+        book.format = resolved_import_format
     book.source_kind = "chapter_wise" if len(import_jobs) == 1 and not files else "batch_upload"
     await db.commit()
     await db.refresh(book)
@@ -695,6 +766,16 @@ async def list_series(
             books.append(enriched)
         output.append(SeriesOut(id=series.id, name=series.name, description=series.description, created_at=series.created_at, books=books))
     return output
+
+
+@router.get("/series/{series_id}/bible", response_model=SeriesBibleOut)
+async def get_series_bible(
+    series_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    series = await get_owned_series(db, series_id, current_user.id)
+    return await build_series_bible_payload(db, series=series)
 
 
 @router.post("/series", response_model=SeriesOut, status_code=201)
@@ -1166,7 +1247,7 @@ async def get_emotional_arc(
 @router.get("/{book_id}/manuscript/export")
 async def export_manuscript(
     book_id: uuid.UUID,
-    format: str = Query("docx", pattern="^(pdf|docx|epub)$"),
+    format: str = Query("docx", pattern="^(pdf|docx|epub|obsidian)$"),
     preset: str = Query("standard_manuscript", pattern="^(standard_manuscript|trade_paperback|kdp_paperback)$"),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
@@ -1196,23 +1277,61 @@ async def export_manuscript(
                 chapter_html = None
         chapters.append({"number": number, "title": chapter_title, "text": chapter_text, "html": chapter_html})
 
+    workspace = build_writer_workspace_payload(book)
+    front_matter = workspace.get("manuscript_front_matter") if isinstance(workspace, dict) else None
+
     filename_base = "".join(ch for ch in (book.title or "lorevia") if ch.isalnum() or ch in {" ", "-", "_"}).strip().replace(" ", "-") or "lorevia"
     if format == "pdf":
-        raw = manuscript_pdf(title=book.title or "LoreVia Manuscript", chapters=chapters, preset=preset)
+        raw = manuscript_pdf_compiled(
+            title=book.title or "LoreVia Manuscript",
+            chapters=chapters,
+            preset=preset,
+            front_matter=cast(dict | None, front_matter),
+        )
         return Response(
             content=raw,
             media_type="application/pdf",
             headers={"Content-Disposition": f'attachment; filename="{filename_base}-manuscript.pdf"'},
         )
     if format == "epub":
-        raw = manuscript_epub(title=book.title or "LoreVia Manuscript", chapters=chapters, preset=preset)
+        raw = manuscript_epub_compiled(
+            title=book.title or "LoreVia Manuscript",
+            chapters=chapters,
+            preset=preset,
+            front_matter=cast(dict | None, front_matter),
+        )
         return Response(
             content=raw,
             media_type="application/epub+zip",
             headers={"Content-Disposition": f'attachment; filename="{filename_base}-manuscript.epub"'},
         )
+    if format == "obsidian":
+        scenes = await list_novel_scenes(db, book=book)
+        notes = await list_obsidian_notes(
+            db,
+            book=book,
+            user_id=current_user.id,
+            source=ObsidianVaultNoteSource.USER_NOTES.value,
+        )
+        raw = manuscript_obsidian_vault_zip(
+            title=book.title or "LoreVia Manuscript",
+            chapters=chapters,
+            scenes=scenes,
+            notes=notes,
+            front_matter=cast(dict | None, front_matter),
+        )
+        return Response(
+            content=raw,
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{filename_base}-manuscript-vault.zip"'},
+        )
 
-    raw = manuscript_docx(title=book.title or "LoreVia Manuscript", chapters=chapters, preset=preset)
+    raw = manuscript_docx(
+        title=book.title or "LoreVia Manuscript",
+        chapters=chapters,
+        preset=preset,
+        front_matter=cast(dict | None, front_matter),
+    )
     return Response(
         content=raw,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",

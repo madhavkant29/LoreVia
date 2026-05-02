@@ -24,6 +24,7 @@ from app.core.config import settings
 from app.core.database import Base, get_db
 from app.core.storage import download_book
 from app.main import app
+from app.utils.migration_utils import is_local_database_url
 
 
 @pytest.fixture(autouse=True)
@@ -133,6 +134,12 @@ async def setup_engine():
 
 @pytest_asyncio.fixture(scope="session")
 async def setup_db(setup_engine):
+    if not is_local_database_url(settings.DATABASE_URL):
+        raise RuntimeError(
+            "Refusing to reset the test schema against a non-local database URL. "
+            "Point DATABASE_URL at a disposable local test database before running tests."
+        )
+
     async with engine_test.begin() as conn:
         # Enable pgvector extension for vector columns
         await conn.execute(sa.text("CREATE EXTENSION IF NOT EXISTS vector"))

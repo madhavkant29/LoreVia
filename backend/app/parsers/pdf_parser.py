@@ -23,7 +23,11 @@ FRONT_MATTER_RE = re.compile(
 ORNAMENT_RE = re.compile(r"[\u2600-\u27ff\u3000-\u303f\uFF00-\uFFEF\U0001F000-\U0001F9FF]+")
 MEDIA_MARKER_TEMPLATE = "[[IMAGE:{marker}]]"
 MEDIA_MARKER_RE = re.compile(r"\[\[IMAGE:[^\]]+\]\]")
-PARAGRAPH_SPLIT_MAX_WORDS = 4000
+PARAGRAPH_SPLIT_TARGET_WORDS = 7000
+HEADING_FALLBACK_RE = re.compile(
+    r"^(chapter|ch\.?|part|volume|vol\.?|book|act|episode|section|scene|prologue|epilogue|interlude|afterword|appendix)\b",
+    re.IGNORECASE,
+)
 NUMBER_WORDS = {
     "zero": 0,
     "one": 1,
@@ -395,7 +399,10 @@ def _blank_chapter(number: int, title: str | None = None) -> dict:
 
 
 def _chapter_has_content(chapter: dict) -> bool:
-    return any(part.strip() for part in chapter["text_parts"])
+    return any(
+        part.strip() and not MEDIA_MARKER_RE.fullmatch(part.strip())
+        for part in chapter["text_parts"]
+    )
 
 
 def _detect_repeated_headers(doc: fitz.Document) -> set[str]:
@@ -439,7 +446,7 @@ def _extract_heading(text: str) -> str | None:
         return first_line.title()
     # Fallback: if it looks like a chapter heading with decorations, strip all non-alphanumeric and return
     cleaned_line = re.sub(r"[^\w\s]", "", first_line).strip()
-    if any(word.lower() in ["chapter", "prologue", "epilogue", "part", "volume"] for word in cleaned_line.split()):
+    if cleaned_line and HEADING_FALLBACK_RE.match(cleaned_line):
         return cleaned_line
     return None
 
@@ -518,7 +525,11 @@ def _drop_front_matter_paragraphs(text: str) -> str:
 
 def _drop_front_matter_text_parts(text_parts: list[str]) -> list[str]:
     parts = [part.strip() for part in text_parts if part and part.strip()]
+    preserved_prefix: list[str] = []
     while parts:
+        if MEDIA_MARKER_RE.fullmatch(parts[0]):
+            preserved_prefix.append(parts.pop(0))
+            continue
         normalized = MEDIA_MARKER_RE.sub(" ", parts[0]).strip()
         if not normalized:
             parts.pop(0)
@@ -527,7 +538,7 @@ def _drop_front_matter_text_parts(text_parts: list[str]) -> list[str]:
             parts.pop(0)
             continue
         break
-    return parts
+    return preserved_prefix + parts
 
 
 def _split_large_chapter_parts(text_parts: list[str]) -> list[list[str]]:
@@ -543,7 +554,7 @@ def _split_large_chapter_parts(text_parts: list[str]) -> list[list[str]]:
         projected_words = current_words + part_words
         should_split = (
             current
-            and projected_words > PARAGRAPH_SPLIT_MAX_WORDS
+            and projected_words > PARAGRAPH_SPLIT_TARGET_WORDS
             and _can_close_section(current)
         )
         if should_split:

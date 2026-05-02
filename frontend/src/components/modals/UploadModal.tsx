@@ -9,7 +9,7 @@ import { useAuthStore } from "@/lib/stores/authStore"
 import { useBookModeStore, type BookMode } from "@/lib/stores/bookModeStore"
 import { GENRE_TAGS } from "@/lib/constants/genreTags"
 import { capture } from "@/lib/analytics/posthog"
-import type { Book, BookSeries, ChapterConsistencyReport } from "@/types/book"
+import type { Book, BookSeries, BookWorkType, ChapterConsistencyReport } from "@/types/book"
 import type { AdvisorSuggestion, EditorialReview, EditorialReviewPassage, ManuscriptSynopsis } from "@/types/intelligence"
 import type { PlotThread } from "@/types/reader"
 
@@ -45,6 +45,8 @@ export function UploadModal({
   const [splitIntoChapters, setSplitIntoChapters] = useState(true)
   const [chunkLongDocuments, setChunkLongDocuments] = useState(false)
   const [files, setFiles] = useState<File[]>([])
+  const [workType, setWorkType] = useState<BookWorkType>("novel")
+  const [workTypeDirty, setWorkTypeDirty] = useState(false)
   const [autoExtractCover, setAutoExtractCover] = useState(true)
   const [preserveChapterNumbers, setPreserveChapterNumbers] = useState(false)
   const [coverFile, setCoverFile] = useState<File | null>(null)
@@ -54,6 +56,8 @@ export function UploadModal({
   const [uploading, setUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [uploadStage, setUploadStage] = useState<"idle" | "uploading" | "processing">("idle")
+  const [processingBookId, setProcessingBookId] = useState<string | null>(null)
+  const [processingBook, setProcessingBook] = useState<Book | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [postImportReview, setPostImportReview] = useState<EditorialReview | null>(null)
   const [postImportPassages, setPostImportPassages] = useState<EditorialReviewPassage[]>([])
@@ -68,6 +72,11 @@ export function UploadModal({
   const user = useAuthStore((state) => state.user)
   const setBookMode = useBookModeStore((state) => state.setMode)
   const isDark = theme === "dark"
+  const infoButtonClass = `inline-flex h-4 w-4 items-center justify-center rounded-full border text-[10px] font-semibold leading-none transition ${
+    isDark
+      ? "border-white/20 text-slate-300 hover:border-white/40 hover:bg-white/10 hover:text-white"
+      : "border-stone-300 text-stone-500 hover:border-stone-400 hover:bg-stone-100 hover:text-stone-700"
+  }`
   const visibility: "private" = "private"
   const genre = selectedTags.join(", ")
   const trimmedCustomTag = customTag.trim()
@@ -105,7 +114,52 @@ export function UploadModal({
     const primaryFile = files[0]
     const isPdf = primaryFile.name.toLowerCase().endsWith(".pdf")
     setAutoExtractCover(isPdf)
-  }, [files])
+    if (!workTypeDirty) {
+      const lowerName = primaryFile.name.toLowerCase()
+      if (lowerName.endsWith(".fountain") || lowerName.endsWith(".screenplay") || lowerName.endsWith(".script")) {
+        setWorkType("screenplay")
+      }
+    }
+  }, [files, workTypeDirty])
+
+  useEffect(() => {
+    if (!processingBookId) return
+
+    let active = true
+    let interval: number | null = null
+
+    const loadProcessingBook = async () => {
+      try {
+        const updated = await booksApi.get(processingBookId)
+        if (!active) return
+        setProcessingBook(updated)
+        if (updated.status === "ready" || updated.status === "failed") {
+          setUploadStage("idle")
+          setUploading(false)
+          setProcessingBookId(null)
+          if (updated.status === "ready") {
+            setTimeout(() => onClose(), 600)
+          }
+        }
+      } catch {
+        if (active) {
+          setProcessingBook(null)
+        }
+      }
+    }
+
+    void loadProcessingBook()
+    interval = window.setInterval(() => {
+      void loadProcessingBook()
+    }, 4000)
+
+    return () => {
+      active = false
+      if (interval !== null) {
+        window.clearInterval(interval)
+      }
+    }
+  }, [onClose, processingBookId])
 
   // Auto-set author to email when in author mode
   useEffect(() => {
@@ -155,6 +209,7 @@ export function UploadModal({
   const existingAuthorBooks = books.filter((book) => book.mode === "author" && !book.hidden_at)
   const selectedExistingBook = existingAuthorBooks.find((book) => book.id === existingBookId) ?? null
   const isManagingExisting = mode === "author" && !!existingBookId
+  const effectiveWorkType = isManagingExisting ? (selectedExistingBook?.work_type ?? workType) : workType
   const needsUsername = mode === "author" && !user?.username
   const hasChapterText = chapterText.trim().length > 0
   const hasChapterFiles = files.length > 0
@@ -167,6 +222,11 @@ export function UploadModal({
       setChapterNumber(String(nextChapter))
     }
   }, [chapterNumberDirty, isManagingExisting, replaceExisting, selectedExistingBook])
+
+  useEffect(() => {
+    if (!isManagingExisting || !selectedExistingBook) return
+    setWorkType(selectedExistingBook.work_type)
+  }, [isManagingExisting, selectedExistingBook])
 
   const resetImportFeedback = () => {
     setError(null)
@@ -194,6 +254,7 @@ export function UploadModal({
     setUploadProgress(0)
     setUploadStage("uploading")
     resetImportFeedback()
+    let startedProcessing = false
     try {
       let bookId: string | null = null
       if (isManagingExisting) {
@@ -204,6 +265,7 @@ export function UploadModal({
           replaceExisting,
           splitIntoChapters,
           chunkLongDocuments,
+          workType: effectiveWorkType,
           files: chapterSource === "upload" ? files : undefined,
         })
         bookId = response.book_id
@@ -211,6 +273,7 @@ export function UploadModal({
         capture("book_uploaded", {
           mode: "author",
           kind: chapterSource === "paste" ? "single_chapter_paste" : "manuscript_import",
+          work_type: effectiveWorkType,
           file_count: chapterSource === "upload" ? files.length : 0,
           chapter_source: chapterSource,
           replace_existing: replaceExisting,
@@ -235,6 +298,7 @@ export function UploadModal({
         setUploadStage("processing")
         setUploadProgress(100)
         await booksApi.list(true).then(setBooks).catch(() => {})
+        setProcessingBookId(response.book_id)
         return
       } else {
         const primaryFile = files[0]
@@ -245,6 +309,7 @@ export function UploadModal({
           seriesIds: selectedSeriesIds,
           autoExtractCover,
           preserveChapterNumbers,
+          workType,
           coverFile: autoExtractCover ? null : coverFile,
           mode,
           onProgress: (percent) => {
@@ -257,6 +322,7 @@ export function UploadModal({
           mode,
           kind: "new_upload",
           format,
+          work_type: workType,
           has_cover_file: Boolean(coverFile) && !autoExtractCover,
           preserve_chapter_numbers: preserveChapterNumbers,
           tag_count: selectedTags.length,
@@ -265,12 +331,21 @@ export function UploadModal({
       }
       setUploadStage("processing")
       setUploadProgress(100)
-      onClose()
+      startedProcessing = true
+      if (bookId) {
+        setProcessingBookId(bookId)
+      } else {
+        onClose()
+      }
     } catch {
       setError("Upload failed. Please try again.")
+      setProcessingBookId(null)
+      setProcessingBook(null)
     } finally {
       setUploading(false)
-      setUploadStage("idle")
+      if (!startedProcessing) {
+        setUploadStage("idle")
+      }
     }
   }
 
@@ -294,6 +369,30 @@ export function UploadModal({
   }
 
   const isInline = presentation === "inline"
+  const isScreenplayWorkspace = effectiveWorkType === "screenplay"
+  const storyUnitLabel = isScreenplayWorkspace ? "scene" : "chapter"
+  const storyUnitLabelTitle = isScreenplayWorkspace ? "Scene" : "Chapter"
+  const storyUnitCollectionLabel = isScreenplayWorkspace ? "scenes" : "chapters"
+  const newUploadAccept = isScreenplayWorkspace ? ".pdf,.fountain,.txt,.md" : ".pdf,.epub,.docx,.txt,.md,.fountain"
+  const newUploadHelp = isScreenplayWorkspace
+    ? "Screenplay mode accepts screenplay PDFs, Fountain, TXT, and Markdown scripts. LoreVia will normalize scenes and dialogue automatically."
+    : "Novel and prose mode accepts PDF, EPUB, DOCX, TXT, Markdown, and Fountain uploads."
+  const chapterUploadHelp = isScreenplayWorkspace
+    ? "Upload a screenplay PDF, Fountain, TXT, or Markdown script segment. LoreVia will turn scenes into synthetic chapters for the rest of the pipeline."
+    : "Click to select a chapter file. Use PDF, EPUB, DOCX, TXT, or Markdown."
+  const processingSummary = processingBook?.processing
+    ? [
+        processingBook.processing.stage ?? processingBook.processing.status,
+        typeof processingBook.processing.progress_pct === "number" ? `${Math.round(processingBook.processing.progress_pct)}%` : null,
+        typeof processingBook.processing.eta_seconds === "number"
+          ? processingBook.processing.eta_seconds <= 0
+            ? "almost done"
+            : `${Math.max(1, Math.round(processingBook.processing.eta_seconds / 60))} min left`
+          : null,
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : null
   const shellClassName = `flex ${isInline ? "min-h-0" : "max-h-[90vh]"} w-full ${postImportReview || isManagingExisting ? "max-w-5xl" : "max-w-md"} flex-col overflow-hidden rounded-2xl border p-6 shadow-2xl transition-colors ${
     isDark
       ? isInline
@@ -306,11 +405,11 @@ export function UploadModal({
       <div className={shellClassName}>
         <div className="mb-5 flex items-center justify-between">
           <div>
-            <h2 className="text-lg font-semibold">{isManagingExisting ? "Add New Chapter" : "Upload Book"}</h2>
+            <h2 className="text-lg font-semibold">{isManagingExisting ? `Add New ${storyUnitLabelTitle}` : "Upload Book"}</h2>
             <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
               {isManagingExisting
-                ? "Paste or upload one chapter, process it incrementally, and review what changed before moving on."
-                : "Add a new book to your workspace."}
+                ? "Paste or upload one scene, chapter, or script segment, process it incrementally, and review what changed before moving on."
+                : "Add a new book or script to your workspace."}
             </p>
           </div>
           <button
@@ -323,6 +422,28 @@ export function UploadModal({
             ×
           </button>
         </div>
+
+        {uploadStage === "processing" && processingBook ? (
+          <div className={`mb-4 rounded-xl border p-4 ${isDark ? "border-amber-500/20 bg-amber-500/10" : "border-amber-200 bg-amber-50"}`}>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className={`text-xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-amber-200" : "text-amber-700"}`}>Processing status</p>
+                <p className={`mt-1 text-sm ${isDark ? "text-slate-200" : "text-slate-700"}`}>
+                  {processingSummary ?? "Your upload is still being processed."}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={onClose}
+                className={`rounded-lg px-3 py-2 text-xs font-semibold transition ${
+                  isDark ? "bg-white/10 text-slate-100 hover:bg-white/15" : "bg-white text-stone-800 hover:bg-stone-100"
+                }`}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        ) : null}
 
         <form onSubmit={submit} className="reader-scrollbar min-h-0 flex-1 overflow-y-auto pr-1">
           <div className="flex flex-col gap-4">
@@ -354,6 +475,55 @@ export function UploadModal({
               }`}
             />
           ) : null}
+
+          <div className={`rounded-xl border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-gray-200 bg-gray-50"}`}>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>Work type</p>
+                <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                  {isManagingExisting
+                    ? selectedExistingBook
+                      ? `This workspace is set to ${selectedExistingBook.work_type}.`
+                      : "Choose how LoreVia should interpret this manuscript."
+                    : "Tell LoreVia whether this upload is a novel, a screenplay, or another prose/script document."}
+                </p>
+              </div>
+            </div>
+            <div className="mt-3 grid gap-2 sm:grid-cols-3">
+              {([
+                { value: "novel", label: "Novel", detail: "Chapter-oriented prose parsing." },
+                { value: "screenplay", label: "Screenplay", detail: "Scene and dialogue-aware ingestion." },
+                { value: "other", label: "Other", detail: "General prose or script document." },
+              ] as const).map((option) => {
+                const active = effectiveWorkType === option.value
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => {
+                      if (isManagingExisting && selectedExistingBook) return
+                      setWorkType(option.value)
+                      setWorkTypeDirty(true)
+                    }}
+                    disabled={isManagingExisting && !!selectedExistingBook}
+                    className={`rounded-xl border px-4 py-3 text-left transition disabled:cursor-not-allowed disabled:opacity-80 ${
+                      active
+                        ? isDark
+                          ? "border-indigo-400/50 bg-indigo-400/15 text-slate-100"
+                          : "border-indigo-300 bg-indigo-50 text-stone-900"
+                        : isDark
+                          ? "border-white/10 bg-black/20 text-slate-300 hover:bg-white/5"
+                          : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"
+                    }`}
+                  >
+                    <p className="text-sm font-semibold">{option.label}</p>
+                    <p className={`mt-1 text-xs leading-5 ${active ? isDark ? "text-slate-200" : "text-stone-700" : isDark ? "text-slate-500" : "text-stone-500"}`}>{option.detail}</p>
+                  </button>
+                )
+              })}
+            </div>
+            <p className={`mt-3 text-xs leading-5 ${isDark ? "text-slate-500" : "text-stone-500"}`}>{newUploadHelp}</p>
+          </div>
 
           <div className={`rounded-xl border p-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-gray-200 bg-gray-50"}`}>
             <div className="flex items-center justify-between gap-3">
@@ -535,20 +705,20 @@ export function UploadModal({
             <div className={`rounded-2xl border p-5 ${isDark ? "border-indigo-500/20 bg-[radial-gradient(circle_at_top_left,rgba(99,102,241,0.18),transparent_45%),rgba(255,255,255,0.03)]" : "border-indigo-200 bg-[radial-gradient(circle_at_top_left,rgba(224,231,255,0.9),transparent_45%),#f8fafc]"}`}>
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
-                  <p className={`text-xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-indigo-300" : "text-indigo-700"}`}>Single-chapter workflow</p>
+                  <p className={`text-xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-indigo-300" : "text-indigo-700"}`}>Single-{isScreenplayWorkspace ? "script" : "chapter"} workflow</p>
                   <p className={`mt-2 max-w-2xl text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
-                    LoreVia will attach this chapter to {selectedExistingBook ? `"${selectedExistingBook.title}"` : "your selected manuscript"}, update character memory and thread data, then surface continuity risks from the fresh ingest.
+                    LoreVia will attach this {isScreenplayWorkspace ? "scene batch or script segment" : "chapter"} to {selectedExistingBook ? `"${selectedExistingBook.title}"` : "your selected manuscript"}, update character memory and thread data, then surface continuity risks from the fresh ingest.
                   </p>
                 </div>
                 <div className={`rounded-xl border px-4 py-3 text-xs ${isDark ? "border-white/10 bg-black/20 text-slate-300" : "border-white bg-white text-stone-600 shadow-sm"}`}>
                   <p className="font-semibold">After processing</p>
-                  <p className="mt-1">You’ll get a chapter summary, new-character changes, thread movement, and continuity review.</p>
+                  <p className="mt-1">You’ll get a fresh summary, new-character changes, thread movement, and continuity review.</p>
                 </div>
               </div>
 
               <div className={`mt-4 inline-flex rounded-full p-1 ${isDark ? "border border-white/10 bg-white/5" : "border border-stone-200 bg-white/80"}`}>
                 {([
-                  { value: "paste", label: "Paste chapter" },
+                  { value: "paste", label: isScreenplayWorkspace ? "Paste script" : "Paste chapter" },
                   { value: "upload", label: "Upload file" },
                 ] as const).map((option) => {
                   const active = chapterSource === option.value
@@ -578,7 +748,7 @@ export function UploadModal({
                     <input
                       type="number"
                       min={1}
-                      placeholder="Chapter number"
+                      placeholder={`${storyUnitLabelTitle} number`}
                       value={chapterNumber}
                       onChange={(e) => {
                         setChapterNumber(e.target.value)
@@ -588,7 +758,7 @@ export function UploadModal({
                     />
                     <label className={`flex items-center gap-2 rounded-lg border px-3 py-2.5 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-300" : "border-gray-300 bg-white text-slate-700"}`}>
                       <input type="checkbox" checked={replaceExisting} onChange={(e) => setReplaceExisting(e.target.checked)} />
-                      Replace chapter
+                      {`Replace ${storyUnitLabel}`}
                     </label>
                   </div>
 
@@ -596,7 +766,7 @@ export function UploadModal({
                     <>
                       <input
                         type="text"
-                        placeholder="Chapter title (optional)"
+                        placeholder={`${storyUnitLabelTitle} title (optional)`}
                         value={chapterTitle}
                         onChange={(e) => setChapterTitle(e.target.value)}
                         className={`rounded-lg border px-3 py-2.5 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-100 placeholder:text-slate-500" : "border-gray-300 bg-white text-slate-950 placeholder:text-slate-400"}`}
@@ -604,13 +774,15 @@ export function UploadModal({
                       <textarea
                         value={chapterText}
                         onChange={(e) => setChapterText(e.target.value)}
-                        placeholder="Paste one chapter here. LoreVia will save it into the manuscript, refresh character profiles, and immediately run continuity checks."
+                        placeholder={isScreenplayWorkspace
+                          ? "Paste screenplay text here. LoreVia will split scenes, refresh character profiles, and immediately run continuity checks."
+                          : "Paste one chapter here. LoreVia will save it into the manuscript, refresh character profiles, and immediately run continuity checks."}
                         rows={14}
                         className={`min-h-[280px] rounded-xl border px-3 py-3 text-sm leading-6 outline-none transition ${isDark ? "border-white/10 bg-black/20 text-slate-100 placeholder:text-slate-500 focus:border-indigo-400/50" : "border-gray-300 bg-white text-slate-950 placeholder:text-slate-400 focus:border-indigo-400"}`}
                       />
                       <div className={`flex items-center justify-between text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-                        <span>{chapterText.trim() ? `${chapterText.trim().split(/\s+/).length} words ready` : "No chapter text pasted yet"}</span>
-                        <span>{replaceExisting ? "Will replace the selected chapter number" : "Will append if the chapter number is new"}</span>
+                        <span>{chapterText.trim() ? `${chapterText.trim().split(/\s+/).length} words ready` : `No ${storyUnitLabel} text pasted yet`}</span>
+                        <span>{replaceExisting ? `Will replace the selected ${storyUnitLabel} number` : `Will append if the ${storyUnitLabel} number is new`}</span>
                       </div>
                     </>
                   ) : (
@@ -626,7 +798,7 @@ export function UploadModal({
                         ref={inputRef}
                         type="file"
                         multiple
-                        accept=".pdf,.epub,.docx,.txt,.md"
+                        accept={isScreenplayWorkspace ? ".pdf,.fountain,.txt,.md" : ".pdf,.epub,.docx,.txt,.md"}
                         className="hidden"
                         onChange={e => setFiles(Array.from(e.target.files ?? []))}
                       />
@@ -636,7 +808,7 @@ export function UploadModal({
                         </p>
                       ) : (
                         <p className={`text-sm ${isDark ? "text-slate-400" : "text-slate-400"}`}>
-                          Click to select a chapter file. Use PDF, EPUB, DOCX, TXT, or Markdown.
+                          {chapterUploadHelp}
                         </p>
                       )}
                     </div>
@@ -649,19 +821,41 @@ export function UploadModal({
                     <div className="mt-3 flex flex-wrap gap-3">
                       <label className={`flex items-center gap-2 text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                         <input type="checkbox" checked={splitIntoChapters} onChange={(e) => setSplitIntoChapters(e.target.checked)} />
-                        Split PDFs into chapters
+                        <span className="inline-flex items-center gap-1">
+                          <span>{isScreenplayWorkspace ? "Split screenplay PDFs into scenes" : "Split PDFs into chapters"}</span>
+                          <button
+                            type="button"
+                            title={isScreenplayWorkspace
+                              ? "Keeps detected scene headings together. If screenplay formatting is noisy, LoreVia will still build a stable scene order."
+                              : "Keeps detected chapters together. If chapter numbering is inconsistent, LoreVia will use its normal sequential split."}
+                            aria-label={isScreenplayWorkspace ? "What Split screenplay PDFs into scenes means" : "What Split PDFs into chapters means"}
+                            className={infoButtonClass}
+                          >
+                            i
+                          </button>
+                        </span>
                       </label>
                       <label className={`flex items-center gap-2 text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                         <input type="checkbox" checked={chunkLongDocuments} onChange={(e) => setChunkLongDocuments(e.target.checked)} />
-                        Chunk long files
+                        <span className="inline-flex items-center gap-1">
+                          <span>Chunk long files</span>
+                          <button
+                            type="button"
+                            title="Breaks long text into smaller pieces for easier processing."
+                            aria-label="What Chunk long files means"
+                            className={infoButtonClass}
+                          >
+                            i
+                          </button>
+                        </span>
                       </label>
                     </div>
                     <div className={`mt-4 rounded-lg border px-3 py-3 text-sm leading-6 ${isDark ? "border-white/10 bg-white/[0.03] text-slate-300" : "border-stone-200 bg-stone-50 text-stone-600"}`}>
                       <p className="font-semibold">What LoreVia updates</p>
-                      <p className="mt-1">Character state, relationship extraction, plot-thread analysis, and chapter-level continuity flags are all rerun from this chapter ingest.</p>
+                      <p className="mt-1">{`Character state, relationship extraction, plot-thread analysis, and ${storyUnitLabel}-level continuity flags are all rerun from this ${storyUnitLabel} ingest.`}</p>
                       {!replaceExisting && selectedExistingBook ? (
                         <p className="mt-2 text-xs opacity-80">
-                          Suggested next chapter: {(selectedExistingBook.total_chapters ?? 0) + 1}
+                          {`Suggested next ${storyUnitLabel}: ${(selectedExistingBook.total_chapters ?? 0) + 1}`}
                         </p>
                       ) : null}
                     </div>
@@ -683,22 +877,22 @@ export function UploadModal({
                     <div className={`rounded-xl border p-4 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-white"}`}>
                       <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Ready for incremental ingest</p>
                       <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
-                        Choose a chapter number, paste or upload a single chapter, and LoreVia will return a focused report instead of making you dig through the whole manuscript again.
+                        {`Choose a ${storyUnitLabel} number, paste or upload a single ${storyUnitLabel}, and LoreVia will return a focused report instead of making you dig through the whole manuscript again.`}
                       </p>
                     </div>
                   )}
 
                   {chapterReports.some((report) => report.continuity_flags.length > 0) ? (
                     <div className={`rounded-xl border p-4 ${isDark ? "border-amber-500/20 bg-amber-500/10" : "border-amber-200 bg-amber-50"}`}>
-                      <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-amber-200" : "text-amber-800"}`}>Fresh chapter continuity flags</p>
+                      <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-amber-200" : "text-amber-800"}`}>{`Fresh ${storyUnitLabel} continuity flags`}</p>
                       <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-200" : "text-stone-700"}`}>
-                        These were surfaced directly from the chapter you just imported, after LoreVia refreshed stored character and story state.
+                        {`These were surfaced directly from the ${storyUnitLabel} you just imported, after LoreVia refreshed stored character and story state.`}
                       </p>
                       <div className="mt-3 space-y-2">
                         {chapterReports.flatMap((report) =>
                           report.continuity_flags.map((flag, index) => (
                             <div key={`${report.chapter_number}-fresh-${index}`} className={`rounded-lg border px-3 py-3 text-sm leading-6 ${isDark ? "border-white/10 bg-black/20 text-slate-100" : "border-white bg-white text-stone-700"}`}>
-                              <p className="font-semibold">Chapter {report.chapter_number}{report.chapter_title ? ` - ${report.chapter_title}` : ""}</p>
+                              <p className="font-semibold">{storyUnitLabelTitle} {report.chapter_number}{report.chapter_title ? ` - ${report.chapter_title}` : ""}</p>
                               <p className="mt-1">{flag}</p>
                             </div>
                           ))
@@ -724,7 +918,7 @@ export function UploadModal({
                 ref={inputRef}
                 type="file"
                 multiple={false}
-                accept=".pdf,.epub"
+                accept={newUploadAccept}
                 className="hidden"
                 onChange={e => setFiles(Array.from(e.target.files ?? []))}
               />
@@ -734,7 +928,7 @@ export function UploadModal({
                 </p>
               ) : (
                 <p className={`text-sm ${isDark ? "text-slate-400" : "text-slate-400"}`}>
-                  Click to select PDF or EPUB
+                  {newUploadHelp}
                 </p>
               )}
             </div>
@@ -751,9 +945,11 @@ export function UploadModal({
                   className="mt-1 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                 />
                 <div>
-                  <p className={`text-sm font-medium ${isDark ? "text-slate-100" : "text-slate-900"}`}>Preserve chapter numbers from the source file</p>
+                  <p className={`text-sm font-medium ${isDark ? "text-slate-100" : "text-slate-900"}`}>{isScreenplayWorkspace ? "Preserve detected scene order from the source file" : "Preserve chapter numbers from the source file"}</p>
                   <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                    Best for novels that already have clean Chapter 1, 2, 3 headings. LoreVia will keep whole detected chapters together and only fall back to the current sequential chunking path if the source numbering is inconsistent.
+                    {isScreenplayWorkspace
+                      ? "Best for scripts with clean scene headings. LoreVia will keep the detected scene order stable and only fall back to sequential numbering if the source layout is noisy."
+                      : "Best for novels that already have clean Chapter 1, 2, 3 headings. LoreVia will keep whole detected chapters together and only fall back to the current sequential chunking path if the source numbering is inconsistent."}
                   </p>
                 </div>
               </label>
@@ -868,8 +1064,8 @@ export function UploadModal({
             <div className={`mt-4 rounded-xl border p-4 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-stone-50"}`}>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <p className={`text-xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-indigo-300" : "text-violet-600"}`}>Chapter consistency report</p>
-                  <p className={`mt-1 text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>Generated from the latest import so you can review the chapter in under 30 seconds.</p>
+                  <p className={`text-xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-indigo-300" : "text-violet-600"}`}>{`${storyUnitLabelTitle} consistency report`}</p>
+                  <p className={`mt-1 text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>{`Generated from the latest import so you can review the ${storyUnitLabel} in under 30 seconds.`}</p>
                 </div>
               </div>
 
@@ -879,7 +1075,7 @@ export function UploadModal({
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
                         <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>
-                          Chapter {report.chapter_number}{report.chapter_title ? ` - ${report.chapter_title}` : ""}
+                          {storyUnitLabelTitle} {report.chapter_number}{report.chapter_title ? ` - ${report.chapter_title}` : ""}
                         </p>
                         <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{report.summary}</p>
                       </div>

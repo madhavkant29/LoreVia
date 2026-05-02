@@ -1,4 +1,21 @@
-export const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api/v1"
+export const API_BASE = "/api/v1"
+
+export function resolveApiOrigin() {
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL
+  if (apiUrl) {
+    try {
+      return new URL(apiUrl).origin
+    } catch {
+      // Fall through to browser or local defaults.
+    }
+  }
+
+  if (typeof window !== "undefined" && window.location?.origin) {
+    return window.location.origin
+  }
+
+  return "http://localhost:8000"
+}
 
 export const CONFIDENCE_THRESHOLDS = {
   SHOW_IN_UI: 0.45,

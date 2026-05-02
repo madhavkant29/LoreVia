@@ -2,7 +2,7 @@ import asyncio
 
 from app.workers.celery_app import celery_app
 from app.workers.consumers.extraction_consumer import _process_chapter, process_book
-from app.utils.ingestion_utils import extract_queue_wait_ms
+from app.utils.ingestion_utils import extract_queue_wait_ms, is_book_hidden, is_retryable_processing_error
 
 
 def _run_coro(coro):
@@ -25,6 +25,8 @@ def process_book_task(self, book_id: str):
         queue_wait_ms = extract_queue_wait_ms(getattr(self.request, "headers", None))
         return _run_coro(process_book(book_id, queue_wait_ms=queue_wait_ms))
     except Exception as exc:
+        if not is_retryable_processing_error(exc):
+            raise
         raise self.retry(exc=exc)
 
 
@@ -39,9 +41,7 @@ def process_chapter_task(self, book_id: str, chapter_num: int):
         from app.core.database import AsyncSessionLocal
         from app.core.storage import download_book
         from app.models.book import Book, Chapter
-        from app.parsers.epub_parser import parse_epub
-        from app.parsers.pdf_parser import parse_pdf
-        from app.utils.book_utils import deserialize_manuscript_content
+        from app.utils.book_utils import deserialize_manuscript_content, parse_book_upload_for_ingestion
         queue_wait_ms = extract_queue_wait_ms(getattr(self.request, "headers", None))
         async with AsyncSessionLocal() as db:
             book = await db.get(Book, uuid.UUID(book_id))
@@ -55,6 +55,9 @@ def process_chapter_task(self, book_id: str, chapter_num: int):
             ).scalar()
             chapter_title = chapter_row.title if chapter_row is not None else ""
             chapter_text = ""
+
+            if await is_book_hidden(db, book.id):
+                return
 
             if chapter_row and chapter_row.s3_key:
                 try:
@@ -70,12 +73,13 @@ def process_chapter_task(self, book_id: str, chapter_num: int):
 
             if not chapter_text.strip():
                 raw = await asyncio.to_thread(download_book, book.s3_key)
-                parser = parse_pdf if book.format == "pdf" else parse_epub
-                chapters = await asyncio.to_thread(
-                    parser,
-                    raw,
-                    split_large_chapters=not book.preserve_chapter_numbers,
+                parsed_payload = await parse_book_upload_for_ingestion(
+                    format_name=book.format,
+                    work_type=book.work_type,
+                    raw=raw,
+                    preserve_chapter_numbers=book.preserve_chapter_numbers,
                 )
+                chapters = parsed_payload["chapters"]
                 chapter_data = next((ch for ch in chapters if ch["number"] == chapter_num), None)
                 if not chapter_data:
                     return
@@ -92,4 +96,6 @@ def process_chapter_task(self, book_id: str, chapter_num: int):
     try:
         _run_coro(_run())
     except Exception as exc:
+        if not is_retryable_processing_error(exc):
+            raise
         raise self.retry(exc=exc)

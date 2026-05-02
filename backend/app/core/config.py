@@ -1,19 +1,10 @@
-from pathlib import Path
 import os
+from pathlib import Path
 
-try:
-    from pydantic_settings import BaseSettings, SettingsConfigDict
-
-    _HAS_PYDANTIC_SETTINGS = True
-except ModuleNotFoundError:
-    _HAS_PYDANTIC_SETTINGS = False
-    try:
-        from pydantic.v1 import BaseSettings
-    except ModuleNotFoundError:
-        from pydantic import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-def _load_env_file(path: str = ".env") -> None:
+def _load_env_file(path: str | Path = ".env") -> None:
     env_path = Path(path)
     if not env_path.exists():
         return
@@ -105,20 +96,20 @@ class Settings(BaseSettings):
     SUPABASE_SERVICE_KEY: str | None = None
 
     # Processing
-    LAZY_PROCESS_INITIAL_CHAPTERS: int = 1
+    LAZY_PROCESS_INITIAL_CHAPTERS: int = 2
     CHUNK_TARGET_TOKENS: int = 900
     CHUNK_MAX_TOKENS: int = 1200
     CHUNK_MIN_TOKENS: int = 260
     CHUNK_OVERLAP_TOKENS: int = 80
     CHUNK_OVERLAP_RATIO: float = 0.07
-    EXTRACTION_BATCH_MAX_TOKENS: int = 5000
-    EXTRACTION_BATCH_MAX_CHUNKS: int = 4
-    EXTRACTION_EMBED_BATCH_SIZE: int = 16
+    EXTRACTION_BATCH_MAX_TOKENS: int = 7000
+    EXTRACTION_BATCH_MAX_CHUNKS: int = 6
+    EXTRACTION_EMBED_BATCH_SIZE: int = 24
     EXTRACTION_EMBED_CONCURRENCY: int = 2
     DEDUP_SIMILARITY_THRESHOLD: float = 0.88
     INGESTION_CHAPTER_UPLOAD_CONCURRENCY: int = 4
     INGESTION_CHAPTER_DISPATCH_WINDOW: int = 3
-    INGESTION_CHAPTER_DISPATCH_DELAY_SECONDS: int = 2
+    INGESTION_CHAPTER_DISPATCH_DELAY_SECONDS: int = 1
     SEARCH_SIMILARITY_THRESHOLD: float = 0.65
     SEARCH_MAX_CONTEXT_CHUNKS: int = 3
     PASSWORD_RESET_TOKEN_TTL_SECONDS: int = 1800
@@ -149,17 +140,10 @@ class Settings(BaseSettings):
     # Cloudflare Tunnel
     CLOUDFLARE_TUNNEL_TOKEN: str | None = None   # Option 1 security
 
-    if _HAS_PYDANTIC_SETTINGS:
-        model_config = SettingsConfigDict(env_file=".env", case_sensitive=True, extra="ignore")
-    else:
-        _load_env_file(Path(__file__).resolve().parents[2] / ".env")
-
-        class Config:
-            case_sensitive = True
-            extra = "ignore"
+    model_config = SettingsConfigDict(env_file=".env", case_sensitive=True, extra="ignore")
 
 
-settings = Settings()  # type: ignore[call-arg]
+settings = Settings()
 
 
 def cors_origins() -> list[str]:

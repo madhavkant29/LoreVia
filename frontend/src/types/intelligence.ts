@@ -198,10 +198,21 @@ export interface VoiceConsistencyReview {
   overall_verdict: string
 }
 
+export interface VoiceConsistencyMatch {
+  character_name: string
+  match_score: number
+  baseline_sample_size: number
+  sample_dialogue_count: number
+  strongest_signals: string[]
+  closest_other_character?: string | null
+  closest_other_score?: number | null
+}
+
 export interface VoiceConsistencyResponse {
   review: VoiceConsistencyReview
   retrieved_passages: EditorialReviewPassage[]
   characters_reviewed: string[]
+  character_matches?: VoiceConsistencyMatch[]
 }
 
 export interface ProseTightenResponse {

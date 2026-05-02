@@ -8,7 +8,6 @@ import { useRouter } from "next/navigation"
 import { UploadModal } from "@/components/modals/UploadModal"
 import { authApi } from "@/lib/api/auth"
 import { booksApi } from "@/lib/api/books"
-import { API_BASE } from "@/lib/constants"
 import { SUPPORT_EMAIL } from "@/lib/constants/contact"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import type { Book } from "@/types/book"
@@ -32,6 +31,57 @@ function statusPillClasses(status: string, isDark: boolean) {
   return STATUS_COLORS[status] ?? STATUS_COLORS.pending
 }
 
+function formatEtaLabel(seconds?: number | null) {
+  if (typeof seconds !== "number" || Number.isNaN(seconds)) return null
+  if (seconds <= 0) return "almost done"
+
+  const minutes = Math.max(1, Math.round(seconds / 60))
+  if (minutes < 60) return `${minutes} min left`
+
+  const hours = Math.max(1, Math.round(minutes / 60))
+  return `${hours} hr left`
+}
+
+function storyUnitLabel(workType?: Book["work_type"], plural = false) {
+  if (workType === "screenplay") return plural ? "scenes" : "scene"
+  return plural ? "chapters" : "chapter"
+}
+
+function storyUnitPrefix(workType?: Book["work_type"]) {
+  return workType === "screenplay" ? "Sc." : "Ch."
+}
+
+function seriesOrderLabel(book: Book) {
+  if (!book.series_name) return ""
+  if (!book.series_order) return book.series_name
+  const prefix = book.work_type === "screenplay" ? "Ep." : "Vol."
+  return `${book.series_name} - ${prefix} ${book.series_order}`
+}
+function getProcessingSummary(book: Book) {
+  const processing = book.processing
+  if (!processing) return null
+
+  const stage = (processing.stage ?? processing.status ?? "").toString().trim()
+  const completed = typeof processing.chapters_completed === "number" ? processing.chapters_completed : null
+  const total = typeof processing.chapters_total === "number" ? processing.chapters_total : book.total_chapters
+  const progress = typeof processing.progress_pct === "number" ? processing.progress_pct : book.progress_pct
+  const eta = formatEtaLabel(processing.eta_seconds)
+  const chapterLabel =
+    processing.last_chapter_number
+      ? `${storyUnitPrefix(book.work_type)} ${processing.last_chapter_number}${processing.last_chapter_title ? ` - ${processing.last_chapter_title}` : ""}`
+      : null
+
+  const parts = [
+    stage ? stage.replace(/_/g, " ") : null,
+    completed !== null && total ? `${completed}/${total} ${storyUnitLabel(book.work_type, true)}` : null,
+    typeof progress === "number" ? `${Math.round(progress)}%` : null,
+    eta,
+    chapterLabel,
+  ].filter(Boolean)
+
+  return parts.length > 0 ? parts.join(" · ") : null
+}
+
 function titleInitials(title: string) {
   return title
     .split(/\s+/)
@@ -45,13 +95,24 @@ function coverSrc(coverUrl: string | null | undefined) {
   if (!coverUrl) return null
   if (/^https?:\/\//i.test(coverUrl)) return coverUrl
   try {
-    return new URL(coverUrl, API_BASE).toString()
-  } catch {
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL
+    if (apiUrl) {
+      return new URL(coverUrl, apiUrl).toString()
+    }
     if (typeof window !== "undefined") {
       return new URL(coverUrl, window.location.origin).toString()
     }
     return coverUrl
+  } catch {
+    return coverUrl
   }
+}
+
+function ProcessingLine({ book, isDark }: { book: Book; isDark: boolean }) {
+  const summary = getProcessingSummary(book)
+  if (!summary && book.status !== "processing") return null
+
+  return <p className={`mt-2 text-xs ${isDark ? "text-amber-300/90" : "text-amber-700"}`}>{summary ?? "Processing in the background"}</p>
 }
 
 export default function LibraryPage() {
@@ -167,7 +228,7 @@ export default function LibraryPage() {
                       : "border border-stone-200 bg-white text-stone-800 hover:bg-stone-50"
                   }`}
                 >
-                  Add Chapter
+                  Add Scene
                 </button>
               ) : null}
               <div
@@ -351,16 +412,17 @@ function ShelfSection({
                     {book.author ? <p className={`mt-1 text-sm ${isDark ? "text-[#808080]" : "text-stone-500"}`}>{book.author}</p> : null}
                     {book.series_name ? (
                       <p className={`mt-1 text-xs font-medium uppercase tracking-wider ${isDark ? "text-violet-400" : "text-violet-600"}`}>
-                        {book.series_order ? `${book.series_name} · Vol. ${book.series_order}` : book.series_name}
+                        {book.series_order ? `${seriesOrderLabel(book)}` : book.series_name}
                       </p>
                     ) : null}
                     <p className={`mt-1 text-xs uppercase tracking-wider ${isDark ? "text-[#606060]" : "text-stone-400"}`}>{book.status}</p>
+                    <ProcessingLine book={book} isDark={isDark} />
                   </div>
 
                   <div className={`pt-3 ${isDark ? "border-t border-white/8" : "border-t border-stone-200"}`}>
                     <div className={`flex items-center justify-between text-xs ${isDark ? "text-[#707070]" : "text-stone-500"}`}>
                       <span>{Math.round(book.progress_pct ?? 0)}% complete</span>
-                      <span>{book.total_chapters ? `${book.total_chapters} chapters` : "Syncing"}</span>
+                      <span>{book.total_chapters ? `${book.total_chapters} ${storyUnitLabel(book.work_type, true)}` : "Syncing"}</span>
                     </div>
 
                     <div className="mt-2">
@@ -389,7 +451,7 @@ function ShelfSection({
                           : "bg-stone-900 text-white hover:bg-stone-800"
                       }`}
                     >
-                      {book.mode === "author" ? "Manage Chapters" : "Continue Reading"}
+                      {book.mode === "author" ? `Manage ${storyUnitLabel(book.work_type, true)}` : "Continue Reading"}
                     </button>
 
                     {book.mode === "author" ? (
@@ -404,7 +466,7 @@ function ShelfSection({
                             : "border border-stone-200 bg-stone-50 text-stone-800 hover:bg-stone-100"
                         }`}
                       >
-                        Add Chapter
+                        Add Scene
                       </button>
                     ) : null}
 
@@ -436,7 +498,7 @@ function ShelfSection({
                               }}
                               className={`block w-full px-4 py-2 text-left text-sm transition ${isDark ? "text-[#E0E0E0] hover:bg-white/10" : "text-stone-700 hover:bg-stone-50"}`}
                             >
-                              Add Chapter
+                              Add Scene
                             </button>
                           )}
                           {book.mode === "author" && (
@@ -507,16 +569,17 @@ function ShelfSection({
                     {book.author ? <p className={`mt-1 text-sm text-center ${isDark ? "text-[#808080]" : "text-stone-500"}`}>{book.author}</p> : null}
                     {book.series_name ? (
                       <p className={`mt-1 text-xs font-medium uppercase tracking-wider text-center ${isDark ? "text-violet-400" : "text-violet-600"}`}>
-                        {book.series_order ? `${book.series_name} · Vol. ${book.series_order}` : book.series_name}
+                        {book.series_order ? `${seriesOrderLabel(book)}` : book.series_name}
                       </p>
                     ) : null}
                     <p className={`mt-1 text-xs uppercase tracking-wider text-center ${isDark ? "text-[#606060]" : "text-stone-400"}`}>{book.status}</p>
+                    <ProcessingLine book={book} isDark={isDark} />
                   </div>
 
                   <div className={`pt-3 ${isDark ? "border-t border-white/8" : "border-t border-stone-200"}`}>
                     <div className={`flex items-center justify-between text-xs ${isDark ? "text-[#707070]" : "text-stone-500"}`}>
                       <span>{Math.round(book.progress_pct ?? 0)}% complete</span>
-                      <span>{book.total_chapters ? `${book.total_chapters} chapters` : "Syncing"}</span>
+                      <span>{book.total_chapters ? `${book.total_chapters} ${storyUnitLabel(book.work_type, true)}` : "Syncing"}</span>
                     </div>
 
                     <div className="mt-2">
@@ -545,7 +608,7 @@ function ShelfSection({
                           : "bg-stone-900 text-white hover:bg-stone-800"
                       }`}
                     >
-                      {book.mode === "author" ? "Manage Chapters" : "Continue Reading"}
+                      {book.mode === "author" ? `Manage ${storyUnitLabel(book.work_type, true)}` : "Continue Reading"}
                     </button>
 
                     {book.mode === "author" ? (
@@ -560,7 +623,7 @@ function ShelfSection({
                             : "border border-stone-200 bg-stone-50 text-stone-800 hover:bg-stone-100"
                         }`}
                       >
-                        Add Chapter
+                        Add Scene
                       </button>
                     ) : null}
 
@@ -592,7 +655,7 @@ function ShelfSection({
                               }}
                               className={`block w-full px-4 py-2 text-left text-sm transition ${isDark ? "text-[#E0E0E0] hover:bg-white/10" : "text-stone-700 hover:bg-stone-50"}`}
                             >
-                              Add Chapter
+                              Add Scene
                             </button>
                           )}
                           {book.mode === "author" && (
@@ -697,3 +760,5 @@ function MetaCell({ label, value, align = "left", isDark }: { label: string; val
 function capitalize(value: string) {
   return value.replace(/(^|\s)\S/g, (char) => char.toUpperCase())
 }
+
+

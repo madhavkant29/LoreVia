@@ -25,8 +25,8 @@ from app.engine.character.entity_filters import (
     is_displayable_character_entity,
 )
 from app.engine.character.profile_builder import merge_profile_fields
-from app.models.character import Character, CharacterState
-from app.models.intelligence import CharacterRelationship
+from app.models.character import Character, CharacterState, CharacterVoiceProfile
+from app.models.intelligence import ChapterSummary, CharacterRelationship, PlotThread, QuoteEntry, WikiEntry
 
 BLEACH_EMPTY_TAGS: Any = frozenset()
 
@@ -312,6 +312,122 @@ def apply_manual_character_description(character: Character, description: str | 
     character.trait_state = trait_state
 
 
+def _normalize_character_reference(value: object | None) -> str:
+    return " ".join(str(value or "").split()).strip().lower()
+
+
+def _character_reference_values(character: Character) -> set[str]:
+    values = {_normalize_character_reference(character.id), _normalize_character_reference(character.name)}
+    values.update(_normalize_character_reference(alias) for alias in (character.aliases or []))
+    return {value for value in values if value}
+
+
+def _replace_reference_list(values: list[object] | None, *, matches: set[str], replacement: str) -> list[str]:
+    replaced: list[str] = []
+    seen: set[str] = set()
+    for item in values or []:
+        candidate = " ".join(str(item or "").split()).strip()
+        if not candidate:
+            continue
+        next_value = replacement if _normalize_character_reference(candidate) in matches else candidate
+        if next_value.lower() in seen:
+            continue
+        seen.add(next_value.lower())
+        replaced.append(next_value)
+    return replaced
+
+
+def _merge_voice_profiles(primary_profile: CharacterVoiceProfile | None, secondary_profile: CharacterVoiceProfile | None) -> None:
+    if primary_profile is None or secondary_profile is None:
+        return
+    primary_profile.sample_dialogue_count = int(primary_profile.sample_dialogue_count or 0) + int(secondary_profile.sample_dialogue_count or 0)
+    primary_profile.sample_word_count = int(primary_profile.sample_word_count or 0) + int(secondary_profile.sample_word_count or 0)
+    for field_name in (
+        "avg_sentence_length",
+        "avg_word_length_x100",
+        "contraction_rate_x1000",
+        "question_rate_x1000",
+        "exclamation_rate_x1000",
+        "ellipsis_rate_x1000",
+        "dash_rate_x1000",
+        "uppercase_rate_x1000",
+        "formality_score_x1000",
+        "lexical_complexity_x1000",
+        "emotional_intensity_x1000",
+    ):
+        if getattr(primary_profile, field_name) is None:
+            setattr(primary_profile, field_name, getattr(secondary_profile, field_name))
+    if not primary_profile.dominant_markers and secondary_profile.dominant_markers:
+        primary_profile.dominant_markers = secondary_profile.dominant_markers
+    if not primary_profile.signature_phrases and secondary_profile.signature_phrases:
+        primary_profile.signature_phrases = secondary_profile.signature_phrases
+
+
+async def _merge_character_references(
+    db: AsyncSession,
+    *,
+    primary: Character,
+    secondary: Character,
+    book_id: uuid.UUID,
+) -> None:
+    reference_values = _character_reference_values(secondary)
+
+    plot_threads = (
+        await db.execute(select(PlotThread).where(PlotThread.book_id == book_id))
+    ).scalars().all()
+    for thread in plot_threads:
+        updated_ids = _replace_reference_list(thread.character_ids, matches=reference_values, replacement=primary.name)
+        if updated_ids:
+            thread.character_ids = updated_ids
+
+    wiki_entries = (
+        await db.execute(select(WikiEntry).where(WikiEntry.book_id == book_id))
+    ).scalars().all()
+    for entry in wiki_entries:
+        related = _replace_reference_list(entry.related_char_ids, matches=reference_values, replacement=str(primary.id))
+        if related:
+            entry.related_char_ids = related
+
+    chapter_summaries = (
+        await db.execute(
+            select(ChapterSummary)
+            .join(ChapterSummary.chapter)
+            .where(ChapterSummary.chapter.has(book_id=book_id))
+        )
+    ).scalars().all()
+    for summary in chapter_summaries:
+        key_events = list(summary.key_events or [])
+        changed = False
+        for event in key_events:
+            if not isinstance(event, dict):
+                continue
+            involved = _replace_reference_list(event.get("involved_characters"), matches=reference_values, replacement=str(primary.id))
+            if involved != list(event.get("involved_characters") or []):
+                event["involved_characters"] = involved
+                changed = True
+        if changed:
+            summary.key_events = key_events
+
+        char_changes = list(summary.char_changes or [])
+        char_change_changed = False
+        for change in char_changes:
+            if not isinstance(change, dict):
+                continue
+            candidate = " ".join(str(change.get("character") or "").split()).strip()
+            if candidate and _normalize_character_reference(candidate) in reference_values:
+                change["character"] = primary.name
+                char_change_changed = True
+        if char_change_changed:
+            summary.char_changes = char_changes
+
+    quotes = (
+        await db.execute(select(QuoteEntry).where(QuoteEntry.book_id == book_id))
+    ).scalars().all()
+    for quote in quotes:
+        if _normalize_character_reference(quote.character_name) in reference_values:
+            quote.character_name = primary.name
+
+
 async def merge_characters(
     db: AsyncSession,
     primary_id: uuid.UUID,
@@ -348,6 +464,12 @@ async def merge_characters(
     primary.growth_events = merged["growth_events"]
     if primary.embedding is None and secondary.embedding is not None:
         primary.embedding = secondary.embedding
+    if primary.voice_profile and secondary.voice_profile:
+        _merge_voice_profiles(primary.voice_profile, secondary.voice_profile)
+        await db.delete(secondary.voice_profile)
+    elif primary.voice_profile is None and secondary.voice_profile is not None:
+        secondary.voice_profile.character_id = primary.id
+        secondary.voice_profile.book_id = primary.book_id
 
     state_rows_result = await db.execute(select(CharacterState).where(CharacterState.character_id == secondary.id))
     state_rows = state_rows_result.scalars().all()
@@ -390,6 +512,7 @@ async def merge_characters(
         if rel.character_a_id == rel.character_b_id:
             await db.delete(rel)
 
+    await _merge_character_references(db, primary=primary, secondary=secondary, book_id=book_id)
     await _dedupe_relationships(db, book_id)
     await db.delete(secondary)
     await db.flush()

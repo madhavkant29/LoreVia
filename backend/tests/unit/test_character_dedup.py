@@ -4,9 +4,9 @@ import pytest
 from sqlalchemy import select
 
 from app.engine.character.entity_filters import VISIBILITY_THRESHOLD, character_visibility_score
-from app.models.book import Book
+from app.models.book import Book, Chapter
 from app.models.character import Character, CharacterState
-from app.models.intelligence import CharacterRelationship
+from app.models.intelligence import ChapterSummary, CharacterRelationship, PlotThread, QuoteEntry, WikiEntry
 from app.models.user import User
 from app.utils.character_utils import description_similarity, merge_characters, name_similarity
 
@@ -118,6 +118,36 @@ async def test_merge_characters_reparents_related_rows(db):
             from_chapter=4,
         )
     )
+    chapter = Chapter(book_id=book.id, number=4, title="Meeting", s3_key="chapters/4.txt")
+    db.add(chapter)
+    await db.flush()
+    db.add(
+        PlotThread(
+            book_id=book.id,
+            title="Hidden Debt",
+            status="ongoing",
+            introduced_at=4,
+            character_ids=[secondary.name],
+        )
+    )
+    db.add(
+        WikiEntry(
+            book_id=book.id,
+            entry_type="concept",
+            name="Debt Ledger",
+            related_char_ids=[str(secondary.id)],
+        )
+    )
+    db.add(
+        ChapterSummary(
+            chapter_id=chapter.id,
+            mode="short",
+            content="The mentor arrives.",
+            key_events=[{"event_title": "Oshino arrives", "involved_characters": [secondary.name]}],
+            char_changes=[{"character": secondary.name, "change": "Takes charge"}],
+        )
+    )
+    db.add(QuoteEntry(user_id=user.id, book_id=book.id, chapter_number=4, character_name=secondary.name, quote_text="Trust me."))
     await db.commit()
 
     merged = await merge_characters(db, primary.id, secondary.id, book.id)
@@ -136,3 +166,12 @@ async def test_merge_characters_reparents_related_rows(db):
         await db.execute(select(CharacterRelationship).where(CharacterRelationship.book_id == book.id))
     ).scalars().all()
     assert relationships == []
+    updated_thread = (await db.execute(select(PlotThread).where(PlotThread.book_id == book.id))).scalar_one()
+    updated_wiki = (await db.execute(select(WikiEntry).where(WikiEntry.book_id == book.id))).scalar_one()
+    updated_summary = (await db.execute(select(ChapterSummary).where(ChapterSummary.chapter_id == chapter.id))).scalar_one()
+    updated_quote = (await db.execute(select(QuoteEntry).where(QuoteEntry.book_id == book.id))).scalar_one()
+    assert updated_thread.character_ids == ["Meme Oshino"]
+    assert updated_wiki.related_char_ids == [str(merged.id)]
+    assert updated_summary.key_events[0]["involved_characters"] == [str(merged.id)]
+    assert updated_summary.char_changes[0]["character"] == "Meme Oshino"
+    assert updated_quote.character_name == "Meme Oshino"

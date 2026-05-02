@@ -7,8 +7,23 @@ import { booksApi } from "@/lib/api/books"
 import { intelligenceApi } from "@/lib/api/intelligence"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
-import type { Book, BookSeries } from "@/types/book"
+import type { Book, BookSeries, SeriesBible } from "@/types/book"
 import type { AdvisorMessage, AdvisorResponse, SeriesContinuityResponse } from "@/types/intelligence"
+
+function storyUnitName(workType?: Book["work_type"], plural = false) {
+  if (workType === "screenplay") return plural ? "scenes" : "scene"
+  return plural ? "chapters" : "chapter"
+}
+
+function collectionUnitName(hasScreenplayEpisodes: boolean, plural = false) {
+  if (hasScreenplayEpisodes) return plural ? "episodes" : "episode"
+  return plural ? "volumes" : "volume"
+}
+
+function collectionUnitLabel(hasScreenplayEpisodes: boolean, order?: number | null) {
+  if (!order) return ""
+  return hasScreenplayEpisodes ? `Ep ${order} · ` : `Vol ${order} · `
+}
 
 function formatMarkdown(text: string): React.ReactNode {
   const paragraphs = text.split(/\n\n+/)
@@ -29,6 +44,9 @@ export default function SeriesPage() {
   const [busyKey, setBusyKey] = useState<string | null>(null)
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
+  const [seriesBibleById, setSeriesBibleById] = useState<Record<string, SeriesBible>>({})
+  const [openSeriesBibleId, setOpenSeriesBibleId] = useState<string | null>(null)
+  const [seriesBibleLoadingId, setSeriesBibleLoadingId] = useState<string | null>(null)
   const [askSeriesId, setAskSeriesId] = useState<string | null>(null)
   const [askQuery, setAskQuery] = useState("")
   const [askMessages, setAskMessages] = useState<AdvisorMessage[]>([])
@@ -68,6 +86,22 @@ export default function SeriesPage() {
       await load()
     } finally {
       setBusyKey(null)
+    }
+  }
+
+  async function toggleSeriesBible(seriesId: string) {
+    if (openSeriesBibleId === seriesId) {
+      setOpenSeriesBibleId(null)
+      return
+    }
+    setOpenSeriesBibleId(seriesId)
+    if (seriesBibleById[seriesId]) return
+    setSeriesBibleLoadingId(seriesId)
+    try {
+      const payload = await booksApi.getSeriesBible(seriesId)
+      setSeriesBibleById((current) => ({ ...current, [seriesId]: payload }))
+    } finally {
+      setSeriesBibleLoadingId(null)
     }
   }
 
@@ -112,7 +146,7 @@ export default function SeriesPage() {
       <div className={`rounded-[2rem] border p-8 ${isDark ? "border-white/10 bg-white/5" : "border-amber-300 bg-amber-50"}`}>
         <h1 className={`text-3xl font-serif ${isDark ? "text-white" : "text-stone-900"}`}>Series workspace</h1>
         <p className={`mt-3 text-sm leading-7 ${isDark ? "text-gray-300" : "text-stone-700"}`}>
-          Series mode is reserved for paid plans. It is built for readers carrying continuity across multiple books without losing where each volume stands.
+          Series mode is reserved for paid plans. It is built for readers carrying continuity across multiple books without losing where each story stands.
         </p>
       </div>
     )
@@ -124,7 +158,7 @@ export default function SeriesPage() {
         <p className={`text-xs font-semibold uppercase tracking-[0.3em] ${isDark ? "text-sky-200" : "text-sky-700"}`}>Series workspace</p>
         <h1 className={`mt-2 font-serif text-4xl ${isDark ? "text-white" : "text-stone-900"}`}>Track sagas</h1>
         <p className={`mt-2 max-w-3xl text-sm font-light leading-7 ${isDark ? "text-gray-300" : "text-stone-600"}`}>
-          Create named series, slot books into proper volume order, and manage your reading continuity across volumes.
+          Create named series, slot books into the right order, and manage your reading continuity across the whole run.
         </p>
       </section>
 
@@ -159,8 +193,14 @@ export default function SeriesPage() {
         </div>
       ) : (
         <div className="space-y-6">
-          {series.map((lane) => (
-            <section key={lane.id} className={`rounded-[1.75rem] border p-6 transition-all duration-200 hover:shadow-lg ${isDark ? "border-white/10 bg-white/5 hover:border-white/20" : "border-stone-200 bg-white hover:border-stone-300"}`}>
+          {series.map((lane) => {
+            const hasScreenplayEpisodes = lane.books.some((book) => book.work_type === "screenplay")
+            const collectionPlural = collectionUnitName(hasScreenplayEpisodes, true)
+            const collectionSingular = collectionUnitName(hasScreenplayEpisodes, false)
+            const seriesBible = seriesBibleById[lane.id]
+            const bibleOpen = openSeriesBibleId === lane.id
+            return (
+              <section key={lane.id} className={`rounded-[1.75rem] border p-6 transition-all duration-200 hover:shadow-lg ${isDark ? "border-white/10 bg-white/5 hover:border-white/20" : "border-stone-200 bg-white hover:border-stone-300"}`}>
               <div className="flex flex-wrap items-center justify-between gap-4">
                 <div>
                   <h2 className={`text-2xl font-bold ${isDark ? "text-white" : "text-stone-900"}`}>{lane.name}</h2>
@@ -168,21 +208,86 @@ export default function SeriesPage() {
                 </div>
                 <div className="flex items-center gap-3">
                   <span className={`rounded-full px-3 py-1.5 text-xs font-medium ${isDark ? "bg-white/10 text-gray-300" : "bg-stone-100 text-stone-600"}`}>
-                    {lane.books.length} volume{lane.books.length === 1 ? "" : "s"}
+                    {lane.books.length} {lane.books.length === 1 ? collectionSingular : collectionPlural}
                   </span>
                   {lane.books.length > 0 && (
-                    <Link
-                    href={`/series/${lane.id}/ask`}
-                    className={`inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs font-semibold transition ${isDark ? "bg-amber-300 text-stone-950 hover:bg-amber-200" : "bg-stone-900 text-white hover:bg-stone-800"}`}
-                  >
-                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                    </svg>
-                    Ask
-                  </Link>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAskSeriesId(lane.id)
+                        setSeriesModalTab("ask")
+                        setAskMessages([])
+                        setAskResponse(null)
+                        setAskQuery("")
+                        setContinuityResult(null)
+                      }}
+                      className={`inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs font-semibold transition ${isDark ? "bg-amber-300 text-stone-950 hover:bg-amber-200" : "bg-stone-900 text-white hover:bg-stone-800"}`}
+                    >
+                      <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                      </svg>
+                      Ask
+                    </button>
                   )}
+                  {hasScreenplayEpisodes ? (
+                    <button
+                      onClick={() => void toggleSeriesBible(lane.id)}
+                      className={`inline-flex items-center gap-1.5 rounded-full border px-4 py-1.5 text-xs font-semibold transition ${isDark ? "border-white/10 text-sky-200 hover:bg-white/10" : "border-stone-300 text-stone-700 hover:bg-stone-50"}`}
+                    >
+                      {seriesBibleLoadingId === lane.id ? "Loading..." : bibleOpen ? "Hide Series Bible" : "View Series Bible"}
+                    </button>
+                  ) : null}
                 </div>
               </div>
+
+              {bibleOpen ? (
+                <div className={`mt-5 rounded-[1.3rem] border p-5 ${isDark ? "border-sky-400/20 bg-sky-400/10" : "border-sky-200 bg-sky-50"}`}>
+                  {seriesBible ? (
+                    <div className="space-y-4">
+                      <div className="flex flex-wrap items-center gap-3">
+                        <span className={`rounded-full px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "bg-white/10 text-sky-100" : "bg-white text-sky-700"}`}>Series Bible</span>
+                        <span className={`text-sm ${isDark ? "text-slate-200" : "text-stone-700"}`}>{seriesBible.episode_count} episode{seriesBible.episode_count === 1 ? "" : "s"} tracked</span>
+                      </div>
+
+                      <div className="grid gap-3 md:grid-cols-4">
+                        <SeriesBibleStat label="Recurring characters" value={String(seriesBible.recurring_characters.length)} isDark={isDark} />
+                        <SeriesBibleStat label="Recurring relationships" value={String(seriesBible.recurring_relationships.length)} isDark={isDark} />
+                        <SeriesBibleStat label="Open plot threads" value={String(seriesBible.unresolved_plot_threads.length)} isDark={isDark} />
+                        <SeriesBibleStat label="Continuity risks" value={String(seriesBible.continuity_risks.length)} isDark={isDark} />
+                      </div>
+
+                      <div className="grid gap-4 lg:grid-cols-2">
+                        <SeriesBibleList
+                          title="Episodes"
+                          items={seriesBible.episodes.map((episode) => `${episode.episode_number ? `Ep ${episode.episode_number}` : "Episode"} - ${episode.title} - ${episode.total_scenes} scenes - ${episode.total_dialogue_lines} dialogue lines`)}
+                          emptyLabel="No screenplay episodes have been parsed yet."
+                          isDark={isDark}
+                        />
+                        <SeriesBibleList
+                          title="Recurring characters"
+                          items={seriesBible.recurring_characters.slice(0, 6).map((character) => `${character.name} - ${character.episode_count} episodes - ${character.total_mentions} mentions`)}
+                          emptyLabel="No recurring characters detected across episodes yet."
+                          isDark={isDark}
+                        />
+                        <SeriesBibleList
+                          title="Open plot threads"
+                          items={seriesBible.unresolved_plot_threads.slice(0, 6).map((thread) => `${thread.title} - ${thread.status} - ${thread.episode_count} episodes`)}
+                          emptyLabel="No unresolved cross-episode plot threads yet."
+                          isDark={isDark}
+                        />
+                        <SeriesBibleList
+                          title="Continuity risks"
+                          items={seriesBible.continuity_risks.slice(0, 6)}
+                          emptyLabel="No obvious cross-episode continuity risks surfaced yet."
+                          isDark={isDark}
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <p className={`text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>Loading the aggregated screenplay workspaceâ€¦</p>
+                  )}
+                </div>
+              ) : null}
 
               {lane.books.length > 0 ? (
                 <div className="mt-5 grid gap-4 lg:grid-cols-2">
@@ -222,8 +327,9 @@ export default function SeriesPage() {
                     ))}
                 </div>
               </div>
-            </section>
-          ))}
+              </section>
+            )
+          })}
         </div>
       )}
 
@@ -245,6 +351,9 @@ export default function SeriesPage() {
       {askSeriesId && (() => {
         const activeSeries = series.find(s => s.id === askSeriesId)
         const seriesBooks = activeSeries?.books ?? []
+        const modalHasScreenplayEpisodes = seriesBooks.some((book) => book.work_type === "screenplay")
+        const modalCollectionPlural = collectionUnitName(modalHasScreenplayEpisodes, true)
+        const modalCollectionSingular = collectionUnitName(modalHasScreenplayEpisodes, false)
         return (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
             <div className={`w-full max-w-2xl rounded-[1.8rem] border shadow-[0_32px_80px_-24px_rgba(0,0,0,0.5)] ${isDark ? "border-white/10 bg-[#0f1117]" : "border-stone-200 bg-white"}`}>
@@ -278,7 +387,7 @@ export default function SeriesPage() {
 
               <div className="max-h-[65vh] overflow-y-auto p-6 space-y-4">
 
-                {/* ── Ask tab ── */}
+                {/* â”€â”€ Ask tab â”€â”€ */}
                 {seriesModalTab === "ask" && (
                   <>
                     <p className={`text-xs leading-5 ${isDark ? "text-slate-400" : "text-stone-500"}`}>
@@ -302,7 +411,7 @@ export default function SeriesPage() {
                             )}
                           </div>
                         ))}
-                        {askLoading && <p className={`text-xs ${isDark ? "text-slate-500" : "text-stone-400"}`}>Analyzing series…</p>}
+                        {askLoading && <p className={`text-xs ${isDark ? "text-slate-500" : "text-stone-400"}`}>Analyzing seriesâ€¦</p>}
                       </div>
                     )}
 
@@ -314,7 +423,7 @@ export default function SeriesPage() {
                       <input
                         value={askQuery}
                         onChange={e => setAskQuery(e.target.value)}
-                        placeholder="Ask about continuity, characters, or plot across all books…"
+                        placeholder="Ask about continuity, characters, or plot across all booksâ€¦"
                         className={`flex-1 rounded-[0.9rem] border px-4 py-2.5 text-sm ${isDark ? "border-white/10 bg-black/20 text-white placeholder:text-slate-500" : "border-stone-200 bg-stone-50 text-stone-900 placeholder:text-stone-400"}`}
                         onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSeriesAsk(askSeriesId) } }}
                       />
@@ -323,17 +432,17 @@ export default function SeriesPage() {
                         disabled={askLoading || !askQuery.trim()}
                         className={`rounded-full px-5 py-2.5 text-sm font-semibold disabled:opacity-50 ${isDark ? "bg-amber-300 text-stone-950 hover:bg-amber-200" : "bg-stone-900 text-white hover:bg-stone-800"}`}
                       >
-                        {askLoading ? "…" : "Ask"}
+                        {askLoading ? "â€¦" : "Ask"}
                       </button>
                     </div>
                   </>
                 )}
 
-                {/* ── Series Continuity Check tab ── */}
+                {/* â”€â”€ Series Continuity Check tab â”€â”€ */}
                 {seriesModalTab === "continuity" && (
                   <>
                     <p className={`text-xs leading-5 ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-                      Paste a passage from your new book and check it against the earlier volumes in this series for character, plot, and world-building consistency.
+                      Paste a passage from your new {modalCollectionSingular} and check it against the earlier {modalCollectionPlural} in this series for character, plot, and world-building consistency.
                     </p>
 
                     <div className="grid gap-3 sm:grid-cols-2">
@@ -344,17 +453,17 @@ export default function SeriesPage() {
                           onChange={e => setContinuityBookId(e.target.value)}
                           className={`w-full rounded-[0.8rem] border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`}
                         >
-                          <option value="">Select book…</option>
+                          <option value="">Select bookâ€¦</option>
                           {seriesBooks.map(b => <option key={b.id} value={b.id}>{b.title}</option>)}
                         </select>
                       </div>
                       <div>
-                        <label className={`mb-1 block text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Chapter (optional)</label>
+                        <label className={`mb-1 block text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{modalHasScreenplayEpisodes ? "Scene (optional)" : "Chapter (optional)"}</label>
                         <input
                           type="number" min={1}
                           value={continuityChapterNum}
                           onChange={e => setContinuityChapterNum(e.target.value)}
-                          placeholder="e.g. 5"
+                          placeholder={modalHasScreenplayEpisodes ? "e.g. 12" : "e.g. 5"}
                           className={`w-full rounded-[0.8rem] border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
                         />
                       </div>
@@ -364,7 +473,7 @@ export default function SeriesPage() {
                       rows={6}
                       value={continuityText}
                       onChange={e => setContinuityText(e.target.value)}
-                      placeholder="Paste the passage you want to cross-check against earlier books…"
+                      placeholder="Paste the passage you want to cross-check against earlier booksâ€¦"
                       className={`w-full resize-none rounded-[1rem] border px-4 py-3 text-sm leading-7 outline-none ${isDark ? "border-white/10 bg-black/20 text-slate-200 placeholder:text-slate-600" : "border-stone-200 bg-stone-50 text-stone-900 placeholder:text-stone-400"}`}
                     />
 
@@ -373,7 +482,7 @@ export default function SeriesPage() {
                       disabled={continuityLoading || !continuityText.trim() || !continuityBookId}
                       className={`w-full rounded-full px-5 py-3 text-sm font-semibold disabled:opacity-50 ${isDark ? "bg-[linear-gradient(135deg,#4f46e5,#4338ca)] text-white" : "bg-stone-900 text-white hover:bg-stone-800"}`}
                     >
-                      {continuityLoading ? "Checking across series…" : "Run series continuity check"}
+                      {continuityLoading ? "Checking across seriesâ€¦" : "Run series continuity check"}
                     </button>
 
                     {continuityResult && (
@@ -416,7 +525,7 @@ export default function SeriesPage() {
                               }`}>
                                 <p className={`font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{issue.title}</p>
                                 <p className={`mt-1 text-xs leading-5 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{issue.description}</p>
-                                {issue.suggestion && <p className={`mt-1.5 text-xs font-medium ${isDark ? "text-indigo-300" : "text-violet-700"}`}>→ {issue.suggestion}</p>}
+                                {issue.suggestion && <p className={`mt-1.5 text-xs font-medium ${isDark ? "text-indigo-300" : "text-violet-700"}`}>â†’ {issue.suggestion}</p>}
                               </div>
                             ))}
                           </div>
@@ -438,11 +547,11 @@ export default function SeriesPage() {
                         {/* Retrieved passages */}
                         {continuityResult.retrieved_passages.length > 0 && (
                           <div>
-                            <p className={`text-[10px] font-bold uppercase tracking-[0.24em] mb-2 ${isDark ? "text-slate-500" : "text-stone-400"}`}>Cross-referenced from earlier volumes</p>
+                            <p className={`text-[10px] font-bold uppercase tracking-[0.24em] mb-2 ${isDark ? "text-slate-500" : "text-stone-400"}`}>Cross-referenced from earlier {modalCollectionPlural}</p>
                             <div className="grid gap-2 sm:grid-cols-2">
                               {continuityResult.retrieved_passages.map((p, i) => (
                                 <div key={i} className={`rounded-[0.9rem] border px-3 py-2 text-xs ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
-                                  <p className={`font-semibold mb-1 ${isDark ? "text-indigo-300" : "text-violet-600"}`}>{p.book_title} · Ch. {p.chapter_num}</p>
+                                  <p className={`font-semibold mb-1 ${isDark ? "text-indigo-300" : "text-violet-600"}`}>{p.book_title} · {modalHasScreenplayEpisodes ? "Sc." : "Ch."} {p.chapter_num}</p>
                                   <p className={`leading-5 ${isDark ? "text-slate-400" : "text-stone-600"}`}>{p.excerpt}</p>
                                 </div>
                               ))}
@@ -468,6 +577,52 @@ export default function SeriesPage() {
   )
 }
 
+function SeriesBibleStat({
+  label,
+  value,
+  isDark,
+}: {
+  label: string
+  value: string
+  isDark: boolean
+}) {
+  return (
+    <div className={`rounded-[1rem] border px-4 py-3 ${isDark ? "border-white/10 bg-black/20" : "border-white bg-white"}`}>
+      <p className={`text-lg font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{value}</p>
+      <p className={`mt-1 text-xs uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>{label}</p>
+    </div>
+  )
+}
+
+function SeriesBibleList({
+  title,
+  items,
+  emptyLabel,
+  isDark,
+}: {
+  title: string
+  items: string[]
+  emptyLabel: string
+  isDark: boolean
+}) {
+  return (
+    <div className={`rounded-[1rem] border p-4 ${isDark ? "border-white/10 bg-black/20" : "border-white bg-white"}`}>
+      <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>{title}</p>
+      {items.length > 0 ? (
+        <div className="mt-3 space-y-2">
+          {items.map((item, index) => (
+            <div key={`${title}-${index}-${item}`} className={`rounded-[0.9rem] border px-3 py-2 text-sm leading-6 ${isDark ? "border-white/10 bg-white/[0.03] text-slate-200" : "border-stone-200 bg-stone-50 text-stone-700"}`}>
+              {item}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className={`mt-3 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>{emptyLabel}</p>
+      )}
+    </div>
+  )
+}
+
 function SeriesBookCard({
   laneId,
   book,
@@ -484,6 +639,7 @@ function SeriesBookCard({
   onBusy: (value: string | null) => void
 }) {
   const progress = book.progress_pct ?? 0
+  const isScreenplay = book.work_type === 'screenplay'
   const isComplete = progress >= 100
   const progressColor = isComplete
     ? (isDark ? "bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]" : "bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.3)]")
@@ -494,7 +650,7 @@ function SeriesBookCard({
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
           <p className={`text-sm font-bold truncate ${isDark ? "text-white" : "text-stone-900"}`}>
-            {book.series_order ? `Vol ${book.series_order} · ` : ""}
+            {collectionUnitLabel(isScreenplay, book.series_order)}
             {book.title}
           </p>
           {book.author ? <p className={`mt-1 text-xs font-light ${isDark ? "text-gray-400" : "text-stone-500"}`}>{book.author}</p> : null}
@@ -517,7 +673,7 @@ function SeriesBookCard({
           <div className={`h-full rounded-full transition-all duration-500 ${progressColor}`} style={{ width: `${Math.max(0, Math.min(progress, 100))}%` }} />
         </div>
         <p className={`mt-2 text-xs font-light ${isDark ? "text-gray-400" : "text-stone-500"}`}>
-          {book.chapters_read_count ?? 0} read · {book.chapters_left ?? 0} left
+          {book.chapters_read_count ?? 0} {storyUnitName(book.work_type, true)} read · {book.chapters_left ?? 0} left
         </p>
       </div>
 
@@ -578,7 +734,8 @@ function AddBookCard({
   onBusy: (value: string | null) => void
   busy: boolean
 }) {
-  const [position, setPosition] = useState(book.series_order ? String(book.series_order) : "")
+  const [position, setPosition] = useState(book.series_order ? String(book.series_order) : '')
+  const isScreenplay = book.work_type === 'screenplay'
 
   return (
     <div className={`rounded-2xl border p-4 transition-all duration-200 hover:shadow-md ${isDark ? "border-white/10 bg-black/20 hover:border-white/20" : "border-stone-200 bg-stone-50 hover:border-stone-300"}`}>
@@ -594,7 +751,7 @@ function AddBookCard({
         <input
           value={position}
           onChange={(e) => setPosition(e.target.value.replace(/[^\d]/g, ""))}
-          placeholder="Vol #"
+          placeholder={isScreenplay ? "Ep #" : "Vol #"}
           className={`w-20 rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-white/5 text-white placeholder:text-gray-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
         />
         <button
@@ -619,3 +776,7 @@ function AddBookCard({
     </div>
   )
 }
+
+
+
+

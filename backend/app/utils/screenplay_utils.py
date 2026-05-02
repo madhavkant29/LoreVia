@@ -220,6 +220,42 @@ async def create_scenes_from_screenplay(
     return created_scenes
 
 
+async def replace_book_scenes(
+    db: AsyncSession,
+    *,
+    book: Book,
+    parsed_scenes: list[Any],
+    chapter_ids_by_number: dict[int, uuid.UUID] | None = None,
+    starting_number: int = 1,
+    replace_scene_numbers: set[int] | None = None,
+) -> list[Scene]:
+    """Replace stored scene rows for a screenplay book."""
+    from app.parsers.screenplay_parser import create_scene_models
+
+    existing_query = select(Scene).where(Scene.book_id == book.id).order_by(Scene.number)
+    if replace_scene_numbers:
+        existing_query = existing_query.where(Scene.number.in_(replace_scene_numbers))
+    existing_scenes = (await db.execute(existing_query)).scalars().all()
+    for scene in existing_scenes:
+        await db.delete(scene)
+    await db.flush()
+
+    created_scenes: list[Scene] = []
+    for offset, scene_model in enumerate(create_scene_models(parsed_scenes, book.id), start=0):
+        scene_model.number = starting_number + offset
+        if chapter_ids_by_number:
+            scene_model.chapter_id = chapter_ids_by_number.get(scene_model.number)
+        db.add(scene_model)
+        await db.flush()
+        for dialogue_model in scene_model.dialogue:
+            dialogue_model.scene_id = scene_model.id
+            db.add(dialogue_model)
+        created_scenes.append(scene_model)
+
+    await db.flush()
+    return created_scenes
+
+
 # ─── Character dialogue extraction ───────────────────────────────────────
 
 async def get_character_dialogue(

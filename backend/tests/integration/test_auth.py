@@ -1,8 +1,9 @@
+from datetime import UTC, datetime
 import uuid
 
 import pytest
 
-from app.core.security import create_access_token, create_refresh_token
+from app.core.security import create_access_token, create_refresh_token, hash_password
 from app.models.user import User
 
 
@@ -87,6 +88,41 @@ async def test_username_update_can_recover_from_refresh_cookie_only(client, db):
         )
     assert response.status_code == 200
     assert response.json()["username"] == "refreshonly2"
+
+
+@pytest.mark.asyncio
+async def test_username_update_falls_back_from_stale_access_cookie(client, db):
+    user = User(
+        email="fallback@lorevia.app",
+        username=None,
+        password_hash=hash_password("SafePass123!@#"),
+        legal_accepted_at=datetime.now(UTC),
+        legal_version="2026-04",
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+
+    stale_access_token = create_access_token(str(uuid.uuid4()))
+    refresh_token = create_refresh_token(str(user.id), session_id="fallback-session")
+
+    async def fake_session_active(*args, **kwargs):
+        return True
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("app.api.deps.auth.refresh_session_active", fake_session_active)
+        response = await client.patch(
+            "/api/v1/auth/me/username?username=fallback_user",
+            headers={
+                "Cookie": (
+                    f"lorevia_access_token={stale_access_token}; "
+                    f"lorevia_refresh_token={refresh_token}"
+                )
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["username"] == "fallback_user"
 
 
 @pytest.mark.asyncio

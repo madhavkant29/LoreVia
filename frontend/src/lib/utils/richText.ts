@@ -118,7 +118,7 @@ function sanitizeHref(value: string) {
 function sanitizeImageSrc(value: string | null) {
   if (!value) return null
   const trimmed = value.trim()
-  if (/^(https?:\/\/|data:image\/)/i.test(trimmed)) return trimmed
+  if (/^(https?:\/\/|data:image\/|\/)/i.test(trimmed)) return trimmed
   return null
 }
 

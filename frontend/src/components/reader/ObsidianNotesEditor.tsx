@@ -47,12 +47,26 @@ export function ObsidianNotesEditor({
   const [status, setStatus] = useState<string | null>(null)
   const [newFolder, setNewFolder] = useState("Characters")
   const [newTitle, setNewTitle] = useState("")
+  const [editedFolder, setEditedFolder] = useState("")
+  const [editedTitle, setEditedTitle] = useState("")
   const [busy, setBusy] = useState(false)
   const [graphExpanded, setGraphExpanded] = useState(false)
   const deferredQuery = useDeferredValue(query)
   const saveTimersRef = useRef<Record<string, number>>({})
   const latestDraftRef = useRef<Record<string, string>>({})
   const importInputRef = useRef<HTMLInputElement | null>(null)
+
+  useEffect(() => {
+    setNotes(initialNotes)
+    setSelectedPath((current) => {
+      if (current && initialNotes.some((note) => note.path === current)) return current
+      return initialNotes[0]?.path ?? null
+    })
+  }, [initialNotes])
+
+  useEffect(() => {
+    setGraph(initialGraph)
+  }, [initialGraph])
 
   useEffect(() => {
     return () => {
@@ -119,6 +133,16 @@ export function ObsidianNotesEditor({
       cancelled = true
     }
   }, [bookId, selectedNote?.path])
+
+  useEffect(() => {
+    if (!selectedNote) {
+      setEditedFolder("")
+      setEditedTitle("")
+      return
+    }
+    setEditedFolder(selectedNote.path.split("/").slice(0, -1).join("/"))
+    setEditedTitle(noteTitle(selectedNote.path))
+  }, [selectedNote?.path])
 
   const refreshGraph = async () => {
     const nextGraph = await booksApi.getObsidianGraph(bookId)
@@ -220,6 +244,53 @@ export function ObsidianNotesEditor({
     }
   }
 
+  const moveCurrent = async () => {
+    if (!selectedNote) return
+    const cleanFolder = editedFolder.trim().replace(/^\/+|\/+$/g, "")
+    const cleanTitle = editedTitle.trim().replace(/[<>:"|?*]+/g, "")
+    if (!cleanTitle) {
+      setStatus("Note title cannot be empty")
+      return
+    }
+    const nextPath = cleanFolder ? `${cleanFolder}/${cleanTitle}.md` : `${cleanTitle}.md`
+    if (nextPath === selectedNote.path) {
+      setStatus("Path already matches this note")
+      return
+    }
+
+    setBusy(true)
+    try {
+      const result = await booksApi.saveObsidianNote(bookId, { path: nextPath, content: selectedContent })
+      await booksApi.deleteObsidianNote(bookId, selectedNote.path)
+      setNotes((current) =>
+        current
+          .filter((note) => note.path !== selectedNote.path)
+          .concat({
+            ...selectedNote,
+            path: result.path,
+            content: result.content,
+            updated_at: result.updated_at ?? selectedNote.updated_at,
+          })
+          .sort((a, b) => a.path.localeCompare(b.path))
+      )
+      setDrafts((current) => {
+        const next = { ...current }
+        delete next[selectedNote.path]
+        next[result.path] = result.content
+        return next
+      })
+      latestDraftRef.current[result.path] = result.content
+      delete latestDraftRef.current[selectedNote.path]
+      setSelectedPath(result.path)
+      setStatus(`Moved note to ${result.path}`)
+      await refreshGraph()
+    } catch {
+      setStatus("Could not move this note")
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const exportNotes = async () => {
     const blob = await booksApi.exportObsidianNotes(bookId)
     const url = window.URL.createObjectURL(blob)
@@ -252,7 +323,7 @@ export function ObsidianNotesEditor({
       <div className="flex flex-col gap-5 border-b border-white/10 pb-5 xl:flex-row xl:items-end xl:justify-between">
         <div className="max-w-3xl">
           <p className={`text-[11px] font-semibold uppercase tracking-[0.34em] ${isDark ? "text-emerald-300" : "text-emerald-600"}`}>Per-book vault</p>
-          <h2 className={`mt-2 font-serif text-4xl tracking-tight ${isDark ? "text-white" : "text-stone-950"}`}>Obsidian-style notes workspace</h2>
+          <h2 className={`mt-2 font-serif text-4xl tracking-tight ${isDark ? "text-white" : "text-stone-950"}`}>Vault notes workspace</h2>
           <p className={`mt-3 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
             Organize notes in folders, write in markdown, jump through wiki-links, and export the vault as a ZIP whenever you want.
           </p>
@@ -333,8 +404,30 @@ export function ObsidianNotesEditor({
                   <button type="button" onClick={() => setMode("edit")} className={`rounded-full px-4 py-2 text-sm font-medium ${mode === "edit" ? "bg-emerald-600 text-white" : isDark ? "bg-white/5 text-slate-200" : "bg-stone-100 text-stone-700"}`}>Edit</button>
                   <button type="button" onClick={() => setMode("preview")} className={`rounded-full px-4 py-2 text-sm font-medium ${mode === "preview" ? "bg-emerald-600 text-white" : isDark ? "bg-white/5 text-slate-200" : "bg-stone-100 text-stone-700"}`}>Preview</button>
                   <button type="button" onClick={() => void saveNote(selectedNote.path, selectedContent)} className={`rounded-full px-4 py-2 text-sm font-medium ${isDark ? "bg-white/10 text-white" : "bg-stone-900 text-white"}`}>Save now</button>
+                  <button type="button" onClick={() => void moveCurrent()} disabled={busy} className={`rounded-full px-4 py-2 text-sm font-medium ${isDark ? "bg-sky-500/15 text-sky-200" : "bg-sky-50 text-sky-700"}`}>Move note</button>
                   <button type="button" onClick={() => void deleteCurrent()} disabled={busy} className={`rounded-full px-4 py-2 text-sm font-medium ${isDark ? "bg-rose-500/15 text-rose-200" : "bg-rose-50 text-rose-700"}`}>Delete</button>
                 </div>
+              </div>
+
+              <div className={`mt-4 grid gap-3 rounded-[1.2rem] border p-4 md:grid-cols-2 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
+                <label className="space-y-2">
+                  <span className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Folder path</span>
+                  <input
+                    value={editedFolder}
+                    onChange={(event) => setEditedFolder(event.target.value)}
+                    placeholder="Characters"
+                    className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-[#07111f] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
+                  />
+                </label>
+                <label className="space-y-2">
+                  <span className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>File title</span>
+                  <input
+                    value={editedTitle}
+                    onChange={(event) => setEditedTitle(event.target.value)}
+                    placeholder="Note title"
+                    className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-[#07111f] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
+                  />
+                </label>
               </div>
 
               <div className="mt-4">

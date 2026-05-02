@@ -12,6 +12,9 @@ interface Props {
   upToChapter: number
   authorMode?: boolean
   theme?: "light" | "dark"
+  compact?: boolean
+  focusCharacterId?: string | null
+  onSelectCharacterId?: (characterId: string | null) => void
 }
 
 type Selection =
@@ -45,9 +48,18 @@ function sentimentLabel(value: unknown) {
   return "Mixed or neutral"
 }
 
-export function RelationshipGraph({ bookId, upToChapter, authorMode = false, theme = "light" }: Props) {
+export function RelationshipGraph({
+  bookId,
+  upToChapter,
+  authorMode = false,
+  theme = "light",
+  compact = false,
+  focusCharacterId = null,
+  onSelectCharacterId,
+}: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const cyRef = useRef<cytoscape.Core | null>(null)
+  const selectCharacterRef = useRef(onSelectCharacterId)
   const [graphData, setGraphData] = useState<GraphData | null>(null)
   const [loading, setLoading] = useState(true)
   const [selection, setSelection] = useState<Selection>(null)
@@ -58,6 +70,10 @@ export function RelationshipGraph({ bookId, upToChapter, authorMode = false, the
   const [edgeDraft, setEdgeDraft] = useState({ relType: "", description: "", sentiment: "0", fromChapter: "", toChapter: "" })
   const [savingEdge, setSavingEdge] = useState(false)
   const [edgeMessage, setEdgeMessage] = useState<string | null>(null)
+
+  useEffect(() => {
+    selectCharacterRef.current = onSelectCharacterId
+  }, [onSelectCharacterId])
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -230,9 +246,25 @@ export function RelationshipGraph({ bookId, upToChapter, authorMode = false, the
     cy.userPanningEnabled(true)
     cy.userZoomingEnabled(true)
     cy.boxSelectionEnabled(false)
-    setZoomLevel(cy.zoom())
+    if (compact) {
+      window.setTimeout(() => {
+        if (!cy.destroyed()) {
+          cy.fit(undefined, 92)
+          if (cy.zoom() > 0.72) {
+            cy.zoom({ level: 0.72, position: { x: cy.width() / 2, y: cy.height() / 2 } })
+          }
+          setZoomLevel(cy.zoom())
+        }
+      }, hasPreset ? 30 : 260)
+    } else {
+      setZoomLevel(cy.zoom())
+    }
 
-    cy.on("tap", "node", (evt) => setSelection({ type: "node", data: evt.target.data() as GraphNodeView }))
+    cy.on("tap", "node", (evt) => {
+      const nextSelection = { type: "node", data: evt.target.data() as GraphNodeView } as const
+      setSelection(nextSelection)
+      selectCharacterRef.current?.(nextSelection.data.id)
+    })
     cy.on("tap", "edge", (evt) => setSelection({ type: "edge", data: evt.target.data() as GraphEdgeView }))
     cy.on("tap", (evt) => {
       if (evt.target === cy) {
@@ -252,7 +284,27 @@ export function RelationshipGraph({ bookId, upToChapter, authorMode = false, the
 
     cyRef.current = cy
     return () => cy.destroy()
-  }, [bookId, upToChapter, filteredGraph, interactionMode, labelOverrides, theme])
+  }, [bookId, upToChapter, compact, filteredGraph, interactionMode, labelOverrides, theme])
+
+  useEffect(() => {
+    const cy = cyRef.current
+    if (!cy || !focusCharacterId) return
+
+    const node = cy.getElementById(focusCharacterId)
+    if (node.empty()) return
+
+    cy.elements().unselect()
+    node.select()
+    setSelection({ type: "node", data: node.data() as GraphNodeView })
+
+    if (compact) {
+      cy.animate({
+        center: { eles: node },
+        zoom: Math.min(cy.zoom(), 0.72),
+        duration: 220,
+      })
+    }
+  }, [compact, focusCharacterId, filteredGraph])
 
   function updateNodeLabel(nodeId: string, value: string) {
     const fallback = graphData?.nodes.find((node) => node.id === nodeId)?.name || value
@@ -335,6 +387,72 @@ export function RelationshipGraph({ bookId, upToChapter, authorMode = false, the
       <div className={`rounded-[1.75rem] border p-8 text-sm ${theme === "dark" ? "border-white/10 bg-white/[0.03] text-slate-300" : "border-slate-200 bg-white text-slate-600"}`}>
         Building the relationship graph...
       </div>
+    )
+  }
+
+  if (compact) {
+    return (
+      <section className={`rounded-[1.2rem] border p-3 ${theme === "dark" ? "border-white/10 bg-[#06070a]" : "border-slate-200 bg-white"}`}>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className={`text-base font-semibold ${theme === "dark" ? "text-white" : "text-slate-900"}`}>Relationship graph</h2>
+            <p className={`mt-1 text-xs leading-5 ${theme === "dark" ? "text-slate-400" : "text-slate-500"}`}>
+              Zoomed out by default. Tap a node to sync the profile.
+            </p>
+          </div>
+          <div className={`rounded-full border px-3 py-1.5 text-xs font-medium ${theme === "dark" ? "border-white/10 bg-white/[0.03] text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600"}`}>
+            {graphStats.nodeCount} cast • {graphStats.edgeCount} ties
+          </div>
+        </div>
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            onClick={() => setFilterType(null)}
+            className={`rounded-full px-3 py-1.5 text-xs font-medium ${filterType === null ? "bg-slate-900 text-white" : theme === "dark" ? "border border-white/10 text-slate-300 hover:bg-white/5" : "border border-slate-300 text-slate-700 hover:bg-slate-50"}`}
+          >
+            All
+          </button>
+          {relationshipTypes.map((type) => (
+            <button
+              key={type}
+              onClick={() => setFilterType(type)}
+              className={`rounded-full px-3 py-1.5 text-xs font-medium ${filterType === type ? "text-white" : theme === "dark" ? "border border-white/10 text-slate-300 hover:bg-white/5" : "border border-slate-300 text-slate-700 hover:bg-slate-50"}`}
+              style={filterType === type ? { backgroundColor: RELATIONSHIP_COLORS[type] || "#475569" } : undefined}
+            >
+              {relationshipLabel(type)}
+            </button>
+          ))}
+        </div>
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button onClick={() => cyRef.current?.fit(undefined, 72)} className={`rounded-full px-3 py-1.5 text-xs font-medium ${theme === "dark" ? "border border-white/10 text-slate-200 hover:bg-white/10" : "border border-slate-300 text-slate-700 hover:bg-slate-50"}`}>Fit</button>
+          <button onClick={() => adjustZoom("out")} className={`rounded-full px-3 py-1.5 text-xs font-medium ${theme === "dark" ? "border border-white/10 text-slate-200 hover:bg-white/10" : "border border-slate-300 text-slate-700 hover:bg-slate-50"}`}>Zoom out</button>
+          <button onClick={resetLayout} className={`rounded-full px-3 py-1.5 text-xs font-medium ${theme === "dark" ? "border border-white/10 text-slate-200 hover:bg-white/10" : "border border-slate-300 text-slate-700 hover:bg-slate-50"}`}>Reset</button>
+        </div>
+
+        {filteredGraph && filteredGraph.nodes.length > 0 ? (
+          <div
+            ref={containerRef}
+            className={`mt-3 h-[260px] min-h-[260px] rounded-[1rem] border ${theme === "dark" ? "border-white/5 bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.07),_transparent_30%),linear-gradient(180deg,#000000_0%,#0a0a0a_100%)]" : "border-slate-200 bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.09),_transparent_26%),linear-gradient(180deg,#f8fafc_0%,#f5f5f4_100%)]"}`}
+            style={{ cursor: interactionMode === "arrange" ? "grab" : "default" }}
+          />
+        ) : (
+          <div className={`mt-3 flex min-h-[220px] items-center justify-center rounded-[1rem] border text-center ${theme === "dark" ? "border-white/5 bg-[linear-gradient(180deg,#000000_0%,#0a0a0a_100%)] text-slate-400" : "border-slate-200 bg-[linear-gradient(180deg,#f8fafc_0%,#f5f5f4_100%)] text-slate-500"}`}>
+            <div className="max-w-sm space-y-2 px-6">
+              <p className="text-base font-semibold">No graphable relationships yet</p>
+              <p className="text-sm leading-6">Read further or clear the active filter to see more of the character network.</p>
+            </div>
+          </div>
+        )}
+
+        <div className={`mt-3 rounded-[1rem] border p-3 text-xs leading-5 ${theme === "dark" ? "border-white/10 bg-white/[0.03] text-slate-400" : "border-slate-200 bg-slate-50 text-slate-500"}`}>
+          {selectedNode
+            ? `${selectedNode.name} selected • ${selectedNode.relationshipCount ?? 0} visible ties`
+            : selectedEdge
+              ? `${relationshipLabel(selectedEdge.type)} selected`
+              : "Select a node to focus the cast summary and relationship map."}
+        </div>
+      </section>
     )
   }
 
@@ -627,3 +745,5 @@ export function RelationshipGraph({ bookId, upToChapter, authorMode = false, the
     </div>
   )
 }
+
+export default RelationshipGraph

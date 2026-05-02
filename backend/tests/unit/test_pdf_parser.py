@@ -27,6 +27,10 @@ def test_extract_heading_handles_named_section():
     assert _extract_heading("Scene Second") == "Scene Second"
 
 
+def test_extract_heading_does_not_promote_regular_sentence_with_part_keyword():
+    assert _extract_heading("Er no not that part I was talking about um her given name") is None
+
+
 def test_heading_remainder_keeps_following_text():
     text = "\u2600 Prologue \U0001F312\nThis is the actual first paragraph."
     assert _extract_heading(text) == "Prologue"
@@ -46,6 +50,16 @@ def test_front_matter_is_removed_from_leading_text():
     assert "real opening paragraph" in cleaned
 
 
+def test_front_matter_cleanup_preserves_leading_image_markers():
+    parts = _drop_front_matter_text_parts([
+        "[[IMAGE:test]]",
+        "Translated by TwilightsCall",
+        "This is the real opening paragraph.",
+    ])
+
+    assert parts == ["[[IMAGE:test]]", "This is the real opening paragraph."]
+
+
 def test_front_matter_detector_flags_credit_lines():
     assert _is_probable_front_matter("Translated by TwilightsCall")
     assert _is_probable_front_matter("Volume 2 - The Twin Towers at Iselma")
@@ -56,8 +70,8 @@ def test_page_boundary_merge_does_not_merge_into_heading():
 
 
 def test_large_chapter_splits_only_on_closed_paragraph_boundary():
-    first = ("word " * 2500).strip() + "."
-    second = ("word " * 1800).strip() + "."
+    first = ("word " * 4200).strip() + "."
+    second = ("word " * 3200).strip() + "."
     third = ("word " * 300).strip()
     split = _split_large_chapter_parts([first, second, third])
     assert len(split) == 2

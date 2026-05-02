@@ -13,7 +13,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN python -c "import tiktoken; tiktoken.encoding_for_model('gpt-4o-mini')"
 
 COPY . .
-USER app
+RUN chmod +x worker-start.sh
+# Start as root so the entrypoint can normalize any mounted local-storage
+# volume before dropping back to the non-root app user.
+ENTRYPOINT ["./worker-start.sh"]
 # CMD overridden per Railway service:
 # extraction: celery -A app.workers.celery_app worker -Q extraction -c 4
 # analysis:   celery -A app.workers.celery_app worker -Q analysis,embedding -c 2

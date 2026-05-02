@@ -2,16 +2,20 @@
 import { useEffect, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 
+import { booksApi } from "@/lib/api/books"
 import { readerApi } from "@/lib/api/reader"
+import type { Book } from "@/types/book"
 import type { SummaryCollectionResponse } from "@/types/reader"
 
 export default function SummariesPage() {
   const { bookId } = useParams<{ bookId: string }>()
   const router = useRouter()
+  const [book, setBook] = useState<Book | null>(null)
   const [data, setData] = useState<SummaryCollectionResponse | null>(null)
   const [theme, setTheme] = useState<"light" | "dark">("light")
 
   useEffect(() => {
+    booksApi.get(bookId).then(setBook).catch(() => {})
     readerApi.getSummaryCollection(bookId).then(setData)
     const stored = window.localStorage.getItem("reader-theme")
     if (stored === "dark" || stored === "light") setTheme(stored)
@@ -25,7 +29,9 @@ export default function SummariesPage() {
           <div>
             <h1 className="text-2xl font-semibold">Read Chapter Summaries</h1>
             <p className={theme === "dark" ? "text-sm text-gray-400 mt-1" : "text-sm text-gray-500 mt-1"}>
-              Showing summaries only through chapter {data?.read_upto ?? 0}.
+              {book?.mode === "author"
+                ? `Showing summaries for all processed chapters through chapter ${data?.read_upto ?? 0}.`
+                : `Showing summaries only through chapter ${data?.read_upto ?? 0}.`}
             </p>
           </div>
         </div>
@@ -50,7 +56,9 @@ export default function SummariesPage() {
                 </span>
               </div>
               <p className={theme === "dark" ? "text-sm text-gray-200 leading-relaxed mt-4" : "text-sm text-gray-700 leading-relaxed mt-4"}>
-                {summary.content || "Summary not available yet for this read chapter."}
+                {summary.content || (book?.mode === "author"
+                  ? "Summary not available yet for this processed chapter."
+                  : "Summary not available yet for this read chapter.")}
               </p>
             </article>
           ))}

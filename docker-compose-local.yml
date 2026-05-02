@@ -3,6 +3,8 @@ services:
     build: { context: ./backend, dockerfile: Dockerfile.api }
     ports: ["8000:8000"]
     env_file: ./backend/.env.local
+    environment:
+      NORMALIZE_LOCAL_STORAGE_PERMISSIONS: "1"
     depends_on: [redis, postgres]
     volumes:
       - local_storage:/app/storage
@@ -10,24 +12,27 @@ services:
   worker-extraction:
     build: { context: ./backend, dockerfile: Dockerfile.worker }
     env_file: ./backend/.env.local
+    environment:
+      NORMALIZE_LOCAL_STORAGE_PERMISSIONS: "1"
     depends_on: [redis, postgres]
-    command: celery -A app.workers.celery_app worker -Q extraction -c 4 --loglevel=info
     volumes:
       - local_storage:/app/storage
 
   worker-analysis:
     build: { context: ./backend, dockerfile: Dockerfile.worker }
     env_file: ./backend/.env.local
+    environment:
+      NORMALIZE_LOCAL_STORAGE_PERMISSIONS: "1"
     depends_on: [redis, postgres]
-    command: celery -A app.workers.celery_app worker -Q analysis,embedding -c 2 --loglevel=info
     volumes:
       - local_storage:/app/storage
 
   worker-intelligence:
     build: { context: ./backend, dockerfile: Dockerfile.worker }
     env_file: ./backend/.env.local
+    environment:
+      NORMALIZE_LOCAL_STORAGE_PERMISSIONS: "1"
     depends_on: [redis, postgres]
-    command: celery -A app.workers.celery_app worker -Q intelligence -c 1 --loglevel=info
     volumes:
       - local_storage:/app/storage
 
@@ -48,8 +53,9 @@ services:
   flower:
     build: { context: ./backend, dockerfile: Dockerfile.worker }
     env_file: ./backend/.env.local
+    environment:
+      NORMALIZE_LOCAL_STORAGE_PERMISSIONS: "1"
     depends_on: [redis, postgres]
-    command: celery -A app.workers.celery_app flower --port=5555
     ports: ["5555:5555"]
     volumes:
       - local_storage:/app/storage

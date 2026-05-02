@@ -70,7 +70,9 @@ from app.utils.reader_utils import (
     require_summary_access,
     serialize_chapter_media,
     serialize_inline_images,
+    summary_visible_chapter_set,
     timeline_character_detail,
+    timeline_visible_chapter_set,
     timeline_relationship_detail,
     update_plot_thread_note,
 )
@@ -639,6 +641,10 @@ async def get_chapter_list(
             ],
         }
     intelligence_map = await chapter_intelligence_map(db, book, current_user)
+    if book.mode == "author":
+        author_visible = [chapter for chapter, available in intelligence_map.items() if available]
+        if author_visible:
+            read_upto = max(author_visible)
 
     return {
         "read_upto": read_upto,
@@ -647,7 +653,7 @@ async def get_chapter_list(
             {
                 "number": chapter.number, "title": chapter.title, "processed": chapter.processed,
                 "intelligence_available": intelligence_map.get(chapter.number, True),
-                "read": chapter.number in read_set,
+                "read": book.mode == "author" or chapter.number in read_set,
             }
             for chapter in chapters
         ],
@@ -670,17 +676,21 @@ async def get_summary_collection(
         )
     )).scalar()
     read_upto = progress.current_chapter if progress else 0
-    read_set = set(progress.chapters_read or []) if progress else set()
-    available_set = await read_available_chapter_set(db, book, current_user, read_set)
+    available_set = await summary_visible_chapter_set(db, book, current_user)
 
     if not available_set:
         return {"read_upto": 0, "summaries": []}
 
-    chapter_rows = (await db.execute(
-        select(Chapter.number, Chapter.title, Chapter.id)
-        .where(Chapter.book_id == book_id, Chapter.number.in_(sorted(available_set)))
-        .order_by(Chapter.number)
-    )).all()
+    if book.mode == "author":
+        read_upto = max(available_set)
+
+    chapters = (
+        await db.execute(
+            select(Chapter)
+            .where(Chapter.book_id == book_id, Chapter.number.in_(sorted(available_set)))
+            .order_by(Chapter.number)
+        )
+    ).scalars().all()
 
     summary_rows = (await db.execute(
         select(ChapterSummary.chapter_id, ChapterSummary.content, ChapterSummary.key_events)
@@ -689,11 +699,12 @@ async def get_summary_collection(
     )).all()
     summary_by_chapter_id = {str(row[0]): {"content": row[1], "key_events": row[2] or []} for row in summary_rows}
 
-    for chapter_number, chapter_title, chapter_id in chapter_rows:
-        chapter_key = str(chapter_id)
+    for chapter in chapters:
+        chapter_key = str(chapter.id)
         if chapter_key in summary_by_chapter_id:
             continue
-        summary_data = await get_or_generate_summary(db, book_id, chapter_number, "short")
+        await queue_analysis_if_missing(db, chapter)
+        summary_data = await get_or_generate_summary(db, book_id, chapter.number, "short")
         if summary_data:
             summary_by_chapter_id[chapter_key] = {
                 "content": summary_data["content"],
@@ -704,12 +715,14 @@ async def get_summary_collection(
         "read_upto": read_upto,
         "summaries": [
             {
-                "chapter_number": row[0], "chapter_title": row[1], "read": True,
-                "available": str(row[2]) in summary_by_chapter_id,
-                "content": summary_by_chapter_id.get(str(row[2]), {}).get("content"),
-                "key_events": summary_by_chapter_id.get(str(row[2]), {}).get("key_events", []),
+                "chapter_number": chapter.number,
+                "chapter_title": chapter.title,
+                "read": book.mode == "author" or chapter.number <= read_upto,
+                "available": str(chapter.id) in summary_by_chapter_id,
+                "content": summary_by_chapter_id.get(str(chapter.id), {}).get("content"),
+                "key_events": summary_by_chapter_id.get(str(chapter.id), {}).get("key_events", []),
             }
-            for row in chapter_rows
+            for chapter in chapters
         ],
     }
 
@@ -724,7 +737,7 @@ async def get_foreshadowing_highlights(
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
 
-    read_set = await read_available_chapter_set(db, book, current_user, await read_chapter_set(db, current_user.id, book_id))
+    read_set = await summary_visible_chapter_set(db, book, current_user)
     if not read_set:
         return {"items": []}
 
@@ -744,33 +757,36 @@ async def get_foreshadowing_highlights(
     if items:
         return {"items": items}
 
-    chapter_rows = (await db.execute(
-        select(Chapter.number, Chapter.title, Chapter.id, Chapter.s3_key)
-        .where(Chapter.book_id == book_id, Chapter.number.in_(sorted(read_set)))
-        .order_by(Chapter.number)
-    )).all()
+    chapters = (
+        await db.execute(
+            select(Chapter)
+            .where(Chapter.book_id == book_id, Chapter.number.in_(sorted(read_set)))
+            .order_by(Chapter.number)
+        )
+    ).scalars().all()
 
     from app.engine.analysis.summariser import generate_summary
 
     generated_rows = []
-    for number, title, chapter_id, s3_key in chapter_rows:
+    for chapter in chapters:
         existing = (await db.execute(
-            select(ChapterSummary).where(ChapterSummary.chapter_id == chapter_id, ChapterSummary.mode == "detailed")
+            select(ChapterSummary).where(ChapterSummary.chapter_id == chapter.id, ChapterSummary.mode == "detailed")
         )).scalar()
         if existing:
-            generated_rows.append((number, title, existing.clues or []))
+            generated_rows.append((chapter.number, chapter.title, existing.clues or []))
             continue
-        if not s3_key:
+        await queue_analysis_if_missing(db, chapter)
+        if not chapter.s3_key:
             continue
         try:
-            chapter_text = download_book(s3_key).decode("utf-8", errors="ignore")
+            chapter_text = download_book(chapter.s3_key).decode("utf-8", errors="ignore")
         except Exception:
             continue
-        data = await generate_summary(chapter_text, "detailed", title or "")
-        row = ChapterSummary(chapter_id=chapter_id, mode="detailed", content=data["content"],
+        data = await generate_summary(chapter_text, "detailed", chapter.title or "")
+        row = ChapterSummary(chapter_id=chapter.id, mode="detailed", content=data["content"],
                              key_events=data.get("key_events"), char_changes=data.get("char_changes"), clues=data.get("clues"))
         db.add(row)
-        generated_rows.append((number, title, data.get("clues") or []))
+        generated_rows.append((chapter.number, chapter.title, data.get("clues") or []))
 
     if generated_rows:
         await db.commit()
@@ -793,15 +809,7 @@ async def get_timeline(
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
 
-    base_read_set = await read_chapter_set(db, current_user.id, book_id)
-    if book.mode == "author":
-        availability = await chapter_intelligence_map(db, book, current_user)
-        read_set = {chapter for chapter, available in availability.items() if available}
-    else:
-        # Timeline should reflect what the reader has actually read.
-        # Do not gate it on intelligence availability/budgets; the payload will naturally be sparse
-        # until summaries/relationships/threads exist.
-        read_set = base_read_set
+    read_set = await timeline_visible_chapter_set(db, book, current_user)
     if not read_set:
         return build_timeline_track_payload([], [], [], [], [])
 
@@ -926,7 +934,7 @@ async def thematic_search(
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
 
-    read_set = await read_available_chapter_set(db, book, current_user, await read_chapter_set(db, current_user.id, book_id))
+    read_set = await summary_visible_chapter_set(db, book, current_user)
     if not read_set:
         return {"results": []}
 

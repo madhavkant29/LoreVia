@@ -30,19 +30,33 @@ from app.models.book import (
     BookNote,
     Chapter,
     ChapterVersion,
+    Dialogue,
+    NovelScene,
     NoteBacklink,
     NoteLink,
     NoteSeriesLink,
     NoteTag,
     ObsidianVaultNote,
     ObsidianVaultNoteSource,
+    Scene,
     Series,
     SeriesBook,
 )
 from app.models.character import Character, CharacterState
-from app.models.intelligence import ChapterSummary, CharacterRelationship, PlotThread
+from app.models.intelligence import ChapterSummary, CharacterRelationship, PlotThread, WikiEntry
 from app.models.progress import ReadingProgress
-from app.schemas.books import BookOut, ChapterConsistencyReport, ChapterReportCharacter
+from app.schemas.books import (
+    BookOut,
+    BookProcessingOut,
+    ChapterConsistencyReport,
+    ChapterReportCharacter,
+    SeriesBibleCanonEntryOut,
+    SeriesBibleCharacterOut,
+    SeriesBibleEpisodeOut,
+    SeriesBibleOut,
+    SeriesBiblePlotThreadOut,
+    SeriesBibleRelationshipOut,
+)
 from app.utils.cover_processor import ProcessedCover, process_cover
 
 if TYPE_CHECKING:
@@ -103,6 +117,11 @@ def _clean_text(value: object | None) -> str:
 def _clean_optional_text(value: str | None) -> str | None:
     cleaned = _clean_text(value)
     return cleaned or None
+
+
+def _count_words(text: str) -> int:
+    cleaned = " ".join((text or "").split()).strip()
+    return len(cleaned.split()) if cleaned else 0
 
 
 DEFAULT_WRITING_TEMPLATES = [
@@ -168,7 +187,213 @@ DEFAULT_WRITER_WORKSPACE = {
         "include_title_page": True,
         "mirror_margins": True,
     },
+    "manuscript_front_matter": {
+        "author_name": "",
+        "pen_name": "",
+        "contact_email": "",
+        "contact_phone": "",
+        "contact_address": "",
+        "title": "",
+        "subtitle": "",
+        "header_last_name": "",
+        "header_title": "",
+        "approximate_word_count_override": None,
+        "dedication": "",
+        "acknowledgments": "",
+        "epigraph": "",
+        "prologue": "",
+        "include_dedication": False,
+        "include_acknowledgments": False,
+        "include_epigraph": False,
+        "include_prologue": False,
+    },
+    "processing": None,
 }
+
+BOOK_WORK_TYPES = {"novel", "screenplay", "other"}
+UPLOAD_EXTENSION_TO_FORMAT = {
+    ".pdf": "pdf",
+    ".epub": "epub",
+    ".docx": "docx",
+    ".doc": "doc",
+    ".txt": "txt",
+    ".md": "md",
+    ".fountain": "fountain",
+    ".screenplay": "fountain",
+    ".script": "fountain",
+}
+FORMAT_TO_UPLOAD_EXTENSION = {
+    "pdf": ".pdf",
+    "epub": ".epub",
+    "docx": ".docx",
+    "doc": ".doc",
+    "txt": ".txt",
+    "md": ".md",
+    "fountain": ".fountain",
+}
+SCREENPLAY_INFER_FORMATS = {"fountain"}
+SCREENPLAY_INPUT_FORMATS = {"pdf", "fountain", "txt", "md"}
+TEXT_ONLY_UPLOAD_FORMATS = {"docx", "doc", "txt", "md"}
+SCENE_BREAK_LINE_RE = re.compile(r"^\s*(?:#(?:\s*#)*)\s*$", re.MULTILINE)
+SCENE_HEADING_LINE_RE = re.compile(r"^\s*#(?:\s*#\s*#)?(?:\s+(.*?))?\s*$")
+
+
+def normalize_book_work_type(value: str | None, *, default: str = "novel") -> str:
+    normalized = " ".join((value or "").split()).strip().lower()
+    if not normalized:
+        return default
+    if normalized not in BOOK_WORK_TYPES:
+        raise HTTPException(400, "Invalid work_type")
+    return normalized
+
+
+def detect_upload_format(filename: str) -> str | None:
+    lower = filename.lower().strip()
+    for extension, format_name in UPLOAD_EXTENSION_TO_FORMAT.items():
+        if lower.endswith(extension):
+            return format_name
+    return None
+
+
+def is_screenplay_format(format_name: str | None) -> bool:
+    normalized = " ".join((format_name or "").split()).strip().lower()
+    return normalized in SCREENPLAY_INPUT_FORMATS or normalized == "screenplay"
+
+
+def infer_work_type_from_filename(filename: str) -> str | None:
+    format_name = detect_upload_format(filename)
+    if format_name in SCREENPLAY_INFER_FORMATS:
+        return "screenplay"
+    lower = filename.lower()
+    if "screenplay" in lower or "script" in lower:
+        return "screenplay"
+    return None
+
+
+def resolve_upload_format_and_work_type(filename: str, explicit_work_type: str | None = None) -> tuple[str, str]:
+    format_name = detect_upload_format(filename)
+    if not format_name:
+        raise HTTPException(400, f"Unsupported upload format: {filename}")
+
+    inferred_work_type = infer_work_type_from_filename(filename)
+    work_type = normalize_book_work_type(explicit_work_type, default=inferred_work_type or "novel")
+
+    if work_type == "screenplay" and format_name not in SCREENPLAY_INPUT_FORMATS:
+        raise HTTPException(400, "Screenplay uploads support PDF, Fountain, TXT, and Markdown files.")
+
+    if work_type != "screenplay" and format_name == "fountain":
+        work_type = "screenplay"
+
+    if work_type != "screenplay" and format_name not in {"pdf", "epub", *TEXT_ONLY_UPLOAD_FORMATS}:
+        raise HTTPException(400, f"Unsupported upload format: {filename}")
+
+    return format_name, work_type
+
+
+def upload_filename_for_format(format_name: str) -> str:
+    extension = FORMAT_TO_UPLOAD_EXTENSION.get(" ".join((format_name or "").split()).strip().lower(), ".txt")
+    return f"upload{extension}"
+
+
+def story_unit_name(book_or_work_type: Book | str | None, *, plural: bool = False, lowercase: bool = False) -> str:
+    work_type = book_or_work_type.work_type if isinstance(book_or_work_type, Book) else str(book_or_work_type or "")
+    base = "scene" if work_type == "screenplay" else "chapter"
+    if not lowercase:
+        base = base.title()
+    if plural:
+        return f"{base}s"
+    return base
+
+
+def story_unit_label(
+    book_or_work_type: Book | str | None,
+    number: int | None,
+    *,
+    fallback: str = "-",
+    short: bool = False,
+    lowercase: bool = False,
+) -> str:
+    if not number:
+        return fallback
+    label = "Sc." if short and story_unit_name(book_or_work_type, lowercase=True) == "scene" else None
+    if label is None:
+        label = "Ch." if short else story_unit_name(book_or_work_type, lowercase=lowercase)
+    return f"{label} {number}"
+
+
+def _normalize_processing_state(raw: dict | None) -> dict | None:
+    source = raw if isinstance(raw, dict) else {}
+
+    status = " ".join(str(source.get("status") or "").split()).strip() or None
+    stage = " ".join(str(source.get("stage") or "").split()).strip() or None
+    progress_pct = source.get("progress_pct")
+    chapters_completed = source.get("chapters_completed")
+    chapters_total = source.get("chapters_total")
+    eta_seconds = source.get("eta_seconds")
+    queue_wait_ms = source.get("queue_wait_ms")
+    last_chapter_number = source.get("last_chapter_number")
+    last_chapter_title = " ".join(str(source.get("last_chapter_title") or "").split()).strip() or None
+    started_at = source.get("started_at")
+    updated_at = source.get("updated_at")
+    last_error = " ".join(str(source.get("last_error") or "").split()).strip() or None
+
+    payload: dict[str, Any] = {}
+    if status:
+        payload["status"] = status
+    if stage:
+        payload["stage"] = stage
+    if isinstance(progress_pct, (int, float)):
+        payload["progress_pct"] = float(progress_pct)
+    if isinstance(chapters_completed, (int, float)) and int(chapters_completed) >= 0:
+        payload["chapters_completed"] = int(chapters_completed)
+    if isinstance(chapters_total, (int, float)) and int(chapters_total) >= 0:
+        payload["chapters_total"] = int(chapters_total)
+    if isinstance(eta_seconds, (int, float)) and int(eta_seconds) >= 0:
+        payload["eta_seconds"] = int(eta_seconds)
+    if isinstance(queue_wait_ms, (int, float)) and int(queue_wait_ms) >= 0:
+        payload["queue_wait_ms"] = int(queue_wait_ms)
+    if isinstance(last_chapter_number, (int, float)) and int(last_chapter_number) >= 0:
+        payload["last_chapter_number"] = int(last_chapter_number)
+    if last_chapter_title:
+        payload["last_chapter_title"] = last_chapter_title
+    if started_at:
+        payload["started_at"] = str(started_at).strip()
+    if updated_at:
+        payload["updated_at"] = str(updated_at).strip()
+    if last_error:
+        payload["last_error"] = last_error
+
+    return payload or None
+
+
+def _derive_front_matter_defaults(raw: dict | None = None, *, title: str = "", author: str = "") -> dict[str, Any]:
+    payload = json.loads(json.dumps(DEFAULT_WRITER_WORKSPACE["manuscript_front_matter"]))
+    source = raw if isinstance(raw, dict) else {}
+
+    payload["author_name"] = " ".join(str(source.get("author_name") or author or "").split()).strip()
+    payload["pen_name"] = " ".join(str(source.get("pen_name") or "").split()).strip()
+    payload["contact_email"] = " ".join(str(source.get("contact_email") or "").split()).strip()
+    payload["contact_phone"] = " ".join(str(source.get("contact_phone") or "").split()).strip()
+    payload["contact_address"] = str(source.get("contact_address") or "").strip()
+    payload["title"] = " ".join(str(source.get("title") or title or "").split()).strip()
+    payload["subtitle"] = " ".join(str(source.get("subtitle") or "").split()).strip()
+
+    header_last_name = " ".join(str(source.get("header_last_name") or "").split()).strip()
+    if not header_last_name:
+        fallback_name = payload["pen_name"] or payload["author_name"]
+        header_last_name = fallback_name.split()[-1] if fallback_name else ""
+    payload["header_last_name"] = header_last_name
+    payload["header_title"] = " ".join(str(source.get("header_title") or payload["title"] or "").split()).strip()
+
+    override = source.get("approximate_word_count_override")
+    payload["approximate_word_count_override"] = int(override) if isinstance(override, (int, float)) and int(override) > 0 else None
+
+    for key in ("dedication", "acknowledgments", "epigraph", "prologue"):
+        payload[key] = str(source.get(key) or "").strip()
+    for key in ("include_dedication", "include_acknowledgments", "include_epigraph", "include_prologue"):
+        payload[key] = bool(source.get(key, False))
+
+    return payload
 
 
 def normalize_writer_workspace(raw: dict | None) -> dict:
@@ -232,11 +457,28 @@ def normalize_writer_workspace(raw: dict | None) -> dict:
             "mirror_margins": bool(publishing.get("mirror_margins", True)),
         }
 
+    payload["manuscript_front_matter"] = _derive_front_matter_defaults(source.get("manuscript_front_matter"))
+    payload["processing"] = _normalize_processing_state(source.get("processing")) if isinstance(source.get("processing"), dict) else None
+
     return payload
 
 
 def build_writer_workspace_payload(book: Book) -> dict:
-    return normalize_writer_workspace(book.writer_workspace if isinstance(book.writer_workspace, dict) else None)
+    payload = normalize_writer_workspace(book.writer_workspace if isinstance(book.writer_workspace, dict) else None)
+    payload["manuscript_front_matter"] = _derive_front_matter_defaults(
+        payload.get("manuscript_front_matter"),
+        title=book.title or "",
+        author=book.author or "",
+    )
+    return payload
+
+
+def build_book_processing_payload(book: Book) -> BookProcessingOut | None:
+    workspace = normalize_writer_workspace(book.writer_workspace if isinstance(book.writer_workspace, dict) else None)
+    processing = workspace.get("processing")
+    if not isinstance(processing, dict) or not processing:
+        return None
+    return BookProcessingOut.model_validate(processing)
 
 
 def estimate_readability(text: str) -> dict[str, Any]:
@@ -520,7 +762,7 @@ async def _load_obsidian_scope_notes(
     book: Book,
     user_id: uuid.UUID,
     source: str,
-) -> tuple[list[ObsidianVaultNote], dict[str, Book]]:
+) -> tuple[list[ObsidianVaultNote], dict[uuid.UUID, Book]]:
     normalized_source = normalize_obsidian_note_source(source)
     scoped_books = {book.id: book}
     if book.primary_series_id:
@@ -545,6 +787,7 @@ async def _load_obsidian_scope_notes(
             .order_by(ObsidianVaultNote.book_id.asc(), ObsidianVaultNote.path.asc())
         )
     ).scalars().all()
+    notes = list(notes)
     return notes, scoped_books
 
 
@@ -1139,6 +1382,704 @@ async def resolve_owned_series_ids(
     return sorted(rows, key=lambda series: order[series.id])
 
 
+async def refresh_screenplay_scene_rows(
+    db: AsyncSession,
+    *,
+    book: Book,
+    parsed_scenes: list[Any],
+    starting_number: int = 1,
+    replace_scene_numbers: set[int] | None = None,
+) -> None:
+    from app.utils.screenplay_utils import replace_book_scenes
+
+    chapter_rows = (
+        await db.execute(
+            select(Chapter.number, Chapter.id).where(Chapter.book_id == book.id).order_by(Chapter.number)
+        )
+    ).all()
+    chapter_ids_by_number = {int(number): chapter_id for number, chapter_id in chapter_rows}
+    await replace_book_scenes(
+        db,
+        book=book,
+        parsed_scenes=parsed_scenes,
+        chapter_ids_by_number=chapter_ids_by_number,
+        starting_number=starting_number,
+        replace_scene_numbers=replace_scene_numbers,
+    )
+
+
+def _scene_slug(value: str, fallback: str = "scene") -> str:
+    cleaned = re.sub(r"[^a-z0-9]+", "-", (value or "").strip().lower()).strip("-")
+    return cleaned or fallback
+
+
+def _scene_display_title(text: str, index: int) -> str:
+    for line in (text or "").splitlines():
+        cleaned = " ".join(line.split()).strip()
+        if cleaned and not SCENE_BREAK_LINE_RE.match(cleaned):
+            return cleaned[:80]
+    return f"Scene {index}"
+
+
+def _scene_folder_for_chapter(chapter_number: int | None) -> str:
+    if isinstance(chapter_number, int) and chapter_number > 0:
+        return f"scenes/chapter-{chapter_number:02d}"
+    return "scenes/unassigned"
+
+
+def build_novel_scene_path(*, chapter_number: int | None, sort_order: int, title: str) -> str:
+    return f"{_scene_folder_for_chapter(chapter_number)}/{sort_order:03d}-{_scene_slug(title)}.md"
+
+
+def _split_scene_blocks(text: str) -> list[str]:
+    normalized = (text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not normalized:
+        return []
+    blocks: list[str] = []
+    current: list[str] = []
+    for raw_line in normalized.splitlines():
+        line = raw_line.rstrip()
+        heading_match = SCENE_HEADING_LINE_RE.match(line)
+        if heading_match:
+            if current and any(part.strip() for part in current):
+                blocks.append("\n".join(current).strip())
+                current = []
+            if heading_match.group(1):
+                current.append(line)
+            continue
+        current.append(line)
+    if current and any(part.strip() for part in current):
+        blocks.append("\n".join(current).strip())
+    return blocks or [normalized]
+
+
+def extract_novel_scene_candidates(
+    *,
+    text: str,
+    chapter_number: int | None,
+    source: str = "extracted",
+) -> list[dict[str, Any]]:
+    blocks = _split_scene_blocks(text)
+    scenes: list[dict[str, Any]] = []
+    for index, block in enumerate(blocks, start=1):
+        lines = [line.rstrip() for line in block.splitlines()]
+        title = _scene_display_title(block, index)
+        description = ""
+        remaining_lines = lines
+        if remaining_lines:
+            first_line = " ".join(remaining_lines[0].split()).strip()
+            heading_match = SCENE_HEADING_LINE_RE.match(first_line)
+            if heading_match and heading_match.group(1):
+                title = heading_match.group(1).strip() or title
+                remaining_lines = remaining_lines[1:]
+            elif len(first_line) <= 80:
+                title = first_line or title
+                remaining_lines = remaining_lines[1:]
+        preview = " ".join(" ".join(line.split()) for line in remaining_lines if line.strip()).strip()
+        if preview:
+            description = preview[:180]
+            if len(preview) > 180:
+                description = description.rstrip() + "..."
+        body = "\n".join(lines).strip()
+        scenes.append(
+            {
+                "chapter_number": chapter_number,
+                "title": title,
+                "description": description or None,
+                "body": body,
+                "html_body": manuscript_text_to_html(body),
+                "status": "assigned" if chapter_number else "unassigned",
+                "sort_order": index,
+                "source": source,
+                "origin_chapter_number": chapter_number,
+                "path": build_novel_scene_path(chapter_number=chapter_number, sort_order=index, title=title),
+            }
+        )
+    return scenes
+
+
+async def replace_chapter_novel_scenes(
+    db: AsyncSession,
+    *,
+    book: Book,
+    chapter_number: int,
+    scenes: list[dict[str, Any]],
+) -> None:
+    await db.execute(
+        delete(NovelScene).where(
+            NovelScene.book_id == book.id,
+            NovelScene.origin_chapter_number == chapter_number,
+            NovelScene.source == "extracted",
+        )
+    )
+
+    chapter_id = (
+        await db.execute(
+            select(Chapter.id).where(Chapter.book_id == book.id, Chapter.number == chapter_number)
+        )
+    ).scalar_one_or_none()
+    for scene in scenes:
+        db.add(
+            NovelScene(
+                book_id=book.id,
+                chapter_id=chapter_id,
+                chapter_number=chapter_number,
+                title=str(scene["title"]),
+                description=cast(str | None, scene.get("description")),
+                body=str(scene["body"]),
+                html_body=cast(str | None, scene.get("html_body")),
+                path=str(scene["path"]),
+                status=str(scene.get("status") or "assigned"),
+                sort_order=int(scene.get("sort_order") or 0),
+                source=str(scene.get("source") or "extracted"),
+                origin_chapter_number=chapter_number,
+            )
+        )
+
+
+def _scene_out(scene: NovelScene) -> dict[str, Any]:
+    return {
+        "id": str(scene.id),
+        "book_id": str(scene.book_id),
+        "chapter_id": str(scene.chapter_id) if scene.chapter_id else None,
+        "chapter_number": scene.chapter_number,
+        "title": scene.title,
+        "description": scene.description,
+        "body": scene.body,
+        "html_body": scene.html_body,
+        "path": scene.path,
+        "status": scene.status,
+        "sort_order": scene.sort_order,
+        "source": scene.source,
+        "origin_chapter_number": scene.origin_chapter_number,
+        "created_at": scene.created_at,
+        "updated_at": scene.updated_at,
+    }
+
+
+async def list_novel_scenes(
+    db: AsyncSession,
+    *,
+    book: Book,
+    chapter_number: int | None = None,
+    status: str | None = None,
+    query: str | None = None,
+) -> list[dict[str, Any]]:
+    stmt = select(NovelScene).where(NovelScene.book_id == book.id)
+    if chapter_number is not None:
+        stmt = stmt.where(NovelScene.chapter_number == chapter_number)
+    if status:
+        stmt = stmt.where(NovelScene.status == status)
+    if query:
+        like = f"%{' '.join(query.split()).strip()}%"
+        stmt = stmt.where(
+            NovelScene.title.ilike(like) | NovelScene.description.ilike(like) | NovelScene.body.ilike(like)
+        )
+    rows = (
+        await db.execute(
+            stmt.order_by(
+                NovelScene.chapter_number.is_(None),
+                NovelScene.chapter_number.asc(),
+                NovelScene.sort_order.asc(),
+                NovelScene.created_at.asc(),
+            )
+        )
+    ).scalars().all()
+    return [_scene_out(scene) for scene in rows]
+
+
+async def save_novel_scene(
+    db: AsyncSession,
+    *,
+    book: Book,
+    scene_id: uuid.UUID | None,
+    title: str,
+    description: str | None,
+    body: str,
+    html_body: str | None,
+    chapter_number: int | None,
+    status: str | None,
+    sort_order: int | None,
+) -> dict[str, Any]:
+    normalized_title = _clean_text(title)
+    if not normalized_title:
+        raise HTTPException(400, "Scene title is required")
+    normalized_body = (body or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not normalized_body:
+        raise HTTPException(400, "Scene body is required")
+    normalized_description = _clean_optional_text(description)
+    normalized_chapter_number = int(chapter_number) if isinstance(chapter_number, int) and chapter_number > 0 else None
+    normalized_status = "assigned" if normalized_chapter_number else "unassigned"
+    if status in {"assigned", "unassigned", "archived"}:
+        normalized_status = status
+    chapter_id = None
+    if normalized_chapter_number:
+        chapter_id = (
+            await db.execute(
+                select(Chapter.id).where(Chapter.book_id == book.id, Chapter.number == normalized_chapter_number)
+            )
+        ).scalar_one_or_none()
+    next_sort_order = int(sort_order) if isinstance(sort_order, int) and sort_order >= 0 else 0
+
+    scene = await db.get(NovelScene, scene_id) if scene_id else None
+    if scene is not None and scene.book_id != book.id:
+        raise HTTPException(404, "Scene not found")
+
+    base_path = build_novel_scene_path(
+        chapter_number=normalized_chapter_number if normalized_status == "assigned" else None,
+        sort_order=next_sort_order or 1,
+        title=normalized_title,
+    )
+    path = base_path
+    suffix = 2
+    while True:
+        existing_path_scene = (
+            await db.execute(
+                select(NovelScene.id).where(
+                    NovelScene.book_id == book.id,
+                    NovelScene.path == path,
+                )
+            )
+        ).scalar_one_or_none()
+        if existing_path_scene is None or (scene is not None and existing_path_scene == scene.id):
+            break
+        if base_path.endswith(".md"):
+            path = f"{base_path[:-3]}-{suffix}.md"
+        else:
+            path = f"{base_path}-{suffix}"
+        suffix += 1
+    if scene is None:
+        scene = NovelScene(
+            book_id=book.id,
+            chapter_id=chapter_id,
+            chapter_number=normalized_chapter_number,
+            title=normalized_title,
+            description=normalized_description,
+            body=normalized_body,
+            html_body=clean_manuscript_html(html_body) if html_body else manuscript_text_to_html(normalized_body),
+            path=path,
+            status=normalized_status,
+            sort_order=next_sort_order or 1,
+            source="manual",
+            origin_chapter_number=normalized_chapter_number,
+        )
+        db.add(scene)
+    else:
+        scene.chapter_id = chapter_id
+        scene.chapter_number = normalized_chapter_number
+        scene.title = normalized_title
+        scene.description = normalized_description
+        scene.body = normalized_body
+        scene.html_body = clean_manuscript_html(html_body) if html_body else manuscript_text_to_html(normalized_body)
+        scene.path = path
+        scene.status = normalized_status
+        scene.sort_order = next_sort_order or scene.sort_order or 1
+    await db.commit()
+    await db.refresh(scene)
+    return _scene_out(scene)
+
+
+async def delete_novel_scene(
+    db: AsyncSession,
+    *,
+    book: Book,
+    scene_id: uuid.UUID,
+) -> None:
+    deleted = await db.execute(
+        delete(NovelScene).where(NovelScene.book_id == book.id, NovelScene.id == scene_id)
+    )
+    if not deleted.rowcount:
+        raise HTTPException(404, "Scene not found")
+    await db.commit()
+
+
+async def build_manuscript_workspace_tree(
+    db: AsyncSession,
+    *,
+    book: Book,
+    user_id: uuid.UUID,
+) -> dict[str, Any]:
+    chapter_rows = (
+        await db.execute(
+            select(Chapter.number, Chapter.title).where(Chapter.book_id == book.id).order_by(Chapter.number.asc())
+        )
+    ).all()
+    scenes = (
+        await db.execute(
+            select(NovelScene).where(NovelScene.book_id == book.id).order_by(
+                NovelScene.chapter_number.is_(None),
+                NovelScene.chapter_number.asc(),
+                NovelScene.sort_order.asc(),
+                NovelScene.created_at.asc(),
+            )
+        )
+    ).scalars().all()
+    note_paths = [
+        note["path"]
+        for note in await list_obsidian_notes(
+            db,
+            book=book,
+            user_id=user_id,
+            source=ObsidianVaultNoteSource.USER_NOTES.value,
+        )
+    ]
+    scene_counts: dict[int, int] = {}
+    grouped_scenes: dict[int | None, list[dict[str, Any]]] = {}
+    for scene in scenes:
+        grouped_scenes.setdefault(scene.chapter_number, []).append(_scene_out(scene))
+        if scene.chapter_number:
+            scene_counts[scene.chapter_number] = scene_counts.get(scene.chapter_number, 0) + 1
+
+    scene_groups: list[dict[str, Any]] = []
+    if grouped_scenes.get(None):
+        scene_groups.append(
+            {
+                "id": "unassigned-scenes",
+                "label": "Unassigned Scenes",
+                "chapter_number": None,
+                "collapsed_by_default": True,
+                "scenes": grouped_scenes[None],
+            }
+        )
+    for chapter_number, chapter_title in chapter_rows:
+        scene_groups.append(
+            {
+                "id": f"chapter-scenes-{chapter_number}",
+                "label": f"Chapter {chapter_number}: {chapter_title or f'Chapter {chapter_number}'}",
+                "chapter_number": int(chapter_number),
+                "collapsed_by_default": False,
+                "scenes": grouped_scenes.get(int(chapter_number), []),
+            }
+        )
+
+    return {
+        "chapters": [
+            {
+                "chapter_number": int(number),
+                "title": chapter_title,
+                "scene_count": scene_counts.get(int(number), 0),
+            }
+            for number, chapter_title in chapter_rows
+        ],
+        "scene_groups": scene_groups,
+        "note_paths": note_paths,
+    }
+
+
+def _series_bible_key(value: str | None) -> str:
+    return " ".join((value or "").split()).strip().lower()
+
+
+async def build_series_bible_payload(
+    db: AsyncSession,
+    *,
+    series: Series,
+) -> SeriesBibleOut:
+    membership_rows = (
+        await db.execute(
+            select(SeriesBook, Book)
+            .join(Book, Book.id == SeriesBook.book_id)
+            .where(SeriesBook.series_id == series.id, Book.hidden_at.is_(None))
+            .order_by(SeriesBook.position.asc().nullslast(), Book.created_at.asc(), Book.title.asc())
+        )
+    ).all()
+
+    if not membership_rows:
+        return SeriesBibleOut(
+            series_id=str(series.id),
+            name=series.name,
+            description=series.description,
+            work_type="screenplay",
+            episode_count=0,
+            episodes=[],
+            recurring_characters=[],
+            recurring_relationships=[],
+            unresolved_plot_threads=[],
+            canon_entries=[],
+            continuity_risks=[],
+        )
+
+    screenplay_rows = [(membership, book) for membership, book in membership_rows if book.work_type == "screenplay"]
+    active_rows = screenplay_rows or membership_rows
+    series_work_type = "screenplay" if screenplay_rows else (active_rows[0][1].work_type if active_rows else "novel")
+    book_ids = [book.id for _, book in active_rows]
+
+    scene_stats_rows = (
+        await db.execute(
+            select(Scene.book_id, func.count(Scene.id), func.coalesce(func.sum(Scene.word_count), 0))
+            .where(Scene.book_id.in_(book_ids))
+            .group_by(Scene.book_id)
+        )
+    ).all() if book_ids else []
+    dialogue_stats_rows = (
+        await db.execute(
+            select(Scene.book_id, func.count(Dialogue.id))
+            .join(Dialogue, Dialogue.scene_id == Scene.id)
+            .where(Scene.book_id.in_(book_ids))
+            .group_by(Scene.book_id)
+        )
+    ).all() if book_ids else []
+    scene_stats_by_book = {
+        book_id: {"total_scenes": int(total_scenes or 0), "total_words": int(total_words or 0)}
+        for book_id, total_scenes, total_words in scene_stats_rows
+    }
+    dialogue_stats_by_book = {book_id: int(total_dialogue or 0) for book_id, total_dialogue in dialogue_stats_rows}
+
+    episodes: list[SeriesBibleEpisodeOut] = []
+    episode_lookup: dict[uuid.UUID, SeriesBibleEpisodeOut] = {}
+    for membership, book in active_rows:
+        scene_stats = scene_stats_by_book.get(book.id, {})
+        episode = SeriesBibleEpisodeOut(
+            book_id=str(book.id),
+            title=book.title,
+            episode_number=membership.position,
+            format=book.format,
+            work_type=book.work_type,
+            total_scenes=int(scene_stats.get("total_scenes", book.total_chapters or 0) or 0),
+            total_dialogue_lines=dialogue_stats_by_book.get(book.id, 0),
+            total_words=int(scene_stats.get("total_words", 0) or 0),
+            status=book.status,
+        )
+        episodes.append(episode)
+        episode_lookup[book.id] = episode
+
+    characters = (
+        await db.execute(
+            select(Character)
+            .where(Character.book_id.in_(book_ids))
+            .order_by(Character.book_id, Character.first_chapter, Character.name)
+        )
+    ).scalars().all() if book_ids else []
+    relationships = (
+        await db.execute(select(CharacterRelationship).where(CharacterRelationship.book_id.in_(book_ids)))
+    ).scalars().all() if book_ids else []
+    plot_threads = (
+        await db.execute(
+            select(PlotThread)
+            .where(PlotThread.book_id.in_(book_ids))
+            .order_by(PlotThread.importance.desc(), PlotThread.title)
+        )
+    ).scalars().all() if book_ids else []
+    wiki_entries = (
+        await db.execute(
+            select(WikiEntry)
+            .where(WikiEntry.book_id.in_(book_ids))
+            .order_by(WikiEntry.entry_type, WikiEntry.name)
+        )
+    ).scalars().all() if book_ids else []
+
+    character_groups: dict[str, dict[str, Any]] = {}
+    for character in characters:
+        key = _series_bible_key(character.name)
+        if not key:
+            continue
+        bucket = character_groups.setdefault(
+            key,
+            {
+                "name": character.name,
+                "episodes": set(),
+                "mentions": 0,
+                "first_episode": None,
+                "last_episode": None,
+            },
+        )
+        bucket["episodes"].add(character.book_id)
+        bucket["mentions"] += int(character.mention_count or 0)
+        episode = episode_lookup.get(character.book_id)
+        if episode is not None and episode.episode_number is not None:
+            if bucket["first_episode"] is None or episode.episode_number < bucket["first_episode"]:
+                bucket["first_episode"] = episode.episode_number
+            if bucket["last_episode"] is None or episode.episode_number > bucket["last_episode"]:
+                bucket["last_episode"] = episode.episode_number
+
+    recurring_characters = sorted(
+        (
+            SeriesBibleCharacterOut(
+                name=bucket["name"],
+                normalized_name=key,
+                episode_count=len(bucket["episodes"]),
+                total_mentions=int(bucket["mentions"]),
+                first_episode=bucket["first_episode"],
+                last_episode=bucket["last_episode"],
+                episodes=[
+                    episode_lookup[book_id]
+                    for book_id in sorted(
+                        bucket["episodes"],
+                        key=lambda item: (episode_lookup[item].episode_number or 10**6, episode_lookup[item].title.lower()),
+                    )
+                ],
+            )
+            for key, bucket in character_groups.items()
+            if len(bucket["episodes"]) >= 2
+        ),
+        key=lambda item: (-item.episode_count, -item.total_mentions, item.name.lower()),
+    )
+
+    relationship_groups: dict[tuple[str, str, str], dict[str, Any]] = {}
+    continuity_risks: list[str] = []
+    pair_type_tracker: dict[tuple[str, str], set[str]] = {}
+    name_by_book_and_id = {(character.book_id, character.id): character.name for character in characters}
+    for relationship in relationships:
+        a_name = name_by_book_and_id.get((relationship.book_id, relationship.character_a_id), "Unknown")
+        b_name = name_by_book_and_id.get((relationship.book_id, relationship.character_b_id), "Unknown")
+        pair: tuple[str, str] = (min(a_name, b_name), max(a_name, b_name))
+        relationship_type = " ".join(str(relationship.rel_type or "").split()).strip() or "unknown"
+        pair_type_tracker.setdefault(pair, set()).add(relationship_type)
+        key = (pair[0].lower(), pair[1].lower(), relationship_type)
+        bucket = relationship_groups.setdefault(
+            key,
+            {
+                "characters": [pair[0], pair[1]],
+                "relationship_type": relationship_type,
+                "episodes": set(),
+                "note": relationship.description,
+            },
+        )
+        bucket["episodes"].add(relationship.book_id)
+        if not bucket.get("note") and relationship.description:
+            bucket["note"] = relationship.description
+
+    recurring_relationships = sorted(
+        (
+            SeriesBibleRelationshipOut(
+                characters=bucket["characters"],
+                relationship_type=bucket["relationship_type"],
+                episode_count=len(bucket["episodes"]),
+                episodes=[
+                    episode_lookup[book_id]
+                    for book_id in sorted(
+                        bucket["episodes"],
+                        key=lambda item: (episode_lookup[item].episode_number or 10**6, episode_lookup[item].title.lower()),
+                    )
+                ],
+                note=bucket.get("note"),
+            )
+            for bucket in relationship_groups.values()
+            if len(bucket["episodes"]) >= 2
+        ),
+        key=lambda item: (-item.episode_count, item.characters[0].lower(), item.characters[1].lower(), item.relationship_type.lower()),
+    )
+
+    for pair, rel_types in pair_type_tracker.items():
+        if len(rel_types) > 1:
+            continuity_risks.append(
+                f"{pair[0]} and {pair[1]} shift relationship labels across episodes: {', '.join(sorted(rel_types))}."
+            )
+
+    plot_thread_groups: dict[str, dict[str, Any]] = {}
+    for thread in plot_threads:
+        key = _series_bible_key(thread.title)
+        if not key:
+            continue
+        bucket = plot_thread_groups.setdefault(
+            key,
+            {
+                "title": thread.title,
+                "episodes": set(),
+                "statuses": set(),
+                "note": thread.note,
+            },
+        )
+        if thread.status not in {"resolved", "abandoned"}:
+            bucket["episodes"].add(thread.book_id)
+        bucket["statuses"].add(thread.status)
+        if not bucket.get("note") and thread.note:
+            bucket["note"] = thread.note
+
+    unresolved_plot_threads = sorted(
+        (
+            SeriesBiblePlotThreadOut(
+                title=bucket["title"],
+                status="ongoing" if "ongoing" in bucket["statuses"] else sorted(bucket["statuses"])[0],
+                episode_count=len(bucket["episodes"]),
+                episodes=[
+                    episode_lookup[book_id]
+                    for book_id in sorted(
+                        bucket["episodes"],
+                        key=lambda item: (episode_lookup[item].episode_number or 10**6, episode_lookup[item].title.lower()),
+                    )
+                ],
+                note=bucket.get("note"),
+            )
+            for bucket in plot_thread_groups.values()
+            if bucket["episodes"]
+        ),
+        key=lambda item: (-item.episode_count, item.title.lower()),
+    )
+
+    canon_groups: dict[tuple[str, str], dict[str, Any]] = {}
+    description_tracker: dict[tuple[str, str], set[str]] = {}
+    for entry in wiki_entries:
+        key = (entry.entry_type, _series_bible_key(entry.name))
+        if not key[1]:
+            continue
+        bucket = canon_groups.setdefault(
+            key,
+            {
+                "name": entry.name,
+                "entry_type": entry.entry_type,
+                "episodes": set(),
+                "description": entry.description,
+            },
+        )
+        bucket["episodes"].add(entry.book_id)
+        if not bucket.get("description") and entry.description:
+            bucket["description"] = entry.description
+        if entry.description:
+            description_tracker.setdefault(key, set()).add(" ".join(entry.description.split()))
+
+    canon_entries = sorted(
+        (
+            SeriesBibleCanonEntryOut(
+                name=bucket["name"],
+                entry_type=bucket["entry_type"],
+                episode_count=len(bucket["episodes"]),
+                episodes=[
+                    episode_lookup[book_id]
+                    for book_id in sorted(
+                        bucket["episodes"],
+                        key=lambda item: (episode_lookup[item].episode_number or 10**6, episode_lookup[item].title.lower()),
+                    )
+                ],
+                description=bucket.get("description"),
+            )
+            for bucket in canon_groups.values()
+        ),
+        key=lambda item: (-item.episode_count, item.entry_type.lower(), item.name.lower()),
+    )
+
+    for key, descriptions in description_tracker.items():
+        if len(descriptions) > 1:
+            continuity_risks.append(
+                f"{canon_groups[key]['name']} has differing {canon_groups[key]['entry_type']} descriptions across episodes."
+            )
+
+    role_tracker: dict[str, set[str]] = {}
+    for character in characters:
+        key = _series_bible_key(character.name)
+        if not key or not character.role:
+            continue
+        role_tracker.setdefault(key, set()).add(character.role)
+    for key, roles in role_tracker.items():
+        if len(roles) > 1:
+            display_name = character_groups.get(key, {}).get("name", key.title())
+            continuity_risks.append(f"{display_name} shifts role labels across episodes: {', '.join(sorted(roles))}.")
+
+    return SeriesBibleOut(
+        series_id=str(series.id),
+        name=series.name,
+        description=series.description,
+        work_type=series_work_type,
+        episode_count=len(episodes),
+        episodes=episodes,
+        recurring_characters=recurring_characters[:12],
+        recurring_relationships=recurring_relationships[:12],
+        unresolved_plot_threads=unresolved_plot_threads[:12],
+        canon_entries=canon_entries[:18],
+        continuity_risks=list(dict.fromkeys(continuity_risks))[:12],
+    )
+
+
 # ─── BookOut construction ─────────────────────────────────────────────────────
 
 async def book_out(db: AsyncSession, book: Book, user_id: uuid.UUID) -> BookOut:
@@ -1162,6 +2103,7 @@ async def book_out(db: AsyncSession, book: Book, user_id: uuid.UUID) -> BookOut:
         author=book.author,
         genre=book.genre,
         format=book.format,
+        work_type=book.work_type,
         status=book.status,
         mode=book.mode or "reader",
         source_kind=book.source_kind or "single_upload",
@@ -1186,6 +2128,7 @@ async def book_out(db: AsyncSession, book: Book, user_id: uuid.UUID) -> BookOut:
         progress_pct=percent,
         chapters_read_count=chapters_read_count,
         chapters_left=chapters_left,
+        processing=build_book_processing_payload(book),
     )
 
 
@@ -1542,52 +2485,138 @@ async def parse_import_upload(filename: str, raw: bytes, split_into_chapters: bo
     raise HTTPException(400, f"Unsupported manuscript import file: {filename}")
 
 
-async def parse_screenplay_upload(filename: str, raw: bytes) -> list[dict]:
-    """Parse screenplay files and return scene data."""
+def _normalize_screenplay_character_name(name: str) -> str:
+    tokens = [token for token in " ".join((name or "").split()).split(" ") if token]
+    normalized_tokens: list[str] = []
+    roman_numerals = {"I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"}
+    for token in tokens:
+        stripped = token.strip()
+        if not stripped:
+            continue
+        if stripped.upper() in roman_numerals or len(stripped) == 1:
+            normalized_tokens.append(stripped.upper())
+            continue
+        normalized_tokens.append(stripped.title() if stripped.isupper() else stripped)
+    return " ".join(normalized_tokens) or "Unknown"
+
+
+def _build_screenplay_scene_chapters(scenes: list[Any]) -> list[dict[str, Any]]:
+    from app.parsers.screenplay_parser import Action, extract_dialogue_from_scene
+
+    chapters: list[dict[str, Any]] = []
+    for index, scene in enumerate(scenes, start=1):
+        action_lines = [
+            " ".join((element.text or "").split()).strip()
+            for element in getattr(scene, "elements", [])
+            if isinstance(element, Action) and " ".join((element.text or "").split()).strip()
+        ]
+        dialogue_lines: list[str] = []
+        for dialogue in extract_dialogue_from_scene(scene):
+            speaker = _normalize_screenplay_character_name(str(dialogue.get("character_name") or "Unknown"))
+            extension = " ".join(str(dialogue.get("character_extension") or "").split()).strip()
+            parenthetical = " ".join(str(dialogue.get("parenthetical") or "").split()).strip()
+            dialogue_text = " ".join(str(dialogue.get("dialogue_text") or "").split()).strip()
+            if not dialogue_text:
+                continue
+            speaker_label = speaker
+            if extension:
+                speaker_label = f"{speaker_label} ({extension})"
+            detail_parts = [f"({parenthetical})" if parenthetical else "", dialogue_text]
+            dialogue_lines.append(f"{speaker_label}: {' '.join(part for part in detail_parts if part)}".strip())
+
+        body_parts = [scene.text.strip()]
+        if action_lines:
+            body_parts.append("\n".join(action_lines))
+        if dialogue_lines:
+            body_parts.append("\n".join(dialogue_lines))
+        chapter_text = "\n\n".join(part for part in body_parts if part).strip()
+        chapters.append(
+            {
+                "number": index,
+                "title": scene.text.strip() or f"Scene {index}",
+                "description": "\n".join(action_lines).strip() or None,
+                "text": chapter_text,
+                "scene_heading": scene.text.strip() or f"Scene {index}",
+                "scene_number": scene.scene_number,
+                "dialogue_count": len(dialogue_lines),
+            }
+        )
+    return chapters
+
+
+async def parse_screenplay_upload(filename: str, raw: bytes) -> dict[str, Any]:
+    """Parse screenplay files and return scene-aware ingestion payloads."""
     lower = filename.lower()
     stem = os.path.splitext(os.path.basename(filename))[0] or "Imported screenplay"
-    
-    if lower.endswith(".txt") or lower.endswith(".md") or lower.endswith(".fountain"):
-        text = raw.decode("utf-8", errors="ignore")
-        from app.parsers.screenplay_parser import analyze_screenplay_stats, parse_screenplay
-        
-        scenes = await asyncio.to_thread(parse_screenplay, text)
-        stats = await asyncio.to_thread(analyze_screenplay_stats, scenes)
-        
-        return [{
-            "title": stem,
-            "text": text,
-            "scenes": len(scenes),
-            "stats": stats,
-            "number": 1
-        }]
-    
-    # For PDF screenplays, extract text then parse
+
     if lower.endswith(".pdf"):
         from app.parsers.pdf_parser import parse_pdf
-        chapters = await asyncio.to_thread(parse_pdf, raw)
-        merged_text = "\n\n".join((ch.get("text") or "").strip() for ch in chapters if ch.get("text"))
-        
-        from app.parsers.screenplay_parser import analyze_screenplay_stats, parse_screenplay
-        scenes = await asyncio.to_thread(parse_screenplay, merged_text)
-        stats = await asyncio.to_thread(analyze_screenplay_stats, scenes)
-        
-        return [{
-            "title": stem,
-            "text": merged_text,
-            "scenes": len(scenes),
-            "stats": stats,
-            "number": 1
-        }]
-    
-    raise HTTPException(400, f"Unsupported screenplay format: {filename}")
+
+        parsed_pages = await asyncio.to_thread(parse_pdf, raw)
+        source_text = "\n\n".join((chapter.get("text") or "").strip() for chapter in parsed_pages if chapter.get("text"))
+    elif lower.endswith(".txt") or lower.endswith(".md") or lower.endswith(".fountain") or lower.endswith(".screenplay") or lower.endswith(".script"):
+        source_text = raw.decode("utf-8", errors="ignore")
+    else:
+        raise HTTPException(400, f"Unsupported screenplay format: {filename}")
+
+    from app.parsers.screenplay_parser import analyze_screenplay_stats, parse_screenplay
+
+    scenes = await asyncio.to_thread(parse_screenplay, source_text)
+    stats = await asyncio.to_thread(analyze_screenplay_stats, scenes)
+    chapters = _build_screenplay_scene_chapters(scenes)
+    if not chapters and source_text.strip():
+        chapters = [{"number": 1, "title": stem, "text": source_text.strip(), "description": None}]
+
+    return {
+        "title": stem,
+        "text": source_text,
+        "chapters": chapters,
+        "scenes": scenes,
+        "stats": stats,
+    }
 
 
 def is_screenplay_file(filename: str) -> bool:
     """Check if file is likely a screenplay based on extension."""
-    screenplay_extensions = {".fountain", ".screenplay", ".script"}
-    lower = filename.lower()
-    return any(lower.endswith(ext) for ext in screenplay_extensions) or "screenplay" in lower
+    return infer_work_type_from_filename(filename) == "screenplay"
+
+
+async def parse_book_upload_for_ingestion(
+    *,
+    format_name: str,
+    work_type: str,
+    raw: bytes,
+    preserve_chapter_numbers: bool,
+) -> dict[str, Any]:
+    if work_type == "screenplay":
+        screenplay_payload = await parse_screenplay_upload(upload_filename_for_format(format_name), raw)
+        return {
+            "chapters": screenplay_payload["chapters"],
+            "screenplay_payload": screenplay_payload,
+        }
+
+    if format_name == "pdf":
+        from app.parsers.pdf_parser import parse_pdf
+
+        chapters = await asyncio.to_thread(
+            parse_pdf,
+            raw,
+            split_large_chapters=not preserve_chapter_numbers,
+        )
+        return {"chapters": chapters, "screenplay_payload": None}
+
+    if format_name == "epub":
+        from app.parsers.epub_parser import parse_epub
+
+        chapters = await asyncio.to_thread(
+            parse_epub,
+            raw,
+            split_large_chapters=not preserve_chapter_numbers,
+        )
+        return {"chapters": chapters, "screenplay_payload": None}
+
+    parsed = await parse_import_upload(upload_filename_for_format(format_name), raw, False)
+    return {"chapters": parsed, "screenplay_payload": None}
 
 
 def normalize_imported_chapters(
@@ -1605,6 +2634,7 @@ def normalize_imported_chapters(
         if not text:
             continue
         title = _clean_optional_text(" ".join(str(chapter.get("title") or "").split()).strip())
+        description = _clean_optional_text(" ".join(str(chapter.get("description") or "").split()).strip())
         html = clean_manuscript_html(chapter.get("html")) if chapter.get("html") else None
         desired_number = chapter_number if replace_existing and chapter_number else running_number
         parts = split_long_document(text) if chunk_long_documents else [text]
@@ -1618,6 +2648,10 @@ def normalize_imported_chapters(
                 "title": part_title,
                 "text": part,
                 "html": html if len(parts) == 1 else manuscript_text_to_html(part),
+                "description": description,
+                "scene_heading": chapter.get("scene_heading"),
+                "scene_number": chapter.get("scene_number"),
+                "dialogue_count": chapter.get("dialogue_count"),
             })
             desired_number += 1
         running_number = desired_number
@@ -1732,7 +2766,7 @@ async def build_chapter_consistency_report(
     continuity_flags = await detect_chapter_continuity_flags(db, book.id, chapter_number)
     summary_line = report_sentence(short_summary.content if short_summary else "")
     if not summary_line:
-        summary_line = f"Chapter {chapter_number} was imported and analysed."
+        summary_line = f"{story_unit_label(book, chapter_number)} was imported and analysed."
 
     additions = []
     if new_characters:
@@ -1774,6 +2808,7 @@ async def detect_chapter_continuity_flags(
     book_id: uuid.UUID,
     chapter_number: int,
 ) -> list[str]:
+    work_type = await db.scalar(select(Book.work_type).where(Book.id == book_id)) or "novel"
     rows = (
         await db.execute(
             select(CharacterState, Character.name)
@@ -1817,7 +2852,7 @@ async def detect_chapter_continuity_flags(
             current_value = _trait_value(current_snapshot.get(trait_key))
             if previous_value and current_value and previous_value.lower() != current_value.lower():
                 flags.append(
-                    f"{char_name}: {label} changed from '{previous_value}' to '{current_value}' since chapter {previous.at_chapter}."
+                    f"{char_name}: {label} changed from '{previous_value}' to '{current_value}' since {story_unit_label(work_type, previous.at_chapter, lowercase=True)}."
                 )
                 break
 
@@ -1836,6 +2871,13 @@ def _trait_value(raw: object) -> str | None:
 # ─── Character card payload ───────────────────────────────────────────────────
 
 async def build_character_card_payload(db: AsyncSession, book: Book, character: Character) -> dict:
+    def _reference_keys() -> set[str]:
+        keys = {" ".join((character.name or "").split()).strip().lower(), str(character.id).strip().lower()}
+        keys.update(" ".join(str(alias or "").split()).strip().lower() for alias in (character.aliases or []))
+        return {key for key in keys if key}
+
+    reference_keys = _reference_keys()
+
     rels = (
         await db.execute(
             select(CharacterRelationship)
@@ -1892,12 +2934,13 @@ async def build_character_card_payload(db: AsyncSession, book: Book, character: 
             "note": thread.note,
         }
         for thread in linked_threads
-        if character.name in (thread.character_ids or [])
+        if any(" ".join(str(item or "").split()).strip().lower() in reference_keys for item in (thread.character_ids or []))
     ]
     continuity_watch: list[str] = []
     if character.last_seen_chapter and book.total_chapters and book.total_chapters - character.last_seen_chapter >= 25:
+        story_units = story_unit_name(book, plural=True, lowercase=True)
         continuity_watch.append(
-            f"{character.name} has not appeared for {book.total_chapters - character.last_seen_chapter} chapters."
+            f"{character.name} has not appeared for {book.total_chapters - character.last_seen_chapter} {story_units}."
         )
     if character_threads:
         unresolved = [thread["title"] for thread in character_threads if thread["status"] not in {"resolved", "abandoned"}]
@@ -1905,6 +2948,7 @@ async def build_character_card_payload(db: AsyncSession, book: Book, character: 
             continuity_watch.append(f"Still tied to unresolved threads: {', '.join(unresolved[:3])}.")
     return {
         "book_title": book.title,
+        "work_type": book.work_type,
         "character_id": str(character.id),
         "name": character.name,
         "aliases": character.aliases or [],
@@ -1952,6 +2996,8 @@ async def snapshot_chapter_version(
     chapter: Chapter,
     *,
     note: str,
+    snapshot_kind: str = "manual",
+    restored_from_version_id: uuid.UUID | None = None,
 ) -> ChapterVersion | None:
     if not chapter.s3_key:
         return None
@@ -1974,10 +3020,132 @@ async def snapshot_chapter_version(
         s3_key=version_key,
         word_count=chapter.word_count,
         note=note,
+        snapshot_kind=snapshot_kind,
+        restored_from_version_id=restored_from_version_id,
     )
     db.add(version)
     await db.flush()
     return version
+
+
+async def get_chapter_version_content(
+    db: AsyncSession,
+    *,
+    book: Book,
+    version_id: uuid.UUID,
+) -> dict[str, Any]:
+    version = (
+        await db.execute(
+            select(ChapterVersion).where(ChapterVersion.book_id == book.id, ChapterVersion.id == version_id)
+        )
+    ).scalar_one_or_none()
+    if version is None:
+        raise HTTPException(404, "Chapter version not found")
+    raw = await asyncio.to_thread(download_book, version.s3_key)
+    stored = deserialize_manuscript_content(raw)
+    return {
+        "id": str(version.id),
+        "chapter_number": version.chapter_number,
+        "title": version.title,
+        "word_count": version.word_count,
+        "note": version.note,
+        "snapshot_kind": version.snapshot_kind,
+        "created_at": version.created_at,
+        "text": str(stored.get("text") or ""),
+        "html": cast(str | None, stored.get("html")),
+    }
+
+
+async def purge_chapter_derived_content(
+    db: AsyncSession,
+    *,
+    book_id: uuid.UUID,
+    chapter_number: int,
+    chapter_id: uuid.UUID | None = None,
+) -> None:
+    from app.models.character import CharacterState
+    from app.models.intelligence import BookChunk, ChapterSummary, CharacterRelationship
+
+    if chapter_id is not None:
+        await db.execute(delete(BookChunk).where(BookChunk.chapter_id == chapter_id))
+        await db.execute(delete(ChapterSummary).where(ChapterSummary.chapter_id == chapter_id))
+    await db.execute(
+        delete(CharacterRelationship).where(
+            CharacterRelationship.book_id == book_id,
+            CharacterRelationship.from_chapter == chapter_number,
+        )
+    )
+    await db.execute(
+        delete(CharacterState).where(CharacterState.at_chapter == chapter_number)
+    )
+    await db.execute(
+        delete(NovelScene).where(
+            NovelScene.book_id == book_id,
+            NovelScene.origin_chapter_number == chapter_number,
+            NovelScene.source == "extracted",
+        )
+    )
+
+
+async def restore_chapter_version(
+    db: AsyncSession,
+    *,
+    book: Book,
+    version_id: uuid.UUID,
+) -> dict[str, Any]:
+    version = (
+        await db.execute(
+            select(ChapterVersion).where(ChapterVersion.book_id == book.id, ChapterVersion.id == version_id)
+        )
+    ).scalar_one_or_none()
+    if version is None:
+        raise HTTPException(404, "Chapter version not found")
+
+    chapter = (
+        await db.execute(
+            select(Chapter).where(Chapter.book_id == book.id, Chapter.number == version.chapter_number)
+        )
+    ).scalar_one_or_none()
+    if chapter is not None:
+        await snapshot_chapter_version(
+            db,
+            book,
+            chapter,
+            note=f"Snapshot before restoring Chapter {chapter.number}",
+            snapshot_kind="pre_restore",
+            restored_from_version_id=version.id,
+        )
+        await purge_chapter_derived_content(db, book_id=book.id, chapter_number=chapter.number, chapter_id=chapter.id)
+        await db.delete(chapter)
+        await db.flush()
+
+    raw = await asyncio.to_thread(download_book, version.s3_key)
+    stored = deserialize_manuscript_content(raw)
+    next_text = str(stored.get("text") or "")
+    next_html = cast(str | None, stored.get("html"))
+    replacement_key = await asyncio.to_thread(
+        upload_binary,
+        f"books/{book.user_id}/{book.id}/chapters/{version.chapter_number}/{uuid.uuid4()}.txt",
+        serialize_manuscript_content(next_text, next_html).encode("utf-8"),
+        "text/plain; charset=utf-8",
+    )
+    restored_chapter = Chapter(
+        book_id=book.id,
+        number=version.chapter_number,
+        title=version.title,
+        s3_key=replacement_key,
+        word_count=_count_words(next_text),
+        processed=False,
+    )
+    db.add(restored_chapter)
+    await db.commit()
+    await db.refresh(restored_chapter)
+    return {
+        "chapter_number": restored_chapter.number,
+        "title": restored_chapter.title,
+        "text": next_text,
+        "html": next_html,
+    }
 
 
 async def list_chapter_versions(
@@ -2001,6 +3169,7 @@ async def list_chapter_versions(
             "title": version.title,
             "word_count": version.word_count,
             "note": version.note,
+            "snapshot_kind": version.snapshot_kind,
             "created_at": version.created_at,
         }
         for version in versions

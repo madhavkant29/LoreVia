@@ -28,6 +28,7 @@ from app.engine.character.profile_builder import build_description
 from app.models.book import Book, Chapter, ChapterMedia
 from app.models.character import Character
 from app.models.intelligence import ChapterSummary, PlotThread
+from app.utils.ingestion_utils import apply_chapter_number_strategy
 
 BLEACH_EMPTY_TAGS: Any = frozenset()
 
@@ -382,8 +383,38 @@ async def read_available_chapter_set(
     return {chapter for chapter in read_set if availability.get(chapter, False)}
 
 
+async def full_available_chapter_set(
+    db: AsyncSession,
+    book: Book,
+    current_user,
+) -> set[int]:
+    availability = await chapter_intelligence_map(db, book, current_user)
+    return {chapter for chapter, available in availability.items() if available}
+
+
+async def summary_visible_chapter_set(
+    db: AsyncSession,
+    book: Book,
+    current_user,
+) -> set[int]:
+    if book.mode == "author":
+        return await full_available_chapter_set(db, book, current_user)
+    read_set = await read_chapter_set(db, current_user.id, book.id)
+    return await read_available_chapter_set(db, book, current_user, read_set)
+
+
+async def timeline_visible_chapter_set(
+    db: AsyncSession,
+    book: Book,
+    current_user,
+) -> set[int]:
+    if book.mode == "author":
+        return await full_available_chapter_set(db, book, current_user)
+    return await read_chapter_set(db, current_user.id, book.id)
+
+
 async def queue_analysis_if_missing(db: AsyncSession, chapter: Chapter) -> None:
-    if await chapter_has_any_summary(db, chapter.id):
+    if await chapter_has_detailed_summary(db, chapter.id):
         return
     from app.workers.tasks.analysis_tasks import analyse_chapter_task
     try:
@@ -396,10 +427,13 @@ async def queue_analysis_if_missing(db: AsyncSession, chapter: Chapter) -> None:
     )
 
 
-async def chapter_has_any_summary(db: AsyncSession, chapter_id: uuid.UUID) -> bool:
+async def chapter_has_detailed_summary(db: AsyncSession, chapter_id: uuid.UUID) -> bool:
     row = (
         await db.execute(
-            select(ChapterSummary.id).where(ChapterSummary.chapter_id == chapter_id).limit(1)
+            select(ChapterSummary.id).where(
+                ChapterSummary.chapter_id == chapter_id,
+                ChapterSummary.mode == "detailed",
+            ).limit(1)
         )
     ).first()
     return row is not None
@@ -506,12 +540,20 @@ def parse_chapter_from_source(book: Book, chapter_num: int) -> dict | None:
     except Exception:
         return None
     try:
+        preserve_numbers = bool(book.preserve_chapter_numbers) and book.work_type != "screenplay"
         if book.format == "pdf":
             from app.parsers.pdf_parser import parse_pdf
-            chapters = parse_pdf(raw)
+
+            chapters = parse_pdf(raw, split_large_chapters=not preserve_numbers)
         else:
             from app.parsers.epub_parser import parse_epub
-            chapters = parse_epub(raw)
+
+            chapters = parse_epub(raw, split_large_chapters=not preserve_numbers)
+        chapters = apply_chapter_number_strategy(
+            chapters,
+            preserve_chapter_numbers=preserve_numbers,
+            generic_titles=book.work_type != "screenplay" and not preserve_numbers,
+        )
     except Exception:
         return None
     chapter = next((item for item in chapters if item.get("number") == chapter_num), None)

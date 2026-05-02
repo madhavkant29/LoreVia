@@ -7,6 +7,7 @@ import logging
 import re
 import time
 import uuid
+from datetime import UTC, datetime
 from typing import Any, cast
 
 from sqlalchemy import delete, func, select
@@ -27,18 +28,28 @@ from app.engine.character.extractor import extract_characters_and_relationships
 from app.engine.character.profile_builder import build_character_profile, update_profile
 from app.engine.embeddings.embedder import embed_batch
 from app.models.book import Book, Chapter, ChapterMedia
-from app.models.character import Character, CharacterState
+from app.models.character import Character, CharacterState, CharacterVoiceProfile
 from app.models.intelligence import BookChunk, CharacterRelationship, Notification
 from app.parsers.chunker import ChunkingConfig, chunk_text, count_tokens
 from app.services.email_service import send_processing_complete_with_stats
 from app.utils.compliance.copyright_check import check_isbn
 from app.utils.external.isbn_lookup import extract_isbn_from_pdf
+from app.utils.book_utils import parse_book_upload_for_ingestion, refresh_screenplay_scene_rows
+from app.utils.intelligence_utils import (
+    compute_voice_metrics,
+    extract_dialogue_samples_by_character,
+    merge_voice_profile_metrics,
+)
 from app.utils.ingestion_utils import (
     apply_chapter_number_strategy,
     build_chapter_dispatch_plan,
     chunked,
     elapsed_ms,
+    get_processing_started_at,
+    is_book_hidden,
+    mark_book_processing_cancelled,
     persist_chapter_payloads,
+    update_book_processing_state,
 )
 from app.utils.notification_utils import build_book_ready_notification, collect_book_ready_stats
 
@@ -51,6 +62,7 @@ MIN_EXISTING_UPDATE_CONFIDENCE = 0.55
 async def process_book(book_id: str, queue_wait_ms: int | None = None) -> dict:
     async with AsyncSessionLocal() as db:
         started_at = time.perf_counter()
+        processing_started_at = datetime.now(UTC)
         book = await db.get(Book, uuid.UUID(book_id))
         if not book:
             return {"error": "not found"}
@@ -59,7 +71,16 @@ async def process_book(book_id: str, queue_wait_ms: int | None = None) -> dict:
             log.info("Skipping processing for hidden book %s", book_id)
             return {"skipped": "book_hidden"}
 
-        await db.execute(sa_update(Book).where(Book.id == book.id).values(status="processing"))
+        book.status = "processing"
+        book.writer_workspace = update_book_processing_state(
+            book,
+            status="processing",
+            stage="queued",
+            total_chapters=book.total_chapters,
+            completed_chapters=0,
+            started_at=processing_started_at,
+            queue_wait_ms=queue_wait_ms,
+        )
         await db.commit()
 
         download_started = time.perf_counter()
@@ -74,15 +95,18 @@ async def process_book(book_id: str, queue_wait_ms: int | None = None) -> dict:
         if book.format == "pdf" and not book.cover_s3_key:
             from app.parsers.pdf_parser import extract_first_page_cover
 
-            cover = await asyncio.to_thread(extract_first_page_cover, raw)
-            if cover:
-                cover_bytes, content_type = cover
-                book.cover_s3_key = await asyncio.to_thread(
-                    upload_binary,
-                    f"covers/{book.user_id}/{uuid.uuid4()}.png",
-                    cover_bytes,
-                    content_type,
-                )
+            try:
+                cover = await asyncio.to_thread(extract_first_page_cover, raw)
+                if cover:
+                    cover_bytes, content_type = cover
+                    book.cover_s3_key = await asyncio.to_thread(
+                        upload_binary,
+                        f"covers/{book.user_id}/{uuid.uuid4()}.png",
+                        cover_bytes,
+                        content_type,
+                    )
+            except Exception:
+                log.warning("cover_extraction_upload_failed book_id=%s", book_id, exc_info=True)
 
         if book.is_public and book.format == "pdf" and not book.isbn:
             detected_isbn = extract_isbn_from_pdf(raw)
@@ -94,25 +118,18 @@ async def process_book(book_id: str, queue_wait_ms: int | None = None) -> dict:
         await db.commit()
 
         parse_started = time.perf_counter()
-        if book.format == "pdf":
-            from app.parsers.pdf_parser import parse_pdf
-
-            chapters = await asyncio.to_thread(
-                parse_pdf,
-                raw,
-                split_large_chapters=not book.preserve_chapter_numbers,
-            )
-        else:
-            from app.parsers.epub_parser import parse_epub
-
-            chapters = await asyncio.to_thread(
-                parse_epub,
-                raw,
-                split_large_chapters=not book.preserve_chapter_numbers,
-            )
+        parsed_payload = await parse_book_upload_for_ingestion(
+            format_name=book.format,
+            work_type=book.work_type,
+            raw=raw,
+            preserve_chapter_numbers=book.preserve_chapter_numbers,
+        )
+        chapters = cast(list[dict[str, Any]], parsed_payload["chapters"])
+        screenplay_payload = cast(dict[str, Any] | None, parsed_payload.get("screenplay_payload"))
         all_chapters = apply_chapter_number_strategy(
             chapters,
-            preserve_chapter_numbers=book.preserve_chapter_numbers,
+            preserve_chapter_numbers=book.preserve_chapter_numbers and book.work_type != "screenplay",
+            generic_titles=book.work_type != "screenplay" and not book.preserve_chapter_numbers,
         )
         log.info(
             "ingestion_timing stage=parse book_id=%s elapsed_ms=%s chapters=%s",
@@ -120,6 +137,16 @@ async def process_book(book_id: str, queue_wait_ms: int | None = None) -> dict:
             elapsed_ms(parse_started),
             len(all_chapters),
         )
+
+        if await is_book_hidden(db, book.id):
+            await mark_book_processing_cancelled(
+                db,
+                book,
+                stage="parse",
+                queue_wait_ms=queue_wait_ms,
+                last_error="Book was removed while processing.",
+            )
+            return {"skipped": "book_hidden"}
 
         from app.models.user import User
 
@@ -171,6 +198,15 @@ async def process_book(book_id: str, queue_wait_ms: int | None = None) -> dict:
                 total_chapters=len(all_chapters),
                 total_tokens=processed_tokens,
                 is_truncated=was_truncated,
+                writer_workspace=update_book_processing_state(
+                    book,
+                    status="processing",
+                    stage="parsed",
+                    total_chapters=len(all_chapters),
+                    completed_chapters=0,
+                    started_at=processing_started_at,
+                    queue_wait_ms=queue_wait_ms,
+                ),
             )
         )
         await db.commit()
@@ -181,12 +217,29 @@ async def process_book(book_id: str, queue_wait_ms: int | None = None) -> dict:
             all_chapters,
             concurrency=settings.INGESTION_CHAPTER_UPLOAD_CONCURRENCY,
         )
+
+        if await is_book_hidden(db, book.id):
+            await mark_book_processing_cancelled(
+                db,
+                book,
+                stage="staged",
+                queue_wait_ms=queue_wait_ms,
+                last_error="Book was removed while processing.",
+            )
+            return {"skipped": "book_hidden"}
+
         for ch_data in all_chapters:
             await _ensure_chapter_stub(
                 db,
                 book,
                 ch_data,
                 s3_key=stored_chapter_keys.get(int(ch_data["number"]), ""),
+            )
+        if screenplay_payload is not None:
+            await refresh_screenplay_scene_rows(
+                db,
+                book=book,
+                parsed_scenes=cast(list[Any], screenplay_payload["scenes"]),
             )
         await db.commit()
         log.info(
@@ -195,6 +248,17 @@ async def process_book(book_id: str, queue_wait_ms: int | None = None) -> dict:
             elapsed_ms(stage_started),
             len(stored_chapter_keys),
         )
+
+        if await is_book_hidden(db, book.id):
+            await mark_book_processing_cancelled(
+                db,
+                book,
+                stage="staged",
+                rollback=True,
+                queue_wait_ms=queue_wait_ms,
+                last_error="Book was removed while processing.",
+            )
+            return {"skipped": "book_hidden"}
 
         from app.workers.tasks.extraction_tasks import process_chapter_task
 
@@ -206,6 +270,15 @@ async def process_book(book_id: str, queue_wait_ms: int | None = None) -> dict:
         )
         queue_started = time.perf_counter()
         for dispatch in dispatch_plan:
+            if await is_book_hidden(db, book.id):
+                await mark_book_processing_cancelled(
+                    db,
+                    book,
+                    stage="queue_chapters",
+                    queue_wait_ms=queue_wait_ms,
+                    last_error="Book was removed while processing.",
+                )
+                return {"skipped": "book_hidden"}
             process_chapter_task.apply_async(
                 args=[str(book.id), dispatch.chapter_number],
                 queue="extraction",
@@ -218,8 +291,18 @@ async def process_book(book_id: str, queue_wait_ms: int | None = None) -> dict:
             len(dispatch_plan),
         )
 
+        if await is_book_hidden(db, book.id):
+            await mark_book_processing_cancelled(
+                db,
+                book,
+                stage="queue_complete",
+                queue_wait_ms=queue_wait_ms,
+                last_error="Book was removed while processing.",
+            )
+            return {"skipped": "book_hidden"}
+
         if was_truncated:
-            await db.execute(sa_update(Book).where(Book.id == book.id).values(status="ready"))
+            book.status = "ready"
             await db.commit()
 
         if settings.DEBUG:
@@ -267,6 +350,7 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
             book_id=book.id,
             number=chapter_number,
             title=ch_data.get("title"),
+            description=ch_data.get("description"),
             s3_key=s3_key,
             word_count=_count_words(ch_data.get("text", "")),
             processed=True,
@@ -278,6 +362,9 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
         chapter_changed = False
         if ch_data.get("title") and chapter.title != ch_data["title"]:
             chapter.title = ch_data["title"]
+            chapter_changed = True
+        if ch_data.get("description") and chapter.description != ch_data["description"]:
+            chapter.description = ch_data["description"]
             chapter_changed = True
         if not chapter.processed:
             chapter.processed = True
@@ -466,6 +553,57 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                     )
                 )
 
+    dialogue_samples = extract_dialogue_samples_by_character(
+        str(ch_data.get("text") or ""),
+        [{"id": str(char.id), "name": char.name, "aliases": char.aliases or []} for char in existing_characters if char.name],
+    )
+    if dialogue_samples:
+        existing_voice_profiles = (
+            await db.execute(
+                select(CharacterVoiceProfile).where(CharacterVoiceProfile.book_id == book.id)
+            )
+        ).scalars().all()
+        profiles_by_character_id = {profile.character_id: profile for profile in existing_voice_profiles}
+        for char in existing_characters:
+            samples = dialogue_samples.get(char.name)
+            if not samples:
+                continue
+            metrics = compute_voice_metrics(samples)
+            if int(metrics.get("sample_dialogue_count") or 0) <= 0:
+                continue
+            current_profile = profiles_by_character_id.get(char.id)
+            merged_metrics = merge_voice_profile_metrics(
+                {
+                    "sample_dialogue_count": current_profile.sample_dialogue_count if current_profile else 0,
+                    "sample_word_count": current_profile.sample_word_count if current_profile else 0,
+                    "avg_sentence_length": current_profile.avg_sentence_length if current_profile else 0,
+                    "avg_word_length_x100": current_profile.avg_word_length_x100 if current_profile else 0,
+                    "contraction_rate_x1000": current_profile.contraction_rate_x1000 if current_profile else 0,
+                    "question_rate_x1000": current_profile.question_rate_x1000 if current_profile else 0,
+                    "exclamation_rate_x1000": current_profile.exclamation_rate_x1000 if current_profile else 0,
+                    "ellipsis_rate_x1000": current_profile.ellipsis_rate_x1000 if current_profile else 0,
+                    "dash_rate_x1000": current_profile.dash_rate_x1000 if current_profile else 0,
+                    "uppercase_rate_x1000": current_profile.uppercase_rate_x1000 if current_profile else 0,
+                    "formality_score_x1000": current_profile.formality_score_x1000 if current_profile else 0,
+                    "lexical_complexity_x1000": current_profile.lexical_complexity_x1000 if current_profile else 0,
+                    "emotional_intensity_x1000": current_profile.emotional_intensity_x1000 if current_profile else 0,
+                    "dominant_markers": current_profile.dominant_markers if current_profile else {},
+                    "signature_phrases": current_profile.signature_phrases if current_profile else [],
+                } if current_profile else None,
+                metrics,
+            )
+            if current_profile is None:
+                db.add(
+                    CharacterVoiceProfile(
+                        book_id=book.id,
+                        character_id=char.id,
+                        **merged_metrics,
+                    )
+                )
+            else:
+                for key, value in merged_metrics.items():
+                    setattr(current_profile, key, value)
+
     log.info(
         "ingestion_timing stage=llm_extract book_id=%s chapter=%s elapsed_ms=%s batches=%s",
         book.id,
@@ -473,6 +611,19 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
         elapsed_ms(llm_started),
         len(extraction_batches),
     )
+
+    if await is_book_hidden(db, book.id):
+        await mark_book_processing_cancelled(
+            db,
+            book,
+            stage="chapter_extract",
+            rollback=True,
+            queue_wait_ms=queue_wait_ms,
+            chapter_number=chapter_number,
+            chapter_title=chapter.title,
+            last_error="Book was removed while processing.",
+        )
+        return
 
     commit_started = time.perf_counter()
     await db.commit()
@@ -483,12 +634,58 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
         elapsed_ms(commit_started),
     )
 
+    processed_count = int(
+        (
+            await db.execute(
+                select(func.count()).select_from(Chapter).where(
+                    Chapter.book_id == book.id,
+                    Chapter.processed.is_(True),
+                )
+            )
+        ).scalar_one()
+    )
+    processing_total = int(book.total_chapters or processed_count or 0) or None
+    book.writer_workspace = update_book_processing_state(
+        book,
+        status="processing",
+        stage="chapter_complete",
+        total_chapters=processing_total,
+        completed_chapters=processed_count,
+        started_at=get_processing_started_at(book),
+        queue_wait_ms=queue_wait_ms,
+        chapter_number=chapter_number,
+        chapter_title=chapter.title,
+    )
+    await db.commit()
+    processing_state = book.writer_workspace.get("processing") if isinstance(book.writer_workspace, dict) else None
+    log.info(
+        "ingestion_progress book_id=%s chapter=%s completed=%s total=%s progress_pct=%s eta_seconds=%s queue_wait_ms=%s",
+        book.id,
+        chapter_number,
+        processed_count,
+        processing_total,
+        (processing_state or {}).get("progress_pct") if isinstance(processing_state, dict) else None,
+        (processing_state or {}).get("eta_seconds") if isinstance(processing_state, dict) else None,
+        queue_wait_ms,
+    )
+
     if await _should_consolidate_after_chapter(db, book, chapter.number):
         await consolidate_characters(db, book.id, up_to_chapter=chapter_number)
         await db.commit()
 
     if await _book_processing_complete(db, book.id):
-        await db.execute(sa_update(Book).where(Book.id == book.id).values(status="ready"))
+        book.status = "ready"
+        book.writer_workspace = update_book_processing_state(
+            book,
+            status="ready",
+            stage="complete",
+            total_chapters=processing_total,
+            completed_chapters=processed_count,
+            started_at=get_processing_started_at(book),
+            queue_wait_ms=queue_wait_ms,
+            chapter_number=chapter_number,
+            chapter_title=chapter.title,
+        )
 
         if book.mode == "author" and book.total_chapters:
             from app.models.progress import ReadingProgress
@@ -544,13 +741,12 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                 continuity_issue_count=ready_stats.continuity_issue_count,
             )
 
-    if chapter_number <= settings.LAZY_PROCESS_INITIAL_CHAPTERS:
-        from app.workers.tasks.analysis_tasks import analyse_chapter_task
+    from app.workers.tasks.analysis_tasks import analyse_chapter_task
 
-        analyse_chapter_task.apply_async(
-            args=[str(chapter.id), ch_data["text"], ch_data.get("title") or ""],
-            queue="analysis",
-        )
+    analyse_chapter_task.apply_async(
+        args=[str(chapter.id), ch_data["text"], ch_data.get("title") or ""],
+        queue="analysis",
+    )
 
     log.info(
         "ingestion_timing stage=chapter_total book_id=%s chapter=%s elapsed_ms=%s",
