@@ -37,6 +37,19 @@ export interface WorldElement {
   chapter_number?: number | null
   chapter_title?: string | null
   world_document_title?: string | null
+  canonical_name?: string | null
+  aliases: string[]
+  confidence?: number | null
+  provenance: Record<string, unknown>[]
+  claims: Record<string, unknown>[]
+  chapter_numbers: number[]
+  chapter_count: number
+  summary_mentions: number
+  presence_score?: number | null
+  narrative_modes: string[]
+  source_excerpt?: string | null
+  character_id?: string | null
+  author_override: boolean
 }
 
 export interface WorldGapItem {
@@ -54,6 +67,10 @@ export interface WorldGapItem {
   story_chapter_title?: string | null
   character_name?: string | null
   priority: number
+  entity_type?: string | null
+  canonical_name?: string | null
+  confidence: number
+  provenance: Record<string, unknown>
 }
 
 export interface WorldGapGroup {
@@ -141,4 +158,14 @@ export interface WorldNote {
   created_at: string
   updated_at: string
   addressed_at?: string | null
+}
+
+export interface CanonOverride {
+  id: string
+  canonical_name: string
+  aliases: string[]
+  entity_type?: string | null
+  notes?: string | null
+  created_at: string
+  updated_at: string
 }

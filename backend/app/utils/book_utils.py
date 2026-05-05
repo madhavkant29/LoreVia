@@ -336,6 +336,7 @@ def _normalize_processing_state(raw: dict | None) -> dict | None:
     started_at = source.get("started_at")
     updated_at = source.get("updated_at")
     last_error = " ".join(str(source.get("last_error") or "").split()).strip() or None
+    parser_diagnostics = source.get("parser_diagnostics") if isinstance(source.get("parser_diagnostics"), dict) else None
 
     payload: dict[str, Any] = {}
     if status:
@@ -362,6 +363,8 @@ def _normalize_processing_state(raw: dict | None) -> dict | None:
         payload["updated_at"] = str(updated_at).strip()
     if last_error:
         payload["last_error"] = last_error
+    if parser_diagnostics:
+        payload["parser_diagnostics"] = parser_diagnostics
 
     return payload or None
 
@@ -2593,17 +2596,18 @@ async def parse_book_upload_for_ingestion(
         return {
             "chapters": screenplay_payload["chapters"],
             "screenplay_payload": screenplay_payload,
+            "parser_diagnostics": None,
         }
 
     if format_name == "pdf":
-        from app.parsers.pdf_parser import parse_pdf
+        from app.parsers.pdf_parser import parse_pdf_with_diagnostics
 
-        chapters = await asyncio.to_thread(
-            parse_pdf,
+        chapters, parser_diagnostics = await asyncio.to_thread(
+            parse_pdf_with_diagnostics,
             raw,
             split_large_chapters=not preserve_chapter_numbers,
         )
-        return {"chapters": chapters, "screenplay_payload": None}
+        return {"chapters": chapters, "screenplay_payload": None, "parser_diagnostics": parser_diagnostics}
 
     if format_name == "epub":
         from app.parsers.epub_parser import parse_epub
@@ -2613,10 +2617,10 @@ async def parse_book_upload_for_ingestion(
             raw,
             split_large_chapters=not preserve_chapter_numbers,
         )
-        return {"chapters": chapters, "screenplay_payload": None}
+        return {"chapters": chapters, "screenplay_payload": None, "parser_diagnostics": None}
 
     parsed = await parse_import_upload(upload_filename_for_format(format_name), raw, False)
-    return {"chapters": parsed, "screenplay_payload": None}
+    return {"chapters": parsed, "screenplay_payload": None, "parser_diagnostics": None}
 
 
 def normalize_imported_chapters(

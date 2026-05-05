@@ -1,10 +1,18 @@
 "use client"
+
 import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { useAuthStore } from "@/lib/stores/authStore"
-import { usePreferencesStore } from "@/lib/stores/preferencesStore"
+
+import {
+  WorkspaceHeader,
+  WorkspaceMetric,
+  WorkspacePage,
+  WorkspacePanel,
+} from "@/components/ui/Workspace"
 import { authApi } from "@/lib/api/auth"
 import { billingApi } from "@/lib/api/billing"
+import { useAuthStore } from "@/lib/stores/authStore"
+import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 
 const MODES = [
   { value: "casual", label: "Casual", desc: "Quick summaries and light-touch guidance." },
@@ -15,20 +23,22 @@ const MODES = [
 export default function SettingsPage() {
   const { user, setUser, logout } = useAuthStore()
   const { theme, setTheme } = usePreferencesStore()
-  const isDark = theme === "dark"
   const [billingBusy, setBillingBusy] = useState(false)
   const [billingMessage, setBillingMessage] = useState<string | null>(null)
   const router = useRouter()
 
   const changeMode = async (mode: string) => {
     await authApi.setReadingMode(mode)
-    if (user) setUser({ ...user, reading_mode: mode as any })
+    if (user) setUser({ ...user, reading_mode: mode as "casual" | "analyst" | "speed" })
   }
 
   const handleLogout = async () => {
     try {
       await authApi.logout()
-    } catch {}
+    } catch {
+      // ignore logout errors
+    }
+
     logout()
     router.replace("/login")
   }
@@ -51,118 +61,153 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <section className={`rounded-[2rem] border p-6 shadow-[0_24px_80px_-48px_rgba(15,23,42,0.45)] ${
-        isDark ? "border-white/10 bg-white/5" : "border-white/70 bg-white/85"
-      }`}>
-        <p className={`text-xs font-semibold uppercase tracking-[0.28em] ${isDark ? "text-amber-200" : "text-amber-700"}`}>Settings</p>
-        <h1 className={`mt-2 font-serif text-4xl ${isDark ? "text-white" : "text-stone-900"}`}>Personalize the workspace</h1>
-        <p className={`mt-3 max-w-2xl text-sm leading-6 ${isDark ? "text-gray-300" : "text-stone-600"}`}>
-          Keep your reading environment consistent across sessions, tune how much detail you want, and manage billing from one place.
-        </p>
-      </section>
+    <WorkspacePage className="min-h-0 bg-transparent">
+      <div className="space-y-8 pb-12">
+        <WorkspacePanel tone="strong" className="p-6 sm:p-8">
+          <WorkspaceHeader
+            eyebrow="Settings"
+            title="Make LoreVia feel stable, personal, and low-friction."
+            description="A professional settings page should keep high-impact controls obvious: account status, billing, appearance, reading mode, and a safe sign-out path."
+            meta={
+              <div className="flex flex-wrap justify-end gap-3">
+                <div className="app-chip">{user?.tier ?? "free"} plan</div>
+                <div className="app-chip">{theme} theme</div>
+              </div>
+            }
+          />
+        </WorkspacePanel>
 
-      <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-        <section className={`rounded-[1.75rem] border p-6 ${
-          isDark ? "border-white/10 bg-white/5" : "border-white/70 bg-white/85"
-        }`}>
-          <h2 className={`text-lg font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>Account</h2>
-          <div className="mt-4 space-y-2">
-            <p className={isDark ? "text-sm text-gray-300" : "text-sm text-stone-600"}>Email: <span className="font-medium">{user?.email}</span></p>
-            <p className={isDark ? "text-sm text-gray-300" : "text-sm text-stone-600"}>Plan: <span className="font-medium capitalize">{user?.tier ?? "free"}</span></p>
-          </div>
-          <p className={`mt-5 text-sm ${isDark ? "text-gray-300" : "text-stone-600"}`}>
-            Manage your subscription in Paddle. Upgrades still happen from the pricing page, while payment method changes and cancellations live in the portal.
-          </p>
-          <div className="mt-5 flex flex-wrap gap-3">
-            <button
-              onClick={openBillingPortal}
-              disabled={billingBusy}
-              className={`rounded-full px-4 py-2 text-sm font-medium transition ${isDark ? "border border-white/10 bg-white/10 text-white hover:bg-white/15" : "border border-stone-300 bg-white text-stone-900 hover:bg-stone-50"} disabled:opacity-60`}
-            >
-              {billingBusy ? "Opening billing..." : "Open billing portal"}
-            </button>
-          </div>
-          {billingMessage ? (
-            <div className={`mt-4 rounded-2xl border px-4 py-3 text-sm ${isDark ? "border-amber-300/30 bg-amber-300/10 text-amber-100" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
-              {billingMessage}
-            </div>
-          ) : null}
+        <section className="grid gap-4 sm:grid-cols-3">
+          <WorkspaceMetric
+            label="Plan"
+            value={(user?.tier ?? "free").toUpperCase()}
+            note="Current workspace access level"
+            accent="accent"
+          />
+          <WorkspaceMetric
+            label="Reading mode"
+            value={(user?.reading_mode ?? "casual").toUpperCase()}
+            note="Default answer depth"
+          />
+          <WorkspaceMetric
+            label="Theme"
+            value={theme.toUpperCase()}
+            note="Synced with the reader"
+            accent="success"
+          />
         </section>
 
-        <section className={`rounded-[1.75rem] border p-6 ${
-          isDark ? "border-white/10 bg-white/5" : "border-white/70 bg-white/85"
-        }`}>
-          <h2 className={`text-lg font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>Appearance</h2>
-          <p className={`mt-2 text-sm ${isDark ? "text-gray-300" : "text-stone-600"}`}>Your theme is saved automatically, including the reader.</p>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            {[
-              { value: "light", label: "Light", desc: "Warm paper tones and bright cards." },
-              { value: "dark", label: "Dark", desc: "Low-glare contrast for long sessions." },
-            ].map((option) => (
-              <button
-                key={option.value}
-                onClick={() => setTheme(option.value as "light" | "dark")}
-                className={`rounded-2xl border p-4 text-left transition ${
-                  theme === option.value
-                    ? isDark
-                      ? "border-amber-300 bg-amber-300/10"
-                      : "border-stone-900 bg-stone-900 text-white"
-                    : isDark
-                      ? "border-white/10 hover:bg-white/5"
-                      : "border-stone-200 hover:bg-stone-50"
-                }`}
-              >
-                <p className="text-sm font-semibold">{option.label}</p>
-                <p className={`mt-1 text-xs leading-5 ${
-                  theme === option.value ? (isDark ? "text-amber-100" : "text-white/80") : isDark ? "text-gray-400" : "text-stone-500"
-                }`}>
-                  {option.desc}
+        <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+          <WorkspacePanel className="p-6">
+            <p className="app-eyebrow">Account</p>
+            <h2 className="mt-3 text-2xl font-semibold text-[rgb(var(--foreground))]">
+              Billing and account details
+            </h2>
+            <div className="mt-5 grid gap-4 sm:grid-cols-2">
+              <div className="app-stat">
+                <p className="app-stat__label">Email</p>
+                <p className="mt-3 break-all text-base font-semibold text-[rgb(var(--foreground))]">
+                  {user?.email ?? "No email available"}
                 </p>
+              </div>
+              <div className="app-stat">
+                <p className="app-stat__label">Plan status</p>
+                <p className="mt-3 text-base font-semibold capitalize text-[rgb(var(--foreground))]">
+                  {user?.tier ?? "free"}
+                </p>
+              </div>
+            </div>
+            <p className="mt-5 max-w-2xl text-sm leading-7 text-[rgb(var(--muted-foreground))]">
+              Subscription changes still begin from pricing, while payment details and cancellations live in the billing portal.
+            </p>
+            <div className="mt-5 flex flex-wrap gap-3">
+              <button onClick={openBillingPortal} disabled={billingBusy} className="app-button-primary disabled:opacity-60">
+                {billingBusy ? "Opening billing..." : "Open billing portal"}
               </button>
-            ))}
-          </div>
-        </section>
-      </div>
+            </div>
+            {billingMessage ? (
+              <div className="mt-4 rounded-[1.1rem] border border-amber-300/40 bg-amber-100/70 px-4 py-3 text-sm text-amber-900 dark:bg-amber-300/10 dark:text-amber-100">
+                {billingMessage}
+              </div>
+            ) : null}
+          </WorkspacePanel>
 
-      <section className={`rounded-[1.75rem] border p-6 ${
-        isDark ? "border-white/10 bg-white/5" : "border-white/70 bg-white/85"
-      }`}>
-        <h2 className={`text-lg font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>Reading mode</h2>
-        <div className="mt-4 grid gap-3">
-          {MODES.map((m) => (
-            <button
-              key={m.value}
-              onClick={() => changeMode(m.value)}
-              className={`rounded-2xl border p-4 text-left transition ${
-                user?.reading_mode === m.value
-                  ? isDark
-                    ? "border-amber-300 bg-amber-300/10"
-                    : "border-stone-900 bg-stone-900 text-white"
-                  : isDark
-                    ? "border-white/10 hover:bg-white/5"
-                    : "border-stone-200 hover:bg-stone-50"
-              }`}
-            >
-              <p className="text-sm font-semibold">{m.label}</p>
-              <p className={`mt-1 text-xs ${
-                user?.reading_mode === m.value ? (isDark ? "text-amber-100" : "text-white/80") : isDark ? "text-gray-400" : "text-stone-500"
-              }`}>
-                {m.desc}
-              </p>
-            </button>
-          ))}
+          <WorkspacePanel className="p-6">
+            <p className="app-eyebrow">Appearance</p>
+            <h2 className="mt-3 text-2xl font-semibold text-[rgb(var(--foreground))]">
+              Choose the workspace tone
+            </h2>
+            <p className="mt-2 text-sm leading-7 text-[rgb(var(--muted-foreground))]">
+              Theme selection is synced automatically across the dashboard and the reader.
+            </p>
+            <div className="mt-5 grid gap-3">
+              {[
+                { value: "light", label: "Light", desc: "Warm paper surfaces and bright working cards." },
+                { value: "dark", label: "Dark", desc: "Low-glare contrast for long sessions and deep reading." },
+              ].map((option) => {
+                const active = theme === option.value
+                return (
+                  <button
+                    key={option.value}
+                    onClick={() => setTheme(option.value as "light" | "dark")}
+                    className={`rounded-[1.3rem] border p-4 text-left transition ${
+                      active
+                        ? "border-[rgba(var(--accent),0.3)] bg-[rgba(var(--accent),0.12)]"
+                        : "border-[rgba(var(--border),0.8)] bg-[rgba(255,255,255,0.38)] hover:bg-[rgba(255,255,255,0.58)] dark:bg-[rgba(255,255,255,0.03)]"
+                    }`}
+                  >
+                    <p className="text-sm font-semibold text-[rgb(var(--foreground))]">{option.label}</p>
+                    <p className="mt-2 text-sm leading-6 text-[rgb(var(--muted-foreground))]">{option.desc}</p>
+                  </button>
+                )
+              })}
+            </div>
+          </WorkspacePanel>
         </div>
-      </section>
 
-      <button
-        onClick={handleLogout}
-        className={`rounded-full px-4 py-2 text-sm transition ${
-          isDark ? "text-rose-300 hover:bg-white/10" : "text-rose-600 hover:bg-white"
-        }`}
-      >
-        Sign out
-      </button>
-    </div>
+        <WorkspacePanel className="p-6">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="app-eyebrow">Answer style</p>
+              <h2 className="mt-3 text-2xl font-semibold text-[rgb(var(--foreground))]">
+                Set the default reading mode
+              </h2>
+            </div>
+            <p className="max-w-2xl text-sm leading-7 text-[rgb(var(--muted-foreground))]">
+              This controls how much context LoreVia gives you by default, so the decision should feel explicit and easy to compare.
+            </p>
+          </div>
+
+          <div className="mt-5 grid gap-3 lg:grid-cols-3">
+            {MODES.map((mode) => {
+              const active = user?.reading_mode === mode.value
+              return (
+                <button
+                  key={mode.value}
+                  onClick={() => changeMode(mode.value)}
+                  className={`rounded-[1.3rem] border p-5 text-left transition ${
+                    active
+                      ? "border-[rgba(var(--accent),0.3)] bg-[rgba(var(--accent),0.12)]"
+                      : "border-[rgba(var(--border),0.8)] bg-[rgba(255,255,255,0.38)] hover:bg-[rgba(255,255,255,0.58)] dark:bg-[rgba(255,255,255,0.03)]"
+                  }`}
+                >
+                  <p className="text-sm font-semibold text-[rgb(var(--foreground))]">{mode.label}</p>
+                  <p className="mt-2 text-sm leading-6 text-[rgb(var(--muted-foreground))]">{mode.desc}</p>
+                </button>
+              )
+            })}
+          </div>
+        </WorkspacePanel>
+
+        <div className="flex justify-start">
+          <button
+            onClick={handleLogout}
+            className="rounded-2xl px-4 py-3 text-sm font-semibold text-rose-600 transition hover:bg-rose-50 dark:text-rose-300 dark:hover:bg-rose-500/10"
+          >
+            Sign out
+          </button>
+        </div>
+      </div>
+    </WorkspacePage>
   )
 }

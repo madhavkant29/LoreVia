@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 import uuid
 from datetime import UTC, datetime
 
@@ -11,8 +10,10 @@ from app.api.deps.auth import get_current_user
 from app.core.database import get_db
 from app.core.storage import download_book
 from app.models.book import Book, Series, SeriesBook
-from app.models.intelligence import WikiEntry, WorldBuildingDocument, WorldElement, WorldGapAnalysis, WorldNote
+from app.models.intelligence import WikiEntry, WorldBuildingDocument, WorldCanonicalIdentity, WorldElement, WorldGapAnalysis, WorldNote
 from app.schemas.world_building import (
+    CanonOverrideBody,
+    CanonOverrideOut,
     GapAnalysisRequest,
     GapAnalysisResponse,
     IntegrationAnalysisResponse,
@@ -43,6 +44,7 @@ from app.utils.world_building_utils import (
     list_world_building_documents,
     load_world_building_document_payload,
     prepare_world_building_uploads,
+    save_canon_override,
     save_world_note,
     update_world_building_document,
 )
@@ -86,6 +88,22 @@ def _serialize_note(note: WorldNote) -> WorldNoteOut:
         created_at=note.created_at,
         updated_at=note.updated_at,
         addressed_at=note.addressed_at,
+    )
+
+
+def _serialize_canon_override(identity: WorldCanonicalIdentity) -> CanonOverrideOut:
+    return CanonOverrideOut(
+        id=str(identity.id),
+        canonical_name=" ".join(str(identity.canonical_name or "").split()).strip(),
+        aliases=[
+            " ".join(str(alias or "").split()).strip()
+            for alias in (identity.aliases or [])
+            if " ".join(str(alias or "").split()).strip()
+        ],
+        entity_type=" ".join(str(identity.entity_type or "").split()).strip() or None,
+        notes=" ".join(str(identity.notes or "").split()).strip() or None,
+        created_at=identity.created_at,
+        updated_at=identity.updated_at,
     )
 
 
@@ -417,6 +435,45 @@ async def accept_world_suggestion(
     return {"accepted": body.suggestion_id, "remaining": len(remaining)}
 
 
+@router.get("/{book_id}/world-building/canon-overrides", response_model=list[CanonOverrideOut])
+async def list_canon_overrides(
+    book_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await _get_owned_book(db, book_id, current_user.id)
+    overrides = (
+        await db.execute(
+            select(WorldCanonicalIdentity)
+            .where(WorldCanonicalIdentity.book_id == book.id)
+            .order_by(WorldCanonicalIdentity.updated_at.desc(), WorldCanonicalIdentity.created_at.desc())
+        )
+    ).scalars().all()
+    return [_serialize_canon_override(identity) for identity in overrides]
+
+
+@router.post("/{book_id}/world-building/canon-overrides", response_model=CanonOverrideOut)
+async def create_canon_override(
+    book_id: uuid.UUID,
+    body: CanonOverrideBody,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await _get_owned_book(db, book_id, current_user.id)
+    identity = await save_canon_override(
+        db,
+        user_id=current_user.id,
+        book=book,
+        canonical_name=body.canonical_name,
+        aliases=body.aliases,
+        entity_type=body.entity_type,
+        notes=body.notes,
+    )
+    await db.commit()
+    await db.refresh(identity)
+    return _serialize_canon_override(identity)
+
+
 @router.get("/{book_id}/world-building/notes", response_model=list[WorldNoteOut])
 async def list_world_notes(
     book_id: uuid.UUID,
@@ -426,7 +483,9 @@ async def list_world_notes(
     book = await _get_owned_book(db, book_id, current_user.id)
     notes = (
         await db.execute(
-            select(WorldNote).where(WorldNote.book_id == book.id).order_by(WorldNote.created_at.desc())
+            select(WorldNote)
+            .where(WorldNote.book_id == book.id, WorldNote.note_type != "canon_override")
+            .order_by(WorldNote.created_at.desc())
         )
     ).scalars().all()
     return [_serialize_note(note) for note in notes]
@@ -512,7 +571,11 @@ async def get_world_notes_by_chapter(
     notes = (
         await db.execute(
             select(WorldNote)
-            .where(WorldNote.book_id == book.id, WorldNote.chapter_number == chapter_number)
+            .where(
+                WorldNote.book_id == book.id,
+                WorldNote.chapter_number == chapter_number,
+                WorldNote.note_type != "canon_override",
+            )
             .order_by(WorldNote.created_at.desc())
         )
     ).scalars().all()

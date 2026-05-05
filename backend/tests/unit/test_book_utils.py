@@ -14,6 +14,7 @@ from app.utils.book_utils import (
     manuscript_html_to_text,
     normalize_writer_workspace,
     parse_screenplay_upload,
+    parse_book_upload_for_ingestion,
     resolve_upload_format_and_work_type,
     serialize_manuscript_content,
     story_unit_label,
@@ -283,3 +284,24 @@ We have to go now.
     assert payload["chapters"][0]["dialogue_count"] == 1
     assert "Maya (V.O.)" in payload["chapters"][0]["text"]
     assert "This is the opening line." in payload["chapters"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_parse_book_upload_for_ingestion_returns_pdf_parser_diagnostics(monkeypatch):
+    chapters = [{"number": 1, "title": "Chapter 1", "text": "Opening text."}]
+    diagnostics = {"source": "pdf", "chapter_count": 1, "fallback_strategy": None}
+
+    monkeypatch.setattr(
+        "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
+        lambda raw, *, split_large_chapters=True: (chapters, diagnostics),
+    )
+
+    payload = await parse_book_upload_for_ingestion(
+        format_name="pdf",
+        work_type="novel",
+        raw=b"%PDF-1.4 mock",
+        preserve_chapter_numbers=False,
+    )
+
+    assert payload["chapters"] == chapters
+    assert payload["parser_diagnostics"] == diagnostics

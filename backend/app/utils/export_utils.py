@@ -1338,14 +1338,48 @@ def _chapter_body_blocks(text: str) -> list[tuple[str, str]]:
         block = raw_block.strip()
         if not block:
             continue
-        if re.fullmatch(r"(?:#(?:\s*#)*)", block):
-            blocks.append(("scene_break", "#"))
+        if re.fullmatch(r"(?:#(?:\s*#)*|\*\s*\*\s*\*)", block):
+            blocks.append(("scene_break", "***"))
         else:
             blocks.append(("paragraph", " ".join(line.strip() for line in block.splitlines() if line.strip())))
     return blocks
 
 
-def manuscript_docx(*, title: str, chapters: list[dict], preset: str = "standard_manuscript", front_matter: dict | None = None) -> bytes:
+def _is_special_chapter_heading(title: object | None) -> bool:
+    cleaned = _clean_line(title).lower()
+    return bool(re.match(r"^(prologue|epilogue)\b", cleaned))
+
+
+def _chapter_heading_lines(chapter: dict[str, Any]) -> tuple[str, str | None]:
+    chapter_number = chapter.get("number")
+    chapter_title = _clean_line(chapter.get("title"))
+    if _is_special_chapter_heading(chapter_title):
+        return chapter_title or f"Chapter {chapter_number}", None
+    default_heading = f"Chapter {chapter_number}"
+    if chapter_title and chapter_title.lower() != default_heading.lower():
+        return default_heading, chapter_title
+    return default_heading, None
+
+
+def _scene_heading_lines(scene: dict[str, Any], index: int) -> tuple[str, str | None]:
+    chapter_number = scene.get("chapter_number")
+    chapter_suffix = f" (Chapter {chapter_number})" if isinstance(chapter_number, int) and chapter_number > 0 else ""
+    scene_title = _clean_line(scene.get("title")) or f"Scene {index}"
+    return f"Scene #{index}{chapter_suffix}", scene_title
+
+
+def _manuscript_end_marker() -> str:
+    return "THE END"
+
+
+def manuscript_docx(
+    *,
+    title: str,
+    chapters: list[dict],
+    scenes: list[dict] | None = None,
+    preset: str = "standard_manuscript",
+    front_matter: dict | None = None,
+) -> bytes:
     from io import BytesIO
 
     from docx import Document
@@ -1362,7 +1396,7 @@ def manuscript_docx(*, title: str, chapters: list[dict], preset: str = "standard
     section.bottom_margin = Inches(1)
     section.left_margin = Inches(1)
     section.right_margin = Inches(1)
-    section.different_first_page_header_footer = True
+    section.different_first_page_header_footer = False
 
     normal_style = cast(Any, doc.styles["Normal"])
     normal_style.font.name = str(export_preset["docx_font"])
@@ -1428,29 +1462,53 @@ def manuscript_docx(*, title: str, chapters: list[dict], preset: str = "standard
     if front["include_prologue"] and front["prologue"]:
         _add_optional_page("Prologue", front["prologue"])
 
-    for chapter in chapters:
-        doc.add_page_break()
-        chapter_number = chapter.get("number")
-        chapter_title = chapter.get("title") or f"Chapter {chapter_number}"
-        for _ in range(4):
-            doc.add_paragraph("")
-        chapter_heading = doc.add_paragraph()
-        chapter_heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        chapter_heading.add_run(f"Chapter {chapter_number}")
-        if chapter_title and chapter_title != f"Chapter {chapter_number}":
-            chapter_title_p = doc.add_paragraph()
-            chapter_title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            chapter_title_p.add_run(str(chapter_title))
-        for kind, block in _chapter_body_blocks(str(chapter.get("text") or "")):
+    def _add_body_text(body_text: str) -> None:
+        first_paragraph = True
+        for kind, block in _chapter_body_blocks(body_text):
             paragraph = doc.add_paragraph()
             if kind == "scene_break":
                 paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 paragraph.paragraph_format.first_line_indent = Pt(0)
-                paragraph.add_run("#")
-            else:
-                paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
-                paragraph.paragraph_format.first_line_indent = Inches(0.5)
-                paragraph.add_run(block)
+                paragraph.add_run("***")
+                continue
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            paragraph.paragraph_format.first_line_indent = Inches(0) if first_paragraph else Inches(0.5)
+            paragraph.add_run(block)
+            first_paragraph = False
+
+    for chapter in chapters:
+        doc.add_page_break()
+        chapter_heading_text, chapter_subtitle = _chapter_heading_lines(chapter)
+        for _ in range(4):
+            doc.add_paragraph("")
+        chapter_heading = doc.add_paragraph()
+        chapter_heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        chapter_heading.add_run(chapter_heading_text)
+        if chapter_subtitle:
+            chapter_title_p = doc.add_paragraph()
+            chapter_title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            chapter_title_p.add_run(chapter_subtitle)
+        _add_body_text(str(chapter.get("text") or ""))
+
+    for index, scene in enumerate(scenes or [], start=1):
+        doc.add_page_break()
+        scene_heading_text, scene_subtitle = _scene_heading_lines(scene, index)
+        for _ in range(4):
+            doc.add_paragraph("")
+        scene_heading = doc.add_paragraph()
+        scene_heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        scene_heading.add_run(scene_heading_text)
+        if scene_subtitle:
+            scene_title_p = doc.add_paragraph()
+            scene_title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            scene_title_p.add_run(scene_subtitle)
+        _add_body_text(str(scene.get("body") or ""))
+
+    doc.add_page_break()
+    ending = doc.add_paragraph()
+    ending.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    ending.paragraph_format.first_line_indent = Pt(0)
+    ending.add_run(_manuscript_end_marker())
 
     buffer = BytesIO()
     doc.save(buffer)
@@ -1596,7 +1654,14 @@ def manuscript_epub(*, title: str, chapters: list[dict], preset: str = "standard
             return handle.read()
 
 
-def manuscript_pdf_compiled(*, title: str, chapters: list[dict], preset: str = "standard_manuscript", front_matter: dict | None = None) -> bytes:
+def manuscript_pdf_compiled(
+    *,
+    title: str,
+    chapters: list[dict],
+    scenes: list[dict] | None = None,
+    preset: str = "standard_manuscript",
+    front_matter: dict | None = None,
+) -> bytes:
     from io import BytesIO
 
     from reportlab.lib.pagesizes import A4, A5, LETTER
@@ -1622,6 +1687,7 @@ def manuscript_pdf_compiled(*, title: str, chapters: list[dict], preset: str = "
     )
     styles = getSampleStyleSheet()
     body = ParagraphStyle("ManuscriptBody", parent=styles["BodyText"], fontName="Times-Roman", fontSize=12, leading=24, firstLineIndent=0.5 * inch)
+    body_first = ParagraphStyle("ManuscriptBodyFirst", parent=body, firstLineIndent=0)
     centered = ParagraphStyle("CenteredBody", parent=body, alignment=1, firstLineIndent=0)
     chapter_heading = ParagraphStyle("ChapterHeading", parent=styles["Heading2"], fontName="Times-Bold", fontSize=14, alignment=1, leading=18)
     title_style = ParagraphStyle("TitleStyle", parent=styles["Heading1"], fontName="Times-Bold", fontSize=18, alignment=1, leading=24)
@@ -1654,21 +1720,44 @@ def manuscript_pdf_compiled(*, title: str, chapters: list[dict], preset: str = "
     if front["include_prologue"] and front["prologue"]:
         _optional_page("Prologue", front["prologue"])
 
+    def _append_body_text(body_text: str) -> None:
+        first_paragraph = True
+        for kind, block in _chapter_body_blocks(body_text):
+            story.append(
+                Paragraph(
+                    "***" if kind == "scene_break" else escaped(block),
+                    centered if kind == "scene_break" else (body_first if first_paragraph else body),
+                )
+            )
+            if kind != "scene_break":
+                first_paragraph = False
+
     for chapter in chapters:
         story.append(PageBreak())
-        chapter_number = chapter.get("number")
-        chapter_title = chapter.get("title") or f"Chapter {chapter_number}"
+        chapter_heading_text, chapter_subtitle = _chapter_heading_lines(chapter)
         story.append(Spacer(1, 2.2 * inch))
-        story.append(Paragraph(f"Chapter {chapter_number}", chapter_heading))
-        if chapter_title and chapter_title != f"Chapter {chapter_number}":
-            story.append(Paragraph(escaped(str(chapter_title)), centered))
+        story.append(Paragraph(escaped(chapter_heading_text), chapter_heading))
+        if chapter_subtitle:
+            story.append(Paragraph(escaped(chapter_subtitle), centered))
             story.append(Spacer(1, 0.1 * inch))
-        for kind, block in _chapter_body_blocks(str(chapter.get("text") or "")):
-            story.append(Paragraph("#" if kind == "scene_break" else escaped(block), centered if kind == "scene_break" else body))
+        _append_body_text(str(chapter.get("text") or ""))
+
+    for index, scene in enumerate(scenes or [], start=1):
+        scene_heading_text, scene_subtitle = _scene_heading_lines(scene, index)
+        story.append(PageBreak())
+        story.append(Spacer(1, 2.2 * inch))
+        story.append(Paragraph(escaped(scene_heading_text), chapter_heading))
+        if scene_subtitle:
+            story.append(Paragraph(escaped(scene_subtitle), centered))
+            story.append(Spacer(1, 0.1 * inch))
+        _append_body_text(str(scene.get("body") or ""))
+
+    story.append(PageBreak())
+    story.append(Spacer(1, 2.2 * inch))
+    story.append(Paragraph(_manuscript_end_marker(), chapter_heading))
 
     def _draw_first_page(canvas, doc_obj) -> None:
-        canvas.saveState()
-        canvas.restoreState()
+        _draw_later_pages(canvas, doc_obj)
 
     def _draw_later_pages(canvas, doc_obj) -> None:
         canvas.saveState()
@@ -1684,9 +1773,147 @@ def manuscript_pdf_compiled(*, title: str, chapters: list[dict], preset: str = "
     return buffer.getvalue()
 
 
-def manuscript_epub_compiled(*, title: str, chapters: list[dict], preset: str = "standard_manuscript", front_matter: dict | None = None) -> bytes:
+def manuscript_epub_compiled(
+    *,
+    title: str,
+    chapters: list[dict],
+    scenes: list[dict] | None = None,
+    preset: str = "standard_manuscript",
+    front_matter: dict | None = None,
+) -> bytes:
+    from ebooklib import epub
+    from html import escape
+    import os
+    import tempfile
+
     front = _manuscript_front_matter(title, chapters, front_matter)
-    return manuscript_epub(title=front["title"], chapters=chapters, preset=preset)
+    safe_title = _clean_line(front["title"]) or "LoreVia Manuscript Export"
+    book = epub.EpubBook()
+    book.set_identifier(_safe_name(safe_title) or "lorevia-manuscript")
+    book.set_title(safe_title)
+    book.set_language("en")
+    if front["display_author"]:
+        book.add_author(front["display_author"])
+
+    stylesheet = epub.EpubItem(
+        uid="style_nav",
+        file_name="styles/main.css",
+        media_type="text/css",
+        content=(
+            "body { font-family: 'Times New Roman', serif; font-size: 12pt; line-height: 2; margin: 8%; } "
+            "h1, h2 { text-align: center; } "
+            ".title-page, .end-marker { text-align: center; margin-top: 20%; } "
+            ".scene-break { text-align: center; letter-spacing: 0.2em; } "
+            ".first-paragraph { text-indent: 0; } "
+            "p { text-indent: 1.5em; margin: 0 0 1em; }"
+        ).encode("utf-8"),
+    )
+    book.add_item(stylesheet)
+
+    spine: list[Any] = ["nav"]
+    toc_entries: list[Any] = []
+
+    def _body_html(text: str) -> str:
+        parts: list[str] = []
+        first_paragraph = True
+        for kind, block in _chapter_body_blocks(text):
+            if kind == "scene_break":
+                parts.append("<p class='scene-break'>***</p>")
+                continue
+            css_class = "first-paragraph" if first_paragraph else ""
+            safe_block = escape(block)
+            parts.append(f"<p class='{css_class}'>{safe_block}</p>" if css_class else f"<p>{safe_block}</p>")
+            first_paragraph = False
+        return "".join(parts) or "<p class='first-paragraph'></p>"
+
+    title_page = epub.EpubHtml(title="Title Page", file_name="title-page.xhtml", lang="en")
+    contact_lines = [
+        line for line in [front["author_name"] or front["display_author"], front["contact_email"], front["contact_phone"], front["contact_address"]]
+        if line
+    ]
+    title_page.content = (
+        "<section class='title-page'>"
+        f"<h1>{escape(front['title'])}</h1>"
+        f"{f'<h2>{escape(front['subtitle'])}</h2>' if front['subtitle'] else ''}"
+        f"<p class='first-paragraph'>{escape(front['display_author'] or ' ')}</p>"
+        f"{''.join(f'<p class=\"first-paragraph\">{escape(str(line))}</p>' for line in contact_lines)}"
+        f"<p class='first-paragraph'>{_approx_word_count_label(int(front['word_count']))}</p>"
+        "</section>"
+    )
+    title_page.add_item(stylesheet)
+    book.add_item(title_page)
+    spine.append(title_page)
+    toc_entries.append(title_page)
+
+    optional_sections: list[tuple[str, str]] = []
+    if front["include_dedication"] and front["dedication"]:
+        optional_sections.append(("Dedication", front["dedication"]))
+    if front["include_epigraph"] and front["epigraph"]:
+        optional_sections.append(("Epigraph", front["epigraph"]))
+    if front["include_acknowledgments"] and front["acknowledgments"]:
+        optional_sections.append(("Acknowledgments", front["acknowledgments"]))
+    if front["include_prologue"] and front["prologue"]:
+        optional_sections.append(("Prologue", front["prologue"]))
+
+    for index, (heading, content) in enumerate(optional_sections, start=1):
+        item = epub.EpubHtml(title=heading, file_name=f"front-{index}.xhtml", lang="en")
+        item.content = f"<h1>{escape(heading)}</h1><p class='first-paragraph'>{escape(content)}</p>"
+        item.add_item(stylesheet)
+        book.add_item(item)
+        spine.append(item)
+        toc_entries.append(item)
+
+    for chapter in chapters:
+        chapter_number = chapter.get("number")
+        chapter_heading_text, chapter_subtitle = _chapter_heading_lines(chapter)
+        item = epub.EpubHtml(
+            title=chapter_subtitle or chapter_heading_text,
+            file_name=f"chapter-{chapter_number}.xhtml",
+            lang="en",
+        )
+        item.content = (
+            f"<h1>{escape(chapter_heading_text)}</h1>"
+            f"{f'<h2>{escape(chapter_subtitle)}</h2>' if chapter_subtitle else ''}"
+            f"{_body_html(str(chapter.get('text') or ''))}"
+        )
+        item.add_item(stylesheet)
+        book.add_item(item)
+        spine.append(item)
+        toc_entries.append(item)
+
+    for index, scene in enumerate(scenes or [], start=1):
+        scene_heading_text, scene_subtitle = _scene_heading_lines(scene, index)
+        item = epub.EpubHtml(
+            title=scene_subtitle or scene_heading_text,
+            file_name=f"scene-{index}.xhtml",
+            lang="en",
+        )
+        item.content = (
+            f"<h1>{escape(scene_heading_text)}</h1>"
+            f"{f'<h2>{escape(scene_subtitle)}</h2>' if scene_subtitle else ''}"
+            f"{_body_html(str(scene.get('body') or ''))}"
+        )
+        item.add_item(stylesheet)
+        book.add_item(item)
+        spine.append(item)
+        toc_entries.append(item)
+
+    ending = epub.EpubHtml(title="The End", file_name="the-end.xhtml", lang="en")
+    ending.content = f"<section class='end-marker'><h1>{_manuscript_end_marker()}</h1></section>"
+    ending.add_item(stylesheet)
+    book.add_item(ending)
+    spine.append(ending)
+    toc_entries.append(ending)
+
+    book.toc = tuple(toc_entries)
+    book.spine = spine
+    book.add_item(epub.EpubNcx())
+    book.add_item(epub.EpubNav())
+    with tempfile.TemporaryDirectory() as tmpdir:
+        target = os.path.join(tmpdir, "manuscript.epub")
+        epub.write_epub(target, book, {})
+        with open(target, "rb") as handle:
+            return handle.read()
 
 
 def manuscript_obsidian_vault_zip(

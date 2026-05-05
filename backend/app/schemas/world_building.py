@@ -47,6 +47,22 @@ class WorldElementOut(BaseModel):
     is_series_canonical: bool = False
     created_at: datetime
     updated_at: datetime
+    chapter_number: int | None = None
+    chapter_title: str | None = None
+    world_document_title: str | None = None
+    canonical_name: str | None = None
+    aliases: list[str] = Field(default_factory=list)
+    confidence: float | None = None
+    provenance: list[dict] = Field(default_factory=list)
+    claims: list[dict] = Field(default_factory=list)
+    chapter_numbers: list[int] = Field(default_factory=list)
+    chapter_count: int = 0
+    summary_mentions: int = 0
+    presence_score: float | None = None
+    narrative_modes: list[str] = Field(default_factory=list)
+    source_excerpt: str | None = None
+    character_id: str | None = None
+    author_override: bool = False
 
 
 class WorldGapItemOut(BaseModel):
@@ -64,6 +80,10 @@ class WorldGapItemOut(BaseModel):
     story_chapter_title: str | None = None
     character_name: str | None = None
     priority: int = 5
+    entity_type: str | None = None
+    canonical_name: str | None = None
+    confidence: float = 0.0
+    provenance: dict = Field(default_factory=dict)
 
 
 class WorldGapGroupOut(BaseModel):
@@ -117,6 +137,23 @@ class WorldQueryResponse(BaseModel):
 class SuggestionAcceptance(BaseModel):
     suggestion_id: str
     mark_implemented: bool = True
+
+
+class CanonOverrideBody(BaseModel):
+    canonical_name: str
+    aliases: list[str] = Field(default_factory=list)
+    entity_type: str | None = None
+    notes: str | None = None
+
+
+class CanonOverrideOut(BaseModel):
+    id: str
+    canonical_name: str
+    aliases: list[str] = Field(default_factory=list)
+    entity_type: str | None = None
+    notes: str | None = None
+    created_at: datetime
+    updated_at: datetime
 
 
 class WorldNoteBody(BaseModel):

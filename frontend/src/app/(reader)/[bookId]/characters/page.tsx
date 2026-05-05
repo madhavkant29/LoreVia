@@ -6,9 +6,11 @@ import { useParams, useRouter } from "next/navigation"
 import RelationshipGraph from "@/components/intelligence/RelationshipGraph"
 import { CONFIDENCE_THRESHOLDS } from "@/lib/constants"
 import { booksApi } from "@/lib/api/books"
+import { intelligenceApi } from "@/lib/api/intelligence"
 import { readerApi } from "@/lib/api/reader"
 import type { Book } from "@/types/book"
 import type { Character, RelationshipGraph as RelationshipGraphData } from "@/types/character"
+import type { ChatMessage } from "@/types/intelligence"
 import type { ReadingProgress } from "@/types/reader"
 
 type EditDraft = {
@@ -230,6 +232,10 @@ export default function CharactersPage() {
   const [exporting, setExporting] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [draft, setDraft] = useState<EditDraft>(buildDraft(null))
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
+  const [chatInput, setChatInput] = useState("")
+  const [chatLoading, setChatLoading] = useState(false)
+  const [chatHint, setChatHint] = useState<string | null>(null)
 
   useEffect(() => {
     let active = true
@@ -340,6 +346,12 @@ export default function CharactersPage() {
       setActionError(null)
     }
   }, [editing, selectedCharacter])
+
+  useEffect(() => {
+    setChatMessages([])
+    setChatInput("")
+    setChatHint(null)
+  }, [selectedCharacter?.id])
 
   const nodeLookup = new Map((graphData?.nodes ?? []).map((node) => [node.id, node.name]))
   const selectedConnections = selectedCharacter
@@ -467,6 +479,30 @@ export default function CharactersPage() {
       setActionError("Could not delete this character.")
     } finally {
       setDeleting(false)
+    }
+  }
+
+  async function handleCharacterChat() {
+    if (!selectedCharacter || !chatInput.trim()) return
+    const nextMessages: ChatMessage[] = [...chatMessages, { role: "user", content: chatInput.trim() }]
+    setChatMessages(nextMessages)
+    setChatInput("")
+    setChatLoading(true)
+    setChatHint(null)
+    try {
+      const response = await intelligenceApi.chat(
+        bookId,
+        selectedCharacter.id,
+        nextMessages,
+        relationshipChapter,
+        selectedCharacterSummary
+      )
+      setChatMessages([...nextMessages, { role: "assistant", content: response.reply }])
+      setChatHint(response.grounded_hint ?? null)
+    } catch {
+      setChatMessages([...nextMessages, { role: "assistant", content: "I cannot answer that right now." }])
+    } finally {
+      setChatLoading(false)
     }
   }
 
@@ -985,6 +1021,52 @@ export default function CharactersPage() {
                       <div className={`mt-4 flex items-center justify-between rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-slate-300" : "border-stone-200 bg-white text-stone-600"}`}>
                         <span>Connections in view</span>
                         <span className="font-semibold">{selectedConnections.length}</span>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {selectedCharacter ? (
+                    <div className={`mt-4 rounded-[1.2rem] border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50/75"}`}>
+                      <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-violet-300" : "text-violet-700"}`}>In-character chat</p>
+                      <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+                        Replies use the extracted personality, motivations, fears, relationships, and growth evidence from the manuscript up to chapter {relationshipChapter}.
+                      </p>
+                      <div className={`mt-3 max-h-72 space-y-2 overflow-y-auto rounded-[1rem] border p-3 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-white"}`}>
+                        {chatMessages.length === 0 ? (
+                          <p className={`text-sm ${isDark ? "text-slate-500" : "text-stone-500"}`}>Ask {selectedCharacter.name} something in their own voice.</p>
+                        ) : null}
+                        {chatMessages.map((message, index) => (
+                          <div
+                            key={`${message.role}-${index}`}
+                            className={`rounded-xl px-3 py-2 text-sm leading-6 ${message.role === "user"
+                              ? isDark ? "bg-violet-500/15 text-violet-100" : "bg-violet-50 text-violet-800"
+                              : isDark ? "bg-white/[0.05] text-slate-200" : "bg-stone-50 text-stone-700"
+                            }`}
+                          >
+                            {message.content}
+                          </div>
+                        ))}
+                        {chatLoading ? <p className={`text-sm ${isDark ? "text-slate-500" : "text-stone-500"}`}>{selectedCharacter.name} is answering...</p> : null}
+                      </div>
+                      {chatHint ? <p className={`mt-2 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{chatHint}</p> : null}
+                      <div className="mt-3 flex gap-2">
+                        <input
+                          value={chatInput}
+                          onChange={(event) => setChatInput(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") void handleCharacterChat()
+                          }}
+                          placeholder={`Ask ${selectedCharacter.name}...`}
+                          className={`min-w-0 flex-1 rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => void handleCharacterChat()}
+                          disabled={chatLoading || !chatInput.trim()}
+                          className="rounded-xl bg-[linear-gradient(135deg,#8b5cf6,#6d28d9)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                        >
+                          Send
+                        </button>
                       </div>
                     </div>
                   ) : null}

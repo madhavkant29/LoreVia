@@ -195,6 +195,25 @@ class WorldElement(Base):
     parent = relationship("WorldElement", remote_side=[id])
 
 
+class WorldCanonicalIdentity(Base):
+    """Book-scoped canonical identity record for world-gap resolution."""
+    __tablename__ = "world_canonical_identities"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    book_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
+    canonical_name: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    entity_type: Mapped[str | None] = mapped_column(String, index=True)
+    aliases: Mapped[list[str] | None] = mapped_column(ARRAY(String))
+    source: Mapped[str] = mapped_column(String, nullable=False, default="author_override", server_default="author_override", index=True)
+    confidence: Mapped[float | None] = mapped_column(Float)
+    notes: Mapped[str | None] = mapped_column(Text)
+    metadata_json: Mapped[dict | None] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), index=True)
+
+    book = relationship("Book", back_populates="world_canonical_identities")
+
+
 class WorldGapAnalysis(Base):
     """Cached world gap detection and integration analysis output."""
     __tablename__ = "world_gap_analyses"

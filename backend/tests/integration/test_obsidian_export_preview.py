@@ -8,7 +8,7 @@ import pytest
 
 from app.api.deps.auth import get_current_user
 from app.main import app
-from app.models.book import Book, Chapter, NoteSeriesLink, ObsidianVaultNote, Series
+from app.models.book import Book, Chapter, NoteSeriesLink, NovelScene, ObsidianVaultNote, Series
 from app.models.character import Character
 from app.models.intelligence import ChapterSummary, PlotThread, WikiEntry
 from app.models.user import User
@@ -322,3 +322,41 @@ async def test_user_obsidian_notes_import_zip(client, db):
         assert all(item["source"] == "user_notes" for item in payload)
     finally:
         app.dependency_overrides.pop(get_current_user, None)
+
+
+@pytest.mark.asyncio
+async def test_manuscript_export_includes_manual_scenes_without_server_error(client, db):
+    user, book = await _build_obsidian_preview_book(db)
+
+    manual_scene = NovelScene(
+        book_id=book.id,
+        chapter_number=2,
+        title="Bridge Scene",
+        description="A handwritten bridge between chapters.",
+        body="Aria connects the clues before the next chapter.",
+        html_body="<p>Aria connects the clues before the next chapter.</p>",
+        path="Scenes/Bridge Scene.md",
+        status="assigned",
+        sort_order=1,
+        source="manual",
+    )
+    db.add(manual_scene)
+    await db.commit()
+
+    async def override_current_user():
+        return user
+
+    app.dependency_overrides[get_current_user] = override_current_user
+    try:
+        response = await client.get(
+            f"/api/v1/books/{book.id}/manuscript/export",
+            params={"format": "docx"},
+        )
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith(
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    assert len(response.content) > 0

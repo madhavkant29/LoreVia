@@ -9,7 +9,7 @@ import { ObsidianVaultPreview } from "@/components/reader/ObsidianVaultPreview"
 import { booksApi } from "@/lib/api/books"
 import { worldBuildingApi } from "@/lib/api/worldBuilding"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
-import type { Book, ObsidianPreview } from "@/types/book"
+import type { Book, ObsidianPreview, ObsidianVaultNote } from "@/types/book"
 
 type ExportFormat = "md" | "pdf" | "docx" | "obsidian_folder"
 type ManuscriptExportFormat = "pdf" | "docx" | "epub" | "obsidian"
@@ -40,6 +40,7 @@ export default function ExportStudioPage() {
   const [manuscriptFormat, setManuscriptFormat] = useState<ManuscriptExportFormat>("docx")
   const [exporting, setExporting] = useState<string | null>(null)
   const [obsidianPreview, setObsidianPreview] = useState<ObsidianPreview | null>(null)
+  const [bibleNotes, setBibleNotes] = useState<ObsidianVaultNote[]>([])
   const [previewLoading, setPreviewLoading] = useState(false)
   const [manuscriptFiles, setManuscriptFiles] = useState<File[]>([])
   const [notesArchive, setNotesArchive] = useState<File | null>(null)
@@ -126,8 +127,12 @@ export default function ExportStudioPage() {
     setPreviewLoading(true)
     setStatus(null)
     try {
-      const preview = await booksApi.previewCharacterBibleObsidian(bookId)
+      const [preview, savedNotes] = await Promise.all([
+        booksApi.previewCharacterBibleObsidian(bookId),
+        booksApi.listCharacterBibleObsidianNotes(bookId).catch(() => []),
+      ])
       setObsidianPreview(preview)
+      setBibleNotes(savedNotes)
       setStatus("Loaded the character bible file preview.")
     } catch {
       setStatus("Could not load the vault preview.")
@@ -332,6 +337,18 @@ export default function ExportStudioPage() {
                         {previewLoading ? "Loading preview..." : "Preview export files"}
                       </button>
                     </div>
+                    {bibleNotes.length > 0 ? (
+                      <div className={`mt-4 rounded-[1rem] border px-4 py-3 text-sm ${isDark ? "border-white/10 bg-black/20 text-slate-300" : "border-stone-200 bg-white text-stone-600"}`}>
+                        <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Saved bible note overrides</p>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {bibleNotes.slice(0, 8).map((note) => (
+                            <span key={note.id} className={`rounded-full px-2.5 py-1 text-xs ${isDark ? "bg-white/8 text-slate-200" : "bg-stone-100 text-stone-700"}`}>
+                              {note.path}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
 
                   <div className={`rounded-[1.4rem] border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50/80"}`}>

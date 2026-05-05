@@ -1,20 +1,17 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useState } from "react"
 import type { Route } from "next"
 import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
 
-import { RecallCard } from "@/components/intelligence/RecallCard"
 import { AuthorToolsNav } from "@/components/layout/AuthorToolsNav"
 import { booksApi } from "@/lib/api/books"
-import { intelligenceApi } from "@/lib/api/intelligence"
 import { readerApi } from "@/lib/api/reader"
 import { useRecall } from "@/lib/hooks/useRecall"
-import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { useBookModeStore } from "@/lib/stores/bookModeStore"
+import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import type { Book } from "@/types/book"
-import type { CrossBookIntelligence } from "@/types/intelligence"
 import type { ChapterListResponse, ReadingProgress } from "@/types/reader"
 
 function storyUnitName(workType?: Book["work_type"], plural = false) {
@@ -50,25 +47,16 @@ function coverSrc(coverUrl: string | null | undefined) {
 function resolveCoverAtmosphere(book: Book | null, isDark: boolean) {
   if (!isDark) {
     return {
-      background: "linear-gradient(180deg,#fcf7ef_0%,#f8f3ec_46%,#f5f0ea_100%)",
+      background: "linear-gradient(180deg,#f7f5f0 0%,#eef2f0 52%,#f6f4ef 100%)",
       color: "#0c0a09",
     }
   }
 
-  const dominant = book?.cover_edge_colors?.dominant
-    || book?.cover_edge_colors?.top
-    || book?.cover_edge_colors?.left
-    || "#5b6c9a"
+  const dominant = book?.cover_edge_colors?.dominant || "#1f2937"
   const top = book?.cover_edge_colors?.top || dominant
-  const right = book?.cover_edge_colors?.right || dominant
 
   return {
-    background: [
-      `radial-gradient(circle at 14% 12%, ${top}33 0%, transparent 28%)`,
-      `radial-gradient(circle at 86% 10%, ${right}22 0%, transparent 24%)`,
-      `radial-gradient(circle at 50% 0%, ${dominant}18 0%, transparent 42%)`,
-      "linear-gradient(180deg, #000000 0%, #050505 42%, #0a0a0a 100%)",
-    ].join(", "),
+    background: `linear-gradient(180deg,#0a0a0b 0%,${top}2b 34%,#101011 100%)`,
     color: "#f8fafc",
   }
 }
@@ -113,9 +101,9 @@ export default function BookOverviewPage() {
   const { bookId } = useParams<{ bookId: string }>()
   const [book, setBook] = useState<Book | null>(null)
   const [progress, setProgress] = useState<ReadingProgress | null>(null)
-  const [crossBook, setCrossBook] = useState<CrossBookIntelligence | null>(null)
   const [chapterList, setChapterList] = useState<ChapterListResponse | null>(null)
   const [modeSaving, setModeSaving] = useState(false)
+  const [coverProcessing, setCoverProcessing] = useState(false)
   const router = useRouter()
   const { recall, lastChapter, show, dismiss } = useRecall(bookId)
   const { theme, toggleTheme } = usePreferencesStore()
@@ -128,7 +116,6 @@ export default function BookOverviewPage() {
     booksApi.get(bookId).then(setBook)
     readerApi.getProgress(bookId).then(setProgress).catch(() => {})
     readerApi.getChapterList(bookId).then(setChapterList).catch(() => {})
-    intelligenceApi.getCrossBookIntelligence(bookId).then(setCrossBook).catch(() => {})
   }, [bookId])
 
   useEffect(() => {
@@ -182,6 +169,8 @@ export default function BookOverviewPage() {
   const unitTitle = storyUnitTitle(book?.work_type)
   const unitPrefix = storyUnitPrefix(book?.work_type)
   const unitPlural = storyUnitName(book?.work_type, true)
+  const topChapterItems = (chapterList?.chapters ?? []).slice(0, 6)
+  const pageAtmosphere = resolveCoverAtmosphere(book, isDark)
 
   const navigateWithMemory = (href: string) => {
     if (typeof window !== "undefined") {
@@ -196,7 +185,8 @@ export default function BookOverviewPage() {
       `/${bookId}/summaries` as Route,
       `/${bookId}/analysis` as Route,
       `/${bookId}/ask` as Route,
-      `/${bookId}/graph` as Route,
+      `/${bookId}/search` as Route,
+      `/${bookId}/timeline` as Route,
       `/${bookId}/chapters` as Route,
       `/${bookId}/chapter/${continueChapter}` as Route,
     ]
@@ -208,7 +198,7 @@ export default function BookOverviewPage() {
         `/${bookId}/export` as Route,
         `/${bookId}/characters` as Route,
         `/${bookId}/advisor` as Route,
-        `/${bookId}/timeline` as Route,
+        `/${bookId}/graph` as Route,
         `/${bookId}/plot-threads` as Route,
         `/${bookId}/world-gap` as Route
       )
@@ -223,47 +213,22 @@ export default function BookOverviewPage() {
     navigateWithMemory(`/${bookId}/chapter/${continueChapter}`)
   }
 
+  const openAddSceneFlow = () => {
+    navigateWithMemory(`/${bookId}/manuscript?newScene=1`)
+  }
+
   const openRelationships = () => {
     navigateWithMemory(`/${bookId}/graph`)
   }
 
-  const quickTools = useMemo(
-    () => [
-      { label: "Characters", href: `/${bookId}/characters` },
-      { label: "Ask LoreVia", href: `/${bookId}/ask` },
-      { label: "Search passages", href: `/${bookId}/search` },
-      { label: "Major events", href: `/${bookId}/timeline` },
-      { label: "Relationships", action: openRelationships },
-      { label: "Summary", href: `/${bookId}/summaries` },
-      ...(activeBookMode === "author"
-        ? [
-            { label: "Notes", href: `/${bookId}/notes` },
-            { label: "World gaps", href: `/${bookId}/world-gap` },
-          ]
-        : []),
-    ],
-    [activeBookMode, bookId]
-  )
-
-  const featureTools = useMemo(
-    () => [
-      { label: "Analysis", meta: "All advanced tools", onClick: () => navigateWithMemory(`/${bookId}/analysis`) },
-    ],
-    [bookId]
-  )
-
-  const topChapterItems = (chapterList?.chapters ?? []).slice(0, 6)
-  const worldNote = crossBook?.wiki_matches?.[0]
-    ? `${crossBook.wiki_matches[0].left_name} mirrors ${crossBook.wiki_matches[0].right_name} across connected books, giving LoreVia a continuity anchor for the wider world.`
-    : "LoreVia builds world notes as you move further into the manuscript."
-  const theoryNote =
-    crossBook?.character_matches?.[0]
-      ? `${crossBook.character_matches[0].left_name} and ${crossBook.character_matches[0].right_name} echo each other across connected books.`
-      : "Character and continuity theories begin to surface once more of the story world has been processed."
-  const pageAtmosphere = resolveCoverAtmosphere(book, isDark)
-
-  if (!book) {
-    return <div className={`flex justify-center py-20 ${isDark ? "text-slate-400" : "text-stone-400"}`}>Loading...</div>
+  const processCover = async () => {
+    setCoverProcessing(true)
+    try {
+      const updated = await booksApi.processCover(bookId)
+      setBook(updated)
+    } finally {
+      setCoverProcessing(false)
+    }
   }
 
   const updateMode = async (nextMode: "reader" | "author") => {
@@ -279,10 +244,17 @@ export default function BookOverviewPage() {
     }
   }
 
+  if (!book) {
+    return <div className={`flex justify-center py-20 ${isDark ? "text-slate-400" : "text-stone-400"}`}>Loading...</div>
+  }
+
+  const recapText = recall || book.public_description || `Start from ${book.title} with a quieter workspace: the book stays central, and deeper tools wait in the sidebar until you need them.`
+  const recapChapter = lastChapter ?? Math.max(continueChapter - 1, 1)
+
   return (
     <div className="min-h-screen text-slate-100" style={pageAtmosphere}>
-      <div className="sticky top-0 z-30 flex items-center justify-between gap-3 px-4 py-5 backdrop-blur-2xl bg-black/45 sm:px-6 lg:px-8">
-        <div className="mx-auto max-w-7xl flex items-center justify-between gap-3 w-full">
+      <div className={`sticky top-0 z-30 flex items-center justify-between gap-3 px-4 py-4 backdrop-blur-2xl sm:px-6 lg:px-8 ${isDark ? "bg-black/55" : "bg-white/75"}`}>
+        <div className="mx-auto flex w-full max-w-[94rem] items-center justify-between gap-3">
           <Link href="/library" className="transition hover:opacity-80">
             <img src="/image.png" alt="LoreVia" className="h-9 w-9 rounded-xl object-cover" />
           </Link>
@@ -298,7 +270,7 @@ export default function BookOverviewPage() {
                 disabled={modeSaving}
                 className={`px-4 py-2 text-sm font-medium transition ${
                   activeBookMode === "reader"
-                    ? isDark ? "bg-white text-slate-950" : "bg-white text-stone-950 shadow-sm"
+                    ? isDark ? "bg-white text-slate-950" : "bg-stone-950 text-white shadow-sm"
                     : isDark ? "text-slate-300 hover:bg-white/10" : "text-stone-600 hover:bg-white"
                 }`}
               >
@@ -309,7 +281,7 @@ export default function BookOverviewPage() {
                 disabled={modeSaving}
                 className={`px-4 py-2 text-sm font-medium transition ${
                   activeBookMode === "author"
-                    ? isDark ? "bg-white text-slate-950" : "bg-white text-stone-950 shadow-sm"
+                    ? isDark ? "bg-white text-slate-950" : "bg-stone-950 text-white shadow-sm"
                     : isDark ? "text-slate-300 hover:bg-white/10" : "text-stone-600 hover:bg-white"
                 }`}
               >
@@ -340,293 +312,400 @@ export default function BookOverviewPage() {
           </div>
         </div>
       </div>
-      <div className="mx-auto max-w-7xl px-4 pb-28 pt-6 sm:px-6 lg:px-8">
 
-        {show && recall ? (
-          <div className="mt-6">
-            <RecallCard recall={recall} lastChapter={lastChapter ?? Math.max(continueChapter - 1, 1)} onDismiss={dismiss} onContinue={continueReading} />
-          </div>
-        ) : null}
-
-        <div className="mt-6 grid gap-10 lg:grid-cols-[minmax(0,1.05fr)_24rem]">
-          <section
-            className={`relative overflow-visible lg:overflow-hidden rounded-[26px] border min-h-[500px] sm:min-h-[600px] lg:min-h-[760px] transition-transform duration-[0.35s] ease hover:scale-[1.01] shadow-[0_10px_30px_rgba(0,0,0,.6)] ${
-              isDark
-                ? "border-white/10 bg-zinc-900/95"
-                : "border-stone-200 bg-zinc-50/95"
-            }`}
-          >
-            <BookCoverCard book={book} isDark={isDark} />
-
-            <div className="absolute inset-0 pointer-events-none">
-              <div className="absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-black/50 to-transparent" />
-              <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-black/50 to-transparent" />
-              <div className="absolute inset-y-0 left-0 w-16 bg-gradient-to-r from-black/30 to-transparent" />
-              <div className="absolute inset-y-0 right-0 w-16 bg-gradient-to-l from-black/30 to-transparent" />
-            </div>
-
-            <div className="absolute inset-x-0 bottom-0 z-10 p-6 lg:p-8 bg-gradient-to-t from-black/90 via-black/60 to-transparent text-center">
-              <h1 className="font-serif text-3xl lg:text-6xl tracking-tight text-white drop-shadow-lg uppercase">
-                {book.title}
-              </h1>
-
-              {book.author ? (
-                <p className="mt-2 text-sm lg:text-base text-white/80">
-                  {book.author}
-                </p>
-              ) : null}
-            </div>
-          </section>
-
-          <aside className="space-y-7">
-            <div className={`rounded-[1.8rem] border p-10 ${isDark ? "border-white/10 bg-zinc-900/70" : "border-stone-200/80 bg-zinc-50/70"}`}>
-              <p className={`text-xs font-semibold uppercase tracking-[0.28em] ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>Reading progress</p>
-              <div className="mt-6 flex items-end justify-between gap-3">
-                <div>
-                  <p className={`text-4xl font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{percentComplete}%</p>
-                  <p className={`mt-2 text-base ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>{chaptersReadCount} {unitPlural} read</p>
-                </div>
-                <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-emerald-800">
-                  {book.status}
-                </span>
-              </div>
-              {processingSummary ? (
-                <p className={`mt-3 text-sm ${isDark ? "text-amber-300" : "text-amber-700"}`}>{processingSummary}</p>
-              ) : null}
-              <div className={`mt-6 h-3 overflow-hidden rounded-full ${isDark ? "bg-white/10" : "bg-stone-200"}`}>
-                <div
-                  className="h-full rounded-full bg-[linear-gradient(90deg,#5b4cf0,#7c6cff)] transition-all duration-1000 ease-out"
-                  style={{ width: `${Math.max(0, Math.min(percentComplete, 100))}%` }}
-                />
-              </div>
-              <div className={`mt-6 grid grid-cols-2 gap-5 border-t pt-6 ${isDark ? "border-white/10" : "border-stone-200"}`}>
-                <Metric label={`Current ${storyUnitName(book?.work_type)}`} value={`${unitPrefix} ${continueChapter}`} isDark={isDark} />
-                <Metric label={`${unitTitle}s left`} value={String(chaptersLeft)} isDark={isDark} />
-                <Metric label="Format" value={book.format.toUpperCase()} isDark={isDark} />
-                <Metric label={`Total ${unitPlural}`} value={String(book.total_chapters ?? chapterList?.chapters.length ?? "Syncing")} isDark={isDark} />
-              </div>
-            </div>
-
-            <div className={`rounded-[1.5rem] border p-6 transition-all duration-300 hover:bg-opacity-60 ${isDark ? "border-white/5 bg-zinc-900/45 hover:bg-zinc-900/60" : "border-stone-200/60 bg-zinc-50/45 hover:bg-zinc-50/60"}`}>
-              <p className={`text-xs font-semibold uppercase tracking-[0.28em] ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>{unitPlural}</p>
-              <div className="mt-3 space-y-1.5">
-                {topChapterItems.length > 0 ? (
-                  topChapterItems.map((chapter) => (
-                    <button
-                      key={chapter.number}
-                      onClick={() => navigateWithMemory(`/${bookId}/chapter/${chapter.number}`)}
-                      className={`flex w-full items-center justify-between rounded-[1rem] px-4 py-3 text-left transition-all duration-300 relative overflow-hidden group ${
-                        chapter.number === continueChapter
-                          ? isDark ? "bg-indigo-500/15 text-indigo-100" : "bg-violet-50 text-violet-700"
-                          : isDark ? "bg-white/5 text-slate-200 hover:bg-white/10" : "bg-stone-50 text-stone-700 hover:bg-stone-100"
-                      }`}
-                    >
-                      <span className="font-medium text-base relative z-10">{unitTitle} {chapter.number}</span>
-                      <span className={`text-xs uppercase tracking-[0.16em] relative z-10 ${isDark ? "text-slate-500" : "text-stone-400"}`}>
-                        {chapter.read ? "Read" : "Unread"}
-                      </span>
-                      <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700 ease-in-out" />
-                    </button>
-                  ))
-                ) : (
-                  <p className={`text-sm leading-7 ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>{unitTitle} indexing is still syncing.</p>
-                )}
-              </div>
-              <button
-                onClick={() => navigateWithMemory(`/${bookId}/chapters`)}
-                className={`mt-3 w-full rounded-[0.8rem] border px-3 py-2.5 text-xs font-medium transition hover:-translate-y-0.5 ${isDark ? "border-white/[0.08] bg-white/[0.03] text-white hover:bg-white/[0.06]" : "border-stone-200/60 bg-white/60 text-stone-600 hover:bg-white/70"}`}
-              >
-                Open full {storyUnitName(book?.work_type)} list
-              </button>
-            </div>
-
-            <div className={`rounded-[1.5rem] border p-6 transition-all duration-300 hover:bg-opacity-60 ${isDark ? "border-white/5 bg-zinc-900/45 hover:bg-zinc-900/60" : "border-stone-200/60 bg-zinc-50/45 hover:bg-zinc-50/60"}`}>
-              <p className={`text-xs font-semibold uppercase tracking-[0.28em] ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>Workspace actions</p>
-              <div className="mt-3 grid gap-2.5">
-                <button
-                  onClick={continueReading}
-                  className="inline-flex items-center justify-center rounded-[1rem] bg-gradient-to-b from-violet-500 to-violet-700 px-4 py-3 text-sm font-semibold text-white shadow-[0_15px_40px_rgba(99,102,241,.35)] transition hover:translate-y-[-1px]"
-                >
-                  {continueChapter > 1 ? `Continue - ${unitTitle} ${continueChapter}` : "Get started"}
-                </button>
-                <Link
-                  href={`/${bookId}/summaries`}
-                  className={`inline-flex items-center justify-center rounded-[1rem] border px-4 py-3 text-sm font-medium transition hover:-translate-y-0.5 ${isDark ? "border-white/[0.08] bg-white/[0.03] text-white hover:bg-white/[0.06]" : "border-stone-200/60 bg-white/60 text-stone-600 hover:bg-white/70"}`}
-                >
-                  Open summary
-                </Link>
-              </div>
-
-              <div className="mt-3 grid grid-cols-2 gap-1.5">
-                {quickTools.map((tool) =>
-                  "href" in tool ? (
-                    <Link
-                      key={tool.label}
-                      href={tool.href as Route}
-                      className={`w-full text-center rounded-md border px-3 py-2 text-xs font-medium transition hover:-translate-y-0.5 ${isDark ? "border-white/[0.08] bg-white/[0.03] text-white hover:bg-white/[0.06]" : "border-stone-200/60 bg-white/60 text-stone-600 hover:bg-white/70"}`}
-                    >
-                      {tool.label}
-                    </Link>
-                  ) : (
-                    <button
-                      key={tool.label}
-                      onClick={tool.action}
-                      className={`w-full text-center rounded-md border px-3 py-2 text-xs font-medium transition hover:-translate-y-0.5 ${isDark ? "border-white/[0.08] bg-white/[0.03] text-white hover:bg-white/[0.06]" : "border-stone-200/60 bg-white/60 text-stone-600 hover:bg-white/70"}`}
-                    >
-                      {tool.label}
-                    </button>
-                  )
-                )}
-              </div>
-            </div>
-          </aside>
+      <div className="mx-auto grid max-w-[94rem] gap-6 px-4 pb-28 pt-6 sm:px-6 lg:grid-cols-[18rem_minmax(0,1fr)_22rem] lg:px-8">
+        <div className="hidden lg:block lg:sticky lg:top-24 lg:self-start">
+          <AuthorToolsNav
+            bookId={bookId}
+            active="overview"
+            isDark={isDark}
+            title={activeBookMode === "author" ? "Author workspace" : "Reader workspace"}
+            description={activeBookMode === "author" ? "Drafting and intelligence stay nearby without crowding the book." : "Reading, chapters, and quiet tools stay one hover away."}
+            currentChapter={continueChapter}
+            mode={activeBookMode}
+            variant="rail"
+          />
         </div>
 
-        <div className="mt-8">
-          <div className="space-y-6">
-            {bookMode === "author" ? (
-              <section className={`rounded-[1.8rem] border p-6 ${isDark ? "border-white/10 bg-white/5" : "border-white/70 bg-white/82"}`}>
-                <div className="grid gap-5 xl:grid-cols-[17rem_minmax(0,1fr)]">
-                  <AuthorToolsNav
-                    bookId={bookId}
-                    active="overview"
-                    isDark={isDark}
-                    title="Author tools"
-                    description="A professional left-side workspace for drafting, notes, export, continuity, and story intelligence."
-                  />
+        <main className="space-y-6">
+          <StoryRecapHero
+            book={book}
+            isDark={isDark}
+            recap={recapText}
+            recapChapter={recapChapter}
+            unitTitle={unitTitle}
+            continueChapter={continueChapter}
+            showDismiss={show && Boolean(recall)}
+            onDismiss={dismiss}
+            onContinue={continueReading}
+          />
 
-                  <div>
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-                      <div>
-                        <p className={`text-[11px] font-semibold uppercase tracking-[0.28em] ${isDark ? "text-indigo-300" : "text-violet-500"}`}>Writing tools</p>
-                        <h2 className={`mt-2 font-serif text-3xl ${isDark ? "text-white" : "text-stone-950"}`}>Write, organize, and export from one workspace</h2>
-                      </div>
-                      <p className={`max-w-xl text-sm leading-7 ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-                        The overview page now acts like a control center instead of a stack of unrelated cards.
-                      </p>
-                    </div>
+          <BookPreview
+            book={book}
+            isDark={isDark}
+            coverProcessing={coverProcessing}
+            onRefreshCover={processCover}
+          />
+        </main>
 
-                    <div className="mt-5 grid gap-3 md:grid-cols-2">
-                      <div className={`rounded-[1.2rem] border p-5 ${isDark ? "border-white/10 bg-zinc-900/45" : "border-stone-200 bg-zinc-50/45"}`}>
-                        <p className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-emerald-300" : "text-emerald-600"}`}>Writing</p>
-                        <p className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>Manuscript editor</p>
-                        <p className={`mt-2 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
-                          Draft chapters with continuity, character, and thread context already within reach.
-                        </p>
-                        <button
-                          onClick={() => navigateWithMemory(`/${bookId}/manuscript`)}
-                          className="mt-4 inline-flex items-center justify-center rounded-[1rem] bg-gradient-to-b from-emerald-500 to-emerald-700 px-5 py-3 text-sm font-semibold text-white shadow-[0_15px_40px_rgba(16,185,129,.35)] transition hover:translate-y-[-1px]"
-                        >
-                          Open manuscript editor
-                        </button>
-                      </div>
+        <aside className="space-y-5 lg:sticky lg:top-24 lg:self-start">
+          <ReadingProgressPanel
+            book={book}
+            isDark={isDark}
+            percentComplete={percentComplete}
+            chaptersReadCount={chaptersReadCount}
+            chaptersLeft={chaptersLeft}
+            continueChapter={continueChapter}
+            processingSummary={processingSummary}
+            unitTitle={unitTitle}
+            unitPrefix={unitPrefix}
+            unitPlural={unitPlural}
+            chapterCount={chapterList?.chapters.length ?? book.total_chapters}
+          />
 
-                      <div className={`rounded-[1.2rem] border p-5 ${isDark ? "border-white/10 bg-zinc-900/45" : "border-stone-200 bg-zinc-50/45"}`}>
-                        <p className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-indigo-300" : "text-violet-500"}`}>Author Intelligence</p>
-                        <p className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>Story Advisor</p>
-                        <p className={`mt-2 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
-                          Ask about plotholes, threads, arcs, and pressure points with grounded manuscript answers.
-                        </p>
-                        <button
-                          onClick={() => navigateWithMemory(`/${bookId}/advisor`)}
-                          className="mt-4 inline-flex items-center justify-center rounded-[1rem] bg-gradient-to-b from-violet-500 to-violet-700 px-5 py-3 text-sm font-semibold text-white shadow-[0_15px_40px_rgba(99,102,241,.35)] transition hover:translate-y-[-1px]"
-                        >
-                          Open Story Advisor
-                        </button>
-                      </div>
+          <ChapterQuickSwitch
+            bookId={bookId}
+            isDark={isDark}
+            chapters={topChapterItems}
+            continueChapter={continueChapter}
+            unitTitle={unitTitle}
+            unitPlural={unitPlural}
+            workType={book.work_type}
+            onNavigate={navigateWithMemory}
+          />
 
-                      <div className={`rounded-[1.2rem] border p-5 ${isDark ? "border-white/10 bg-zinc-900/45" : "border-stone-200 bg-zinc-50/45"}`}>
-                        <p className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-sky-300" : "text-sky-700"}`}>Notes and files</p>
-                        <p className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>Import & Export studio</p>
-                        <p className={`mt-2 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
-                          Keep imports separate from exports, preview vault files, and ship manuscript, notes, or bible outputs from one page.
-                        </p>
-                        <div className="mt-4 flex flex-wrap gap-3">
-                          <button
-                            onClick={() => navigateWithMemory(`/${bookId}/export`)}
-                            className="inline-flex items-center justify-center rounded-[1rem] bg-gradient-to-b from-sky-500 to-blue-700 px-5 py-3 text-sm font-semibold text-white shadow-[0_15px_40px_rgba(37,99,235,.35)] transition hover:translate-y-[-1px]"
-                          >
-                            Open import & export
-                          </button>
-                          <button
-                            onClick={() => navigateWithMemory(`/${bookId}/notes`)}
-                            className={`inline-flex items-center justify-center rounded-[1rem] border px-4 py-3 text-sm font-semibold transition ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`}
-                          >
-                            Open notes workspace
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className={`rounded-[1.2rem] border p-5 ${isDark ? "border-white/10 bg-zinc-900/45" : "border-stone-200 bg-zinc-50/45"}`}>
-                        <p className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-amber-300" : "text-amber-700"}`}>World building</p>
-                        <p className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>World Gap Detection</p>
-                        <p className={`mt-2 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
-                          Compare separate lore documents against the manuscript and turn continuity gaps into actionable cleanup notes.
-                        </p>
-                        <button
-                          onClick={() => navigateWithMemory(`/${bookId}/world-gap`)}
-                          className="mt-4 inline-flex items-center justify-center rounded-[1rem] bg-gradient-to-b from-amber-500 to-amber-700 px-5 py-3 text-sm font-semibold text-white shadow-[0_15px_40px_rgba(245,158,11,.35)] transition hover:translate-y-[-1px]"
-                        >
-                          Open World Gap Detection
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </section>
-            ) : null}
-
-            <section className={`rounded-[1.8rem] border p-6 ${isDark ? "border-white/10 bg-zinc-900/70" : "border-stone-200 bg-zinc-50/70"}`}>
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-                <div>
-                  <p className={`text-[11px] font-semibold uppercase tracking-[0.28em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Explore</p>
-                  <h2 className={`mt-2 font-serif text-3xl ${isDark ? "text-white" : "text-stone-900"}`}>Keep the current tools, but make them quieter.</h2>
-                </div>
-                <p className={`max-w-xl text-sm leading-7 ${isDark ? "text-slate-400" : "text-stone-600"}`}>
-                  Analysis remains available, but the primary experience starts with the book itself and expands only as needed.
-                </p>
-              </div>
-              <div className="mt-5">
-                {featureTools.map((tool) => (
-                  <button
-                    key={tool.label}
-                    onClick={tool.onClick}
-                    className={`w-full rounded-[1.2rem] border px-6 py-5 text-center transition flex flex-col items-center justify-center ${isDark ? "border-white/10 bg-zinc-900/45 hover:bg-zinc-900/55" : "border-stone-200 bg-zinc-50/45 hover:bg-zinc-50/55"}`}
-                  >
-                    <p className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>{tool.meta}</p>
-                    <p className={`mt-2 text-2xl font-serif font-semibold uppercase tracking-widest ${isDark ? "text-white" : "text-stone-900"}`}>{tool.label}</p>
-                  </button>
-                ))}
-              </div>
-            </section>
-
-          </div>
-        </div>
+          <ContextPanel
+            isDark={isDark}
+            activeBookMode={activeBookMode}
+            recap={recapText}
+            unitTitle={unitTitle}
+            continueChapter={continueChapter}
+          />
+        </aside>
       </div>
+
+      {activeBookMode === "author" ? (
+        <CreateFab
+          bookId={bookId}
+          isDark={isDark}
+          onAddScene={openAddSceneFlow}
+          onNavigate={navigateWithMemory}
+        />
+      ) : null}
 
       <nav className={`fixed inset-x-0 bottom-0 z-30 border-t px-4 py-3 backdrop-blur lg:hidden ${isDark ? "border-white/10 bg-black/92" : "border-stone-200 bg-white/92"}`}>
         <div className={`mx-auto grid max-w-xl grid-cols-6 gap-2 text-center text-[11px] font-medium ${isDark ? "text-slate-400" : "text-stone-500"}`}>
           <Link href={`/${bookId}`} className={`rounded-xl px-2 py-2 ${isDark ? "text-indigo-300" : "text-violet-700"}`}>Overview</Link>
+          <button onClick={continueReading} className="rounded-xl px-2 py-2">Read</button>
+          <Link href={`/${bookId}/chapters`} className="rounded-xl px-2 py-2">Chapters</Link>
           <Link href={`/${bookId}/summaries`} className="rounded-xl px-2 py-2">Summary</Link>
-          <Link href={`/${bookId}/ask`} className="rounded-xl px-2 py-2">Query</Link>
           <button onClick={openRelationships} className="rounded-xl px-2 py-2">Graph</button>
-          <Link href="/notifications" className="rounded-xl px-2 py-2">Alerts</Link>
           <Link href="/library" className="rounded-xl px-2 py-2">Library</Link>
         </div>
       </nav>
+    </div>
+  )
+}
 
+function StoryRecapHero({
+  book,
+  isDark,
+  recap,
+  recapChapter,
+  unitTitle,
+  continueChapter,
+  showDismiss,
+  onDismiss,
+  onContinue,
+}: {
+  book: Book
+  isDark: boolean
+  recap: string
+  recapChapter: number
+  unitTitle: string
+  continueChapter: number
+  showDismiss: boolean
+  onDismiss: () => void
+  onContinue: () => void
+}) {
+  return (
+    <section className={`rounded-3xl border p-6 shadow-[0_24px_90px_-58px_rgba(0,0,0,0.75)] ${isDark ? "border-white/10 bg-[#111214]/92 text-white" : "border-stone-200 bg-white/90 text-stone-950"}`}>
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_18rem] xl:items-center">
+        <div>
+          <p className={`text-xs font-semibold uppercase tracking-[0.28em] ${isDark ? "text-indigo-200" : "text-indigo-700"}`}>Story recap</p>
+          <h1 className="mt-3 font-serif text-3xl tracking-tight sm:text-4xl">{book.title}</h1>
+          <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+            Resume with a grounded recap through {unitTitle.toLowerCase()} {recapChapter}.
+          </p>
+          <p className={`mt-5 max-w-3xl text-sm leading-8 ${isDark ? "text-slate-100" : "text-stone-700"}`}>{recap}</p>
+        </div>
+
+        <div className="flex flex-col gap-3 xl:items-stretch">
+          <button
+            onClick={onContinue}
+            className={`rounded-full px-5 py-3 text-sm font-semibold transition ${isDark ? "bg-amber-300 text-stone-950 hover:bg-amber-200" : "bg-stone-950 text-white hover:bg-stone-800"}`}
+          >
+            {continueChapter > 1 ? `Continue Reading - ${unitTitle} ${continueChapter}` : "Continue Reading"}
+          </button>
+          <div className={`rounded-full px-4 py-3 text-center text-xs font-medium ${isDark ? "bg-white/8 text-slate-200" : "bg-stone-100 text-stone-600"}`}>
+            Last active {unitTitle.toLowerCase()}: {recapChapter || "syncing"}
+          </div>
+          {showDismiss ? (
+            <button
+              onClick={onDismiss}
+              className={`rounded-full px-3 py-2 text-sm transition ${isDark ? "text-slate-400 hover:bg-white/8 hover:text-white" : "text-stone-500 hover:bg-stone-100 hover:text-stone-800"}`}
+            >
+              Dismiss
+            </button>
+          ) : null}
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function BookPreview({
+  book,
+  isDark,
+  coverProcessing,
+  onRefreshCover,
+}: {
+  book: Book
+  isDark: boolean
+  coverProcessing: boolean
+  onRefreshCover: () => void
+}) {
+  return (
+    <section className={`relative overflow-hidden rounded-3xl border shadow-[0_18px_70px_-42px_rgba(0,0,0,0.8)] ${isDark ? "border-white/10 bg-[#0f1012]" : "border-stone-200 bg-stone-50"}`}>
+      <div className="absolute left-5 top-5 z-20 flex items-center gap-3">
+        <p className={`rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "bg-black/45 text-slate-300" : "bg-white/80 text-stone-500"}`}>Book preview</p>
+      </div>
+      <button
+        type="button"
+        onClick={onRefreshCover}
+        disabled={coverProcessing}
+        className={`absolute right-5 top-5 z-20 rounded-full border px-4 py-2 text-xs font-medium backdrop-blur transition ${isDark ? "border-white/10 bg-black/35 text-slate-200 hover:bg-black/55" : "border-stone-200 bg-white/80 text-stone-700 hover:bg-white"} disabled:opacity-50`}
+      >
+        {coverProcessing ? "Refreshing..." : "Refresh cover"}
+      </button>
+
+      <div className="relative h-[70vh] sm:h-[80vh] lg:h-[90vh]">
+        <BookCoverCard book={book} isDark={isDark} />
+        <div className="pointer-events-none absolute inset-0">
+          {isDark ? (
+            <>
+              <div className="absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-black/45 to-transparent" />
+              <div className="absolute inset-x-0 bottom-0 h-36 bg-gradient-to-t from-black/82 via-black/42 to-transparent" />
+              <div className="absolute inset-y-0 left-0 w-16 bg-gradient-to-r from-black/22 to-transparent" />
+              <div className="absolute inset-y-0 right-0 w-16 bg-gradient-to-l from-black/22 to-transparent" />
+            </>
+          ) : (
+            <>
+              <div className="absolute inset-x-0 top-0 h-20 bg-gradient-to-b from-white/40 to-transparent" />
+              <div className="absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-white/55 to-transparent" />
+            </>
+          )}
+        </div>
+
+        <div className="absolute inset-x-0 bottom-0 z-10 p-6 text-center lg:p-8">
+          <h2 className={`font-serif text-3xl uppercase tracking-tight drop-shadow-lg sm:text-5xl ${
+              isDark ? "text-white" : "text-stone-900"
+            }`}>
+            {book.title}
+          </h2>
+          {book.author ? (
+            <p className={`mt-2 text-sm sm:text-base ${isDark ? "text-white/80" : "text-stone-700"}`}>
+              {book.author}
+            </p>
+          ) : null}
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function ReadingProgressPanel({
+  book,
+  isDark,
+  percentComplete,
+  chaptersReadCount,
+  chaptersLeft,
+  continueChapter,
+  processingSummary,
+  unitTitle,
+  unitPrefix,
+  unitPlural,
+  chapterCount,
+}: {
+  book: Book
+  isDark: boolean
+  percentComplete: number
+  chaptersReadCount: number
+  chaptersLeft: number
+  continueChapter: number
+  processingSummary: string | null
+  unitTitle: string
+  unitPrefix: string
+  unitPlural: string
+  chapterCount: number | null | undefined
+}) {
+  return (
+    <section className={`rounded-3xl border p-6 ${isDark ? "border-white/10 bg-[#111214]/88" : "border-stone-200 bg-white/88"}`}>
+      <p className={`text-xs font-semibold uppercase tracking-[0.28em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Reading progress</p>
+      <div className="mt-5 flex items-end justify-between gap-3">
+        <div>
+          <p className={`text-4xl font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{percentComplete}%</p>
+          <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>{chaptersReadCount} {unitPlural} read</p>
+        </div>
+        <span className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] ${book.status === "ready" ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>
+          {book.status}
+        </span>
+      </div>
+      {processingSummary ? (
+        <p className={`mt-3 text-sm ${isDark ? "text-amber-300" : "text-amber-700"}`}>{processingSummary}</p>
+      ) : null}
+      <div className={`mt-6 h-2 overflow-hidden rounded-full ${isDark ? "bg-white/10" : "bg-stone-200"}`}>
+        <div
+          className="h-full rounded-full bg-[linear-gradient(90deg,#5b4cf0,#10b981)] transition-all duration-1000 ease-out"
+          style={{ width: `${Math.max(0, Math.min(percentComplete, 100))}%` }}
+        />
+      </div>
+      <div className={`mt-6 grid grid-cols-2 gap-5 border-t pt-6 ${isDark ? "border-white/10" : "border-stone-200"}`}>
+        <Metric label={`Current ${storyUnitName(book.work_type)}`} value={`${unitPrefix} ${continueChapter}`} isDark={isDark} />
+        <Metric label={`${unitTitle}s left`} value={String(chaptersLeft)} isDark={isDark} />
+        <Metric label="Format" value={book.format.toUpperCase()} isDark={isDark} />
+        <Metric label={`Total ${unitPlural}`} value={String(chapterCount ?? "Syncing")} isDark={isDark} />
+      </div>
+    </section>
+  )
+}
+
+function ChapterQuickSwitch({
+  bookId,
+  isDark,
+  chapters,
+  continueChapter,
+  unitTitle,
+  unitPlural,
+  workType,
+  onNavigate,
+}: {
+  bookId: string
+  isDark: boolean
+  chapters: ChapterListResponse["chapters"]
+  continueChapter: number
+  unitTitle: string
+  unitPlural: string
+  workType: Book["work_type"]
+  onNavigate: (href: string) => void
+}) {
+  return (
+    <section className={`rounded-3xl border p-5 ${isDark ? "border-white/10 bg-[#111214]/74" : "border-stone-200 bg-white/82"}`}>
+      <p className={`text-xs font-semibold uppercase tracking-[0.28em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>{unitPlural}</p>
+      <div className="mt-3 space-y-1.5">
+        {chapters.length > 0 ? (
+          chapters.map((chapter) => (
+            <button
+              key={chapter.number}
+              onClick={() => onNavigate(`/${bookId}/chapter/${chapter.number}`)}
+              className={`flex h-12 w-full items-center justify-between rounded-xl px-4 text-left transition ${
+                chapter.number === continueChapter
+                  ? isDark ? "bg-white text-stone-950" : "bg-stone-950 text-white"
+                  : isDark ? "bg-white/[0.04] text-slate-200 hover:bg-white/[0.08]" : "bg-stone-50 text-stone-700 hover:bg-stone-100"
+              }`}
+            >
+              <span className="truncate text-sm font-semibold">{unitTitle} {chapter.number}</span>
+              <span className={`ml-3 shrink-0 text-[10px] uppercase tracking-[0.16em] ${chapter.number === continueChapter ? (isDark ? "text-stone-600" : "text-white/65") : (isDark ? "text-slate-500" : "text-stone-400")}`}>
+                {chapter.read ? "Read" : "Unread"}
+              </span>
+            </button>
+          ))
+        ) : (
+          <p className={`text-sm leading-7 ${isDark ? "text-slate-400" : "text-stone-500"}`}>{unitTitle} indexing is still syncing.</p>
+        )}
+      </div>
+      <button
+        onClick={() => onNavigate(`/${bookId}/chapters`)}
+        className={`mt-3 w-full rounded-xl border px-3 py-2.5 text-xs font-medium transition ${isDark ? "border-white/[0.08] bg-white/[0.03] text-white hover:bg-white/[0.06]" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`}
+      >
+        Open full {storyUnitName(workType)} list
+      </button>
+    </section>
+  )
+}
+
+function ContextPanel({
+  isDark,
+  activeBookMode,
+  recap,
+  unitTitle,
+  continueChapter,
+}: {
+  isDark: boolean
+  activeBookMode: "reader" | "author"
+  recap: string
+  unitTitle: string
+  continueChapter: number
+}) {
+  const summary = recap.length > 220 ? `${recap.slice(0, 220).trim()}...` : recap
+  const suggestion = activeBookMode === "author"
+    ? "Use the sidebar for drafting and intelligence. The next useful action is still to read or review the current chapter before opening tools."
+    : "Continue reading from the current chapter, then use Summary or Search from the sidebar when you need context."
+
+  return (
+    <section className={`rounded-3xl border p-5 ${isDark ? "border-white/10 bg-[#111214]/62" : "border-stone-200 bg-white/78"}`}>
+      <p className={`text-xs font-semibold uppercase tracking-[0.28em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Context</p>
+      <div className={`mt-4 rounded-2xl px-4 py-4 ${isDark ? "bg-white/[0.04]" : "bg-stone-50"}`}>
+        <p className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-emerald-300" : "text-emerald-700"}`}>Suggested next action</p>
+        <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{suggestion}</p>
+      </div>
+      <div className={`mt-3 rounded-2xl px-4 py-4 ${isDark ? "bg-white/[0.04]" : "bg-stone-50"}`}>
+        <p className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-indigo-300" : "text-indigo-700"}`}>Current {unitTitle.toLowerCase()} context</p>
+        <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{unitTitle} {continueChapter} is ready. {summary}</p>
+      </div>
+    </section>
+  )
+}
+
+function CreateFab({
+  bookId,
+  isDark,
+  onAddScene,
+  onNavigate,
+}: {
+  bookId: string
+  isDark: boolean
+  onAddScene: () => void
+  onNavigate: (href: string) => void
+}) {
+  const itemClass = `rounded-full border px-4 py-2 text-sm font-semibold shadow-[0_18px_44px_-28px_rgba(0,0,0,0.8)] transition ${
+    isDark ? "border-white/10 bg-[#17191d] text-slate-100 hover:bg-[#202329]" : "border-stone-200 bg-white text-stone-800 hover:bg-stone-50"
+  }`
+
+  return (
+    <div className="group/create fixed bottom-24 right-5 z-40 flex flex-col items-end gap-3 lg:bottom-8 lg:right-8">
+      <div className="pointer-events-none flex translate-y-2 flex-col items-end gap-2 opacity-0 transition group-hover/create:pointer-events-auto group-hover/create:translate-y-0 group-hover/create:opacity-100 group-focus-within/create:pointer-events-auto group-focus-within/create:translate-y-0 group-focus-within/create:opacity-100">
+        <button onClick={onAddScene} className={itemClass}>Add Scene</button>
+        <button onClick={() => onNavigate(`/${bookId}/notes`)} className={itemClass}>Add Note</button>
+        <button onClick={() => onNavigate(`/${bookId}/characters`)} className={itemClass}>Add Character</button>
+      </div>
+      <button
+        className={`rounded-full px-5 py-3 text-sm font-semibold shadow-[0_18px_55px_-28px_rgba(0,0,0,0.9)] transition ${isDark ? "bg-amber-300 text-stone-950 hover:bg-amber-200" : "bg-stone-950 text-white hover:bg-stone-800"}`}
+      >
+        + Create
+      </button>
     </div>
   )
 }
 
 function BookCoverCard({ book, isDark }: { book: Book; isDark: boolean }) {
   const [failed, setFailed] = useState(false)
-  const src = !failed ? coverSrc(book.cover_url) ?? book.cover_url ?? null : null
+  const src = !failed ? coverSrc(book.cover_processed_url ?? book.cover_url) : null
 
   if (!src) {
     return (
-      <div className={`absolute inset-0 flex items-center justify-center ${isDark ? "bg-gradient-to-br from-indigo-900 to-slate-800" : "bg-gradient-to-br from-violet-100 to-stone-200"}`}>
-        <span className={`font-serif text-8xl lg:text-[12rem] font-bold ${isDark ? "text-white/20" : "text-stone-400/40"}`}>
+      <div className={`absolute inset-0 flex items-center justify-center ${isDark ? "bg-[#17191d]" : "bg-stone-100"}`}>
+        <span className={`font-serif text-8xl font-bold lg:text-[12rem] ${isDark ? "text-white/20" : "text-stone-400/40"}`}>
           {titleInitials(book.title)}
         </span>
       </div>
@@ -660,5 +739,3 @@ function titleInitials(title: string) {
     .map((part) => part[0]?.toUpperCase() ?? "")
     .join("")
 }
-
-

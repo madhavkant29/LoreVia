@@ -164,3 +164,23 @@ async def test_world_building_documents_gap_detection_and_notes(client, db, monk
     )
     assert reopened.status_code == 200
     assert reopened.json()["status"] == "open"
+
+    override_response = await client.post(
+        f"/api/v1/intelligence/{book.id}/world-building/canon-overrides",
+        headers=headers,
+        json={
+            "canonical_name": "Sofya Semyonovna",
+            "aliases": ["Sonia", "Sonya"],
+            "entity_type": "character",
+            "notes": "Merge these names in world gap detection.",
+        },
+    )
+    assert override_response.status_code == 200
+    assert override_response.json()["canonical_name"] == "Sofya Semyonovna"
+
+    listed_overrides = await client.get(
+        f"/api/v1/intelligence/{book.id}/world-building/canon-overrides",
+        headers=headers,
+    )
+    assert listed_overrides.status_code == 200
+    assert any(item["canonical_name"] == "Sofya Semyonovna" for item in listed_overrides.json())

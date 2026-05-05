@@ -135,6 +135,11 @@ export const booksApi = {
     ),
   getReadability: (id: string, text: string) =>
     apiClient.post<ReadabilityMetrics>(`/books/${id}/manuscript/readability`, { text }).then(r => r.data),
+  processCover: (id: string) =>
+    apiClient.post<Book>(`/books/${id}/process-cover`).then(r => {
+      invalidateBookCache(id)
+      return r.data
+    }),
   getEvents: (id: string) =>
     cachedGet(bookCacheKey(id, "events"), 20 * 1000, () =>
       apiClient.get<BookEvents>(`/books/${id}/events`).then(r => r.data)

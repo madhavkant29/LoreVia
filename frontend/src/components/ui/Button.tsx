@@ -7,22 +7,22 @@ interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const variants = {
-  primary:   "bg-slate-900 text-white border border-slate-900 hover:bg-slate-800 hover:border-slate-800 dark:bg-white dark:text-slate-900 dark:border-white dark:hover:bg-slate-100 dark:hover:border-slate-100",
-  secondary: "bg-white text-slate-900 border border-slate-200 hover:bg-slate-50 hover:border-slate-300 dark:bg-slate-800 dark:text-white dark:border-slate-700 dark:hover:bg-slate-700 dark:hover:border-slate-600",
-  ghost:     "text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800",
+  primary:   "border border-transparent bg-[rgb(var(--accent))] text-white shadow-[0_18px_40px_-24px_rgba(var(--accent),0.72)] hover:translate-y-[-1px] hover:opacity-95",
+  secondary: "border border-[rgba(var(--border),0.9)] bg-white/80 text-[rgb(var(--foreground))] hover:translate-y-[-1px] hover:bg-white dark:bg-white/5 dark:hover:bg-white/10",
+  ghost:     "text-[rgb(var(--muted-foreground))] hover:text-[rgb(var(--foreground))] hover:bg-[rgba(var(--foreground),0.05)]",
   danger:    "bg-red-600 text-white border border-red-600 hover:bg-red-700 hover:border-red-700",
 }
 const sizes = {
-  sm: "px-3 py-1.5 text-xs rounded-md",
-  md: "px-4 py-2 text-sm rounded-md",
-  lg: "px-6 py-2.5 text-base rounded-lg",
+  sm: "px-3 py-2 text-xs rounded-xl",
+  md: "px-4 py-2.5 text-sm rounded-xl",
+  lg: "px-6 py-3 text-base rounded-2xl",
 }
 
 export function Button({ variant = "primary", size = "md", className, children, ...props }: Props) {
   return (
     <button
       className={cn(
-        "font-medium transition-colors duration-150 ease-out disabled:opacity-50 disabled:cursor-not-allowed",
+        "font-medium transition-all duration-150 ease-out disabled:cursor-not-allowed disabled:opacity-50",
         variants[variant], sizes[size], className
       )}
       {...props}

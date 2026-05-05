@@ -91,6 +91,7 @@ def build_ingestion_progress_state(
     chapter_number: int | None = None,
     chapter_title: str | None = None,
     last_error: str | None = None,
+    parser_diagnostics: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     now = datetime.now(UTC)
     completed = max(0, completed_chapters)
@@ -120,6 +121,8 @@ def build_ingestion_progress_state(
         payload["last_chapter_title"] = " ".join(str(chapter_title).split()).strip()
     if last_error:
         payload["last_error"] = " ".join(str(last_error).split()).strip()
+    if parser_diagnostics:
+        payload["parser_diagnostics"] = parser_diagnostics
     return payload
 
 
@@ -147,6 +150,15 @@ def _current_processing_progress(book: Book) -> tuple[int, int | None]:
     return completed_chapters, total_chapters
 
 
+def current_parser_diagnostics(book: Book) -> dict[str, Any] | None:
+    workspace = normalize_writer_workspace(book.writer_workspace if isinstance(book.writer_workspace, dict) else None)
+    processing = workspace.get("processing") if isinstance(workspace, dict) else None
+    if not isinstance(processing, dict):
+        return None
+    diagnostics = processing.get("parser_diagnostics")
+    return diagnostics if isinstance(diagnostics, dict) else None
+
+
 def update_book_processing_state(
     book: Book,
     *,
@@ -159,8 +171,10 @@ def update_book_processing_state(
     chapter_number: int | None = None,
     chapter_title: str | None = None,
     last_error: str | None = None,
+    parser_diagnostics: dict[str, Any] | None = None,
 ) -> dict:
     processing_started_at = started_at or get_processing_started_at(book) or datetime.now(UTC)
+    effective_parser_diagnostics = parser_diagnostics if parser_diagnostics is not None else current_parser_diagnostics(book)
     processing_state = build_ingestion_progress_state(
         status=status,
         stage=stage,
@@ -171,6 +185,7 @@ def update_book_processing_state(
         chapter_number=chapter_number,
         chapter_title=chapter_title,
         last_error=last_error,
+        parser_diagnostics=effective_parser_diagnostics,
     )
     return build_writer_workspace_with_processing(book, processing_state)
 
@@ -206,6 +221,7 @@ async def mark_book_processing_cancelled(
         chapter_number=chapter_number,
         chapter_title=chapter_title,
         last_error=last_error or f"Book was removed while processing at {stage} stage.",
+        parser_diagnostics=current_parser_diagnostics(book),
     )
     await db.commit()
 

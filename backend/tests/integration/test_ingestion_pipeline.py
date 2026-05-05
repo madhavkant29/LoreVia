@@ -102,7 +102,10 @@ async def test_upload_pipeline_stages_and_processes_multiple_chapters(client, db
     monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_chapter_task", _ChapterTask())
     monkeypatch.setattr("app.workers.tasks.analysis_tasks.analyse_chapter_task", _AnalysisTask())
     monkeypatch.setattr("app.workers.consumers.extraction_consumer.download_book", lambda key: b"%PDF-1.4 mock")
-    monkeypatch.setattr("app.parsers.pdf_parser.parse_pdf", lambda raw, *, split_large_chapters=True: chapters)
+    monkeypatch.setattr(
+        "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
+        lambda raw, *, split_large_chapters=True: (chapters, {"source": "pdf", "chapter_count": len(chapters)}),
+    )
     monkeypatch.setattr("app.parsers.pdf_parser.extract_first_page_cover", lambda raw: None)
     monkeypatch.setattr("app.workers.consumers.extraction_consumer.extract_characters_and_relationships", _fake_extract)
     monkeypatch.setattr("app.workers.consumers.extraction_consumer.embed_batch", _fake_embed)
@@ -146,6 +149,7 @@ async def test_upload_pipeline_stages_and_processes_multiple_chapters(client, db
     assert processing_state["chapters_total"] == 3
     assert processing_state["chapters_completed"] == 0
     assert processing_state["progress_pct"] == 0.0
+    assert processing_state["parser_diagnostics"]["source"] == "pdf"
 
     for chapter_data in chapters:
         await _process_chapter(db, book, chapter_data, queue_wait_ms=4)
@@ -162,6 +166,7 @@ async def test_upload_pipeline_stages_and_processes_multiple_chapters(client, db
     assert final_processing_state["chapters_total"] == 3
     assert final_processing_state["progress_pct"] == 100.0
     assert final_processing_state["eta_seconds"] == 0
+    assert final_processing_state["parser_diagnostics"]["chapter_count"] == 3
     assert all(chapter.processed is True for chapter in processed_chapters)
     assert captured_analysis_tasks
     assert captured_analysis_tasks[0]["args"][2] == "One"
@@ -212,7 +217,10 @@ async def test_upload_pipeline_continues_when_cover_upload_fails(client, db, aut
     monkeypatch.setattr("app.api.v1.routes.books.process_book_task", _ProcessBookTask())
     monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_chapter_task", _ChapterTask())
     monkeypatch.setattr("app.workers.consumers.extraction_consumer.download_book", lambda key: b"%PDF-1.4 mock")
-    monkeypatch.setattr("app.parsers.pdf_parser.parse_pdf", lambda raw, *, split_large_chapters=True: chapters)
+    monkeypatch.setattr(
+        "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
+        lambda raw, *, split_large_chapters=True: (chapters, {"source": "pdf", "chapter_count": len(chapters)}),
+    )
     monkeypatch.setattr("app.parsers.pdf_parser.extract_first_page_cover", lambda raw: (b"cover-bytes", "image/png"))
     monkeypatch.setattr("app.workers.consumers.extraction_consumer.upload_binary", _raise_permission_error)
     monkeypatch.setattr("app.workers.consumers.extraction_consumer.extract_characters_and_relationships", _fake_extract)
@@ -272,9 +280,9 @@ async def test_upload_pipeline_preserves_chapter_numbers_when_requested(client, 
 
     def _fake_parse_pdf(raw: bytes, *, split_large_chapters: bool = True):
         parse_calls.append(split_large_chapters)
-        return parsed_chapters
+        return parsed_chapters, {"source": "pdf", "chapter_count": len(parsed_chapters)}
 
-    monkeypatch.setattr("app.parsers.pdf_parser.parse_pdf", _fake_parse_pdf)
+    monkeypatch.setattr("app.parsers.pdf_parser.parse_pdf_with_diagnostics", _fake_parse_pdf)
     monkeypatch.setattr("app.parsers.pdf_parser.extract_first_page_cover", lambda raw: None)
 
     response = await client.post(
@@ -330,7 +338,10 @@ async def test_upload_pipeline_stops_when_book_is_hidden_mid_processing(client, 
     monkeypatch.setattr("app.api.v1.routes.books.process_book_task", _ProcessBookTask())
     monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_chapter_task", _ChapterTask())
     monkeypatch.setattr("app.workers.consumers.extraction_consumer.download_book", lambda key: b"%PDF-1.4 mock")
-    monkeypatch.setattr("app.parsers.pdf_parser.parse_pdf", lambda raw, *, split_large_chapters=True: chapters)
+    monkeypatch.setattr(
+        "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
+        lambda raw, *, split_large_chapters=True: (chapters, {"source": "pdf", "chapter_count": len(chapters)}),
+    )
     monkeypatch.setattr("app.parsers.pdf_parser.extract_first_page_cover", lambda raw: None)
     monkeypatch.setattr("app.workers.consumers.extraction_consumer.is_book_hidden", _fake_is_book_hidden)
 

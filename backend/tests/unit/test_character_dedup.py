@@ -5,7 +5,7 @@ from sqlalchemy import select
 
 from app.engine.character.entity_filters import VISIBILITY_THRESHOLD, character_visibility_score
 from app.models.book import Book, Chapter
-from app.models.character import Character, CharacterState
+from app.models.character import Character, CharacterState, CharacterVoiceProfile
 from app.models.intelligence import ChapterSummary, CharacterRelationship, PlotThread, QuoteEntry, WikiEntry
 from app.models.user import User
 from app.utils.character_utils import description_similarity, merge_characters, name_similarity
@@ -108,6 +108,28 @@ async def test_merge_characters_reparents_related_rows(db):
     db.add_all([primary, secondary])
     await db.flush()
 
+    db.add(
+        CharacterVoiceProfile(
+            book_id=book.id,
+            character_id=primary.id,
+            sample_dialogue_count=3,
+            sample_word_count=24,
+            dominant_markers={"tone": "calm"},
+            signature_phrases=["Let's keep moving."],
+        )
+    )
+    db.add(
+        CharacterVoiceProfile(
+            book_id=book.id,
+            character_id=secondary.id,
+            sample_dialogue_count=2,
+            sample_word_count=19,
+            avg_sentence_length=11,
+            dominant_markers={"tone": "wry"},
+            signature_phrases=["Trust me."],
+        )
+    )
+
     db.add(CharacterState(character_id=secondary.id, at_chapter=4, trait_snapshot={"hair": {"value": "black", "confidence": 0.9}}))
     db.add(
         CharacterRelationship(
@@ -158,9 +180,18 @@ async def test_merge_characters_reparents_related_rows(db):
     assert "Mister Oshino" in (merged.aliases or [])
     assert "Mr. Oshino" in (merged.aliases or [])
     assert merged.mention_count == 5
+    await db.refresh(merged, ["voice_profile"])
+    assert merged.voice_profile is not None
+    assert merged.voice_profile.sample_dialogue_count == 5
+    assert merged.voice_profile.sample_word_count == 43
+    assert merged.voice_profile.avg_sentence_length == 11
+    assert merged.voice_profile.dominant_markers == {"tone": "calm"}
+    assert merged.voice_profile.signature_phrases == ["Let's keep moving."]
 
     states = (await db.execute(select(CharacterState).where(CharacterState.character_id == merged.id))).scalars().all()
     assert len(states) == 1
+    voice_profiles = (await db.execute(select(CharacterVoiceProfile).where(CharacterVoiceProfile.book_id == book.id))).scalars().all()
+    assert len(voice_profiles) == 1
 
     relationships = (
         await db.execute(select(CharacterRelationship).where(CharacterRelationship.book_id == book.id))

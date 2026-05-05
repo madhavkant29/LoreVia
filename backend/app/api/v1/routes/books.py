@@ -148,6 +148,7 @@ from app.utils.book_utils import (
     list_book_notes,
     list_chapter_consistency_reports,
     list_chapter_versions,
+    list_novel_scenes,
     list_obsidian_note_relations,
     list_obsidian_notes,
     list_user_notes,
@@ -1279,12 +1280,18 @@ async def export_manuscript(
 
     workspace = build_writer_workspace_payload(book)
     front_matter = workspace.get("manuscript_front_matter") if isinstance(workspace, dict) else None
+    manuscript_scenes = [
+        scene
+        for scene in await list_novel_scenes(db, book=book)
+        if scene.get("source") == "manual" and scene.get("status") != "archived"
+    ]
 
     filename_base = "".join(ch for ch in (book.title or "lorevia") if ch.isalnum() or ch in {" ", "-", "_"}).strip().replace(" ", "-") or "lorevia"
     if format == "pdf":
         raw = manuscript_pdf_compiled(
             title=book.title or "LoreVia Manuscript",
             chapters=chapters,
+            scenes=manuscript_scenes,
             preset=preset,
             front_matter=cast(dict | None, front_matter),
         )
@@ -1297,6 +1304,7 @@ async def export_manuscript(
         raw = manuscript_epub_compiled(
             title=book.title or "LoreVia Manuscript",
             chapters=chapters,
+            scenes=manuscript_scenes,
             preset=preset,
             front_matter=cast(dict | None, front_matter),
         )
@@ -1306,7 +1314,6 @@ async def export_manuscript(
             headers={"Content-Disposition": f'attachment; filename="{filename_base}-manuscript.epub"'},
         )
     if format == "obsidian":
-        scenes = await list_novel_scenes(db, book=book)
         notes = await list_obsidian_notes(
             db,
             book=book,
@@ -1316,7 +1323,7 @@ async def export_manuscript(
         raw = manuscript_obsidian_vault_zip(
             title=book.title or "LoreVia Manuscript",
             chapters=chapters,
-            scenes=scenes,
+            scenes=manuscript_scenes,
             notes=notes,
             front_matter=cast(dict | None, front_matter),
         )
@@ -1329,6 +1336,7 @@ async def export_manuscript(
     raw = manuscript_docx(
         title=book.title or "LoreVia Manuscript",
         chapters=chapters,
+        scenes=manuscript_scenes,
         preset=preset,
         front_matter=cast(dict | None, front_matter),
     )

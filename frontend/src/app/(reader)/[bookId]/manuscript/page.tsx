@@ -3,7 +3,7 @@
 import type { CSSProperties, ReactNode } from "react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
-import { useParams } from "next/navigation"
+import { useParams, useRouter, useSearchParams } from "next/navigation"
 
 import { booksApi } from "@/lib/api/books"
 import { intelligenceApi } from "@/lib/api/intelligence"
@@ -11,7 +11,7 @@ import { readerApi } from "@/lib/api/reader"
 import { htmlToPlainText, renderRichTextHtml, sanitizeRichTextHtml } from "@/lib/utils/richText"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { capture } from "@/lib/analytics/posthog"
-import type { Book, BookNote, ChapterVersion, CorkboardCard, EmotionalArcOverview, ManuscriptFrontMatter, ManuscriptWorkspaceTree, NovelScene, PreWritingCheck, ReadabilityMetrics, WriterWorkspace, WritingTemplate } from "@/types/book"
+import type { Book, BookNote, ChapterVersion, ChapterVersionDetail, CorkboardCard, EmotionalArcOverview, ManuscriptFrontMatter, ManuscriptWorkspaceTree, NovelScene, PreWritingCheck, ReadabilityMetrics, WriterWorkspace, WritingTemplate } from "@/types/book"
 import type { Character } from "@/types/character"
 import type { AdvisorSuggestion, EditorialReview, EditorialReviewPassage, InlineContinuityResponse, ManuscriptSynopsis, VoiceConsistencyMatch, VoiceConsistencyReview } from "@/types/intelligence"
 import type { ChapterListResponse, PlotThread, SearchResult } from "@/types/reader"
@@ -22,6 +22,8 @@ type RightPane = "insights" | "notes" | "character"
 
 export default function ManuscriptPage() {
   const { bookId } = useParams<{ bookId: string }>()
+  const router = useRouter()
+  const searchParams = useSearchParams()
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
 
@@ -50,6 +52,7 @@ export default function ManuscriptPage() {
   const [plotThreads, setPlotThreads] = useState<PlotThread[]>([])
   const [preWritingCheck, setPreWritingCheck] = useState<PreWritingCheck | null>(null)
   const [chapterVersions, setChapterVersions] = useState<ChapterVersion[]>([])
+  const [chapterVersionDetail, setChapterVersionDetail] = useState<ChapterVersionDetail | null>(null)
   const [workspaceTree, setWorkspaceTree] = useState<ManuscriptWorkspaceTree | null>(null)
   const [sceneSearch, setSceneSearch] = useState("")
   const [collapsedSceneGroups, setCollapsedSceneGroups] = useState<Record<string, boolean>>({})
@@ -129,6 +132,7 @@ export default function ManuscriptPage() {
   const searchInputRef = useRef<HTMLInputElement | null>(null)
   const manuscriptSectionRef = useRef<HTMLDivElement | null>(null)
   const initialChapterLoadedRef = useRef<number | null>(null)
+  const handledSceneIntentRef = useRef(false)
 
   const nextChapterNumber = useMemo(() => {
     const numbers = chapterList?.chapters.map((chapter) => chapter.number) ?? []
@@ -336,6 +340,15 @@ export default function ManuscriptPage() {
     setSceneChapterDraft(selectedChapter ?? null)
   }
 
+  useEffect(() => {
+    const shouldOpenNewScene = searchParams.get("newScene") === "1"
+    if (!shouldOpenNewScene || handledSceneIntentRef.current) return
+
+    handledSceneIntentRef.current = true
+    openSceneEditor(null)
+    router.replace(`/${bookId}/manuscript`)
+  }, [bookId, router, searchParams])
+
   const saveScene = async () => {
     if (!sceneTitleDraft.trim() || !sceneBodyDraft.trim()) return
     setSceneSaving(true)
@@ -363,10 +376,11 @@ export default function ManuscriptPage() {
     setStatusMessage(`Deleted scene "${scene.title}".`)
   }
 
-  const insertSceneIntoDraft = (scene: NovelScene) => {
+  const insertSceneIntoDraft = async (scene: NovelScene) => {
+    const insertion = await booksApi.getSceneInsertion(bookId, scene.id, activeChapterNumber, "end")
     const separator = text.trim() ? "\n\n#\n\n" : ""
-    const nextText = `${text}${separator}${scene.body}`.trim()
-    const nextHtml = textToHtml(nextText)
+    const nextText = `${text}${separator}${insertion.body}`.trim()
+    const nextHtml = insertion.html_body || textToHtml(nextText)
     setText(nextText)
     setHtml(nextHtml)
     setBookDrafts((current) => ({
@@ -374,7 +388,7 @@ export default function ManuscriptPage() {
       [activeChapterNumber]: { title: chapterTitle, text: nextText, html: nextHtml },
     }))
     markDraftDirty(activeChapterNumber)
-    setStatusMessage(`Inserted scene "${scene.title}" into chapter ${activeChapterNumber}.`)
+    setStatusMessage(`Inserted scene "${insertion.title}" into chapter ${activeChapterNumber}.`)
   }
 
   const createSnapshot = async () => {
@@ -412,6 +426,15 @@ export default function ManuscriptPage() {
       setStatusMessage(`Restored chapter ${restored.chapter_number} from snapshot.`)
     } finally {
       setRestoringVersionId(null)
+    }
+  }
+
+  const previewSnapshot = async (versionId: string) => {
+    try {
+      const detail = await booksApi.getChapterVersionDetail(bookId, versionId)
+      setChapterVersionDetail(detail)
+    } catch {
+      setStatusMessage("Could not load that snapshot preview.")
     }
   }
 
@@ -1397,7 +1420,7 @@ export default function ManuscriptPage() {
                   onClick={() => openSceneEditor(null)}
                   className={`rounded-full px-3 py-1.5 text-xs ${isDark ? "bg-emerald-500/15 text-emerald-200" : "bg-emerald-50 text-emerald-700"}`}
                 >
-                  New scene
+                  New standalone scene
                 </button>
               </div>
             </div>
@@ -1457,7 +1480,7 @@ export default function ManuscriptPage() {
                                   <p className={`mt-1 text-[11px] ${isDark ? "text-slate-500" : "text-stone-500"}`}>{scene.path}</p>
                                   {scene.description ? <p className={`mt-2 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>{scene.description}</p> : null}
                                 </div>
-                                <button onClick={() => insertSceneIntoDraft(scene)} className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${isDark ? "bg-emerald-500/15 text-emerald-200" : "bg-emerald-50 text-emerald-700"}`}>Insert</button>
+                                <button onClick={() => void insertSceneIntoDraft(scene)} className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${isDark ? "bg-emerald-500/15 text-emerald-200" : "bg-emerald-50 text-emerald-700"}`}>Insert</button>
                               </div>
                               <div className="mt-3 flex flex-wrap gap-2">
                                 <button onClick={() => openSceneEditor(scene)} className={`rounded-full px-2.5 py-1 text-[11px] ${isDark ? "bg-white/10 text-slate-200" : "bg-white text-stone-700"}`}>Edit</button>
@@ -1508,7 +1531,18 @@ export default function ManuscriptPage() {
                         >
                           {restoringVersionId === version.id ? "Restoring..." : "Restore"}
                         </button>
+                        <button
+                          onClick={() => void previewSnapshot(version.id)}
+                          className={`rounded-full px-3 py-1.5 text-[11px] font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}
+                        >
+                          Preview
+                        </button>
                       </div>
+                      {chapterVersionDetail?.id === version.id ? (
+                        <div className={`mt-3 max-h-44 overflow-y-auto rounded-[0.8rem] border px-3 py-2 text-xs leading-5 ${isDark ? "border-white/10 bg-black/30 text-slate-300" : "border-stone-200 bg-white text-stone-700"}`}>
+                          {chapterVersionDetail.text || "No text stored in this snapshot."}
+                        </div>
+                      ) : null}
                     </div>
                   ))}
                   {chapterVersions.length === 0 ? <p className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>No snapshots saved for this chapter yet.</p> : null}
@@ -2748,8 +2782,8 @@ export default function ManuscriptPage() {
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-emerald-300" : "text-emerald-700"}`}>Scene workspace</p>
-                  <h3 className="mt-2 text-2xl font-semibold">{editingScene ? "Edit scene" : "New scene"}</h3>
-                  <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>Scenes stay separate from notes and can stay unassigned until you decide where to use them.</p>
+                  <h3 className="mt-2 text-2xl font-semibold">{editingScene ? "Edit standalone scene" : "New standalone scene"}</h3>
+                  <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>Scenes are independent writing pieces. You can leave them unassigned, or tag them to a chapter later without turning them into chapter content.</p>
                 </div>
                 <button onClick={closeSceneEditor} className={`rounded-full px-3 py-1.5 text-sm ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}>Close</button>
               </div>
@@ -2764,7 +2798,7 @@ export default function ManuscriptPage() {
                   />
                 </label>
                 <label className="text-sm">
-                  <span className={`mb-2 block text-xs font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Chapter mapping</span>
+                  <span className={`mb-2 block text-xs font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Optional chapter tag</span>
                   <select
                     value={sceneChapterDraft ?? ""}
                     onChange={(event) => setSceneChapterDraft(event.target.value ? Number(event.target.value) : null)}

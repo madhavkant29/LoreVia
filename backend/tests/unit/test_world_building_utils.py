@@ -1,15 +1,19 @@
 import pytest
 
+from app.engine.world.extractor import extract_world_elements_from_text
 from app.models.book import Book
-from app.models.intelligence import WorldElement
+from app.models.character import Character
+from app.models.intelligence import WorldCanonicalIdentity, WorldElement
 from app.models.user import User
 from app.utils.world_building_utils import (
+    _claims_contradict,
     build_world_logic_response,
     classify_world_intent,
     create_world_building_documents,
     detect_integration_analysis,
     detect_world_gaps,
     generate_wiki_from_manuscript,
+    save_canon_override,
 )
 
 
@@ -133,3 +137,213 @@ async def test_generate_wiki_and_world_logic_response(db, monkeypatch):
     assert logic["mode"] == "story_integration"
     assert logic["simulation_steps"]
     assert any(citation["name"] == "Aurelia" for citation in logic["citations"])
+
+
+def test_extract_world_elements_filters_common_sentence_starters_and_title_fragments():
+    text = (
+        "This manuscript is a living atlas. They had almost no rest.\n"
+        "Crime and Punishment is set in Saint Petersburg.\n"
+        "Svidrigailov walks the canals at dawn."
+    )
+
+    names = {item["name"] for item in extract_world_elements_from_text(text)}
+
+    assert "This" not in names
+    assert "They" not in names
+    assert "Crime" not in names
+    assert "Punishment" not in names
+    assert "Saint Petersburg" in names
+    assert "Svidrigailov" in names
+
+
+def test_extract_world_elements_emits_exact_sentence_and_match_offsets():
+    text = "Northreach is not a frozen capital. Saint Petersburg glows at dusk."
+
+    items = extract_world_elements_from_text(text)
+    northreach = next(item for item in items if item["name"] == "Northreach")
+    provenance = northreach["provenance"]
+
+    assert provenance["excerpt"] == "Northreach is not a frozen capital."
+    assert provenance["match_start"] == 0
+    assert provenance["match_end"] == len("Northreach")
+    assert provenance["sentence_start"] == 0
+    assert provenance["sentence_end"] == len("Northreach is not a frozen capital.")
+
+
+def test_extract_world_elements_marks_negated_claims():
+    text = "Northreach is not a frozen capital."
+
+    items = extract_world_elements_from_text(text)
+    northreach = next(item for item in items if item["name"] == "Northreach")
+    claims_by_attribute = {claim["attribute"]: claim for claim in northreach["claims"]}
+
+    assert claims_by_attribute["occupation"]["value"] == "frozen capital"
+    assert claims_by_attribute["occupation"]["negated"] is True
+    assert claims_by_attribute["climate"]["value"] == "frozen"
+    assert claims_by_attribute["climate"]["negated"] is True
+
+
+def test_claim_contradiction_detects_negation_flip():
+    assert _claims_contradict(
+        {"attribute": "occupation", "value": "doctor", "confidence": 0.8, "negated": False},
+        {"attribute": "occupation", "value": "doctor", "confidence": 0.8, "negated": True},
+    )
+
+
+@pytest.mark.asyncio
+async def test_detect_world_gaps_matches_transliteration_variants_without_false_missing_items(db, monkeypatch):
+    user = User(email="world-alias@lorevia.app", username="worldalias", password_hash="hash")
+    db.add(user)
+    await db.flush()
+
+    book = Book(user_id=user.id, title="Alias Test", format="pdf", s3_key="world/alias.pdf", status="ready")
+    db.add(book)
+    await db.flush()
+
+    db.add(
+        WorldElement(
+            book_id=book.id,
+            source_scope="story",
+            element_type="culture",
+            name="Dounia",
+            description="Dounia pleads with Raskolnikov in a tense family exchange.",
+            usage_count=3,
+            analysis_metadata={"chapter_number": 2, "chapter_title": "Family Visit"},
+        )
+    )
+    await db.flush()
+
+    stored: dict[str, bytes] = {}
+
+    def fake_upload_binary(key: str, raw: bytes, content_type: str | None = None) -> str:
+        stored[key] = raw
+        return key
+
+    def fake_download_book(key: str) -> bytes:
+        return stored[key]
+
+    monkeypatch.setattr("app.core.storage.upload_binary", fake_upload_binary)
+    monkeypatch.setattr("app.core.storage.download_book", fake_download_book)
+    monkeypatch.setattr("app.utils.world_building_utils.upload_binary", fake_upload_binary)
+    monkeypatch.setattr("app.utils.world_building_utils.download_book", fake_download_book)
+
+    await create_world_building_documents(
+        db,
+        book=book,
+        user_id=user.id,
+        documents=[
+            {
+                "title": "World Bible",
+                "source_name": "world-bible.txt",
+                "text": "Dunya is Raskolnikov's sister and a central family obligation in the novel.",
+                "html": None,
+            }
+        ],
+    )
+    await db.commit()
+
+    gap_payload = await detect_world_gaps(db, book)
+
+    missing_in_story = gap_payload["gap_categories"].get("missing_in_story", [])
+    missing_in_world = gap_payload["gap_categories"].get("missing_in_world", [])
+
+    assert not any(item["title"].startswith("Dunya is missing") for item in missing_in_story)
+    assert not any(item["title"].startswith("Dounia appears") for item in missing_in_world)
+
+
+@pytest.mark.asyncio
+async def test_detect_world_gaps_uses_character_aliases_as_canonical_identity(db, monkeypatch):
+    stored: dict[str, bytes] = {}
+
+    def fake_upload_binary(key: str, raw: bytes, content_type: str | None = None) -> str:
+        stored[key] = raw
+        return key
+
+    def fake_download_book(key: str) -> bytes:
+        return stored[key]
+
+    monkeypatch.setattr("app.core.storage.upload_binary", fake_upload_binary)
+    monkeypatch.setattr("app.core.storage.download_book", fake_download_book)
+    monkeypatch.setattr("app.utils.world_building_utils.upload_binary", fake_upload_binary)
+    monkeypatch.setattr("app.utils.world_building_utils.download_book", fake_download_book)
+
+    user = User(email="world-character@lorevia.app", username="worldcharacter", password_hash="hash")
+    db.add(user)
+    await db.flush()
+    book = Book(user_id=user.id, title="Character Alias Test", format="pdf", s3_key="world/character-alias.pdf", status="ready")
+    db.add(book)
+    await db.flush()
+
+    db.add(
+        Character(
+            book_id=book.id,
+            name="Rodion Raskolnikov",
+            aliases=["Rodya", "Rodion Romanovitch"],
+            first_chapter=1,
+            mention_count=8,
+            arc_summary="Rodion struggles with guilt after a violent act.",
+        )
+    )
+    db.add(
+        WorldElement(
+            book_id=book.id,
+            source_scope="story",
+            element_type="character",
+            name="Rodya",
+            description="Rodya wrestles with the consequences of his crime.",
+            usage_count=4,
+            analysis_metadata={"chapter_number": 1, "chapter_title": "Fever Dream", "presence_score": 0.8},
+        )
+    )
+    await db.flush()
+
+    await create_world_building_documents(
+        db,
+        book=book,
+        user_id=user.id,
+        documents=[
+            {
+                "title": "World Bible",
+                "source_name": "world-bible.txt",
+                "text": "Rodion Romanovitch is a former law student consumed by pride and guilt.",
+                "html": None,
+            }
+        ],
+    )
+    await db.commit()
+
+    gap_payload = await detect_world_gaps(db, book)
+    missing_in_story = gap_payload["gap_categories"].get("missing_in_story", [])
+    missing_in_world = gap_payload["gap_categories"].get("missing_in_world", [])
+
+    assert not any("Rodion" in item["title"] for item in missing_in_story)
+    assert not any("Rodya" in item["title"] for item in missing_in_world)
+
+
+@pytest.mark.asyncio
+async def test_save_canon_override_persists_alias_merges(db):
+    user = User(email="world-override@lorevia.app", username="worldoverride", password_hash="hash")
+    db.add(user)
+    await db.flush()
+    book = Book(user_id=user.id, title="Override Test", format="pdf", s3_key="world/override.pdf", status="ready")
+    db.add(book)
+    await db.flush()
+
+    identity = await save_canon_override(
+        db,
+        user_id=user.id,
+        book=book,
+        canonical_name="Sofya Semyonovna",
+        aliases=["Sonia", "Sonya"],
+        entity_type="character",
+        notes="Use the full canonical form in world docs.",
+    )
+    await db.commit()
+
+    stored_identity = await db.get(WorldCanonicalIdentity, identity.id)
+    assert stored_identity is not None
+    assert stored_identity.canonical_name == "Sofya Semyonovna"
+    assert stored_identity.entity_type == "character"
+    assert "Sonia" in (stored_identity.aliases or [])
+    assert "Sonya" in (stored_identity.aliases or [])
+    assert stored_identity.source == "author_override"

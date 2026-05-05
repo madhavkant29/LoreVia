@@ -16,6 +16,7 @@ from app.utils.ingestion_utils import (
     is_retryable_processing_error,
     mark_book_processing_cancelled,
     regroup_prose_chapters_for_reading,
+    update_book_processing_state,
 )
 
 
@@ -75,6 +76,37 @@ def test_build_ingestion_progress_state_computes_progress_and_eta():
     assert payload["eta_seconds"] is not None
     assert payload["started_at"].endswith("+00:00")
     assert payload["updated_at"].endswith("+00:00")
+
+
+def test_update_book_processing_state_preserves_parser_diagnostics():
+    book = Book(
+        user_id=uuid.uuid4(),
+        title="Diagnostics Story",
+        format="pdf",
+        s3_key="books/diagnostics.pdf",
+    )
+    started_at = datetime.now(UTC) - timedelta(minutes=2)
+    book.writer_workspace = {
+        "processing": build_ingestion_progress_state(
+            status="processing",
+            stage="parsed",
+            total_chapters=3,
+            completed_chapters=0,
+            started_at=started_at,
+            parser_diagnostics={"source": "pdf", "chapter_count": 3},
+        )
+    }
+
+    workspace = update_book_processing_state(
+        book,
+        status="processing",
+        stage="chapter_complete",
+        total_chapters=3,
+        completed_chapters=1,
+        started_at=started_at,
+    )
+
+    assert workspace["processing"]["parser_diagnostics"]["chapter_count"] == 3
 
 
 @pytest.mark.asyncio

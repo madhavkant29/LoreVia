@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import uuid
 from collections import defaultdict
 from datetime import UTC, datetime
@@ -10,18 +11,28 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.storage import download_book, upload_binary
+from app.engine.character.deduplicator import names_equivalent
 from app.engine.world.dependency_graph import build_dependency_graph
-from app.engine.world.extractor import extract_world_elements_from_text, infer_element_type
+from app.engine.world.extractor import extract_claims_from_text, extract_world_elements_from_text, infer_element_type
 from app.engine.world.gap_detector import detect_consistency_flags
 from app.models.book import Book, Chapter, SeriesBook
 from app.models.character import Character
-from app.models.intelligence import ChapterSummary, WikiEntry, WorldBuildingDocument, WorldElement, WorldGapAnalysis, WorldNote
+from app.models.intelligence import (
+    ChapterSummary,
+    WikiEntry,
+    WorldBuildingDocument,
+    WorldCanonicalIdentity,
+    WorldElement,
+    WorldGapAnalysis,
+    WorldNote,
+)
 from app.utils.book_utils import (
     clean_manuscript_html,
     deserialize_manuscript_content,
     parse_import_upload,
     serialize_manuscript_content,
 )
+from app.utils.character_utils import name_similarity, normalize_character_name
 
 GAP_GROUP_META: dict[str, tuple[str, str]] = {
     "story_conflicts": (
@@ -45,6 +56,9 @@ GAP_GROUP_META: dict[str, tuple[str, str]] = {
         "Lore only appears late or too lightly in the manuscript to feel grounded.",
     ),
 }
+CANON_OVERRIDE_NOTE_TYPE = "canon_override"
+WORLD_KEEPABLE_TYPES = {"character", "place", "organization", "object", "event", "concept", "era"}
+WORLD_HIGH_SIGNAL_TYPES = {"character", "place", "organization", "object", "event"}
 STOPWORDS = {
     "the",
     "a",
@@ -78,6 +92,289 @@ def classify_world_intent(query: str | None) -> str:
     if any(token in text for token in ("missing", "gap", "incomplete", "contradiction", "consistency", "worldbuild")):
         return "gap_detection"
     return "gap_detection"
+
+
+async def _load_character_registry(db: AsyncSession, book: Book) -> list[dict]:
+    rows = (
+        await db.execute(
+            select(
+                Character.id,
+                Character.name,
+                Character.aliases,
+                Character.role,
+                Character.first_chapter,
+                Character.arc_summary,
+                Character.mention_count,
+            )
+            .where(Character.book_id == book.id)
+            .order_by(Character.mention_count.desc(), Character.name.asc())
+        )
+    ).all()
+    registry: list[dict] = []
+    for character_id, name, aliases, role, first_chapter, arc_summary, mention_count in rows:
+        registry.append(
+            {
+                "character_id": str(character_id),
+                "canonical_name": name,
+                "aliases": [alias for alias in (aliases or []) if alias],
+                "role": role,
+                "first_chapter": first_chapter,
+                "arc_summary": arc_summary,
+                "mention_count": int(mention_count or 0),
+                "entity_type": "character",
+            }
+        )
+    return registry
+
+
+async def _load_canon_override_lookup(db: AsyncSession, book: Book) -> dict[str, dict]:
+    identity_rows = (
+        await db.execute(
+            select(WorldCanonicalIdentity)
+            .where(WorldCanonicalIdentity.book_id == book.id)
+            .order_by(WorldCanonicalIdentity.updated_at.desc(), WorldCanonicalIdentity.created_at.desc())
+        )
+    ).scalars().all()
+    lookup: dict[str, dict] = {}
+    for identity in identity_rows:
+        canonical_name = " ".join(str(identity.canonical_name or "").split()).strip()
+        if not canonical_name:
+            continue
+        aliases = [
+            " ".join(str(alias or "").split()).strip()
+            for alias in (identity.aliases or [])
+            if " ".join(str(alias or "").split()).strip()
+        ]
+        override = {
+            "canonical_name": canonical_name,
+            "aliases": aliases,
+            "entity_type": " ".join(str(identity.entity_type or "").split()).strip() or None,
+            "identity_id": str(identity.id),
+            "notes": " ".join(str(identity.notes or "").split()).strip() or None,
+            "source": identity.source,
+            "confidence": float(identity.confidence or 0.0),
+        }
+        for candidate in [canonical_name, *aliases]:
+            key = _normalize_world_name(candidate)
+            if key:
+                lookup[key] = override
+
+    rows = (
+        await db.execute(
+            select(WorldNote)
+            .where(WorldNote.book_id == book.id, WorldNote.note_type == CANON_OVERRIDE_NOTE_TYPE)
+            .order_by(WorldNote.updated_at.desc(), WorldNote.created_at.desc())
+        )
+    ).scalars().all()
+    for note in rows:
+        try:
+            payload = json.loads(note.body or "{}")
+        except Exception:
+            continue
+        canonical_name = " ".join(str(payload.get("canonical_name") or note.title or "").split()).strip()
+        if not canonical_name:
+            continue
+        aliases = [
+            " ".join(str(alias or "").split()).strip()
+            for alias in (payload.get("aliases") or [])
+            if " ".join(str(alias or "").split()).strip()
+        ]
+        override = {
+            "canonical_name": canonical_name,
+            "aliases": aliases,
+            "entity_type": " ".join(str(payload.get("entity_type") or note.context_label or "").split()).strip() or None,
+            "note_id": str(note.id),
+            "notes": " ".join(str(payload.get("notes") or "").split()).strip() or None,
+            "source": "legacy_note",
+            "confidence": 0.98,
+        }
+        for candidate in [canonical_name, *aliases]:
+            key = _normalize_world_name(candidate)
+            if key and key not in lookup:
+                lookup[key] = override
+    return lookup
+
+
+def _dedupe_strings(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        cleaned = " ".join((value or "").split()).strip()
+        if not cleaned:
+            continue
+        key = cleaned.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(cleaned)
+    return result
+
+
+def _candidate_priority_score(candidate: dict) -> float:
+    description = str(candidate.get("description") or "").strip()
+    confidence = float(candidate.get("confidence") or 0.0)
+    usage_count = int(candidate.get("usage_count") or 0)
+    return confidence + min(0.25, usage_count * 0.05) + min(0.2, len(description) / 500.0)
+
+
+def _normalize_candidate_record(candidate: dict) -> dict:
+    canonical_name = " ".join(str(candidate.get("canonical_name") or candidate.get("name") or "").split()).strip()
+    name = " ".join(str(candidate.get("name") or canonical_name).split()).strip()
+    element_type = " ".join(str(candidate.get("element_type") or infer_element_type(name, str(candidate.get("description") or ""))).split()).strip().lower() or "concept"
+    aliases = _dedupe_strings([name, *[str(alias) for alias in (candidate.get("aliases") or [])]])
+    description = " ".join(str(candidate.get("description") or "").split()).strip() or None
+    chapter_number = candidate.get("chapter_number")
+    provenance = candidate.get("provenance") if isinstance(candidate.get("provenance"), dict) else {}
+    claims = [claim for claim in (candidate.get("claims") or []) if isinstance(claim, dict)]
+    confidence = max(0.05, min(0.99, float(candidate.get("confidence") or 0.35)))
+    return {
+        "name": canonical_name or name,
+        "canonical_name": canonical_name or name,
+        "aliases": aliases,
+        "element_type": element_type,
+        "description": description,
+        "usage_count": int(candidate.get("usage_count") or 1),
+        "chapter_number": chapter_number,
+        "chapter_numbers": [chapter_number] if chapter_number else [],
+        "confidence": confidence,
+        "claims": claims,
+        "provenance": [provenance] if provenance else [],
+        "narrative_modes": [str(provenance.get("narrative_mode") or "")] if provenance else [],
+        "source_excerpt": str(provenance.get("excerpt") or description or "").strip() or None,
+        "character_id": candidate.get("character_id"),
+        "author_override": bool(candidate.get("author_override")),
+        "summary_mentions": int(candidate.get("summary_mentions") or 0),
+        "presence_score": float(candidate.get("presence_score") or 0.0),
+    }
+
+
+def _apply_character_and_override_resolution(
+    candidates: list[dict],
+    *,
+    character_registry: list[dict],
+    override_lookup: dict[str, dict],
+) -> list[dict]:
+    resolved: list[dict] = []
+    for candidate in candidates:
+        normalized = _normalize_candidate_record(candidate)
+        raw_name = normalized["name"]
+        override = _resolve_override(raw_name, normalized["aliases"], override_lookup)
+        match = _resolve_character_match(raw_name, normalized["aliases"], character_registry)
+        if override is not None:
+            normalized["canonical_name"] = override["canonical_name"]
+            normalized["name"] = override["canonical_name"]
+            normalized["aliases"] = _dedupe_strings([*normalized["aliases"], override["canonical_name"], *(override.get("aliases") or [])])
+            if override.get("entity_type"):
+                normalized["element_type"] = str(override["entity_type"]).strip().lower()
+            normalized["author_override"] = True
+            normalized["confidence"] = max(float(normalized.get("confidence") or 0.0), 0.96)
+        elif match is not None:
+            normalized["canonical_name"] = match["canonical_name"]
+            normalized["name"] = match["canonical_name"]
+            normalized["aliases"] = _dedupe_strings([*normalized["aliases"], match["canonical_name"], *(match.get("aliases") or [])])
+            normalized["element_type"] = "character"
+            normalized["character_id"] = match["character_id"]
+            normalized["confidence"] = max(float(normalized.get("confidence") or 0.0), 0.9)
+        resolved.append(normalized)
+    return _merge_canonical_candidates(resolved)
+
+
+def _resolve_override(name: str, aliases: list[str], override_lookup: dict[str, dict]) -> dict | None:
+    keys = {_normalize_world_name(name), *(_normalize_world_name(alias) for alias in aliases)}
+    keys.discard("")
+    for key in keys:
+        if key in override_lookup:
+            return override_lookup[key]
+    for override in override_lookup.values():
+        if _world_names_equivalent(name, override.get("canonical_name")):
+            return override
+    return None
+
+
+def _resolve_character_match(name: str, aliases: list[str], character_registry: list[dict]) -> dict | None:
+    best_match: dict | None = None
+    best_score = 0.0
+    for character in character_registry:
+        canonical_name = str(character.get("canonical_name") or "").strip()
+        character_aliases = [str(alias) for alias in (character.get("aliases") or []) if str(alias).strip()]
+        if not canonical_name:
+            continue
+        if not names_equivalent(name, aliases, canonical_name, character_aliases):
+            continue
+        score = max(
+            name_similarity(name, canonical_name),
+            max((name_similarity(alias, canonical_name) for alias in aliases), default=0.0),
+        )
+        if score >= best_score:
+            best_score = score
+            best_match = character
+    return best_match if best_score >= 0.74 else None
+
+
+def _merge_canonical_candidates(candidates: list[dict]) -> list[dict]:
+    merged: dict[str, dict] = {}
+    for candidate in candidates:
+        key = _normalize_world_name(candidate.get("canonical_name") or candidate.get("name") or "")
+        if not key:
+            continue
+        current = merged.get(key)
+        if current is None:
+            merged[key] = dict(candidate)
+            continue
+        current["usage_count"] = int(current.get("usage_count") or 0) + int(candidate.get("usage_count") or 0)
+        current["aliases"] = _dedupe_strings([*(current.get("aliases") or []), *(candidate.get("aliases") or [])])
+        current["chapter_numbers"] = sorted({*current.get("chapter_numbers", []), *candidate.get("chapter_numbers", [])})
+        current["summary_mentions"] = int(current.get("summary_mentions") or 0) + int(candidate.get("summary_mentions") or 0)
+        current["provenance"] = [*current.get("provenance", []), *candidate.get("provenance", [])][:8]
+        current["narrative_modes"] = _dedupe_strings([*current.get("narrative_modes", []), *candidate.get("narrative_modes", [])])
+        current["claims"] = _merge_claims(current.get("claims") or [], candidate.get("claims") or [])
+        current["confidence"] = max(float(current.get("confidence") or 0.0), float(candidate.get("confidence") or 0.0))
+        current["author_override"] = bool(current.get("author_override")) or bool(candidate.get("author_override"))
+        current["character_id"] = current.get("character_id") or candidate.get("character_id")
+        if _candidate_priority_score(candidate) > _candidate_priority_score(current):
+            current["description"] = candidate.get("description")
+            current["source_excerpt"] = candidate.get("source_excerpt")
+            current["element_type"] = candidate.get("element_type") or current.get("element_type")
+        elif not current.get("description") and candidate.get("description"):
+            current["description"] = candidate.get("description")
+            current["source_excerpt"] = candidate.get("source_excerpt")
+        current["presence_score"] = max(float(current.get("presence_score") or 0.0), float(candidate.get("presence_score") or 0.0))
+
+    normalized_items = list(merged.values())
+    for item in normalized_items:
+        item["presence_score"] = _presence_score(item)
+    return sorted(normalized_items, key=lambda item: (-float(item.get("confidence") or 0.0), -int(item.get("usage_count") or 0), str(item.get("name") or "")))
+
+
+def _merge_claims(existing: list[dict], incoming: list[dict]) -> list[dict]:
+    by_key: dict[tuple[str, str], dict] = {}
+    for claim in [*existing, *incoming]:
+        attribute = " ".join(str(claim.get("attribute") or "").split()).strip().lower()
+        value = " ".join(str(claim.get("value") or "").split()).strip().lower()
+        if not attribute or not value:
+            continue
+        key = (attribute, value)
+        current = by_key.get(key)
+        if current is None or float(claim.get("confidence") or 0.0) > float(current.get("confidence") or 0.0):
+            by_key[key] = dict(claim)
+    return list(by_key.values())
+
+
+def _presence_score(candidate: dict) -> float:
+    usage_count = int(candidate.get("usage_count") or 0)
+    chapter_count = len(candidate.get("chapter_numbers") or [])
+    summary_mentions = int(candidate.get("summary_mentions") or 0)
+    narrative_modes = {mode for mode in (candidate.get("narrative_modes") or []) if mode}
+    confidence = float(candidate.get("confidence") or 0.0)
+    score = 0.15 + min(0.25, usage_count * 0.06) + min(0.25, chapter_count * 0.12) + min(0.15, summary_mentions * 0.07)
+    score += min(0.15, confidence * 0.15)
+    if narrative_modes and narrative_modes == {"dialogue"}:
+        score -= 0.12
+    if candidate.get("character_id"):
+        score += 0.08
+    if str(candidate.get("element_type") or "") in WORLD_HIGH_SIGNAL_TYPES:
+        score += 0.05
+    return max(0.0, min(0.99, round(score, 3)))
 
 
 async def list_world_building_documents(
@@ -396,6 +693,8 @@ async def build_world_logic_response(db: AsyncSession, book: Book, query: str, m
 
 async def sync_world_document_elements(db: AsyncSession, book: Book) -> list[WorldElement]:
     documents = await list_world_building_documents(db, book)
+    character_registry = await _load_character_registry(db, book)
+    override_lookup = await _load_canon_override_lookup(db, book)
     await db.execute(
         delete(WorldElement).where(
             WorldElement.book_id == book.id,
@@ -408,8 +707,14 @@ async def sync_world_document_elements(db: AsyncSession, book: Book) -> list[Wor
     for document in documents:
         payload = await load_world_building_document_payload(document)
         text = str(payload.get("text") or "")
-        for candidate in extract_world_elements_from_text(text):
-            name = str(candidate.get("name") or "").strip()
+        raw_candidates = extract_world_elements_from_text(text)
+        normalized_candidates = _apply_character_and_override_resolution(
+            raw_candidates,
+            character_registry=character_registry,
+            override_lookup=override_lookup,
+        )
+        for candidate in normalized_candidates:
+            name = str(candidate.get("canonical_name") or candidate.get("name") or "").strip()
             if not name:
                 continue
             element = WorldElement(
@@ -422,10 +727,23 @@ async def sync_world_document_elements(db: AsyncSession, book: Book) -> list[Wor
                 name=name,
                 description=str(candidate.get("description") or "").strip() or None,
                 usage_count=int(candidate.get("usage_count") or 1),
+                dependencies=list(candidate.get("claims") or []),
                 analysis_metadata={
                     "source": "world_document",
                     "world_document_title": document.title,
                     "world_document_source_name": document.source_name,
+                    "canonical_name": name,
+                    "aliases": list(candidate.get("aliases") or []),
+                    "confidence": float(candidate.get("confidence") or 0.0),
+                    "provenance": list(candidate.get("provenance") or []),
+                    "claims": list(candidate.get("claims") or []),
+                    "chapter_numbers": list(candidate.get("chapter_numbers") or []),
+                    "chapter_count": len(candidate.get("chapter_numbers") or []),
+                    "presence_score": float(candidate.get("presence_score") or 0.0),
+                    "narrative_modes": list(candidate.get("narrative_modes") or []),
+                    "source_excerpt": candidate.get("source_excerpt"),
+                    "character_id": candidate.get("character_id"),
+                    "author_override": bool(candidate.get("author_override")),
                 },
                 is_series_canonical=bool(book.primary_series_id),
             )
@@ -442,7 +760,13 @@ async def ingest_world_elements_from_chapter(
     chapter: Chapter,
     chapter_text: str,
 ) -> list[WorldElement]:
-    extracted = extract_world_elements_from_text(chapter_text, chapter_number=chapter.number)
+    character_registry = await _load_character_registry(db, book)
+    override_lookup = await _load_canon_override_lookup(db, book)
+    extracted = _apply_character_and_override_resolution(
+        extract_world_elements_from_text(chapter_text, chapter_number=chapter.number),
+        character_registry=character_registry,
+        override_lookup=override_lookup,
+    )
     if not extracted:
         return []
 
@@ -458,7 +782,7 @@ async def ingest_world_elements_from_chapter(
     touched: list[WorldElement] = []
 
     for candidate in extracted:
-        key = str(candidate.get("name") or "").strip().lower()
+        key = _normalize_world_name(str(candidate.get("canonical_name") or candidate.get("name") or "").strip())
         if not key:
             continue
         current = by_name.get(key)
@@ -470,14 +794,27 @@ async def ingest_world_elements_from_chapter(
                 series_id=book.primary_series_id,
                 source_book_id=book.id,
                 source_scope="story",
-                element_type=str(candidate.get("element_type") or "culture"),
-                name=str(candidate.get("name") or "").strip(),
+                element_type=str(candidate.get("element_type") or "concept"),
+                name=str(candidate.get("canonical_name") or candidate.get("name") or "").strip(),
                 description=description,
                 usage_count=usage_increment,
+                dependencies=list(candidate.get("claims") or []),
                 analysis_metadata={
                     "source": "chapter_text",
                     "chapter_number": chapter.number,
                     "chapter_title": chapter.title,
+                    "canonical_name": str(candidate.get("canonical_name") or candidate.get("name") or "").strip(),
+                    "aliases": list(candidate.get("aliases") or []),
+                    "confidence": float(candidate.get("confidence") or 0.0),
+                    "provenance": list(candidate.get("provenance") or []),
+                    "claims": list(candidate.get("claims") or []),
+                    "chapter_numbers": list(candidate.get("chapter_numbers") or [chapter.number]),
+                    "chapter_count": len(candidate.get("chapter_numbers") or [chapter.number]),
+                    "presence_score": float(candidate.get("presence_score") or 0.0),
+                    "narrative_modes": list(candidate.get("narrative_modes") or []),
+                    "source_excerpt": candidate.get("source_excerpt"),
+                    "character_id": candidate.get("character_id"),
+                    "author_override": bool(candidate.get("author_override")),
                 },
                 is_series_canonical=bool(book.primary_series_id),
             )
@@ -488,9 +825,23 @@ async def ingest_world_elements_from_chapter(
             if description and (not current.description or len(description) > len(current.description)):
                 current.description = description
             metadata = dict(current.analysis_metadata or {})
+            chapter_numbers = sorted({*(metadata.get("chapter_numbers") or []), *(candidate.get("chapter_numbers") or [chapter.number])})
             metadata.setdefault("chapter_number", chapter.number)
             metadata.setdefault("chapter_title", chapter.title)
+            metadata["canonical_name"] = str(candidate.get("canonical_name") or current.name or "").strip()
+            metadata["aliases"] = _dedupe_strings([*(metadata.get("aliases") or []), *(candidate.get("aliases") or [])])
+            metadata["confidence"] = max(float(metadata.get("confidence") or 0.0), float(candidate.get("confidence") or 0.0))
+            metadata["provenance"] = [*(metadata.get("provenance") or []), *(candidate.get("provenance") or [])][:8]
+            metadata["claims"] = _merge_claims(metadata.get("claims") or [], candidate.get("claims") or [])
+            metadata["chapter_numbers"] = chapter_numbers
+            metadata["chapter_count"] = len(chapter_numbers)
+            metadata["presence_score"] = max(float(metadata.get("presence_score") or 0.0), float(candidate.get("presence_score") or 0.0))
+            metadata["narrative_modes"] = _dedupe_strings([*(metadata.get("narrative_modes") or []), *(candidate.get("narrative_modes") or [])])
+            metadata["source_excerpt"] = metadata.get("source_excerpt") or candidate.get("source_excerpt")
+            metadata["character_id"] = metadata.get("character_id") or candidate.get("character_id")
+            metadata["author_override"] = bool(metadata.get("author_override")) or bool(candidate.get("author_override"))
             current.analysis_metadata = metadata
+            current.dependencies = _merge_claims(list(current.dependencies or []), list(candidate.get("claims") or []))
         touched.append(current)
 
     await db.flush()
@@ -531,12 +882,17 @@ async def detect_world_gaps(db: AsyncSession, book: Book) -> dict:
     characters = await _collect_story_characters(db, book)
     story_by_name = _collapse_elements([_serialize_world_element(item) for item in story_elements])
     world_by_name = _collapse_elements([_serialize_world_element(item) for item in document_elements])
-    world_corpus_text = "\n".join(item.get("description") or "" for item in world_by_name.values()).lower()
+    world_corpus_text = "\n".join(
+        f"{item.get('canonical_name') or item.get('name') or ''} {' '.join(item.get('aliases') or [])} {item.get('description') or ''}"
+        for item in world_by_name.values()
+    ).lower()
 
     grouped_items: dict[str, list[dict]] = defaultdict(list)
 
     for key, world_item in world_by_name.items():
-        story_match = story_by_name.get(key)
+        if not _should_surface_world_item(world_item):
+            continue
+        story_match = _find_matching_item(world_item["name"], story_by_name)
         if story_match is None:
             grouped_items["missing_in_story"].append(
                 _build_gap_item(
@@ -546,12 +902,12 @@ async def detect_world_gaps(db: AsyncSession, book: Book) -> dict:
                     description="This lore item is documented in the world-building corpus but does not appear in the current story manuscript.",
                     suggested_fix=f"Seed {world_item['name']} into a chapter scene, summary beat, or character conversation so the manuscript reflects the reference lore.",
                     world_item=world_item,
-                    priority=8,
+                    priority=8 if str(world_item.get("element_type") or "") in WORLD_HIGH_SIGNAL_TYPES else 6,
                 )
             )
             continue
 
-        if _descriptions_conflict(str(world_item.get("description") or ""), str(story_match.get("description") or "")):
+        if _items_conflict(world_item, story_match):
             grouped_items["story_conflicts"].append(
                 _build_gap_item(
                     category="story_conflicts",
@@ -566,7 +922,7 @@ async def detect_world_gaps(db: AsyncSession, book: Book) -> dict:
             )
             continue
 
-        if int(story_match.get("usage_count") or 0) <= 1:
+        if _is_underintegrated_story_match(story_match):
             grouped_items["timeline_gaps"].append(
                 _build_gap_item(
                     category="timeline_gaps",
@@ -581,7 +937,7 @@ async def detect_world_gaps(db: AsyncSession, book: Book) -> dict:
             )
 
     for key, story_item in story_by_name.items():
-        if key in world_by_name or int(story_item.get("usage_count") or 0) < 2:
+        if _find_matching_item(story_item["name"], world_by_name) is not None or not _should_surface_story_item(story_item):
             continue
         grouped_items["missing_in_world"].append(
             _build_gap_item(
@@ -598,7 +954,7 @@ async def detect_world_gaps(db: AsyncSession, book: Book) -> dict:
     for character in characters:
         if not character["should_watch"]:
             continue
-        if character["name"].lower() in world_corpus_text:
+        if _world_text_mentions_name(world_corpus_text, character["name"]) or _find_matching_item(character["name"], world_by_name) is not None:
             continue
         grouped_items["character_gaps"].append(
             {
@@ -671,10 +1027,14 @@ async def detect_integration_analysis(db: AsyncSession, book: Book) -> dict:
     integration_opportunities: list[dict] = []
 
     for element in document_elements:
-        story_match = story_by_name.get(element.name.lower())
+        serialized_element = _serialize_world_element(element)
+        if not _should_surface_world_item(serialized_element):
+            continue
+        story_match = _find_matching_item(element.name, story_by_name)
         story_match_data = story_match or {}
+        presence_score = float(story_match_data.get("presence_score") or 0.0)
         usage_count = int(story_match_data.get("usage_count") or 0)
-        if usage_count >= 2:
+        if presence_score >= 0.62 or usage_count >= 3:
             continue
         metadata = element.analysis_metadata or {}
         target_chapter = story_match_data.get("chapter_number")
@@ -690,9 +1050,11 @@ async def detect_integration_analysis(db: AsyncSession, book: Book) -> dict:
                 ],
                 "target_chapter": target_chapter,
                 "target_chapter_title": story_match_data.get("chapter_title"),
-                "priority": 8 if usage_count == 0 else 6,
+                "priority": 8 if usage_count == 0 else (7 if presence_score < 0.35 else 6),
                 "world_document_id": str(element.world_document_id) if element.world_document_id else None,
                 "world_document_title": metadata.get("world_document_title"),
+                "confidence": float(serialized_element.get("confidence") or 0.0),
+                "canonical_name": serialized_element.get("canonical_name") or element.name,
             }
         )
 
@@ -760,6 +1122,62 @@ async def save_world_note(
     return note
 
 
+async def save_canon_override(
+    db: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    book: Book,
+    canonical_name: str,
+    aliases: list[str],
+    entity_type: str | None = None,
+    notes: str | None = None,
+) -> WorldCanonicalIdentity:
+    cleaned_canonical = " ".join((canonical_name or "").split()).strip()
+    if not cleaned_canonical:
+        raise HTTPException(400, "Canonical name is required")
+    cleaned_aliases = _dedupe_strings([alias for alias in aliases if alias and " ".join(alias.split()).strip()])
+    normalized_entity_type = " ".join((entity_type or "").split()).strip() or None
+    normalized_notes = " ".join((notes or "").split()).strip() or None
+
+    existing_rows = (
+        await db.execute(
+            select(WorldCanonicalIdentity)
+            .where(WorldCanonicalIdentity.book_id == book.id)
+            .order_by(WorldCanonicalIdentity.updated_at.desc(), WorldCanonicalIdentity.created_at.desc())
+        )
+    ).scalars().all()
+    for identity in existing_rows:
+        existing_canonical = " ".join(str(identity.canonical_name or "").split()).strip()
+        existing_aliases = [str(alias).strip() for alias in (identity.aliases or []) if str(alias).strip()]
+        if _world_names_equivalent(cleaned_canonical, existing_canonical) or any(_world_names_equivalent(alias, cleaned_canonical) for alias in existing_aliases):
+            identity.canonical_name = cleaned_canonical
+            identity.entity_type = normalized_entity_type
+            identity.aliases = _dedupe_strings([*existing_aliases, *cleaned_aliases])
+            identity.notes = normalized_notes
+            identity.source = "author_override"
+            identity.confidence = 0.99
+            metadata = dict(identity.metadata_json or {})
+            metadata["updated_by_user_id"] = str(user_id)
+            identity.metadata_json = metadata
+            identity.updated_at = datetime.now(UTC)
+            await db.flush()
+            return identity
+
+    identity = WorldCanonicalIdentity(
+        book_id=book.id,
+        canonical_name=cleaned_canonical,
+        entity_type=normalized_entity_type,
+        aliases=cleaned_aliases or None,
+        source="author_override",
+        confidence=0.99,
+        notes=normalized_notes,
+        metadata_json={"created_by_user_id": str(user_id)},
+    )
+    db.add(identity)
+    await db.flush()
+    return identity
+
+
 def _serialize_world_document(document: WorldBuildingDocument) -> dict:
     return {
         "id": str(document.id),
@@ -798,23 +1216,58 @@ def _serialize_world_element(element: WorldElement) -> dict:
         "chapter_number": metadata.get("chapter_number"),
         "chapter_title": metadata.get("chapter_title"),
         "world_document_title": metadata.get("world_document_title"),
+        "canonical_name": metadata.get("canonical_name") or element.name,
+        "aliases": list(metadata.get("aliases") or []),
+        "confidence": metadata.get("confidence"),
+        "provenance": list(metadata.get("provenance") or []),
+        "claims": list(metadata.get("claims") or []),
+        "chapter_numbers": list(metadata.get("chapter_numbers") or ([] if metadata.get("chapter_number") is None else [metadata.get("chapter_number")])),
+        "chapter_count": metadata.get("chapter_count") or (1 if metadata.get("chapter_number") else 0),
+        "summary_mentions": metadata.get("summary_mentions") or 0,
+        "presence_score": metadata.get("presence_score"),
+        "narrative_modes": list(metadata.get("narrative_modes") or []),
+        "source_excerpt": metadata.get("source_excerpt"),
+        "character_id": metadata.get("character_id"),
+        "author_override": bool(metadata.get("author_override")),
     }
 
 
-async def _collect_story_elements(db: AsyncSession, book: Book) -> list[WorldElement]:
-    rows = list(
-        (
-            await db.execute(
-                select(WorldElement).where(
-                    WorldElement.book_id == book.id,
-                    WorldElement.source_scope == "story",
+async def _apply_summary_mentions(db: AsyncSession, book: Book, collapsed: dict[str, dict]) -> None:
+    if not collapsed:
+        return
+    summary_rows = (
+        await db.execute(
+            select(Chapter.number, ChapterSummary.content, ChapterSummary.key_events)
+            .join(ChapterSummary, ChapterSummary.chapter_id == Chapter.id)
+            .where(Chapter.book_id == book.id)
+        )
+    ).all()
+    if not summary_rows:
+        return
+    for chapter_number, content, key_events in summary_rows:
+        summary_text_parts = [str(content or "")]
+        if isinstance(key_events, list):
+            summary_text_parts.extend(
+                " ".join(
+                    str(event.get(field) or "")
+                    for field in ("event_title", "event", "description", "impact")
+                    if isinstance(event, dict)
                 )
+                for event in key_events
+                if isinstance(event, dict)
             )
-        ).scalars().all()
-    )
-    if rows:
-        return rows
+        summary_text = " ".join(part for part in summary_text_parts if part).lower()
+        if not summary_text:
+            continue
+        normalized_summary = _normalize_text(summary_text)
+        for item in collapsed.values():
+            names = [str(item.get("canonical_name") or item.get("name") or "").strip(), *[str(alias).strip() for alias in (item.get("aliases") or [])]]
+            if any(name and _normalize_world_name(name) in normalized_summary for name in names):
+                item["summary_mentions"] = int(item.get("summary_mentions") or 0) + 1
+                item["chapter_numbers"] = sorted({*(item.get("chapter_numbers") or []), chapter_number})
 
+
+async def _collect_story_elements(db: AsyncSession, book: Book) -> list[WorldElement]:
     chapter_rows = (
         await db.execute(
             select(Chapter.id, Chapter.number, Chapter.title, Chapter.s3_key)
@@ -822,6 +1275,21 @@ async def _collect_story_elements(db: AsyncSession, book: Book) -> list[WorldEle
             .order_by(Chapter.number.asc())
         )
     ).all()
+    if not chapter_rows:
+        rows = list(
+            (
+                await db.execute(
+                    select(WorldElement).where(
+                        WorldElement.book_id == book.id,
+                        WorldElement.source_scope == "story",
+                    )
+                )
+            ).scalars().all()
+        )
+        return rows
+
+    character_registry = await _load_character_registry(db, book)
+    override_lookup = await _load_canon_override_lookup(db, book)
     collapsed: dict[str, dict] = {}
     for _, chapter_number, chapter_title, s3_key in chapter_rows:
         if not s3_key:
@@ -831,11 +1299,16 @@ async def _collect_story_elements(db: AsyncSession, book: Book) -> list[WorldEle
         except Exception:
             continue
         text = str(stored.get("text") or "")
-        for candidate in extract_world_elements_from_text(text):
-            name = str(candidate.get("name") or "").strip()
+        normalized_candidates = _apply_character_and_override_resolution(
+            extract_world_elements_from_text(text, chapter_number=chapter_number),
+            character_registry=character_registry,
+            override_lookup=override_lookup,
+        )
+        for candidate in normalized_candidates:
+            name = str(candidate.get("canonical_name") or candidate.get("name") or "").strip()
             if not name:
                 continue
-            key = name.lower()
+            key = _normalize_world_name(name)
             current = collapsed.get(key)
             description = str(candidate.get("description") or "").strip() or None
             usage_count = int(candidate.get("usage_count") or 1)
@@ -843,16 +1316,41 @@ async def _collect_story_elements(db: AsyncSession, book: Book) -> list[WorldEle
                 current = {
                     "element_type": str(candidate.get("element_type") or infer_element_type(name, description or "")),
                     "name": name,
+                    "canonical_name": name,
+                    "aliases": list(candidate.get("aliases") or []),
                     "description": description,
                     "usage_count": usage_count,
                     "chapter_number": chapter_number,
                     "chapter_title": chapter_title,
+                    "chapter_numbers": list(candidate.get("chapter_numbers") or ([chapter_number] if chapter_number else [])),
+                    "confidence": float(candidate.get("confidence") or 0.0),
+                    "provenance": list(candidate.get("provenance") or []),
+                    "claims": list(candidate.get("claims") or []),
+                    "narrative_modes": list(candidate.get("narrative_modes") or []),
+                    "summary_mentions": 0,
+                    "presence_score": float(candidate.get("presence_score") or 0.0),
+                    "source_excerpt": candidate.get("source_excerpt"),
+                    "character_id": candidate.get("character_id"),
+                    "author_override": bool(candidate.get("author_override")),
                 }
                 collapsed[key] = current
             else:
                 current["usage_count"] = int(current.get("usage_count") or 0) + usage_count
+                current["aliases"] = _dedupe_strings([*(current.get("aliases") or []), *(candidate.get("aliases") or [])])
+                current["chapter_numbers"] = sorted({*(current.get("chapter_numbers") or []), *(candidate.get("chapter_numbers") or [chapter_number])})
+                current["confidence"] = max(float(current.get("confidence") or 0.0), float(candidate.get("confidence") or 0.0))
+                current["provenance"] = [*(current.get("provenance") or []), *(candidate.get("provenance") or [])][:8]
+                current["claims"] = _merge_claims(current.get("claims") or [], candidate.get("claims") or [])
+                current["narrative_modes"] = _dedupe_strings([*(current.get("narrative_modes") or []), *(candidate.get("narrative_modes") or [])])
+                current["character_id"] = current.get("character_id") or candidate.get("character_id")
+                current["author_override"] = bool(current.get("author_override")) or bool(candidate.get("author_override"))
                 if description and (not current.get("description") or len(description) > len(str(current.get("description") or ""))):
                     current["description"] = description
+                    current["source_excerpt"] = candidate.get("source_excerpt")
+
+    await _apply_summary_mentions(db, book, collapsed)
+    for item in collapsed.values():
+        item["presence_score"] = _presence_score(item)
 
     story_elements: list[WorldElement] = []
     for item in collapsed.values():
@@ -867,10 +1365,24 @@ async def _collect_story_elements(db: AsyncSession, book: Book) -> list[WorldEle
                 name=str(item["name"]),
                 description=str(item.get("description") or "") or None,
                 usage_count=int(item.get("usage_count") or 0),
+                dependencies=list(item.get("claims") or []),
                 analysis_metadata={
                     "source": "chapter_text_snapshot",
                     "chapter_number": item.get("chapter_number"),
                     "chapter_title": item.get("chapter_title"),
+                    "canonical_name": item.get("canonical_name"),
+                    "aliases": list(item.get("aliases") or []),
+                    "confidence": float(item.get("confidence") or 0.0),
+                    "provenance": list(item.get("provenance") or []),
+                    "claims": list(item.get("claims") or []),
+                    "chapter_numbers": list(item.get("chapter_numbers") or []),
+                    "chapter_count": len(item.get("chapter_numbers") or []),
+                    "summary_mentions": int(item.get("summary_mentions") or 0),
+                    "presence_score": float(item.get("presence_score") or 0.0),
+                    "narrative_modes": list(item.get("narrative_modes") or []),
+                    "source_excerpt": item.get("source_excerpt"),
+                    "character_id": item.get("character_id"),
+                    "author_override": bool(item.get("author_override")),
                 },
                 is_series_canonical=bool(book.primary_series_id),
                 created_at=datetime.now(UTC),
@@ -916,11 +1428,11 @@ async def _collect_story_characters(db: AsyncSession, book: Book) -> list[dict]:
 
 def _map_element_to_wiki_type(element_type: str) -> str:
     normalized = " ".join((element_type or "").split()).strip().lower()
-    if normalized in {"geography", "location", "city", "kingdom", "region"}:
+    if normalized in {"place", "geography", "location", "city", "kingdom", "region"}:
         return "location"
-    if normalized in {"faction", "religion", "culture", "government"}:
+    if normalized in {"organization", "faction", "religion", "culture", "government"}:
         return "faction"
-    if normalized in {"artifact", "item", "technology", "weapon"}:
+    if normalized in {"object", "artifact", "item", "technology", "weapon"}:
         return "item"
     if normalized in {"event", "history"}:
         return "event"
@@ -931,7 +1443,9 @@ def _rank_world_elements_for_query(elements: list[WorldElement], query: str) -> 
     tokens = {token for token in re.findall(r"[a-z0-9']+", (query or "").lower()) if token not in STOPWORDS}
 
     def score(element: WorldElement) -> tuple[int, int, str]:
-        haystack = f"{element.name} {element.description or ''} {element.element_type}".lower()
+        metadata = element.analysis_metadata or {}
+        aliases = " ".join(str(alias) for alias in (metadata.get("aliases") or []))
+        haystack = f"{element.name} {aliases} {element.description or ''} {element.element_type}".lower()
         overlap = sum(1 for token in tokens if token in haystack)
         return (overlap, int(element.usage_count or 0), element.name.lower())
 
@@ -941,7 +1455,7 @@ def _rank_world_elements_for_query(elements: list[WorldElement], query: str) -> 
 def _collapse_elements(items: list[dict]) -> dict[str, dict]:
     collapsed: dict[str, dict] = {}
     for item in items:
-        key = str(item.get("name") or "").strip().lower()
+        key = _normalize_world_name(str(item.get("canonical_name") or item.get("name") or "").strip())
         if not key:
             continue
         current = collapsed.get(key)
@@ -953,11 +1467,77 @@ def _collapse_elements(items: list[dict]) -> dict[str, dict]:
         current.setdefault("chapter_title", item.get("chapter_title"))
         current.setdefault("world_document_id", item.get("world_document_id"))
         current.setdefault("world_document_title", item.get("world_document_title"))
+        current["canonical_name"] = current.get("canonical_name") or item.get("canonical_name") or item.get("name")
+        current["aliases"] = _dedupe_strings([*(current.get("aliases") or []), *(item.get("aliases") or [])])
+        current["confidence"] = max(float(current.get("confidence") or 0.0), float(item.get("confidence") or 0.0))
+        current["provenance"] = [*(current.get("provenance") or []), *(item.get("provenance") or [])][:8]
+        current["claims"] = _merge_claims(current.get("claims") or [], item.get("claims") or [])
+        current["chapter_numbers"] = sorted({*(current.get("chapter_numbers") or []), *(item.get("chapter_numbers") or [])})
+        current["chapter_count"] = max(int(current.get("chapter_count") or 0), len(current.get("chapter_numbers") or []))
+        current["summary_mentions"] = int(current.get("summary_mentions") or 0) + int(item.get("summary_mentions") or 0)
+        current["presence_score"] = max(float(current.get("presence_score") or 0.0), float(item.get("presence_score") or 0.0))
+        current["narrative_modes"] = _dedupe_strings([*(current.get("narrative_modes") or []), *(item.get("narrative_modes") or [])])
+        current["source_excerpt"] = current.get("source_excerpt") or item.get("source_excerpt")
+        current["character_id"] = current.get("character_id") or item.get("character_id")
+        current["author_override"] = bool(current.get("author_override")) or bool(item.get("author_override"))
         description = str(item.get("description") or "").strip()
         current_description = str(current.get("description") or "").strip()
         if description and len(description) > len(current_description):
             current["description"] = description
     return collapsed
+
+
+def _find_matching_item(name: str, items_by_name: dict[str, dict]) -> dict | None:
+    key = _normalize_world_name(name)
+    if not key:
+        return None
+
+    exact_match = items_by_name.get(key)
+    if exact_match is not None:
+        return exact_match
+
+    best_match: dict | None = None
+    best_score = 0.0
+    for candidate in items_by_name.values():
+        candidate_name = str(candidate.get("name") or "").strip()
+        if not candidate_name:
+            continue
+        if _world_names_equivalent(name, candidate_name):
+            score = name_similarity(name, candidate_name)
+            if score >= best_score:
+                best_score = score
+                best_match = candidate
+    return best_match if best_score >= 0.84 else None
+
+
+def _world_names_equivalent(left: str | None, right: str | None) -> bool:
+    left_normalized = _normalize_world_name(left)
+    right_normalized = _normalize_world_name(right)
+    if not left_normalized or not right_normalized:
+        return False
+    if left_normalized == right_normalized:
+        return True
+    if names_equivalent(left, [], right, []):
+        return True
+    return name_similarity(left, right) >= 0.9
+
+
+def _normalize_world_name(name: str | None) -> str:
+    normalized = normalize_character_name(name)
+    if normalized:
+        return normalized
+    return " ".join(re.findall(r"[A-Za-z0-9][A-Za-z0-9'-]*", name or "")).strip().lower()
+
+
+def _world_text_mentions_name(world_text: str, name: str) -> bool:
+    normalized_name = _normalize_world_name(name)
+    if not normalized_name:
+        return False
+    if normalized_name in world_text:
+        return True
+    world_tokens = set(re.findall(r"[a-z0-9']+", world_text))
+    name_tokens = [token for token in normalized_name.split() if token]
+    return bool(name_tokens) and set(name_tokens).issubset(world_tokens)
 
 
 def _build_gap_item(
@@ -1004,7 +1584,133 @@ def _build_gap_item(
         "story_chapter_title": story_chapter_title,
         "character_name": None,
         "priority": priority,
+        "entity_type": str((world_item or story_item or {}).get("element_type") or ""),
+        "canonical_name": str((world_item or story_item or {}).get("canonical_name") or item_name),
+        "confidence": max(
+            float((world_item or {}).get("confidence") or 0.0),
+            float((story_item or {}).get("confidence") or 0.0),
+        ),
+        "provenance": {
+            "world": list((world_item or {}).get("provenance") or [])[:2],
+            "story": list((story_item or {}).get("provenance") or [])[:2],
+        },
     }
+
+
+def _should_surface_world_item(world_item: dict) -> bool:
+    element_type = str(world_item.get("element_type") or "")
+    confidence = float(world_item.get("confidence") or 0.0)
+    usage_count = int(world_item.get("usage_count") or 0)
+    if element_type not in WORLD_KEEPABLE_TYPES:
+        return False
+    if confidence < 0.5 and usage_count < 2:
+        return False
+    return True
+
+
+def _should_surface_story_item(story_item: dict) -> bool:
+    element_type = str(story_item.get("element_type") or "")
+    usage_count = int(story_item.get("usage_count") or 0)
+    chapter_count = int(story_item.get("chapter_count") or len(story_item.get("chapter_numbers") or []))
+    presence_score = float(story_item.get("presence_score") or 0.0)
+    confidence = float(story_item.get("confidence") or 0.0)
+    if element_type not in WORLD_KEEPABLE_TYPES:
+        return False
+    if presence_score >= 0.62:
+        return True
+    if usage_count >= 3 and chapter_count >= 2 and confidence >= 0.58:
+        return True
+    return False
+
+
+def _is_underintegrated_story_match(story_item: dict) -> bool:
+    presence_score = float(story_item.get("presence_score") or 0.0)
+    usage_count = int(story_item.get("usage_count") or 0)
+    chapter_count = int(story_item.get("chapter_count") or len(story_item.get("chapter_numbers") or []))
+    return presence_score < 0.58 or usage_count <= 1 or chapter_count <= 1
+
+
+def _items_conflict(world_item: dict, story_item: dict) -> bool:
+    if not _descriptions_conflict(str(world_item.get("description") or ""), str(story_item.get("description") or "")):
+        return False
+
+    world_claims = _claims_by_attribute(world_item.get("claims") or [])
+    story_claims = _claims_by_attribute(story_item.get("claims") or [])
+    if world_claims and story_claims:
+        for attribute, left_claims in world_claims.items():
+            right_claims = story_claims.get(attribute) or []
+            if not right_claims:
+                continue
+            for left_claim in left_claims:
+                for right_claim in right_claims:
+                    if _claims_contradict(left_claim, right_claim):
+                        return True
+        return False
+
+    return True
+
+
+def _claims_by_attribute(claims: list[dict]) -> dict[str, list[dict]]:
+    grouped: dict[str, list[dict]] = defaultdict(list)
+    for claim in claims:
+        attribute = " ".join(str(claim.get("attribute") or "").split()).strip().lower()
+        value = " ".join(str(claim.get("value") or "").split()).strip()
+        if not attribute or not value:
+            continue
+        grouped[attribute].append(
+            {
+                "attribute": attribute,
+                "value": value,
+                "confidence": float(claim.get("confidence") or 0.0),
+                "negated": bool(claim.get("negated")),
+                "cue": " ".join(str(claim.get("cue") or "").split()).strip() or None,
+            }
+        )
+    return grouped
+
+
+def _claims_contradict(left_claim: dict, right_claim: dict) -> bool:
+    left_value = _normalize_text(str(left_claim.get("value") or ""))
+    right_value = _normalize_text(str(right_claim.get("value") or ""))
+    left_negated = bool(left_claim.get("negated"))
+    right_negated = bool(right_claim.get("negated"))
+    if not left_value or not right_value:
+        return False
+    if left_value == right_value:
+        return left_negated != right_negated
+
+    left_numbers = {token for token in left_value.split() if token.isdigit()}
+    right_numbers = {token for token in right_value.split() if token.isdigit()}
+    if left_numbers and right_numbers and left_numbers != right_numbers and left_negated == right_negated:
+        return True
+
+    if (left_claim.get("attribute") or "") == "climate":
+        left_bucket = _climate_bucket(left_value)
+        right_bucket = _climate_bucket(right_value)
+        if left_bucket and right_bucket:
+            if left_bucket == right_bucket:
+                return left_negated != right_negated
+            if left_negated == right_negated:
+                return True
+            return False
+
+    left_tokens = {token for token in left_value.split() if token not in STOPWORDS}
+    right_tokens = {token for token in right_value.split() if token not in STOPWORDS}
+    overlap = left_tokens & right_tokens
+    if left_negated != right_negated and overlap:
+        return True
+    if overlap:
+        if left_tokens <= right_tokens or right_tokens <= left_tokens:
+            return False
+        return False
+
+    if left_negated != right_negated:
+        return False
+    return True
+
+
+def _extract_claims_from_description(text: str) -> list[dict]:
+    return extract_claims_from_text("", text, "concept")
 
 
 def _descriptions_conflict(left: str, right: str) -> bool:
@@ -1023,13 +1729,16 @@ def _descriptions_conflict(left: str, right: str) -> bool:
     if left_bucket and right_bucket and left_bucket != right_bucket:
         return True
 
-    left_tokens = {token for token in normalized_left.split() if token not in STOPWORDS}
-    right_tokens = {token for token in normalized_right.split() if token not in STOPWORDS}
-    if not left_tokens or not right_tokens:
-        return False
-    overlap = len(left_tokens & right_tokens)
-    union = len(left_tokens | right_tokens)
-    return union > 0 and (overlap / union) < 0.2
+    left_claims = _claims_by_attribute(_extract_claims_from_description(normalized_left))
+    right_claims = _claims_by_attribute(_extract_claims_from_description(normalized_right))
+    shared_attributes = set(left_claims) & set(right_claims)
+    for attribute in shared_attributes:
+        for left_claim in left_claims[attribute]:
+            for right_claim in right_claims[attribute]:
+                if _claims_contradict(left_claim, right_claim):
+                    return True
+
+    return False
 
 
 def _climate_bucket(text: str) -> str | None:

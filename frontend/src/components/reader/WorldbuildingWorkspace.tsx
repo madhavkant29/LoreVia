@@ -9,9 +9,12 @@ import type {
   WorldBuildingDocument,
   WorldGapItem,
   WorldGapResult,
+  WorldIntegrationResult,
   WorldNote,
   WorldQueryResponse,
   WikiEntry,
+  CanonOverride,
+  WorldElement,
 } from "@/types/world-building"
 
 type WorkspaceFocus = "editor" | "gap"
@@ -38,8 +41,14 @@ export function WorldbuildingWorkspace({
   const [replaceCorpusOnUpload, setReplaceCorpusOnUpload] = useState(false)
   const [uploadingFiles, setUploadingFiles] = useState(false)
   const [analysis, setAnalysis] = useState<WorldGapResult | null>(null)
+  const [integration, setIntegration] = useState<WorldIntegrationResult | null>(null)
   const [loadingAnalysis, setLoadingAnalysis] = useState(false)
+  const [loadingIntegration, setLoadingIntegration] = useState(false)
   const [notes, setNotes] = useState<WorldNote[]>([])
+  const [canonOverrides, setCanonOverrides] = useState<CanonOverride[]>([])
+  const [canonName, setCanonName] = useState("")
+  const [canonAliases, setCanonAliases] = useState("")
+  const [savingCanon, setSavingCanon] = useState(false)
   const [wikiEntries, setWikiEntries] = useState<WikiEntry[]>([])
   const [wikiLoading, setWikiLoading] = useState(false)
   const [wikiGenerating, setWikiGenerating] = useState(false)
@@ -96,6 +105,11 @@ export function WorldbuildingWorkspace({
     }
   }
 
+  const loadCanonOverrides = async () => {
+    const payload = await worldBuildingApi.listCanonOverrides(bookId)
+    setCanonOverrides(payload)
+  }
+
   const loadDocumentBody = async (documentId: string) => {
     setLoadingDocumentBody(true)
     try {
@@ -138,6 +152,16 @@ export function WorldbuildingWorkspace({
     }
   }
 
+  const runIntegration = async () => {
+    setLoadingIntegration(true)
+    try {
+      const payload = await worldBuildingApi.getIntegration(bookId)
+      setIntegration(payload)
+    } finally {
+      setLoadingIntegration(false)
+    }
+  }
+
   useEffect(() => {
     loadDocuments().catch(() => {
       setDocuments([])
@@ -154,6 +178,7 @@ export function WorldbuildingWorkspace({
       setWikiEntries([])
       setWikiLoading(false)
     })
+    loadCanonOverrides().catch(() => setCanonOverrides([]))
   }, [bookId])
 
   useEffect(() => {
@@ -271,6 +296,72 @@ export function WorldbuildingWorkspace({
     } finally {
       setNoteStatusId(null)
     }
+  }
+
+  const saveIntegrationAsNote = async (item: WorldIntegrationResult["integration_opportunities"][number]) => {
+    setNoteSavingId(item.id)
+    try {
+      const created = await worldBuildingApi.createNote(bookId, {
+        world_document_id: item.world_document_id,
+        note_type: "world_integration",
+        chapter_number: item.target_chapter ?? null,
+        title: item.element_name,
+        body: item.description,
+        priority: item.priority >= 8 ? "critical" : item.priority >= 6 ? "high" : "medium",
+        status: "open",
+        linked_integration_id: item.id,
+        context_label: item.world_document_title ?? item.element_type,
+        suggested_fix: item.suggestions.join(" "),
+      })
+      setNotes((current) => [created, ...current])
+    } finally {
+      setNoteSavingId(null)
+    }
+  }
+
+  const deleteNote = async (noteId: string) => {
+    setNoteStatusId(noteId)
+    try {
+      await worldBuildingApi.deleteNote(bookId, noteId)
+      setNotes((current) => current.filter((note) => note.id !== noteId))
+    } finally {
+      setNoteStatusId(null)
+    }
+  }
+
+  const saveCanonOverride = async () => {
+    if (!canonName.trim()) return
+    setSavingCanon(true)
+    try {
+      const saved = await worldBuildingApi.saveCanonOverride(bookId, {
+        canonical_name: canonName.trim(),
+        aliases: canonAliases.split(",").map((item) => item.trim()).filter(Boolean),
+      })
+      setCanonOverrides((current) => [saved, ...current])
+      setCanonName("")
+      setCanonAliases("")
+      setStatusMessage(`Saved canon override for ${saved.canonical_name}.`)
+    } finally {
+      setSavingCanon(false)
+    }
+  }
+
+  const acceptElementSuggestion = async (element: WorldElement, suggestion: Record<string, unknown> | string) => {
+    const suggestionId = typeof suggestion === "string" ? suggestion : String(suggestion.id ?? suggestion.title ?? suggestion.name ?? "")
+    if (!suggestionId) return
+    await worldBuildingApi.acceptSuggestion(element.id, { suggestion_id: suggestionId, mark_implemented: true })
+    const removeSuggestion = (item: WorldElement) => item.id === element.id
+      ? {
+          ...item,
+          suggestions: item.suggestions.filter((candidate) => {
+            const candidateId = typeof candidate === "string" ? candidate : String(candidate.id ?? candidate.title ?? candidate.name ?? "")
+            return candidateId !== suggestionId
+          }),
+        }
+      : item
+    setIntegration((current) => current ? { ...current, world_elements: current.world_elements.map(removeSuggestion) } : current)
+    setAnalysis((current) => current ? { ...current, world_elements: current.world_elements.map(removeSuggestion) } : current)
+    setStatusMessage("Marked that world suggestion as implemented.")
   }
 
   const generateWiki = async () => {
@@ -606,10 +697,17 @@ export function WorldbuildingWorkspace({
                                   Chapter {item.story_chapter_number}
                                 </Link>
                               ) : null}
-                            </div>
-                            <h4 className={`mt-3 text-lg font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{item.title}</h4>
-                            <p className={`mt-2 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-700"}`}>{item.description}</p>
-                          </div>
+                             </div>
+                             <h4 className={`mt-3 text-lg font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{item.title}</h4>
+                             {item.canonical_name ? (
+                               <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>
+                                 Canon: {item.canonical_name}
+                                 {item.entity_type ? ` · ${item.entity_type}` : ""}
+                                 {item.confidence ? ` · ${(item.confidence * 100).toFixed(0)}% confidence` : ""}
+                               </p>
+                             ) : null}
+                             <p className={`mt-2 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-700"}`}>{item.description}</p>
+                           </div>
                           <button
                             type="button"
                             onClick={() => void saveGapAsNote(item)}
@@ -657,6 +755,148 @@ export function WorldbuildingWorkspace({
     </section>
   )
 
+  const integrationPanel = (
+    <section className={`rounded-[1.7rem] border p-5 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-white/90"}`}>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-emerald-300" : "text-emerald-700"}`}>World integration</p>
+          <h2 className={`mt-2 text-2xl font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>Underused canon and story opportunities</h2>
+        </div>
+        <button
+          type="button"
+          onClick={() => void runIntegration()}
+          disabled={loadingIntegration || documents.length === 0}
+          className={`rounded-[1rem] border px-4 py-3 text-sm font-semibold ${isDark ? "border-emerald-300/20 bg-emerald-400/10 text-emerald-100" : "border-emerald-200 bg-emerald-50 text-emerald-800"} disabled:opacity-50`}
+        >
+          {loadingIntegration ? "Mapping..." : "Run integration analysis"}
+        </button>
+      </div>
+      {integration ? (
+        <div className="mt-5 grid gap-3">
+          {integration.integration_opportunities.length === 0 ? (
+            <p className={`rounded-[1rem] border px-4 py-5 text-sm ${isDark ? "border-white/10 bg-black/20 text-slate-400" : "border-stone-200 bg-stone-50 text-stone-500"}`}>
+              No underused world elements surfaced on this pass.
+            </p>
+          ) : null}
+          {integration.integration_opportunities.map((item) => (
+            <article key={item.id} className={`rounded-[1.2rem] border p-4 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50/80"}`}>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <div className="flex flex-wrap gap-2">
+                    <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${isDark ? "bg-emerald-500/10 text-emerald-200" : "bg-emerald-50 text-emerald-700"}`}>{item.element_type}</span>
+                    {item.target_chapter ? <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${isDark ? "bg-white/8 text-slate-300" : "bg-white text-stone-600"}`}>Chapter {item.target_chapter}</span> : null}
+                  </div>
+                  <h3 className={`mt-3 text-lg font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{item.element_name}</h3>
+                  <p className={`mt-2 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-700"}`}>{item.description}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void saveIntegrationAsNote(item)}
+                  disabled={noteSavingId === item.id}
+                  className="rounded-[1rem] bg-[linear-gradient(135deg,#059669,#047857)] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+                >
+                  {noteSavingId === item.id ? "Saving..." : "Save as note"}
+                </button>
+              </div>
+              {item.suggestions.length > 0 ? (
+                <div className="mt-3 grid gap-2 md:grid-cols-2">
+                  {item.suggestions.map((suggestion) => (
+                    <p key={suggestion} className={`rounded-[0.9rem] border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-white/[0.03] text-slate-300" : "border-white bg-white text-stone-700"}`}>
+                      {suggestion}
+                    </p>
+                  ))}
+                </div>
+              ) : null}
+            </article>
+          ))}
+        </div>
+      ) : (
+        <p className={`mt-5 rounded-[1rem] border border-dashed px-4 py-6 text-center text-sm ${isDark ? "border-white/10 text-slate-400" : "border-stone-300 text-stone-500"}`}>
+          Run integration analysis to find world elements that need stronger story presence.
+        </p>
+      )}
+    </section>
+  )
+
+  const canonPanel = (
+    <section className={`rounded-[1.7rem] border p-5 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-white/90"}`}>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-fuchsia-300" : "text-fuchsia-700"}`}>Canon overrides</p>
+          <h2 className={`mt-2 text-2xl font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>Tell LoreVia which names are the same thing</h2>
+        </div>
+        <button
+          type="button"
+          onClick={() => void loadCanonOverrides()}
+          className={`rounded-full border px-3 py-2 text-xs font-semibold ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-stone-50 text-stone-700"}`}
+        >
+          Refresh
+        </button>
+      </div>
+      <div className="mt-5 grid gap-3 lg:grid-cols-[1fr_1fr_auto]">
+        <input
+          value={canonName}
+          onChange={(event) => setCanonName(event.target.value)}
+          placeholder="Canonical name"
+          className={`rounded-[1rem] border px-4 py-3 text-sm ${isDark ? "border-white/10 bg-black/30 text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-stone-50 text-stone-900 placeholder:text-stone-400"}`}
+        />
+        <input
+          value={canonAliases}
+          onChange={(event) => setCanonAliases(event.target.value)}
+          placeholder="Aliases, comma separated"
+          className={`rounded-[1rem] border px-4 py-3 text-sm ${isDark ? "border-white/10 bg-black/30 text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-stone-50 text-stone-900 placeholder:text-stone-400"}`}
+        />
+        <button
+          type="button"
+          onClick={() => void saveCanonOverride()}
+          disabled={savingCanon || !canonName.trim()}
+          className="rounded-[1rem] bg-[linear-gradient(135deg,#c026d3,#9333ea)] px-4 py-3 text-sm font-semibold text-white disabled:opacity-50"
+        >
+          {savingCanon ? "Saving..." : "Save override"}
+        </button>
+      </div>
+      <div className="mt-4 flex flex-wrap gap-2">
+        {canonOverrides.map((item) => (
+          <span key={item.id} className={`rounded-full px-3 py-1.5 text-xs ${isDark ? "bg-white/8 text-slate-200" : "bg-stone-100 text-stone-700"}`}>
+            {item.canonical_name}{item.aliases.length ? `: ${item.aliases.join(", ")}` : ""}
+          </span>
+        ))}
+        {canonOverrides.length === 0 ? <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>No author canon overrides yet.</p> : null}
+      </div>
+    </section>
+  )
+
+  const elementSuggestionsPanel = (
+    <section className={`rounded-[1.7rem] border p-5 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-white/90"}`}>
+      <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-amber-300" : "text-amber-700"}`}>Element suggestions</p>
+      <h2 className={`mt-2 text-2xl font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>Accept implemented world suggestions</h2>
+      <div className="mt-5 grid gap-3">
+        {((integration?.world_elements ?? analysis?.world_elements ?? []).filter((element) => element.suggestions.length > 0)).slice(0, 10).map((element) => (
+          <article key={element.id} className={`rounded-[1.1rem] border p-4 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50"}`}>
+            <h3 className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{element.name}</h3>
+            <div className="mt-3 grid gap-2 md:grid-cols-2">
+              {element.suggestions.map((suggestion, index) => (
+                <div key={`${element.id}-${index}`} className={`rounded-[0.9rem] border p-3 text-sm ${isDark ? "border-white/10 bg-white/[0.03] text-slate-300" : "border-white bg-white text-stone-700"}`}>
+                  <p>{summarizeRecord(suggestion)}</p>
+                  <button
+                    type="button"
+                    onClick={() => void acceptElementSuggestion(element, suggestion)}
+                    className={`mt-3 rounded-full px-3 py-1.5 text-xs font-semibold ${isDark ? "bg-amber-300 text-stone-950" : "bg-stone-900 text-white"}`}
+                  >
+                    Mark implemented
+                  </button>
+                </div>
+              ))}
+            </div>
+          </article>
+        ))}
+        {((integration?.world_elements ?? analysis?.world_elements ?? []).filter((element) => element.suggestions.length > 0)).length === 0 ? (
+          <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>No pending element suggestions are available right now.</p>
+        ) : null}
+      </div>
+    </section>
+  )
+
   const notesPanel = (
     <section className={`rounded-[1.7rem] border p-5 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-white/90"}`}>
       <div className="flex items-center justify-between gap-3">
@@ -697,6 +937,14 @@ export function WorldbuildingWorkspace({
                     >
                       {noteStatusId === note.id ? "Updating..." : "Resolve"}
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => void deleteNote(note.id)}
+                      disabled={noteStatusId === note.id}
+                      className={`rounded-full px-3 py-1.5 text-xs font-semibold ${isDark ? "bg-rose-500/10 text-rose-200" : "bg-rose-50 text-rose-700"}`}
+                    >
+                      Delete
+                    </button>
                   </div>
                   <p className={`mt-3 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-700"}`}>{note.body}</p>
                   {note.suggested_fix ? (
@@ -728,6 +976,14 @@ export function WorldbuildingWorkspace({
                       className={`rounded-full px-3 py-1.5 text-xs font-semibold ${isDark ? "bg-white/8 text-slate-200" : "bg-stone-100 text-stone-700"}`}
                     >
                       {noteStatusId === note.id ? "Updating..." : "Reopen"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void deleteNote(note.id)}
+                      disabled={noteStatusId === note.id}
+                      className={`rounded-full px-3 py-1.5 text-xs font-semibold ${isDark ? "bg-rose-500/10 text-rose-200" : "bg-rose-50 text-rose-700"}`}
+                    >
+                      Delete
                     </button>
                   </div>
                   <p className={`mt-3 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-700"}`}>{note.body}</p>
@@ -799,6 +1055,9 @@ export function WorldbuildingWorkspace({
           {focus === "gap" ? (
             <>
               {analysisPanel}
+              {integrationPanel}
+              {canonPanel}
+              {elementSuggestionsPanel}
               {wikiPanel}
               {editorPanel}
             </>
@@ -807,6 +1066,9 @@ export function WorldbuildingWorkspace({
               {editorPanel}
               {wikiPanel}
               {analysisPanel}
+              {integrationPanel}
+              {canonPanel}
+              {elementSuggestionsPanel}
             </>
           )}
           {notesPanel}

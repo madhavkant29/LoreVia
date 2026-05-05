@@ -15,6 +15,7 @@ from typing import Any
 import bleach  # type: ignore[import-untyped]
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.engine.character.entity_filters import (
     complex_character_score,
@@ -435,8 +436,17 @@ async def merge_characters(
     book_id: uuid.UUID,
 ) -> Character:
     """Merge duplicate character records and preserve aliases / references."""
-    primary = await db.get(Character, primary_id)
-    secondary = await db.get(Character, secondary_id)
+    characters = (
+        await db.execute(
+            select(Character)
+            .options(selectinload(Character.voice_profile))
+            .where(Character.id.in_([primary_id, secondary_id]))
+            .execution_options(populate_existing=True)
+        )
+    ).scalars().all()
+    characters_by_id = {character.id: character for character in characters}
+    primary = characters_by_id.get(primary_id)
+    secondary = characters_by_id.get(secondary_id)
     if not primary or not secondary:
         raise ValueError("Character not found")
     if primary.book_id != book_id or secondary.book_id != book_id:

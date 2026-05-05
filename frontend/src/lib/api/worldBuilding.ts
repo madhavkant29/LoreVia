@@ -1,5 +1,6 @@
 import { apiClient } from "./client"
 import type {
+  CanonOverride,
   WorldBuildingDocument,
   WorldBuildingDocumentDetail,
   WorldGapResult,
@@ -59,6 +60,8 @@ export const worldBuildingApi = {
     apiClient.post<WikiGenerationResponse>(`/intelligence/${bookId}/world-building/wiki/generate`).then(r => r.data),
   getSeriesAnalysis: (seriesId: string) =>
     apiClient.get(`/intelligence/series/${seriesId}/world-building/series-analysis`).then(r => r.data),
+  acceptSuggestion: (worldElementId: string, payload: { suggestion_id: string; mark_implemented?: boolean }) =>
+    apiClient.post<{ accepted: string; remaining: number }>(`/intelligence/${worldElementId}/world-building/accept-suggestion`, payload).then(r => r.data),
   listNotes: (bookId: string) =>
     apiClient.get<WorldNote[]>(`/intelligence/${bookId}/world-building/notes`).then(r => r.data),
   createNote: (
@@ -82,4 +85,10 @@ export const worldBuildingApi = {
     apiClient.patch<WorldNote>(`/intelligence/${bookId}/world-building/notes/${noteId}/status`, { status }).then(r => r.data),
   deleteNote: (bookId: string, noteId: string) =>
     apiClient.delete(`/intelligence/${bookId}/world-building/notes/${noteId}`).then(r => r.data),
+  listCanonOverrides: (bookId: string) =>
+    apiClient.get<CanonOverride[]>(`/intelligence/${bookId}/world-building/canon-overrides`).then(r => r.data),
+  saveCanonOverride: (
+    bookId: string,
+    payload: { canonical_name: string; aliases?: string[]; entity_type?: string | null; notes?: string | null }
+  ) => apiClient.post<CanonOverride>(`/intelligence/${bookId}/world-building/canon-overrides`, payload).then(r => r.data),
 }

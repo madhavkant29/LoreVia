@@ -410,7 +410,12 @@ async def timeline_visible_chapter_set(
 ) -> set[int]:
     if book.mode == "author":
         return await full_available_chapter_set(db, book, current_user)
-    return await read_chapter_set(db, current_user.id, book.id)
+    read_set = await read_chapter_set(db, current_user.id, book.id)
+    if not read_set:
+        return set()
+    # Keep the timeline cumulative to the furthest visible chapter so
+    # ongoing arcs still appear even when explicit read progress is sparse.
+    return set(range(1, max(read_set) + 1))
 
 
 async def queue_analysis_if_missing(db: AsyncSession, chapter: Chapter) -> None:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -338,6 +338,7 @@ class BookProcessingOut(BaseModel):
     started_at: datetime | None = None
     updated_at: datetime | None = None
     last_error: str | None = None
+    parser_diagnostics: dict[str, Any] | None = None
 
 
 class WriterWorkspaceOut(BaseModel):

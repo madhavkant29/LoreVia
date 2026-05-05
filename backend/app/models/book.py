@@ -60,6 +60,7 @@ class Book(Base):
     plot_threads = relationship("PlotThread", back_populates="book", cascade="all, delete-orphan")
     wiki_entries = relationship("WikiEntry", back_populates="book", cascade="all, delete-orphan")
     world_building_documents = relationship("WorldBuildingDocument", back_populates="book", cascade="all, delete-orphan")
+    world_canonical_identities = relationship("WorldCanonicalIdentity", back_populates="book", cascade="all, delete-orphan")
     world_elements = relationship("WorldElement", foreign_keys="WorldElement.book_id", back_populates="book", cascade="all, delete-orphan")
     world_gap_analyses = relationship("WorldGapAnalysis", back_populates="book", cascade="all, delete-orphan")
     world_notes = relationship("WorldNote", back_populates="book", cascade="all, delete-orphan")

@@ -126,17 +126,6 @@ async def qa_endpoint(
         await client.close()
 
 
-@router.post("/{book_id}/predict")
-async def predict_endpoint(
-    book_id: uuid.UUID,
-    body: QARequest,
-    db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user),
-    _=Depends(rate_limit_chat),
-):
-    return await qa_endpoint(book_id, body, db, current_user, _)
-
-
 @router.post("/{book_id}/chat/{character_id}")
 async def character_chat(
     book_id: uuid.UUID,

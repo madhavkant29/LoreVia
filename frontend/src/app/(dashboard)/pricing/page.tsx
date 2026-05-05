@@ -45,8 +45,8 @@ const pricingTiers: PricingTier[] = [
   {
     name: "Reader",
     badge: "Most Popular",
-    priceMonthly: 8,
-    priceAnnual: 80,
+    priceMonthly: 12,
+    priceAnnual: 120,
     subtitle: "For the dedicated reader",
     highlight: false,
     cta: "Go Pro",

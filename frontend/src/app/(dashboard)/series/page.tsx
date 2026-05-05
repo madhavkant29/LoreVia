@@ -5,6 +5,7 @@ import Link from "next/link"
 
 import { booksApi } from "@/lib/api/books"
 import { intelligenceApi } from "@/lib/api/intelligence"
+import { worldBuildingApi } from "@/lib/api/worldBuilding"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import type { Book, BookSeries, SeriesBible } from "@/types/book"
@@ -58,6 +59,8 @@ export default function SeriesPage() {
   const [continuityBookId, setContinuityBookId] = useState("")
   const [continuityResult, setContinuityResult] = useState<SeriesContinuityResponse | null>(null)
   const [continuityLoading, setContinuityLoading] = useState(false)
+  const [worldAnalysisBySeriesId, setWorldAnalysisBySeriesId] = useState<Record<string, any>>({})
+  const [worldAnalysisLoadingId, setWorldAnalysisLoadingId] = useState<string | null>(null)
 
   async function load() {
     const [seriesRows, bookRows] = await Promise.all([booksApi.listSeries(), booksApi.list()])
@@ -138,6 +141,16 @@ export default function SeriesPage() {
       setContinuityResult(null)
     } finally {
       setContinuityLoading(false)
+    }
+  }
+
+  async function loadSeriesWorldAnalysis(seriesId: string) {
+    setWorldAnalysisLoadingId(seriesId)
+    try {
+      const payload = await worldBuildingApi.getSeriesAnalysis(seriesId)
+      setWorldAnalysisBySeriesId((current) => ({ ...current, [seriesId]: payload }))
+    } finally {
+      setWorldAnalysisLoadingId(null)
     }
   }
 
@@ -237,8 +250,33 @@ export default function SeriesPage() {
                       {seriesBibleLoadingId === lane.id ? "Loading..." : bibleOpen ? "Hide Series Bible" : "View Series Bible"}
                     </button>
                   ) : null}
+                  <button
+                    type="button"
+                    onClick={() => void loadSeriesWorldAnalysis(lane.id)}
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-4 py-1.5 text-xs font-semibold transition ${isDark ? "border-white/10 text-emerald-200 hover:bg-white/10" : "border-stone-300 text-stone-700 hover:bg-stone-50"}`}
+                  >
+                    {worldAnalysisLoadingId === lane.id ? "Loading..." : "World analysis"}
+                  </button>
                 </div>
               </div>
+
+              {worldAnalysisBySeriesId[lane.id] ? (
+                <div className={`mt-5 rounded-[1.3rem] border p-5 ${isDark ? "border-emerald-400/20 bg-emerald-400/10" : "border-emerald-200 bg-emerald-50"}`}>
+                  <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-emerald-200" : "text-emerald-700"}`}>Series world analysis</p>
+                  <div className="mt-3 grid gap-3 md:grid-cols-3">
+                    <SeriesBibleStat label="Books" value={String(worldAnalysisBySeriesId[lane.id].book_count ?? lane.books.length)} isDark={isDark} />
+                    <SeriesBibleStat label="Analyses" value={String(worldAnalysisBySeriesId[lane.id].analysis_count ?? 0)} isDark={isDark} />
+                    <SeriesBibleStat label="Context blocks" value={String((worldAnalysisBySeriesId[lane.id].world_context ?? []).length ?? 0)} isDark={isDark} />
+                  </div>
+                  <div className="mt-3 grid gap-2 md:grid-cols-2">
+                    {(worldAnalysisBySeriesId[lane.id].world_context ?? []).slice(0, 6).map((item: any, index: number) => (
+                      <div key={`${lane.id}-world-${index}`} className={`rounded-[0.9rem] border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-slate-200" : "border-white bg-white text-stone-700"}`}>
+                        {typeof item === "string" ? item : item.name || item.title || item.description || JSON.stringify(item)}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
 
               {bibleOpen ? (
                 <div className={`mt-5 rounded-[1.3rem] border p-5 ${isDark ? "border-sky-400/20 bg-sky-400/10" : "border-sky-200 bg-sky-50"}`}>

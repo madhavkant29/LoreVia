@@ -87,3 +87,19 @@ async def test_timeline_visible_chapter_set_uses_read_progress_in_reader_mode(mo
     visible = await reader_utils.timeline_visible_chapter_set(AsyncMock(), book, current_user)
 
     assert visible == {1, 2}
+
+
+@pytest.mark.asyncio
+async def test_timeline_visible_chapter_set_expands_sparse_reader_progress(monkeypatch):
+    book = _build_book("reader")
+    current_user = SimpleNamespace(id=uuid.uuid4(), tier="pro")
+
+    monkeypatch.setattr(
+        reader_utils,
+        "read_chapter_set",
+        AsyncMock(return_value={3}),
+    )
+
+    visible = await reader_utils.timeline_visible_chapter_set(AsyncMock(), book, current_user)
+
+    assert visible == {1, 2, 3}

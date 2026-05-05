@@ -126,6 +126,7 @@ async def process_book(book_id: str, queue_wait_ms: int | None = None) -> dict:
         )
         chapters = cast(list[dict[str, Any]], parsed_payload["chapters"])
         screenplay_payload = cast(dict[str, Any] | None, parsed_payload.get("screenplay_payload"))
+        parser_diagnostics = cast(dict[str, Any] | None, parsed_payload.get("parser_diagnostics"))
         all_chapters = apply_chapter_number_strategy(
             chapters,
             preserve_chapter_numbers=book.preserve_chapter_numbers and book.work_type != "screenplay",
@@ -206,6 +207,7 @@ async def process_book(book_id: str, queue_wait_ms: int | None = None) -> dict:
                     completed_chapters=0,
                     started_at=processing_started_at,
                     queue_wait_ms=queue_wait_ms,
+                    parser_diagnostics=parser_diagnostics,
                 ),
             )
         )

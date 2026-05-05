@@ -45,6 +45,9 @@ function AddChapterPageInner() {
               <p className={`mt-4 max-w-2xl text-base leading-7 ${isDark ? "text-[#A0A0A0]" : "text-stone-600"}`}>
                 Drop into LoreVia&apos;s incremental ingest flow, update character memory and plot threads, then review fresh continuity flags before you move on.
               </p>
+              <p className={`mt-3 max-w-2xl text-sm leading-6 ${isDark ? "text-[#8C8C8C]" : "text-stone-500"}`}>
+                Standalone scenes live in the manuscript workspace so they stay separate from chapter imports and can be linked later only if you want.
+              </p>
             </div>
 
             <div className="flex flex-wrap gap-3">
@@ -71,6 +74,18 @@ function AddChapterPageInner() {
               >
                 Reset Flow
               </button>
+              {initialBookId ? (
+                <Link
+                  href={`/${initialBookId}/manuscript`}
+                  className={`inline-flex items-center justify-center rounded-[1.1rem] px-5 py-3 text-sm font-semibold transition ${
+                    isDark
+                      ? "border border-emerald-400/20 bg-emerald-500/10 text-emerald-100 hover:bg-emerald-500/15"
+                      : "border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
+                  }`}
+                >
+                  Open Scene Workspace
+                </Link>
+              ) : null}
             </div>
           </div>
         </section>

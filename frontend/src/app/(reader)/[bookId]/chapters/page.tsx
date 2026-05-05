@@ -23,16 +23,42 @@ export default function ChapterListPage() {
   const [data, setData] = useState<ChapterListResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [readBusy, setReadBusy] = useState<string | null>(null)
 
-  useEffect(() => {
+  async function loadChapters() {
     setLoading(true)
-    Promise.all([
+    setError(null)
+    await Promise.all([
       booksApi.get(bookId).then(setBook),
       readerApi.getChapterList(bookId).then(setData),
     ])
       .catch(() => setError("Could not load the full chapter list."))
       .finally(() => setLoading(false))
+  }
+
+  useEffect(() => {
+    loadChapters().catch(() => {})
   }, [bookId])
+
+  async function setChapterRead(chapter: number, read: boolean) {
+    setReadBusy(`chapter:${chapter}`)
+    try {
+      await readerApi.updateChapterReadStatus(bookId, chapter, read)
+      await readerApi.getChapterList(bookId).then(setData)
+    } finally {
+      setReadBusy(null)
+    }
+  }
+
+  async function markBookRead() {
+    setReadBusy("book")
+    try {
+      await readerApi.markBookRead(bookId)
+      await readerApi.getChapterList(bookId).then(setData)
+    } finally {
+      setReadBusy(null)
+    }
+  }
 
   const unitLabel = storyUnitLabel(book?.work_type)
   const processedCount = useMemo(
@@ -60,6 +86,19 @@ export default function ChapterListPage() {
           </div>
         </div>
 
+        {!loading && !error && data?.chapters.length ? (
+          <div className="mt-5 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => void markBookRead()}
+              disabled={readBusy === "book"}
+              className={`rounded-full border px-4 py-2 text-sm font-semibold ${isDark ? "border-emerald-300/20 bg-emerald-400/10 text-emerald-100" : "border-emerald-200 bg-emerald-50 text-emerald-800"} disabled:opacity-50`}
+            >
+              {readBusy === "book" ? "Marking..." : "Mark book read"}
+            </button>
+          </div>
+        ) : null}
+
         {error ? (
           <div className={`mt-6 rounded-[1.3rem] border px-5 py-4 text-sm ${isDark ? "border-red-500/25 bg-red-500/10 text-red-300" : "border-red-200 bg-red-50 text-red-700"}`}>
             {error}
@@ -75,13 +114,12 @@ export default function ChapterListPage() {
         {!loading && !error ? (
           <div className="mt-8 space-y-4">
             {(data?.chapters ?? []).map((chapter) => (
-              <button
+              <article
                 key={chapter.number}
-                onClick={() => router.push(`/${bookId}/chapter/${chapter.number}`)}
-                className={`w-full rounded-[1.4rem] border px-5 py-5 text-left transition hover:-translate-y-0.5 ${
+                className={`w-full rounded-[1.4rem] border px-5 py-5 text-left ${
                   isDark
-                    ? "border-white/10 bg-white/[0.04] hover:bg-white/[0.06]"
-                    : "border-stone-200 bg-white/90 hover:bg-white"
+                    ? "border-white/10 bg-white/[0.04]"
+                    : "border-stone-200 bg-white/90"
                 }`}
               >
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -117,7 +155,27 @@ export default function ChapterListPage() {
                     </span>
                   </div>
                 </div>
-              </button>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => router.push(`/${bookId}/chapter/${chapter.number}`)}
+                    className={`rounded-full border px-4 py-2 text-sm font-semibold ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`}
+                  >
+                    Open
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void setChapterRead(chapter.number, !chapter.read)}
+                    disabled={readBusy === `chapter:${chapter.number}`}
+                    className={`rounded-full border px-4 py-2 text-sm font-semibold ${chapter.read
+                      ? isDark ? "border-white/10 bg-white/[0.03] text-slate-300" : "border-stone-200 bg-stone-50 text-stone-600"
+                      : isDark ? "border-violet-300/20 bg-violet-400/10 text-violet-100" : "border-violet-200 bg-violet-50 text-violet-800"
+                    } disabled:opacity-50`}
+                  >
+                    {readBusy === `chapter:${chapter.number}` ? "Saving..." : chapter.read ? "Mark unread" : "Mark read"}
+                  </button>
+                </div>
+              </article>
             ))}
           </div>
         ) : null}

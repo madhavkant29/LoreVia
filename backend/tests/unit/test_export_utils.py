@@ -194,6 +194,7 @@ def test_manuscript_docx_uses_front_matter_for_title_page():
     raw = manuscript_docx(
         title="Atlas",
         chapters=[{"number": 1, "title": "Opening", "text": "First paragraph.\n\n#\n\nSecond paragraph."}],
+        scenes=[],
         front_matter={
             "author_name": "A. Writer",
             "contact_email": "writer@example.com",
@@ -209,6 +210,36 @@ def test_manuscript_docx_uses_front_matter_for_title_page():
     assert "A. Writer" in text
     assert "writer@example.com" in text
     assert "Chapter 1" in text
+
+
+def test_manuscript_docx_includes_special_headings_manual_scenes_and_end_marker():
+    raw = manuscript_docx(
+        title="Atlas",
+        chapters=[
+            {"number": 1, "title": "Prologue", "text": "Opening paragraph.\n\n#\n\nSecond beat."},
+            {"number": 2, "title": "Chapter 1", "text": "Main chapter text."},
+            {"number": 3, "title": "Epilogue", "text": "Closing paragraph."},
+        ],
+        scenes=[
+            {
+                "title": "Lantern Walk",
+                "body": "Standalone scene body.",
+                "chapter_number": 2,
+                "source": "manual",
+            }
+        ],
+        front_matter={"title": "Atlas Rising", "author_name": "A. Writer"},
+    )
+
+    doc = Document(BytesIO(raw))
+    text = "\n".join(paragraph.text for paragraph in doc.paragraphs)
+
+    assert "Prologue" in text
+    assert "Epilogue" in text
+    assert "Scene #1 (Chapter 2)" in text
+    assert "Lantern Walk" in text
+    assert "***" in text
+    assert "THE END" in text
 
 
 def test_manuscript_obsidian_vault_zip_creates_expected_folders():

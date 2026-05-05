@@ -9,7 +9,7 @@ import { readerApi } from "@/lib/api/reader"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { capture } from "@/lib/analytics/posthog"
 import type { Book } from "@/types/book"
-import type { SearchResult } from "@/types/reader"
+import type { SearchResult, ThematicSearchResult } from "@/types/reader"
 
 const AUTHOR_PROMPTS = [
   "Find every scene where Aria and Marcus are alone together.",
@@ -27,6 +27,8 @@ export default function SearchPage() {
   const [book, setBook] = useState<Book | null>(null)
   const [query, setQuery] = useState("")
   const [results, setResults] = useState<SearchResult[]>([])
+  const [thematicResults, setThematicResults] = useState<ThematicSearchResult[]>([])
+  const [mode, setMode] = useState<"semantic" | "thematic">("semantic")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -42,11 +44,20 @@ export default function SearchPage() {
     setError(null)
     capture("search_submitted", { book_id: bookId, query_len: trimmed.length, workspace: isAuthor ? "author" : "reader" })
     try {
-      const data = await readerApi.search(bookId, trimmed, 9999)
-      setResults(data)
-      capture("search_results_loaded", { book_id: bookId, result_count: data.length })
+      if (mode === "thematic") {
+        const data = await readerApi.thematicSearch(bookId, trimmed)
+        setThematicResults(data.results)
+        setResults([])
+        capture("search_results_loaded", { book_id: bookId, result_count: data.results.length, mode })
+      } else {
+        const data = await readerApi.search(bookId, trimmed, 9999)
+        setResults(data)
+        setThematicResults([])
+        capture("search_results_loaded", { book_id: bookId, result_count: data.length, mode })
+      }
     } catch {
       setResults([])
+      setThematicResults([])
       setError("Search failed. Please try again.")
     } finally {
       setLoading(false)
@@ -105,6 +116,25 @@ export default function SearchPage() {
             </button>
           </div>
 
+          <div className="mt-4 flex flex-wrap gap-2">
+            {([
+              ["semantic", "Passages"],
+              ["thematic", "Themes"],
+            ] as Array<["semantic" | "thematic", string]>).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setMode(value)}
+                className={`rounded-full border px-3 py-2 text-xs font-semibold ${mode === value
+                  ? isDark ? "border-emerald-300/30 bg-emerald-400/10 text-emerald-100" : "border-emerald-200 bg-emerald-50 text-emerald-800"
+                  : isDark ? "border-white/10 bg-white/[0.03] text-slate-300" : "border-stone-200 bg-stone-50 text-stone-600"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
           {isAuthor ? (
             <div className="mt-4 flex flex-wrap gap-2">
               {AUTHOR_PROMPTS.map((prompt) => (
@@ -123,6 +153,22 @@ export default function SearchPage() {
         {error ? <div className={`mt-6 rounded-[1.4rem] border p-4 text-sm ${isDark ? "border-rose-500/20 bg-rose-500/10 text-rose-200" : "border-rose-200 bg-rose-50 text-rose-700"}`}>{error}</div> : null}
 
         <div className="mt-6 space-y-4">
+          {thematicResults.map((result, index) => (
+            <div key={`theme-${result.chapter_number}-${index}`} className={`rounded-[1.6rem] border p-5 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-white/90"}`}>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-cyan-300" : "text-cyan-700"}`}>
+                  Chapter {result.chapter_number}{result.chapter_title ? ` - ${result.chapter_title}` : ""}
+                </p>
+                <span className={`rounded-full px-3 py-1 text-xs ${isDark ? "bg-white/10 text-slate-300" : "bg-stone-100 text-stone-600"}`}>
+                  {Math.round(result.score * 100)}% theme match
+                </span>
+              </div>
+              <p className={`mt-3 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
+                {result.summary || "Matched this theme in the chapter text or intelligence notes."}
+              </p>
+            </div>
+          ))}
+
           {results.map((result, index) => (
             <div key={`${result.chapter_num}-${index}`} className={`rounded-[1.6rem] border p-5 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-white/90"}`}>
               <div className="flex flex-wrap items-center justify-between gap-3">
@@ -138,7 +184,7 @@ export default function SearchPage() {
             </div>
           ))}
 
-          {results.length === 0 && !loading && query ? (
+          {results.length === 0 && thematicResults.length === 0 && !loading && query ? (
             <div className={`rounded-[1.6rem] border p-5 text-sm ${isDark ? "border-white/10 bg-white/[0.04] text-slate-400" : "border-stone-200 bg-white/90 text-stone-500"}`}>
               No matching passages yet. Try a broader query, a character name, or a concrete scene description.
             </div>
