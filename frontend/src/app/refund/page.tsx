@@ -1,52 +1,112 @@
 import type { Metadata } from "next"
 
+import { TrustPage } from "@/components/legal/TrustPage"
+import { SUPPORT_EMAIL } from "@/lib/constants/contact"
+import { TRUST_EFFECTIVE_DATE } from "@/lib/constants/trust"
+
 export const metadata: Metadata = {
   title: "Refund Policy",
-  description: "Read the LoreVia Refund Policy to understand our refund terms and process.",
+  description: "Understand LoreVia subscription cancellation, refund review criteria, renewal timing, and billing support.",
+  alternates: {
+    canonical: "/refund",
+  },
 }
+
+const sections = [
+  {
+    title: "Subscriptions and renewals",
+    paragraphs: [
+      "LoreVia offers paid plans for users who need expanded access beyond the free tier. Paid plans may be billed on monthly or annual intervals depending on the option you select at checkout. Unless a specific offer states otherwise, subscriptions renew automatically until you cancel them.",
+      "The price, billing cadence, and any taxes or processor-imposed terms are presented during checkout. Because billing is handled through a dedicated payment provider, some operational details of the charge lifecycle, receipt delivery, and refund mechanics depend on that provider's systems in addition to LoreVia's own policy decisions.",
+    ],
+  },
+  {
+    title: "How cancellation works",
+    paragraphs: [
+      "You can cancel a paid subscription through the LoreVia billing portal available from your account settings. That portal is the standard path for managing an active plan, reviewing the current subscription state, and ending future renewals without needing manual intervention from support.",
+      "Cancellation stops the next renewal. It does not usually terminate access on the same day you click cancel. In most cases, you keep the paid tier until the current billing period ends, and then the account steps down to the free plan if one is available.",
+    ],
+  },
+  {
+    title: "What happens after cancellation",
+    paragraphs: [
+      "When a subscription ends, LoreVia may reduce access to features that exceed the free tier while preserving the account and its stored work according to the live product rules and retention practices. That means your books, notes, and workspace history are not automatically erased just because a paid plan ends.",
+      "However, premium-only capabilities, higher limits, or plan-specific tools may no longer be available. If you are working against a deadline, cancel with that timing in mind instead of assuming premium features will remain permanently available after the billing term closes.",
+    ],
+  },
+  {
+    title: "When refund requests may be reviewed",
+    paragraphs: [
+      "LoreVia reviews refund requests on a case-by-case basis rather than promising an automatic no-questions-asked refund for every charge. The most common cases that warrant review are duplicate charges, clear billing mistakes, technical failures that blocked access to the paid service, or other circumstances where the charge did not align with what the customer reasonably purchased.",
+      "If you believe a refund is justified, contact support within 14 days of the charge and include the account email, the charge date, the plan involved, and a short explanation of what went wrong. Requests with specific facts are much easier to evaluate fairly than one-line refund demands with no context.",
+    ],
+  },
+  {
+    title: "What does not automatically qualify",
+    paragraphs: [
+      "Cancelling a subscription does not automatically create a refund. It simply prevents future renewals. A refund request also may be denied when the account had meaningful access to the paid service and there is no billing error, fraud event, or material product failure to review.",
+      "LoreVia may also deny requests that appear abusive, such as repeated signups followed by repeated refund demands after heavy use, or patterns that look like an attempt to use premium features temporarily without paying for the consumed service period.",
+    ],
+  },
+  {
+    title: "Approved refund timing and chargebacks",
+    paragraphs: [
+      "If a refund is approved, it is sent back to the original payment method through the billing provider. Posting times depend on the financial institutions involved and may take several business days before the credit is visible on your statement.",
+      "If you are considering a chargeback because you believe a charge is fraudulent, unauthorized, or the product was materially unavailable, contact support first when possible. Most legitimate billing issues can be resolved faster through direct review, and unnecessary chargebacks can complicate account restoration and payment processing history.",
+    ],
+  },
+  {
+    title: "Trials, promos, and future plan changes",
+    paragraphs: [
+      "From time to time, LoreVia may offer promotional pricing, new plan structures, or limited trial programs. If that happens, the specific terms of the offer will control the billing behavior for that purchase. Trial language, intro pricing, or discounted annual offers should be read carefully because they may have different renewal timing than a standard full-price plan.",
+      "This published policy applies unless a more specific offer, required consumer law, or separate written agreement overrides a particular point.",
+    ],
+  },
+] as const
 
 export default function RefundPage() {
   return (
-    <main className="min-h-screen bg-[linear-gradient(180deg,#020202_0%,#0a0a0a_45%,#111111_100%)] px-6 py-16 text-white">
-      <div className="mx-auto max-w-4xl">
-      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">LoreVia</p>
-      <h1 className="mt-3 text-4xl font-semibold text-white">Refund Policy</h1>
-      <div className="mt-8 space-y-6 text-sm leading-7 text-slate-300">
-        <p>We want you to be satisfied with LoreVia. This policy explains our refund terms and how cancellations work through our billing system.</p>
-
-        <div>
-          <p className="font-semibold text-white">How to cancel your subscription</p>
-          <p className="mt-2">You can cancel your subscription at any time through the LoreVia billing portal. To access the portal, go to your account settings and select "Manage billing." This opens a secure Paddle portal where you can view your subscription details and cancel active plans. Cancellations take effect at the end of your current billing period. After cancellation, your account is automatically downgraded to the free tier when the subscription ends.</p>
-        </div>
-
-        <div>
-          <p className="font-semibold text-white">What happens when you cancel</p>
-          <p className="mt-2">When your subscription is cancelled, our system automatically updates your account tier to free. You retain access to the free-tier features, including your uploaded books, reading progress, and basic workspace tools. Any paid features that exceed the free tier limits will be disabled. Your data remains stored in your account according to our standard data retention policies.</p>
-        </div>
-
-        <div>
-          <p className="font-semibold text-white">Refund eligibility</p>
-          <p className="mt-2">Refund requests are evaluated on a case-by-case basis. If you believe you are entitled to a refund (for example, if you were charged incorrectly or experienced a service issue), contact us at support@getlorevia.com within 14 days of the charge with your account email and the reason for your request. We review each request individually and respond within 5 business days. Refunds are not guaranteed and depend on the specific circumstances.</p>
-        </div>
-
-        <div>
-          <p className="font-semibold text-white">Refund processing</p>
-          <p className="mt-2">Approved refunds are processed back to your original payment method. The timing depends on your payment provider and may take 5-10 business days to appear in your account. Paddle, our payment processor, governs the actual refund mechanics and any processor-specific rules.</p>
-        </div>
-
-        <div>
-          <p className="font-semibold text-white">No automatic refunds for cancellations</p>
-          <p className="mt-2">Cancelling your subscription through the billing portal does not automatically generate a refund. You will continue to have access to paid features until the end of your current billing period. If you want a refund in addition to cancellation, you must contact support separately.</p>
-        </div>
-
-        <div>
-          <p className="font-semibold text-white">Exceptions</p>
-          <p className="mt-2">We reserve the right to deny refund requests that show signs of abuse, such as repeated subscription cycles followed by refund requests, or extensive use of paid features before requesting a refund.</p>
-        </div>
-
-        <p>Questions about this policy can be sent to support@getlorevia.com.</p>
-      </div>
-      </div>
-    </main>
+    <TrustPage
+      currentPath="/refund"
+      eyebrow="Refunds"
+      title="Refunds are reviewed carefully, not hidden behind vague copy."
+      description="This page explains how LoreVia subscriptions renew, how cancellation works, and when a refund request may be reasonable to review."
+      effectiveDate={TRUST_EFFECTIVE_DATE}
+      intro={[
+        "The goal of this policy is clarity. We do not want users guessing whether cancelling ends access immediately, whether a mistaken charge can be reviewed, or whether billing support lives inside the app or with a processor.",
+        "LoreVia uses a dedicated billing flow and applies a case-by-case refund process. That is stricter than a blanket promise, but it is also more honest about how subscription products actually work.",
+      ]}
+      facts={[
+        {
+          label: "Cancellation",
+          value: "Self-serve through the billing portal",
+          detail: "The normal path is to manage or cancel your plan from the account billing area rather than by emailing first.",
+        },
+        {
+          label: "Refund window",
+          value: "Contact support within 14 days",
+          detail: "That gives us the best chance to verify the charge while the billing context is still fresh.",
+        },
+        {
+          label: "Automatic refund",
+          value: "No",
+          detail: "Cancellation stops renewal, but it does not automatically reverse the charge that already occurred.",
+        },
+        {
+          label: "Billing help",
+          value: SUPPORT_EMAIL,
+          detail: "Include the account email, charge timing, and the reason you believe the charge should be reviewed.",
+        },
+      ]}
+      sections={[...sections]}
+      contacts={[
+        {
+          title: "Refund and billing review",
+          description: "Use support for duplicate charges, cancellation questions, billing portal issues, and refund review requests.",
+          ctaLabel: SUPPORT_EMAIL,
+          ctaHref: `mailto:${SUPPORT_EMAIL}`,
+        },
+      ]}
+    />
   )
 }

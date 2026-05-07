@@ -18,6 +18,7 @@ export function AuthBootstrap() {
       pathname === "/auth/callback" ||
       pathname.startsWith("/login") ||
       pathname.startsWith("/register") ||
+      pathname.startsWith("/verify-email") ||
       pathname.startsWith("/complete-username") ||
       pathname.startsWith("/forgot-password") ||
       pathname.startsWith("/reset-password")

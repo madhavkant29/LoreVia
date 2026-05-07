@@ -6,6 +6,7 @@ import { authApi } from "@/lib/api/auth"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { supabase } from "@/lib/supabase"
+import { getOrCreateDeviceId } from "@/lib/utils/device"
 
 function evaluatePassword(password: string, email: string) {
   const lengthScore = password.length >= 16 ? 3 : password.length >= 12 ? 2 : password.length >= 8 ? 1 : 0
@@ -67,7 +68,6 @@ export default function RegisterPage() {
   const [loading, setLoading] = useState(false)
   const router = useRouter()
   const user = useAuthStore(s => s.user)
-  const setUser = useAuthStore(s => s.setUser)
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
   const passwordState = evaluatePassword(password, email)
@@ -85,14 +85,20 @@ export default function RegisterPage() {
     setLoading(true)
     setError(null)
     try {
-      const user = await authApi.register(email, username, password, acceptedTerms)
-      if (!user) {
-        setError("Could not load your account. Please try again.")
+      const result = await authApi.register(email, username, password, acceptedTerms, getOrCreateDeviceId())
+      if (!result?.email) {
+        setError("Could not create your account. Please try again.")
         return
       }
-      setUser(user)
-      router.push("/library")
-    } catch {
+      router.push(`/verify-email?email=${encodeURIComponent(result.email)}`)
+    } catch (error: unknown) {
+      if (typeof error === "object" && error && "response" in error) {
+        const detail = (error as { response?: { data?: { detail?: unknown } } }).response?.data?.detail
+        if (typeof detail === "string" && detail.trim()) {
+          setError(detail)
+          return
+        }
+      }
       setError("Registration failed. Email may already be taken.")
     } finally {
       setLoading(false)
@@ -126,7 +132,7 @@ export default function RegisterPage() {
       <div className="mb-8 text-center">
         <h1 className={`text-3xl font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>Create account</h1>
         <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-          Set up your account to start using LoreVia.
+          Set up your account, then verify your email before signing in.
         </p>
       </div>
 

@@ -54,11 +54,21 @@ export interface AdvisorPassage {
   relevance: number
 }
 
+export interface AdvisorWorldAnalysis {
+  mode: "gap_detection" | "story_integration" | string
+  answer: string
+  citations: Array<Record<string, unknown>>
+  suggestions: Array<Record<string, unknown>>
+  logic_alerts: Array<Record<string, unknown>>
+  simulation_steps: string[]
+}
+
 export interface AdvisorResponse {
   reply: string
   intent: "plothole" | "direction" | "opportunity" | "consistency" | "general"
   response_type: "standard" | "warning" | "opportunity" | "tradeoff"
   retrieved_passages: AdvisorPassage[]
+  world_analysis?: AdvisorWorldAnalysis | null
   cached?: boolean
 }
 

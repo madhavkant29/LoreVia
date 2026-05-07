@@ -4,6 +4,7 @@ import { booksApi } from "@/lib/api/books"
 import { authApi } from "@/lib/api/auth"
 import { intelligenceApi } from "@/lib/api/intelligence"
 import { readerApi } from "@/lib/api/reader"
+import { canUseAuthorFeatures } from "@/lib/billing/plans"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { useBookModeStore, type BookMode } from "@/lib/stores/bookModeStore"
@@ -70,6 +71,7 @@ export function UploadModal({
   const coverInputRef = useRef<HTMLInputElement>(null)
   const { theme } = usePreferencesStore()
   const user = useAuthStore((state) => state.user)
+  const canUploadAuthorMode = canUseAuthorFeatures(user?.tier)
   const setBookMode = useBookModeStore((state) => state.setMode)
   const isDark = theme === "dark"
   const infoButtonClass = `inline-flex h-4 w-4 items-center justify-center rounded-full border text-[10px] font-semibold leading-none transition ${
@@ -95,6 +97,12 @@ export function UploadModal({
   useEffect(() => {
     setMode(initialMode)
   }, [initialMode])
+
+  useEffect(() => {
+    if (!canUploadAuthorMode && mode === "author") {
+      setMode("reader")
+    }
+  }, [canUploadAuthorMode, mode])
 
   useEffect(() => {
     setExistingBookId(initialExistingBookId)
@@ -539,22 +547,32 @@ export function UploadModal({
             <div className={`mt-3 inline-flex w-full rounded-full p-1 ${isDark ? "border border-white/10 bg-white/5" : "border border-stone-200 bg-stone-100"}`}>
               {(["reader", "author"] as const).map((value) => {
                 const active = mode === value
+                const locked = value === "author" && !canUploadAuthorMode
                 return (
                   <button
                     key={value}
                     type="button"
-                    onClick={() => setMode(value)}
-                    className={`flex-1 rounded-full px-4 py-2 text-sm font-medium transition ${
+                    onClick={() => {
+                      if (locked) return
+                      setMode(value)
+                    }}
+                    disabled={locked}
+                    className={`flex-1 rounded-full px-4 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${
                       active
                         ? isDark ? "bg-white text-slate-950" : "bg-white text-stone-950 shadow-sm"
                         : isDark ? "text-slate-300 hover:bg-white/10" : "text-stone-600 hover:bg-white/70"
                     }`}
                   >
-                    {value === "reader" ? "Reading mode" : "Author mode"}
+                    {value === "reader" ? "Reading mode" : locked ? "Author mode locked" : "Author mode"}
                   </button>
                 )
               })}
             </div>
+            {!canUploadAuthorMode ? (
+              <p className={`mt-3 text-xs leading-5 ${isDark ? "text-amber-200" : "text-amber-700"}`}>
+                Author uploads require Author or Lore Architect access. Reader plans stay reader-only.
+              </p>
+            ) : null}
             {mode === "author" && !user?.username ? (
               <div className={`mt-4 rounded-xl border p-4 ${isDark ? "border-amber-500/30 bg-amber-500/10" : "border-amber-300 bg-amber-50"}`}>
                 <p className={`text-sm font-medium mb-2 ${isDark ? "text-amber-200" : "text-amber-800"}`}>Set your username to use Author mode</p>

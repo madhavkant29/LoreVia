@@ -3,14 +3,9 @@ Character chat: in-character responses grounded in story context.
 """
 from typing import Any, cast
 
-from openai import AsyncOpenAI
-
 from app.core.config import settings
+from app.core.llm import complete_with_fallback
 from app.models.character import Character
-
-
-def get_client() -> AsyncOpenAI:
-    return AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 
 
 CHAR_SYSTEM = """You are {name} from "{title}".
@@ -55,6 +50,32 @@ def _format_growth_events(events: object) -> str:
     return "; ".join(lines) if lines else "no growth evidence extracted yet"
 
 
+def _format_relationship_memory(character: Character) -> str:
+    direct_summaries = getattr(character, "relationship_summaries", None)
+    if isinstance(direct_summaries, list):
+        cleaned = [str(item).strip() for item in direct_summaries if str(item).strip()]
+        if cleaned:
+            return "; ".join(cleaned[:4])
+
+    summaries: list[str] = []
+    for attr_name, counterpart_attr in (
+        ("relationships_as_a", "character_b"),
+        ("relationships_as_b", "character_a"),
+    ):
+        relationships = character.__dict__.get(attr_name)
+        if not isinstance(relationships, list):
+            continue
+        for rel in relationships[:4]:
+            counterpart = getattr(rel, counterpart_attr, None)
+            counterpart_name = str(getattr(counterpart, "name", "") or "").strip() or "someone"
+            description = str(getattr(rel, "description", "") or "").strip()
+            rel_type = str(getattr(rel, "rel_type", "") or "connection").replace("_", " ").strip() or "connection"
+            summaries.append(description or f"{rel_type.capitalize()} connection with {counterpart_name}.")
+
+    cleaned = [summary for summary in summaries if summary]
+    return "; ".join(cleaned[:4]) if cleaned else "no relationship evidence extracted yet"
+
+
 async def chat_as_character(
     character: Character,
     book_title: str,
@@ -63,33 +84,39 @@ async def chat_as_character(
     search_context: str,
     messages: list[dict],
 ) -> str:
-    client = get_client()
-    try:
-        from app.engine.character.profile_builder import build_description
+    from app.engine.character.profile_builder import build_description
 
-        system = CHAR_SYSTEM.format(
-            name=character.name,
-            title=book_title,
-            personality=_join_values(character.personality_tags),
-            motivations=_join_values(character.motivations),
-            fears=_join_values(character.fears),
-            arc_summary=character.arc_summary or "story ongoing",
-            description=build_description(character.trait_state or {}, character.archetype),
-            relationships=_join_values(character.relationship_summaries, "no relationship evidence extracted yet"),
-            growth_events=_format_growth_events(character.growth_events),
-            chapter=current_chapter,
-            context=("\n".join(filter(None, [context_summary or "", search_context or ""])))[:1300],
-        )
+    trait_state = character.trait_state if isinstance(character.trait_state, dict) else {}
+    system = CHAR_SYSTEM.format(
+        name=character.name,
+        title=book_title,
+        personality=_join_values(character.personality_tags),
+        motivations=_join_values(character.motivations),
+        fears=_join_values(character.fears),
+        arc_summary=character.arc_summary or "story ongoing",
+        description=build_description(trait_state, character.archetype),
+        relationships=_format_relationship_memory(character),
+        growth_events=_format_growth_events(character.growth_events),
+        chapter=current_chapter,
+        context=("\n".join(filter(None, [context_summary or "", search_context or ""])))[:1300],
+    )
 
-        recent = messages[-10:]
-        chat_messages = cast(Any, [{"role": "system", "content": system}] + recent)
+    recent = messages[-10:]
+    user_prompt = "\n".join(
+        f"{str(message.get('role', 'user')).upper()}: {str(message.get('content', '')).strip()}"
+        for message in recent
+        if str(message.get("content", "")).strip()
+    )
 
-        response = await client.chat.completions.create(
-            model=settings.OPENAI_INTEL_MODEL,
-            messages=chat_messages,
-            temperature=0.7,
-            max_tokens=220,
-        )
-        return (response.choices[0].message.content or "").strip()
-    finally:
-        await client.close()
+    reply = await complete_with_fallback(
+        system=system,
+        user=user_prompt or "USER: Say something in character.",
+        openai_model=settings.OPENAI_INTEL_MODEL,
+        gemini_model=None,
+        temperature=0.7,
+        max_tokens=220,
+    )
+    cleaned_reply = cast(str, reply).strip()
+    if cleaned_reply:
+        return cleaned_reply
+    return "I don't know how to answer that just yet."

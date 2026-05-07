@@ -5,6 +5,10 @@ import type { Route } from "next"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 
+import { AuthorFeatureComponent } from "@/components/billing/AuthorFeatureComponent"
+import { canUseAuthorFeatures } from "@/lib/billing/plans"
+import { useAuthStore } from "@/lib/stores/authStore"
+
 type BookMode = "reader" | "author"
 
 type AuthorToolsNavProps = {
@@ -65,7 +69,8 @@ const NAV_SECTIONS = (bookId: string, currentChapter = 1): NavSection[] => [
     authorOnly: true,
     items: [
       { id: "manuscript", label: "Manuscript Editor", href: `/${bookId}/manuscript` as Route, tone: "Drafting", icon: "pen" },
-      { id: "add-scene", label: "Add Scene", href: `/${bookId}/manuscript?newScene=1` as Route, tone: "Create", icon: "plus" },
+      { id: "scenes", label: "Scene Workspace", href: `/${bookId}/scenes` as Route, tone: "File tree", icon: "files" },
+      { id: "add-scene", label: "Add Scene", href: `/${bookId}/scenes` as Route, tone: "Create", icon: "plus" },
     ],
   },
   {
@@ -75,7 +80,7 @@ const NAV_SECTIONS = (bookId: string, currentChapter = 1): NavSection[] => [
       { id: "advisor", label: "Story Advisor", href: `/${bookId}/advisor` as Route, tone: "Continuity", icon: "spark" },
       { id: "ask", label: "Ask LoreVia", href: `/${bookId}/ask` as Route, tone: "Questions", icon: "chat" },
       { id: "world-gap", label: "World Gap Detection", href: `/${bookId}/world-gap` as Route, tone: "Lore cleanup", icon: "gap" },
-      { id: "characters", label: "Characters", href: `/${bookId}/characters` as Route, tone: "Profiles", icon: "users" },
+      { id: "characters", label: "Character Bible", href: `/${bookId}/characters` as Route, tone: "Profiles", icon: "users" },
       { id: "relationships", label: "Relationships", href: `/${bookId}/graph` as Route, tone: "Network", icon: "links" },
       { id: "plot-threads", label: "Plot Threads", href: `/${bookId}/plot-threads` as Route, tone: "Arc tracking", icon: "threads" },
     ],
@@ -110,7 +115,9 @@ export function AuthorToolsNav({
   variant = "panel",
 }: AuthorToolsNavProps) {
   const router = useRouter()
-  const sections = NAV_SECTIONS(bookId, currentChapter).filter((section) => mode === "author" || !section.authorOnly)
+  const tier = useAuthStore((state) => state.user?.tier)
+  const showAuthorSections = mode === "author" && canUseAuthorFeatures(tier)
+  const sections = NAV_SECTIONS(bookId, currentChapter).filter((section) => showAuthorSections || !section.authorOnly)
   const items = sections.flatMap((section) => section.items)
 
   useEffect(() => {
@@ -121,7 +128,7 @@ export function AuthorToolsNav({
 
   const rail = variant === "rail"
   const containerClass = rail
-    ? `group/rail sticky top-24 z-20 h-[calc(100vh-7.5rem)] w-[4.75rem] overflow-hidden rounded-2xl border p-3 shadow-[0_24px_70px_-48px_rgba(0,0,0,0.75)] transition-[width,background-color,border-color] duration-300 hover:w-72 focus-within:w-72 ${
+    ? `group/rail sticky top-24 z-20 flex h-[calc(100vh-7.5rem)] w-[4.75rem] flex-col overflow-hidden rounded-2xl border p-3 shadow-[0_24px_70px_-48px_rgba(0,0,0,0.75)] transition-[width,background-color,border-color] duration-300 hover:w-72 focus-within:w-72 ${
         isDark ? "border-white/10 bg-[#0d0f12]/90" : "border-stone-200 bg-white/90"
       }`
     : `rounded-2xl border p-4 ${isDark ? "border-white/10 bg-[#0d0f12]/90" : "border-stone-200 bg-white/92"}`
@@ -143,9 +150,10 @@ export function AuthorToolsNav({
         {description}
       </p>
 
-      <div className="mt-4 space-y-4">
-        {sections.map((section) => (
-          <div key={section.title}>
+      <div className={`mt-4 space-y-4 ${rail ? "min-h-0 flex-1 overflow-y-auto overflow-x-hidden pr-1" : ""}`}>
+        {sections.map((section) => {
+          const sectionMarkup = (
+          <div>
             <p className={`mb-2 px-1 text-[10px] font-semibold uppercase tracking-[0.24em] transition-opacity duration-200 ${labelVisibility} ${isDark ? "text-slate-600" : "text-stone-400"}`}>
               {section.title}
             </p>
@@ -181,7 +189,15 @@ export function AuthorToolsNav({
               })}
             </div>
           </div>
-        ))}
+          )
+          return section.authorOnly ? (
+            <AuthorFeatureComponent key={section.title} locked={null}>
+              {sectionMarkup}
+            </AuthorFeatureComponent>
+          ) : (
+            <div key={section.title}>{sectionMarkup}</div>
+          )
+        })}
       </div>
     </aside>
   )

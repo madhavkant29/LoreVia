@@ -1955,6 +1955,15 @@ def manuscript_obsidian_vault_zip(
         for scene in scenes:
             scene_title = _clean_line(scene.get("title")) or "Scene"
             scene_description = str(scene.get("description") or "").strip()
+            scene_metadata = scene.get("metadata") if isinstance(scene.get("metadata"), dict) else {}
+            metadata_lines: list[str] = []
+            for key, value in scene_metadata.items():
+                label = str(key).replace("_", " ").title()
+                if isinstance(value, list):
+                    metadata_lines.append(f"{label}:")
+                    metadata_lines.extend(f"- {_clean_line(item)}" for item in value if _clean_line(item))
+                elif _clean_line(value):
+                    metadata_lines.append(f"{label}: {_clean_line(value)}")
             chapter_number = scene.get("chapter_number")
             folder = f"chapter-{int(chapter_number):02d}" if isinstance(chapter_number, int) and chapter_number > 0 else "unassigned"
             archive.writestr(
@@ -1967,6 +1976,8 @@ def manuscript_obsidian_vault_zip(
                         f"Status: {scene.get('status') or 'unassigned'}",
                         f"Linked Chapter: {chapter_number or 'undecided'}",
                         "",
+                        *metadata_lines,
+                        "" if metadata_lines else "",
                         "---",
                         "",
                         str(scene.get("body") or "").strip(),

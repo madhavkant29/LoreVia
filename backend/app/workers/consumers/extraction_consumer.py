@@ -13,7 +13,7 @@ from typing import Any, cast
 from sqlalchemy import delete, func, select
 from sqlalchemy import update as sa_update
 
-from app.core.config import effective_tier, settings
+from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.core.storage import download_book, upload_binary
 from app.engine.character.consolidator import consolidate_characters
@@ -30,7 +30,9 @@ from app.engine.embeddings.embedder import embed_batch
 from app.models.book import Book, Chapter, ChapterMedia
 from app.models.character import Character, CharacterState, CharacterVoiceProfile
 from app.models.intelligence import BookChunk, CharacterRelationship, Notification
+from app.models.user import User
 from app.parsers.chunker import ChunkingConfig, chunk_text, count_tokens
+from app.services.monetization_service import qualify_referral_if_ready, reward_first_processed_book
 from app.services.email_service import send_processing_complete_with_stats
 from app.utils.compliance.copyright_check import check_isbn
 from app.utils.external.isbn_lookup import extract_isbn_from_pdf
@@ -51,7 +53,9 @@ from app.utils.ingestion_utils import (
     persist_chapter_payloads,
     update_book_processing_state,
 )
+from app.utils.billing_utils import user_access_tier
 from app.utils.notification_utils import build_book_ready_notification, collect_book_ready_stats
+from app.utils.queue_utils import queue_for_user
 
 log = logging.getLogger("lorevia.extraction")
 AUTO_SAVE_CONFIDENCE = 0.78
@@ -149,8 +153,6 @@ async def process_book(book_id: str, queue_wait_ms: int | None = None) -> dict:
             )
             return {"skipped": "book_hidden"}
 
-        from app.models.user import User
-
         user = await db.get(User, book.user_id)
 
         full_tokens = sum(count_tokens(ch["text"]) for ch in all_chapters)
@@ -158,7 +160,7 @@ async def process_book(book_id: str, queue_wait_ms: int | None = None) -> dict:
         was_truncated = False
         ai_chapters = all_chapters
 
-        if user and effective_tier(user.tier) not in ("pro", "power", "admin", "premium"):
+        if user and user_access_tier(user) not in ("reader", "author", "architect", "admin"):
             result = await db.execute(
                 select(func.sum(Book.total_tokens))
                 .where(Book.user_id == user.id, Book.id != book.id, Book.status != "error")
@@ -283,7 +285,7 @@ async def process_book(book_id: str, queue_wait_ms: int | None = None) -> dict:
                 return {"skipped": "book_hidden"}
             process_chapter_task.apply_async(
                 args=[str(book.id), dispatch.chapter_number],
-                queue="extraction",
+                queue=queue_for_user(user, "extraction") if user else "extraction",
                 countdown=dispatch.countdown,
             )
         log.info(
@@ -327,6 +329,7 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
 
     chapter_number = int(ch_data["number"])
     started_at = time.perf_counter()
+    user = await db.get(User, book.user_id)
     db_load_started = time.perf_counter()
     chapter = (
         await db.execute(
@@ -730,9 +733,12 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
 
         await db.commit()
 
-        from app.models.user import User
-
         user = await db.get(User, book.user_id)
+        if user and existing_ready_notification is None:
+            await reward_first_processed_book(db, user, book)
+            await qualify_referral_if_ready(db, user, source_book_id=book.id)
+            await db.commit()
+
         if user and user.email and existing_ready_notification is None:
             await send_processing_complete_with_stats(
                 user.email,
@@ -747,7 +753,7 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
 
     analyse_chapter_task.apply_async(
         args=[str(chapter.id), ch_data["text"], ch_data.get("title") or ""],
-        queue="analysis",
+        queue=queue_for_user(user, "analysis") if user else "analysis",
     )
 
     log.info(

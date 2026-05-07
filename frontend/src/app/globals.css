@@ -32,7 +32,7 @@
   --reader-line-height: 1.5;
   --reader-size: 18px;
   --reader-display: var(--font-newsreader), "Times New Roman", serif;
-  --reader-label: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --reader-label: var(--font-ui), "Avenir Next", "Segoe UI Variable Text", sans-serif;
 }
 
 .dark {
@@ -68,7 +68,7 @@ html {
 
 body {
   min-height: 100vh;
-  font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--font-ui), "Avenir Next", "Segoe UI Variable Text", sans-serif;
   background-color: rgb(var(--background));
   color: rgb(var(--foreground));
   overflow-x: hidden;

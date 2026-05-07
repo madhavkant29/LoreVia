@@ -1,14 +1,22 @@
 import type { Metadata, Viewport } from "next"
 import "./globals.css"
-import { Inter, Merriweather, Newsreader } from "next/font/google"
+import { Merriweather, Newsreader, Space_Grotesk } from "next/font/google"
 import { AuthBootstrap } from "@/components/auth/AuthBootstrap"
 import { PWARegister } from "@/components/app/PWARegister"
 import { SiteFooter } from "@/components/layout/SiteFooter"
 import { PostHogClientProvider } from "@/components/analytics/PostHogClient"
+import {
+  DEFAULT_OG_IMAGE,
+  SITE_DESCRIPTION,
+  SITE_NAME,
+  SITE_URL,
+  organizationJsonLd,
+  websiteJsonLd,
+} from "@/lib/seo"
 
-const inter = Inter({
+const uiFont = Space_Grotesk({
   subsets: ["latin"],
-  variable: "--font-inter",
+  variable: "--font-ui",
   display: "swap",
 })
 
@@ -29,13 +37,13 @@ const newsreader = Newsreader({
 })
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://getlorevia.com"),
+  metadataBase: new URL(SITE_URL),
+  applicationName: SITE_NAME,
   title: {
-    default: "LoreVia — AI Reading Companion for Authors",
-    template: "%s | LoreVia",
+    default: "LoreVia: AI Reading Companion for Authors",
+    template: `%s | ${SITE_NAME}`,
   },
-  description:
-    "LoreVia helps authors deeply understand their manuscripts — track characters, plot threads, timelines, and story consistency with AI.",
+  description: SITE_DESCRIPTION,
   keywords: [
     "AI writing assistant",
     "manuscript analysis",
@@ -46,8 +54,20 @@ export const metadata: Metadata = {
     "author tools",
     "LoreVia",
   ],
-  authors: [{ name: "LoreVia", url: "https://getlorevia.com" }],
-  creator: "LoreVia",
+  authors: [{ name: SITE_NAME, url: SITE_URL }],
+  creator: SITE_NAME,
+  publisher: SITE_NAME,
+  alternates: {
+    canonical: "/",
+  },
+  verification: {
+    google: process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION || undefined,
+    other: process.env.NEXT_PUBLIC_BING_SITE_VERIFICATION
+      ? {
+          "msvalidate.01": process.env.NEXT_PUBLIC_BING_SITE_VERIFICATION,
+        }
+      : undefined,
+  },
   robots: {
     index: true,
     follow: true,
@@ -56,26 +76,26 @@ export const metadata: Metadata = {
   openGraph: {
     type: "website",
     locale: "en_US",
-    url: "https://getlorevia.com",
-    siteName: "LoreVia",
-    title: "LoreVia — AI Reading Companion for Authors",
+    url: SITE_URL,
+    siteName: SITE_NAME,
+    title: "LoreVia: AI Reading Companion for Authors",
     description:
       "Track characters, plot threads, timelines and story consistency with AI. Your manuscript, deeply understood.",
     images: [
       {
-        url: "/og-image.png",
+        url: DEFAULT_OG_IMAGE,
         width: 1200,
         height: 630,
-        alt: "LoreVia — AI Reading Companion for Authors",
+        alt: "LoreVia: AI Reading Companion for Authors",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "LoreVia — AI Reading Companion for Authors",
+    title: "LoreVia: AI Reading Companion for Authors",
     description:
       "Track characters, plot threads, timelines and story consistency with AI.",
-    images: ["/og-image.png"],
+    images: [DEFAULT_OG_IMAGE],
     creator: "@getlorevia",
   },
   manifest: "/manifest.webmanifest",
@@ -102,8 +122,18 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html
       lang="en"
       suppressHydrationWarning
-      className={`${inter.variable} ${merriweather.variable} ${newsreader.variable}`}
+      className={`${uiFont.variable} ${merriweather.variable} ${newsreader.variable}`}
     >
+      <head>
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(websiteJsonLd) }}
+        />
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(organizationJsonLd) }}
+        />
+      </head>
       <body className="antialiased">
         <PostHogClientProvider>
           <AuthBootstrap />

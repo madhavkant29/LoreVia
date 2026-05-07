@@ -29,7 +29,7 @@ async def test_supabase_oauth_failure_does_not_log_response_body(monkeypatch, ca
     monkeypatch.setattr("app.api.v1.routes.auth.settings.SUPABASE_SERVICE_KEY", "service-key", raising=False)
     monkeypatch.setattr("app.api.v1.routes.auth.httpx.AsyncClient", FakeAsyncClient)
 
-    body = SupabaseOAuthBody(token="user-token", accepted_terms=True)
+    body = SupabaseOAuthBody(token="user-token", accepted_terms=True, device_id="device-logging-1234567890")
     response = Response()
 
     with caplog.at_level("WARNING", logger="lorevia.auth"):

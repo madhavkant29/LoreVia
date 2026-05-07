@@ -94,7 +94,7 @@ export function ReaderToolbar({
               </nav>
             </div>
             <p className={`mt-2 hidden text-sm lg:block ${toneClass.text}`}>
-              {chapterTitle || `Chapter ${chapterNum}`} • {wordsRead.toLocaleString()} of {totalWords.toLocaleString()} words
+              {chapterTitle || `Chapter ${chapterNum}`} | {wordsRead.toLocaleString()} of {totalWords.toLocaleString()} words
             </p>
           </div>
 
@@ -187,7 +187,7 @@ export function ReaderToolbar({
                 {chapterTitle || `Chapter ${chapterNum}`}
               </p>
               <p className={`mt-1 text-xs ${toneClass.text}`}>
-                {totalChapters ? `${chapterNum} of ${totalChapters}` : "Reader"} • {wordsRead.toLocaleString()} / {totalWords.toLocaleString()} words
+                {totalChapters ? `${chapterNum} of ${totalChapters}` : "Reader"} | {wordsRead.toLocaleString()} / {totalWords.toLocaleString()} words
               </p>
             </div>
             <div className="flex items-center gap-2">

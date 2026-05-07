@@ -74,43 +74,75 @@ def mock_celery_tasks(monkeypatch):
 def mock_redis(monkeypatch):
     """Mock Redis to avoid event loop issues with global _redis connection."""
     from app.core import redis as redis_module
-    
+
     class FakeRedis:
+        def __init__(self):
+            self.store: dict[str, str] = {}
+
         async def ping(self):
             return True
+
         async def get(self, key):
-            return None
+            return self.store.get(key)
+
         async def set(self, key, value, ex=None, nx=False):
+            if nx and key in self.store:
+                return False
+            self.store[key] = str(value)
             return True
+
         async def setex(self, key, ttl, value):
+            self.store[key] = str(value)
             return True
+
         async def delete(self, *keys):
-            return 0
+            deleted = 0
+            for key in keys:
+                if key in self.store:
+                    deleted += 1
+                    del self.store[key]
+            return deleted
+
         async def exists(self, *keys):
-            return 0
+            return sum(1 for key in keys if key in self.store)
+
         async def incr(self, key):
-            return 1
-        async def pipeline(self, transaction=True):
+            value = int(self.store.get(key, "0")) + 1
+            self.store[key] = str(value)
+            return value
+
+        def pipeline(self, transaction=True):
+            outer = self
+
             class FakePipeline:
                 async def __aenter__(self):
                     return self
+
                 async def __aexit__(self, *args):
-                    pass
+                    return False
+
                 def delete(self, *keys):
+                    for key in keys:
+                        outer.store.pop(key, None)
                     return self
+
                 def setex(self, key, ttl, value):
+                    outer.store[key] = str(value)
                     return self
+
                 async def execute(self):
                     return []
+
             return FakePipeline()
+
         async def aclose(self):
             pass
-    
+
     monkeypatch.setattr(redis_module, "_redis", FakeRedis())
-    
+
     async def fake_get_redis():
         return redis_module._redis
-    
+
     monkeypatch.setattr(redis_module, "get_redis", fake_get_redis)
 
 if sys.platform == "win32":
@@ -186,7 +218,13 @@ async def auth_headers(client):
     email = f"user-{uid}@lorevia.app"
     r = await client.post(
         "/api/v1/auth/register",
-        json={"email": email, "username": f"user{uid}", "password": "SecurePass456!@#", "accepted_terms": True},
+        json={
+            "email": email,
+            "username": f"user{uid}",
+            "password": "SecurePass456!@#",
+            "accepted_terms": True,
+            "device_id": f"device-{uuid.uuid4().hex}",
+        },
     )
     if r.status_code != 201:
         raise Exception(f"Registration failed: {r.status_code} - {r.text}")

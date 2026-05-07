@@ -21,12 +21,9 @@ class BookOut(BaseModel):
     source_kind: str
     preserve_chapter_numbers: bool = False
     cover_url: str | None = None
-    cover_processed_url: str | None = None
-    cover_edge_colors: dict[str, str] | None = None
-    cover_processed_at: datetime | None = None
-    cover_crop_bounds: dict[str, int] | None = None
     total_chapters: int | None
     total_tokens: int | None
+    total_words: int = 0
     is_truncated: bool
     primary_series_id: uuid.UUID | None = None
     series_name: str | None
@@ -41,7 +38,7 @@ class BookOut(BaseModel):
     chapters_read_count: int | None = None
     chapters_left: int | None = None
     marked_complete_in_series: bool | None = None
-    processing: "BookProcessingOut | None" = None
+    processing: BookProcessingOut | None = None
 
 
 class SeriesOut(BaseModel):
@@ -182,6 +179,19 @@ class ChapterConsistencyReport(BaseModel):
     continuity_flags: list[str]
 
 
+class StoryHealthMetricOut(BaseModel):
+    label: str
+    score: int
+    detail: str
+
+
+class StoryHealthOut(BaseModel):
+    score: int
+    status: str
+    summary: str
+    metrics: list[StoryHealthMetricOut]
+
+
 class ManuscriptImportResult(BaseModel):
     book_id: str
     imported_chapters: list[int]
@@ -279,6 +289,15 @@ class WordCountGoalsOut(BaseModel):
     session_target: int | None = None
 
 
+class GoalCalendarItemOut(BaseModel):
+    id: str
+    title: str
+    due_date: str
+    quota_value: int | None = None
+    quota_unit: str | None = None
+    completed: bool = False
+
+
 class CorkboardCardOut(BaseModel):
     id: str
     title: str
@@ -343,6 +362,7 @@ class BookProcessingOut(BaseModel):
 
 class WriterWorkspaceOut(BaseModel):
     word_count_goals: WordCountGoalsOut
+    goal_calendar: list[GoalCalendarItemOut]
     corkboard_cards: list[CorkboardCardOut]
     templates: list[WritingTemplateOut]
     publishing: PublishingPresetOut
@@ -354,6 +374,15 @@ class WordCountGoalsBody(BaseModel):
     chapter_target: int | None = None
     book_target: int | None = None
     session_target: int | None = None
+
+
+class GoalCalendarItemBody(BaseModel):
+    id: str | None = None
+    title: str
+    due_date: str
+    quota_value: int | None = None
+    quota_unit: str | None = None
+    completed: bool = False
 
 
 class CorkboardCardBody(BaseModel):
@@ -404,6 +433,7 @@ class ManuscriptFrontMatterBody(BaseModel):
 
 class WriterWorkspaceBody(BaseModel):
     word_count_goals: WordCountGoalsBody | None = None
+    goal_calendar: list[GoalCalendarItemBody] | None = None
     corkboard_cards: list[CorkboardCardBody] | None = None
     templates: list[WritingTemplateBody] | None = None
     publishing: PublishingPresetBody | None = None
@@ -553,6 +583,8 @@ class NovelSceneBody(BaseModel):
     description: str | None = None
     body: str
     html_body: str | None = None
+    metadata: dict[str, Any] | None = None
+    path: str | None = None
     chapter_number: int | None = None
     status: str | None = None
     sort_order: int | None = None
@@ -567,6 +599,7 @@ class NovelSceneOut(BaseModel):
     description: str | None = None
     body: str
     html_body: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
     path: str
     status: str
     sort_order: int

@@ -48,6 +48,8 @@ from app.schemas.reader import (
 from app.schemas.books import BookEventsOut, CharacterEventOut, MajorEventOut
 from app.services.summary_service import get_or_generate_summary
 from app.utils.book_utils import deserialize_manuscript_content
+from app.utils.billing_utils import summary_mode_allowed
+from app.utils.queue_utils import queue_for_user
 
 # ── Utils imports ──────────────────────────────────────────────────────────────
 from app.utils.reader_utils import (
@@ -72,6 +74,7 @@ from app.utils.reader_utils import (
     serialize_inline_images,
     summary_visible_chapter_set,
     timeline_character_detail,
+    timeline_plot_thread_span,
     timeline_visible_chapter_set,
     timeline_relationship_detail,
     update_plot_thread_note,
@@ -376,10 +379,12 @@ async def get_summary(
     book = await db.get(Book, book_id)
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
-    await require_summary_access(db, book, current_user, chapter_num)
 
     if mode not in ("short", "detailed", "key_points"):
         raise HTTPException(400, "Invalid mode")
+    if not summary_mode_allowed(current_user, mode):
+        raise HTTPException(403, "Upgrade to Reader to unlock detailed and key-point summaries.")
+    await require_summary_access(db, book, current_user, chapter_num)
 
     read_set = await read_chapter_set(db, current_user.id, book_id)
     if chapter_num not in read_set and not is_local_mode():
@@ -393,7 +398,7 @@ async def get_summary(
 
     data = await get_or_generate_summary(db, book_id, chapter_num, mode)
     if not data:
-        await queue_analysis_if_missing(db, chapter)
+        await queue_analysis_if_missing(db, chapter, current_user)
         raise HTTPException(503, "Chapter text not available yet")
 
     data = normalize_summary_response(data["content"], data.get("key_events"), data.get("char_changes"), data.get("clues"))
@@ -703,7 +708,7 @@ async def get_summary_collection(
         chapter_key = str(chapter.id)
         if chapter_key in summary_by_chapter_id:
             continue
-        await queue_analysis_if_missing(db, chapter)
+        await queue_analysis_if_missing(db, chapter, current_user)
         summary_data = await get_or_generate_summary(db, book_id, chapter.number, "short")
         if summary_data:
             summary_by_chapter_id[chapter_key] = {
@@ -775,7 +780,7 @@ async def get_foreshadowing_highlights(
         if existing:
             generated_rows.append((chapter.number, chapter.title, existing.clues or []))
             continue
-        await queue_analysis_if_missing(db, chapter)
+        await queue_analysis_if_missing(db, chapter, current_user)
         if not chapter.s3_key:
             continue
         try:
@@ -885,13 +890,15 @@ async def get_timeline(
         if resolved_at and resolved_at in read_set:
             events.append({"chapter_number": resolved_at, "chapter_title": chapter_titles.get(int(resolved_at)),
                             "kind": "thread_end", "title": title, "detail": "Resolved"})
-        if introduced_at and introduced_at in read_set:
+        span = timeline_plot_thread_span(introduced_at, resolved_at, read_set)
+        if span:
+            start_chapter, end_chapter = span
             thread_tracks.append({
                 "id": str(thread_id),
                 "title": title,
                 "status": status,
-                "start_chapter": introduced_at,
-                "end_chapter": max(introduced_at, min(resolved_at or max(read_set), max(read_set))),
+                "start_chapter": start_chapter,
+                "end_chapter": end_chapter,
                 "note": note,
                 "detail": description,
             })
@@ -929,6 +936,7 @@ async def thematic_search(
     q: str = Query(...),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
+    _=Depends(rate_limit_search),
 ):
     book = await db.get(Book, book_id)
     if not book or book.user_id != current_user.id:
@@ -1201,12 +1209,16 @@ async def update_progress(
             continue
         if not await chapter_intelligence_available(db, book, current_user, n):
             continue
-        process_chapter_task.apply_async(args=[str(book_id), n, "", ""], countdown=n * 3, queue="extraction")
+        process_chapter_task.apply_async(
+            args=[str(book_id), n],
+            countdown=n * 3,
+            queue=queue_for_user(current_user, "extraction"),
+        )
     current_row = (await db.execute(
         select(Chapter).where(Chapter.book_id == book_id, Chapter.number == current_chapter)
     )).scalar()
     if current_row and await chapter_intelligence_available(db, book, current_user, current_chapter):
-        await queue_analysis_if_missing(db, current_row)
+        await queue_analysis_if_missing(db, current_row, current_user)
     return {"ok": True}
 
 
@@ -1280,5 +1292,5 @@ async def update_chapter_read_status(
             select(Chapter).where(Chapter.book_id == book_id, Chapter.number == chapter)
         )).scalar()
         if chapter_row and await chapter_intelligence_available(db, book, current_user, chapter):
-            await queue_analysis_if_missing(db, chapter_row)
+            await queue_analysis_if_missing(db, chapter_row, current_user)
     return {"ok": True, "chapter": chapter, "read": read}

@@ -10,9 +10,9 @@ import io
 import json
 import os
 import re
+import statistics
 import uuid
 import zipfile
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
 import bleach  # type: ignore[import-untyped]
@@ -31,11 +31,11 @@ from app.models.book import (
     Chapter,
     ChapterVersion,
     Dialogue,
-    NovelScene,
     NoteBacklink,
     NoteLink,
     NoteSeriesLink,
     NoteTag,
+    NovelScene,
     ObsidianVaultNote,
     ObsidianVaultNoteSource,
     Scene,
@@ -43,7 +43,14 @@ from app.models.book import (
     SeriesBook,
 )
 from app.models.character import Character, CharacterState
-from app.models.intelligence import ChapterSummary, CharacterRelationship, PlotThread, WikiEntry
+from app.models.intelligence import (
+    ChapterSummary,
+    CharacterRelationship,
+    PlotThread,
+    WikiEntry,
+    WorldBuildingDocument,
+    WorldGapAnalysis,
+)
 from app.models.progress import ReadingProgress
 from app.schemas.books import (
     BookOut,
@@ -56,8 +63,8 @@ from app.schemas.books import (
     SeriesBibleOut,
     SeriesBiblePlotThreadOut,
     SeriesBibleRelationshipOut,
+    StoryHealthOut,
 )
-from app.utils.cover_processor import ProcessedCover, process_cover
 
 if TYPE_CHECKING:
     pass
@@ -179,6 +186,7 @@ DEFAULT_WRITER_WORKSPACE = {
         "book_target": 80000,
         "session_target": 1000,
     },
+    "goal_calendar": [],
     "corkboard_cards": [],
     "templates": DEFAULT_WRITING_TEMPLATES,
     "publishing": {
@@ -234,8 +242,31 @@ FORMAT_TO_UPLOAD_EXTENSION = {
 SCREENPLAY_INFER_FORMATS = {"fountain"}
 SCREENPLAY_INPUT_FORMATS = {"pdf", "fountain", "txt", "md"}
 TEXT_ONLY_UPLOAD_FORMATS = {"docx", "doc", "txt", "md"}
-SCENE_BREAK_LINE_RE = re.compile(r"^\s*(?:#(?:\s*#)*)\s*$", re.MULTILINE)
-SCENE_HEADING_LINE_RE = re.compile(r"^\s*#(?:\s*#\s*#)?(?:\s+(.*?))?\s*$")
+SCENE_BREAK_LINE_RE = re.compile(r"^\s*(?:#(?:\s*#)*|\*\s*\*\s*\*)\s*$", re.MULTILINE)
+SCENE_HEADING_LINE_RE = re.compile(r"^\s*#{1,3}(?:\s+(.*?))?\s*$")
+SCENE_METADATA_LABELS = {
+    "pov": "POV",
+    "location": "Location",
+    "time": "Time",
+    "timeline": "Timeline",
+    "characters": "Characters",
+    "objects": "Objects",
+    "goals": "Goals",
+    "conflict": "Conflict",
+    "plot_threads": "Plot Threads",
+    "mood": "Mood",
+}
+SCENE_METADATA_ALIASES = {
+    "point of view": "pov",
+    "point-of-view": "pov",
+    "pov character": "pov",
+    "time/day": "time",
+    "time of day": "time",
+    "timeline marker": "timeline",
+    "plot thread": "plot_threads",
+    "plot threads": "plot_threads",
+}
+SCENE_METADATA_LIST_FIELDS = {"characters", "objects", "goals", "plot_threads", "mood"}
 
 
 def normalize_book_work_type(value: str | None, *, default: str = "novel") -> str:
@@ -409,6 +440,28 @@ def normalize_writer_workspace(raw: dict | None) -> dict:
             value = goals.get(key)
             payload["word_count_goals"][key] = int(value) if isinstance(value, (int, float)) and int(value) > 0 else None
 
+    calendar_items: list[dict[str, Any]] = []
+    for item in source.get("goal_calendar") or []:
+        if not isinstance(item, dict):
+            continue
+        title = " ".join(str(item.get("title") or "").split()).strip()
+        due_date = " ".join(str(item.get("due_date") or "").split()).strip()
+        if not title or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", due_date):
+            continue
+        quota_value = item.get("quota_value")
+        quota_unit = " ".join(str(item.get("quota_unit") or "").split()).strip() or None
+        calendar_items.append(
+            {
+                "id": str(item.get("id") or uuid.uuid4()),
+                "title": title,
+                "due_date": due_date,
+                "quota_value": int(quota_value) if isinstance(quota_value, (int, float)) and int(quota_value) > 0 else None,
+                "quota_unit": quota_unit,
+                "completed": bool(item.get("completed", False)),
+            }
+        )
+    payload["goal_calendar"] = calendar_items
+
     cards: list[dict[str, Any]] = []
     for card in source.get("corkboard_cards") or []:
         if not isinstance(card, dict):
@@ -516,6 +569,152 @@ def estimate_readability(text: str) -> dict[str, Any]:
         "grade_level": round(max(0.0, grade_level), 2),
         "label": label,
     }
+
+
+def _clamp_score(value: float, *, minimum: int = 0, maximum: int = 100) -> int:
+    return max(minimum, min(maximum, int(round(value))))
+
+
+def _story_health_status(score: int) -> tuple[str, str]:
+    if score >= 85:
+        return "Excellent", "Story signals look strong across character, world, plot, and pacing."
+    if score >= 70:
+        return "Good", "Overall story health looks solid, with a few areas worth refining."
+    if score >= 55:
+        return "Fair", "The draft has momentum, but a couple of craft systems need attention."
+    return "Needs Attention", "Several story systems are under strain, so this is a good moment for a focused revision pass."
+
+
+async def build_story_health_payload(db: AsyncSession, book: Book) -> StoryHealthOut:
+    from app.utils.character_utils import is_displayable_character
+
+    characters = (
+        await db.execute(select(Character).where(Character.book_id == book.id).order_by(Character.mention_count.desc(), Character.name))
+    ).scalars().all()
+    visible_characters = [character for character in characters if is_displayable_character(character)]
+
+    relationships = (
+        await db.execute(select(CharacterRelationship).where(CharacterRelationship.book_id == book.id))
+    ).scalars().all()
+    relationship_counts: dict[uuid.UUID, int] = {}
+    for relationship in relationships:
+        relationship_counts[relationship.character_a_id] = relationship_counts.get(relationship.character_a_id, 0) + 1
+        relationship_counts[relationship.character_b_id] = relationship_counts.get(relationship.character_b_id, 0) + 1
+
+    character_scores: list[float] = []
+    for character in visible_characters:
+        evidence_points = 0
+        if character.role:
+            evidence_points += 1
+        if character.arc_summary:
+            evidence_points += 1
+        if character.personality_tags or character.archetype or character.trait_state:
+            evidence_points += 1
+        if character.motivations or character.fears:
+            evidence_points += 1
+        if relationship_counts.get(character.id, 0) > 0:
+            evidence_points += 1
+        character_scores.append((evidence_points / 5) * 100)
+
+    character_score = _clamp_score(statistics.fmean(character_scores), minimum=0, maximum=100) if character_scores else 0
+    character_detail = f"{len(visible_characters)} visible character profiles scored from actual role, arc, trait, motive, and relationship coverage."
+
+    chapter_reports = await list_chapter_consistency_reports(db, book, limit=6)
+    continuity_issue_count = sum(len(report.continuity_flags) for report in chapter_reports)
+
+    plot_threads = (
+        await db.execute(select(PlotThread).where(PlotThread.book_id == book.id))
+    ).scalars().all()
+    resolved_threads = sum(1 for thread in plot_threads if thread.status == "resolved")
+    abandoned_threads = sum(1 for thread in plot_threads if thread.status == "abandoned")
+    total_threads = len(plot_threads)
+    plot_score = _clamp_score(
+        62 + min(total_threads * 3, 18) + min(resolved_threads * 2, 12) - (continuity_issue_count * 8) - (abandoned_threads * 5),
+        minimum=0,
+        maximum=100,
+    )
+    plot_detail = f"{continuity_issue_count} recent continuity flags across {len(chapter_reports)} reports and {resolved_threads}/{total_threads} resolved plot threads."
+
+    wiki_count = (
+        await db.scalar(select(func.count(WikiEntry.id)).where(WikiEntry.book_id == book.id))
+    ) or 0
+    world_document_count = (
+        await db.scalar(
+            select(func.count(WorldBuildingDocument.id)).where(
+                WorldBuildingDocument.book_id == book.id,
+                WorldBuildingDocument.is_active.is_(True),
+                WorldBuildingDocument.archived_at.is_(None),
+            )
+        )
+    ) or 0
+    latest_world_gap_analysis = (
+        await db.execute(
+            select(WorldGapAnalysis)
+            .where(WorldGapAnalysis.book_id == book.id)
+            .order_by(WorldGapAnalysis.generated_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    priority_gaps = len(latest_world_gap_analysis.priority_gaps or []) if latest_world_gap_analysis else 0
+    consistency_flags = len(latest_world_gap_analysis.consistency_flags or []) if latest_world_gap_analysis else 0
+    world_score = _clamp_score(
+        58 + min(world_document_count * 8, 24) + min(wiki_count * 2, 18) - (priority_gaps * 7) - (consistency_flags * 6),
+        minimum=0,
+        maximum=100,
+    )
+    world_detail = f"{world_document_count} active world documents, {wiki_count} wiki entries, and {priority_gaps + consistency_flags} cached world-analysis issues."
+
+    chapter_word_counts = [
+        int(word_count)
+        for word_count in (
+            await db.execute(
+                select(Chapter.word_count)
+                .where(Chapter.book_id == book.id, Chapter.word_count.is_not(None), Chapter.word_count > 0)
+                .order_by(Chapter.number.asc())
+            )
+        ).scalars().all()
+    ]
+    if len(chapter_word_counts) >= 2:
+        mean_word_count = statistics.fmean(chapter_word_counts)
+        stdev_word_count = statistics.pstdev(chapter_word_counts) if len(chapter_word_counts) > 1 else 0.0
+        coefficient_of_variation = (stdev_word_count / mean_word_count) if mean_word_count else 1.0
+        median_word_count = statistics.median(chapter_word_counts)
+        outlier_count = sum(
+            1
+            for word_count in chapter_word_counts
+            if word_count < median_word_count * 0.6 or word_count > median_word_count * 1.6
+        )
+        outlier_rate = outlier_count / len(chapter_word_counts)
+        pacing_score = _clamp_score(
+            100 - (coefficient_of_variation * 85) - (outlier_rate * 35),
+            minimum=0,
+            maximum=100,
+        )
+        pacing_detail = f"{len(chapter_word_counts)} chapter word counts measured; {outlier_count} pacing outliers against a {int(round(median_word_count))}-word median."
+    elif len(chapter_word_counts) == 1:
+        pacing_score = 65
+        pacing_detail = "Only one chapter has a persisted word count, so pacing is based on limited manuscript data."
+    else:
+        pacing_score = 0
+        pacing_detail = "No persisted chapter word counts are available yet for pacing analysis."
+
+    overall_score = _clamp_score(
+        statistics.fmean([character_score, world_score, plot_score, pacing_score]),
+        minimum=0,
+        maximum=100,
+    )
+    status, summary = _story_health_status(overall_score)
+    return StoryHealthOut(
+        score=overall_score,
+        status=status,
+        summary=summary,
+        metrics=[
+            {"label": "Characters", "score": character_score, "detail": character_detail},
+            {"label": "World Coherence", "score": world_score, "detail": world_detail},
+            {"label": "Plot Consistency", "score": plot_score, "detail": plot_detail},
+            {"label": "Pacing", "score": pacing_score, "detail": pacing_detail},
+        ],
+    )
 
 
 def _estimate_syllables(word: str) -> int:
@@ -1434,6 +1633,219 @@ def build_novel_scene_path(*, chapter_number: int | None, sort_order: int, title
     return f"{_scene_folder_for_chapter(chapter_number)}/{sort_order:03d}-{_scene_slug(title)}.md"
 
 
+def _scene_metadata_key(label: str) -> str | None:
+    normalized = re.sub(r"[^a-z0-9]+", " ", label.strip().lower()).strip()
+    if not normalized:
+        return None
+    alias = SCENE_METADATA_ALIASES.get(normalized)
+    if alias:
+        return alias
+    key = normalized.replace(" ", "_")
+    return key if key in SCENE_METADATA_LABELS else None
+
+
+def _append_scene_metadata_value(metadata: dict[str, Any], key: str, value: str) -> None:
+    cleaned = _clean_text(value)
+    if not cleaned:
+        return
+    if key in SCENE_METADATA_LIST_FIELDS:
+        values = metadata.setdefault(key, [])
+        if isinstance(values, list) and cleaned not in values:
+            values.append(cleaned)
+        return
+    metadata[key] = cleaned
+
+
+def extract_scene_metadata(text: str, *, description: str | None = None) -> dict[str, Any]:
+    metadata: dict[str, Any] = {}
+    active_list_key: str | None = None
+    for raw_line in (text or "").replace("\r\n", "\n").replace("\r", "\n").splitlines():
+        line = raw_line.strip()
+        if not line or SCENE_BREAK_LINE_RE.match(line):
+            active_list_key = None
+            continue
+        label_match = re.match(r"^([A-Za-z][A-Za-z /_-]{1,32}):\s*(.*)$", line)
+        if label_match:
+            key = _scene_metadata_key(label_match.group(1))
+            if key is None:
+                active_list_key = None
+                continue
+            value = label_match.group(2).strip()
+            if value:
+                _append_scene_metadata_value(metadata, key, value)
+                active_list_key = None
+            else:
+                if key in SCENE_METADATA_LIST_FIELDS:
+                    metadata.setdefault(key, [])
+                active_list_key = key
+            continue
+        bullet_match = re.match(r"^[-*]\s+(.+)$", line)
+        if bullet_match and active_list_key:
+            _append_scene_metadata_value(metadata, active_list_key, bullet_match.group(1))
+            continue
+        active_list_key = None
+    if description and "summary" not in metadata:
+        metadata["summary"] = _clean_text(description)
+    return {key: value for key, value in metadata.items() if value not in ("", [], None)}
+
+
+def _scene_title_line_matches(line: str, title: str) -> bool:
+    cleaned = " ".join(line.split()).strip()
+    if not cleaned:
+        return False
+    heading_match = SCENE_HEADING_LINE_RE.match(cleaned)
+    if heading_match and heading_match.group(1):
+        cleaned = heading_match.group(1).strip()
+    title_cleaned = " ".join((title or "").split()).strip()
+    return bool(title_cleaned and cleaned.lower() == title_cleaned.lower())
+
+
+def strip_scene_planning_block(text: str, *, title: str | None = None) -> str:
+    lines = (text or "").replace("\r\n", "\n").replace("\r", "\n").splitlines()
+    index = 0
+    while index < len(lines) and not lines[index].strip():
+        index += 1
+    if index < len(lines):
+        cleaned = lines[index].strip()
+        if (
+            (title and _scene_title_line_matches(cleaned, title))
+            or re.match(r"^#{1,3}\s+Scene\b", cleaned, re.IGNORECASE)
+        ):
+            index += 1
+    while index < len(lines) and not lines[index].strip():
+        index += 1
+
+    consumed_metadata = False
+    while index < len(lines):
+        stripped = lines[index].strip()
+        if not stripped:
+            if consumed_metadata:
+                index += 1
+                continue
+            break
+        if stripped == "---" and consumed_metadata:
+            index += 1
+            break
+        if stripped == "---":
+            index += 1
+            continue
+        label_match = re.match(r"^([A-Za-z][A-Za-z /_-]{1,32}):\s*(.*)$", stripped)
+        if label_match and _scene_metadata_key(label_match.group(1)) is not None:
+            consumed_metadata = True
+            index += 1
+            while index < len(lines):
+                continuation = lines[index].strip()
+                if not continuation:
+                    index += 1
+                    break
+                next_label = re.match(r"^([A-Za-z][A-Za-z /_-]{1,32}):\s*(.*)$", continuation)
+                if next_label and _scene_metadata_key(next_label.group(1)) is not None:
+                    break
+                if re.match(r"^[-*]\s+.+$", continuation):
+                    index += 1
+                    continue
+                break
+            continue
+        break
+    return "\n".join(lines[index:]).strip()
+
+
+def build_scene_chapter_import_text(
+    scene: dict[str, Any],
+    *,
+    scene_number: int,
+    include_metadata: bool = True,
+) -> str:
+    title = _clean_text(scene.get("title")) or f"Scene {scene_number}"
+    body = strip_scene_planning_block(str(scene.get("body") or ""), title=title)
+    if not include_metadata:
+        return body
+
+    heading = title
+    scene_label_match = re.match(r"^Scene\s+\d+\b", title, re.IGNORECASE)
+    if not scene_label_match:
+        heading = f"Scene {scene_number} - {title}"
+    lines = [f"## {heading}", ""]
+    metadata = scene.get("metadata") or scene.get("scene_metadata") or {}
+    if not isinstance(metadata, dict) or not metadata:
+        metadata = extract_scene_metadata(str(scene.get("body") or ""), description=cast(str | None, scene.get("description")))
+
+    for key in ["pov", "location", "time", "timeline"]:
+        value = metadata.get(key)
+        if value:
+            lines.append(f"{SCENE_METADATA_LABELS[key]}: {value}")
+    if any(metadata.get(key) for key in ["pov", "location", "time", "timeline"]):
+        lines.append("")
+    for key in ["characters", "objects", "goals", "plot_threads", "mood"]:
+        values = metadata.get(key)
+        if isinstance(values, str):
+            values = [values]
+        if isinstance(values, list) and values:
+            lines.append(f"{SCENE_METADATA_LABELS[key]}:")
+            for value in values:
+                cleaned = _clean_text(value)
+                if cleaned:
+                    lines.append(f"- {cleaned}")
+            lines.append("")
+    conflict = metadata.get("conflict")
+    if conflict:
+        lines.extend(["Conflict:", f"- {_clean_text(conflict)}", ""])
+    summary = metadata.get("summary")
+    if summary:
+        lines.extend(["Summary:", f"- {_clean_text(summary)}", ""])
+    lines.extend(["---", "", body])
+    return "\n".join(lines).strip()
+
+
+def strip_scene_metadata_from_manuscript_text(text: str) -> str:
+    lines = (text or "").replace("\r\n", "\n").replace("\r", "\n").splitlines()
+    output: list[str] = []
+
+    def last_non_empty_output() -> str:
+        for value in reversed(output):
+            if value.strip():
+                return value.strip()
+        return ""
+
+    index = 0
+    while index < len(lines):
+        stripped = lines[index].strip()
+        if re.match(r"^#{1,3}\s+Scene\b", stripped, re.IGNORECASE):
+            if any(line.strip() for line in output) and last_non_empty_output() != "***":
+                output.extend(["", "***", ""])
+            index += 1
+            while index < len(lines) and not lines[index].strip():
+                index += 1
+            consumed_metadata = False
+            while index < len(lines):
+                current = lines[index].strip()
+                if current == "---":
+                    index += 1
+                    if consumed_metadata:
+                        break
+                    continue
+                label_match = re.match(r"^([A-Za-z][A-Za-z /_-]{1,32}):\s*(.*)$", current)
+                if label_match and _scene_metadata_key(label_match.group(1)) is not None:
+                    consumed_metadata = True
+                    index += 1
+                    continue
+                if consumed_metadata and (not current or re.match(r"^[-*]\s+.+$", current)):
+                    index += 1
+                    continue
+                break
+            continue
+        if SCENE_BREAK_LINE_RE.match(stripped):
+            if any(line.strip() for line in output) and last_non_empty_output() != "***":
+                output.extend(["", "***", ""])
+            index += 1
+            continue
+        output.append(lines[index].rstrip())
+        index += 1
+    cleaned = "\n".join(output)
+    cleaned = re.sub(r"\n{4,}", "\n\n\n", cleaned)
+    return cleaned.strip()
+
+
 def _split_scene_blocks(text: str) -> list[str]:
     normalized = (text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
     if not normalized:
@@ -1442,6 +1854,11 @@ def _split_scene_blocks(text: str) -> list[str]:
     current: list[str] = []
     for raw_line in normalized.splitlines():
         line = raw_line.rstrip()
+        if SCENE_BREAK_LINE_RE.match(line):
+            if current and any(part.strip() for part in current):
+                blocks.append("\n".join(current).strip())
+                current = []
+            continue
         heading_match = SCENE_HEADING_LINE_RE.match(line)
         if heading_match:
             if current and any(part.strip() for part in current):
@@ -1484,6 +1901,7 @@ def extract_novel_scene_candidates(
             if len(preview) > 180:
                 description = description.rstrip() + "..."
         body = "\n".join(lines).strip()
+        scene_metadata = extract_scene_metadata(body, description=description or None)
         scenes.append(
             {
                 "chapter_number": chapter_number,
@@ -1491,6 +1909,7 @@ def extract_novel_scene_candidates(
                 "description": description or None,
                 "body": body,
                 "html_body": manuscript_text_to_html(body),
+                "metadata": scene_metadata,
                 "status": "assigned" if chapter_number else "unassigned",
                 "sort_order": index,
                 "source": source,
@@ -1531,6 +1950,7 @@ async def replace_chapter_novel_scenes(
                 description=cast(str | None, scene.get("description")),
                 body=str(scene["body"]),
                 html_body=cast(str | None, scene.get("html_body")),
+                scene_metadata=cast(dict | None, scene.get("metadata")) or {},
                 path=str(scene["path"]),
                 status=str(scene.get("status") or "assigned"),
                 sort_order=int(scene.get("sort_order") or 0),
@@ -1550,6 +1970,7 @@ def _scene_out(scene: NovelScene) -> dict[str, Any]:
         "description": scene.description,
         "body": scene.body,
         "html_body": scene.html_body,
+        "metadata": scene.scene_metadata or {},
         "path": scene.path,
         "status": scene.status,
         "sort_order": scene.sort_order,
@@ -1603,6 +2024,8 @@ async def save_novel_scene(
     chapter_number: int | None,
     status: str | None,
     sort_order: int | None,
+    metadata: dict[str, Any] | None = None,
+    path: str | None = None,
 ) -> dict[str, Any]:
     normalized_title = _clean_text(title)
     if not normalized_title:
@@ -1611,6 +2034,9 @@ async def save_novel_scene(
     if not normalized_body:
         raise HTTPException(400, "Scene body is required")
     normalized_description = _clean_optional_text(description)
+    normalized_metadata = metadata if isinstance(metadata, dict) else {}
+    inferred_metadata = extract_scene_metadata(normalized_body, description=normalized_description)
+    normalized_metadata = {**inferred_metadata, **normalized_metadata}
     normalized_chapter_number = int(chapter_number) if isinstance(chapter_number, int) and chapter_number > 0 else None
     normalized_status = "assigned" if normalized_chapter_number else "unassigned"
     if status in {"assigned", "unassigned", "archived"}:
@@ -1628,7 +2054,7 @@ async def save_novel_scene(
     if scene is not None and scene.book_id != book.id:
         raise HTTPException(404, "Scene not found")
 
-    base_path = build_novel_scene_path(
+    base_path = normalize_obsidian_note_path(path) if path else build_novel_scene_path(
         chapter_number=normalized_chapter_number if normalized_status == "assigned" else None,
         sort_order=next_sort_order or 1,
         title=normalized_title,
@@ -1660,6 +2086,7 @@ async def save_novel_scene(
             description=normalized_description,
             body=normalized_body,
             html_body=clean_manuscript_html(html_body) if html_body else manuscript_text_to_html(normalized_body),
+            scene_metadata=normalized_metadata,
             path=path,
             status=normalized_status,
             sort_order=next_sort_order or 1,
@@ -1674,6 +2101,7 @@ async def save_novel_scene(
         scene.description = normalized_description
         scene.body = normalized_body
         scene.html_body = clean_manuscript_html(html_body) if html_body else manuscript_text_to_html(normalized_body)
+        scene.scene_metadata = normalized_metadata
         scene.path = path
         scene.status = normalized_status
         scene.sort_order = next_sort_order or scene.sort_order or 1
@@ -2099,6 +2527,11 @@ async def book_out(db: AsyncSession, book: Book, user_id: uuid.UUID) -> BookOut:
     total = book.total_chapters or 0
     percent = round((chapters_read_count / total) * 100, 1) if total else 0.0
     chapters_left = max(total - chapters_read_count, 0) if total else None
+    total_words = (
+        await db.scalar(
+            select(func.coalesce(func.sum(Chapter.word_count), 0)).where(Chapter.book_id == book.id)
+        )
+    ) or 0
     cover_url = cover_url_for_book(book)
     return BookOut(
         id=book.id,
@@ -2112,12 +2545,9 @@ async def book_out(db: AsyncSession, book: Book, user_id: uuid.UUID) -> BookOut:
         source_kind=book.source_kind or "single_upload",
         preserve_chapter_numbers=bool(book.preserve_chapter_numbers),
         cover_url=cover_url,
-        cover_processed_url=processed_cover_url_for_book(book),
-        cover_edge_colors=book.cover_edge_colors or None,
-        cover_processed_at=book.cover_processed_at,
-        cover_crop_bounds=book.cover_crop_bounds or None,
         total_chapters=book.total_chapters,
         total_tokens=book.total_tokens,
+        total_words=int(total_words),
         is_truncated=book.is_truncated,
         primary_series_id=book.primary_series_id,
         series_name=book.series_name,
@@ -2147,40 +2577,7 @@ def cover_url_for_book(book: Book) -> str | None:
     return f"{settings.API_V1_PREFIX}/books/{book.id}/cover?token={token}"
 
 
-def processed_cover_url_for_book(book: Book) -> str | None:
-    if not book.cover_s3_key:
-        return None
-    token = create_asset_token(str(book.user_id), f"book-cover-processed:{book.id}", expires_minutes=120)
-    return f"{settings.API_V1_PREFIX}/books/{book.id}/cover/processed?token={token}"
-
-
-async def process_and_store_book_cover(
-    db: AsyncSession,
-    book: Book,
-    cover_bytes: bytes,
-) -> ProcessedCover | None:
-    if not cover_bytes:
-        return None
-    try:
-        processed = await asyncio.to_thread(process_cover, cover_bytes)
-        processed_key = await asyncio.to_thread(
-            upload_binary,
-            f"covers/{book.user_id}/{book.id}/processed/{uuid.uuid4()}.png",
-            processed.image_bytes,
-            processed.mime_type,
-        )
-    except Exception:
-        return None
-
-    book.cover_processed_url = processed_key
-    book.cover_edge_colors = processed.edge_colors
-    book.cover_processed_at = datetime.now(UTC)
-    book.cover_crop_bounds = processed.crop_bounds
-    await db.flush()
-    return processed
-
-
-async def ensure_book_cover(db: AsyncSession, book: Book, *, force: bool = False) -> None:
+async def ensure_book_cover(db: AsyncSession, book: Book) -> None:
     if book.format == "pdf" and not book.cover_s3_key and book.s3_key:
         from app.parsers.pdf_parser import extract_first_page_cover
 
@@ -2204,19 +2601,7 @@ async def ensure_book_cover(db: AsyncSession, book: Book, *, force: bool = False
                 except Exception:
                     return
 
-    if not book.cover_s3_key or (book.cover_processed_url and not force):
-        return
-
-    try:
-        raw = await asyncio.to_thread(download_book, book.cover_s3_key)
-    except Exception:
-        return
-
-    try:
-        await process_and_store_book_cover(db, book, raw)
-        await db.commit()
-        await db.refresh(book)
-    except Exception:
+    if not book.cover_s3_key:
         return
 
 

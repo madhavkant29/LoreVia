@@ -1,16 +1,18 @@
 import pytest
 
 from app.engine.world.extractor import extract_world_elements_from_text
-from app.models.book import Book
+from app.models.book import Book, Chapter, Series, SeriesBook
 from app.models.character import Character
 from app.models.intelligence import WorldCanonicalIdentity, WorldElement
 from app.models.user import User
+from app.utils.book_utils import serialize_manuscript_content
 from app.utils.world_building_utils import (
     _claims_contradict,
     build_world_logic_response,
     classify_world_intent,
     create_world_building_documents,
     detect_integration_analysis,
+    detect_series_world_analysis,
     detect_world_gaps,
     generate_wiki_from_manuscript,
     save_canon_override,
@@ -79,6 +81,77 @@ async def test_detect_world_gap_and_integration_payloads(db, monkeypatch):
     assert any(item["title"].startswith("Northreach conflicts") for item in gap_payload["priority_gaps"])
     assert integration_payload["mode"] == "story_integration"
     assert any(item["element_name"] == "The Ember Rite" for item in integration_payload["integration_opportunities"])
+
+
+@pytest.mark.asyncio
+async def test_detect_series_world_analysis_checks_lore_across_books(db, monkeypatch):
+    stored: dict[str, bytes] = {}
+
+    def fake_upload_binary(key: str, raw: bytes, content_type: str | None = None) -> str:
+        stored[key] = raw
+        return key
+
+    def fake_download_book(key: str) -> bytes:
+        return stored[key]
+
+    monkeypatch.setattr("app.core.storage.upload_binary", fake_upload_binary)
+    monkeypatch.setattr("app.core.storage.download_book", fake_download_book)
+    monkeypatch.setattr("app.utils.world_building_utils.upload_binary", fake_upload_binary)
+    monkeypatch.setattr("app.utils.world_building_utils.download_book", fake_download_book)
+
+    user = User(email="world-series-utils@lorevia.app", username="worldseriesutils", password_hash="hash")
+    db.add(user)
+    await db.flush()
+    series = Series(user_id=user.id, name="The Northreach Cycle")
+    db.add(series)
+    await db.flush()
+    first_book = Book(user_id=user.id, title="Ice Gates", format="pdf", s3_key="series/ice.pdf", status="ready", primary_series_id=series.id)
+    second_book = Book(user_id=user.id, title="Glass Market", format="pdf", s3_key="series/glass.pdf", status="ready", primary_series_id=series.id)
+    db.add_all([first_book, second_book])
+    await db.flush()
+    db.add_all(
+        [
+            SeriesBook(series_id=series.id, book_id=first_book.id, position=1),
+            SeriesBook(series_id=series.id, book_id=second_book.id, position=2),
+        ]
+    )
+
+    story_key = f"chapters/{second_book.id}/1.txt"
+    stored[story_key] = serialize_manuscript_content(
+        "Northreach is a desert capital where the market roads bake under glass heat.",
+        "<p>Northreach is a desert capital where the market roads bake under glass heat.</p>",
+    ).encode("utf-8")
+    db.add(
+        Chapter(
+            book_id=second_book.id,
+            number=1,
+            title="Salt Market",
+            s3_key=story_key,
+            word_count=11,
+            processed=True,
+        )
+    )
+    await create_world_building_documents(
+        db,
+        book=first_book,
+        user_id=user.id,
+        documents=[
+            {
+                "title": "Series Bible",
+                "source_name": "series-bible.txt",
+                "text": "Northreach is a frozen capital ringed by ice gates.",
+                "html": None,
+            }
+        ],
+    )
+    await db.commit()
+
+    payload = await detect_series_world_analysis(db, series.id)
+
+    assert payload["book_count"] == 2
+    assert payload["gap_analysis"]["mode"] == "series_gap_detection"
+    assert any(item["title"].startswith("Northreach conflicts") for item in payload["gap_analysis"]["priority_gaps"])
+    assert any(flag["title"] == "Conflicting definition for Northreach" for flag in payload["gap_analysis"]["consistency_flags"])
 
 
 @pytest.mark.asyncio
@@ -181,6 +254,30 @@ def test_extract_world_elements_marks_negated_claims():
     assert claims_by_attribute["occupation"]["negated"] is True
     assert claims_by_attribute["climate"]["value"] == "frozen"
     assert claims_by_attribute["climate"]["negated"] is True
+
+
+def test_extract_worldbuilding_labeled_sections_for_core_lore_types():
+    text = """
+    # Countries
+    - Aurelia: a river kingdom ruled by merchant houses.
+    - Glass Empire: a desert nation built around mirror roads.
+
+    Races: sunborn, Moon Kin
+    Areas: The Ashen Wastes, Northreach Province
+    Magic System: Aetherbinding converts memory into fire.
+    """
+
+    items = extract_world_elements_from_text(text)
+    by_name = {item["name"]: item for item in items}
+
+    assert by_name["Aurelia"]["element_type"] == "country"
+    assert by_name["Glass Empire"]["element_type"] == "country"
+    assert by_name["Sunborn"]["element_type"] == "race"
+    assert by_name["Moon Kin"]["element_type"] == "race"
+    assert by_name["The Ashen Wastes"]["element_type"] == "region"
+    assert by_name["Northreach Province"]["element_type"] == "region"
+    assert by_name["Aetherbinding"]["element_type"] == "magic_system"
+    assert by_name["Aetherbinding"]["provenance"]["narrative_mode"] == "worldbuilding_note"
 
 
 def test_claim_contradiction_detects_negation_flip():

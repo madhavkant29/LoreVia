@@ -2,7 +2,7 @@ import uuid
 
 import pytest
 
-from app.models.book import Book, Chapter
+from app.models.book import Book, Chapter, Series, SeriesBook
 from app.utils.book_utils import serialize_manuscript_content
 
 
@@ -95,6 +95,11 @@ async def test_world_building_documents_gap_detection_and_notes(client, db, monk
     documents = docs_response.json()
     assert len(documents) == 2
 
+    elements_response = await client.get(f"/api/v1/intelligence/{book.id}/world-building/elements", headers=headers)
+    assert elements_response.status_code == 200
+    elements = elements_response.json()
+    assert any(item["name"] == "Northreach" and item["source_scope"] == "worldbuilding" for item in elements)
+
     detail_response = await client.get(
         f"/api/v1/intelligence/{book.id}/world-building/documents/{first_doc['id']}",
         headers=headers,
@@ -184,3 +189,74 @@ async def test_world_building_documents_gap_detection_and_notes(client, db, monk
     )
     assert listed_overrides.status_code == 200
     assert any(item["canonical_name"] == "Sofya Semyonovna" for item in listed_overrides.json())
+
+
+@pytest.mark.asyncio
+async def test_series_world_building_analysis_checks_across_member_books(client, db, monkeypatch):
+    stored: dict[str, bytes] = {}
+
+    def fake_upload_binary(key: str, raw: bytes, content_type: str | None = None) -> str:
+        stored[key] = raw
+        return key
+
+    def fake_download_book(key: str) -> bytes:
+        return stored[key]
+
+    monkeypatch.setattr("app.core.storage.upload_binary", fake_upload_binary)
+    monkeypatch.setattr("app.core.storage.download_book", fake_download_book)
+    monkeypatch.setattr("app.utils.world_building_utils.upload_binary", fake_upload_binary)
+    monkeypatch.setattr("app.utils.world_building_utils.download_book", fake_download_book)
+    monkeypatch.setattr("app.api.v1.routes.world_building.download_book", fake_download_book)
+
+    headers, user_id = await _register_user(client, f"world-series-api-{uuid.uuid4().hex[:8]}@lorevia.app")
+    series = Series(user_id=user_id, name="The Northreach Cycle")
+    db.add(series)
+    await db.flush()
+    first_book = Book(user_id=user_id, title="Ice Gates", format="pdf", s3_key="series/ice.pdf", status="ready", primary_series_id=series.id)
+    second_book = Book(user_id=user_id, title="Glass Market", format="pdf", s3_key="series/glass.pdf", status="ready", primary_series_id=series.id)
+    db.add_all([first_book, second_book])
+    await db.flush()
+    db.add_all(
+        [
+            SeriesBook(series_id=series.id, book_id=first_book.id, position=1),
+            SeriesBook(series_id=series.id, book_id=second_book.id, position=2),
+        ]
+    )
+    story_key = f"chapters/{second_book.id}/1.txt"
+    stored[story_key] = serialize_manuscript_content(
+        "Northreach is a desert capital where the market roads bake under glass heat.",
+        "<p>Northreach is a desert capital where the market roads bake under glass heat.</p>",
+    ).encode("utf-8")
+    db.add(
+        Chapter(
+            book_id=second_book.id,
+            number=1,
+            title="Salt Market",
+            s3_key=story_key,
+            word_count=11,
+            processed=True,
+        )
+    )
+    await db.commit()
+
+    created_docs = await client.post(
+        f"/api/v1/intelligence/{first_book.id}/world-building/documents",
+        headers=headers,
+        files={
+            "title": (None, "Series Bible"),
+            "text": (None, "Northreach is a frozen capital ringed by ice gates."),
+        },
+    )
+    assert created_docs.status_code == 200
+
+    response = await client.get(
+        f"/api/v1/intelligence/series/{series.id}/world-building/series-analysis",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["series_id"] == str(series.id)
+    assert payload["book_count"] == 2
+    assert payload["gap_analysis"]["mode"] == "series_gap_detection"
+    assert any(item["title"].startswith("Northreach conflicts") for item in payload["gap_analysis"]["priority_gaps"])

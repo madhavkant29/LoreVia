@@ -55,6 +55,8 @@ from app.utils.advisor_utils import (
     VOICE_CONSISTENCY_SYSTEM,
     VOICE_CONSISTENCY_USER,
     advisor_response_cache,
+    build_advisor_world_analysis,
+    build_advisor_world_context,
     build_character_voice_context,
     build_continuity_report_markdown,
     build_continuity_report_pdf,
@@ -63,6 +65,7 @@ from app.utils.advisor_utils import (
     build_story_context,
     classify_intent,
     classify_response_type,
+    detect_advisor_world_mode,
     identify_character_mentions,
     make_advisor_cache_key,
     make_editorial_cache_key,
@@ -141,11 +144,18 @@ async def advisor_message(
             classify_intent(client, last_user_msg),
             build_story_context(db, book_id, book.total_chapters or 0),
         )
+        world_mode = detect_advisor_world_mode(last_user_msg, intent)
+        world_analysis = (
+            await build_advisor_world_analysis(db, book, last_user_msg, world_mode)
+            if world_mode
+            else None
+        )
+        world_context = build_advisor_world_context(world_analysis)
 
         # 2. Retrieve relevant chunks
         max_ch = body.total_chapters
-        chunk_limit = 10 if intent in ("consistency", "plothole") else 5
-        threshold = 0.25 if intent in ("consistency", "plothole") else 0.30
+        chunk_limit = 10 if intent in ("consistency", "plothole") or world_mode else 5
+        threshold = 0.25 if intent in ("consistency", "plothole") or world_mode else 0.30
 
         query_emb = await embed_text(last_user_msg)
         rows = await db.execute(
@@ -196,11 +206,16 @@ async def advisor_message(
             "direction": "[AUTHOR INTENT DETECTED: debate options and walk through narrative tradeoffs]",
             "opportunity": "[AUTHOR INTENT DETECTED: surface foreshadowing and arc opportunities]",
         }.get(intent, "")
+        if world_mode == "gap_detection":
+            intent_hint = "[AUTHOR INTENT DETECTED: check world-building, canon, lore coverage, and world-gap issues]"
+        elif world_mode == "story_integration":
+            intent_hint = "[AUTHOR INTENT DETECTED: use world-building lore to find story integration options]"
 
         augmented_last = (
             f"{last_user_msg}\n\n"
             + (f"{intent_hint}\n\n" if intent_hint else "")
             + f"--- Retrieved passages ---\n{retrieved_context}"
+            + (f"\n\n{world_context}" if world_context else "")
         )
 
         # 5. Build message list for LLM
@@ -240,6 +255,7 @@ async def advisor_message(
                 }
                 for h in hits[:5]
             ],
+            "world_analysis": world_analysis,
             "cached": False,
         }
         # Store in cache for subsequent identical queries

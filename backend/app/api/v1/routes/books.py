@@ -81,30 +81,29 @@ from app.core.security import create_asset_token, decode_token
 from app.core.storage import download_book, upload_binary, upload_book_bytes
 from app.engine.character.consolidator import consolidate_characters
 from app.engine.character.profile_builder import build_description
-from app.models.book import Book, Chapter, Series, SeriesBook
-from app.models.book import ObsidianVaultNoteSource
+from app.models.book import Book, Chapter, ObsidianVaultNoteSource, Series, SeriesBook
 from app.models.character import Character
 from app.models.intelligence import ChapterSummary, CharacterRelationship, PlotThread, QuoteEntry
 from app.models.progress import ReadingProgress
 from app.schemas.books import (
-    BookModeBody,
     BookEventsOut,
+    BookModeBody,
     BookNoteBody,
     BookNoteOut,
     BookOut,
-    CorkboardCardOut,
-    CharacterEventOut,
     ChapterConsistencyReport,
     ChapterVersionOut,
+    CharacterEventOut,
     CharacterMergeBody,
     CharacterShareOut,
     CharacterUpdateBody,
+    CorkboardCardOut,
     EmotionalArcOverviewOut,
-    ManuscriptImportResult,
     MajorEventOut,
-    ObsidianPreviewOut,
+    ManuscriptImportResult,
     ObsidianGraphOut,
     ObsidianNoteLinkListOut,
+    ObsidianPreviewOut,
     ObsidianVaultNoteBody,
     ObsidianVaultNoteOut,
     ObsidianVaultNoteSaveOut,
@@ -114,32 +113,36 @@ from app.schemas.books import (
     ReadabilityMetricsOut,
     ReadabilityRequestBody,
     RelationshipUpdateBody,
-    SeriesBody,
     SeriesBibleOut,
+    SeriesBody,
     SeriesBookStatusBody,
     SeriesCreateBody,
     SeriesMembershipBody,
     SeriesOut,
+    StoryHealthOut,
     UserStatsOut,
     WriterWorkspaceBody,
     WriterWorkspaceOut,
 )
+from app.utils.billing_utils import require_author_access
 from app.utils.book_utils import (
     as_bool,
     book_out,
     build_chapter_consistency_report,
     build_character_card_payload,
     build_emotional_arc_payload,
-    build_series_bible_payload,
-    build_writer_workspace_payload,
     build_obsidian_graph,
     build_prewriting_check,
+    build_series_bible_payload,
+    build_story_health_payload,
+    build_writer_workspace_payload,
     clean_manuscript_html,
     compute_words_read_for_book,
-    delete_obsidian_note,
     delete_book_note,
+    delete_obsidian_note,
     deserialize_manuscript_content,
     ensure_book_cover,
+    estimate_readability,
     export_obsidian_notes_zip,
     extract_novel_scene_candidates,
     get_owned_book,
@@ -151,25 +154,24 @@ from app.utils.book_utils import (
     list_novel_scenes,
     list_obsidian_note_relations,
     list_obsidian_notes,
-    list_user_notes,
     list_obsidian_vault_notes,
+    list_user_notes,
     load_obsidian_vault_overrides,
     next_chapter_number,
-    estimate_readability,
-    normalize_writer_workspace,
-    normalize_imported_chapters,
     normalize_book_work_type,
+    normalize_imported_chapters,
+    normalize_writer_workspace,
     parse_import_upload,
     parse_screenplay_upload,
-    process_and_store_book_cover,
-    replace_chapter_novel_scenes,
     refresh_screenplay_scene_rows,
+    replace_chapter_novel_scenes,
     resolve_owned_series_ids,
     resolve_upload_format_and_work_type,
     save_book_note,
     save_obsidian_vault_note,
     snapshot_chapter_version,
     story_unit_name,
+    strip_scene_metadata_from_manuscript_text,
 )
 
 # ── Utils imports ──────────────────────────────────────────────────────────────
@@ -186,9 +188,9 @@ from app.utils.character_utils import (
     relationship_summary_for_character,
 )
 from app.utils.export_utils import (
+    build_character_bible_obsidian_context,
     character_bible_docx,
     character_bible_markdown,
-    build_character_bible_obsidian_context,
     character_bible_obsidian_folder,
     character_bible_obsidian_preview,
     character_bible_pdf,
@@ -205,6 +207,8 @@ from app.utils.notification_utils import (
     build_continuity_risk_notifications,
     build_upload_processing_notification,
 )
+from app.utils.queue_utils import queue_for_user
+from app.utils.user_utils import add_daily_word_progress
 from app.workers.consumers.analysis_consumer import analyse_chapter
 from app.workers.consumers.extraction_consumer import _process_chapter
 from app.workers.tasks.extraction_tasks import process_book_task
@@ -282,6 +286,8 @@ async def upload_book_endpoint(
         raise HTTPException(400, "Invalid visibility")
     if mode not in {"reader", "author"}:
         raise HTTPException(400, "Invalid mode")
+    if mode == "author":
+        require_author_access(current_user)
     if not title.strip():
         raise HTTPException(400, "Title is required")
 
@@ -326,8 +332,6 @@ async def upload_book_endpoint(
     )
     db.add(book)
     await db.flush()
-    if cover_s3_key and cover_raw:
-        await process_and_store_book_cover(db, book, cover_raw)
     for index, series in enumerate(selected_series):
         membership = SeriesBook(series_id=series.id, book_id=book.id)
         db.add(membership)
@@ -344,7 +348,7 @@ async def upload_book_endpoint(
     db.add(notification)
     await db.commit()
 
-    process_book_task.apply_async(args=[str(book.id)], queue="extraction")
+    process_book_task.apply_async(args=[str(book.id)], queue=queue_for_user(current_user, "extraction"))
     return {"book_id": str(book.id), "status": "processing",
             "copyright_warning": False, "visibility": visibility, "mode": mode}
 
@@ -360,6 +364,8 @@ async def update_book_mode(
     mode = (body.mode or "").strip().lower()
     if mode not in {"reader", "author"}:
         raise HTTPException(400, "Invalid mode")
+    if mode == "author":
+        require_author_access(current_user)
     book.mode = mode
     if mode == "author" and not book.source_kind:
         book.source_kind = "single_upload"
@@ -450,11 +456,13 @@ async def import_manuscript_content(
     current_user=Depends(get_current_user),
 ):
     book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
     if not text and not files:
         raise HTTPException(400, "Provide text or one or more files")
 
     import_jobs: list[dict[str, object]] = []
     screenplay_batches: list[dict[str, object]] = []
+    daily_words_added = 0
     normalized_title = _clean_optional_text(title)
     next_number = await next_chapter_number(db, book.id)
     replace_flag = as_bool(replace_existing)
@@ -549,11 +557,15 @@ async def import_manuscript_content(
     imported_numbers: list[int] = []
     for job in import_jobs:
         job_number = int(cast(Any, job["number"]))
+        next_text = str(job.get("text") or "")
+        next_word_count = len(next_text.split()) if next_text.strip() else 0
+        previous_word_count = 0
         if replace_flag:
             existing = (
                 await db.execute(select(Chapter).where(Chapter.book_id == book.id, Chapter.number == job_number))
             ).scalar()
             if existing is not None:
+                previous_word_count = int(existing.word_count or 0)
                 await snapshot_chapter_version(
                     db,
                     book,
@@ -563,13 +575,14 @@ async def import_manuscript_content(
                 )
                 await db.delete(existing)
                 await db.flush()
+        daily_words_added += max(next_word_count - previous_word_count, 0)
         await _process_chapter(
             db,
             book,
             {
                 "number": job_number,
                 "title": job.get("title"),
-                "text": job.get("text", ""),
+                "text": next_text,
                 "html": job.get("html"),
                 "description": job.get("description"),
                 "images": [],
@@ -577,7 +590,7 @@ async def import_manuscript_content(
         )
         if resolved_book_work_type != "screenplay":
             extracted_scenes = extract_novel_scene_candidates(
-                text=str(job.get("text") or ""),
+                text=next_text,
                 chapter_number=job_number,
                 source="extracted",
             )
@@ -605,6 +618,8 @@ async def import_manuscript_content(
     if resolved_import_format:
         book.format = resolved_import_format
     book.source_kind = "chapter_wise" if len(import_jobs) == 1 and not files else "batch_upload"
+    if daily_words_added > 0:
+        add_daily_word_progress(current_user, daily_words_added)
     await db.commit()
     await db.refresh(book)
 
@@ -1167,6 +1182,16 @@ async def get_prewriting_check(
     return await build_prewriting_check(db, book, next_chapter)
 
 
+@router.get("/{book_id}/story-health", response_model=StoryHealthOut)
+async def get_story_health(
+    book_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    return await build_story_health_payload(db, book)
+
+
 @router.get("/{book_id}/chapter-reports", response_model=list[ChapterConsistencyReport])
 async def get_book_chapter_reports(
     book_id: uuid.UUID,
@@ -1228,6 +1253,7 @@ async def manuscript_readability(
     current_user=Depends(get_current_user),
 ):
     book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
     _ = book
     return ReadabilityMetricsOut(**estimate_readability(body.text))
 
@@ -1250,10 +1276,12 @@ async def export_manuscript(
     book_id: uuid.UUID,
     format: str = Query("docx", pattern="^(pdf|docx|epub|obsidian)$"),
     preset: str = Query("standard_manuscript", pattern="^(standard_manuscript|trade_paperback|kdp_paperback)$"),
+    include_scene_metadata: bool = Query(True),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
     chapter_rows = (
         await db.execute(
             select(Chapter.number, Chapter.title, Chapter.s3_key)
@@ -1276,6 +1304,9 @@ async def export_manuscript(
             except Exception:
                 chapter_text = ""
                 chapter_html = None
+        if not include_scene_metadata:
+            chapter_text = strip_scene_metadata_from_manuscript_text(chapter_text)
+            chapter_html = None
         chapters.append({"number": number, "title": chapter_title, "text": chapter_text, "html": chapter_html})
 
     workspace = build_writer_workspace_payload(book)
@@ -1291,7 +1322,7 @@ async def export_manuscript(
         raw = manuscript_pdf_compiled(
             title=book.title or "LoreVia Manuscript",
             chapters=chapters,
-            scenes=manuscript_scenes,
+            scenes=[],
             preset=preset,
             front_matter=cast(dict | None, front_matter),
         )
@@ -1304,7 +1335,7 @@ async def export_manuscript(
         raw = manuscript_epub_compiled(
             title=book.title or "LoreVia Manuscript",
             chapters=chapters,
-            scenes=manuscript_scenes,
+            scenes=[],
             preset=preset,
             front_matter=cast(dict | None, front_matter),
         )
@@ -1336,7 +1367,7 @@ async def export_manuscript(
     raw = manuscript_docx(
         title=book.title or "LoreVia Manuscript",
         chapters=chapters,
-        scenes=manuscript_scenes,
+        scenes=[],
         preset=preset,
         front_matter=cast(dict | None, front_matter),
     )
@@ -1369,51 +1400,6 @@ async def get_book_cover_public(book_id: uuid.UUID, token: str = Query(...), db:
     raw = await asyncio.to_thread(download_book, book.cover_s3_key)
     media_type = mimetypes.guess_type(book.cover_s3_key)[0] or "image/png"
     return Response(content=raw, media_type=media_type)
-
-
-@router.get("/{book_id}/cover/processed")
-async def get_book_cover_processed_public(book_id: uuid.UUID, token: str = Query(...), db: AsyncSession = Depends(get_db)):
-    book = await db.get(Book, book_id)
-    if not book:
-        raise HTTPException(404, "Book not found")
-
-    payload = decode_token(token)
-    if (
-        not payload
-        or payload.get("type") != "asset"
-        or payload.get("sub") != str(book.user_id)
-        or payload.get("res") != f"book-cover-processed:{book.id}"
-    ):
-        raise HTTPException(401, "Invalid cover token")
-
-    await ensure_book_cover(db, book)
-    target_key = book.cover_processed_url or book.cover_s3_key
-    if not target_key:
-        raise HTTPException(404, "Cover not found")
-
-    import mimetypes
-
-    try:
-        raw = await asyncio.to_thread(download_book, target_key)
-    except Exception:
-        if target_key != book.cover_s3_key and book.cover_s3_key:
-            raw = await asyncio.to_thread(download_book, book.cover_s3_key)
-            target_key = book.cover_s3_key
-        else:
-            raise HTTPException(404, "Cover not found")
-    media_type = mimetypes.guess_type(target_key)[0] or "image/png"
-    return Response(content=raw, media_type=media_type)
-
-
-@router.post("/{book_id}/process-cover", response_model=BookOut)
-async def process_book_cover_endpoint(
-    book_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user),
-):
-    book = await get_owned_book(db, book_id, current_user.id)
-    await ensure_book_cover(db, book, force=True)
-    return await book_out(db, book, current_user.id)
 
 
 @router.put("/{book_id}/archive", response_model=BookOut)
@@ -1603,6 +1589,7 @@ async def delete_book_character(
     current_user=Depends(get_current_user),
 ):
     book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
     character = await db.get(Character, character_id)
     if not character or character.book_id != book.id:
         raise HTTPException(404, "Character not found")
@@ -1623,6 +1610,7 @@ async def update_book_relationship(
     current_user=Depends(get_current_user),
 ):
     book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
     relationship = await db.get(CharacterRelationship, relationship_id)
     if not relationship or relationship.book_id != book.id:
         raise HTTPException(404, "Relationship not found")
@@ -1669,6 +1657,7 @@ async def share_book_character(
     current_user=Depends(get_current_user),
 ):
     book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
     character = await db.get(Character, character_id)
     if not character or character.book_id != book.id:
         raise HTTPException(404, "Character not found")
@@ -1713,6 +1702,7 @@ async def export_character_bible(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    require_author_access(current_user)
     context = await build_character_bible_obsidian_context(db, book_id)
     book = context.get("book")
     if not book or book.user_id != current_user.id:
@@ -1845,6 +1835,7 @@ async def preview_character_bible_obsidian(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    require_author_access(current_user)
     context = await build_character_bible_obsidian_context(db, book_id)
     book = context.get("book")
     if not book or book.user_id != current_user.id:
@@ -1884,6 +1875,7 @@ async def save_character_bible_obsidian_note(
     current_user=Depends(get_current_user),
 ):
     book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
     return await save_obsidian_vault_note(
         db,
         book=book,

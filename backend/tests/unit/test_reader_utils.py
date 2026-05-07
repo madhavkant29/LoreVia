@@ -103,3 +103,15 @@ async def test_timeline_visible_chapter_set_expands_sparse_reader_progress(monke
     visible = await reader_utils.timeline_visible_chapter_set(AsyncMock(), book, current_user)
 
     assert visible == {1, 2, 3}
+
+
+def test_timeline_plot_thread_span_uses_visible_window_when_intro_is_missing():
+    span = reader_utils.timeline_plot_thread_span(None, None, {1, 2, 3})
+
+    assert span == (1, 3)
+
+
+def test_timeline_plot_thread_span_clamps_to_visible_window():
+    span = reader_utils.timeline_plot_thread_span(2, 5, {1, 2, 3})
+
+    assert span == (2, 3)

@@ -5,13 +5,17 @@ import Link from "next/link"
 import { useParams } from "next/navigation"
 import { booksApi } from "@/lib/api/books"
 import { intelligenceApi } from "@/lib/api/intelligence"
+import { canUseAuthorFeatures } from "@/lib/billing/plans"
+import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { capture } from "@/lib/analytics/posthog"
+import { saveContextualVaultNote } from "@/lib/utils/notes"
 import type {
   AdvisorMessage,
   AdvisorPassage,
   AdvisorSuggestion,
   AdvisorGreeting,
+  AdvisorWorldAnalysis,
   EditorialReview,
   EditorialReviewPassage,
 } from "@/types/intelligence"
@@ -27,7 +31,7 @@ function responseTypeStyle(type: ResponseType, isDark: boolean) {
         border: isDark ? "border-amber-500/35" : "border-amber-400/60",
         bg: isDark ? "bg-amber-500/8" : "bg-amber-50",
         badge: isDark ? "bg-amber-500/20 text-amber-300" : "bg-amber-100 text-amber-700",
-        label: "⚠️ Contradiction",
+        label: "Contradiction",
         glow: isDark ? "shadow-[0_0_20px_-8px_rgba(245,158,11,0.4)]" : "",
       }
     case "opportunity":
@@ -35,7 +39,7 @@ function responseTypeStyle(type: ResponseType, isDark: boolean) {
         border: isDark ? "border-teal-500/35" : "border-teal-400/60",
         bg: isDark ? "bg-teal-500/8" : "bg-teal-50",
         badge: isDark ? "bg-teal-500/20 text-teal-300" : "bg-teal-100 text-teal-700",
-        label: "✨ Opportunity",
+        label: "Opportunity",
         glow: isDark ? "shadow-[0_0_20px_-8px_rgba(20,184,166,0.4)]" : "",
       }
     case "tradeoff":
@@ -43,7 +47,7 @@ function responseTypeStyle(type: ResponseType, isDark: boolean) {
         border: isDark ? "border-violet-500/35" : "border-violet-400/60",
         bg: isDark ? "bg-violet-500/8" : "bg-violet-50",
         badge: isDark ? "bg-violet-500/20 text-violet-300" : "bg-violet-100 text-violet-700",
-        label: "🔀 Tradeoff",
+        label: "Tradeoff",
         glow: isDark ? "shadow-[0_0_20px_-8px_rgba(139,92,246,0.4)]" : "",
       }
     default:
@@ -51,7 +55,7 @@ function responseTypeStyle(type: ResponseType, isDark: boolean) {
         border: isDark ? "border-white/10" : "border-stone-200",
         bg: isDark ? "bg-white/4" : "bg-white",
         badge: isDark ? "bg-white/12 text-slate-300" : "bg-stone-100 text-stone-500",
-        label: "💬 Response",
+        label: "Response",
         glow: "",
       }
   }
@@ -62,7 +66,7 @@ function severityConfig(severity: string) {
   switch (severity) {
     case "warning":
       return {
-        icon: "⚠️",
+        icon: "WRN",
         color: "border-amber-500/30 bg-amber-500/8",
         badge: "bg-amber-500/20 text-amber-300",
         dot: "bg-amber-400",
@@ -70,7 +74,7 @@ function severityConfig(severity: string) {
       }
     case "direction":
       return {
-        icon: "🧭",
+        icon: "DIR",
         color: "border-violet-500/30 bg-violet-500/8",
         badge: "bg-violet-500/20 text-violet-300",
         dot: "bg-violet-400",
@@ -78,7 +82,7 @@ function severityConfig(severity: string) {
       }
     case "opportunity":
       return {
-        icon: "✨",
+        icon: "OPP",
         color: "border-teal-500/30 bg-teal-500/8",
         badge: "bg-teal-500/20 text-teal-300",
         dot: "bg-teal-400",
@@ -86,7 +90,7 @@ function severityConfig(severity: string) {
       }
     default:
       return {
-        icon: "ℹ️",
+        icon: "INF",
         color: "border-blue-500/30 bg-blue-500/8",
         badge: "bg-blue-500/20 text-blue-300",
         dot: "bg-blue-400",
@@ -118,10 +122,32 @@ function buildReplyFollowUps(responseType: ResponseType) {
     default:
       return [
         "Are there any plotholes I should know about?",
-        "What foreshadowing opportunities am I missing?",
+        "Are my world rules creating any gaps?",
         "Help me think through how to end the current arc.",
       ]
   }
+}
+
+function compactWorldText(value: unknown, fallback = ""): string {
+  if (typeof value === "string") return value.trim()
+  if (typeof value === "number") return String(value)
+  if (Array.isArray(value)) return value.map(item => compactWorldText(item)).filter(Boolean).join(", ")
+  return fallback
+}
+
+function worldItemTitle(item: Record<string, unknown>, fallback: string): string {
+  return compactWorldText(item.title)
+    || compactWorldText(item.element_name)
+    || compactWorldText(item.name)
+    || compactWorldText(item.category)
+    || fallback
+}
+
+function worldItemDescription(item: Record<string, unknown>): string {
+  return compactWorldText(item.description)
+    || compactWorldText(item.problem)
+    || compactWorldText(item.suggested_fix)
+    || compactWorldText(item.what_to_add)
 }
 
 function renderInlineFormatting(text: string) {
@@ -144,7 +170,7 @@ function renderFormattedTextBlock(text: string) {
 }
 
 // ─── Rich message renderer ────────────────────────────────────────────────────
-// Parses ⚠️ Contradiction / ✨ Opportunity / 🔀 Option blocks out of plain text
+// Parses structured contradiction, opportunity, and option blocks out of plain text.
 // and renders them with distinct visual treatment.
 function RichMessage({ content, isDark }: { content: string; isDark: boolean }) {
   // Split on block starters while keeping the delimiter
@@ -154,13 +180,13 @@ function RichMessage({ content, isDark }: { content: string; isDark: boolean }) 
 
   for (const line of lines) {
     const trimmed = line.trim()
-    if (trimmed.startsWith("⚠️")) {
+    if (/^(?:[^\w\s]+)?\s*Contradiction\b/i.test(trimmed)) {
       if (current) segments.push(current)
       current = { type: "warning", lines: [line] }
-    } else if (trimmed.startsWith("✨")) {
+    } else if (/^(?:[^\w\s]+)?\s*Opportunity\b/i.test(trimmed)) {
       if (current) segments.push(current)
       current = { type: "opportunity", lines: [line] }
-    } else if (trimmed.startsWith("🔀 Option")) {
+    } else if (/^(?:[^\w\s]+)?\s*Option\b/i.test(trimmed)) {
       if (current && current.type !== "tradeoff") segments.push(current)
       if (!current || current.type !== "tradeoff") current = { type: "tradeoff", lines: [] }
       current.lines.push(line)
@@ -296,7 +322,7 @@ function SuggestionGroup({
                     <button
                       onClick={() => onMarkIntentional(s.id)}
                       className={`rounded-[0.7rem] px-3 py-1.5 text-xs font-medium transition ${isDark ? "border border-white/10 bg-white/5 text-slate-400 hover:bg-white/10" : "border border-stone-200 bg-white text-stone-500 hover:bg-stone-50"}`}
-                      title="Mark as a deliberate authorial choice — won't reappear"
+                      title="Mark as a deliberate authorial choice that will not reappear"
                     >
                       Mark as intentional
                     </button>
@@ -322,12 +348,15 @@ function SuggestionGroup({
 export default function AdvisorPage() {
   const { bookId } = useParams<{ bookId: string }>()
   const { theme } = usePreferencesStore()
+  const userTier = useAuthStore((state) => state.user?.tier)
+  const canUseAuthorMode = canUseAuthorFeatures(userTier)
   const isDark = theme === "dark"
 
   const [tab, setTab] = useState<AdvisorPanel>("checker")
   const [greeting, setGreeting] = useState<AdvisorGreeting | null>(null)
   const [messages, setMessages] = useState<AdvisorMessage[]>([])
   const [passages, setPassages] = useState<AdvisorPassage[]>([])
+  const [worldAnalysis, setWorldAnalysis] = useState<AdvisorWorldAnalysis | null>(null)
   const [input, setInput] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -399,6 +428,7 @@ export default function AdvisorPage() {
       )
       setMessages(prev => [...prev, { role: "assistant", content: res.reply }])
       setPassages(res.retrieved_passages)
+      setWorldAnalysis(res.world_analysis ?? null)
       setResponseTypes(prev => [...prev, (res.response_type ?? "standard") as ResponseType])
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : ""
@@ -444,12 +474,14 @@ export default function AdvisorPage() {
 
   const saveQuickNote = useCallback(async (payload: { chapterNumber: number | null; title: string | null; body: string }) => {
     try {
-      await booksApi.saveBookNote(bookId, {
-        chapterNumber: payload.chapterNumber,
-        title: payload.title,
-        body: payload.body,
+      await saveContextualVaultNote({
+        bookId,
+        title: payload.title?.trim() || "Advisor note",
+        content: payload.body,
+        context: "story_advisor",
+        folderSegments: payload.chapterNumber ? [`Chapter ${payload.chapterNumber}`] : [],
       })
-      setNoteToast(`Saved note${payload.chapterNumber ? ` for chapter ${payload.chapterNumber}` : ""}.`)
+      setNoteToast(`Saved to Story Advisor${payload.chapterNumber ? ` / Chapter ${payload.chapterNumber}` : ""}.`)
     } catch {
       setNoteToast("Could not save note. Please try again.")
     } finally {
@@ -523,17 +555,25 @@ export default function AdvisorPage() {
         <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:pb-10">
 
           {/* ── Title ─────────────────────────────────────────────────────────── */}
-          <div className="mb-6">
-            <p className={`text-[11px] font-semibold uppercase tracking-[0.34em] ${isDark ? "text-indigo-300" : "text-violet-500"}`}>
-              Author Intelligence
-            </p>
-            <h1 className={`mt-2 font-serif text-4xl leading-tight ${isDark ? "text-white" : "text-stone-950"}`}>
-              Story Advisor
-            </h1>
-            <p className={`mt-2 max-w-xl text-sm leading-6 ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-              Ask anything about your manuscript. The advisor will counter contradictions, surface foreshadowing,
-              and walk you through the tradeoffs of every story decision.
-            </p>
+          <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <p className={`text-[11px] font-semibold uppercase tracking-[0.34em] ${isDark ? "text-indigo-300" : "text-violet-500"}`}>
+                Author Intelligence
+              </p>
+              <h1 className={`mt-2 font-serif text-4xl leading-tight ${isDark ? "text-white" : "text-stone-950"}`}>
+                Story Advisor
+              </h1>
+              <p className={`mt-2 max-w-xl text-sm leading-6 ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+                Ask anything about your manuscript, including lore, canon, world gaps, and story logic. The advisor will counter contradictions,
+                surface foreshadowing, and walk you through the tradeoffs of every story decision.
+              </p>
+            </div>
+            <Link
+              href={`/${bookId}/notes`}
+              className={`inline-flex items-center justify-center rounded-full px-4 py-2.5 text-sm font-medium ${isDark ? "bg-white/10 text-slate-100" : "bg-stone-900 text-white"}`}
+            >
+              Open notes workspace
+            </Link>
           </div>
 
           {/* ── Tab switcher ──────────────────────────────────────────────────── */}
@@ -587,7 +627,7 @@ export default function AdvisorPage() {
                           "What foreshadowing opportunities am I missing?",
                           "Help me think through how to end the current arc.",
                           "Is there a consistency issue with my magic system?",
-                          "I want to suddenly change the genre — is that a good idea?",
+                          "I want to suddenly change the genre. Is that a good idea?",
                         ].map(prompt => (
                           <button
                             key={prompt}
@@ -689,7 +729,7 @@ export default function AdvisorPage() {
                       value={input}
                       onChange={e => setInput(e.target.value)}
                       onKeyDown={handleKeyDown}
-                      placeholder="Ask about plotholes, arc endings, consistency issues, foreshadowing…"
+                      placeholder="Ask about plotholes, lore gaps, world rules, arc endings, consistency issues..."
                       rows={2}
                       disabled={loading}
                       className={`flex-1 resize-none bg-transparent text-sm leading-6 outline-none ${isDark ? "text-slate-100 placeholder:text-slate-500" : "text-stone-800 placeholder:text-stone-400"}`}
@@ -704,13 +744,63 @@ export default function AdvisorPage() {
                     </button>
                   </div>
                   <p className={`mt-2 text-[10px] ${isDark ? "text-slate-600" : "text-stone-400"}`}>
-                    Enter to send · Shift+Enter for new line · Contradictions flagged automatically
+                    Enter to send · Shift+Enter for new line · Contradictions and world gaps flagged automatically
                   </p>
                 </div>
               </div>
 
-              {/* Right panel — retrieved passages + how it works */}
+              {/* Right panel: retrieved passages + how it works */}
               <div className="space-y-4">
+                {worldAnalysis ? (
+                  <div className={`rounded-[1.8rem] border p-5 ${isDark ? "border-emerald-500/20 bg-emerald-500/6" : "border-emerald-200 bg-emerald-50"}`}>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className={`text-[11px] font-semibold uppercase tracking-[0.28em] ${isDark ? "text-emerald-300" : "text-emerald-700"}`}>
+                        World analysis
+                      </p>
+                      <span className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] ${isDark ? "bg-emerald-400/10 text-emerald-200" : "bg-white text-emerald-700"}`}>
+                        {worldAnalysis.mode === "story_integration" ? "Integration" : "Gap detection"}
+                      </span>
+                    </div>
+                    <p className={`mt-3 text-xs leading-6 line-clamp-5 ${isDark ? "text-emerald-50/80" : "text-emerald-950/75"}`}>
+                      {worldAnalysis.answer}
+                    </p>
+                    {worldAnalysis.logic_alerts.length > 0 ? (
+                      <div className="mt-4 space-y-2">
+                        <p className={`text-[10px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-emerald-300/80" : "text-emerald-800"}`}>Alerts</p>
+                        {worldAnalysis.logic_alerts.slice(0, 3).map((item, index) => (
+                          <div key={`world-alert-${index}`} className={`rounded-[1rem] border p-3 ${isDark ? "border-white/8 bg-black/15" : "border-emerald-100 bg-white/70"}`}>
+                            <p className={`text-xs font-semibold ${isDark ? "text-slate-100" : "text-stone-800"}`}>{worldItemTitle(item, `Alert ${index + 1}`)}</p>
+                            {worldItemDescription(item) ? (
+                              <p className={`mt-1 text-xs leading-5 ${isDark ? "text-slate-400" : "text-stone-600"}`}>{worldItemDescription(item)}</p>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                    {worldAnalysis.suggestions.length > 0 ? (
+                      <div className="mt-4 space-y-2">
+                        <p className={`text-[10px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-emerald-300/80" : "text-emerald-800"}`}>Next moves</p>
+                        {worldAnalysis.suggestions.slice(0, 3).map((item, index) => (
+                          <div key={`world-suggestion-${index}`} className={`rounded-[1rem] border p-3 ${isDark ? "border-white/8 bg-black/15" : "border-emerald-100 bg-white/70"}`}>
+                            <p className={`text-xs font-semibold ${isDark ? "text-slate-100" : "text-stone-800"}`}>{worldItemTitle(item, `Suggestion ${index + 1}`)}</p>
+                            {worldItemDescription(item) ? (
+                              <p className={`mt-1 text-xs leading-5 ${isDark ? "text-slate-400" : "text-stone-600"}`}>{worldItemDescription(item)}</p>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                    {worldAnalysis.citations.length > 0 ? (
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        {worldAnalysis.citations.slice(0, 4).map((citation, index) => (
+                          <span key={`world-citation-${index}`} className={`rounded-full px-2.5 py-1 text-[10px] font-medium ${isDark ? "bg-white/8 text-slate-300" : "bg-white text-stone-600"}`}>
+                            {worldItemTitle(citation, `Source ${index + 1}`)}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
                 <div className={`rounded-[1.8rem] border p-5 ${isDark ? "border-white/10 bg-white/4" : "border-stone-200 bg-white"}`}>
                   <p className={`text-[11px] font-semibold uppercase tracking-[0.28em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>
                     Retrieved passages
@@ -728,7 +818,7 @@ export default function AdvisorPage() {
                         <div key={i} className={`rounded-[1rem] border p-4 ${isDark ? "border-white/8 bg-white/3" : "border-stone-100 bg-stone-50"}`}>
                           <div className="flex items-center justify-between mb-2">
                             <span className={`text-[10px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-indigo-300" : "text-violet-600"}`}>
-                              Ch. {p.chapter_num}{p.chapter_title ? ` — ${p.chapter_title}` : ""}
+                              Ch. {p.chapter_num}{p.chapter_title ? `: ${p.chapter_title}` : ""}
                             </span>
                             <span className={`text-[10px] tabular-nums ${isDark ? "text-slate-600" : "text-stone-400"}`}>
                               {Math.round(p.relevance * 100)}% match
@@ -748,10 +838,10 @@ export default function AdvisorPage() {
                   <p className={`text-[11px] font-semibold uppercase tracking-[0.26em] mb-3 ${isDark ? "text-slate-500" : "text-stone-400"}`}>Response types</p>
                   <div className="space-y-2">
                     {[
-                      { icon: "⚠️", label: "Contradiction", desc: "Your plan clashes with the text" },
-                      { icon: "✨", label: "Opportunity", desc: "Foreshadowing or arc connection found" },
-                      { icon: "🔀", label: "Tradeoff", desc: "Multiple endings debated" },
-                      { icon: "💬", label: "Response", desc: "General analysis or advice" },
+                      { icon: "WRN", label: "Contradiction", desc: "Your plan clashes with the text" },
+                      { icon: "OPP", label: "Opportunity", desc: "Foreshadowing or arc connection found" },
+                      { icon: "TRD", label: "Tradeoff", desc: "Multiple endings debated" },
+                      { icon: "RSP", label: "Response", desc: "General analysis or advice" },
                     ].map(({ icon, label, desc }) => (
                       <div key={label} className="flex gap-2.5 items-start">
                         <span className="text-sm shrink-0 mt-0.5">{icon}</span>
@@ -794,7 +884,7 @@ export default function AdvisorPage() {
                 <div>
                   <div className="mb-5 flex items-start justify-between gap-4">
                     <p className={`text-sm leading-6 max-w-xl ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-                      Proactive analysis of your manuscript — structural issues, direction decisions, and foreshadowing
+                      Proactive analysis of your manuscript, including structural issues, direction decisions, and foreshadowing
                       opportunities. Powered by extracted story data, not the full book.
                     </p>
                     <button
@@ -813,7 +903,7 @@ export default function AdvisorPage() {
                     </div>
                   ) : visibleSuggestions.length === 0 ? (
                     <div className={`rounded-[1.8rem] border p-10 text-center ${isDark ? "border-white/10 bg-white/4" : "border-stone-200 bg-white"}`}>
-                      <p className="text-3xl mb-3">✅</p>
+                      <p className="text-sm font-semibold uppercase tracking-[0.24em] mb-3">Ready</p>
                       <p className={`font-semibold text-lg ${isDark ? "text-white" : "text-stone-900"}`}>Scan warming up</p>
                       <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
                         No scan cards are available yet. Refresh after your next extraction pass or ask the continuity checker for a proactive story audit.
@@ -821,10 +911,10 @@ export default function AdvisorPage() {
                     </div>
                   ) : (
                     <div className="space-y-8">
-                      <SuggestionGroup label="Warnings" icon="⚠️" items={grouped.warning} isDark={isDark} intentionalIds={intentionalIds} onAsk={handleSuggestionAsk} onSaveNote={saveQuickNote} onMarkIntentional={markIntentional} onDismiss={dismissSuggestion} />
-                      <SuggestionGroup label="Future Direction" icon="🧭" items={grouped.direction} isDark={isDark} intentionalIds={intentionalIds} onAsk={handleSuggestionAsk} onSaveNote={saveQuickNote} onMarkIntentional={markIntentional} onDismiss={dismissSuggestion} />
-                      <SuggestionGroup label="Opportunities" icon="✨" items={grouped.opportunity} isDark={isDark} intentionalIds={intentionalIds} onAsk={handleSuggestionAsk} onSaveNote={saveQuickNote} onMarkIntentional={markIntentional} onDismiss={dismissSuggestion} />
-                      <SuggestionGroup label="Info" icon="ℹ️" items={grouped.info} isDark={isDark} intentionalIds={intentionalIds} onAsk={handleSuggestionAsk} onSaveNote={saveQuickNote} onMarkIntentional={markIntentional} onDismiss={dismissSuggestion} />
+                      <SuggestionGroup label="Warnings" icon="WRN" items={grouped.warning} isDark={isDark} intentionalIds={intentionalIds} onAsk={handleSuggestionAsk} onSaveNote={saveQuickNote} onMarkIntentional={markIntentional} onDismiss={dismissSuggestion} />
+                      <SuggestionGroup label="Future Direction" icon="DIR" items={grouped.direction} isDark={isDark} intentionalIds={intentionalIds} onAsk={handleSuggestionAsk} onSaveNote={saveQuickNote} onMarkIntentional={markIntentional} onDismiss={dismissSuggestion} />
+                      <SuggestionGroup label="Opportunities" icon="OPP" items={grouped.opportunity} isDark={isDark} intentionalIds={intentionalIds} onAsk={handleSuggestionAsk} onSaveNote={saveQuickNote} onMarkIntentional={markIntentional} onDismiss={dismissSuggestion} />
+                      <SuggestionGroup label="Info" icon="INF" items={grouped.info} isDark={isDark} intentionalIds={intentionalIds} onAsk={handleSuggestionAsk} onSaveNote={saveQuickNote} onMarkIntentional={markIntentional} onDismiss={dismissSuggestion} />
 
                       {intentionalIds.size > 0 && (
                         <div className={`rounded-[1.5rem] border p-5 ${isDark ? "border-white/8 bg-white/3" : "border-stone-100 bg-stone-50"}`}>
@@ -846,7 +936,7 @@ export default function AdvisorPage() {
                 <div className="space-y-6">
                   <p className={`text-sm leading-6 max-w-2xl ${isDark ? "text-slate-400" : "text-stone-500"}`}>
                     Paste a passage you've written. The advisor will cross-check it against your characters'
-                    personalities, established events, tone, and themes — and also flag grammar and formatting issues.
+                    personalities, established events, tone, and themes, and it will also flag grammar and formatting issues.
                   </p>
 
                   <div className={`rounded-[1.8rem] border p-6 ${isDark ? "border-white/10 bg-black/80" : "border-stone-200 bg-white"}`}>
@@ -861,6 +951,7 @@ export default function AdvisorPage() {
                       </div>
                       <button
                         onClick={async () => {
+                          if (!canUseAuthorMode) return
                           if (bookMode === "author") return
                           try {
                             const updated = await booksApi.setMode(bookId, "author")
@@ -870,9 +961,10 @@ export default function AdvisorPage() {
                             setImportMessage("Could not switch this upload to author mode right now.")
                           }
                         }}
-                        className={`rounded-[0.8rem] border px-4 py-2 text-xs font-semibold transition ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-stone-200 bg-stone-50 text-stone-700 hover:bg-white"}`}
+                        disabled={!canUseAuthorMode}
+                        className={`rounded-[0.8rem] border px-4 py-2 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-55 ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-stone-200 bg-stone-50 text-stone-700 hover:bg-white"}`}
                       >
-                        {bookMode === "author" ? "Author mode active" : "Convert reader upload to author upload"}
+                        {bookMode === "author" ? "Author mode active" : canUseAuthorMode ? "Convert reader upload to author upload" : "Author mode locked"}
                       </button>
                     </div>
 
@@ -979,7 +1071,7 @@ export default function AdvisorPage() {
                     <textarea
                       value={editText}
                       onChange={e => setEditText(e.target.value)}
-                      placeholder="Paste your passage here — a paragraph, a scene, or a full chapter section…"
+                      placeholder="Paste your passage here: a paragraph, a scene, or a full chapter section."
                       rows={10}
                       className={`w-full resize-y rounded-[1rem] border px-4 py-3 text-sm leading-7 outline-none transition ${isDark ? "border-white/10 bg-white/4 text-slate-200 placeholder:text-slate-600 focus:border-indigo-500/40" : "border-stone-200 bg-stone-50 text-stone-800 placeholder:text-stone-400 focus:border-violet-300"}`}
                     />
@@ -1057,7 +1149,7 @@ export default function AdvisorPage() {
                       {editResult.continuity_issues.length > 0 && (
                         <div>
                           <p className={`text-[11px] font-bold uppercase tracking-[0.28em] mb-3 ${isDark ? "text-amber-300" : "text-amber-700"}`}>
-                            ⚠️ Continuity Issues ({editResult.continuity_issues.length})
+                            Continuity Issues ({editResult.continuity_issues.length})
                           </p>
                           <div className="space-y-3">
                             {editResult.continuity_issues.map((issue, i) => (
@@ -1189,7 +1281,7 @@ export default function AdvisorPage() {
                             {editPassages.map((p, i) => (
                               <div key={i} className={`rounded-[1rem] border p-4 ${isDark ? "border-white/8 bg-white/3" : "border-stone-100 bg-stone-50"}`}>
                                 <p className={`text-[10px] font-bold uppercase tracking-[0.22em] mb-1 ${isDark ? "text-indigo-300" : "text-violet-600"}`}>
-                                  Ch. {p.chapter_num}{p.chapter_title ? ` — ${p.chapter_title}` : ""}
+                                  Ch. {p.chapter_num}{p.chapter_title ? `: ${p.chapter_title}` : ""}
                                 </p>
                                 <p className={`text-xs leading-5 line-clamp-3 ${isDark ? "text-slate-400" : "text-stone-600"}`}>{p.excerpt}</p>
                               </div>
@@ -1200,7 +1292,7 @@ export default function AdvisorPage() {
 
                       {editResult.continuity_issues.length === 0 && editResult.grammar_issues.length === 0 && (
                         <div className={`rounded-[1.5rem] border p-6 text-center ${isDark ? "border-teal-500/20 bg-teal-500/8" : "border-teal-200 bg-teal-50"}`}>
-                          <p className="text-2xl mb-2">✅</p>
+                          <p className="text-sm font-semibold uppercase tracking-[0.24em] mb-2">Clear</p>
                           <p className={`font-semibold ${isDark ? "text-teal-200" : "text-teal-800"}`}>No continuity or grammar issues found</p>
                           <p className={`mt-1 text-xs ${isDark ? "text-teal-400" : "text-teal-600"}`}>The passage is consistent with established story facts.</p>
                         </div>

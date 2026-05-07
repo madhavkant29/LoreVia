@@ -57,7 +57,6 @@ apiClient.interceptors.response.use(
         return apiClient(originalRequest)
       }
       if (typeof window !== "undefined") {
-        localStorage.removeItem("lorevia-auth")
         window.location.replace("/login")
       }
     }

@@ -25,6 +25,11 @@ def _load_env_file(path: str | Path = ".env") -> None:
         os.environ[key] = value
 
 
+_BASE_DIR = Path(__file__).resolve().parents[2]
+_load_env_file(_BASE_DIR / ".env")
+_load_env_file(_BASE_DIR / ".env.local")
+
+
 class Settings(BaseSettings):
     APP_NAME: str = "LoreVia"
     DEBUG: bool = False
@@ -75,7 +80,16 @@ class Settings(BaseSettings):
     # Paddle
     PADDLE_API_KEY: str | None = None
     PADDLE_WEBHOOK_SECRET: str | None = None
+    PADDLE_WEBHOOK_TOLERANCE_SECONDS: int = 300
     PADDLE_DEFAULT_CHECKOUT_URL: str | None = None
+    PADDLE_READER_MONTHLY_PRICE_ID: str | None = None
+    PADDLE_READER_ANNUAL_PRICE_ID: str | None = None
+    PADDLE_AUTHOR_MONTHLY_PRICE_ID: str | None = None
+    PADDLE_AUTHOR_ANNUAL_PRICE_ID: str | None = None
+    PADDLE_ARCHITECT_MONTHLY_PRICE_ID: str | None = None
+    PADDLE_ARCHITECT_ANNUAL_PRICE_ID: str | None = None
+    # Legacy names kept so existing environments do not break while the new
+    # Reader/Author/Architect catalog is being rolled out.
     PADDLE_PRO_MONTHLY_PRICE_ID: str | None = None
     PADDLE_PRO_ANNUAL_PRICE_ID: str | None = None
     PADDLE_POWER_MONTHLY_PRICE_ID: str | None = None
@@ -113,34 +127,52 @@ class Settings(BaseSettings):
     SEARCH_SIMILARITY_THRESHOLD: float = 0.65
     SEARCH_MAX_CONTEXT_CHUNKS: int = 3
     PASSWORD_RESET_TOKEN_TTL_SECONDS: int = 1800
-    COVER_BORDER_VARIANCE_THRESHOLD: float = 0.02
-    COVER_EDGE_SAMPLE_SIZE: int = 10
-    COVER_FINAL_PADDING_PCT: float = 0.02
-
+    EMAIL_VERIFICATION_TOKEN_TTL_SECONDS: int = 86400
     # Tier limits
     FREE_MAX_BOOKS: int = 2
     FREE_TOTAL_TOKEN_BUDGET: int = 250000
-    FREE_SEARCH_PER_HOUR: int = 20
+    FREE_SEARCH_PER_DAY: int = 5
     FREE_SUMMARY_PER_HOUR: int = 30
-    FREE_CHAT_PER_DAY: int = 10
-    PRO_CHAT_PER_DAY: int = 100
-    FREE_ADVISOR_PER_DAY: int = 20
-    FREE_ADVISOR_PER_WEEK: int = 80
-    FREE_ADVISOR_PER_MONTH: int = 240
-    PRO_ADVISOR_PER_DAY: int = 80
-    PRO_ADVISOR_PER_WEEK: int = 320
-    PRO_ADVISOR_PER_MONTH: int = 960
-    POWER_ADVISOR_PER_DAY: int = 200
-    POWER_ADVISOR_PER_WEEK: int = 800
-    POWER_ADVISOR_PER_MONTH: int = 2400
+    FREE_PREDICTION_PER_DAY: int = 3
+    READER_PREDICTION_PER_DAY: int = 10
+    AUTHOR_PREDICTION_PER_DAY: int = 30
+    ARCHITECT_PREDICTION_PER_DAY: int = 60
+    TRIAL_HIGH_COST_TURNS_PER_DAY: int = 20
+    AUTHOR_HIGH_COST_TURNS_PER_DAY: int = 30
+    ARCHITECT_HIGH_COST_TURNS_PER_DAY: int = 60
+    FREE_ADVISOR_PER_DAY: int = 0
+    FREE_ADVISOR_PER_WEEK: int = 0
+    FREE_ADVISOR_PER_MONTH: int = 0
+    TRIAL_AUTHOR_ADVISOR_PER_DAY: int = 20
+    READER_ADVISOR_PER_DAY: int = 0
+    READER_ADVISOR_PER_WEEK: int = 0
+    READER_ADVISOR_PER_MONTH: int = 0
+    AUTHOR_ADVISOR_PER_DAY: int = 30
+    AUTHOR_ADVISOR_PER_WEEK: int = 210
+    AUTHOR_ADVISOR_PER_MONTH: int = 900
+    ARCHITECT_ADVISOR_PER_DAY: int = 60
+    ARCHITECT_ADVISOR_PER_WEEK: int = 420
+    ARCHITECT_ADVISOR_PER_MONTH: int = 1800
     FREE_CONTINUITY_PER_MINUTE: int = 6
+    READER_CONTINUITY_PER_MINUTE: int = 0
+    AUTHOR_CONTINUITY_PER_MINUTE: int = 20
+    ARCHITECT_CONTINUITY_PER_MINUTE: int = 40
+    PRO_CHAT_PER_DAY: int = 30
+    PRO_ADVISOR_PER_DAY: int = 30
+    PRO_ADVISOR_PER_WEEK: int = 210
+    PRO_ADVISOR_PER_MONTH: int = 900
+    POWER_ADVISOR_PER_DAY: int = 60
+    POWER_ADVISOR_PER_WEEK: int = 420
+    POWER_ADVISOR_PER_MONTH: int = 1800
     PRO_CONTINUITY_PER_MINUTE: int = 20
     POWER_CONTINUITY_PER_MINUTE: int = 40
+    DEVICE_TRIAL_ENFORCEMENT_ENABLED: bool = False
+    DEVICE_TRIAL_MAX_ACCOUNTS: int = 2
 
     # Cloudflare Tunnel
     CLOUDFLARE_TUNNEL_TOKEN: str | None = None   # Option 1 security
 
-    model_config = SettingsConfigDict(env_file=".env", case_sensitive=True, extra="ignore")
+    model_config = SettingsConfigDict(case_sensitive=True, extra="ignore")
 
 
 settings = Settings()
@@ -163,5 +195,6 @@ def is_local_mode() -> bool:
 
 def effective_tier(tier: str) -> str:
     if settings.DEBUG:
-        return "pro"
-    return tier
+        return "architect"
+    normalized = (tier or "free").strip().lower()
+    return {"pro": "author", "power": "architect"}.get(normalized, normalized)

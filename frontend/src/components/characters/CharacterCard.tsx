@@ -2,6 +2,7 @@
 
 import { useState, type KeyboardEvent, type MouseEvent } from "react"
 import { booksApi } from "@/lib/api/books"
+import { isPaidTier } from "@/lib/billing/plans"
 import { CONFIDENCE_THRESHOLDS } from "@/lib/constants"
 import { useAuthStore } from "@/lib/stores/authStore"
 import type { Character } from "@/types/character"
@@ -82,7 +83,7 @@ export function CharacterCard({ character, bookId, compact = false, editable = f
   const isDark = theme === "dark"
   const relationshipSummaries = character.relationship_summaries ?? []
   const growthEvents = [...(character.growth_events ?? [])]
-  const isPaid = user?.tier === "pro" || user?.tier === "power" || user?.tier === "admin"
+  const isPaid = isPaidTier(user?.tier)
   const advancedTraits = visible.filter(([key]) => !["hair", "eyes", "face", "build", "age", "distinguishing", "manual_description"].includes(key))
 
   const toggleExpanded = () => setExpanded((value) => !value)
@@ -484,7 +485,7 @@ export function CharacterCard({ character, bookId, compact = false, editable = f
                   <div>
                     <p className={isDark ? "text-xs font-semibold uppercase tracking-[0.22em] text-slate-500" : "text-xs font-semibold uppercase tracking-[0.22em] text-slate-400"}>Advanced details</p>
                     <p className={isDark ? "mt-1 text-xs text-slate-400" : "mt-1 text-xs text-slate-500"}>
-                      {isPaid ? "Expanded unique traits and profile detail." : "Upgrade to Pro to unlock deeper character detail."}
+                      {isPaid ? "Expanded unique traits and profile detail." : "Upgrade to Reader to unlock deeper character detail."}
                     </p>
                   </div>
                   <span className={isDark ? "text-sm text-slate-300 font-medium" : "text-sm text-slate-600 font-medium"}>{advancedOpen ? "Hide" : isPaid ? "Open" : "Preview"}</span>

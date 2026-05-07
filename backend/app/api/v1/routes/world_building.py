@@ -9,8 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps.auth import get_current_user
 from app.core.database import get_db
 from app.core.storage import download_book
-from app.models.book import Book, Series, SeriesBook
-from app.models.intelligence import WikiEntry, WorldBuildingDocument, WorldCanonicalIdentity, WorldElement, WorldGapAnalysis, WorldNote
+from app.models.book import Book, Series
+from app.models.intelligence import WikiEntry, WorldBuildingDocument, WorldCanonicalIdentity, WorldElement, WorldNote
 from app.schemas.world_building import (
     CanonOverrideBody,
     CanonOverrideOut,
@@ -23,6 +23,7 @@ from app.schemas.world_building import (
     WorldBuildingDocumentDetailOut,
     WorldBuildingDocumentOut,
     WorldBuildingDocumentUpdateBody,
+    WorldElementOut,
     WorldNoteBody,
     WorldNoteOut,
     WorldNoteStatusBody,
@@ -30,17 +31,17 @@ from app.schemas.world_building import (
     WorldQueryResponse,
 )
 from app.utils.world_building_utils import (
-    build_series_world_context,
-    build_world_context,
     build_world_logic_response,
     classify_world_intent,
     create_world_building_documents,
     delete_world_building_document,
     detect_integration_analysis,
+    detect_series_world_analysis,
     detect_world_gaps,
     extract_world_elements,
     get_world_building_document,
     generate_wiki_from_manuscript,
+    list_extracted_world_elements,
     list_world_building_documents,
     load_world_building_document_payload,
     prepare_world_building_uploads,
@@ -313,6 +314,16 @@ async def get_world_integration(
     return IntegrationAnalysisResponse(**payload)
 
 
+@router.get("/{book_id}/world-building/elements", response_model=list[WorldElementOut])
+async def list_world_elements(
+    book_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await _get_owned_book(db, book_id, current_user.id)
+    return await list_extracted_world_elements(db, book)
+
+
 @router.get("/{book_id}/world-building/wiki", response_model=list[WikiEntryOut])
 async def list_auto_wiki(
     book_id: uuid.UUID,
@@ -390,19 +401,8 @@ async def get_series_world_analysis(
     series = await db.get(Series, series_id)
     if not series or series.user_id != current_user.id:
         raise HTTPException(404, "Series not found")
-    book_ids = (
-        await db.execute(select(SeriesBook.book_id).where(SeriesBook.series_id == series_id))
-    ).scalars().all()
-    analyses = (
-        await db.execute(select(WorldGapAnalysis).where(WorldGapAnalysis.book_id.in_(book_ids)))
-    ).scalars().all() if book_ids else []
-    return {
-        "series_id": str(series_id),
-        "series_name": series.name,
-        "book_count": len(book_ids),
-        "analysis_count": len(analyses),
-        "world_context": await build_series_world_context(db, series_id),
-    }
+    payload = await detect_series_world_analysis(db, series_id)
+    return {**payload, "series_name": series.name}
 
 
 @router.post("/{world_element_id}/world-building/accept-suggestion")

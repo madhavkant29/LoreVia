@@ -14,12 +14,9 @@ export interface Book {
   source_kind?: string
   preserve_chapter_numbers?: boolean
   cover_url?: string | null
-  cover_processed_url?: string | null
-  cover_edge_colors?: Record<string, string> | null
-  cover_processed_at?: string | null
-  cover_crop_bounds?: { x: number; y: number; width: number; height: number } | null
   total_chapters: number | null
   total_tokens?: number | null
+  total_words?: number
   is_truncated?: boolean
   primary_series_id?: string | null
   series_name?: string | null
@@ -121,7 +118,6 @@ export interface PublicBook {
   work_type: BookWorkType
   status: BookStatus
   cover_url?: string | null
-  cover_processed_url?: string | null
   total_chapters: number | null
   copyright_warning?: boolean
   created_at?: string
@@ -288,6 +284,19 @@ export interface ChapterConsistencyReport {
   continuity_flags: string[]
 }
 
+export interface StoryHealthMetric {
+  label: string
+  score: number
+  detail: string
+}
+
+export interface StoryHealth {
+  score: number
+  status: string
+  summary: string
+  metrics: StoryHealthMetric[]
+}
+
 export interface PreWritingCharacter {
   id: string
   name: string
@@ -392,8 +401,18 @@ export interface ManuscriptFrontMatter {
   include_prologue: boolean
 }
 
+export interface GoalCalendarItem {
+  id: string
+  title: string
+  due_date: string
+  quota_value?: number | null
+  quota_unit?: string | null
+  completed: boolean
+}
+
 export interface WriterWorkspace {
   word_count_goals: WordCountGoals
+  goal_calendar: GoalCalendarItem[]
   corkboard_cards: CorkboardCard[]
   templates: WritingTemplate[]
   publishing: PublishingPreset
@@ -410,6 +429,7 @@ export interface NovelScene {
   description?: string | null
   body: string
   html_body?: string | null
+  metadata?: Record<string, unknown>
   path: string
   status: string
   sort_order: number

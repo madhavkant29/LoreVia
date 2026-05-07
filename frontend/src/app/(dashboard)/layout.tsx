@@ -1,23 +1,13 @@
-"use client"
+import type { Metadata } from "next"
+import { DashboardShell } from "@/components/layout/DashboardShell"
 
-import { useEffect } from "react"
-import { Navbar } from "@/components/layout/Navbar"
-import { usePreferencesStore } from "@/lib/stores/preferencesStore"
+export const metadata: Metadata = {
+  robots: {
+    index: false,
+    follow: false,
+  },
+}
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const { theme } = usePreferencesStore()
-  const isDark = theme === "dark"
-
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme
-  }, [theme])
-
-  return (
-    <div className="min-h-screen bg-background text-foreground transition-colors duration-300">
-      <Navbar />
-      <main className="mx-auto max-w-7xl px-4 py-8 md:px-8 lg:px-10">
-        {children}
-      </main>
-    </div>
-  )
+  return <DashboardShell>{children}</DashboardShell>
 }

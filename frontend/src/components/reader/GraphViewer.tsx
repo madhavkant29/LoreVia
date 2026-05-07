@@ -94,7 +94,7 @@ export function GraphViewer({
           "border-opacity": isDark ? 0.18 : 0.48,
           color: isDark ? "#cad5f5" : "#334155",
           "font-size": "11",
-          "font-family": "ui-sans-serif, system-ui, sans-serif",
+          "font-family": '"Space Grotesk", "Avenir Next", "Segoe UI Variable Text", sans-serif',
           "text-wrap": "wrap",
           "text-max-width": "92",
           "text-valign": "bottom",
@@ -279,7 +279,7 @@ export function GraphViewer({
       <div className="absolute inset-x-3 top-3 z-10 flex items-start justify-between gap-3">
         <div className={`rounded-2xl border px-3 py-2 backdrop-blur-md ${isDark ? "border-white/10 bg-black/35 text-slate-200" : "border-white/70 bg-white/70 text-stone-700"}`}>
           <p className={`text-[10px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Graph View</p>
-          <p className="mt-1 text-sm font-medium">{renderedGraph.nodes.length} notes · {renderedGraph.edges.length} links</p>
+          <p className="mt-1 text-sm font-medium">{renderedGraph.nodes.length} notes | {renderedGraph.edges.length} links</p>
           {focusNode ? (
             <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>Focus: {focusNode.title}</p>
           ) : (

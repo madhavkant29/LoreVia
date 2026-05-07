@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 
 import {
@@ -10,6 +10,7 @@ import {
   WorkspacePanel,
 } from "@/components/ui/Workspace"
 import { authApi } from "@/lib/api/auth"
+import { tierLabel } from "@/lib/billing/plans"
 import { billingApi } from "@/lib/api/billing"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
@@ -25,7 +26,19 @@ export default function SettingsPage() {
   const { theme, setTheme } = usePreferencesStore()
   const [billingBusy, setBillingBusy] = useState(false)
   const [billingMessage, setBillingMessage] = useState<string | null>(null)
+  const [goalDraft, setGoalDraft] = useState("1000")
+  const [goalSaving, setGoalSaving] = useState(false)
+  const [goalMessage, setGoalMessage] = useState<string | null>(null)
   const router = useRouter()
+  const displayTier = user?.tier_label ?? tierLabel(user?.tier)
+  const purchasedTier = tierLabel(user?.plan_tier)
+  const trialEndsLabel = user?.trial_ends_at
+    ? new Intl.DateTimeFormat("en-US", { dateStyle: "medium" }).format(new Date(user.trial_ends_at))
+    : null
+
+  useEffect(() => {
+    setGoalDraft(String(user?.daily_word_goal ?? 1000))
+  }, [user?.daily_word_goal])
 
   const changeMode = async (mode: string) => {
     await authApi.setReadingMode(mode)
@@ -60,6 +73,27 @@ export default function SettingsPage() {
     }
   }
 
+  const saveDailyGoal = async () => {
+    const parsedGoal = Math.max(1, Number(goalDraft) || 0)
+    if (!parsedGoal) {
+      setGoalMessage("Enter a daily word goal above zero.")
+      return
+    }
+
+    setGoalSaving(true)
+    setGoalMessage(null)
+    try {
+      const updated = await authApi.setDailyWordGoal(parsedGoal)
+      setUser(updated)
+      setGoalDraft(String(updated.daily_word_goal))
+      setGoalMessage("Daily goal updated.")
+    } catch {
+      setGoalMessage("We could not save the daily goal right now.")
+    } finally {
+      setGoalSaving(false)
+    }
+  }
+
   return (
     <WorkspacePage className="min-h-0 bg-transparent">
       <div className="space-y-8 pb-12">
@@ -70,7 +104,7 @@ export default function SettingsPage() {
             description="A professional settings page should keep high-impact controls obvious: account status, billing, appearance, reading mode, and a safe sign-out path."
             meta={
               <div className="flex flex-wrap justify-end gap-3">
-                <div className="app-chip">{user?.tier ?? "free"} plan</div>
+                <div className="app-chip">{displayTier} plan</div>
                 <div className="app-chip">{theme} theme</div>
               </div>
             }
@@ -80,8 +114,8 @@ export default function SettingsPage() {
         <section className="grid gap-4 sm:grid-cols-3">
           <WorkspaceMetric
             label="Plan"
-            value={(user?.tier ?? "free").toUpperCase()}
-            note="Current workspace access level"
+            value={displayTier}
+            note={user?.trial_active ? "Temporary Author access during trial" : "Current workspace access level"}
             accent="accent"
           />
           <WorkspaceMetric
@@ -113,10 +147,19 @@ export default function SettingsPage() {
               <div className="app-stat">
                 <p className="app-stat__label">Plan status</p>
                 <p className="mt-3 text-base font-semibold capitalize text-[rgb(var(--foreground))]">
-                  {user?.tier ?? "free"}
+                  {displayTier}
                 </p>
               </div>
             </div>
+            {user?.trial_active ? (
+              <p className="mt-5 max-w-2xl rounded-[1.1rem] border border-emerald-300/30 bg-emerald-100/70 px-4 py-3 text-sm leading-7 text-emerald-950 dark:bg-emerald-300/10 dark:text-emerald-100">
+                You are currently seeing Author (free trial). Your purchased plan is {purchasedTier}, so access will revert when the trial ends{trialEndsLabel ? ` on ${trialEndsLabel}` : ""} unless you upgrade.
+              </p>
+            ) : (
+              <p className="mt-5 max-w-2xl text-sm leading-7 text-[rgb(var(--muted-foreground))]">
+                Purchased plan: {purchasedTier}. Payment details and cancellations live in the billing portal.
+              </p>
+            )}
             <p className="mt-5 max-w-2xl text-sm leading-7 text-[rgb(var(--muted-foreground))]">
               Subscription changes still begin from pricing, while payment details and cancellations live in the billing portal.
             </p>
@@ -196,6 +239,50 @@ export default function SettingsPage() {
                 </button>
               )
             })}
+          </div>
+        </WorkspacePanel>
+
+        <WorkspacePanel className="p-6">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="app-eyebrow">Daily goal</p>
+              <h2 className="mt-3 text-2xl font-semibold text-[rgb(var(--foreground))]">
+                Set your personal writing target
+              </h2>
+            </div>
+            <p className="max-w-2xl text-sm leading-7 text-[rgb(var(--muted-foreground))]">
+              This goal feeds the overview page and tracks progress from manuscript saves across your workspace.
+            </p>
+          </div>
+
+          <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,16rem)_minmax(0,1fr)]">
+            <label className="app-stat">
+              <p className="app-stat__label">Words per day</p>
+              <input
+                type="number"
+                min={1}
+                value={goalDraft}
+                onChange={(event) => setGoalDraft(event.target.value)}
+                className="mt-3 w-full rounded-[1rem] border border-[rgba(var(--border),0.8)] bg-[rgba(255,255,255,0.7)] px-4 py-3 text-base font-semibold text-[rgb(var(--foreground))] outline-none dark:bg-[rgba(255,255,255,0.04)]"
+              />
+            </label>
+            <div className="app-stat">
+              <p className="app-stat__label">Today</p>
+              <p className="mt-3 text-base font-semibold text-[rgb(var(--foreground))]">
+                {(user?.today_word_count ?? 0).toLocaleString()} / {(user?.daily_word_goal ?? 1000).toLocaleString()} words
+              </p>
+              <p className="mt-2 text-sm leading-7 text-[rgb(var(--muted-foreground))]">
+                Progress updates when you save manuscript edits, and your streak is based on daily sign-ins.
+              </p>
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <button onClick={saveDailyGoal} disabled={goalSaving} className="app-button-primary disabled:opacity-60">
+                  {goalSaving ? "Saving..." : "Save daily goal"}
+                </button>
+                {goalMessage ? (
+                  <span className="text-sm text-[rgb(var(--muted-foreground))]">{goalMessage}</span>
+                ) : null}
+              </div>
+            </div>
           </div>
         </WorkspacePanel>
 

@@ -57,8 +57,25 @@ GAP_GROUP_META: dict[str, tuple[str, str]] = {
     ),
 }
 CANON_OVERRIDE_NOTE_TYPE = "canon_override"
-WORLD_KEEPABLE_TYPES = {"character", "place", "organization", "object", "event", "concept", "era"}
-WORLD_HIGH_SIGNAL_TYPES = {"character", "place", "organization", "object", "event"}
+WORLD_KEEPABLE_TYPES = {
+    "character",
+    "concept",
+    "country",
+    "creature",
+    "culture",
+    "era",
+    "event",
+    "language",
+    "magic_system",
+    "object",
+    "organization",
+    "place",
+    "race",
+    "region",
+    "religion",
+    "technology",
+}
+WORLD_HIGH_SIGNAL_TYPES = {"character", "country", "place", "organization", "object", "event", "race", "region", "magic_system"}
 STOPWORDS = {
     "the",
     "a",
@@ -558,6 +575,11 @@ async def extract_world_elements(db: AsyncSession, book: Book) -> list[WorldElem
     return rows
 
 
+async def list_extracted_world_elements(db: AsyncSession, book: Book) -> list[dict]:
+    rows = await extract_world_elements(db, book)
+    return [_serialize_world_element(element) for element in rows]
+
+
 async def generate_wiki_from_manuscript(db: AsyncSession, book: Book) -> list[WikiEntry]:
     elements = await _collect_story_elements(db, book)
     summaries = (
@@ -880,6 +902,131 @@ async def detect_world_gaps(db: AsyncSession, book: Book) -> dict:
     document_elements = await sync_world_document_elements(db, book)
     story_elements = await _collect_story_elements(db, book)
     characters = await _collect_story_characters(db, book)
+    return await _build_world_gap_analysis_payload(
+        db,
+        book_id=book.id,
+        series_id=book.primary_series_id,
+        mode="gap_detection",
+        documents=documents,
+        document_elements=document_elements,
+        story_elements=story_elements,
+        characters=characters,
+    )
+
+
+async def detect_series_world_analysis(db: AsyncSession, series_id: uuid.UUID) -> dict:
+    membership_rows = (
+        await db.execute(
+            select(Book, SeriesBook.position)
+            .join(SeriesBook, SeriesBook.book_id == Book.id)
+            .where(SeriesBook.series_id == series_id, Book.hidden_at.is_(None))
+            .order_by(SeriesBook.position.asc().nullslast(), Book.created_at.asc(), Book.title.asc())
+        )
+    ).all()
+    books = [book for book, _ in membership_rows]
+    if not books:
+        return {
+            "series_id": str(series_id),
+            "book_count": 0,
+            "analysis_count": 0,
+            "books": [],
+            "world_context": "",
+            "gap_analysis": _empty_gap_analysis_payload("series_gap_detection"),
+            "integration_analysis": _empty_integration_analysis_payload("series_story_integration"),
+        }
+
+    documents: list[WorldBuildingDocument] = []
+    document_elements: list[WorldElement] = []
+    story_elements: list[WorldElement] = []
+    characters: list[dict] = []
+    books_payload: list[dict] = []
+
+    for book, position in membership_rows:
+        documents.extend(await list_world_building_documents(db, book))
+        document_elements.extend(await sync_world_document_elements(db, book))
+        story_elements.extend(await _collect_story_elements(db, book))
+        characters.extend(await _collect_story_characters(db, book))
+        books_payload.append(
+            {
+                "book_id": str(book.id),
+                "title": book.title,
+                "position": position,
+                "world_document_count": sum(1 for document in documents if document.book_id == book.id),
+            }
+        )
+
+    gap_payload = await _build_world_gap_analysis_payload(
+        db,
+        book_id=None,
+        series_id=series_id,
+        mode="series_gap_detection",
+        documents=documents,
+        document_elements=document_elements,
+        story_elements=story_elements,
+        characters=characters,
+        consistency_elements=[*document_elements, *story_elements],
+        persist=False,
+    )
+    integration_payload = await _build_integration_analysis_payload(
+        db,
+        book_id=None,
+        series_id=series_id,
+        mode="series_story_integration",
+        documents=documents,
+        document_elements=document_elements,
+        story_elements=story_elements,
+        consistency_elements=[*document_elements, *story_elements],
+        persist=False,
+    )
+    return {
+        "series_id": str(series_id),
+        "book_count": len(books),
+        "analysis_count": 2,
+        "books": books_payload,
+        "world_context": await build_series_world_context(db, series_id),
+        "gap_analysis": gap_payload,
+        "integration_analysis": integration_payload,
+    }
+
+
+def _empty_gap_analysis_payload(mode: str) -> dict:
+    return {
+        "mode": mode,
+        "generated_at": None,
+        "gap_categories": {},
+        "gap_groups": [],
+        "priority_gaps": [],
+        "consistency_flags": [],
+        "world_elements": [],
+        "world_documents": [],
+    }
+
+
+def _empty_integration_analysis_payload(mode: str) -> dict:
+    return {
+        "mode": mode,
+        "generated_at": None,
+        "integration_opportunities": [],
+        "consistency_flags": [],
+        "world_elements": [],
+        "world_documents": [],
+        "dependency_graph": [],
+    }
+
+
+async def _build_world_gap_analysis_payload(
+    db: AsyncSession,
+    *,
+    book_id: uuid.UUID | None,
+    series_id: uuid.UUID | None,
+    mode: str,
+    documents: list[WorldBuildingDocument],
+    document_elements: list[WorldElement],
+    story_elements: list[WorldElement],
+    characters: list[dict],
+    consistency_elements: list[WorldElement] | None = None,
+    persist: bool = True,
+) -> dict:
     story_by_name = _collapse_elements([_serialize_world_element(item) for item in story_elements])
     world_by_name = _collapse_elements([_serialize_world_element(item) for item in document_elements])
     world_corpus_text = "\n".join(
@@ -993,23 +1140,26 @@ async def detect_world_gaps(db: AsyncSession, book: Book) -> dict:
     priority_gaps = [item for group in gap_groups for item in group["items"]]
     priority_gaps.sort(key=lambda item: (-int(item.get("priority") or 0), str(item.get("title") or "")))
     priority_gaps = priority_gaps[:12]
-    consistency_flags = detect_consistency_flags([_serialize_world_element(item) for item in document_elements])
+    consistency_flags = detect_consistency_flags([_serialize_world_element(item) for item in (consistency_elements or document_elements)])
 
-    analysis = await _upsert_world_analysis(
-        db,
-        book_id=book.id,
-        series_id=book.primary_series_id,
-        mode="gap_detection",
-        gap_categories=gap_categories,
-        priority_gaps=priority_gaps,
-        integration_opportunities=[],
-        consistency_flags=consistency_flags,
-    )
+    generated_at = datetime.now(UTC)
+    if persist:
+        analysis = await _upsert_world_analysis(
+            db,
+            book_id=book_id,
+            series_id=series_id,
+            mode=mode,
+            gap_categories=gap_categories,
+            priority_gaps=priority_gaps,
+            integration_opportunities=[],
+            consistency_flags=consistency_flags,
+        )
+        generated_at = analysis.generated_at
     _apply_gap_scores(document_elements, priority_gaps)
 
     return {
-        "mode": "gap_detection",
-        "generated_at": analysis.generated_at,
+        "mode": mode,
+        "generated_at": generated_at,
         "gap_categories": gap_categories,
         "gap_groups": gap_groups,
         "priority_gaps": priority_gaps,
@@ -1023,6 +1173,29 @@ async def detect_integration_analysis(db: AsyncSession, book: Book) -> dict:
     documents = await list_world_building_documents(db, book)
     document_elements = await sync_world_document_elements(db, book)
     story_elements = await _collect_story_elements(db, book)
+    return await _build_integration_analysis_payload(
+        db,
+        book_id=book.id,
+        series_id=book.primary_series_id,
+        mode="story_integration",
+        documents=documents,
+        document_elements=document_elements,
+        story_elements=story_elements,
+    )
+
+
+async def _build_integration_analysis_payload(
+    db: AsyncSession,
+    *,
+    book_id: uuid.UUID | None,
+    series_id: uuid.UUID | None,
+    mode: str,
+    documents: list[WorldBuildingDocument],
+    document_elements: list[WorldElement],
+    story_elements: list[WorldElement],
+    consistency_elements: list[WorldElement] | None = None,
+    persist: bool = True,
+) -> dict:
     story_by_name = _collapse_elements([_serialize_world_element(item) for item in story_elements])
     integration_opportunities: list[dict] = []
 
@@ -1059,21 +1232,24 @@ async def detect_integration_analysis(db: AsyncSession, book: Book) -> dict:
         )
 
     integration_opportunities.sort(key=lambda item: (-int(item.get("priority") or 0), item["element_name"].lower()))
-    consistency_flags = detect_consistency_flags([_serialize_world_element(item) for item in document_elements])
-    analysis = await _upsert_world_analysis(
-        db,
-        book_id=book.id,
-        series_id=book.primary_series_id,
-        mode="story_integration",
-        gap_categories={},
-        priority_gaps=[],
-        integration_opportunities=integration_opportunities,
-        consistency_flags=consistency_flags,
-    )
+    consistency_flags = detect_consistency_flags([_serialize_world_element(item) for item in (consistency_elements or document_elements)])
+    generated_at = datetime.now(UTC)
+    if persist:
+        analysis = await _upsert_world_analysis(
+            db,
+            book_id=book_id,
+            series_id=series_id,
+            mode=mode,
+            gap_categories={},
+            priority_gaps=[],
+            integration_opportunities=integration_opportunities,
+            consistency_flags=consistency_flags,
+        )
+        generated_at = analysis.generated_at
     _apply_integration_scores(document_elements, integration_opportunities)
     return {
-        "mode": "story_integration",
-        "generated_at": analysis.generated_at,
+        "mode": mode,
+        "generated_at": generated_at,
         "integration_opportunities": integration_opportunities,
         "consistency_flags": consistency_flags,
         "world_elements": [_serialize_world_element(element) for element in document_elements],
@@ -1428,9 +1604,9 @@ async def _collect_story_characters(db: AsyncSession, book: Book) -> list[dict]:
 
 def _map_element_to_wiki_type(element_type: str) -> str:
     normalized = " ".join((element_type or "").split()).strip().lower()
-    if normalized in {"place", "geography", "location", "city", "kingdom", "region"}:
+    if normalized in {"place", "geography", "location", "city", "country", "kingdom", "realm", "region", "territory", "province"}:
         return "location"
-    if normalized in {"organization", "faction", "religion", "culture", "government"}:
+    if normalized in {"organization", "faction", "religion", "culture", "government", "race", "species", "people"}:
         return "faction"
     if normalized in {"object", "artifact", "item", "technology", "weapon"}:
         return "item"
@@ -1778,7 +1954,11 @@ async def _upsert_world_analysis(
     existing = (
         await db.execute(
             select(WorldGapAnalysis)
-            .where(WorldGapAnalysis.book_id == book_id, WorldGapAnalysis.analysis_mode == mode)
+            .where(
+                WorldGapAnalysis.book_id == book_id,
+                WorldGapAnalysis.series_id == series_id,
+                WorldGapAnalysis.analysis_mode == mode,
+            )
             .order_by(WorldGapAnalysis.generated_at.desc())
         )
     ).scalars().first()

@@ -28,4 +28,12 @@ from app.models.intelligence import (
     WorldNote,
 )
 from app.models.progress import ReadingProgress, ReadingSession
-from app.models.user import Subscription, User, UserRateLimitOverride
+from app.models.user import (
+    DeviceTrial,
+    PointLedgerEntry,
+    Referral,
+    Subscription,
+    TrialEmailEvent,
+    User,
+    UserRateLimitOverride,
+)

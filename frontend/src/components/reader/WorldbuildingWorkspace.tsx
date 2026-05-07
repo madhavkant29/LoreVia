@@ -49,6 +49,8 @@ export function WorldbuildingWorkspace({
   const [canonName, setCanonName] = useState("")
   const [canonAliases, setCanonAliases] = useState("")
   const [savingCanon, setSavingCanon] = useState(false)
+  const [extractedElements, setExtractedElements] = useState<WorldElement[]>([])
+  const [loadingElements, setLoadingElements] = useState(false)
   const [wikiEntries, setWikiEntries] = useState<WikiEntry[]>([])
   const [wikiLoading, setWikiLoading] = useState(false)
   const [wikiGenerating, setWikiGenerating] = useState(false)
@@ -84,6 +86,31 @@ export function WorldbuildingWorkspace({
       return summary
     }, {})
   }, [wikiEntries])
+  const elementTypeSummary = useMemo(() => {
+    return extractedElements.reduce<Record<string, number>>((summary, element) => {
+      const key = element.element_type || "element"
+      summary[key] = (summary[key] ?? 0) + 1
+      return summary
+    }, {})
+  }, [extractedElements])
+
+  const visibleElements = useMemo(() => {
+    return [...extractedElements].sort((left, right) => {
+      const leftScore = left.source_scope === "worldbuilding" ? 1 : 0
+      const rightScore = right.source_scope === "worldbuilding" ? 1 : 0
+      return rightScore - leftScore || right.usage_count - left.usage_count || left.name.localeCompare(right.name)
+    }).slice(0, 18)
+  }, [extractedElements])
+
+  const loadElements = async () => {
+    setLoadingElements(true)
+    try {
+      const payload = await worldBuildingApi.listElements(bookId)
+      setExtractedElements(payload)
+    } finally {
+      setLoadingElements(false)
+    }
+  }
 
   const loadWiki = async () => {
     setWikiLoading(true)
@@ -147,6 +174,7 @@ export function WorldbuildingWorkspace({
     try {
       const payload = await worldBuildingApi.getGaps(bookId)
       setAnalysis(payload)
+      setExtractedElements(payload.world_elements)
     } finally {
       setLoadingAnalysis(false)
     }
@@ -157,6 +185,7 @@ export function WorldbuildingWorkspace({
     try {
       const payload = await worldBuildingApi.getIntegration(bookId)
       setIntegration(payload)
+      setExtractedElements(payload.world_elements)
     } finally {
       setLoadingIntegration(false)
     }
@@ -177,6 +206,10 @@ export function WorldbuildingWorkspace({
     loadWiki().catch(() => {
       setWikiEntries([])
       setWikiLoading(false)
+    })
+    loadElements().catch(() => {
+      setExtractedElements([])
+      setLoadingElements(false)
     })
     loadCanonOverrides().catch(() => setCanonOverrides([]))
   }, [bookId])
@@ -220,6 +253,8 @@ export function WorldbuildingWorkspace({
       }
       if (focus === "gap") {
         await runAnalysis()
+      } else {
+        await loadElements()
       }
     } finally {
       setSavingDocument(false)
@@ -241,6 +276,8 @@ export function WorldbuildingWorkspace({
       await loadDocuments(created[0]?.id ?? null)
       if (focus === "gap") {
         await runAnalysis()
+      } else {
+        await loadElements()
       }
       setStatusMessage(
         replaceCorpusOnUpload
@@ -260,6 +297,8 @@ export function WorldbuildingWorkspace({
       await loadDocuments()
       if (focus === "gap") {
         await runAnalysis()
+      } else {
+        await loadElements()
       }
       setStatusMessage("Removed that worldbuilding document from the active corpus.")
     } finally {
@@ -503,6 +542,53 @@ export function WorldbuildingWorkspace({
             {loadingAnalysis ? "Checking gaps..." : "Run world gap detection"}
           </button>
         </div>
+      </div>
+    </section>
+  )
+
+  const elementBrowserPanel = (
+    <section className={`rounded-[1.7rem] border p-5 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-white/90"}`}>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-sky-300" : "text-sky-700"}`}>Extracted elements</p>
+          <h2 className={`mt-2 text-2xl font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>Countries, regions, races, magic, and lore</h2>
+        </div>
+        <button
+          type="button"
+          onClick={() => void loadElements()}
+          disabled={loadingElements}
+          className={`rounded-full border px-3 py-2 text-xs font-semibold ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-stone-50 text-stone-700"}`}
+        >
+          {loadingElements ? "Refreshing..." : "Refresh"}
+        </button>
+      </div>
+      <div className="mt-4 flex flex-wrap gap-2">
+        {Object.entries(elementTypeSummary).slice(0, 10).map(([type, count]) => (
+          <span key={type} className={`rounded-full px-3 py-1.5 text-xs font-semibold ${isDark ? "bg-white/8 text-slate-200" : "bg-stone-100 text-stone-700"}`}>
+            {formatElementType(type)} {count}
+          </span>
+        ))}
+        {Object.keys(elementTypeSummary).length === 0 ? <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>No extracted world elements yet.</p> : null}
+      </div>
+      <div className="mt-5 grid gap-3 lg:grid-cols-2">
+        {visibleElements.map((element) => (
+          <article key={element.id} className={`rounded-[1.1rem] border p-4 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50/80"}`}>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${isDark ? "bg-sky-500/10 text-sky-200" : "bg-sky-50 text-sky-700"}`}>{formatElementType(element.element_type)}</span>
+              <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${isDark ? "bg-white/8 text-slate-300" : "bg-white text-stone-600"}`}>{element.source_scope}</span>
+              {element.confidence ? <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${isDark ? "bg-white/8 text-slate-300" : "bg-white text-stone-600"}`}>{Math.round(element.confidence * 100)}%</span> : null}
+            </div>
+            <h3 className={`mt-3 text-base font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{element.name}</h3>
+            {element.description ? (
+              <p className={`mt-2 line-clamp-3 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-700"}`}>{element.description}</p>
+            ) : null}
+            <p className={`mt-3 text-xs ${isDark ? "text-slate-500" : "text-stone-400"}`}>
+              {element.usage_count.toLocaleString()} mention{element.usage_count === 1 ? "" : "s"}
+              {element.chapter_numbers.length ? ` - ${element.chapter_numbers.length} chapter${element.chapter_numbers.length === 1 ? "" : "s"}` : ""}
+              {element.world_document_title ? ` - ${element.world_document_title}` : ""}
+            </p>
+          </article>
+        ))}
       </div>
     </section>
   )
@@ -998,9 +1084,10 @@ export function WorldbuildingWorkspace({
 
   return (
     <div className="space-y-5">
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <SummaryTile label="Active docs" value={String(documents.length)} note="Separate from story chapters" isDark={isDark} />
         <SummaryTile label="Corpus words" value={totalWorldWords.toLocaleString()} note="Live reference material" isDark={isDark} />
+        <SummaryTile label="Extracted lore" value={String(extractedElements.length)} note="Typed world elements" isDark={isDark} />
         <SummaryTile label="Open notes" value={String(groupedNotes.open.length)} note="Saved cleanup backlog" isDark={isDark} />
       </div>
       {statusMessage ? (
@@ -1058,12 +1145,14 @@ export function WorldbuildingWorkspace({
               {integrationPanel}
               {canonPanel}
               {elementSuggestionsPanel}
+              {elementBrowserPanel}
               {wikiPanel}
               {editorPanel}
             </>
           ) : (
             <>
               {editorPanel}
+              {elementBrowserPanel}
               {wikiPanel}
               {analysisPanel}
               {integrationPanel}
@@ -1124,6 +1213,10 @@ function summarizeRecord(record: Record<string, unknown>) {
     .slice(0, 3)
     .map(([key, value]) => `${key.replaceAll("_", " ")}: ${String(value)}`)
     .join(" · ")
+}
+
+function formatElementType(type: string) {
+  return (type || "element").replaceAll("_", " ")
 }
 
 function severityClass(severity: string, isDark: boolean) {

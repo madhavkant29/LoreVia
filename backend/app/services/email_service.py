@@ -3,6 +3,12 @@ from typing import Any, cast
 import resend
 
 from app.core.config import settings
+from app.utils.monetization_utils import (
+    TRIAL_EMAIL_ENDED,
+    TRIAL_EMAIL_ENDING,
+    TRIAL_EMAIL_NUDGE,
+    TRIAL_EMAIL_STARTED,
+)
 
 resend.api_key = settings.RESEND_API_KEY
 
@@ -86,6 +92,64 @@ async def send_onboarding_email(email: str) -> None:
         <p><a href="{settings.APP_URL.rstrip('/')}/library">Open your library</a></p>
         """,
     })
+
+
+async def send_trial_email(email: str, email_type: str) -> bool:
+    app_url = settings.APP_URL.rstrip("/")
+    templates = {
+        TRIAL_EMAIL_STARTED: (
+            "Your 10-day LoreVia trial has started",
+            "Your LoreVia trial is live",
+            "Upload a book and let LoreVia build your character map, summaries, and continuity workspace.",
+            "Start your trial workspace",
+        ),
+        TRIAL_EMAIL_NUDGE: (
+            "Have you tried LoreVia on your current read?",
+            "A gentle nudge from LoreVia",
+            "Try uploading one chapter or book today so you can see the relationship graph and reader memory in action.",
+            "Try LoreVia now",
+        ),
+        TRIAL_EMAIL_ENDING: (
+            "Your LoreVia trial ends tomorrow",
+            "Your trial ends tomorrow",
+            "Upgrade to keep unlimited reading intelligence, author tools, and higher AI limits after the trial window closes.",
+            "See plans",
+        ),
+        TRIAL_EMAIL_ENDED: (
+            "Your LoreVia trial has ended",
+            "Your trial has ended",
+            "Upgrade to get all features back, including full authoring workflows, deeper summaries, search, and continuity support.",
+            "Upgrade LoreVia",
+        ),
+    }
+    subject, heading, body, cta = templates[email_type]
+    return _send({
+        "from": settings.EMAIL_FROM,
+        "to": email,
+        "subject": subject,
+        "html": f"""
+        <h2>{heading}</h2>
+        <p>{body}</p>
+        <p><a href="{app_url}/billing">{cta}</a></p>
+        <p>Questions? Reach us at <a href="mailto:{settings.SUPPORT_EMAIL}">{settings.SUPPORT_EMAIL}</a>.</p>
+        """,
+    })
+
+
+async def deliver_verification_email(email: str, token: str) -> tuple[bool, str]:
+    verification_url = f"{settings.APP_URL.rstrip('/')}/verify-email?token={token}"
+    delivered = _send({
+        "from": settings.EMAIL_FROM,
+        "to": email,
+        "subject": "Verify your LoreVia email",
+        "html": f"""
+        <h2>Verify your LoreVia email</h2>
+        <p>Confirm your email address to finish setting up your account and sign in.</p>
+        <p><a href="{verification_url}">Verify email</a></p>
+        <p>This link expires in 24 hours. If you did not create this account, you can ignore this email.</p>
+        """,
+    })
+    return delivered, verification_url
 
 
 async def send_password_reset_email(email: str, token: str) -> None:

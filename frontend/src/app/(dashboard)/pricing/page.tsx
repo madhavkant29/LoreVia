@@ -2,12 +2,12 @@
 
 import { useState } from "react"
 
+import type { PaidPlanCode } from "@/lib/billing/plans"
 import { billingApi } from "@/lib/api/billing"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 
 type BillingCycle = "monthly" | "annual"
-type PaidPlanCode = "pro_monthly" | "pro_annual" | "power_monthly" | "power_annual"
 
 type PricingTier = {
   name: string
@@ -25,21 +25,22 @@ type PricingTier = {
 
 const pricingTiers: PricingTier[] = [
   {
-    name: "Starter",
-    badge: "Foundation",
+    name: "Free",
+    badge: "After trial",
     priceMonthly: 0,
     priceAnnual: 0,
-    subtitle: "Free forever",
+    subtitle: "Free forever after your Author trial",
     highlight: false,
     cta: "Get started",
     monthlyCode: null,
     annualCode: null,
-    message: "Starter is already available inside the app.",
+    message: "Free is already available inside the app.",
     bullets: [
-      "Track up to 2 books",
-      "Tap any character name to get their information",
-      'Ask 5 questions per day ("When did they first meet?")',
-      "Basic summaries and reading progress",
+      "2 active books",
+      "Unlimited Smart Tap and memory recall",
+      "Full character profiles",
+      "Short summaries only",
+      "5 semantic searches/day and 3 prediction queries/day",
     ],
   },
   {
@@ -49,15 +50,16 @@ const pricingTiers: PricingTier[] = [
     priceAnnual: 120,
     subtitle: "For the dedicated reader",
     highlight: false,
-    cta: "Go Pro",
-    monthlyCode: "pro_monthly",
-    annualCode: "pro_annual",
+    cta: "Go Reader",
+    monthlyCode: "reader_monthly",
+    annualCode: "reader_annual",
     bullets: [
-      "Everything in Starter, plus:",
+      "Everything in Free, plus:",
       "Unlimited books",
-      "Multi-mode Story Summaries",
-      "Ask unlimited questions about your story",
-      "Smarter predictions about plot and characters",
+      "All 3 summary modes",
+      "Unlimited semantic search",
+      "10 prediction queries/day",
+      "Reader-only by design: no authoring tools",
     ],
   },
   {
@@ -68,34 +70,34 @@ const pricingTiers: PricingTier[] = [
     subtitle: "For manuscript builders",
     highlight: true,
     cta: "Start Drafting",
-    monthlyCode: "power_monthly",
-    annualCode: "power_annual",
+    monthlyCode: "author_monthly",
+    annualCode: "author_annual",
     bullets: [
       "Everything in Reader, plus:",
       "Catch continuity errors automatically",
-      "Chapter & Manuscript feedback",
-      "Auto-generated character reference sheets",
-      "Edit and organize your full manuscript",
+      "Chapter and full-book manuscript editing",
+      "Character bible export and edit mode",
       "Visual character relationship maps",
+      "Marketed as unlimited with a 30/day fair-use cap",
     ],
   },
   {
-    name: "Architect",
+    name: "Lore Architect",
     badge: "Power User",
     priceMonthly: 36,
     priceAnnual: 360,
     subtitle: "For series & world-builders",
     highlight: false,
     cta: "Build your World",
-    monthlyCode: null,
-    annualCode: null,
-    message: "Architect tier is not checkout-enabled in this app environment yet.",
+    monthlyCode: "architect_monthly",
+    annualCode: "architect_annual",
     bullets: [
       "Everything in Author, plus:",
-      "Faster processing for big files",
+      "Priority processing planned for launch rollout",
       "Deeper continuity analysis",
       "Analyze multiple books together",
       "Early access to new features",
+      "Marketed as unlimited with a 60/day fair-use cap",
     ],
   },
 ]
@@ -104,7 +106,7 @@ export default function PricingPage() {
   const { theme } = usePreferencesStore()
   const { user } = useAuthStore()
   const isDark = theme === "dark"
-  const [billingCycle, setBillingCycle] = useState<BillingCycle>("monthly")
+  const [billingCycle, setBillingCycle] = useState<BillingCycle>("annual")
   const [busyPlan, setBusyPlan] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
 
@@ -142,7 +144,10 @@ export default function PricingPage() {
             pace.
           </h1>
           <p className="mt-6 max-w-2xl text-lg leading-9 text-slate-300">
-            Monthly billing is shown by default. Every new signup gets 10 days of Author Pro access — no credit card required.
+            Annual billing is shown by default. Every new signup gets 10 days of Author access, with no credit card required.
+          </p>
+          <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-400">
+            Annual plans save $16 on Reader, $48 on Author, and $72 on Lore Architect.
           </p>
           {user ? (
             <p className="mt-4 text-sm text-slate-500">Your account is ready for upgrades right from this screen.</p>
@@ -186,7 +191,7 @@ export default function PricingPage() {
       <div className="mt-16 grid gap-5 md:grid-cols-2 xl:grid-cols-4">
         {pricingTiers.map((tier) => {
           const price = billingCycle === "annual" ? tier.priceAnnual : tier.priceMonthly
-          const unit = tier.name === "Starter" ? "" : billingCycle === "annual" ? "/yr" : "/mo"
+          const unit = tier.name === "Free" ? "" : billingCycle === "annual" ? "/yr" : "/mo"
           const selectedPlanCode = billingCycle === "annual" ? tier.annualCode : tier.monthlyCode
           const isBusy = selectedPlanCode ? busyPlan === selectedPlanCode : false
 
@@ -210,7 +215,7 @@ export default function PricingPage() {
 
               <div className="mt-4 flex items-end gap-1">
                 <span className="text-6xl font-bold tracking-tighter text-white">
-                  {tier.name === "Starter" ? "$0" : `$${price}`}
+                  {tier.name === "Free" ? "$0" : `$${price}`}
                 </span>
                 <span className="mb-2 text-sm text-slate-400">{unit}</span>
               </div>

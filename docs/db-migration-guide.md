@@ -110,6 +110,12 @@ cd C:\Users\madha\.vscode\prod\LoreVia2\backend
 & psql "$env:ALEMBIC_DATABASE_URL" -c "select * from public.alembic_version;"
 ```
 
+
+### remove old db url
+```powershell
+Remove-Item Env:ALEMBIC_DATABASE_URL -ErrorAction SilentlyContinue
+```
+
 ## Prod Supabase migrations
 
 Use this path only after:

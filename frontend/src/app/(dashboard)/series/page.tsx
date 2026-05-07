@@ -5,6 +5,7 @@ import Link from "next/link"
 
 import { booksApi } from "@/lib/api/books"
 import { intelligenceApi } from "@/lib/api/intelligence"
+import { isPaidTier } from "@/lib/billing/plans"
 import { worldBuildingApi } from "@/lib/api/worldBuilding"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
@@ -69,7 +70,7 @@ export default function SeriesPage() {
   }
 
   useEffect(() => {
-    if (user?.tier === "pro" || user?.tier === "power" || user?.tier === "admin") {
+    if (isPaidTier(user?.tier)) {
       load().catch(() => {})
     }
   }, [user?.tier])
@@ -154,7 +155,7 @@ export default function SeriesPage() {
     }
   }
 
-  if (!user || user.tier === "free") {
+  if (!user || !isPaidTier(user.tier)) {
     return (
       <div className={`rounded-[2rem] border p-8 ${isDark ? "border-white/10 bg-white/5" : "border-amber-300 bg-amber-50"}`}>
         <h1 className={`text-3xl font-serif ${isDark ? "text-white" : "text-stone-900"}`}>Series workspace</h1>

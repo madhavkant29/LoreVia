@@ -10,6 +10,7 @@ from app.utils.book_utils import (
     deserialize_manuscript_content,
     estimate_readability,
     extract_novel_scene_candidates,
+    build_scene_chapter_import_text,
     markdown_to_html,
     manuscript_html_to_text,
     normalize_writer_workspace,
@@ -17,6 +18,7 @@ from app.utils.book_utils import (
     parse_book_upload_for_ingestion,
     resolve_upload_format_and_work_type,
     serialize_manuscript_content,
+    strip_scene_metadata_from_manuscript_text,
     story_unit_label,
     story_unit_name,
 )
@@ -151,6 +153,10 @@ def test_normalize_writer_workspace_preserves_defaults_and_sanitizes_cards():
     workspace = normalize_writer_workspace(
         {
             "word_count_goals": {"chapter_target": 3200, "book_target": -5, "session_target": 900},
+            "goal_calendar": [
+                {"title": " Draft chapter 4 ", "due_date": "2026-05-08", "quota_value": 2000, "quota_unit": " words ", "completed": True},
+                {"title": " ", "due_date": "not-a-date"},
+            ],
             "corkboard_cards": [{"title": " Opening turn ", "lane": "drafting", "chapter_number": 3}],
             "publishing": {"active_preset": "kdp_paperback", "trim_size": "6x9"},
             "processing": {
@@ -172,6 +178,12 @@ def test_normalize_writer_workspace_preserves_defaults_and_sanitizes_cards():
     assert workspace["word_count_goals"]["chapter_target"] == 3200
     assert workspace["word_count_goals"]["book_target"] is None
     assert workspace["word_count_goals"]["session_target"] == 900
+    assert workspace["goal_calendar"][0]["title"] == "Draft chapter 4"
+    assert workspace["goal_calendar"][0]["due_date"] == "2026-05-08"
+    assert workspace["goal_calendar"][0]["quota_value"] == 2000
+    assert workspace["goal_calendar"][0]["quota_unit"] == "words"
+    assert workspace["goal_calendar"][0]["completed"] is True
+    assert len(workspace["goal_calendar"]) == 1
     assert workspace["corkboard_cards"][0]["title"] == "Opening turn"
     assert workspace["corkboard_cards"][0]["lane"] == "drafting"
     assert workspace["publishing"]["active_preset"] == "kdp_paperback"
@@ -192,16 +204,63 @@ def test_estimate_readability_returns_basic_metrics():
 
 
 def test_extract_novel_scene_candidates_splits_hash_breaks_and_assigns_paths():
-    text = "Opening beat.\n\n#\n\nForest encounter.\n\n# Hidden cache\n\nReveal in the dark."
+    text = "Opening beat.\n\n#\n\nForest encounter.\n\n***\n\nAftermath.\n\n# Hidden cache\n\nReveal in the dark."
 
     scenes = extract_novel_scene_candidates(text=text, chapter_number=4, source="extracted")
 
-    assert len(scenes) == 3
+    assert len(scenes) == 4
     assert scenes[0]["title"] == "Opening beat."
     assert scenes[0]["status"] == "assigned"
     assert scenes[0]["path"].startswith("scenes/chapter-04/")
     assert scenes[1]["title"] == "Forest encounter."
-    assert scenes[2]["title"] == "Hidden cache"
+    assert scenes[2]["title"] == "Aftermath."
+    assert scenes[3]["title"] == "Hidden cache"
+
+
+def test_scene_import_text_can_include_or_strip_metadata():
+    scene = {
+        "title": "Rooftop Encounter",
+        "description": "Recover the transmitter.",
+        "body": (
+            "POV: Arlen\n"
+            "Location: Eastern Tower\n"
+            "Time: Night\n\n"
+            "Characters:\n"
+            "- Arlen\n"
+            "- Nyra\n\n"
+            "The wind howled across the rooftop."
+        ),
+    }
+
+    with_metadata = build_scene_chapter_import_text(scene, scene_number=1, include_metadata=True)
+    without_metadata = build_scene_chapter_import_text(scene, scene_number=1, include_metadata=False)
+
+    assert with_metadata.startswith("## Scene 1 - Rooftop Encounter")
+    assert "POV: Arlen" in with_metadata
+    assert "Characters:\n- Arlen\n- Nyra" in with_metadata
+    assert with_metadata.endswith("The wind howled across the rooftop.")
+    assert without_metadata == "The wind howled across the rooftop."
+
+
+def test_strip_scene_metadata_from_manuscript_text_keeps_plain_scene_breaks():
+    text = (
+        "Opening paragraph.\n\n"
+        "***\n\n"
+        "## Scene 2 - Council Chamber\n\n"
+        "POV: Nyra\n"
+        "Location: Inner Citadel\n\n"
+        "Characters:\n"
+        "- Nyra\n\n"
+        "---\n\n"
+        "Nyra entered the chamber."
+    )
+
+    stripped = strip_scene_metadata_from_manuscript_text(text)
+
+    assert "## Scene" not in stripped
+    assert "POV:" not in stripped
+    assert "Characters:" not in stripped
+    assert stripped == "Opening paragraph.\n\n***\n\nNyra entered the chamber."
 
 
 def test_build_emotional_arc_payload_uses_growth_events():
@@ -253,6 +312,7 @@ def test_normalize_writer_workspace_includes_front_matter_defaults():
 
     front_matter = workspace["manuscript_front_matter"]
 
+    assert workspace["goal_calendar"] == []
     assert front_matter["author_name"] == ""
     assert front_matter["title"] == ""
     assert front_matter["include_dedication"] is False

@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.book import Book, Chapter
 from app.models.character import Character
 from app.models.intelligence import ChapterSummary, PlotThread, WorldElement
+from app.utils.world_building_utils import build_world_logic_response, classify_world_intent
 
 
 # ─── Advisor response cache ───────────────────────────────────────────────────
@@ -78,6 +79,7 @@ You have two sources of knowledge about this book:
 2. RETRIEVED PASSAGES — specific text excerpts most relevant to the author's question
 
 Core responsibilities:
+- If WORLD ANALYSIS is supplied, use it to answer lore, canon, world-rule, and world-gap questions. Treat its alerts and suggestions as first-class evidence.
 - ANSWER using both sources. Lead with story data, ground specifics in passages.
 - Quote retrieved passages with chapter references when relevant.
 - When passages are sparse, reason from STORY KNOWLEDGE — you always have character names, roles, arcs, and plot threads.
@@ -123,6 +125,165 @@ Classify this author message into ONE of:
 Message: {message}
 
 Reply with just the label, nothing else."""
+
+WORLD_ADVISOR_QUERY_TERMS = (
+    "worldbuilding",
+    "world-building",
+    "world build",
+    "world gap",
+    "world gaps",
+    "world rule",
+    "world rules",
+    "lore",
+    "canon",
+    "magic system",
+    "geography",
+    "kingdom",
+    "empire",
+    "faction",
+    "culture",
+    "religion",
+    "technology",
+    "species",
+    "race",
+    "realm",
+    "region",
+    "country",
+    "city",
+    "language",
+    "mythology",
+)
+WORLD_GAP_QUERY_TERMS = (
+    "gap",
+    "missing",
+    "contradiction",
+    "inconsistency",
+    "consistency",
+    "conflict",
+    "continuity",
+    "incomplete",
+    "hole",
+    "doesn't make sense",
+    "does not make sense",
+    "breaks",
+)
+WORLD_INTEGRATION_QUERY_TERMS = (
+    "use",
+    "integrate",
+    "introduce",
+    "where",
+    "scene",
+    "chapter",
+    "thread",
+    "plant",
+    "seed",
+    "foreshadow",
+    "react",
+    "respond",
+    "response",
+    "how would",
+    "what would",
+    "what happens if",
+)
+
+
+def detect_advisor_world_mode(message: str, intent: str | None = None) -> str | None:
+    """Return the world-analysis mode when an advisor question is lore-focused."""
+    text = (message or "").strip().lower()
+    if not text:
+        return None
+    has_world_signal = any(term in text for term in WORLD_ADVISOR_QUERY_TERMS)
+    if not has_world_signal:
+        return None
+    if intent in {"plothole", "consistency"} or any(term in text for term in WORLD_GAP_QUERY_TERMS):
+        return "gap_detection"
+    if any(term in text for term in WORLD_INTEGRATION_QUERY_TERMS):
+        return "story_integration"
+    return classify_world_intent(message)
+
+
+def _short_world_value(value: object, limit: int = 220) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (list, tuple)):
+        text = "; ".join(_short_world_value(item, limit=limit) for item in value if item)
+    elif isinstance(value, dict):
+        preferred = (
+            value.get("title")
+            or value.get("element_name")
+            or value.get("name")
+            or value.get("description")
+            or value.get("suggested_fix")
+            or value.get("answer")
+            or ""
+        )
+        text = _short_world_value(preferred, limit=limit) if preferred else json.dumps(value, default=str)
+    else:
+        text = str(value)
+    text = " ".join(text.split()).strip()
+    return (text[: limit - 3] + "...") if len(text) > limit else text
+
+
+def _format_world_item(item: object) -> str:
+    if not isinstance(item, dict):
+        return _short_world_value(item)
+    label = _short_world_value(
+        item.get("title")
+        or item.get("element_name")
+        or item.get("name")
+        or item.get("category")
+        or item.get("severity")
+    )
+    description = _short_world_value(item.get("description") or item.get("body") or item.get("problem"))
+    fix = _short_world_value(item.get("suggested_fix") or item.get("suggestion") or item.get("what_to_add"))
+    parts = [part for part in (label, description, f"Fix: {fix}" if fix else "") if part]
+    return " - ".join(parts)
+
+
+def build_advisor_world_context(world_analysis: dict[str, Any] | None) -> str:
+    """Compact world-building analysis so the advisor LLM can cite it cleanly."""
+    if not world_analysis:
+        return ""
+    lines = [
+        "--- WORLD ANALYSIS ---",
+        f"Mode: {world_analysis.get('mode') or 'gap_detection'}",
+    ]
+    answer = _short_world_value(world_analysis.get("answer"), limit=700)
+    if answer:
+        lines.append(f"Summary: {answer}")
+    logic_alerts = [item for item in world_analysis.get("logic_alerts") or [] if item][:4]
+    if logic_alerts:
+        lines.append("Logic alerts:")
+        lines.extend(f"- {_format_world_item(item)}" for item in logic_alerts)
+    suggestions = [item for item in world_analysis.get("suggestions") or [] if item][:5]
+    if suggestions:
+        lines.append("Priority suggestions:")
+        lines.extend(f"- {_format_world_item(item)}" for item in suggestions)
+    citations = [item for item in world_analysis.get("citations") or [] if isinstance(item, dict)][:5]
+    if citations:
+        lines.append("World citations:")
+        for item in citations:
+            name = _short_world_value(item.get("name"))
+            element_type = _short_world_value(item.get("element_type"), limit=80)
+            scope = _short_world_value(item.get("source_scope"), limit=80)
+            lines.append(f"- {name} [{element_type}] source={scope}".strip())
+    steps = [_short_world_value(item) for item in world_analysis.get("simulation_steps") or [] if item][:4]
+    if steps:
+        lines.append("World-logic steps:")
+        lines.extend(f"- {step}" for step in steps)
+    lines.append("----------------------")
+    return "\n".join(lines)
+
+
+async def build_advisor_world_analysis(
+    db: AsyncSession,
+    book: Book,
+    query: str,
+    mode: str,
+) -> dict[str, Any]:
+    """Run the world-building analyzer for advisor chat questions."""
+    return await build_world_logic_response(db, book, query, mode)
+
 
 RESPONSE_TYPE_PROMPT = """\
 Given this Story Advisor reply, classify the PRIMARY response type into ONE of:

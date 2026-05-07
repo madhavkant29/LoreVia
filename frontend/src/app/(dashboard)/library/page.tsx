@@ -1,45 +1,36 @@
 "use client"
 
+import type { ReactNode } from "react"
 import { useEffect, useState } from "react"
 import type { Route } from "next"
-import Link from "next/link"
 import { useRouter } from "next/navigation"
 
 import { UploadModal } from "@/components/modals/UploadModal"
-import { authApi } from "@/lib/api/auth"
 import { booksApi } from "@/lib/api/books"
-import { SUPPORT_EMAIL } from "@/lib/constants/contact"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
-import type { Book } from "@/types/book"
+import type { Book, BookStatus } from "@/types/book"
 
-const STATUS_COLORS: Record<string, string> = {
-  pending: "bg-stone-200 text-stone-700",
-  processing: "bg-amber-100 text-amber-800",
-  ready: "bg-emerald-100 text-emerald-800",
-  failed: "bg-rose-100 text-rose-700",
-}
+type SortOption = "recent" | "title" | "progress"
+type ViewMode = "grid" | "list"
+type ModeFilter = "all" | "author" | "reader"
+type StatusFilter = "all" | BookStatus
+type GlyphName = "moon" | "spark" | "leaf" | "crown" | "wave" | "diamond" | "orbit" | "star"
 
-const STATUS_COLORS_DARK: Record<string, string> = {
-  pending: "border border-white/10 bg-white/5 text-[#E0E0E0]",
-  processing: "border border-amber-400/30 bg-amber-400/10 text-amber-200",
-  ready: "border border-emerald-400/30 bg-emerald-400/10 text-emerald-200",
-  failed: "border border-rose-400/30 bg-rose-400/10 text-rose-200",
-}
-
-function statusPillClasses(status: string, isDark: boolean) {
-  if (isDark) return STATUS_COLORS_DARK[status] ?? STATUS_COLORS_DARK.pending
-  return STATUS_COLORS[status] ?? STATUS_COLORS.pending
-}
-
-function formatEtaLabel(seconds?: number | null) {
-  if (typeof seconds !== "number" || Number.isNaN(seconds)) return null
-  if (seconds <= 0) return "almost done"
-
-  const minutes = Math.max(1, Math.round(seconds / 60))
-  if (minutes < 60) return `${minutes} min left`
-
-  const hours = Math.max(1, Math.round(minutes / 60))
-  return `${hours} hr left`
+const PINNED_STORAGE_KEY = "library-pinned-projects:v1"
+const NUMBER_FORMAT = new Intl.NumberFormat("en-US")
+const GLYPHS: GlyphName[] = ["moon", "spark", "leaf", "crown", "wave", "diamond", "orbit", "star"]
+const ACCENT_CLASSES = [
+  "text-violet-300 border-violet-400/18 bg-violet-500/[0.06]",
+  "text-blue-300 border-blue-400/18 bg-blue-500/[0.06]",
+  "text-cyan-300 border-cyan-400/18 bg-cyan-500/[0.06]",
+  "text-amber-200 border-amber-300/18 bg-amber-400/[0.06]",
+  "text-emerald-300 border-emerald-400/18 bg-emerald-500/[0.06]",
+]
+const DOT_CLASSES: Record<BookStatus, string> = {
+  pending: "bg-slate-500",
+  processing: "bg-amber-400",
+  ready: "bg-blue-400",
+  failed: "bg-rose-400",
 }
 
 function storyUnitLabel(workType?: Book["work_type"], plural = false) {
@@ -48,93 +39,181 @@ function storyUnitLabel(workType?: Book["work_type"], plural = false) {
 }
 
 function storyUnitPrefix(workType?: Book["work_type"]) {
-  return workType === "screenplay" ? "Sc." : "Ch."
+  return workType === "screenplay" ? "Scene" : "Chapter"
 }
 
-function seriesOrderLabel(book: Book) {
-  if (!book.series_name) return ""
-  if (!book.series_order) return book.series_name
-  const prefix = book.work_type === "screenplay" ? "Ep." : "Vol."
-  return `${book.series_name} - ${prefix} ${book.series_order}`
-}
-function getProcessingSummary(book: Book) {
-  const processing = book.processing
-  if (!processing) return null
-
-  const stage = (processing.stage ?? processing.status ?? "").toString().trim()
-  const completed = typeof processing.chapters_completed === "number" ? processing.chapters_completed : null
-  const total = typeof processing.chapters_total === "number" ? processing.chapters_total : book.total_chapters
-  const progress = typeof processing.progress_pct === "number" ? processing.progress_pct : book.progress_pct
-  const eta = formatEtaLabel(processing.eta_seconds)
-  const chapterLabel =
-    processing.last_chapter_number
-      ? `${storyUnitPrefix(book.work_type)} ${processing.last_chapter_number}${processing.last_chapter_title ? ` - ${processing.last_chapter_title}` : ""}`
-      : null
-
-  const parts = [
-    stage ? stage.replace(/_/g, " ") : null,
-    completed !== null && total ? `${completed}/${total} ${storyUnitLabel(book.work_type, true)}` : null,
-    typeof progress === "number" ? `${Math.round(progress)}%` : null,
-    eta,
-    chapterLabel,
-  ].filter(Boolean)
-
-  return parts.length > 0 ? parts.join(" · ") : null
+function clampProgress(value?: number | null) {
+  return Math.max(0, Math.min(100, Math.round(value ?? 0)))
 }
 
-function titleInitials(title: string) {
-  return title
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() ?? "")
-    .join("")
-}
-
-function coverSrc(coverUrl: string | null | undefined) {
-  if (!coverUrl) return null
-  if (/^https?:\/\//i.test(coverUrl)) return coverUrl
-  try {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL
-    if (apiUrl) {
-      return new URL(coverUrl, apiUrl).toString()
-    }
-    if (typeof window !== "undefined") {
-      return new URL(coverUrl, window.location.origin).toString()
-    }
-    return coverUrl
-  } catch {
-    return coverUrl
+function hashString(value: string) {
+  let hash = 0
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 31 + value.charCodeAt(index)) | 0
   }
+  return Math.abs(hash)
 }
 
-function ProcessingLine({ book, isDark }: { book: Book; isDark: boolean }) {
-  const summary = getProcessingSummary(book)
-  if (!summary && book.status !== "processing") return null
+function getProjectGlyph(book: Book) {
+  return GLYPHS[hashString(book.id + book.title) % GLYPHS.length]
+}
 
-  return <p className={`mt-2 text-xs ${isDark ? "text-amber-300/90" : "text-amber-700"}`}>{summary ?? "Processing in the background"}</p>
+function getAccentClass(book: Book) {
+  return ACCENT_CLASSES[hashString(book.title + book.id) % ACCENT_CLASSES.length]
+}
+
+function getBookUpdatedAt(book: Book) {
+  return book.processing?.updated_at ?? book.created_at
+}
+
+function formatRelativeTime(dateString?: string | null) {
+  if (!dateString) return "Updated recently"
+
+  const date = new Date(dateString)
+  if (Number.isNaN(date.getTime())) return "Updated recently"
+
+  const minutes = Math.max(1, Math.round((Date.now() - date.getTime()) / 60000))
+  if (minutes < 60) return `Updated ${minutes}m ago`
+
+  const hours = Math.round(minutes / 60)
+  if (hours < 24) return `Updated ${hours}h ago`
+
+  const days = Math.round(hours / 24)
+  if (days < 7) return `Updated ${days}d ago`
+
+  const weeks = Math.round(days / 7)
+  if (weeks < 5) return `Updated ${weeks}w ago`
+
+  const months = Math.round(days / 30)
+  return `Updated ${months}mo ago`
+}
+
+function estimateWordCount(book: Book) {
+  if (typeof book.total_tokens === "number" && book.total_tokens > 0) {
+    return Math.round(book.total_tokens * 0.75)
+  }
+
+  const unitCount = Math.max(book.total_chapters ?? 0, book.chapters_read_count ?? 0, 1)
+  return unitCount * (book.work_type === "screenplay" ? 900 : 3200)
+}
+
+function estimateTargetWordCount(book: Book, currentWords: number) {
+  if (book.work_type === "screenplay") {
+    return Math.max(18000, Math.ceil(currentWords / 3000) * 3000)
+  }
+
+  return Math.max(100000, Math.ceil(currentWords / 10000) * 10000)
+}
+
+function getActiveUnit(book: Book) {
+  if (book.processing?.last_chapter_number) return book.processing.last_chapter_number
+
+  const totalUnits = Math.max(book.total_chapters ?? 0, 1)
+  if (!book.progress_pct) return 1
+  return Math.min(totalUnits, Math.max(1, Math.round((book.progress_pct / 100) * totalUnits)))
+}
+
+function getProgressLine(book: Book) {
+  const prefix = storyUnitPrefix(book.work_type)
+  const unit = getActiveUnit(book)
+  const title = book.processing?.last_chapter_title?.trim()
+
+  if (title) return `${prefix} ${unit} - ${title}`
+
+  if (book.status === "processing") return `${prefix} ${unit} - Processing`
+  if (book.mode === "author") return `${prefix} ${unit} - Draft in motion`
+  if (book.progress_pct && book.progress_pct > 0) return `${prefix} ${unit} - Continue reading`
+  return `${prefix} 1 - Starting point`
+}
+
+function getGenreLabel(book: Book) {
+  if (book.genre?.trim()) return book.genre
+  if (book.work_type === "screenplay") return "Screenplay"
+  if (book.mode === "author") return "Writing Project"
+  return "Manuscript"
+}
+
+function matchesSearch(book: Book, search: string) {
+  if (!search) return true
+
+  const haystack = [
+    book.title,
+    book.author,
+    book.genre,
+    book.series_name,
+    book.status,
+    book.mode,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase()
+
+  return haystack.includes(search)
+}
+
+function compareBooks(left: Book, right: Book, sortBy: SortOption) {
+  if (sortBy === "title") return left.title.localeCompare(right.title)
+  if (sortBy === "progress") return clampProgress(right.progress_pct) - clampProgress(left.progress_pct)
+
+  return new Date(getBookUpdatedAt(right)).getTime() - new Date(getBookUpdatedAt(left)).getTime()
+}
+
+function countWarnings(book: Book) {
+  let warnings = 0
+  if (book.status === "failed") warnings += 1
+  if (book.copyright_warning) warnings += 1
+  return warnings
+}
+
+function formatNumber(value: number) {
+  return NUMBER_FORMAT.format(value)
 }
 
 export default function LibraryPage() {
   const router = useRouter()
+  const { theme } = usePreferencesStore()
+  const isDark = theme === "dark"
+
   const [books, setBooks] = useState<Book[]>([])
   const [loading, setLoading] = useState(true)
   const [showUpload, setShowUpload] = useState(false)
   const [uploadPreset, setUploadPreset] = useState<{ mode?: "reader" | "author"; existingBookId?: string }>({})
   const [busyBookId, setBusyBookId] = useState<string | null>(null)
-  const [freeTokenBudget, setFreeTokenBudget] = useState<number>(250000)
-  const { theme } = usePreferencesStore()
-  const isDark = theme === "dark"
+  const [search, setSearch] = useState("")
+  const [sortBy, setSortBy] = useState<SortOption>("recent")
+  const [viewMode, setViewMode] = useState<ViewMode>("grid")
+  const [modeFilter, setModeFilter] = useState<ModeFilter>("all")
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
+  const [showArchived, setShowArchived] = useState(false)
+  const [filterOpen, setFilterOpen] = useState(false)
+  const [menuBookId, setMenuBookId] = useState<string | null>(null)
+  const [pinnedIds, setPinnedIds] = useState<Record<string, boolean>>({})
+  const [pinsReady, setPinsReady] = useState(false)
 
   const load = () => booksApi.list(true).then(setBooks).finally(() => setLoading(false))
 
   useEffect(() => {
-    authApi.getTierLimits().then(limits => setFreeTokenBudget(limits.free_total_token_budget))
+    load()
   }, [])
 
   useEffect(() => {
-    load()
+    try {
+      const raw = window.localStorage.getItem(PINNED_STORAGE_KEY)
+      if (raw) {
+        const parsed = JSON.parse(raw) as Record<string, boolean>
+        setPinnedIds(parsed)
+      }
+    } catch {
+      // ignore malformed local storage
+    } finally {
+      setPinsReady(true)
+    }
   }, [])
+
+  useEffect(() => {
+    if (!pinsReady) return
+    window.localStorage.setItem(PINNED_STORAGE_KEY, JSON.stringify(pinnedIds))
+  }, [pinnedIds, pinsReady])
 
   useEffect(() => {
     if (loading) return
@@ -148,33 +227,49 @@ export default function LibraryPage() {
     return () => window.clearInterval(interval)
   }, [books, loading])
 
+  const normalizedSearch = search.trim().toLowerCase()
   const visibleBooks = books.filter((book) => !book.hidden_at)
-  const activeBooks = visibleBooks.filter((book) => !book.archived_at)
-  const archivedBooks = visibleBooks.filter((book) => !!book.archived_at)
-  const authorBooks = visibleBooks.filter((book) => book.mode === "author")
-  const consumedTokens = books.reduce((sum, book) => sum + (book.total_tokens ?? 0), 0)
-  const tokenBudgetUsedPct = Math.min(100, Math.round((consumedTokens / freeTokenBudget) * 100))
+  const filteredBooks = visibleBooks
+    .filter((book) => (showArchived ? true : !book.archived_at))
+    .filter((book) => (modeFilter === "all" ? true : book.mode === modeFilter))
+    .filter((book) => (statusFilter === "all" ? true : book.status === statusFilter))
+    .filter((book) => matchesSearch(book, normalizedSearch))
+    .sort((left, right) => compareBooks(left, right, sortBy))
+
+  const explicitPinned = filteredBooks.filter((book) => pinnedIds[book.id] && !book.archived_at)
+  const fallbackPinned = [...filteredBooks]
+    .filter((book) => !book.archived_at)
+    .sort((left, right) => {
+      const leftScore = (left.mode === "author" ? 3 : 0) + (left.status === "ready" ? 2 : left.status === "processing" ? 1 : 0) + clampProgress(left.progress_pct)
+      const rightScore = (right.mode === "author" ? 3 : 0) + (right.status === "ready" ? 2 : right.status === "processing" ? 1 : 0) + clampProgress(right.progress_pct)
+      return rightScore - leftScore
+    })
+  const pinnedBooks = explicitPinned.length > 0 ? explicitPinned.slice(0, 3) : fallbackPinned.slice(0, 3)
+  const pinnedBookIds = new Set(pinnedBooks.map((book) => book.id))
+  const allProjectBooks = filteredBooks.filter((book) => !pinnedBookIds.has(book.id))
+  const filterSummary =
+    modeFilter === "all" && statusFilter === "all" && !showArchived ? "Filter" : "Filtered"
 
   async function handleArchive(bookId: string, archived: boolean) {
     setBusyBookId(bookId)
     try {
       await booksApi.archive(bookId, archived)
       await load()
+      setMenuBookId(null)
     } finally {
       setBusyBookId(null)
     }
   }
 
   async function handleRemove(bookId: string) {
-    const confirmed = window.confirm(
-      "Remove this book from your library view? It will still count toward your upload and token usage."
-    )
+    const confirmed = window.confirm("Remove this project from your library view? It will stay counted for usage.")
     if (!confirmed) return
 
     setBusyBookId(bookId)
     try {
       await booksApi.hide(bookId, true)
       await load()
+      setMenuBookId(null)
     } finally {
       setBusyBookId(null)
     }
@@ -185,133 +280,319 @@ export default function LibraryPage() {
     router.push(href)
   }
 
+  function openBook(book: Book) {
+    router.push(`/${book.id}`)
+  }
+
+  function togglePinned(bookId: string) {
+    setPinnedIds((current) => ({ ...current, [bookId]: !current[bookId] }))
+    setMenuBookId(null)
+  }
+
+  const pageBackground = isDark
+    ? "bg-[#07070b] text-[#f4f1ea]"
+    : "bg-[radial-gradient(circle_at_top,rgba(236,228,255,0.38),transparent_24%),linear-gradient(180deg,#faf7f1_0%,#f5f1ea_100%)] text-stone-950"
+  const surfaceClass = isDark
+    ? "border-white/[0.06] bg-[#0c0c12]"
+    : "border-stone-200/80 bg-white/80"
+  const mutedText = isDark ? "text-[#9b9aa6]" : "text-stone-500"
+  const headingText = isDark ? "text-[#f7f3ed]" : "text-stone-950"
+  const controlClass = isDark
+    ? "border-white/[0.08] bg-[#111118] text-[#ebe7df]"
+    : "border-stone-200 bg-white text-stone-800"
+
   return (
-    <div
-      className={`min-h-screen transition-colors ${
-        isDark
-          ? "bg-black text-[#E0E0E0]"
-          : "bg-[linear-gradient(180deg,#fcf7ef_0%,#f8f3eb_42%,#f4f0ea_100%)] text-stone-950"
-      }`}
-    >
-      <div className="mx-auto w-full px-3 pb-16 pt-6 sm:px-6 lg:px-8 xl:max-w-7xl">
-        <section
-          className={`overflow-hidden rounded-[2rem] border ${
-            isDark
-              ? "border-white/10 bg-[#0D0D0D]"
-              : "border-white/70 bg-[radial-gradient(circle_at_top,#f8f4ff,transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.92),rgba(255,255,255,0.76))]"
-          }`}
-        >
-          <div className="flex flex-col gap-8 px-6 py-7 sm:px-8 lg:flex-row lg:items-end lg:justify-between lg:px-10 lg:py-10">
-            <div className="max-w-3xl">
-              <p className={`text-[11px] font-semibold uppercase tracking-[0.34em] ${isDark ? "text-[#A0A0A0]" : "text-violet-500"}`}>Library</p>
-              <h1 className={`mt-3 font-serif text-4xl tracking-tight sm:text-5xl ${isDark ? "text-[#E0E0E0]" : "text-stone-950"}`}>My Library</h1>
+    <div className={`relative left-1/2 min-h-screen w-screen -translate-x-1/2 transition-colors duration-300 ${pageBackground}`}>
+      <div className="mx-auto w-full max-w-none px-4 pb-16 pt-4 sm:px-8 lg:px-16">
+        <section className="space-y-7">
+          <div className="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
+            <div className="space-y-3">
+              <h1 className={`font-serif text-[3rem] leading-none tracking-normal sm:text-[4.15rem] ${headingText}`}>Library</h1>
+              <p className={`max-w-xl text-lg ${mutedText}`}>All your projects. All your worlds.</p>
             </div>
 
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <div className="flex w-full flex-col gap-3 xl:w-auto xl:flex-row xl:items-center">
+              <label className={`flex min-h-[3.25rem] flex-1 items-center gap-3 rounded-lg border px-4 xl:min-w-[17.5rem] ${controlClass}`}>
+                <SearchIcon className={isDark ? "text-[#7c7a87]" : "text-stone-400"} />
+                <input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="Search projects..."
+                  className={`w-full bg-transparent text-sm outline-none ${isDark ? "placeholder:text-[#66636f]" : "placeholder:text-stone-400"}`}
+                />
+              </label>
+
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setFilterOpen((current) => !current)}
+                  className={`inline-flex min-h-[3.25rem] items-center gap-3 rounded-lg border px-5 text-sm font-medium ${controlClass}`}
+                >
+                  <FilterIcon className={isDark ? "text-[#c8c4bd]" : "text-stone-600"} />
+                  {filterSummary}
+                </button>
+
+                {filterOpen ? (
+                  <div className={`absolute right-0 z-30 mt-3 w-[18rem] rounded-xl border p-4 shadow-[0_24px_80px_-40px_rgba(0,0,0,0.75)] ${surfaceClass}`}>
+                    <div className="space-y-4">
+                      <div>
+                        <p className={`text-[0.68rem] font-semibold uppercase tracking-[0.28em] ${mutedText}`}>Project mode</p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {[
+                            ["all", "All"],
+                            ["author", "Author"],
+                            ["reader", "Reader"],
+                          ].map(([value, label]) => (
+                            <button
+                              key={value}
+                              type="button"
+                              onClick={() => setModeFilter(value as ModeFilter)}
+                              className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+                                modeFilter === value
+                                  ? "border-violet-400/50 bg-violet-500/15 text-violet-200"
+                                  : isDark
+                                    ? "border-white/[0.08] bg-white/[0.03] text-[#b1afba]"
+                                    : "border-stone-200 bg-stone-50 text-stone-600"
+                              }`}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div>
+                        <p className={`text-[0.68rem] font-semibold uppercase tracking-[0.28em] ${mutedText}`}>Status</p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {[
+                            ["all", "Any"],
+                            ["ready", "Ready"],
+                            ["processing", "Processing"],
+                            ["pending", "Queued"],
+                            ["failed", "Needs review"],
+                          ].map(([value, label]) => (
+                            <button
+                              key={value}
+                              type="button"
+                              onClick={() => setStatusFilter(value as StatusFilter)}
+                              className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+                                statusFilter === value
+                                  ? "border-violet-400/50 bg-violet-500/15 text-violet-200"
+                                  : isDark
+                                    ? "border-white/[0.08] bg-white/[0.03] text-[#b1afba]"
+                                    : "border-stone-200 bg-stone-50 text-stone-600"
+                              }`}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <label className="flex items-center justify-between gap-3">
+                        <span className={`text-sm ${headingText}`}>Show archived projects</span>
+                        <button
+                          type="button"
+                          onClick={() => setShowArchived((current) => !current)}
+                          className={`relative h-7 w-12 rounded-full transition ${showArchived ? "bg-violet-500" : isDark ? "bg-white/[0.1]" : "bg-stone-200"}`}
+                        >
+                          <span className={`absolute top-1 h-5 w-5 rounded-full bg-white transition ${showArchived ? "left-6" : "left-1"}`} />
+                        </button>
+                      </label>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+
+              <div className={`flex min-h-[3.25rem] items-center rounded-lg border px-4 ${controlClass}`}>
+                <select
+                  value={sortBy}
+                  onChange={(event) => setSortBy(event.target.value as SortOption)}
+                  className="min-w-[10rem] bg-transparent pr-6 text-sm outline-none [color-scheme:dark] cursor-pointer"
+                >
+                  <option value="recent" className="bg-[#121212] text-white">Recently Updated</option>
+                  <option value="progress" className="bg-[#121212] text-white">Most Progress</option>
+                  <option value="title" className="bg-[#121212] text-white">Title A-Z</option>
+                </select>
+              </div>
+
+              <div className={`inline-flex min-h-[3.25rem] items-center overflow-hidden rounded-lg border ${controlClass}`}>
+                <button
+                  type="button"
+                  onClick={() => setViewMode("grid")}
+                  className={`inline-flex h-full items-center justify-center px-4 transition ${viewMode === "grid" ? "bg-violet-500/16 text-violet-200" : mutedText}`}
+                  aria-label="Grid view"
+                >
+                  <GridIcon />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode("list")}
+                  className={`inline-flex h-full items-center justify-center px-4 transition ${viewMode === "list" ? "bg-violet-500/16 text-violet-200" : mutedText}`}
+                  aria-label="List view"
+                >
+                  <ListIcon />
+                </button>
+              </div>
+
               <button
+                type="button"
                 onClick={() => {
                   setUploadPreset({})
                   setShowUpload(true)
                 }}
-                className="inline-flex items-center justify-center rounded-[1.1rem] bg-[linear-gradient(135deg,#4f46e5,#4338ca)] px-6 py-3.5 text-sm font-semibold text-white shadow-[0_18px_40px_-24px_rgba(79,70,229,0.7)] transition hover:translate-y-[-1px]"
+                className="inline-flex min-h-[3.25rem] items-center justify-center gap-3 rounded-lg bg-[#33206f] px-6 text-sm font-semibold text-white shadow-[0_22px_44px_-28px_rgba(109,40,217,0.78)] transition hover:translate-y-[-1px] hover:bg-[#3d2782]"
               >
-                Upload Book
+                <PlusIcon />
+                New Project
               </button>
-              {authorBooks.length > 0 ? (
-                <button
-                  onClick={() => {
-                    handleAddChapter(authorBooks[0]?.id)
+            </div>
+          </div>
+
+          <section className="space-y-4">
+            <SectionHeading
+              icon={<PinIcon className={isDark ? "text-violet-300" : "text-violet-600"} />}
+              title="Pinned Projects"
+              actionLabel={pinnedBooks.length > 0 ? "View All" : undefined}
+              actionHandler={() => setShowArchived(false)}
+              isDark={isDark}
+            />
+
+            {loading ? (
+              <LoadingPanel isDark={isDark} label="Loading your pinned projects..." />
+            ) : pinnedBooks.length === 0 ? (
+              <EmptyPanel
+                isDark={isDark}
+                title="Nothing pinned yet"
+                body="Use the project menu to pin the stories you want on top."
+              />
+            ) : viewMode === "grid" ? (
+              <div className="grid gap-4 lg:grid-cols-3">
+                {pinnedBooks.map((book) => (
+                  <ProjectCard
+                    key={book.id}
+                    book={book}
+                    isDark={isDark}
+                    busy={busyBookId === book.id}
+                    isPinned={!!pinnedIds[book.id]}
+                    menuOpen={menuBookId === book.id}
+                    onMenuToggle={() => setMenuBookId((current) => (current === book.id ? null : book.id))}
+                    onOpen={() => openBook(book)}
+                    onTogglePinned={() => togglePinned(book.id)}
+                    onArchive={() => handleArchive(book.id, true)}
+                    onRestore={() => handleArchive(book.id, false)}
+                    onRemove={() => handleRemove(book.id)}
+                    onAddChapter={() => handleAddChapter(book.id)}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {pinnedBooks.map((book) => (
+                  <ProjectRow
+                    key={book.id}
+                    book={book}
+                    isDark={isDark}
+                    busy={busyBookId === book.id}
+                    isPinned={!!pinnedIds[book.id]}
+                    menuOpen={menuBookId === book.id}
+                    onMenuToggle={() => setMenuBookId((current) => (current === book.id ? null : book.id))}
+                    onOpen={() => openBook(book)}
+                    onTogglePinned={() => togglePinned(book.id)}
+                    onArchive={() => handleArchive(book.id, true)}
+                    onRestore={() => handleArchive(book.id, false)}
+                    onRemove={() => handleRemove(book.id)}
+                    onAddChapter={() => handleAddChapter(book.id)}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="space-y-4">
+            <SectionHeading
+              icon={<PinIcon className={isDark ? "text-violet-300" : "text-violet-600"} />}
+              title="All Projects"
+              actionLabel={filteredBooks.length > 0 ? "View All" : undefined}
+              actionHandler={() => {
+                setSearch("")
+                setModeFilter("all")
+                setStatusFilter("all")
+                setShowArchived(false)
+              }}
+              isDark={isDark}
+            />
+
+            {loading ? (
+              <LoadingPanel isDark={isDark} label="Loading your library..." />
+            ) : allProjectBooks.length === 0 && filteredBooks.length === 0 ? (
+              <EmptyPanel
+                isDark={isDark}
+                title="No projects match this view"
+                body="Try a different filter, or start a new project from the button above."
+              />
+            ) : viewMode === "grid" ? (
+              <div className="grid gap-4 lg:grid-cols-3">
+                {allProjectBooks.map((book) => (
+                  <ProjectCard
+                    key={book.id}
+                    book={book}
+                    isDark={isDark}
+                    busy={busyBookId === book.id}
+                    isPinned={!!pinnedIds[book.id]}
+                    menuOpen={menuBookId === book.id}
+                    onMenuToggle={() => setMenuBookId((current) => (current === book.id ? null : book.id))}
+                    onOpen={() => openBook(book)}
+                    onTogglePinned={() => togglePinned(book.id)}
+                    onArchive={() => handleArchive(book.id, true)}
+                    onRestore={() => handleArchive(book.id, false)}
+                    onRemove={() => handleRemove(book.id)}
+                    onAddChapter={() => handleAddChapter(book.id)}
+                  />
+                ))}
+
+                <CreateProjectCard
+                  isDark={isDark}
+                  onCreate={() => {
+                    setUploadPreset({})
+                    setShowUpload(true)
                   }}
-                  className={`inline-flex items-center justify-center rounded-[1.1rem] px-6 py-3.5 text-sm font-semibold transition ${
-                    isDark
-                      ? "border border-white/12 bg-[#111111] text-[#E0E0E0] hover:bg-[#171717]"
-                      : "border border-stone-200 bg-white text-stone-800 hover:bg-stone-50"
-                  }`}
-                >
-                  Add Scene
-                </button>
-              ) : null}
-              <div
-                className={`rounded-[1.1rem] border px-5 py-3 text-sm ${
-                  isDark ? "border-white/12 bg-[#0B0B0B] text-[#A0A0A0]" : "border-stone-200 bg-white/80 text-stone-500"
-                }`}
-              >
-                {visibleBooks.length} visible books
+                />
               </div>
-            </div>
-          </div>
+            ) : (
+              <div className="space-y-3">
+                {allProjectBooks.map((book) => (
+                  <ProjectRow
+                    key={book.id}
+                    book={book}
+                    isDark={isDark}
+                    busy={busyBookId === book.id}
+                    isPinned={!!pinnedIds[book.id]}
+                    menuOpen={menuBookId === book.id}
+                    onMenuToggle={() => setMenuBookId((current) => (current === book.id ? null : book.id))}
+                    onOpen={() => openBook(book)}
+                    onTogglePinned={() => togglePinned(book.id)}
+                    onArchive={() => handleArchive(book.id, true)}
+                    onRestore={() => handleArchive(book.id, false)}
+                    onRemove={() => handleRemove(book.id)}
+                    onAddChapter={() => handleAddChapter(book.id)}
+                  />
+                ))}
 
-          <div className={`grid gap-3 border-t px-6 py-5 sm:grid-cols-3 sm:px-8 lg:px-10 ${isDark ? "border-white/10" : "border-stone-200/70"}`}>
-            <OverviewMetric label="Active shelf" value={String(activeBooks.length)} note="Ready to open" isDark={isDark} />
-            <OverviewMetric label="Archived shelf" value={String(archivedBooks.length)} note="Quiet but preserved" isDark={isDark} />
-            <OverviewMetric label="AI budget used" value={`${tokenBudgetUsedPct}%`} note={`${consumedTokens.toLocaleString()} tracked tokens`} isDark={isDark} />
-          </div>
+                <CreateProjectRow
+                  isDark={isDark}
+                  onCreate={() => {
+                    setUploadPreset({})
+                    setShowUpload(true)
+                  }}
+                />
+              </div>
+            )}
+          </section>
         </section>
-
-        <div className="mt-8 space-y-10">
-          {loading ? (
-            <div
-              className={`rounded-[1.75rem] border border-dashed py-20 text-center ${
-                isDark ? "border-white/15 bg-[#0B0B0B] text-[#A0A0A0]" : "border-stone-300 bg-white/60 text-stone-400"
-              }`}
-            >
-              Loading your shelves...
-            </div>
-          ) : (
-            <>
-              <ShelfSection
-                title="Current shelf"
-                subtitle="Books still in your main reading workspace."
-                emptyTitle="No active books yet"
-                emptyBody="Upload a PDF or EPUB and LoreVia will turn it into a progress-aware reading space."
-                books={activeBooks}
-                busyBookId={busyBookId}
-                onArchive={(id) => handleArchive(id, true)}
-                onRestore={(id) => handleArchive(id, false)}
-                onRemove={handleRemove}
-                isDark={isDark}
-                onOpenBook={(id) => router.push(`/${id}`)}
-                onAddChapter={handleAddChapter}
-              />
-
-              <ShelfSection
-                title="Archive"
-                subtitle="Books you want to retain without keeping them in the primary shelf."
-                emptyTitle="Nothing archived"
-                emptyBody="Archived books stay counted for quotas while moving out of the main shelf."
-                books={archivedBooks}
-                busyBookId={busyBookId}
-                onArchive={(id) => handleArchive(id, true)}
-                onRestore={(id) => handleArchive(id, false)}
-                onRemove={handleRemove}
-                archived
-                isDark={isDark}
-                onOpenBook={(id) => router.push(`/${id}`)}
-                onAddChapter={handleAddChapter}
-              />
-
-              <div
-                className={`rounded-[1.6rem] border p-5 text-sm leading-7 ${
-                  isDark ? "border-white/12 bg-[#0B0B0B] text-[#A0A0A0]" : "border-stone-200/80 bg-white/72 text-stone-600"
-                }`}
-              >
-                <p className={`text-[11px] font-semibold uppercase tracking-[0.3em] ${isDark ? "text-[#A0A0A0]" : "text-stone-400"}`}>Support</p>
-                <p className="mt-3">
-                  If a cover or extraction looks off, email{" "}
-                  <a
-                    href={`mailto:${SUPPORT_EMAIL}`}
-                    className={`font-medium underline underline-offset-4 ${isDark ? "text-[#E0E0E0] decoration-white/20" : "text-stone-900 decoration-stone-300"}`}
-                  >
-                    {SUPPORT_EMAIL}
-                  </a>.
-                </p>
-              </div>
-            </>
-          )}
-        </div>
       </div>
 
-      {showUpload && (
+      {showUpload ? (
         <UploadModal
           initialMode={uploadPreset.mode}
           initialExistingBookId={uploadPreset.existingBookId}
@@ -321,444 +602,600 @@ export default function LibraryPage() {
             load()
           }}
         />
-      )}
+      ) : null}
     </div>
   )
 }
 
-function OverviewMetric({ label, value, note, isDark }: { label: string; value: string; note: string; isDark: boolean }) {
-  return (
-    <div className={`rounded-[1.35rem] border p-4 ${isDark ? "border-white/12 bg-[#0B0B0B]" : "border-stone-200/80 bg-white/85"}`}>
-      <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-[#A0A0A0]" : "text-stone-400"}`}>{label}</p>
-      <p className={`mt-2 text-3xl font-semibold ${isDark ? "text-[#E0E0E0]" : "text-stone-950"}`}>{value}</p>
-      <p className={`mt-2 text-sm ${isDark ? "text-[#A0A0A0]" : "text-stone-500"}`}>{note}</p>
-    </div>
-  )
-}
-
-function ShelfSection({
+function SectionHeading({
+  icon,
   title,
-  subtitle,
-  emptyTitle,
-  emptyBody,
-  books,
-  busyBookId,
+  actionLabel,
+  actionHandler,
+  isDark,
+}: {
+  icon: ReactNode
+  title: string
+  actionLabel?: string
+  actionHandler?: () => void
+  isDark: boolean
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <div className="flex items-center gap-3">
+        {icon}
+        <h2 className={`text-lg font-medium ${isDark ? "text-[#f5f0e8]" : "text-stone-900"}`}>{title}</h2>
+      </div>
+
+      {actionLabel && actionHandler ? (
+        <button
+          type="button"
+          onClick={actionHandler}
+          className={`inline-flex items-center gap-2 text-sm transition ${isDark ? "text-violet-300 hover:text-violet-200" : "text-violet-600 hover:text-violet-700"}`}
+        >
+          {actionLabel}
+          <ChevronRightIcon />
+        </button>
+      ) : null}
+    </div>
+  )
+}
+
+function LoadingPanel({ isDark, label }: { isDark: boolean; label: string }) {
+  return (
+    <div className={`rounded-lg border border-dashed px-6 py-16 text-center ${isDark ? "border-white/[0.08] bg-[#0d0d14] text-[#9f9da7]" : "border-stone-300 bg-white/60 text-stone-500"}`}>
+      {label}
+    </div>
+  )
+}
+
+function EmptyPanel({ isDark, title, body }: { isDark: boolean; title: string; body: string }) {
+  return (
+    <div className={`rounded-lg border border-dashed px-6 py-16 text-center ${isDark ? "border-white/[0.08] bg-[#0d0d14]" : "border-stone-300 bg-white/60"}`}>
+      <p className={`text-xl font-medium ${isDark ? "text-[#f5f0e8]" : "text-stone-900"}`}>{title}</p>
+      <p className={`mx-auto mt-3 max-w-lg text-sm ${isDark ? "text-[#9f9da7]" : "text-stone-500"}`}>{body}</p>
+    </div>
+  )
+}
+
+function ProjectCard({
+  book,
+  isDark,
+  busy,
+  isPinned,
+  menuOpen,
+  onMenuToggle,
+  onOpen,
+  onTogglePinned,
   onArchive,
   onRestore,
   onRemove,
-  onOpenBook,
   onAddChapter,
-  archived = false,
-  isDark,
 }: {
-  title: string
-  subtitle: string
-  emptyTitle: string
-  emptyBody: string
-  books: Book[]
-  busyBookId: string | null
-  onArchive: (id: string) => void
-  onRestore: (id: string) => void
-  onRemove: (id: string) => void
-  onOpenBook: (id: string) => void
-  onAddChapter: (id?: string) => void
-  archived?: boolean
+  book: Book
   isDark: boolean
+  busy: boolean
+  isPinned: boolean
+  menuOpen: boolean
+  onMenuToggle: () => void
+  onOpen: () => void
+  onTogglePinned: () => void
+  onArchive: () => void
+  onRestore: () => void
+  onRemove: () => void
+  onAddChapter: () => void
 }) {
-  const [menuOpen, setMenuOpen] = useState<string | null>(null)
-  return (
-    <section className="space-y-4">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h2 className={`font-serif text-3xl ${isDark ? "text-[#E0E0E0]" : "text-stone-950"}`}>{title}</h2>
-          <p className={`mt-1 text-sm ${isDark ? "text-[#A0A0A0]" : "text-stone-500"}`}>{subtitle}</p>
-        </div>
-        <p className={`text-xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-[#808080]" : "text-stone-400"}`}>{books.length} books</p>
-      </div>
+  const accentClass = getAccentClass(book)
+  const progress = clampProgress(book.progress_pct)
+  const currentWords = estimateWordCount(book)
+  const targetWords = estimateTargetWordCount(book, currentWords)
+  const warningCount = countWarnings(book)
+  const isArchived = !!book.archived_at
 
-      {books.length === 0 ? (
-        <div className={`rounded-[1.75rem] border border-dashed py-14 text-center ${isDark ? "border-white/15 bg-[#0B0B0B]" : "border-stone-300 bg-white/60"}`}>
-          <p className={`text-lg font-medium ${isDark ? "text-[#E0E0E0]" : "text-stone-700"}`}>{emptyTitle}</p>
-          <p className={`mt-2 text-sm ${isDark ? "text-[#A0A0A0]" : "text-stone-500"}`}>{emptyBody}</p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 xl:grid-cols-3">
-          {books.map((book) => (
-            <article
-              key={book.id}
-              role="link"
-              tabIndex={0}
-              onClick={() => onOpenBook(book.id)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault()
-                  onOpenBook(book.id)
-                }
+  return (
+    <article
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault()
+          onOpen()
+        }
+      }}
+      className={`group relative cursor-pointer rounded-lg border p-5 transition duration-300 hover:-translate-y-0.5 hover:border-violet-400/20 hover:shadow-[0_24px_60px_-44px_rgba(109,40,217,0.72)] focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/45 ${
+        isDark ? "border-white/[0.06] bg-[#0f0f16]" : "border-stone-200/80 bg-white/82"
+      }`}
+    >
+      <div className="flex h-full flex-col">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex min-w-0 items-start gap-4">
+            <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-full border ${accentClass}`}>
+              <ProjectGlyph glyph={getProjectGlyph(book)} />
+            </div>
+
+            <div className="min-w-0">
+              <div className="flex items-center gap-3">
+                <h3 className={`truncate font-serif text-2xl leading-tight tracking-normal ${isDark ? "text-[#f7f3ed]" : "text-stone-950"}`}>
+                  {book.title}
+                </h3>
+                <span className={`h-2.5 w-2.5 rounded-full ${DOT_CLASSES[book.status]}`} />
+              </div>
+              <p className={`truncate text-sm ${isDark ? "text-[#b7b4bd]" : "text-stone-600"}`}>{getGenreLabel(book)}</p>
+            </div>
+          </div>
+
+          <div className="relative">
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation()
+                onMenuToggle()
               }}
-              className={`relative ${menuOpen === book.id ? "z-50" : "z-0"} rounded-[1.5rem] transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_8px_40px_-12px_rgba(99,102,241,0.25)] focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40 ${
-                isDark
-                  ? "bg-[#0A0A0A] hover:bg-[#0D0D0D]"
-                  : "bg-white hover:bg-stone-50"
+              className={`relative z-20 rounded-full p-2 transition ${isDark ? "text-[#8c8994] hover:bg-white/[0.06] hover:text-white" : "text-stone-500 hover:bg-stone-100 hover:text-stone-900"}`}
+              aria-label={`Open actions for ${book.title}`}
+            >
+              <DotsIcon />
+            </button>
+
+            {menuOpen ? (
+              <ProjectMenu
+                isDark={isDark}
+                busy={busy}
+                isPinned={isPinned}
+                isArchived={isArchived}
+                isAuthor={book.mode === "author"}
+                workType={book.work_type}
+                onTogglePinned={onTogglePinned}
+                onArchive={onArchive}
+                onRestore={onRestore}
+                onRemove={onRemove}
+                onAddChapter={onAddChapter}
+              />
+            ) : null}
+          </div>
+        </div>
+
+        <p className={`mt-6 text-sm ${isDark ? "text-[#d8d3cb]" : "text-stone-700"}`}>{getProgressLine(book)}</p>
+
+        <div className="mt-4">
+          <div className={`h-1.5 overflow-hidden rounded-full ${isDark ? "bg-white/[0.08]" : "bg-stone-200"}`}>
+            <div className="h-full rounded-full bg-[linear-gradient(90deg,#8b5cf6,#a78bfa)]" style={{ width: `${progress}%` }} />
+          </div>
+
+          <div className={`mt-3 flex items-center justify-between gap-4 text-sm ${isDark ? "text-[#c8c4bd]" : "text-stone-700"}`}>
+            <span>{formatNumber(currentWords)} / {formatNumber(targetWords)} words</span>
+            <span>{progress}%</span>
+          </div>
+
+          <p className={`mt-1 text-sm ${isDark ? "text-[#8c8994]" : "text-stone-500"}`}>{formatRelativeTime(getBookUpdatedAt(book))}</p>
+        </div>
+
+        <div className={`mt-6 flex items-center gap-10 text-sm ${isDark ? "text-[#b7b4bd]" : "text-stone-600"}`}>
+          <MetaBadge icon={<GroupIcon />} value={String(book.total_chapters ?? 0)} />
+          <MetaBadge icon={<PageIcon />} value={String(Math.max(1, Math.round(currentWords / 1000)))} />
+          <MetaBadge icon={<AlertIcon />} value={String(warningCount)} />
+        </div>
+      </div>
+    </article>
+  )
+}
+
+function ProjectRow({
+  book,
+  isDark,
+  busy,
+  isPinned,
+  menuOpen,
+  onMenuToggle,
+  onOpen,
+  onTogglePinned,
+  onArchive,
+  onRestore,
+  onRemove,
+  onAddChapter,
+}: {
+  book: Book
+  isDark: boolean
+  busy: boolean
+  isPinned: boolean
+  menuOpen: boolean
+  onMenuToggle: () => void
+  onOpen: () => void
+  onTogglePinned: () => void
+  onArchive: () => void
+  onRestore: () => void
+  onRemove: () => void
+  onAddChapter: () => void
+}) {
+  const accentClass = getAccentClass(book)
+  const progress = clampProgress(book.progress_pct)
+  const currentWords = estimateWordCount(book)
+  const targetWords = estimateTargetWordCount(book, currentWords)
+  const isArchived = !!book.archived_at
+
+  return (
+    <article
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault()
+          onOpen()
+        }
+      }}
+      className={`relative cursor-pointer rounded-lg border px-5 py-4 transition hover:border-violet-400/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/45 ${isDark ? "border-white/[0.06] bg-[#0f0f16]" : "border-stone-200/80 bg-white/82"}`}
+    >
+      <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
+        <div className="flex min-w-0 items-center gap-4">
+          <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-full border ${accentClass}`}>
+            <ProjectGlyph glyph={getProjectGlyph(book)} />
+          </div>
+
+          <div className="min-w-0">
+            <div className="flex items-center gap-3">
+              <h3 className={`truncate font-serif text-2xl tracking-normal ${isDark ? "text-[#f7f3ed]" : "text-stone-950"}`}>{book.title}</h3>
+              <span className={`h-2.5 w-2.5 rounded-full ${DOT_CLASSES[book.status]}`} />
+            </div>
+            <p className={`mt-1 truncate ${isDark ? "text-[#b7b4bd]" : "text-stone-600"}`}>{getGenreLabel(book)}</p>
+            <p className={`mt-1 text-sm ${isDark ? "text-[#8c8994]" : "text-stone-500"}`}>{getProgressLine(book)}</p>
+          </div>
+        </div>
+
+        <div className="flex flex-1 flex-col gap-3 xl:max-w-[34rem]">
+          <div className={`h-1.5 overflow-hidden rounded-full ${isDark ? "bg-white/[0.08]" : "bg-stone-200"}`}>
+            <div className="h-full rounded-full bg-[linear-gradient(90deg,#8b5cf6,#a78bfa)]" style={{ width: `${progress}%` }} />
+          </div>
+          <div className={`flex flex-wrap items-center gap-x-5 gap-y-2 text-sm ${isDark ? "text-[#b7b4bd]" : "text-stone-600"}`}>
+            <span>{formatNumber(currentWords)} / {formatNumber(targetWords)} words</span>
+            <span>{progress}% complete</span>
+            <span>{formatRelativeTime(getBookUpdatedAt(book))}</span>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between gap-3 xl:justify-end">
+          {book.mode === "author" ? (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation()
+                onAddChapter()
+              }}
+              className={`relative z-10 rounded-full px-4 py-2 text-sm font-medium transition ${
+                isDark ? "bg-white/[0.04] text-[#f1ece4] hover:bg-white/[0.08]" : "bg-stone-100 text-stone-800 hover:bg-stone-200"
               }`}
             >
-              <div className="hidden p-6 sm:block">
-                <div className={`aspect-[1.5/1] overflow-hidden rounded-[1.25rem] ${isDark ? "bg-black" : "bg-stone-100"}`}>
-                  <BookCover book={book} isDark={isDark} />
-                </div>
+              Add {storyUnitLabel(book.work_type)}
+            </button>
+          ) : null}
 
-                <div className="mt-5 space-y-3">
-                  <div className="min-w-0">
-                    <h3 className={`line-clamp-2 font-serif text-[1.75rem] font-medium leading-tight ${isDark ? "text-[#E0E0E0]" : "text-stone-950"}`}>{book.title}</h3>
-                    {book.author ? <p className={`mt-1 text-sm ${isDark ? "text-[#808080]" : "text-stone-500"}`}>{book.author}</p> : null}
-                    {book.series_name ? (
-                      <p className={`mt-1 text-xs font-medium uppercase tracking-wider ${isDark ? "text-violet-400" : "text-violet-600"}`}>
-                        {book.series_order ? `${seriesOrderLabel(book)}` : book.series_name}
-                      </p>
-                    ) : null}
-                    <p className={`mt-1 text-xs uppercase tracking-wider ${isDark ? "text-[#606060]" : "text-stone-400"}`}>{book.status}</p>
-                    <ProcessingLine book={book} isDark={isDark} />
-                  </div>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation()
+                onMenuToggle()
+              }}
+              className={`relative z-20 rounded-full p-2 transition ${isDark ? "text-[#8c8994] hover:bg-white/[0.06] hover:text-white" : "text-stone-500 hover:bg-stone-100 hover:text-stone-900"}`}
+              aria-label={`Open actions for ${book.title}`}
+            >
+              <DotsIcon />
+            </button>
 
-                  <div className={`pt-3 ${isDark ? "border-t border-white/8" : "border-t border-stone-200"}`}>
-                    <div className={`flex items-center justify-between text-xs ${isDark ? "text-[#707070]" : "text-stone-500"}`}>
-                      <span>{Math.round(book.progress_pct ?? 0)}% complete</span>
-                      <span>{book.total_chapters ? `${book.total_chapters} ${storyUnitLabel(book.work_type, true)}` : "Syncing"}</span>
-                    </div>
-
-                    <div className="mt-2">
-                      <div className={`h-1 overflow-hidden rounded-full ${isDark ? "bg-white/8" : "bg-stone-200"}`}>
-                        <div
-                          className="h-full rounded-full bg-gradient-to-r from-violet-500 to-indigo-500"
-                          style={{ width: `${Math.max(0, Math.min(book.progress_pct ?? 0, 100))}%` }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-3 pt-2">
-                    <button
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        if (book.mode === "author") {
-                          window.location.href = `/${book.id}/manuscript`
-                        } else {
-                          onOpenBook(book.id)
-                        }
-                      }}
-                      className={`min-w-0 flex-1 rounded-lg px-3 py-2.5 text-sm font-medium transition ${
-                        isDark
-                          ? "bg-white text-black hover:bg-white/90"
-                          : "bg-stone-900 text-white hover:bg-stone-800"
-                      }`}
-                    >
-                      {book.mode === "author" ? `Manage ${storyUnitLabel(book.work_type, true)}` : "Continue Reading"}
-                    </button>
-
-                    {book.mode === "author" ? (
-                      <button
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          onAddChapter(book.id)
-                        }}
-                        className={`rounded-lg px-3 py-2.5 text-sm font-medium transition ${
-                          isDark
-                            ? "border border-white/12 bg-white/5 text-[#E0E0E0] hover:bg-white/10"
-                            : "border border-stone-200 bg-stone-50 text-stone-800 hover:bg-stone-100"
-                        }`}
-                      >
-                        Add Scene
-                      </button>
-                    ) : null}
-
-                    <div className="relative">
-                      <button
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          setMenuOpen(menuOpen === book.id ? null : book.id)
-                        }}
-                        className={`rounded-lg p-2.5 transition ${isDark ? "hover:bg-white/10 text-[#A0A0A0]" : "hover:bg-stone-100 text-stone-500"}`}
-                      >
-                        <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
-                          <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
-                        </svg>
-                      </button>
-
-                      {menuOpen === book.id && (
-                        <div className={`absolute right-0 bottom-full mb-2 sm:bottom-auto sm:top-full sm:mt-2 sm:mb-0 z-50 w-44 overflow-hidden rounded-xl border py-1 shadow-2xl ${
-                          isDark
-                            ? "border-white/12 bg-[#0D0D0D]"
-                            : "border-stone-200 bg-white"
-                        }`}>
-                          {book.mode === "author" && (
-                            <button
-                              onClick={(event) => {
-                                event.stopPropagation()
-                                onAddChapter(book.id)
-                                setMenuOpen(null)
-                              }}
-                              className={`block w-full px-4 py-2 text-left text-sm transition ${isDark ? "text-[#E0E0E0] hover:bg-white/10" : "text-stone-700 hover:bg-stone-50"}`}
-                            >
-                              Add Scene
-                            </button>
-                          )}
-                          {book.mode === "author" && (
-                            <Link
-                              href="/notes"
-                              onClick={(event) => {
-                                event.stopPropagation()
-                                setMenuOpen(null)
-                              }}
-                              className={`block px-4 py-2 text-sm transition ${isDark ? "text-[#E0E0E0] hover:bg-white/10" : "text-stone-700 hover:bg-stone-50"}`}
-                            >
-                              Notes
-                            </Link>
-                          )}
-                          {archived ? (
-                            <button
-                              onClick={(event) => {
-                                event.stopPropagation()
-                                onRestore(book.id)
-                                setMenuOpen(null)
-                              }}
-                              disabled={busyBookId === book.id}
-                              className={`w-full px-4 py-2 text-left text-sm transition disabled:opacity-60 ${isDark ? "text-[#E0E0E0] hover:bg-white/10" : "text-stone-700 hover:bg-stone-50"}`}
-                            >
-                              Restore
-                            </button>
-                          ) : (
-                            <button
-                              onClick={(event) => {
-                                event.stopPropagation()
-                                onArchive(book.id)
-                                setMenuOpen(null)
-                              }}
-                              disabled={busyBookId === book.id}
-                              className={`w-full px-4 py-2 text-left text-sm transition disabled:opacity-60 ${isDark ? "text-[#E0E0E0] hover:bg-white/10" : "text-stone-700 hover:bg-stone-50"}`}
-                            >
-                              Archive
-                            </button>
-                          )}
-                          <button
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              onRemove(book.id)
-                              setMenuOpen(null)
-                            }}
-                            disabled={busyBookId === book.id}
-                            className={`w-full px-4 py-2 text-left text-sm transition disabled:opacity-60 ${
-                              isDark ? "text-rose-300 hover:bg-rose-500/10" : "text-rose-600 hover:bg-rose-50"
-                            }`}
-                          >
-                            Remove
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="block px-3 pb-6 pt-5 sm:hidden">
-                <div className={`aspect-[1.5/1] overflow-hidden rounded-[1.25rem] ${isDark ? "bg-black" : "bg-stone-100"}`}>
-                  <BookCover book={book} isDark={isDark} />
-                </div>
-
-                <div className="mt-4 space-y-3">
-                  <div className="w-full overflow-visible">
-                    <h3 className={`w-full font-serif text-sm font-medium leading-snug break-words overflow-wrap-anywhere ${isDark ? "text-[#E0E0E0]" : "text-stone-950"}`}>{book.title}</h3>
-                    {book.author ? <p className={`mt-1 text-sm text-center ${isDark ? "text-[#808080]" : "text-stone-500"}`}>{book.author}</p> : null}
-                    {book.series_name ? (
-                      <p className={`mt-1 text-xs font-medium uppercase tracking-wider text-center ${isDark ? "text-violet-400" : "text-violet-600"}`}>
-                        {book.series_order ? `${seriesOrderLabel(book)}` : book.series_name}
-                      </p>
-                    ) : null}
-                    <p className={`mt-1 text-xs uppercase tracking-wider text-center ${isDark ? "text-[#606060]" : "text-stone-400"}`}>{book.status}</p>
-                    <ProcessingLine book={book} isDark={isDark} />
-                  </div>
-
-                  <div className={`pt-3 ${isDark ? "border-t border-white/8" : "border-t border-stone-200"}`}>
-                    <div className={`flex items-center justify-between text-xs ${isDark ? "text-[#707070]" : "text-stone-500"}`}>
-                      <span>{Math.round(book.progress_pct ?? 0)}% complete</span>
-                      <span>{book.total_chapters ? `${book.total_chapters} ${storyUnitLabel(book.work_type, true)}` : "Syncing"}</span>
-                    </div>
-
-                    <div className="mt-2">
-                      <div className={`h-1 overflow-hidden rounded-full ${isDark ? "bg-white/8" : "bg-stone-200"}`}>
-                        <div
-                          className="h-full rounded-full bg-gradient-to-r from-violet-500 to-indigo-500"
-                          style={{ width: `${Math.max(0, Math.min(book.progress_pct ?? 0, 100))}%` }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-3 pt-2">
-                    <button
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        if (book.mode === "author") {
-                          window.location.href = `/${book.id}/manuscript`
-                        } else {
-                          onOpenBook(book.id)
-                        }
-                      }}
-                      className={`min-w-0 flex-1 rounded-lg px-3 py-2.5 text-sm font-medium transition ${
-                        isDark
-                          ? "bg-white text-black hover:bg-white/90"
-                          : "bg-stone-900 text-white hover:bg-stone-800"
-                      }`}
-                    >
-                      {book.mode === "author" ? `Manage ${storyUnitLabel(book.work_type, true)}` : "Continue Reading"}
-                    </button>
-
-                    {book.mode === "author" ? (
-                      <button
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          onAddChapter(book.id)
-                        }}
-                        className={`rounded-lg px-3 py-2.5 text-sm font-medium transition ${
-                          isDark
-                            ? "border border-white/12 bg-white/5 text-[#E0E0E0] hover:bg-white/10"
-                            : "border border-stone-200 bg-stone-50 text-stone-800 hover:bg-stone-100"
-                        }`}
-                      >
-                        Add Scene
-                      </button>
-                    ) : null}
-
-                    <div className="relative">
-                      <button
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          setMenuOpen(menuOpen === book.id ? null : book.id)
-                        }}
-                        className={`rounded-lg p-2.5 transition ${isDark ? "hover:bg-white/10 text-[#A0A0A0]" : "hover:bg-stone-100 text-stone-500"}`}
-                      >
-                        <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
-                          <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
-                        </svg>
-                      </button>
-
-                      {menuOpen === book.id && (
-                        <div className={`absolute right-0 bottom-full mb-2 sm:bottom-auto sm:top-full sm:mt-2 sm:mb-0 z-50 w-44 overflow-hidden rounded-xl border py-1 shadow-2xl ${
-                          isDark
-                            ? "border-white/12 bg-[#0D0D0D]"
-                            : "border-stone-200 bg-white"
-                        }`}>
-                          {book.mode === "author" && (
-                            <button
-                              onClick={(event) => {
-                                event.stopPropagation()
-                                onAddChapter(book.id)
-                                setMenuOpen(null)
-                              }}
-                              className={`block w-full px-4 py-2 text-left text-sm transition ${isDark ? "text-[#E0E0E0] hover:bg-white/10" : "text-stone-700 hover:bg-stone-50"}`}
-                            >
-                              Add Scene
-                            </button>
-                          )}
-                          {book.mode === "author" && (
-                            <Link
-                              href="/notes"
-                              onClick={(event) => {
-                                event.stopPropagation()
-                                setMenuOpen(null)
-                              }}
-                              className={`block px-4 py-2 text-sm transition ${isDark ? "text-[#E0E0E0] hover:bg-white/10" : "text-stone-700 hover:bg-stone-50"}`}
-                            >
-                              Notes
-                            </Link>
-                          )}
-                          {archived ? (
-                            <button
-                              onClick={(event) => {
-                                event.stopPropagation()
-                                onRestore(book.id)
-                                setMenuOpen(null)
-                              }}
-                              disabled={busyBookId === book.id}
-                              className={`w-full px-4 py-2 text-left text-sm transition disabled:opacity-60 ${isDark ? "text-[#E0E0E0] hover:bg-white/10" : "text-stone-700 hover:bg-stone-50"}`}
-                            >
-                              Restore
-                            </button>
-                          ) : (
-                            <button
-                              onClick={(event) => {
-                                event.stopPropagation()
-                                onArchive(book.id)
-                                setMenuOpen(null)
-                              }}
-                              disabled={busyBookId === book.id}
-                              className={`w-full px-4 py-2 text-left text-sm transition disabled:opacity-60 ${isDark ? "text-[#E0E0E0] hover:bg-white/10" : "text-stone-700 hover:bg-stone-50"}`}
-                            >
-                              Archive
-                            </button>
-                          )}
-                          <button
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              onRemove(book.id)
-                              setMenuOpen(null)
-                            }}
-                            disabled={busyBookId === book.id}
-                            className={`w-full px-4 py-2 text-left text-sm transition disabled:opacity-60 ${
-                              isDark ? "text-rose-300 hover:bg-rose-500/10" : "text-rose-600 hover:bg-rose-50"
-                            }`}
-                          >
-                            Remove
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </article>
-          ))}
+            {menuOpen ? (
+              <ProjectMenu
+                isDark={isDark}
+                busy={busy}
+                isPinned={isPinned}
+                isArchived={isArchived}
+                isAuthor={book.mode === "author"}
+                workType={book.work_type}
+                onTogglePinned={onTogglePinned}
+                onArchive={onArchive}
+                onRestore={onRestore}
+                onRemove={onRemove}
+                onAddChapter={onAddChapter}
+              />
+            ) : null}
+          </div>
         </div>
-      )}
-    </section>
-  )
-}
-
-function BookCover({ book, isDark }: { book: Book; isDark: boolean }) {
-  const [failed, setFailed] = useState(false)
-  const src = !failed ? coverSrc(book.cover_url) ?? book.cover_url ?? null : null
-
-  if (src) {
-    return (
-      <img
-        src={src}
-        alt={`${book.title} cover`}
-        className={`h-full w-full ${book.format === "pdf" ? "object-contain p-2" : "object-cover object-top"}`}
-        onError={() => setFailed(true)}
-      />
-    )
-  }
-
-  return (
-    <div className={`flex h-full w-full flex-col justify-between p-5 ${isDark ? "bg-[#0D0D0D] text-[#E0E0E0]" : "bg-[linear-gradient(150deg,#f4ecda,#ffffff_60%,#ecebff)] text-stone-900"}`}>
-      <span className={`text-[0.65rem] font-semibold uppercase tracking-[0.28em] ${isDark ? "text-[#808080]" : "text-violet-600"}`}>LoreVia</span>
-      <div>
-        <p className="text-3xl font-semibold leading-none">{titleInitials(book.title)}</p>
-        <p className={`mt-3 line-clamp-3 text-sm leading-6 ${isDark ? "text-[#A0A0A0]" : "text-stone-600"}`}>{book.title}</p>
       </div>
-    </div>
+    </article>
   )
 }
 
-function MetaCell({ label, value, align = "left", isDark }: { label: string; value: string; align?: "left" | "right"; isDark: boolean }) {
+function ProjectMenu({
+  isDark,
+  busy,
+  isPinned,
+  isArchived,
+  isAuthor,
+  workType,
+  onTogglePinned,
+  onArchive,
+  onRestore,
+  onRemove,
+  onAddChapter,
+}: {
+  isDark: boolean
+  busy: boolean
+  isPinned: boolean
+  isArchived: boolean
+  isAuthor: boolean
+  workType: Book["work_type"]
+  onTogglePinned: () => void
+  onArchive: () => void
+  onRestore: () => void
+  onRemove: () => void
+  onAddChapter: () => void
+}) {
   return (
-    <div className={align === "right" ? "text-right" : ""}>
-      <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-[#808080]" : "text-stone-400"}`}>{label}</p>
-      <p className={`mt-1 text-base font-medium ${isDark ? "text-[#E0E0E0]" : "text-stone-900"}`}>{value}</p>
+    <div
+      onClick={(event) => event.stopPropagation()}
+      className={`absolute right-0 top-full z-30 mt-2 w-48 overflow-hidden rounded-lg border py-2 shadow-[0_30px_90px_-40px_rgba(0,0,0,0.85)] ${isDark ? "border-white/[0.08] bg-[#12121a]" : "border-stone-200 bg-white"}`}
+    >
+      <MenuButton isDark={isDark} onClick={onTogglePinned} label={isPinned ? "Unpin project" : "Pin project"} />
+      {isAuthor ? <MenuButton isDark={isDark} onClick={onAddChapter} label={`Add ${storyUnitLabel(workType)}`} /> : null}
+      {isArchived ? (
+        <MenuButton isDark={isDark} onClick={onRestore} label="Restore" disabled={busy} />
+      ) : (
+        <MenuButton isDark={isDark} onClick={onArchive} label="Archive" disabled={busy} />
+      )}
+      <MenuButton isDark={isDark} onClick={onRemove} label="Remove" disabled={busy} danger />
     </div>
   )
 }
 
-function capitalize(value: string) {
-  return value.replace(/(^|\s)\S/g, (char) => char.toUpperCase())
+function MenuButton({
+  isDark,
+  onClick,
+  label,
+  disabled = false,
+  danger = false,
+}: {
+  isDark: boolean
+  onClick: () => void
+  label: string
+  disabled?: boolean
+  danger?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      onClick={(event) => {
+        event.stopPropagation()
+        onClick()
+      }}
+      disabled={disabled}
+      className={`block w-full px-4 py-2.5 text-left text-sm transition disabled:opacity-50 ${
+        danger
+          ? isDark
+            ? "text-rose-300 hover:bg-rose-500/10"
+            : "text-rose-600 hover:bg-rose-50"
+          : isDark
+            ? "text-[#efe9df] hover:bg-white/[0.06]"
+            : "text-stone-700 hover:bg-stone-50"
+      }`}
+    >
+      {label}
+    </button>
+  )
 }
 
+function MetaBadge({ icon, value }: { icon: ReactNode; value: string }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span>{icon}</span>
+      <span>{value}</span>
+    </div>
+  )
+}
 
+function CreateProjectCard({ isDark, onCreate }: { isDark: boolean; onCreate: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onCreate}
+      className={`flex min-h-[16rem] flex-col items-center justify-center rounded-lg border border-dashed p-8 text-center transition hover:-translate-y-0.5 ${
+        isDark
+          ? "border-white/[0.08] bg-[#0d0d14] hover:border-violet-400/30 hover:bg-[#11111a]"
+          : "border-stone-300 bg-white/65 hover:border-violet-300 hover:bg-white"
+      }`}
+    >
+      <div className={`flex h-20 w-20 items-center justify-center rounded-full border ${isDark ? "border-white/[0.08] text-[#b7b4bd]" : "border-stone-300 text-stone-500"}`}>
+        <PlusLargeIcon />
+      </div>
+      <h3 className={`mt-8 font-serif text-2xl tracking-normal ${isDark ? "text-[#f7f3ed]" : "text-stone-900"}`}>Create New Project</h3>
+      <p className={`mt-3 text-lg ${isDark ? "text-[#9f9da7]" : "text-stone-500"}`}>Start a new story</p>
+    </button>
+  )
+}
+
+function CreateProjectRow({ isDark, onCreate }: { isDark: boolean; onCreate: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onCreate}
+      className={`flex items-center justify-between rounded-lg border border-dashed px-5 py-5 text-left transition ${
+        isDark
+          ? "border-white/[0.08] bg-[#0d0d14] hover:border-violet-400/30 hover:bg-[#11111a]"
+          : "border-stone-300 bg-white/65 hover:border-violet-300 hover:bg-white"
+      }`}
+    >
+      <div>
+        <h3 className={`font-serif text-2xl tracking-normal ${isDark ? "text-[#f7f3ed]" : "text-stone-900"}`}>Create New Project</h3>
+        <p className={`mt-2 ${isDark ? "text-[#9f9da7]" : "text-stone-500"}`}>Start a new story</p>
+      </div>
+      <div className={`flex h-14 w-14 items-center justify-center rounded-full border ${isDark ? "border-white/[0.08] text-[#b7b4bd]" : "border-stone-300 text-stone-500"}`}>
+        <PlusLargeIcon />
+      </div>
+    </button>
+  )
+}
+
+function SearchIcon({ className }: { className?: string }) {
+  return (
+    <svg className={`h-5 w-5 ${className ?? ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M11 18a7 7 0 100-14 7 7 0 000 14zM20 20l-4-4" />
+    </svg>
+  )
+}
+
+function FilterIcon({ className }: { className?: string }) {
+  return (
+    <svg className={`h-5 w-5 ${className ?? ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16l-6 7v5l-4 2v-7L4 6z" />
+    </svg>
+  )
+}
+
+function GridIcon() {
+  return (
+    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <rect x="4" y="4" width="6" height="6" rx="1.4" />
+      <rect x="14" y="4" width="6" height="6" rx="1.4" />
+      <rect x="4" y="14" width="6" height="6" rx="1.4" />
+      <rect x="14" y="14" width="6" height="6" rx="1.4" />
+    </svg>
+  )
+}
+
+function ListIcon() {
+  return (
+    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01" />
+    </svg>
+  )
+}
+
+function PinIcon({ className }: { className?: string }) {
+  return (
+    <svg className={`h-4 w-4 ${className ?? ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M14 4l6 6-3 1-4 7-2-2 7-4 1-3-6-6 1-1zM8 14l-4 6" />
+    </svg>
+  )
+}
+
+function PlusIcon() {
+  return (
+    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14M5 12h14" />
+    </svg>
+  )
+}
+
+function PlusLargeIcon() {
+  return (
+    <svg className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.6}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14M5 12h14" />
+    </svg>
+  )
+}
+
+function DotsIcon() {
+  return (
+    <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
+      <path d="M4 10a1.4 1.4 0 112.8 0A1.4 1.4 0 014 10zm4.6 0a1.4 1.4 0 112.8 0 1.4 1.4 0 01-2.8 0zm4.6 0a1.4 1.4 0 112.8 0 1.4 1.4 0 01-2.8 0z" />
+    </svg>
+  )
+}
+
+function GroupIcon() {
+  return (
+    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.7}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 11a3 3 0 100-6 3 3 0 000 6zM4 19a5 5 0 0110 0M17 11a2.5 2.5 0 100-5M15.5 15.5A4.5 4.5 0 0120 20" />
+    </svg>
+  )
+}
+
+function PageIcon() {
+  return (
+    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.7}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M7 4h8l3 3v13H7V4z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M15 4v4h4M9 12h6M9 16h4" />
+    </svg>
+  )
+}
+
+function AlertIcon() {
+  return (
+    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.7}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4l8 14H4l8-14z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v4M12 17h.01" />
+    </svg>
+  )
+}
+
+function ChevronRightIcon() {
+  return (
+    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 6l6 6-6 6" />
+    </svg>
+  )
+}
+
+function ProjectGlyph({ glyph }: { glyph: GlyphName }) {
+  const className = "h-7 w-7"
+
+  switch (glyph) {
+    case "moon":
+      return (
+        <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M15.5 3.5a8.5 8.5 0 108 12.2A8 8 0 0115.5 3.5z" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 7.5l.7 1.6 1.6.7-1.6.7-.7 1.6-.7-1.6-1.6-.7 1.6-.7.7-1.6z" />
+        </svg>
+      )
+    case "spark":
+      return (
+        <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v18M3 12h18M6.5 6.5l11 11M17.5 6.5l-11 11" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 6l1.3 4.7L18 12l-4.7 1.3L12 18l-1.3-4.7L6 12l4.7-1.3L12 6z" />
+        </svg>
+      )
+    case "leaf":
+      return (
+        <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M18.5 5.5C11 5.5 6 10.2 6 16.4c0 1 .1 1.9.4 2.6 7.1-.4 12.1-5.1 12.1-11.4z" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M7 17c2.8-2.5 5.7-4.6 9.5-6.2" />
+        </svg>
+      )
+    case "crown":
+      return (
+        <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 18l1.8-9 5.7 4.2L17.7 9l1.8 9H4.5z" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M8 18V7m8 11V7" />
+        </svg>
+      )
+    case "wave":
+      return (
+        <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M4 8c2 0 2-1 4-1s2 1 4 1 2-1 4-1 2 1 4 1" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M4 13c2 0 2-1 4-1s2 1 4 1 2-1 4-1 2 1 4 1" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M4 18c2 0 2-1 4-1s2 1 4 1 2-1 4-1 2 1 4 1" />
+        </svg>
+      )
+    case "diamond":
+      return (
+        <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 4l8 8-8 8-8-8 8-8z" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 8l4 4-4 4-4-4 4-4z" />
+        </svg>
+      )
+    case "orbit":
+      return (
+        <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <circle cx="12" cy="12" r="2.2" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12c2.4-4.7 12.6-4.7 15 0-2.4 4.7-12.6 4.7-15 0z" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M8 4.8c4.8-1.6 10.4 6.7 8.1 11.5-4.8 1.6-10.4-6.7-8.1-11.5z" />
+        </svg>
+      )
+    case "star":
+    default:
+      return (
+        <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 4l1.8 5.7L20 12l-6.2 2.3L12 20l-1.8-5.7L4 12l6.2-2.3L12 4z" />
+        </svg>
+      )
+  }
+}

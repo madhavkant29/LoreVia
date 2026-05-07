@@ -35,7 +35,7 @@ async def _register_user(client, email: str) -> tuple[dict[str, str], uuid.UUID]
 
 
 @pytest.mark.asyncio
-async def test_manual_cover_upload_populates_processed_cover_fields(client, db):
+async def test_manual_cover_upload_returns_original_cover_without_processing_metadata(client, db):
     headers, _ = await _register_user(client, "cover-owner@lorevia.app")
 
     response = await client.post(
@@ -58,11 +58,12 @@ async def test_manual_cover_upload_populates_processed_cover_fields(client, db):
     assert book_response.status_code == 200
     payload = book_response.json()
 
-    assert payload["cover_processed_url"]
-    assert payload["cover_processed_at"] is not None
-    assert payload["cover_edge_colors"]
-    assert payload["cover_crop_bounds"]
-    assert payload["cover_processed_url"].startswith("/api/v1/books/")
+    assert payload["cover_url"]
+    assert payload["cover_url"].startswith("/api/v1/books/")
+    assert "cover_processed_url" not in payload
+    assert "cover_processed_at" not in payload
+    assert "cover_edge_colors" not in payload
+    assert "cover_crop_bounds" not in payload
 
 
 @pytest.mark.asyncio

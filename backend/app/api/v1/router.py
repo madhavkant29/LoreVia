@@ -10,6 +10,7 @@ from app.api.v1.routes import (
     characters,
     intelligence,
     manuscript,
+    monetization,
     notifications,
     public,
     reader,
@@ -44,6 +45,7 @@ api_router.include_router(books.router,         prefix="/books",         tags=["
 api_router.include_router(manuscript.router,    prefix="/books",         tags=["manuscript"], dependencies=[Depends(rate_limit_api)])
 api_router.include_router(public.router,        prefix="/public",        tags=["public"], dependencies=[Depends(rate_limit_public)])
 api_router.include_router(billing.router,       prefix="/billing",       tags=["billing"], dependencies=[Depends(rate_limit_api)])
+api_router.include_router(monetization.router,  prefix="/monetization",  tags=["monetization"], dependencies=[Depends(rate_limit_api)])
 api_router.include_router(webhooks.router,      prefix="/webhooks",      tags=["webhooks"])
 api_router.include_router(characters.router,    prefix="/characters",    tags=["characters"], dependencies=[Depends(rate_limit_api)])
 api_router.include_router(reader.router,        prefix="/reader",        tags=["reader"], dependencies=[Depends(rate_limit_api)])

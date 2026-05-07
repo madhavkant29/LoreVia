@@ -13,12 +13,110 @@ from app.engine.character.entity_filters import (
 
 
 ELEMENT_PATTERNS: dict[str, tuple[str, ...]] = {
+    "country": ("country", "kingdom", "nation", "empire", "realm", "republic", "sovereignty"),
+    "region": ("area", "province", "region", "territory", "borderland", "frontier", "wastes"),
+    "race": ("race", "species", "people", "folk", "tribe", "clan", "bloodline"),
+    "magic_system": ("aether", "arcana", "magic", "mana", "spell", "spellcraft", "sorcery", "witchcraft"),
+    "culture": ("culture", "custom", "festival", "holiday", "taboo", "tradition"),
+    "language": ("dialect", "language", "script", "tongue"),
+    "religion": ("church", "deity", "faith", "god", "goddess", "pantheon", "religion", "ritual", "temple"),
+    "creature": ("beast", "creature", "dragon", "monster", "spirit"),
+    "technology": ("device", "engine", "machine", "technology"),
     "place": ("city", "street", "lane", "square", "river", "canal", "bridge", "palace", "district", "island", "mountain", "forest", "desert", "capital"),
     "organization": ("council", "throne", "senate", "alliance", "rebellion", "faction", "guild", "church", "office", "department", "university", "police"),
     "object": ("artifact", "axe", "coin", "device", "machine", "ring", "sword", "weapon", "watch"),
     "event": ("festival", "murder", "rebellion", "trial", "war", "confession", "exile", "funeral"),
     "concept": ("culture", "custom", "faith", "idea", "language", "magic", "mana", "philosophy", "prophecy", "religion", "ritual", "theory", "tradition"),
     "era": ("century", "era", "summer", "winter", "year"),
+}
+SECTION_LABEL_TYPES: dict[str, str] = {
+    "area": "region",
+    "areas": "region",
+    "beast": "creature",
+    "beasts": "creature",
+    "bloodline": "race",
+    "bloodlines": "race",
+    "city": "place",
+    "cities": "place",
+    "clan": "race",
+    "clans": "race",
+    "country": "country",
+    "countries": "country",
+    "creature": "creature",
+    "creatures": "creature",
+    "culture": "culture",
+    "cultures": "culture",
+    "deities": "religion",
+    "deity": "religion",
+    "district": "region",
+    "districts": "region",
+    "empire": "country",
+    "empires": "country",
+    "faith": "religion",
+    "faiths": "religion",
+    "faction": "organization",
+    "factions": "organization",
+    "folk": "race",
+    "geography": "region",
+    "god": "religion",
+    "goddess": "religion",
+    "gods": "religion",
+    "government": "organization",
+    "governments": "organization",
+    "kingdom": "country",
+    "kingdoms": "country",
+    "language": "language",
+    "languages": "language",
+    "location": "place",
+    "locations": "place",
+    "magic": "magic_system",
+    "magic system": "magic_system",
+    "magic systems": "magic_system",
+    "mana": "magic_system",
+    "nation": "country",
+    "nations": "country",
+    "pantheon": "religion",
+    "pantheons": "religion",
+    "people": "race",
+    "peoples": "race",
+    "place": "place",
+    "places": "place",
+    "power system": "magic_system",
+    "power systems": "magic_system",
+    "province": "region",
+    "provinces": "region",
+    "race": "race",
+    "races": "race",
+    "realm": "country",
+    "realms": "country",
+    "region": "region",
+    "regions": "region",
+    "religion": "religion",
+    "religions": "religion",
+    "species": "race",
+    "spellcasting": "magic_system",
+    "technology": "technology",
+    "territories": "region",
+    "territory": "region",
+    "tribe": "race",
+    "tribes": "race",
+}
+SECTION_BOUNDARY_WORDS = {
+    "areas",
+    "countries",
+    "cultures",
+    "factions",
+    "geography",
+    "languages",
+    "locations",
+    "magic",
+    "pantheons",
+    "places",
+    "races",
+    "regions",
+    "religions",
+    "spellcasting",
+    "technology",
 }
 
 WORLD_ELEMENT_BLOCKLIST = {
@@ -33,6 +131,7 @@ WORLD_ELEMENT_BLOCKLIST = {
     "reading",
     "source",
     "sources",
+    "system",
     "world",
 }
 WORLD_META_HINTS = (
@@ -76,10 +175,14 @@ PLACE_SUFFIXES = {
     "street",
     "university",
 }
+COUNTRY_SUFFIXES = {"country", "empire", "kingdom", "nation", "realm", "republic", "state", "states", "sovereignty"}
+REGION_SUFFIXES = {"area", "borderland", "district", "frontier", "lands", "province", "region", "territories", "territory", "wastes"}
+RACE_SUFFIXES = {"bloodline", "clan", "clans", "folk", "kin", "people", "race", "species", "tribe", "tribes"}
+MAGIC_SUFFIXES = {"arcana", "binding", "craft", "magic", "mana", "mancy", "spellcraft", "sorcery"}
 ORGANIZATION_SUFFIXES = {"church", "court", "department", "guild", "office", "order", "police", "senate", "tribunal"}
 OBJECT_SUFFIXES = {"axe", "book", "coin", "document", "ring", "sword", "ticket", "watch"}
 EVENT_SUFFIXES = {"confession", "festival", "murder", "rebellion", "trial", "war"}
-CONCEPT_SUFFIXES = {"faith", "idea", "morality", "philosophy", "religion", "theory", "tradition"}
+CONCEPT_SUFFIXES = {"culture", "faith", "idea", "language", "morality", "philosophy", "religion", "theory", "tradition"}
 COMMON_VERB_LEMMAS = {
     "ask",
     "be",
@@ -130,10 +233,16 @@ def infer_element_type(name: str, description: str = "") -> str:
     normalized_name = normalize_entity_name(name)
     words = normalized_name.split()
     lowered = f"{normalized_name} {description}".lower()
-    if looks_like_person_entity_name(name):
-        return "character"
     if words:
         last_word = words[-1]
+        if last_word in COUNTRY_SUFFIXES:
+            return "country"
+        if last_word in REGION_SUFFIXES:
+            return "region"
+        if last_word in RACE_SUFFIXES:
+            return "race"
+        if last_word in MAGIC_SUFFIXES or last_word.endswith("mancy"):
+            return "magic_system"
         if last_word in PLACE_SUFFIXES:
             return "place"
         if last_word in ORGANIZATION_SUFFIXES:
@@ -144,6 +253,10 @@ def infer_element_type(name: str, description: str = "") -> str:
             return "event"
         if last_word in CONCEPT_SUFFIXES:
             return "concept"
+    if "magic system" in lowered or "power system" in lowered:
+        return "magic_system"
+    if looks_like_person_entity_name(name):
+        return "character"
     haystack = f"{name} {description}".lower()
     for element_type, words in ELEMENT_PATTERNS.items():
         if any(word in haystack for word in words):
@@ -161,9 +274,25 @@ def extract_world_elements_from_text(text: str, *, chapter_number: int | None = 
     """Extract world-building candidates with lightweight typing, confidence, and provenance."""
     candidates: list[dict] = []
     seen: set[str] = set()
-    cleaned = _preprocess_world_text(text or "")
+    raw_text = text or ""
+    cleaned = _preprocess_world_text(raw_text)
     if not cleaned:
         return candidates
+
+    for labeled_candidate in _extract_labeled_world_candidates(raw_text, chapter_number=chapter_number):
+        phrase = str(labeled_candidate.get("name") or "").strip()
+        key = phrase.lower()
+        if key in seen:
+            continue
+        if is_valid_world_element_candidate(
+            phrase,
+            raw_text,
+            count=int(labeled_candidate.get("usage_count") or 1),
+            description=str(labeled_candidate.get("description") or ""),
+            provenance=labeled_candidate.get("provenance") if isinstance(labeled_candidate.get("provenance"), dict) else None,
+        ):
+            seen.add(key)
+            candidates.append(labeled_candidate)
 
     sentence_spans = _split_sentences_with_offsets(cleaned)
     matches = list(re.finditer(r"\b(?:[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\b", cleaned))
@@ -243,7 +372,11 @@ def is_valid_world_element_candidate(
     words = normalized.split()
     if not words:
         return False
+    if normalized in SECTION_LABEL_TYPES:
+        return False
     if any(word in WORLD_ELEMENT_BLOCKLIST for word in words):
+        return False
+    if len(words) > 1 and words[-1] in SECTION_BOUNDARY_WORDS:
         return False
     if len(words) == 1 and words[0] in COMMON_NON_NAME_WORDS:
         return False
@@ -271,6 +404,162 @@ def _preprocess_world_text(text: str) -> str:
     cleaned = " ".join(kept_lines)
     cleaned = re.sub(r"[—-]\s*\d+\s*[—-]", " ", cleaned)
     return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def _extract_labeled_world_candidates(text: str, *, chapter_number: int | None) -> list[dict]:
+    candidates: list[dict] = []
+    current_type: str | None = None
+    offset = 0
+    for raw_line in text.splitlines(keepends=True):
+        line_start = offset
+        offset += len(raw_line)
+        line = raw_line.strip()
+        if not line:
+            current_type = None
+            continue
+
+        cleaned_line = _strip_world_note_marker(line)
+        if not cleaned_line or _is_structural_line(cleaned_line):
+            continue
+
+        label_match = re.match(r"^([A-Za-z][A-Za-z\s/&-]{1,40})\s*[:\-]\s*(.+)$", cleaned_line)
+        if label_match:
+            label = _normalize_section_label(label_match.group(1))
+            element_type = SECTION_LABEL_TYPES.get(label)
+            if element_type:
+                current_type = element_type
+                candidates.extend(
+                    _candidates_from_labeled_value(
+                        label_match.group(2),
+                        element_type=element_type,
+                        description=cleaned_line,
+                        source_text=text,
+                        line_start=line_start,
+                        chapter_number=chapter_number,
+                    )
+                )
+                continue
+
+        section_type = SECTION_LABEL_TYPES.get(_normalize_section_label(cleaned_line))
+        if section_type:
+            current_type = section_type
+            continue
+
+        if current_type and re.match(r"^(?:[-*+]\s+|\d+[.)]\s+)?[A-Za-z0-9'\"(]", line):
+            candidates.extend(
+                _candidates_from_labeled_value(
+                    cleaned_line,
+                    element_type=current_type,
+                    description=cleaned_line,
+                    source_text=text,
+                    line_start=line_start,
+                    chapter_number=chapter_number,
+                )
+            )
+    return candidates
+
+
+def _strip_world_note_marker(line: str) -> str:
+    cleaned = re.sub(r"^\s{0,3}#{1,6}\s*", "", line.strip())
+    cleaned = re.sub(r"^\s*(?:[-*+]|\d+[.)])\s+", "", cleaned)
+    return cleaned.strip()
+
+
+def _normalize_section_label(label: str) -> str:
+    cleaned = re.sub(r"\s+", " ", (label or "").replace("_", " ").strip().lower())
+    cleaned = cleaned.strip(" :.-")
+    if cleaned.startswith("world "):
+        cleaned = cleaned[6:]
+    return cleaned
+
+
+def _candidates_from_labeled_value(
+    value: str,
+    *,
+    element_type: str,
+    description: str,
+    source_text: str,
+    line_start: int,
+    chapter_number: int | None,
+) -> list[dict]:
+    results: list[dict] = []
+    for raw_part in re.split(r"[,;|/]+", value):
+        name = _name_from_labeled_part(raw_part)
+        if not name:
+            continue
+        occurrence_count = len(re.findall(rf"\b{re.escape(name)}\b", source_text, flags=re.IGNORECASE))
+        local_match = re.search(re.escape(name), description, flags=re.IGNORECASE)
+        match_start = line_start + (local_match.start() if local_match else 0)
+        match_end = match_start + len(name)
+        provenance = {
+            "sentence_index": None,
+            "sentence_start": line_start,
+            "sentence_end": line_start + len(description),
+            "match_start": match_start,
+            "match_end": match_end,
+            "excerpt": description,
+            "narrative_mode": "worldbuilding_note",
+        }
+        results.append(
+            {
+                "name": name,
+                "element_type": element_type,
+                "description": description,
+                "chapter_number": chapter_number,
+                "usage_count": max(1, occurrence_count),
+                "canonical_name": name,
+                "aliases": [],
+                "confidence": _labeled_candidate_confidence(name, element_type, description),
+                "provenance": provenance,
+                "claims": _extract_claims(name, description, element_type),
+            }
+        )
+    return results
+
+
+def _name_from_labeled_part(value: str) -> str | None:
+    cleaned = " ".join((value or "").split()).strip()
+    if not cleaned:
+        return None
+    cleaned = re.sub(r"^\s*(?:[-*+]|\d+[.)])\s+", "", cleaned)
+    cleaned = cleaned.strip(" \"'`[]")
+    cleaned = re.sub(r"\([^)]*\)", "", cleaned).strip()
+    cleaned = re.split(
+        r"\s+(?:is|are|was|were|uses|use|draws|draw|converts|convert|governs|govern|controls|control|comes|come|lives|live|known|ruled|located)\b",
+        cleaned,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0]
+    cleaned = re.split(r"\s[:\-]\s", cleaned, maxsplit=1)[0].strip()
+    cleaned = cleaned.strip(" .,:;")
+    if not cleaned:
+        return None
+
+    title_match = re.match(r"^(?:the\s+)?[A-Z][A-Za-z0-9'-]*(?:\s+[A-Z][A-Za-z0-9'-]*){0,5}", cleaned)
+    if title_match:
+        cleaned = title_match.group(0).strip()
+    elif re.fullmatch(r"[a-z][a-z0-9'-]*(?:\s+[a-z][a-z0-9'-]*){0,3}", cleaned):
+        cleaned = " ".join(part.capitalize() for part in cleaned.split())
+    else:
+        return None
+
+    normalized = normalize_entity_name(cleaned)
+    if not normalized:
+        return None
+    if len(normalized.split()) > 6:
+        return None
+    return cleaned
+
+
+def _labeled_candidate_confidence(name: str, element_type: str, description: str) -> float:
+    score = 0.72
+    if element_type in {"country", "region", "race", "magic_system"}:
+        score += 0.12
+    if len(normalize_entity_name(name).split()) >= 2:
+        score += 0.04
+    if len(description.split()) >= 5:
+        score += 0.04
+    return min(0.99, round(score, 3))
 
 
 def _is_structural_line(line: str) -> bool:

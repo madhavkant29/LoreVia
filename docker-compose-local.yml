@@ -63,6 +63,8 @@ services:
   migrate:
     build: { context: ./backend, dockerfile: Dockerfile.api }
     env_file: ./backend/.env.local
+    environment:
+      ALEMBIC_ALLOW_DESTRUCTIVE_UPGRADES: "1"
     depends_on:
       postgres:
         condition: service_healthy

@@ -63,7 +63,7 @@ export default function BookNotesPage() {
 
   return (
     <div className={`min-h-screen ${isDark ? "bg-[linear-gradient(180deg,#010409_0%,#07111c_50%,#0b1523_100%)] text-slate-100" : "bg-[linear-gradient(180deg,#f6f3ea_0%,#eef5ef_50%,#eef3f8_100%)] text-stone-950"}`}>
-      <div className="mx-auto max-w-[96rem] px-4 pb-20 pt-8 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-[108rem] px-4 pb-20 pt-6 sm:px-6 lg:px-8">
         <div className="grid gap-6 xl:grid-cols-[17rem_minmax(0,1fr)]">
           <AuthorToolsNav
             bookId={bookId}
@@ -74,17 +74,6 @@ export default function BookNotesPage() {
           />
 
           <div className="space-y-8">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p className={`text-[11px] font-semibold uppercase tracking-[0.3em] ${isDark ? "text-emerald-300" : "text-emerald-600"}`}>Vault notes workspace</p>
-                <h1 className={`mt-2 font-serif text-4xl tracking-tight ${isDark ? "text-white" : "text-stone-950"}`}>{book?.title || "Notes"}</h1>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Link href={`/${bookId}`} className={`rounded-full px-4 py-2 text-sm font-medium ${isDark ? "bg-white/5 text-slate-200" : "bg-white text-stone-700"}`}>Back to overview</Link>
-                <Link href={`/${bookId}/export`} className={`rounded-full px-4 py-2 text-sm font-medium ${isDark ? "bg-white/10 text-white" : "bg-stone-900 text-white"}`}>Open export studio</Link>
-              </div>
-            </div>
-
             {notesLoading ? (
               <div className={`rounded-[1.8rem] border border-dashed py-24 text-center ${isDark ? "border-white/10 text-slate-400" : "border-stone-300 text-stone-500"}`}>Loading vault notes workspace...</div>
             ) : (
@@ -111,6 +100,12 @@ export default function BookNotesPage() {
                   className={`inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-medium ${isDark ? "bg-white/10 text-slate-100" : "bg-stone-900 text-white"}`}
                 >
                   Open manuscript notes
+                </Link>
+                <Link
+                  href={`/${bookId}/scenes`}
+                  className={`inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-medium ${isDark ? "bg-white/10 text-slate-100" : "bg-white text-stone-700"}`}
+                >
+                  Open scene workspace
                 </Link>
               </div>
 

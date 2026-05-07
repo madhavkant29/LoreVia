@@ -109,7 +109,7 @@ export function ChapterText({
       ? '"Newsreader", "Merriweather", Georgia, serif'
       : fontFamily === "mono"
         ? '"SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace'
-        : '"Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
+        : '"Space Grotesk", "Avenir Next", "Segoe UI Variable Text", sans-serif'
 
   return (
     <div className="mx-auto w-full px-4 pb-28 pt-8 sm:px-8 lg:px-10" onMouseUp={handleMouseUp} style={{ maxWidth: "1000px" }}>

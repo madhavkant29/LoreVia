@@ -4,18 +4,8 @@ import { useState } from "react"
 
 import { cn } from "@/lib/utils/text"
 
-type EdgeColors = {
-  top?: string | null
-  bottom?: string | null
-  left?: string | null
-  right?: string | null
-  dominant?: string | null
-}
-
 interface SmartBookCoverProps {
   src?: string | null
-  processedSrc?: string | null
-  edgeColors?: EdgeColors | null
   title: string
   isDark?: boolean
   className?: string
@@ -24,53 +14,28 @@ interface SmartBookCoverProps {
 
 export function SmartBookCover({
   src,
-  processedSrc,
-  edgeColors,
   title,
   isDark = false,
   className,
   imageClassName,
 }: SmartBookCoverProps) {
   const [failed, setFailed] = useState(false)
-  const [attempt, setAttempt] = useState<"processed" | "original" | "fallback">("processed")
 
-  const processed = resolveCoverUrl(processedSrc)
-  const original = resolveCoverUrl(src)
-  const activeSrc = !failed
-    ? attempt === "processed"
-      ? processed ?? original
-      : attempt === "original"
-        ? original
-        : null
-    : null
+  const activeSrc = !failed ? resolveCoverUrl(src) : null
 
   const hasImage = Boolean(activeSrc)
   const imageSrc = activeSrc ?? ""
-  const colors = normalizeColors(edgeColors)
-  const fallbackStyle = colors
-    ? {
-        backgroundImage: `linear-gradient(160deg, ${colors.top} 0%, ${colors.dominant} 52%, ${colors.bottom} 100%)`,
-        backgroundColor: colors.dominant,
-      }
-    : undefined
 
   return (
     <div
       className={cn("relative overflow-hidden", className)}
-      style={fallbackStyle}
     >
       {hasImage ? (
         <img
           src={imageSrc}
           alt={`${title} cover`}
           className={cn("absolute inset-0 z-10 h-full w-full", imageClassName ?? "object-cover object-center")}
-          onError={() => {
-            if (attempt === "processed" && original && original !== processed) {
-              setAttempt("original")
-              return
-            }
-            setFailed(true)
-          }}
+          onError={() => setFailed(true)}
         />
       ) : (
         <div
@@ -105,14 +70,6 @@ function resolveCoverUrl(coverUrl: string | null | undefined) {
   } catch {
     return coverUrl
   }
-}
-
-function normalizeColors(edgeColors: EdgeColors | null | undefined) {
-  if (!edgeColors) return null
-  const top = edgeColors.top ?? edgeColors.dominant ?? "#1f2937"
-  const bottom = edgeColors.bottom ?? edgeColors.dominant ?? "#111827"
-  const dominant = edgeColors.dominant ?? top
-  return { top, bottom, dominant }
 }
 
 function titleInitials(title: string) {

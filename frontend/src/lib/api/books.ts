@@ -1,7 +1,7 @@
 import axios from "axios"
 import { apiClient } from "./client"
 import { cachedGet, invalidateCachedGets } from "./requestCache"
-import type { Book, BookEvents, BookNote, BookSeries, BookWorkType, ChapterConsistencyReport, ChapterVersion, ChapterVersionDetail, EmotionalArcOverview, ManuscriptWorkspaceTree, NovelScene, ObsidianGraph, ObsidianNoteRelations, ObsidianPreview, ObsidianVaultNote, ObsidianVaultNoteSaveResult, PreWritingCheck, PublicBook, PublicBookDetail, PublicChapter, ReadabilityMetrics, SavedQuote, SeriesBible, UserStats, WriterWorkspace } from "@/types/book"
+import type { Book, BookEvents, BookNote, BookSeries, BookWorkType, ChapterConsistencyReport, ChapterVersion, ChapterVersionDetail, EmotionalArcOverview, ManuscriptWorkspaceTree, NovelScene, ObsidianGraph, ObsidianNoteRelations, ObsidianPreview, ObsidianVaultNote, ObsidianVaultNoteSaveResult, PreWritingCheck, PublicBook, PublicBookDetail, PublicChapter, ReadabilityMetrics, SavedQuote, SeriesBible, StoryHealth, UserStats, WriterWorkspace } from "@/types/book"
 import type { Character, CharacterShareResponse } from "@/types/character"
 
 export interface ManuscriptImportResponse {
@@ -44,6 +44,10 @@ export const booksApi = {
   getPreWritingCheck: (id: string, upcomingChapter?: number) =>
     cachedGet(bookCacheKey(id, `pre-writing:${upcomingChapter ?? "auto"}`), 30 * 1000, () =>
       apiClient.get<PreWritingCheck>(`/books/${id}/pre-writing-check`, { params: typeof upcomingChapter === "number" ? { upcoming_chapter: upcomingChapter } : undefined }).then(r => r.data)
+    ),
+  getStoryHealth: (id: string) =>
+    cachedGet(bookCacheKey(id, "story-health"), 30 * 1000, () =>
+      apiClient.get<StoryHealth>(`/books/${id}/story-health`).then(r => r.data)
     ),
   getChapterVersions: (id: string, chapterNumber: number, limit = 12) =>
     cachedGet(bookCacheKey(id, `chapter-versions:${chapterNumber}:${limit}`), 30 * 1000, () =>
@@ -90,6 +94,8 @@ export const booksApi = {
       description?: string | null
       body: string
       html_body?: string | null
+      metadata?: Record<string, unknown> | null
+      path?: string | null
       chapter_number?: number | null
       status?: string | null
       sort_order?: number | null
@@ -109,7 +115,7 @@ export const booksApi = {
       invalidateCachedGets(bookCacheKey(id, "workspace-tree"))
       invalidateCachedGets(bookCacheKey(id, "scenes:"))
     }),
-  getSceneInsertion: (id: string, sceneId: string, chapterNumber: number, position: "start" | "end" = "end") =>
+  getSceneInsertion: (id: string, sceneId: string, chapterNumber: number, position: "start" | "end" = "end", includeMetadata = true) =>
     apiClient.post<{
       chapter_number: number
       position: "start" | "end"
@@ -117,7 +123,8 @@ export const booksApi = {
       body: string
       html_body?: string | null
       scene_id: string
-    }>(`/books/${id}/scenes/${sceneId}/insert`, null, { params: { chapter_number: chapterNumber, position } }).then(r => r.data),
+      include_metadata: boolean
+    }>(`/books/${id}/scenes/${sceneId}/insert`, null, { params: { chapter_number: chapterNumber, position, include_metadata: includeMetadata } }).then(r => r.data),
   getWriterWorkspace: (id: string) =>
     cachedGet(bookCacheKey(id, "writer-workspace"), 10 * 1000, () =>
       apiClient.get<WriterWorkspace>(`/books/${id}/writer-workspace`).then(r => r.data)
@@ -135,11 +142,6 @@ export const booksApi = {
     ),
   getReadability: (id: string, text: string) =>
     apiClient.post<ReadabilityMetrics>(`/books/${id}/manuscript/readability`, { text }).then(r => r.data),
-  processCover: (id: string) =>
-    apiClient.post<Book>(`/books/${id}/process-cover`).then(r => {
-      invalidateBookCache(id)
-      return r.data
-    }),
   getEvents: (id: string) =>
     cachedGet(bookCacheKey(id, "events"), 20 * 1000, () =>
       apiClient.get<BookEvents>(`/books/${id}/events`).then(r => r.data)
@@ -416,10 +418,11 @@ export const booksApi = {
   exportManuscript: (
     bookId: string,
     format: "pdf" | "docx" | "epub" | "obsidian" = "docx",
-    preset: "standard_manuscript" | "trade_paperback" | "kdp_paperback" = "standard_manuscript"
+    preset: "standard_manuscript" | "trade_paperback" | "kdp_paperback" = "standard_manuscript",
+    includeSceneMetadata = true
   ) =>
     apiClient.get<Blob>(`/books/${bookId}/manuscript/export`, {
-      params: { format, preset },
+      params: { format, preset, include_scene_metadata: includeSceneMetadata },
       responseType: "blob",
     }).then(r => r.data),
   delete: (id: string) => apiClient.delete<Book>(`/books/${id}`).then(r => {

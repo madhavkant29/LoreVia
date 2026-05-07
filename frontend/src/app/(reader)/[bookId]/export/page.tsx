@@ -38,6 +38,7 @@ export default function ExportStudioPage() {
   const [status, setStatus] = useState<string | null>(null)
   const [bibleFormat, setBibleFormat] = useState<ExportFormat>("obsidian_folder")
   const [manuscriptFormat, setManuscriptFormat] = useState<ManuscriptExportFormat>("docx")
+  const [includeSceneMetadata, setIncludeSceneMetadata] = useState(true)
   const [exporting, setExporting] = useState<string | null>(null)
   const [obsidianPreview, setObsidianPreview] = useState<ObsidianPreview | null>(null)
   const [bibleNotes, setBibleNotes] = useState<ObsidianVaultNote[]>([])
@@ -97,7 +98,7 @@ export default function ExportStudioPage() {
     setExporting("manuscript")
     setStatus(null)
     try {
-      const blob = await booksApi.exportManuscript(bookId, manuscriptFormat)
+      const blob = await booksApi.exportManuscript(bookId, manuscriptFormat, "standard_manuscript", includeSceneMetadata)
       const extension = manuscriptFormat === "obsidian" ? "zip" : manuscriptFormat
       downloadBlob(blob, `${safeFileBase(book.title, "lorevia")}-manuscript.${extension}`)
       setStatus(`Downloaded manuscript as ${extension.toUpperCase()}.`)
@@ -373,6 +374,20 @@ export default function ExportStudioPage() {
                         </button>
                       ))}
                     </div>
+                    <label className={`mt-4 flex items-start gap-3 rounded-[1rem] border px-4 py-3 text-sm ${isDark ? "border-white/10 bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+                      <input
+                        type="checkbox"
+                        checked={includeSceneMetadata}
+                        onChange={(event) => setIncludeSceneMetadata(event.target.checked)}
+                        className="mt-1 h-4 w-4 rounded border-stone-300"
+                      />
+                      <span>
+                        <span className="block font-semibold">Include scene metadata</span>
+                        <span className={`mt-1 block text-xs leading-5 ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+                          Disable for clean prose with scene breaks rendered as ***.
+                        </span>
+                      </span>
+                    </label>
                     <button
                       type="button"
                       onClick={() => void exportManuscript()}

@@ -20,6 +20,7 @@ from app.core.config import allowed_hosts, cors_origins, settings
 from app.core.database import engine
 from app.core.events import on_shutdown, on_startup
 from app.core.redis import get_redis
+from app.utils.security_utils import apply_security_headers
 
 if settings.SENTRY_DSN and not settings.DEBUG:
     sentry_sdk.init(
@@ -100,14 +101,11 @@ class SecurityHeadersMiddleware:
             if message["type"] == "http.response.start":
                 response_started = True
                 headers = dict(message.get("headers", []))
-                headers[b"x-request-id"] = request_id.encode()
-                headers[b"x-frame-options"] = b"DENY"
-                headers[b"x-content-type-options"] = b"nosniff"
-                headers[b"referrer-policy"] = b"strict-origin-when-cross-origin"
-                headers[b"permissions-policy"] = b"camera=(), microphone=(), geolocation=()"
-                headers[b"content-security-policy"] = b"default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
-                if not settings.DEBUG:
-                    headers[b"strict-transport-security"] = b"max-age=31536000; includeSubDomains; preload"
+                headers = apply_security_headers(
+                    headers,
+                    request_id=request_id,
+                    include_hsts=not settings.DEBUG,
+                )
                 message["headers"] = list(headers.items())
             await send(message)
 

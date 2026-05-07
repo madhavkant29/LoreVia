@@ -6,18 +6,19 @@ import { useParams } from "next/navigation"
 
 import { booksApi } from "@/lib/api/books"
 import { intelligenceApi } from "@/lib/api/intelligence"
+import { isPaidTier } from "@/lib/billing/plans"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import type { BookSeries } from "@/types/book"
 import type { AdvisorMessage, AdvisorResponse } from "@/types/intelligence"
 
 const SUGGESTED_QUESTIONS = [
-  { category: "Characters", question: "Who is the most recurring side character?", icon: "👤" },
-  { category: "Plot", question: "Summarize the conflict in Book 2.", icon: "📖" },
-  { category: "Continuity", question: "Are there any unresolved plot threads?", icon: "🔗" },
-  { category: "Lore", question: "Explain the significance of the main artifact.", icon: "✨" },
-  { category: "Arcs", question: "How does the protagonist's attitude change?", icon: "📈" },
-  { category: "Timeline", question: "Did the characters know the secret in Book 1?", icon: "⏱️" },
+  { category: "Characters", question: "Who is the most recurring side character?" },
+  { category: "Plot", question: "Summarize the conflict in Book 2." },
+  { category: "Continuity", question: "Are there any unresolved plot threads?" },
+  { category: "Lore", question: "Explain the significance of the main artifact." },
+  { category: "Arcs", question: "How does the protagonist's attitude change?" },
+  { category: "Timeline", question: "Did the characters know the secret in Book 1?" },
 ]
 
 function formatMarkdown(text: string): React.ReactNode {
@@ -75,7 +76,7 @@ export default function SeriesAskPage() {
   const bookCount = series?.books?.length || 0
   const hasStarted = askMessages.length > 0
 
-  if (!user || user.tier === "free") {
+  if (!user || !isPaidTier(user.tier)) {
     return (
       <div className={`min-h-screen flex items-center justify-center px-4 ${isDark ? "bg-[#0a0a0a]" : "bg-[#f5efe6]"}`}>
         <div className={`rounded-[2rem] border p-8 max-w-md ${isDark ? "border-white/10 bg-white/5" : "border-amber-300 bg-amber-50"}`}>
@@ -225,7 +226,7 @@ export default function SeriesAskPage() {
             
             {/* Footer Note */}
             <p className={`text-center text-xs mt-3 ${isDark ? "text-slate-500" : "text-stone-400"}`}>
-              Responses are grounded in your series data • AI may occasionally make mistakes
+              Responses are grounded in your series data. AI may occasionally make mistakes.
             </p>
           </div>
         </div>

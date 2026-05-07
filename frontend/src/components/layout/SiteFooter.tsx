@@ -5,6 +5,7 @@ import type { Route } from "next"
 import { usePathname } from "next/navigation"
 import { SocialLinks } from "@/components/layout/SocialLinks"
 import { LEGAL_EMAIL, SUPPORT_EMAIL } from "@/lib/constants/contact"
+import { TRUST_RESOURCE_LINKS } from "@/lib/constants/trust"
 import { useAuthStore } from "@/lib/stores/authStore"
 
 export function SiteFooter() {
@@ -18,6 +19,7 @@ export function SiteFooter() {
   const returnLink: { href: Route; label: string } = hydrated && user
     ? { href: "/library", label: "Return to library" }
     : { href: "/", label: "Return to landing page" }
+  const footerDocs = TRUST_RESOURCE_LINKS.filter((link) => link.href !== "/status")
 
   return (
     <footer className="border-t border-white/10 bg-[#050814] px-4 py-14 text-sm text-white transition-colors">
@@ -37,29 +39,16 @@ export function SiteFooter() {
 
         <div className="flex flex-col gap-6">
           <div className="flex flex-wrap gap-3">
-            <Link href="/contact" className={footerLinkClass}>
-              Contact
-            </Link>
-            <Link href="/terms" className={footerLinkClass}>
-              Terms
-            </Link>
-            <Link href="/privacy" className={footerLinkClass}>
-              Privacy
-            </Link>
+            {footerDocs.map((link) => (
+              <Link key={link.href} href={link.href} className={footerLinkClass}>
+                {link.label}
+              </Link>
+            ))}
             <Link href="/pricing" className={footerLinkClass}>
               Pricing
             </Link>
             <Link href="/status" className={footerLinkClass}>
               Status
-            </Link>
-            <Link href="/compliance" className={footerLinkClass}>
-              Compliance
-            </Link>
-            <Link href="/refund" className={footerLinkClass}>
-              Refund
-            </Link>
-            <Link href="/eula" className={footerLinkClass}>
-              EULA
             </Link>
             <Link href={returnLink.href} className={footerLinkClass}>
               {returnLink.label}

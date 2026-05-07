@@ -16,7 +16,7 @@ from fastapi import HTTPException
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import effective_tier, settings
+from app.core.config import settings
 from app.core.security import create_asset_token
 from app.core.storage import download_book, get_presigned_url
 from app.engine.character.deduplicator import names_equivalent
@@ -24,6 +24,8 @@ from app.engine.character.entity_filters import (
     VISIBILITY_THRESHOLD,
     character_visibility_score,
 )
+from app.utils.billing_utils import user_access_tier
+from app.utils.queue_utils import queue_for_user
 from app.engine.character.profile_builder import build_description
 from app.models.book import Book, Chapter, ChapterMedia
 from app.models.character import Character
@@ -159,6 +161,40 @@ def dedupe_timeline_events(events: list[dict]) -> list[dict]:
         seen.add(key)
         deduped.append(event)
     return deduped
+
+
+def timeline_plot_thread_span(
+    introduced_at: int | None,
+    resolved_at: int | None,
+    visible_chapters: set[int],
+) -> tuple[int, int] | None:
+    """Clamp a plot-thread span to the visible timeline window.
+
+    Older or partial extraction runs can leave plot threads without an
+    ``introduced_at`` chapter. In that case, keep the thread visible
+    across the currently visible window instead of dropping it.
+    """
+    if not visible_chapters:
+        return None
+
+    visible_min = min(visible_chapters)
+    visible_max = max(visible_chapters)
+
+    if introduced_at is not None and introduced_at > visible_max:
+        return None
+    if resolved_at is not None and resolved_at < visible_min:
+        return None
+
+    start_chapter = introduced_at if introduced_at is not None else visible_min
+    end_chapter = resolved_at if resolved_at is not None else visible_max
+
+    start_chapter = min(max(start_chapter, visible_min), visible_max)
+    end_chapter = min(max(end_chapter, visible_min), visible_max)
+
+    if end_chapter < start_chapter:
+        end_chapter = start_chapter
+
+    return start_chapter, end_chapter
 
 
 # ─── Relationship graph helpers ───────────────────────────────────────────────
@@ -345,7 +381,7 @@ def strip_json_fence(content: str) -> str:
 # ─── Chapter intelligence / access ───────────────────────────────────────────
 
 async def require_summary_access(db: AsyncSession, book: Book, current_user, chapter_num: int | None = None) -> None:
-    if effective_tier(current_user.tier) in ("pro", "power", "admin"):
+    if user_access_tier(current_user) in ("reader", "author", "architect", "admin"):
         return
     if not book.is_truncated:
         return
@@ -418,7 +454,7 @@ async def timeline_visible_chapter_set(
     return set(range(1, max(read_set) + 1))
 
 
-async def queue_analysis_if_missing(db: AsyncSession, chapter: Chapter) -> None:
+async def queue_analysis_if_missing(db: AsyncSession, chapter: Chapter, current_user=None) -> None:
     if await chapter_has_detailed_summary(db, chapter.id):
         return
     from app.workers.tasks.analysis_tasks import analyse_chapter_task
@@ -428,7 +464,7 @@ async def queue_analysis_if_missing(db: AsyncSession, chapter: Chapter) -> None:
         return
     analyse_chapter_task.apply_async(
         args=[str(chapter.id), chapter_text, chapter.title or ""],
-        queue="analysis",
+        queue=queue_for_user(current_user, "analysis") if current_user else "analysis",
     )
 
 
@@ -451,7 +487,7 @@ async def chapter_intelligence_available(db: AsyncSession, book: Book, current_u
 
 async def chapter_intelligence_map(db: AsyncSession, book: Book, current_user) -> dict[int, bool]:
     from app.models.book import Chapter as Ch
-    if effective_tier(current_user.tier) in ("pro", "power", "admin"):
+    if user_access_tier(current_user) in ("reader", "author", "architect", "admin"):
         rows = (await db.execute(
             select(Ch.number).where(Ch.book_id == book.id).order_by(Ch.number)
         )).all()

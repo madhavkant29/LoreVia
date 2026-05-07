@@ -1,6 +1,6 @@
 export interface Trait {
   value: string
-  confidence: number      // 0.0–1.0
+  confidence: number      // 0.0-1.0
   type: "objective" | "subjective" | "abstract"
 }
 

@@ -14,10 +14,5 @@ export const useAuthStore = create<AuthStore>()((set) => ({
   hydrated: false,
   setUser: (user) => set({ user, hydrated: true }),
   setHydrated: () => set({ hydrated: true }),
-  logout: () => {
-    if (typeof window !== "undefined") {
-      window.localStorage.removeItem("lorevia-auth")
-    }
-    set({ user: null, hydrated: true })
-  },
+  logout: () => set({ user: null, hydrated: true }),
 }))

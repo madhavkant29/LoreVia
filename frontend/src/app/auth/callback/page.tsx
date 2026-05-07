@@ -2,10 +2,12 @@
 
 import { useEffect } from "react"
 import { useRouter } from "next/navigation"
+import axios from "axios"
 
 import { authApi } from "@/lib/api/auth"
 import { supabase } from "@/lib/supabase"
 import { useAuthStore } from "@/lib/stores/authStore"
+import { getOrCreateDeviceId } from "@/lib/utils/device"
 
 export default function AuthCallbackPage() {
   const router = useRouter()
@@ -49,19 +51,26 @@ export default function AuthCallbackPage() {
         }
 
         const acceptedTerms = window.sessionStorage.getItem("lorevia-oauth-accepted-terms") === "true"
-        window.sessionStorage.removeItem("lorevia-oauth-accepted-terms")
-        const user = await authApi.loginWithSupabaseToken(session.access_token, acceptedTerms)
+        const user = await authApi.loginWithSupabaseToken(session.access_token, getOrCreateDeviceId(), acceptedTerms)
         if (!active) return
 
         if (!user) {
           fail("Could not load your profile after Google sign-in.")
           return
         }
+        window.sessionStorage.removeItem("lorevia-oauth-accepted-terms")
         setUser(user)
         router.replace(user.username ? "/library" : "/complete-username")
       } catch (error) {
+        if (axios.isAxiosError(error)) {
+          const detail = error.response?.data?.detail
+          if (typeof detail === "string" && detail.trim()) {
+            fail(detail)
+            return
+          }
+        }
         if (error instanceof Error) {
-          fail("OAuth sign-in failed.")
+          fail(error.message || "OAuth sign-in failed.")
           return
         }
         fail("OAuth sign-in failed.")
