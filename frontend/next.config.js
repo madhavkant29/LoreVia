@@ -57,7 +57,7 @@ const nextConfig = {
             key: "Content-Security-Policy",
             value: [
               "default-src 'self'",
-              "script-src 'self' 'unsafe-eval' https://eu.posthog.com",
+              "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://eu.posthog.com",
               "style-src 'self' 'unsafe-inline'",
               [
                 "img-src 'self' data: blob: https://getlorevia.com https://api.getlorevia.com",
