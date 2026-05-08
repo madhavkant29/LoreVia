@@ -294,7 +294,7 @@ def apply_chapter_number_strategy(
         return []
 
     if not preserve_chapter_numbers:
-        if generic_titles:
+        if generic_titles and _should_regroup_before_renumbering(normalized):
             normalized = regroup_prose_chapters_for_reading(normalized)
         return _renumber_sequentially(normalized, generic_titles=generic_titles)
 
@@ -312,6 +312,31 @@ def apply_chapter_number_strategy(
     for chapter, source_number in zip(normalized, source_numbers):
         chapter["number"] = source_number
     return normalized
+
+
+def _should_regroup_before_renumbering(chapters: Sequence[Mapping[str, Any]]) -> bool:
+    normalized_titles = [
+        " ".join(str(chapter.get("title") or "").split()).strip().lower()
+        for chapter in chapters
+        if " ".join(str(chapter.get("title") or "").split()).strip()
+    ]
+    if len(normalized_titles) < 2:
+        return False
+
+    if all(re.fullmatch(r"(chapter|part|section|scene|act|book|episode|volume)\s+([0-9]+|[ivxlcdm]+|[a-z])", title) for title in normalized_titles):
+        return True
+
+    repeated_bases: dict[str, int] = {}
+    for title in normalized_titles:
+        match = re.fullmatch(r"(?P<base>.+?)\s+([0-9]+|[ivxlcdm]+|[a-z])", title)
+        if not match:
+            continue
+        base = match.group("base").strip()
+        if not base:
+            continue
+        repeated_bases[base] = repeated_bases.get(base, 0) + 1
+
+    return any(count >= 2 for count in repeated_bases.values())
 
 
 def _renumber_sequentially(

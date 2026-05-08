@@ -285,3 +285,20 @@ def test_apply_chapter_number_strategy_regroups_non_preserved_chapters_before_re
     assert len(normalized) == 2
     assert [chapter["number"] for chapter in normalized] == [1, 2]
     assert [chapter["title"] for chapter in normalized] == ["Chapter 1", "Chapter 2"]
+
+
+def test_apply_chapter_number_strategy_keeps_distinct_titled_sections_separate():
+    chapters = [
+        {"number": 1, "title": "One", "text": "Aoi enters the archive and meets Ren."},
+        {"number": 2, "title": "Two", "text": "Ren reveals the ledger and the hidden room."},
+        {"number": 3, "title": "Three", "text": "They form a pact and leave before dawn."},
+    ]
+
+    normalized = apply_chapter_number_strategy(
+        chapters,
+        preserve_chapter_numbers=False,
+        generic_titles=True,
+    )
+
+    assert len(normalized) == 3
+    assert [chapter["number"] for chapter in normalized] == [1, 2, 3]

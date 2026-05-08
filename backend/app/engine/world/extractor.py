@@ -255,12 +255,12 @@ def infer_element_type(name: str, description: str = "") -> str:
             return "concept"
     if "magic system" in lowered or "power system" in lowered:
         return "magic_system"
-    if looks_like_person_entity_name(name):
-        return "character"
     haystack = f"{name} {description}".lower()
     for element_type, words in ELEMENT_PATTERNS.items():
         if any(word in haystack for word in words):
             return element_type
+    if looks_like_person_entity_name(name):
+        return "character"
     if re.search(r"\b(18|19|20)\d{2}\b", lowered):
         return "era"
     return "concept"
@@ -306,13 +306,26 @@ def extract_world_elements_from_text(text: str, *, chapter_number: int | None = 
                 "end": match.end(),
             }
         )
-    minimum_mentions = 1 if chapter_number is None else 2
     for phrase, count in counts.most_common(30):
         occurrence_entries = occurrences_by_phrase.get(phrase) or []
         provenance = _best_provenance(cleaned, phrase, occurrence_entries, sentence_spans)
         description = str((provenance or {}).get("excerpt") or "").strip()
+        narrative_mode = str((provenance or {}).get("narrative_mode") or "unknown")
+        element_type = infer_element_type(phrase, description or cleaned[:800])
         if (
-            count < minimum_mentions
+            (
+                count < 1
+                or (
+                    count < 2
+                    and chapter_number is not None
+                    and not _allow_single_mention_chapter_candidate(
+                        phrase,
+                        description,
+                        element_type=element_type,
+                        narrative_mode=narrative_mode,
+                    )
+                )
+            )
             or len(phrase) < 4
             or not is_valid_world_element_candidate(
                 phrase,
@@ -327,8 +340,6 @@ def extract_world_elements_from_text(text: str, *, chapter_number: int | None = 
         if key in seen:
             continue
         seen.add(key)
-        narrative_mode = str((provenance or {}).get("narrative_mode") or "unknown")
-        element_type = infer_element_type(phrase, description or cleaned[:800])
         if not description:
             description = f"Mentioned {count} times in chapter {chapter_number}." if chapter_number else f"Mentioned {count} times."
         confidence = _candidate_confidence(phrase, description, count=count, element_type=element_type, narrative_mode=narrative_mode)
@@ -355,6 +366,24 @@ def extract_world_elements_from_text(text: str, *, chapter_number: int | None = 
             }
         )
     return candidates
+
+
+def _allow_single_mention_chapter_candidate(
+    phrase: str,
+    description: str,
+    *,
+    element_type: str,
+    narrative_mode: str,
+) -> bool:
+    if narrative_mode == "dialogue":
+        return False
+
+    normalized_words = normalize_entity_name(phrase).split()
+    if len(normalized_words) >= 2:
+        return True
+    if element_type in {"place", "country", "region", "organization", "religion", "event", "object", "magic_system", "character"}:
+        return True
+    return bool(_extract_claims(phrase, description, element_type))
 
 
 def is_valid_world_element_candidate(

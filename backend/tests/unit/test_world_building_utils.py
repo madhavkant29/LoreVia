@@ -256,6 +256,16 @@ def test_extract_world_elements_marks_negated_claims():
     assert claims_by_attribute["climate"]["negated"] is True
 
 
+def test_extract_world_elements_keeps_single_mention_chapter_places_with_descriptive_context():
+    items = extract_world_elements_from_text(
+        "Northreach is a desert capital where the market roads bake under glass heat.",
+        chapter_number=1,
+    )
+
+    northreach = next(item for item in items if item["name"] == "Northreach")
+    assert northreach["element_type"] == "place"
+
+
 def test_extract_worldbuilding_labeled_sections_for_core_lore_types():
     text = """
     # Countries

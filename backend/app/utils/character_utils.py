@@ -397,7 +397,7 @@ async def _merge_character_references(
         )
     ).scalars().all()
     for summary in chapter_summaries:
-        key_events = list(summary.key_events or [])
+        key_events = [dict(event) if isinstance(event, dict) else event for event in (summary.key_events or [])]
         changed = False
         for event in key_events:
             if not isinstance(event, dict):
@@ -409,7 +409,7 @@ async def _merge_character_references(
         if changed:
             summary.key_events = key_events
 
-        char_changes = list(summary.char_changes or [])
+        char_changes = [dict(change) if isinstance(change, dict) else change for change in (summary.char_changes or [])]
         char_change_changed = False
         for change in char_changes:
             if not isinstance(change, dict):

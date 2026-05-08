@@ -318,9 +318,10 @@ def _resolve_character_match(name: str, aliases: list[str], character_registry: 
             continue
         if not names_equivalent(name, aliases, canonical_name, character_aliases):
             continue
+        candidate_names = [canonical_name, *character_aliases]
         score = max(
-            name_similarity(name, canonical_name),
-            max((name_similarity(alias, canonical_name) for alias in aliases), default=0.0),
+            max((name_similarity(name, candidate_name) for candidate_name in candidate_names), default=0.0),
+            max((name_similarity(alias, candidate_name) for alias in aliases for candidate_name in candidate_names), default=0.0),
         )
         if score >= best_score:
             best_score = score
@@ -1039,7 +1040,7 @@ async def _build_world_gap_analysis_payload(
     for key, world_item in world_by_name.items():
         if not _should_surface_world_item(world_item):
             continue
-        story_match = _find_matching_item(world_item["name"], story_by_name)
+        story_match = _find_matching_item(world_item["name"], story_by_name, aliases=world_item.get("aliases") or [])
         if story_match is None:
             grouped_items["missing_in_story"].append(
                 _build_gap_item(
@@ -1084,7 +1085,7 @@ async def _build_world_gap_analysis_payload(
             )
 
     for key, story_item in story_by_name.items():
-        if _find_matching_item(story_item["name"], world_by_name) is not None or not _should_surface_story_item(story_item):
+        if _find_matching_item(story_item["name"], world_by_name, aliases=story_item.get("aliases") or []) is not None or not _should_surface_story_item(story_item):
             continue
         grouped_items["missing_in_world"].append(
             _build_gap_item(
@@ -1101,7 +1102,10 @@ async def _build_world_gap_analysis_payload(
     for character in characters:
         if not character["should_watch"]:
             continue
-        if _world_text_mentions_name(world_corpus_text, character["name"]) or _find_matching_item(character["name"], world_by_name) is not None:
+        character_aliases = list(character.get("aliases") or [])
+        if _world_text_mentions_name(world_corpus_text, character["name"]) or any(
+            _world_text_mentions_name(world_corpus_text, alias) for alias in character_aliases
+        ) or _find_matching_item(character["name"], world_by_name, aliases=character_aliases) is not None:
             continue
         grouped_items["character_gaps"].append(
             {
@@ -1203,13 +1207,17 @@ async def _build_integration_analysis_payload(
         serialized_element = _serialize_world_element(element)
         if not _should_surface_world_item(serialized_element):
             continue
-        story_match = _find_matching_item(element.name, story_by_name)
+        metadata = element.analysis_metadata or {}
+        story_match = _find_matching_item(
+            element.name,
+            story_by_name,
+            aliases=metadata.get("aliases") or [],
+        )
         story_match_data = story_match or {}
         presence_score = float(story_match_data.get("presence_score") or 0.0)
         usage_count = int(story_match_data.get("usage_count") or 0)
         if presence_score >= 0.62 or usage_count >= 3:
             continue
-        metadata = element.analysis_metadata or {}
         target_chapter = story_match_data.get("chapter_number")
         integration_opportunities.append(
             {
@@ -1574,6 +1582,7 @@ async def _collect_story_characters(db: AsyncSession, book: Book) -> list[dict]:
             select(
                 Character.id,
                 Character.name,
+                Character.aliases,
                 Character.role,
                 Character.first_chapter,
                 Character.arc_summary,
@@ -1584,7 +1593,7 @@ async def _collect_story_characters(db: AsyncSession, book: Book) -> list[dict]:
         )
     ).all()
     results = []
-    for character_id, name, role, first_chapter, arc_summary, mention_count in rows:
+    for character_id, name, aliases, role, first_chapter, arc_summary, mention_count in rows:
         story_evidence = f"{name} appears in the manuscript"
         if role:
             story_evidence += f" as {role}"
@@ -1594,6 +1603,7 @@ async def _collect_story_characters(db: AsyncSession, book: Book) -> list[dict]:
             {
                 "id": str(character_id),
                 "name": name,
+                "aliases": [alias for alias in (aliases or []) if alias],
                 "chapter_number": first_chapter,
                 "story_evidence": story_evidence,
                 "should_watch": int(mention_count or 0) >= 4 or role in {"mc", "sc"},
@@ -1663,26 +1673,43 @@ def _collapse_elements(items: list[dict]) -> dict[str, dict]:
     return collapsed
 
 
-def _find_matching_item(name: str, items_by_name: dict[str, dict]) -> dict | None:
-    key = _normalize_world_name(name)
-    if not key:
+def _find_matching_item(name: str, items_by_name: dict[str, dict], *, aliases: list[str] | None = None) -> dict | None:
+    query_names = [str(name or "").strip(), *[str(alias).strip() for alias in (aliases or [])]]
+    query_names = [query_name for query_name in query_names if query_name]
+    normalized_keys = {_normalize_world_name(query_name) for query_name in query_names}
+    normalized_keys.discard("")
+    if not normalized_keys:
         return None
 
-    exact_match = items_by_name.get(key)
-    if exact_match is not None:
-        return exact_match
+    for key in normalized_keys:
+        exact_match = items_by_name.get(key)
+        if exact_match is not None:
+            return exact_match
 
     best_match: dict | None = None
     best_score = 0.0
     for candidate in items_by_name.values():
-        candidate_name = str(candidate.get("name") or "").strip()
-        if not candidate_name:
+        candidate_names = [
+            str(candidate.get("canonical_name") or candidate.get("name") or "").strip(),
+            *[str(alias).strip() for alias in (candidate.get("aliases") or [])],
+        ]
+        candidate_names = [candidate_name for candidate_name in candidate_names if candidate_name]
+        if not candidate_names:
             continue
-        if _world_names_equivalent(name, candidate_name):
-            score = name_similarity(name, candidate_name)
-            if score >= best_score:
-                best_score = score
-                best_match = candidate
+        if any(_normalize_world_name(candidate_name) in normalized_keys for candidate_name in candidate_names):
+            return candidate
+        score = max(
+            (
+                name_similarity(query_name, candidate_name)
+                for query_name in query_names
+                for candidate_name in candidate_names
+                if _world_names_equivalent(query_name, candidate_name)
+            ),
+            default=0.0,
+        )
+        if score >= best_score:
+            best_score = score
+            best_match = candidate
     return best_match if best_score >= 0.84 else None
 
 

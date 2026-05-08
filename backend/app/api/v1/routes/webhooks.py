@@ -30,7 +30,7 @@ async def paddle_webhook(request: Request, paddle_signature: str | None = Header
 
     payload = await request.body()
     if not verify_webhook_signature(payload, paddle_signature):
-        raise HTTPException(400, "Invalid signature")
+        raise HTTPException(400, "Invalid request.")
 
     event = await request.json()
     event_id = event_id_from_paddle_payload(event)

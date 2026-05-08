@@ -529,12 +529,12 @@ def build_writer_workspace_payload(book: Book) -> dict:
     return payload
 
 
-def build_book_processing_payload(book: Book) -> BookProcessingOut | None:
+def build_book_processing_payload(book: Book) -> dict[str, Any] | None:
     workspace = normalize_writer_workspace(book.writer_workspace if isinstance(book.writer_workspace, dict) else None)
     processing = workspace.get("processing")
     if not isinstance(processing, dict) or not processing:
         return None
-    return BookProcessingOut.model_validate(processing)
+    return BookProcessingOut.model_validate(processing).model_dump(mode="json")
 
 
 def estimate_readability(text: str) -> dict[str, Any]:
@@ -1842,7 +1842,7 @@ def strip_scene_metadata_from_manuscript_text(text: str) -> str:
         output.append(lines[index].rstrip())
         index += 1
     cleaned = "\n".join(output)
-    cleaned = re.sub(r"\n{4,}", "\n\n\n", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     return cleaned.strip()
 
 

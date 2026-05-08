@@ -28,6 +28,12 @@ from app.utils.migration_utils import is_local_database_url
 
 
 @pytest.fixture(autouse=True)
+def test_runtime_defaults(monkeypatch):
+    """Run tests with production-like auth and billing behavior by default."""
+    monkeypatch.setattr("app.core.config.settings.DEBUG", False, raising=False)
+
+
+@pytest.fixture(autouse=True)
 def mock_download_book(monkeypatch):
     """Mock download_book to avoid S3 errors in all tests."""
     monkeypatch.setattr("app.core.storage.download_book", lambda key: b"mock content")

@@ -17,6 +17,7 @@ async def _register_user(client, email: str) -> tuple[dict[str, str], uuid.UUID]
             "username": email.split("@")[0][:24],
             "password": "StrongPass123!@#",
             "accepted_terms": True,
+            "device_id": f"device-{uuid.uuid4().hex[:24]}",
         },
     )
     assert response.status_code == 201

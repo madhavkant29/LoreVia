@@ -163,9 +163,12 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
             detail=exc.detail,
         ),
     )
+    detail = public_error_message(exc.status_code)
+    if exc.status_code != 404 and isinstance(exc.detail, str) and exc.detail:
+        detail = exc.detail
     return JSONResponse(
         status_code=exc.status_code,
-        content={"detail": public_error_message(exc.status_code)},
+        content={"detail": detail},
     )
 
 

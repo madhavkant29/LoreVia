@@ -11,17 +11,18 @@ from app.utils.user_utils import (
 
 
 def _user_stub(**overrides):
-    return SimpleNamespace(
-        daily_word_goal=1000,
-        today_word_count=0,
-        today_word_count_date=None,
-        last_login_at=None,
-        last_login_date=None,
-        login_streak_days=0,
-        longest_login_streak_days=0,
-        login_activity_dates=[],
-        **overrides,
-    )
+    payload = {
+        "daily_word_goal": 1000,
+        "today_word_count": 0,
+        "today_word_count_date": None,
+        "last_login_at": None,
+        "last_login_date": None,
+        "login_streak_days": 0,
+        "longest_login_streak_days": 0,
+        "login_activity_dates": [],
+    }
+    payload.update(overrides)
+    return SimpleNamespace(**payload)
 
 
 def test_current_daily_word_goal_falls_back_to_default():
