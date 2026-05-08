@@ -39,6 +39,7 @@ type NavIcon =
   | "summary"
   | "analysis"
   | "notes"
+  | "quote"
   | "files"
 
 type NavItem = {
@@ -91,6 +92,7 @@ const NAV_SECTIONS = (bookId: string, currentChapter = 1): NavSection[] => [
       { id: "search", label: "Search Passages", href: `/${bookId}/search` as Route, tone: "Find", icon: "search" },
       { id: "timeline", label: "Major Events", href: `/${bookId}/timeline` as Route, tone: "Plot", icon: "events" },
       { id: "summaries", label: "Summary", href: `/${bookId}/summaries` as Route, tone: "Recap", icon: "summary" },
+      { id: "quotes", label: "Saved Quotes", href: "/quotes" as Route, tone: "Highlights", icon: "quote" },
       { id: "analysis", label: "Analysis", href: `/${bookId}/analysis` as Route, tone: "Advanced", icon: "analysis" },
     ],
   },
@@ -236,6 +238,8 @@ function NavSvg({ icon }: { icon: NavIcon }) {
       return <svg className={common} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M5 19V9M10 19V5M15 19v-7M20 19V8" /><path strokeLinecap="round" strokeLinejoin="round" d="M4 19h17" /></svg>
     case "notes":
       return <svg className={common} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M7 4h8l3 3v13H7V4z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 4v4h4M9 13h6M9 16h4" /></svg>
+    case "quote":
+      return <svg className={common} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M9 9H6v4h3v5l-4-3V9a3 3 0 013-3h1v3zM18 9h-3v4h3v5l-4-3V9a3 3 0 013-3h1v3z" /></svg>
     case "files":
       return <svg className={common} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M4 7h6l2 2h8v9a2 2 0 01-2 2H6a2 2 0 01-2-2V7z" /><path strokeLinecap="round" strokeLinejoin="round" d="M12 13h5M14.5 10.5L17 13l-2.5 2.5" /></svg>
     case "book":

@@ -101,6 +101,7 @@ class Settings(BaseSettings):
     EMAIL_FROM: str = "support@mail.getlorevia.com"
     SUPPORT_EMAIL: str = "support@getlorevia.com"
     LEGAL_EMAIL: str = "legal@getlorevia.com"
+    INTERNAL_JOB_SECRET: str | None = None
 
     # Monitoring
     SENTRY_DSN: str | None = None

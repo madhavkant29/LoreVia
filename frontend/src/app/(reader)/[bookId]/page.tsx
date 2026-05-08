@@ -367,6 +367,7 @@ export default function BookOverviewPage() {
   useEffect(() => {
     const routes: Route[] = [
       `/${bookId}` as Route,
+      "/quotes" as Route,
       `/${bookId}/summaries` as Route,
       `/${bookId}/analysis` as Route,
       `/${bookId}/ask` as Route,

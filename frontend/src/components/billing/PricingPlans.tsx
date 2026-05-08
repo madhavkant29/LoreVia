@@ -1,11 +1,11 @@
 "use client"
 
 import { useState } from "react"
+import { useRouter } from "next/navigation"
 
-import type { PaidPlanCode } from "@/lib/billing/plans"
 import { billingApi } from "@/lib/api/billing"
+import type { PaidPlanCode } from "@/lib/billing/plans"
 import { useAuthStore } from "@/lib/stores/authStore"
-import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 
 type BillingCycle = "monthly" | "annual"
 
@@ -21,6 +21,10 @@ type PricingTier = {
   annualCode: PaidPlanCode | null
   message?: string | null
   bullets: string[]
+}
+
+type PricingPlansProps = {
+  surface?: "public" | "app"
 }
 
 const pricingTiers: PricingTier[] = [
@@ -45,7 +49,7 @@ const pricingTiers: PricingTier[] = [
   },
   {
     name: "Reader",
-    badge: "Most Popular",
+    badge: "Most popular",
     priceMonthly: 12,
     priceAnnual: 120,
     subtitle: "For the dedicated reader",
@@ -83,10 +87,10 @@ const pricingTiers: PricingTier[] = [
   },
   {
     name: "Lore Architect",
-    badge: "Power User",
+    badge: "Power user",
     priceMonthly: 36,
     priceAnnual: 360,
-    subtitle: "For series & world-builders",
+    subtitle: "For series and world-builders",
     highlight: false,
     cta: "Build your World",
     monthlyCode: "architect_monthly",
@@ -102,15 +106,23 @@ const pricingTiers: PricingTier[] = [
   },
 ]
 
-export default function PricingPage() {
-  const { theme } = usePreferencesStore()
+function getGuestCtaLabel(tier: PricingTier) {
+  return tier.name === "Free" ? "Start free" : "Start free trial"
+}
+
+export function PricingPlans({ surface = "public" }: PricingPlansProps) {
+  const router = useRouter()
   const { user } = useAuthStore()
-  const isDark = theme === "dark"
   const [billingCycle, setBillingCycle] = useState<BillingCycle>("annual")
   const [busyPlan, setBusyPlan] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
 
   async function handlePlanClick(tier: PricingTier) {
+    if (!user) {
+      router.push("/register")
+      return
+    }
+
     const selectedPlanCode = billingCycle === "annual" ? tier.annualCode : tier.monthlyCode
     if (!selectedPlanCode) {
       setMessage(tier.message ?? `${tier.name} cannot be started from this page yet.`)
@@ -133,122 +145,103 @@ export default function PricingPage() {
     }
   }
 
+  const helperCopy = user
+    ? "Your account is ready for upgrades from this screen."
+    : surface === "public"
+      ? "Create an account to start the 10-day Author trial, then choose the plan that fits."
+      : "Create an account or sign in before starting checkout."
+
   return (
-    <div className={`rounded-[2.2rem] border px-6 py-8 shadow-[0_30px_110px_-55px_rgba(15,23,42,0.4)] md:px-8 lg:px-10 ${isDark ? "border-white/10 bg-[#050505]" : "border-stone-200 bg-[#0c0c0d] text-white"}`}>
-      <div className="flex flex-col gap-10 lg:flex-row lg:items-end lg:justify-between">
-        <div className="max-w-3xl">
-          <p className="text-xs font-bold uppercase tracking-[0.34em] text-slate-300">Pricing</p>
-          <h1 className="mt-4 font-serif text-5xl leading-[0.95] text-white md:text-6xl">
-            Pick a tier that matches your
-            <br />
-            pace.
-          </h1>
-          <p className="mt-6 max-w-2xl text-lg leading-9 text-slate-300">
-            Annual billing is shown by default. Every new signup gets 10 days of Author access, with no credit card required.
-          </p>
-          <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-400">
-            Annual plans save $16 on Reader, $48 on Author, and $72 on Lore Architect.
-          </p>
-          {user ? (
-            <p className="mt-4 text-sm text-slate-500">Your account is ready for upgrades right from this screen.</p>
-          ) : null}
+    <section className={surface === "public" ? "border-t border-white/[0.08] py-8" : undefined}>
+      <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="text-2xl font-semibold tracking-[-0.02em] text-[#F2F4F7]">Plans</h2>
+          <p className="mt-2 text-sm text-[#7F8994]">{helperCopy}</p>
         </div>
 
-        <div className="flex justify-start lg:justify-end">
-          <div className="relative inline-flex items-center rounded-full bg-white/10 p-1">
-            <div
-              className="absolute left-1 top-1 h-[calc(100%-8px)] w-[calc(50%-4px)] rounded-full bg-white transition-transform duration-300 ease-out"
-              style={{ transform: billingCycle === "annual" ? "translateX(100%)" : "translateX(0)" }}
-            />
+        <div className="inline-flex w-fit rounded-full border border-white/[0.08] bg-[#0B0F14] p-1">
+          {(["monthly", "annual"] as const).map((cycle) => (
             <button
+              key={cycle}
               type="button"
-              onClick={() => setBillingCycle("monthly")}
-              className={`relative z-10 rounded-full px-5 py-2 text-sm font-semibold transition-colors duration-200 ${
-                billingCycle === "monthly" ? "text-stone-950" : "text-slate-300 hover:text-white"
+              onClick={() => setBillingCycle(cycle)}
+              className={`rounded-full px-4 py-2 text-sm font-medium capitalize transition ${
+                billingCycle === cycle ? "bg-[#D2B47A] text-[#05070A]" : "text-[#A8B0BA] hover:text-[#F2F4F7]"
               }`}
             >
-              Monthly
+              {cycle}
             </button>
-            <button
-              type="button"
-              onClick={() => setBillingCycle("annual")}
-              className={`relative z-10 rounded-full px-5 py-2 text-sm font-semibold transition-colors duration-200 ${
-                billingCycle === "annual" ? "text-stone-950" : "text-slate-300 hover:text-white"
-              }`}
-            >
-              Annual
-            </button>
-          </div>
+          ))}
         </div>
       </div>
 
       {message ? (
-        <div className="mt-6 rounded-2xl border border-amber-300/20 bg-amber-300/10 px-4 py-3 text-sm text-amber-100">
+        <div className="mt-6 rounded-xl border border-[#C9A86A]/30 bg-[#0B0F14] px-4 py-3 text-sm leading-6 text-[#E5CA91]">
           {message}
         </div>
       ) : null}
 
-      <div className="mt-16 grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+      <div className="mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {pricingTiers.map((tier) => {
           const price = billingCycle === "annual" ? tier.priceAnnual : tier.priceMonthly
           const unit = tier.name === "Free" ? "" : billingCycle === "annual" ? "/yr" : "/mo"
           const selectedPlanCode = billingCycle === "annual" ? tier.annualCode : tier.monthlyCode
           const isBusy = selectedPlanCode ? busyPlan === selectedPlanCode : false
+          const buttonLabel = user ? tier.cta : getGuestCtaLabel(tier)
 
           return (
             <article
               key={tier.name}
-              className={`group relative flex min-h-[48rem] flex-col rounded-[2rem] p-8 transition-all duration-300 hover:-translate-y-1 ${
-                tier.highlight
-                  ? "border border-violet-400/20 bg-violet-500/[0.07] shadow-[inset_0_0_40px_rgba(139,92,246,0.10),0_24px_80px_-30px_rgba(139,92,246,0.18)]"
-                  : "border border-white/10 bg-white/[0.03] hover:border-white/15"
+              className={`flex min-h-[34rem] flex-col rounded-xl border bg-[#0B0F14] p-6 ${
+                tier.highlight ? "border-[#C9A86A]/55" : "border-white/[0.08]"
               }`}
             >
-              <div className="mb-8 flex items-center justify-between">
-                <span className={`text-[10px] font-bold uppercase tracking-[0.2em] ${tier.highlight ? "text-violet-300" : "text-slate-500"}`}>
-                  {tier.badge}
-                </span>
-                {tier.highlight ? <div className="h-2.5 w-2.5 rounded-full bg-violet-300" /> : null}
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-[#7F8994]">{tier.badge}</p>
+                  <h3 className="mt-4 text-2xl font-semibold text-[#F2F4F7]">{tier.name}</h3>
+                </div>
+                {tier.highlight ? <span className="text-[11px] font-semibold uppercase tracking-[0.24em] text-[#C9A86A]">Core</span> : null}
               </div>
 
-              <h2 className="text-2xl font-semibold text-white">{tier.name}</h2>
-
-              <div className="mt-4 flex items-end gap-1">
-                <span className="text-6xl font-bold tracking-tighter text-white">
+              <div className="mt-7 flex items-end gap-1">
+                <span className="text-5xl font-semibold tracking-[-0.05em] text-[#F2F4F7]">
                   {tier.name === "Free" ? "$0" : `$${price}`}
                 </span>
-                <span className="mb-2 text-sm text-slate-400">{unit}</span>
+                <span className="mb-1 text-sm text-[#7F8994]">{unit}</span>
               </div>
 
-              <p className="mt-2 text-sm text-slate-400">{tier.subtitle}</p>
+              <p className="mt-3 text-sm leading-6 text-[#A8B0BA]">{tier.subtitle}</p>
 
-              <ul className="mt-10 space-y-5">
+              <ul className="mt-8 space-y-3 text-sm leading-6 text-[#A8B0BA]">
                 {tier.bullets.map((bullet) => (
-                  <li key={bullet} className="flex items-start gap-4 text-sm leading-8">
-                    <span className={`mt-1 text-base font-bold ${tier.highlight ? "text-violet-300" : "text-slate-500"}`}>•</span>
-                    <span className={bullet.startsWith("Everything in") ? "text-slate-400" : "text-slate-200"}>{bullet}</span>
+                  <li key={bullet} className="flex gap-3">
+                    <span className="text-[#C9A86A]" aria-hidden="true">
+                      -
+                    </span>
+                    <span className={bullet.startsWith("Everything in") ? "text-[#7F8994]" : undefined}>{bullet}</span>
                   </li>
                 ))}
               </ul>
 
-              <div className="mt-auto pt-10">
+              <div className="mt-auto pt-8">
                 <button
                   type="button"
                   onClick={() => void handlePlanClick(tier)}
                   disabled={isBusy}
-                  className={`inline-flex w-full items-center justify-center rounded-xl py-4 text-base font-semibold transition-all duration-200 disabled:opacity-60 ${
+                  className={`inline-flex w-full items-center justify-center rounded-lg border px-4 py-3 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
                     tier.highlight
-                      ? "bg-white text-stone-950 hover:bg-stone-100"
-                      : "border border-white/10 bg-transparent text-slate-100 hover:border-white/20 hover:bg-white/[0.04]"
+                      ? "border-[#D2B47A] bg-[#D2B47A] text-[#05070A] hover:bg-[#E5CA91]"
+                      : "border-white/[0.1] text-[#F2F4F7] hover:border-[#C9A86A]/45"
                   }`}
                 >
-                  {isBusy ? "Opening checkout..." : tier.cta}
+                  {isBusy ? "Opening checkout..." : buttonLabel}
                 </button>
               </div>
             </article>
           )
         })}
       </div>
-    </div>
+    </section>
   )
 }

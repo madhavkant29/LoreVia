@@ -45,7 +45,7 @@ export const TRUST_RESOURCE_LINKS: Array<{
     description: "How subscription cancellation works, when refunds may be reviewed, and how approved refunds are processed.",
   },
   {
-    href: "/eula",
+    href: "/eula" as Route,
     label: "EULA",
     title: "End user license agreement",
     description: "The software license covering permitted use, restrictions, ownership, updates, and termination.",

@@ -148,15 +148,6 @@ async def _issue_email_verification(user: User) -> tuple[bool, str]:
     return await deliver_verification_email(user.email, token)
 
 
-def _enqueue_trial_email_scan() -> None:
-    try:
-        from app.workers.tasks.lifecycle_tasks import send_due_trial_emails_task
-
-        send_due_trial_emails_task.apply_async(queue="lifecycle")
-    except Exception:
-        log.exception("Failed to enqueue trial email lifecycle scan")
-
-
 @router.post("/register", response_model=RegisterOut, status_code=201)
 async def register(
     body: RegisterBody,
@@ -317,7 +308,6 @@ async def oauth_supabase(
 
     if created:
         await send_onboarding_email(existing.email)
-        _enqueue_trial_email_scan()
 
     record_login_activity(existing)
     await db.commit()
@@ -434,7 +424,6 @@ async def verify_email(
         await schedule_trial_email_events(db, user)
         await db.commit()
         await send_onboarding_email(user.email)
-        _enqueue_trial_email_scan()
 
     record_login_activity(user)
     await db.commit()

@@ -17,6 +17,7 @@ from app.schemas.monetization import (
 from app.services.monetization_service import (
     create_referral_if_valid,
     ensure_referral_code,
+    expire_due_points_for_user,
     point_balance,
 )
 
@@ -28,6 +29,8 @@ async def get_points_balance(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    await expire_due_points_for_user(db, current_user.id)
+    await db.commit()
     return PointsBalanceOut(balance=await point_balance(db, current_user.id))
 
 
@@ -36,6 +39,8 @@ async def get_points_ledger(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    await expire_due_points_for_user(db, current_user.id)
+    await db.commit()
     entries = (
         await db.execute(
             select(PointLedgerEntry)
@@ -52,6 +57,7 @@ async def get_referrals(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    await expire_due_points_for_user(db, current_user.id)
     referral_code = await ensure_referral_code(db, current_user)
     rewards = (
         await db.execute(

@@ -4,6 +4,7 @@ import Link from "next/link"
 import type { Route } from "next"
 import { usePathname, useRouter } from "next/navigation"
 import { authApi } from "@/lib/api/auth"
+import { BrandLockup } from "@/components/layout/BrandLockup"
 import { NotificationBell } from "@/components/layout/NotificationBell"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
@@ -31,9 +32,10 @@ export function Navbar() {
   const navItems: Array<{ href: Route; label: string }> = [
     { href: "/library", label: "Library" },
     { href: "/notes", label: "Notes" },
+    { href: "/quotes", label: "Quotes" },
     { href: "/stats", label: "Stats" },
     { href: "/series", label: "Series" },
-    { href: "/pricing", label: "Pricing" },
+    { href: "/upgrade", label: "Pricing" },
     { href: "/settings", label: "Settings" },
   ]
 
@@ -42,10 +44,11 @@ export function Navbar() {
       <div className="mx-auto flex max-w-7xl flex-col gap-4">
         <div className="flex items-center justify-between gap-4">
           <Link href="/library" className="group flex items-center">
-            <img 
-              src="/image.png" 
-              alt="LoreVia" 
-              className="h-10 w-10 rounded-lg object-cover transition-transform group-hover:scale-105"
+            <BrandLockup
+              size="sm"
+              className="transition-transform group-hover:scale-[1.02]"
+              iconClassName="h-10 w-10 rounded-xl"
+              textClassName="text-slate-900 dark:text-white"
             />
           </Link>
 

@@ -543,7 +543,8 @@ Implemented in the current pricing pass:
 - pricing strategy doc
 - points ledger schema, service, and read APIs
 - referral code capture and referral rewards after verified first-book processing
-- trial email event scheduling and Resend delivery worker
+- trial email event scheduling and protected internal cron delivery endpoint
+- lazy point expiry on points reads
 - Architect/Admin priority queue dispatch for extraction and analysis tasks
 
 Not implemented yet:

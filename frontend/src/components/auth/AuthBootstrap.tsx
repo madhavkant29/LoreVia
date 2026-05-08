@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react"
 import { usePathname } from "next/navigation"
 import { authApi } from "@/lib/api/auth"
+import { shouldSkipAuthBootstrap } from "@/lib/routes"
 import { useAuthStore } from "@/lib/stores/authStore"
 
 export function AuthBootstrap() {
@@ -14,15 +15,7 @@ export function AuthBootstrap() {
     if (ran.current) return
     ran.current = true
 
-    if (
-      pathname === "/auth/callback" ||
-      pathname.startsWith("/login") ||
-      pathname.startsWith("/register") ||
-      pathname.startsWith("/verify-email") ||
-      pathname.startsWith("/complete-username") ||
-      pathname.startsWith("/forgot-password") ||
-      pathname.startsWith("/reset-password")
-    ) {
+    if (shouldSkipAuthBootstrap(pathname)) {
       setHydrated()
       return
     }

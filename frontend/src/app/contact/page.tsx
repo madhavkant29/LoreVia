@@ -1,6 +1,6 @@
 import type { Metadata } from "next"
 
-import { TrustPage } from "@/components/legal/TrustPage"
+import { LegalContactBlock, LegalPageShell, LegalRightRail } from "@/components/legal/LegalPageShell"
 import { LEGAL_EMAIL, SUPPORT_EMAIL } from "@/lib/constants/contact"
 import { TRUST_EFFECTIVE_DATE } from "@/lib/constants/trust"
 
@@ -64,59 +64,43 @@ const sections = [
 
 export default function ContactPage() {
   return (
-    <TrustPage
-      currentPath="/contact"
+    <LegalPageShell
       eyebrow="Contact"
-      title="Reach the right LoreVia inbox the first time."
+      title="We're here to help."
       description="Use this page to route support, billing, legal, copyright, privacy, and security questions without guessing which channel is appropriate."
       effectiveDate={TRUST_EFFECTIVE_DATE}
-      intro={[
-        "A lot of footer contact pages are decorative. This one is meant to be operational. It tells you where to send what, what context helps, and how to report something sensitive without turning it into a public problem first.",
-        "LoreVia is a product for manuscript work, which means support requests can range from ordinary account issues to copyright or confidentiality concerns. Routing matters.",
-      ]}
-      facts={[
-        {
-          label: "Support",
-          value: SUPPORT_EMAIL,
-          detail: "Use for product help, billing questions, refunds, bugs, and account-access issues.",
-        },
-        {
-          label: "Legal",
-          value: LEGAL_EMAIL,
-          detail: "Use for formal notices, rights disputes, licensing questions, privacy matters, and security reporting.",
-        },
-        {
-          label: "Live operations",
-          value: "status.getlorevia.com",
-          detail: "Use the status page for active incidents and planned maintenance rather than waiting on manual email updates.",
-        },
-        {
-          label: "Best reports",
-          value: "Specific, reproducible, calm",
-          detail: "Concise facts beat vague frustration when the goal is getting the issue fixed quickly.",
-        },
-      ]}
-      sections={[...sections]}
-      contacts={[
-        {
-          title: "Support and billing",
-          description: "Product help, billing portal issues, refund reviews, account questions, and bug reports.",
-          ctaLabel: SUPPORT_EMAIL,
-          ctaHref: `mailto:${SUPPORT_EMAIL}`,
-        },
-        {
-          title: "Legal, privacy, and security",
-          description: "Formal notices, rights concerns, licensing questions, sensitive privacy matters, and vulnerability reports.",
-          ctaLabel: LEGAL_EMAIL,
-          ctaHref: `mailto:${LEGAL_EMAIL}`,
-        },
-        {
-          title: "Service health",
-          description: "Check the live public status host for maintenance windows and incident updates before assuming a local account problem.",
-          ctaLabel: "status.getlorevia.com",
-          ctaHref: "https://status.getlorevia.com",
-        },
-      ]}
+      notice="This page is operational, not decorative. It tells you where to send what, what context helps, and how to report something sensitive privately."
+      sections={sections}
+      rightRail={
+        <LegalRightRail
+          items={[
+            {
+              label: "Support",
+              value: SUPPORT_EMAIL,
+              href: `mailto:${SUPPORT_EMAIL}`,
+              detail: "Product help, billing questions, refunds, bugs, and account-access issues.",
+            },
+            {
+              label: "Legal",
+              value: LEGAL_EMAIL,
+              href: `mailto:${LEGAL_EMAIL}`,
+              detail: "Formal notices, rights disputes, licensing questions, privacy matters, and security reporting.",
+            },
+            {
+              label: "Live operations",
+              value: "LoreVia status page",
+              href: "/status",
+              detail: "Use the status page for active incidents and planned maintenance.",
+            },
+          ]}
+        />
+      }
+      contactBlock={
+        <LegalContactBlock
+          title="Need help?"
+          description="For product, billing, legal, privacy, or security questions, use the relevant inbox below."
+        />
+      }
     />
   )
 }

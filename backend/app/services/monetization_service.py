@@ -9,6 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.book import Book
 from app.models.user import PointLedgerEntry, Referral, TrialEmailEvent, User
+from app.services.email_service import send_trial_email
+from app.utils.billing_utils import FREE_TIER, normalize_tier
 from app.utils.monetization_utils import (
     FIRST_PROCESSED_BOOK_POINTS,
     POINT_ENTRY_EXPIRE,
@@ -143,6 +145,57 @@ async def point_balance(db: AsyncSession, user_id: uuid.UUID) -> int:
     return max(int(balance or 0), 0)
 
 
+async def send_due_trial_emails(
+    db: AsyncSession,
+    *,
+    now: datetime | None = None,
+    limit: int = 100,
+) -> dict[str, int]:
+    current = now or utc_now()
+    current = current if current.tzinfo else current.replace(tzinfo=UTC)
+    due_rows = (
+        await db.execute(
+            select(TrialEmailEvent, User)
+            .join(User, User.id == TrialEmailEvent.user_id)
+            .where(
+                TrialEmailEvent.status == "pending",
+                TrialEmailEvent.scheduled_for <= current,
+                User.email_verified_at.is_not(None),
+            )
+            .order_by(TrialEmailEvent.scheduled_for.asc())
+            .limit(limit)
+            .with_for_update(skip_locked=True)
+        )
+    ).all()
+
+    sent_count = 0
+    latest_due_by_user: dict[str, tuple[TrialEmailEvent, User]] = {}
+    for event, user in due_rows:
+        user_key = str(user.id)
+        older = latest_due_by_user.get(user_key)
+        if older is not None:
+            older[0].status = "skipped"
+            older[0].last_error = "Superseded by a later due trial email."
+        latest_due_by_user[user_key] = (event, user)
+
+    for event, user in latest_due_by_user.values():
+        if normalize_tier(user.tier) != FREE_TIER:
+            event.status = "skipped"
+            event.last_error = "User upgraded before trial email was due."
+            continue
+        delivered = await send_trial_email(user.email, event.email_type)
+        if delivered:
+            event.status = "sent"
+            event.sent_at = current
+            event.last_error = None
+            sent_count += 1
+        else:
+            event.status = "failed"
+            event.last_error = "Resend delivery failed."
+
+    return {"sent": sent_count, "checked": len(due_rows)}
+
+
 async def qualify_referral_if_ready(
     db: AsyncSession,
     referred_user: User,
@@ -247,6 +300,60 @@ async def expire_due_points(db: AsyncSession, now: datetime | None = None, limit
         db.add(
             PointLedgerEntry(
                 user_id=grant.user_id,
+                entry_type=POINT_ENTRY_EXPIRE,
+                source_type=grant.source_type,
+                source_id=source_id,
+                points_delta=-grant.points_delta,
+                metadata_json={"expired_grant_id": source_id},
+            )
+        )
+        expired += 1
+    return expired
+
+
+async def expire_due_points_for_user(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    now: datetime | None = None,
+    limit: int = 100,
+) -> int:
+    current = now or utc_now()
+    current = current if current.tzinfo else current.replace(tzinfo=UTC)
+    grants = (
+        await db.execute(
+            select(PointLedgerEntry)
+            .where(
+                PointLedgerEntry.user_id == user_id,
+                PointLedgerEntry.entry_type == POINT_ENTRY_GRANT,
+                PointLedgerEntry.points_delta > 0,
+                PointLedgerEntry.expires_at.is_not(None),
+                PointLedgerEntry.expires_at <= current,
+            )
+            .order_by(PointLedgerEntry.expires_at.asc())
+            .limit(limit)
+            .with_for_update(skip_locked=True)
+        )
+    ).scalars().all()
+
+    expired = 0
+    for grant in grants:
+        source_id = str(grant.id)
+        exists = (
+            await db.execute(
+                select(PointLedgerEntry.id).where(
+                    PointLedgerEntry.user_id == user_id,
+                    PointLedgerEntry.entry_type == POINT_ENTRY_EXPIRE,
+                    PointLedgerEntry.source_type == grant.source_type,
+                    PointLedgerEntry.source_id == source_id,
+                )
+            )
+        ).first()
+        if exists:
+            continue
+        db.add(
+            PointLedgerEntry(
+                user_id=user_id,
                 entry_type=POINT_ENTRY_EXPIRE,
                 source_type=grant.source_type,
                 source_id=source_id,

@@ -10,16 +10,24 @@ function getApiOrigin() {
   }
 }
 
-function getApiRewriteOrigin() {
-  return getApiOrigin() ?? "http://localhost:8000"
-}
-
 const nextConfig = {
   typedRoutes: true,
   output: "standalone",
   productionBrowserSourceMaps: false,
   async rewrites() {
-    const apiOrigin = getApiRewriteOrigin()
+    const apiOrigin = getApiOrigin()
+    if (!apiOrigin) {
+      if (process.env.NODE_ENV !== "production") {
+        return [
+          {
+            source: "/api/v1/:path*",
+            destination: "http://localhost:8000/api/v1/:path*",
+          },
+        ]
+      }
+      return []
+    }
+
     return [
       {
         source: "/api/v1/:path*",

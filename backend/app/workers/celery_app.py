@@ -72,7 +72,6 @@ celery_app = Celery(
         "app.workers.tasks.analysis_tasks",
         "app.workers.tasks.embedding_tasks",
         "app.workers.tasks.intelligence_tasks",
-        "app.workers.tasks.lifecycle_tasks",
     ],
 )
 
@@ -91,7 +90,6 @@ celery_app.conf.update(
         "analysis_tasks.*":   {"queue": "analysis"},
         "embedding_tasks.*":  {"queue": "embedding"},
         "intelligence_tasks.*": {"queue": "intelligence"},
-        "lifecycle_tasks.*": {"queue": "lifecycle"},
     },
     task_annotations={
         # Queue-specific guardrails:

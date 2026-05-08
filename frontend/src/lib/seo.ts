@@ -51,5 +51,4 @@ export const organizationJsonLd = {
   name: SITE_NAME,
   url: SITE_URL,
   logo: toAbsoluteUrl("/image.png"),
-  sameAs: ["https://status.getlorevia.com"],
 }

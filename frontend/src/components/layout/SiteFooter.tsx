@@ -3,6 +3,7 @@
 import Link from "next/link"
 import type { Route } from "next"
 import { usePathname } from "next/navigation"
+import { BrandLockup } from "@/components/layout/BrandLockup"
 import { SocialLinks } from "@/components/layout/SocialLinks"
 import { LEGAL_EMAIL, SUPPORT_EMAIL } from "@/lib/constants/contact"
 import { TRUST_RESOURCE_LINKS } from "@/lib/constants/trust"
@@ -16,6 +17,7 @@ export function SiteFooter() {
 
   const footerLinkClass =
     "rounded-full px-3 py-1.5 -mx-1 -my-1.5 text-sm transition-all hover:bg-white/10 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/40"
+  const pricingHref = hydrated && user ? "/upgrade" : "/pricing"
   const returnLink: { href: Route; label: string } = hydrated && user
     ? { href: "/library", label: "Return to library" }
     : { href: "/", label: "Return to landing page" }
@@ -25,12 +27,9 @@ export function SiteFooter() {
     <footer className="border-t border-white/10 bg-[#050814] px-4 py-14 text-sm text-white transition-colors">
       <div className="mx-auto flex max-w-7xl flex-col gap-8 lg:flex-row lg:items-end lg:justify-between">
         <div className="max-w-xl">
-          <div className="flex items-center gap-3">
-            <img src="/image.png" alt="LoreVia" className="h-11 w-11 rounded-2xl object-cover" />
-            <div>
-              <p className="text-sm font-semibold tracking-[0.3em]">LOREVIA</p>
-              <p className="text-sm text-white/60">Manuscript intelligence for readers and authors</p>
-            </div>
+          <div>
+            <BrandLockup size="md" iconClassName="h-11 w-11 rounded-2xl" />
+            <p className="mt-2 text-sm text-white/60">Manuscript intelligence for readers and authors</p>
           </div>
           <p className="mt-5 max-w-lg text-base leading-7 text-white/70">
             Built for long books, real continuity work, and people who want a calmer way to work through a story.
@@ -44,9 +43,15 @@ export function SiteFooter() {
                 {link.label}
               </Link>
             ))}
-            <Link href="/pricing" className={footerLinkClass}>
-              Pricing
-            </Link>
+            {hydrated && user ? (
+              <Link href={pricingHref as Route} className={footerLinkClass}>
+                Pricing
+              </Link>
+            ) : (
+              <a href={pricingHref} className={footerLinkClass}>
+                Pricing
+              </a>
+            )}
             <Link href="/status" className={footerLinkClass}>
               Status
             </Link>

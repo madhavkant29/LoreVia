@@ -30,9 +30,10 @@ The backend implementation now includes:
   - `trial_ending`
   - `trial_ended`
 - Resend-backed trial email delivery through `backend/app/services/email_service.py`.
-- `lifecycle_tasks.send_due_trial_emails` Celery scanner for due verified-user trial emails.
-- If a user verifies late and multiple lifecycle emails are already due, the worker skips older pending trial emails and sends the latest due message only.
+- Protected internal cron endpoint at `POST /api/v1/internal/jobs/send-due-trial-emails` for due verified-user trial emails.
+- If a user verifies late and multiple lifecycle emails are already due, the cron-triggered scan skips older pending trial emails and sends the latest due message only.
 - Immutable `point_ledger_entries` with grant and expiry entries.
+- Lazy point expiry on points balance, ledger, and referral-balance reads instead of a scheduled expiry worker.
 - Referral codes on users and `referrals` records.
 - Referral rewards only after the referred user has verified email and completed first book processing.
 - First processed book point reward.
@@ -220,13 +221,13 @@ Why:
 Recommended implementation:
 
 - create schedule rows when the user registers
-- run an hourly worker or cron-triggered task that:
+- run an hourly cron-triggered internal endpoint that:
   - selects due unsent emails
   - checks eligibility
   - sends via Resend
   - marks sent/failed/skipped
 
-Do not rely only on delayed single-shot tasks at signup. A reconciliation scanner is safer if workers restart or tasks are lost.
+Do not rely only on delayed single-shot tasks at signup. A reconciliation scanner is safer if jobs are delayed or requests are missed.
 
 ### Eligibility checks
 
@@ -317,7 +318,11 @@ Recommended expiry policy:
   - not expire in MVP
   - or use a 180-day expiry if cost pressure matters
 
-Also add a weekly cleanup worker for expiry processing.
+Implemented direction:
+
+- expiry is lazy for now
+- expire points when the user reads balance/ledger or otherwise touches the points system
+- do not run a separate scheduled expiry worker yet
 
 ## Referral rewards plan
 
@@ -491,6 +496,8 @@ To keep this phase safe and shippable:
 - use Resend through the existing email service
 - store lifecycle email delivery state in SQL, not only Redis
 - use an immutable points ledger
+- use a protected internal cron endpoint instead of a dedicated lifecycle Celery worker
+- keep point expiry lazy until point spending is introduced
 - make referral rewards qualify only after meaningful user activity
 - enforce Architect priority through dedicated queues
 - keep ad watch ledger and public rollout fully out of scope

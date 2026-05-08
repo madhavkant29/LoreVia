@@ -19,10 +19,12 @@ down_revision: str | None = "20260507_add_user_goal_and_login_streak"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
-
 def _index_names(inspector: sa.Inspector, table_name: str) -> set[str]:
-    return {index["name"] for index in inspector.get_indexes(table_name)}
-
+    return {
+        name
+        for index in inspector.get_indexes(table_name)
+        if isinstance(name := index.get("name"), str)
+    }
 
 def upgrade() -> None:
     bind = op.get_bind()

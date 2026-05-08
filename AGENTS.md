@@ -75,6 +75,12 @@ LoreVia2/
 - No commented-out code left in PRs.
 - Preserve all existing docstrings and comments unrelated to your change.
 
+### 6a. Frontend Branding
+
+- Always use the real LoreVia logo assets from `frontend/public/`.
+- Use `frontend/public/logoandtext.png` for full logo lockups and `frontend/public/image.png` only for icon-only marks.
+- Do not recreate the LoreVia logo with inline SVG, text-only approximations, generated artwork, or hand-drawn substitutes.
+
 ### 7. Testing
 
 - **Write tests for all new functions** in `backend/tests/unit/` for utility functions and `backend/tests/integration/` for API endpoints.

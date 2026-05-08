@@ -2,6 +2,7 @@
 
 import posthog from "posthog-js"
 import { PostHogProvider } from "posthog-js/react"
+import { usePathname } from "next/navigation"
 import React from "react"
 import CookieConsent, { getCookieConsentValue } from "react-cookie-consent"
 
@@ -23,6 +24,7 @@ function initPostHog() {
 
 export function PostHogClientProvider({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = React.useState(false)
+  const pathname = usePathname()
 
   React.useEffect(() => {
     if (!isEnabled()) return
@@ -41,7 +43,7 @@ export function PostHogClientProvider({ children }: { children: React.ReactNode 
   return (
     <>
       {ready ? <PostHogProvider client={posthog}>{children}</PostHogProvider> : <>{children}</>}
-      {isEnabled() ? (
+      {isEnabled() && pathname !== "/privacy" ? (
         <CookieConsent
           cookieName="lorevia_analytics_consent"
           enableDeclineButton

@@ -3,6 +3,7 @@
 import Link from "next/link"
 import type { Route } from "next"
 import { useEffect, useRef, useState, type ReactNode } from "react"
+import { BrandLockup } from "@/components/layout/BrandLockup"
 import { useAuthStore } from "@/lib/stores/authStore"
 
 const navItems = [
@@ -16,13 +17,12 @@ const navItems = [
 const fileFormats = ["DOCX", "PDF", "EPUB", "MD", "TXT", "Obsidian"]
 
 const workspaceNav = [
-  "Ask LoreVia",
+  "Workspace",
   "Manuscript",
   "Characters",
-  "Places",
-  "Plot Threads",
+  "Continuity",
   "Timeline",
-  "Continuity Scan",
+  "Story Advisor",
   "Notes",
 ]
 
@@ -36,21 +36,40 @@ const scanSummary = [
 
 const workspaceModules = [
   {
-    title: "Manuscript",
-    body: "Chapter text stays beside references, notes, and issue markers.",
+    title: "Manuscript Editor",
+    body: "Write chapters with notes, references, and issue markers beside the draft.",
   },
   {
     title: "Character Bible",
-    body: "Profiles update from the draft instead of depending on manual cards.",
-  },
-  {
-    title: "Story Advisor",
-    body: "Ask grounded questions with chapter-aware limits and citations.",
+    body: "Automatically track characters, aliases, traits, relationships, and appearances.",
   },
   {
     title: "Continuity Scan",
-    body: "Contradictions, dropped promises, and duplicate names surface together.",
+    body: "Catch contradictions, duplicate names, dropped plot threads, and unresolved promises.",
   },
+  {
+    title: "Story Advisor",
+    body: "Ask grounded questions with chapter-aware citations and spoiler limits.",
+  },
+]
+
+const workspaceShowcaseTabs = ["Manuscript Editor", "Character Bible", "Continuity Scan", "Story Advisor"]
+
+const manuscriptHighlights = [
+  "Chapter 18 now mirrors the river crossing setup from Chapter 7.",
+  "Mira's oath to return the amulet is still open in the current draft.",
+  "Joren's alias appears in three scenes before the formal reveal.",
+]
+
+const characterSnapshot = [
+  ["Aliases", "3 tracked"],
+  ["Relationships", "12 linked"],
+  ["Last appearance", "Chapter 18"],
+]
+
+const advisorCitations = [
+  "Chapter 7: Mira reaches Vael with the northern caravan.",
+  "Chapter 11: The alias 'Glassbird' is first used in council notes.",
 ]
 
 const processSteps = [
@@ -96,25 +115,30 @@ const audienceTabs = {
 }
 
 const comparisonRows = [
-  ["Automatic character extraction", "-", "Limited", "-", "Yes"],
-  ["Spoiler-aware answers", "-", "-", "-", "Yes"],
-  ["Continuity contradiction detection", "-", "-", "-", "Yes"],
-  ["Chapter-grounded references", "-", "Limited", "Mixed", "Yes"],
-  ["Author revision workspace", "Yes", "-", "-", "Yes"],
-  ["Works before publishing", "Yes", "-", "-", "Yes"],
-  ["Reader-safe recap", "-", "Limited", "-", "Yes"],
+  ["Manuscript editor", "Yes", "Yes", "Yes", "Yes"],
+  ["Character database", "Manual", "Manual", "No", "Automatic"],
+  ["Relationship tracking", "Manual", "Yes", "No", "Automatic"],
+  ["Timeline tools", "Manual", "Yes", "No", "Yes"],
+  ["Worldbuilding workspace", "Limited", "Yes", "No", "Yes"],
+  ["AI story understanding", "No", "No", "No", "Yes"],
+  ["Automatic continuity scans", "No", "No", "No", "Yes"],
+  ["Chapter-grounded answers", "No", "No", "No", "Yes"],
+  ["Spoiler-aware story memory", "No", "No", "No", "Yes"],
+  ["Multi-book analysis", "No", "Partial", "No", "Yes"],
+  ["Detect dropped plot threads", "No", "No", "No", "Yes"],
+  ["Character voice consistency checks", "No", "No", "No", "Yes"],
 ]
 
 const pricingTiers = [
   {
     name: "Free",
     price: 0,
-    subtitle: "For testing one book and trying story recall.",
+    subtitle: "Explore LoreVia with a single project.",
     bullets: [
       "2 active books",
-      "Smart Tap, character profiles, and recall",
-      "Short summaries only",
-      "5 semantic searches/day and 3 prediction queries/day",
+      "Character tracking and story recall",
+      "Basic chapter summaries",
+      "Standard usage limits",
     ],
     cta: "Start free",
     highlighted: false,
@@ -122,43 +146,43 @@ const pricingTiers = [
   {
     name: "Reader",
     price: 12,
-    subtitle: "For dedicated readers returning to long books.",
+    subtitle: "For readers following long stories and series.",
     bullets: [
       "Everything in Free, plus",
       "Unlimited books",
-      "Multi-mode story summaries",
-      "Reader-only access with no authoring tools",
-      "10 prediction queries/day",
+      "Multi-chapter summaries",
+      "Advanced story questions",
+      "Reader-focused workspace",
     ],
-    cta: "Go Reader",
+    cta: "Continue reading",
     highlighted: false,
   },
   {
     name: "Author",
     price: 24,
-    subtitle: "For drafting, revising, and managing an active manuscript.",
+    subtitle: "For active manuscript drafting and revision.",
     bullets: [
       "Everything in Reader, plus",
-      "Catch continuity errors automatically",
-      "Chapter and manuscript feedback",
-      "Auto-generated character reference sheets",
-      "Visual relationship maps",
-      "Marketed as unlimited with a 30/day fair-use cap",
+      "Continuity scans",
+      "Manuscript feedback",
+      "Character reference generation",
+      "Relationship and timeline tracking",
+      "High monthly usage limits",
     ],
-    cta: "Start drafting",
+    cta: "Start writing",
     highlighted: true,
   },
   {
     name: "Lore Architect",
     price: 36,
-    subtitle: "For heavy usage, large manuscripts, and series work.",
+    subtitle: "For multi-book projects and expansive story worlds.",
     bullets: [
       "Everything in Author, plus",
-      "Priority processing planned for launch rollout",
-      "Deeper continuity analysis",
-      "Analyze multiple books together",
+      "Cross-book continuity analysis",
+      "Advanced world consistency checks",
+      "Series-wide relationship tracking",
       "Early access to new features",
-      "Marketed as unlimited with a 60/day fair-use cap",
+      "Extended analysis capacity",
     ],
     cta: "Build your world",
     highlighted: false,
@@ -271,10 +295,11 @@ function SectionHeader({
 
 function LogoMark({ compact = false }: { compact?: boolean }) {
   return (
-    <div className="flex items-center gap-3">
-      <img src="/image.png" alt="LoreVia" className={compact ? "h-9 w-9 rounded-xl object-cover" : "h-12 w-12 rounded-2xl object-cover"} />
-      <span className={compact ? "text-lg font-semibold text-white" : "text-2xl font-semibold text-white"}>LoreVia</span>
-    </div>
+    <BrandLockup
+      size={compact ? "sm" : "md"}
+      textClassName={compact ? "" : "text-[0.82rem] sm:text-[0.88rem] tracking-[0.3em]"}
+      iconClassName={compact ? "" : "h-10 w-10 rounded-xl"}
+    />
   )
 }
 
@@ -518,16 +543,16 @@ function ScanProof({ ctaHref }: { ctaHref: Route }) {
 function WorkspacePreview() {
   return (
     <Section id="product">
-      <div className="grid gap-10 lg:grid-cols-[0.8fr_1.2fr] lg:items-center">
+      <div className="grid gap-12">
         <Reveal>
-          <div>
+          <div className="max-w-3xl">
             <SectionHeader
-              title="One workspace for the entire story."
-              body="Instead of another row of feature cards, LoreVia gives the manuscript a working surface: text, characters, threads, scans, and grounded answers in one place."
+              title="Everything your story needs, in one workspace."
+              body="Upload a manuscript and LoreVia turns it into a living workspace for chapters, characters, continuity checks, notes, timelines, and grounded story questions."
             />
-            <div className="mt-8 grid gap-4 sm:grid-cols-2">
+            <div className="mt-10 grid gap-px overflow-hidden rounded-2xl border border-white/10 bg-white/10 sm:grid-cols-2">
               {workspaceModules.map((item) => (
-                <div key={item.title} className="border-l border-white/15 pl-5">
+                <div key={item.title} className="h-full bg-[#080d18]/88 p-5 md:p-6">
                   <h3 className="text-lg font-semibold text-white">{item.title}</h3>
                   <p className="mt-2 text-sm leading-6 text-slate-400">{item.body}</p>
                 </div>
@@ -536,9 +561,9 @@ function WorkspacePreview() {
           </div>
         </Reveal>
 
-        <Reveal delay={100}>
-          <div className="overflow-hidden rounded-2xl border border-white/10 bg-[#080d18]">
-            <div className="grid lg:grid-cols-[190px_1fr_210px]">
+        <Reveal delay={100} className="min-w-0">
+          <div className="min-w-0 overflow-hidden rounded-2xl border border-white/10 bg-[#080d18]">
+            <div className="grid min-w-0 lg:grid-cols-[190px_minmax(0,1fr)_220px]">
               <aside className="hidden border-r border-white/10 p-4 lg:block">
                 {["Manuscripts", "Scans", "Characters", "Locations", "World Bible", "Timelines", "Notes"].map((item, index) => (
                   <div
@@ -552,21 +577,28 @@ function WorkspacePreview() {
                 ))}
               </aside>
 
-              <div className="p-5 md:p-6">
+              <div className="min-w-0 p-5 md:p-6 lg:p-7">
                 <div className="flex flex-wrap items-center justify-between gap-4">
                   <h3 className="text-2xl font-semibold text-white">Manuscripts</h3>
                   <button type="button" className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white">
                     + New Manuscript
                   </button>
                 </div>
-                <div className="mt-6 overflow-x-auto">
-                  <table className="w-full min-w-[560px] text-left text-sm">
+                <div className="mt-6">
+                  <table className="w-full table-fixed text-left text-sm">
+                    <colgroup>
+                      <col className="w-[34%]" />
+                      <col className="w-[18%]" />
+                      <col className="w-[14%]" />
+                      <col className="w-[18%]" />
+                      <col className="w-[16%]" />
+                    </colgroup>
                     <thead className="text-slate-500">
                       <tr>
-                        <th className="pb-3 font-medium">Title</th>
-                        <th className="pb-3 font-medium">Status</th>
-                        <th className="pb-3 font-medium">Chapters</th>
-                        <th className="pb-3 font-medium">Last Scan</th>
+                        <th className="pb-3 pr-4 font-medium">Title</th>
+                        <th className="pb-3 pr-4 font-medium">Status</th>
+                        <th className="pb-3 pr-4 font-medium">Chapters</th>
+                        <th className="pb-3 pr-4 font-medium">Last Scan</th>
                         <th className="pb-3 font-medium">Score</th>
                       </tr>
                     </thead>
@@ -579,12 +611,12 @@ function WorkspacePreview() {
                         ["Dawn of the Fifth", "Outlining", "10", "Apr 5", "84%"],
                       ].map((row) => (
                         <tr key={row[0]}>
-                          <td className="py-3 font-medium text-white">{row[0]}</td>
-                          <td className="py-3">
-                            <span className="rounded bg-white/8 px-2 py-1 text-xs">{row[1]}</span>
+                          <td className="py-3 pr-4 font-medium text-white">{row[0]}</td>
+                          <td className="py-3 pr-4">
+                            <span className="inline-flex rounded bg-white/8 px-2 py-1 text-xs">{row[1]}</span>
                           </td>
-                          <td className="py-3">{row[2]}</td>
-                          <td className="py-3">{row[3]}</td>
+                          <td className="py-3 pr-4">{row[2]}</td>
+                          <td className="py-3 pr-4">{row[3]}</td>
                           <td className="py-3 font-semibold text-emerald-300">{row[4]}</td>
                         </tr>
                       ))}
@@ -601,7 +633,7 @@ function WorkspacePreview() {
                     <p className="text-xs text-slate-400">Excellent</p>
                   </div>
                 </div>
-                <div className="mt-7 grid grid-cols-2 gap-4 text-sm">
+                <div className="mt-7 grid grid-cols-2 gap-4 text-sm sm:grid-cols-4 lg:grid-cols-2">
                   <div>
                     <p className="text-slate-500">Total Scans</p>
                     <p className="mt-1 font-semibold text-white">27</p>
@@ -734,8 +766,8 @@ function ComparisonSection() {
   return (
     <Section id="comparison">
       <SectionHeader
-        title="Why authors choose LoreVia."
-        body="A compact look at where LoreVia is different: it reads the story, keeps chapter evidence, and works before a book is public."
+        title="Where traditional writing tools stop."
+        body="Traditional writing tools help organize stories. LoreVia actively understands them."
       />
       <Reveal>
         <div className="mt-10 overflow-hidden rounded-2xl border border-white/10 bg-[#080d18]">
@@ -743,7 +775,7 @@ function ComparisonSection() {
             <table className="w-full min-w-[820px] border-separate border-spacing-0 text-left text-sm">
               <thead>
                 <tr className="text-slate-400">
-                  {["Feature", "Campfire", "Kindle X-Ray", "Wiki", "LoreVia"].map((head) => (
+                  {["Feature", "Scrivener", "Campfire", "Google Docs", "LoreVia"].map((head) => (
                     <th
                       key={head}
                       className={`border-b border-white/10 px-5 py-5 font-semibold ${
@@ -765,7 +797,9 @@ function ComparisonSection() {
                           index === 0 ? "font-medium text-white" : ""
                         } ${index === 4 ? "bg-cyan-300/[0.06] font-semibold text-cyan-100" : ""}`}
                       >
-                        {cell}
+                        {cell === "" || cell === "No" ? (
+                          <span className="text-slate-600">&times;</span>
+                        ) : cell}
                       </td>
                     ))}
                   </tr>
@@ -783,8 +817,8 @@ function PricingSection({ ctaHref }: { ctaHref: Route }) {
   return (
     <Section id="pricing">
       <SectionHeader
-        title="Simple pricing for different story loads."
-        body="Start free, then choose the plan that matches how many books, chapters, and scans you need. The Author plan is the best fit for most manuscript work."
+        title="Choose the workspace that fits your writing."
+        body="From casual reading to full manuscript management."
         align="center"
       />
       <div className="mt-12 grid gap-5 md:grid-cols-2 lg:grid-cols-4">
@@ -865,68 +899,67 @@ export default function HomePage() {
       <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(circle_at_20%_0%,rgba(125,211,252,0.09),transparent_28%),radial-gradient(circle_at_80%_12%,rgba(196,181,253,0.08),transparent_24%),linear-gradient(180deg,#050814_0%,#070b14_42%,#0b1020_100%)]" />
 
       <header className="sticky top-0 z-50 border-b border-white/10 bg-[#050814]/88 backdrop-blur-xl">
-        <div className="mx-auto flex h-20 max-w-7xl items-center justify-between px-5 md:px-8">
+        <div className="mx-auto flex h-[76px] max-w-7xl items-center justify-between px-5 md:px-8">
           <Link href="/" aria-label="LoreVia home">
             <LogoMark />
           </Link>
-          <nav className="hidden items-center gap-9 lg:flex">
+          <nav className="hidden items-center gap-8 lg:flex">
             {navItems.map((item) => (
-              <a key={item.label} href={item.href} className="text-sm font-medium text-slate-300 transition hover:text-white">
+              <a
+                key={item.label}
+                href={item.href}
+                className="text-[14px] font-medium tracking-[0.01em] text-white/70 transition hover:text-white"
+              >
                 {item.label}
               </a>
             ))}
           </nav>
           <div className="flex items-center gap-3">
-            <Link href="/login" className="hidden rounded-md px-4 py-2 text-sm font-semibold text-slate-300 transition hover:text-white sm:inline-flex">
+            <Link
+              href="/login"
+              className="hidden px-4 py-2 text-[14px] font-medium tracking-[0.01em] text-white/70 transition hover:text-white sm:inline-flex"
+            >
               Sign in
             </Link>
-            <Link href={ctaHref} className="rounded-md bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-500">
+            <Link
+              href={ctaHref}
+              className="rounded-[10px] bg-[#f4f4f5] px-4 py-2.5 text-[14px] font-semibold text-[#09090b] transition hover:bg-[#e7e9f8] focus-visible:outline-indigo-300"
+            >
               Start free
             </Link>
           </div>
         </div>
       </header>
 
-      <section className="relative mx-auto grid min-h-[88vh] max-w-7xl gap-12 px-5 pb-16 pt-14 md:px-8 lg:grid-cols-[0.82fr_1.18fr] lg:items-center">
+      <section className="relative mx-auto grid max-w-7xl gap-10 px-5 pb-14 pt-10 md:gap-12 md:px-8 md:pb-16 md:pt-12 lg:grid-cols-[0.82fr_1.18fr] lg:items-start lg:pt-16">
         <Reveal>
           <div>
             <p className="inline-flex rounded-full border border-white/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-300">
               For fiction authors and serious readers
             </p>
-            <h1 className="mt-8 font-display text-6xl font-semibold leading-[0.96] tracking-normal text-white md:text-7xl xl:text-[5.4rem]">
+            <h1
+              className="mt-7 text-5xl font-[650] leading-[0.98] tracking-[-0.04em] text-white md:text-7xl xl:text-[5.15rem]"
+              style={{ fontFamily: '"Inter", "Geist", "Satoshi", var(--font-ui), sans-serif' }}
+            >
               Never lose track of your story again.
             </h1>
-            <p className="mt-7 max-w-2xl text-lg leading-9 text-slate-300 md:text-xl">
-              LoreVia remembers every character, relationship, plot thread, contradiction, and chapter detail, so you can write, revise, or reread without digging through hundreds of pages.
+            <p className="mt-6 max-w-2xl text-lg leading-9 text-slate-300 md:text-xl">
+              LoreVia tracks your characters, relationships, timelines, and continuity issues directly from your manuscript, so you can revise complex stories without losing the thread.
             </p>
-            <div className="mt-9 flex flex-col gap-4 xl:flex-row">
+            <div className="mt-8 flex flex-col gap-4 xl:flex-row">
               <Link
                 href={ctaHref}
-                className="inline-flex items-center justify-center gap-3 rounded-lg bg-white px-7 py-4 text-base font-semibold text-slate-950 transition hover:bg-slate-200"
+                className="inline-flex items-center justify-center gap-3 rounded-[10px] bg-[#f4f4f5] px-7 py-4 text-base font-semibold text-[#09090b] transition hover:bg-[#e7e9f8] focus-visible:outline-indigo-300"
               >
-                Start analyzing your story
+                Analyze your manuscript
                 <Icon name="arrow" className="h-5 w-5" />
               </Link>
               <a
                 href="#scan"
-                className="inline-flex items-center justify-center rounded-lg border border-white/15 px-7 py-4 text-base font-semibold text-white transition hover:border-white/30 hover:bg-white/8"
+                className="inline-flex items-center justify-center rounded-[10px] border border-white/15 px-7 py-4 text-base font-semibold text-white transition hover:border-white/30 hover:bg-[#161c2e]"
               >
                 See example scan
               </a>
-            </div>
-
-            <div className="mt-10 grid gap-4 border-t border-white/10 pt-7 sm:grid-cols-4">
-              {[
-                ["Spoiler-aware", "shield"],
-                ["Chapter-grounded", "book"],
-                ["Private by design", "shield"],
-                ["Author-first", "scan"],
-              ].map(([label, icon]) => (
-                <div key={label} className="flex items-center gap-2 text-sm text-slate-400">
-                  <Icon name={icon} className="h-4 w-4 text-slate-500" />
-                  <span>{label}</span>
-                </div>
-              ))}
             </div>
 
             <div className="mt-10">
