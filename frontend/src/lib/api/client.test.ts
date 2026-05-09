@@ -43,9 +43,9 @@ async function loadClientModule() {
   })
 
   axiosCreateMock.mockReturnValue(apiClientMock)
-  const module = await import("./client")
+  const clientModule = await import("./client")
 
-  return { ...module, apiClientMock, captured }
+  return { ...clientModule, apiClientMock, captured }
 }
 
 describe("api client", () => {
