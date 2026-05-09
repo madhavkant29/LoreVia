@@ -1,4 +1,4 @@
-from app.core.config import cors_origins
+from app.core.config import LOCALHOST_CORS_ORIGIN_REGEX, cors_middleware_options, cors_origins
 
 
 def test_cors_origins_include_localhost_and_loopback(monkeypatch):
@@ -30,3 +30,31 @@ def test_load_env_file_allows_dotenv_local_to_override_repo_defaults(tmp_path, m
     _load_env_file(local_env, override_loaded_values=True)
 
     assert os.environ["LOREVIA_TEST_OVERRIDE"] == "local"
+
+
+def test_cors_middleware_options_only_allow_localhost_regex_in_debug(monkeypatch):
+    monkeypatch.setattr("app.core.config.settings.DEBUG", True, raising=False)
+    monkeypatch.setattr(
+        "app.core.config.settings.BACKEND_CORS_ORIGINS",
+        "https://getlorevia.com",
+        raising=False,
+    )
+
+    options = cors_middleware_options()
+
+    assert options["allow_origins"] == ["https://getlorevia.com"]
+    assert options["allow_origin_regex"] == LOCALHOST_CORS_ORIGIN_REGEX
+
+
+def test_cors_middleware_options_exclude_localhost_regex_in_production(monkeypatch):
+    monkeypatch.setattr("app.core.config.settings.DEBUG", False, raising=False)
+    monkeypatch.setattr(
+        "app.core.config.settings.BACKEND_CORS_ORIGINS",
+        "https://getlorevia.com",
+        raising=False,
+    )
+
+    options = cors_middleware_options()
+
+    assert options["allow_origins"] == ["https://getlorevia.com"]
+    assert "allow_origin_regex" not in options

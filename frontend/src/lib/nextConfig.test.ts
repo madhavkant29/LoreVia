@@ -21,7 +21,7 @@ describe("next config", () => {
 
   it("uses the local backend rewrite in development when no public api url is configured", async () => {
     delete process.env.NEXT_PUBLIC_API_URL
-    process.env.NODE_ENV = "development"
+    Object.assign(process.env, { NODE_ENV: "development" })
 
     const nextConfig = loadNextConfig()
     const rewrites = await nextConfig.rewrites()
@@ -32,18 +32,17 @@ describe("next config", () => {
         destination: "http://localhost:8000/api/v1/:path*",
       },
     ])
-    expect(await nextConfig.headers()).toEqual([])
+    expect(nextConfig.headers).toBeUndefined()
   })
 
-  it("emits hardened production headers and routes api traffic to the configured origin", async () => {
-    process.env.NODE_ENV = "production"
-    process.env.NEXT_PUBLIC_API_URL = "https://staging.getlorevia.com/api/v1"
+  it("routes api traffic to the configured origin in production", async () => {
+    Object.assign(process.env, {
+      NODE_ENV: "production",
+      NEXT_PUBLIC_API_URL: "https://staging.getlorevia.com/api/v1",
+    })
 
     const nextConfig = loadNextConfig()
     const rewrites = await nextConfig.rewrites()
-    const headers = await nextConfig.headers()
-    const headerMap = new Map(headers[0].headers.map((header: { key: string; value: string }) => [header.key, header.value]))
-    const csp = headerMap.get("Content-Security-Policy") ?? ""
 
     expect(rewrites).toEqual([
       {
@@ -51,11 +50,6 @@ describe("next config", () => {
         destination: "https://staging.getlorevia.com/api/v1/:path*",
       },
     ])
-    expect(headerMap.get("X-Frame-Options")).toBe("DENY")
-    expect(headerMap.get("X-Content-Type-Options")).toBe("nosniff")
-    expect(headerMap.get("Permissions-Policy")).toContain("camera=()")
-    expect(csp).toContain("frame-ancestors 'none'")
-    expect(csp).toContain("object-src 'none'")
-    expect(csp).toContain("https://staging.getlorevia.com")
+    expect(nextConfig.headers).toBeUndefined()
   })
 })

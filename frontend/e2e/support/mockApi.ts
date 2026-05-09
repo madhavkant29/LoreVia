@@ -8,6 +8,13 @@ type MockOptions = {
   login?: LoginMode
 }
 
+function normalizeMockApiPath(pathname: string) {
+  return pathname
+    .replace(/^\/api\/v1\/books\/[^/]+--([^/]+)(?=\/|$)/, "/api/v1/books/$1")
+    .replace(/^\/api\/v1\/reader\/[^/]+--([^/]+)(?=\/|$)/, "/api/v1/reader/$1")
+    .replace(/^\/api\/v1\/intelligence\/[^/]+--([^/]+)(?=\/|$)/, "/api/v1/intelligence/$1")
+}
+
 const user = {
   id: "user-1",
   email: "author@getlorevia.com",
@@ -105,6 +112,34 @@ const chapter = {
     },
   ],
 }
+
+const chaptersByNumber = {
+  1: {
+    chapter_number: 1,
+    chapter_title: "Ashfall",
+    total_chapters: 3,
+    intelligence_available: true,
+    text_url: null,
+    text_content:
+      "Nora leaves the outer district with a sealed message and no time to second-guess the mission.",
+    html_content:
+      "<p>Nora leaves the outer district with a sealed message and no time to second-guess the mission.</p>",
+    media: [],
+    characters: chapter.characters,
+  },
+  2: chapter,
+  3: {
+    chapter_number: 3,
+    chapter_title: "River of Glass",
+    total_chapters: 3,
+    intelligence_available: false,
+    text_url: null,
+    text_content: "",
+    html_content: "<p></p>",
+    media: [],
+    characters: chapter.characters,
+  },
+} as const
 
 const storyHealth = {
   score: 82,
@@ -297,10 +332,7 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
 
   await page.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url())
-    const path = url.pathname
-      .replace("/api/v1/books/sky-of-ash--book-1", "/api/v1/books/book-1")
-      .replace("/api/v1/reader/sky-of-ash--book-1", "/api/v1/reader/book-1")
-      .replace("/api/v1/intelligence/sky-of-ash--book-1", "/api/v1/intelligence/book-1")
+    const path = normalizeMockApiPath(url.pathname)
     const method = route.request().method()
 
     if (path === "/api/v1/auth/me" && method === "GET") {
@@ -381,8 +413,11 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
       return json(route, chapterList)
     }
 
-    if (path === "/api/v1/reader/book-1/chapter/2" && method === "GET") {
-      return json(route, chapter)
+    const chapterMatch = path.match(/^\/api\/v1\/reader\/book-1\/chapter\/(\d+)$/)
+    if (chapterMatch && method === "GET") {
+      const chapterNumber = Number.parseInt(chapterMatch[1] ?? "", 10)
+      const chapterData = chaptersByNumber[chapterNumber as keyof typeof chaptersByNumber]
+      return chapterData ? json(route, chapterData) : notFound(route)
     }
 
     if (path === "/api/v1/reader/book-1/plot-threads" && method === "GET") {

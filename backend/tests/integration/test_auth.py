@@ -444,7 +444,12 @@ async def test_daily_word_goal_can_be_updated(client, auth_headers):
 
 
 @pytest.mark.asyncio
-async def test_manuscript_import_updates_today_word_count(client, db, auth_headers):
+async def test_manuscript_import_updates_today_word_count(client, db, auth_headers, monkeypatch):
+    async def _fake_embed_batch(texts: list[str]) -> list[list[float]]:
+        return [[0.0] * 1536 for _ in texts]
+
+    monkeypatch.setattr("app.workers.consumers.extraction_consumer.embed_batch", _fake_embed_batch)
+
     me = await client.get("/api/v1/auth/me", headers=auth_headers)
     assert me.status_code == 200
     user_id = uuid.UUID(me.json()["id"])

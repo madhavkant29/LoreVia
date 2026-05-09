@@ -15,10 +15,14 @@ from app.api.deps.rate_limit import (
     rate_limit_auth_register,
     rate_limit_chat,
     rate_limit_continuity_checker,
+    rate_limit_manuscript_import,
     rate_limit_public,
     rate_limit_public_asset,
     rate_limit_search,
     rate_limit_summary,
+    rate_limit_upload,
+    rate_limit_world_building_ai,
+    rate_limit_world_building_upload,
 )
 from app.core.config import settings
 from app.core.database import Base, get_db
@@ -48,6 +52,40 @@ def mock_storage_uploads(monkeypatch):
     monkeypatch.setattr("app.core.storage.upload_binary", lambda key, raw, content_type=None: key, raising=False)
     monkeypatch.setattr("app.core.storage.upload_book", lambda *args, **kwargs: "books/mock.pdf", raising=False)
     monkeypatch.setattr("app.core.storage.upload_text", lambda key, content: key, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def mock_dedup_embeddings(monkeypatch):
+    """Keep character dedup embeddings local during tests."""
+
+    async def _fake_embed_for_dedup(name: str, traits: dict) -> list[float]:
+        text = f"{name}|{sorted((traits or {}).keys())}"
+        seed = sum(ord(char) for char in text)
+        return [((seed + index) % 997) / 997 for index in range(1536)]
+
+    async def _fake_find_similar(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(
+        "app.engine.character.deduplicator.embed_for_dedup",
+        _fake_embed_for_dedup,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.workers.consumers.extraction_consumer.embed_for_dedup",
+        _fake_embed_for_dedup,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.engine.character.deduplicator.find_similar",
+        _fake_find_similar,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.workers.consumers.extraction_consumer.find_similar",
+        _fake_find_similar,
+        raising=False,
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -211,6 +249,10 @@ async def client(db):
     app.dependency_overrides[rate_limit_public] = lambda: None
     app.dependency_overrides[rate_limit_public_asset] = lambda: None
     app.dependency_overrides[rate_limit_continuity_checker] = lambda: None
+    app.dependency_overrides[rate_limit_upload] = lambda: None
+    app.dependency_overrides[rate_limit_manuscript_import] = lambda: None
+    app.dependency_overrides[rate_limit_world_building_upload] = lambda: None
+    app.dependency_overrides[rate_limit_world_building_ai] = lambda: None
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://localhost") as c:
         yield c
     app.dependency_overrides.clear()

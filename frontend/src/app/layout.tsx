@@ -1,4 +1,6 @@
 import type { Metadata, Viewport } from "next"
+import { headers } from "next/headers"
+import { connection } from "next/server"
 import "./globals.css"
 import { Merriweather, Newsreader, Space_Grotesk } from "next/font/google"
 import { AuthBootstrap } from "@/components/auth/AuthBootstrap"
@@ -117,7 +119,14 @@ export const viewport: Viewport = {
   themeColor: "#000000",
 }
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+function stringifyJsonLd(data: Record<string, unknown>) {
+  return JSON.stringify(data).replace(/</g, "\\u003c")
+}
+
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  await connection()
+  const nonce = (await headers()).get("x-nonce") ?? undefined
+
   return (
     <html
       lang="en"
@@ -126,12 +135,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     >
       <head>
         <script
+          nonce={nonce}
           type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(websiteJsonLd) }}
+          dangerouslySetInnerHTML={{ __html: stringifyJsonLd(websiteJsonLd) }}
         />
         <script
+          nonce={nonce}
           type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(organizationJsonLd) }}
+          dangerouslySetInnerHTML={{ __html: stringifyJsonLd(organizationJsonLd) }}
         />
       </head>
       <body className="antialiased">

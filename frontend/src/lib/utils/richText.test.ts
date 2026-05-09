@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { htmlToPlainText, renderRichTextHtml, sanitizeRichTextHtml } from "./richText"
+import { htmlToPlainText, renderMarkdownHtml, renderRichTextHtml, sanitizeRichTextHtml } from "./richText"
 
 describe("richText utilities", () => {
   it("sanitizes unsafe links and images while preserving safe formatting", () => {
@@ -29,6 +29,15 @@ describe("richText utilities", () => {
     const rendered = renderRichTextHtml("Hello world\nSecond line\n\nNext paragraph")
 
     expect(rendered).toBe("<p>Hello world<br>Second line</p><p>Next paragraph</p>")
+  })
+
+  it("renders markdown as safe formatted html", () => {
+    const rendered = renderMarkdownHtml("**Bold**\n*Italic*\n\n<script>alert(1)</script>")
+
+    expect(rendered).toContain("<strong>Bold</strong>")
+    expect(rendered).toContain("<em>Italic</em>")
+    expect(rendered).not.toContain("<script>")
+    expect(rendered).toContain("&lt;script&gt;alert(1)&lt;/script&gt;")
   })
 
   it("extracts readable block text from rich html", () => {

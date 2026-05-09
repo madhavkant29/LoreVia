@@ -28,7 +28,11 @@ describe("request cache", () => {
   it("re-fetches after ttl expiry", async () => {
     const nowSpy = vi.spyOn(Date, "now")
     nowSpy.mockReturnValueOnce(1000).mockReturnValueOnce(1000).mockReturnValueOnce(2500).mockReturnValueOnce(2500)
-    const fetcher = vi.fn(async () => fetcher.mock.calls.length)
+    let fetchCount = 0
+    const fetcher = vi.fn(async () => {
+      fetchCount += 1
+      return fetchCount
+    })
 
     const first = await cachedGet("books:stats", 1000, fetcher)
     const second = await cachedGet("books:stats", 1000, fetcher)
@@ -38,17 +42,24 @@ describe("request cache", () => {
   })
 
   it("deduplicates in-flight requests for the same key", async () => {
-    let resolveFetch: ((value: string) => void) | null = null
+    let fetchCreated = false
+    let resolveFetch: (value: string) => void = () => {
+      throw new Error("fetch promise was not created")
+    }
     const fetcher = vi.fn(
       () =>
         new Promise<string>((resolve) => {
+          fetchCreated = true
           resolveFetch = resolve
         })
     )
 
     const first = cachedGet("reader:1:chapter:1", 1000, fetcher)
     const second = cachedGet("reader:1:chapter:1", 1000, fetcher)
-    resolveFetch?.("chapter")
+    if (!fetchCreated) {
+      throw new Error("fetch promise was not created")
+    }
+    resolveFetch("chapter")
 
     await expect(first).resolves.toBe("chapter")
     await expect(second).resolves.toBe("chapter")
@@ -84,7 +95,11 @@ describe("request cache", () => {
   })
 
   it("clears cached and in-flight entries with clearCachedGets", async () => {
-    const fetcher = vi.fn(async () => fetcher.mock.calls.length)
+    let fetchCount = 0
+    const fetcher = vi.fn(async () => {
+      fetchCount += 1
+      return fetchCount
+    })
 
     await cachedGet("reader:1:timeline", 1000, fetcher)
     clearCachedGets()

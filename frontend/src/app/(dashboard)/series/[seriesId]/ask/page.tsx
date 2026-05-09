@@ -9,6 +9,7 @@ import { intelligenceApi } from "@/lib/api/intelligence"
 import { isPaidTier } from "@/lib/billing/plans"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
+import { renderMarkdownHtml } from "@/lib/utils/richText"
 import type { BookSeries } from "@/types/book"
 import type { AdvisorMessage, AdvisorResponse } from "@/types/intelligence"
 
@@ -20,16 +21,6 @@ const SUGGESTED_QUESTIONS = [
   { category: "Arcs", question: "How does the protagonist's attitude change?" },
   { category: "Timeline", question: "Did the characters know the secret in Book 1?" },
 ]
-
-function formatMarkdown(text: string): React.ReactNode {
-  const paragraphs = text.split(/\n\n+/)
-  return paragraphs.map((paragraph, pIndex) => {
-    let formatted = paragraph.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-    formatted = formatted.replace(/\*(.*?)\*/g, '<em>$1</em>')
-    formatted = formatted.replace(/\n/g, '<br />')
-    return <p key={pIndex} dangerouslySetInnerHTML={{ __html: formatted }} />
-  })
-}
 
 export default function SeriesAskPage() {
   const { seriesId } = useParams<{ seriesId: string }>()
@@ -149,7 +140,9 @@ export default function SeriesAskPage() {
                   </div>
                   <div className={`flex-1 ${msg.role === "user" ? "text-right" : ""}`}>
                     <div className={`inline-block text-left rounded-2xl px-5 py-3 text-sm leading-7 ${msg.role === "user" ? (isDark ? "bg-slate-700/50 text-slate-200" : "bg-stone-200 text-stone-800") : (isDark ? "text-white" : "text-stone-900")}`}>
-                      {msg.role === "assistant" ? formatMarkdown(msg.content) : msg.content}
+                      {msg.role === "assistant" ? (
+                        <div dangerouslySetInnerHTML={{ __html: renderMarkdownHtml(msg.content) }} />
+                      ) : msg.content}
                     </div>
                   </div>
                 </div>
