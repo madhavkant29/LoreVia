@@ -1,49 +1,46 @@
 "use client"
 
 import { useEffect, useRef } from "react"
+import { usePathname } from "next/navigation"
 import { authApi } from "@/lib/api/auth"
+import { shouldSkipAuthBootstrap } from "@/lib/routes"
 import { useAuthStore } from "@/lib/stores/authStore"
 
 export function AuthBootstrap() {
-  const { user, setAuth, setUser, logout } = useAuthStore()
+  const { user, setUser, setHydrated, logout } = useAuthStore()
   const ran = useRef(false)
+  const pathname = usePathname()
 
   useEffect(() => {
     if (ran.current) return
     ran.current = true
 
-    const accessToken = typeof window !== "undefined" ? localStorage.getItem("access_token") : null
-    const refreshToken = typeof window !== "undefined" ? localStorage.getItem("refresh_token") : null
-    if (!accessToken && !refreshToken) return
+    if (shouldSkipAuthBootstrap(pathname)) {
+      setHydrated()
+      return
+    }
+
     if (user) return
 
     const restore = async () => {
       try {
-        if (!accessToken && refreshToken) {
-          const refreshed = await authApi.refresh(refreshToken)
-          setAuth(refreshed.access_token, refreshed.refresh_token)
+        let me = await authApi.me()
+        if (!me) {
+          await authApi.refresh()
+          me = await authApi.me()
         }
-        const me = await authApi.me()
-        setUser(me)
-      } catch {
-        if (refreshToken) {
-          try {
-            const refreshed = await authApi.refresh(refreshToken)
-            setAuth(refreshed.access_token, refreshed.refresh_token)
-            const me = await authApi.me()
-            setUser(me)
-            return
-          } catch {
-            logout()
-          }
+        if (me) {
+          setUser(me)
         } else {
-          logout()
+          setHydrated()
         }
+      } catch {
+        logout()
       }
     }
 
     restore()
-  }, [user, setAuth, setUser, logout])
+  }, [pathname, user, setHydrated, setUser, logout])
 
   return null
 }

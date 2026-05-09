@@ -106,6 +106,30 @@ async def consume_password_reset_token(token: str) -> str | None:
     return value
 
 
+async def store_email_verification_token(token: str, user_id: str, ttl_seconds: int) -> None:
+    r = await get_redis()
+    previous_token = await r.get(key_email_verification_user(user_id))
+    async with r.pipeline(transaction=True) as pipe:
+        if previous_token:
+            pipe.delete(key_email_verification(previous_token))
+        pipe.setex(key_email_verification(token), ttl_seconds, user_id)
+        pipe.setex(key_email_verification_user(user_id), ttl_seconds, token)
+        await pipe.execute()
+
+
+async def consume_email_verification_token(token: str) -> str | None:
+    r = await get_redis()
+    key = key_email_verification(token)
+    value = await r.get(key)
+    if not value:
+        return None
+    async with r.pipeline(transaction=True) as pipe:
+        pipe.delete(key)
+        pipe.delete(key_email_verification_user(value))
+        await pipe.execute()
+    return value
+
+
 # ── Key builders — single source of truth ────────────────────────────────────
 def key_character_profile(character_id: str) -> str:
     return f"character:profile:{character_id}"
@@ -148,6 +172,14 @@ def key_password_reset(token: str) -> str:
 
 def key_password_reset_user(user_id: str) -> str:
     return f"password_reset_user:{user_id}"
+
+
+def key_email_verification(token: str) -> str:
+    return f"email_verification:{token}"
+
+
+def key_email_verification_user(user_id: str) -> str:
+    return f"email_verification_user:{user_id}"
 
 
 def key_grounded_answer(book_id: str, chapter: int, question: str) -> str:

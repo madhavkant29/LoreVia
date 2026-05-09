@@ -31,6 +31,8 @@ node_modules/
 .next/
 out/
 build/
+*.tsbuildinfo
+.next_corrupt*/
 .vscode/
 npm-debug.log*
 yarn-debug.log*
@@ -97,5 +99,4 @@ local_settings.py
 
 # Exclude generated files
 *.pb.go
-
 

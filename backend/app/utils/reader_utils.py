@@ -9,22 +9,30 @@ import base64
 import json
 import re
 import uuid
+from typing import Any
 
+import bleach  # type: ignore[import-untyped]
 from fastapi import HTTPException
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import effective_tier
+from app.core.config import settings
+from app.core.security import create_asset_token
 from app.core.storage import download_book, get_presigned_url
 from app.engine.character.deduplicator import names_equivalent
 from app.engine.character.entity_filters import (
     VISIBILITY_THRESHOLD,
     character_visibility_score,
 )
+from app.utils.billing_utils import user_access_tier
+from app.utils.queue_utils import queue_for_user
 from app.engine.character.profile_builder import build_description
 from app.models.book import Book, Chapter, ChapterMedia
 from app.models.character import Character
 from app.models.intelligence import ChapterSummary, PlotThread
+from app.utils.ingestion_utils import apply_chapter_number_strategy
+
+BLEACH_EMPTY_TAGS: Any = frozenset()
 
 # ─── Character stopwords / filter sets ───────────────────────────────────────
 
@@ -155,6 +163,40 @@ def dedupe_timeline_events(events: list[dict]) -> list[dict]:
     return deduped
 
 
+def timeline_plot_thread_span(
+    introduced_at: int | None,
+    resolved_at: int | None,
+    visible_chapters: set[int],
+) -> tuple[int, int] | None:
+    """Clamp a plot-thread span to the visible timeline window.
+
+    Older or partial extraction runs can leave plot threads without an
+    ``introduced_at`` chapter. In that case, keep the thread visible
+    across the currently visible window instead of dropping it.
+    """
+    if not visible_chapters:
+        return None
+
+    visible_min = min(visible_chapters)
+    visible_max = max(visible_chapters)
+
+    if introduced_at is not None and introduced_at > visible_max:
+        return None
+    if resolved_at is not None and resolved_at < visible_min:
+        return None
+
+    start_chapter = introduced_at if introduced_at is not None else visible_min
+    end_chapter = resolved_at if resolved_at is not None else visible_max
+
+    start_chapter = min(max(start_chapter, visible_min), visible_max)
+    end_chapter = min(max(end_chapter, visible_min), visible_max)
+
+    if end_chapter < start_chapter:
+        end_chapter = start_chapter
+
+    return start_chapter, end_chapter
+
+
 # ─── Relationship graph helpers ───────────────────────────────────────────────
 
 def relationship_node_description(
@@ -265,9 +307,27 @@ def collapse_graph_characters(chars: list[Character]) -> tuple[list[Character], 
             if alias and alias.strip() and alias.strip().lower() != primary.name.strip().lower()
         }
         primary.aliases = sorted(merged_aliases)
-        primary.personality_tags = list(dict.fromkeys([*(primary.personality_tags or []), *(duplicate.personality_tags or [])]))
-        primary.motivations = list(dict.fromkeys([*(primary.motivations or []), *(duplicate.motivations or [])]))
-        primary.fears = list(dict.fromkeys([*(primary.fears or []), *(duplicate.fears or [])]))
+        personality_tags: list[str] = []
+        motivations: list[str] = []
+        fears: list[str] = []
+        seen_personality_tags: set[str] = set()
+        seen_motivations: set[str] = set()
+        seen_fears: set[str] = set()
+        for tag in [*(primary.personality_tags or []), *(duplicate.personality_tags or [])]:
+            if tag and tag not in seen_personality_tags:
+                seen_personality_tags.add(tag)
+                personality_tags.append(tag)
+        for item in [*(primary.motivations or []), *(duplicate.motivations or [])]:
+            if item and item not in seen_motivations:
+                seen_motivations.add(item)
+                motivations.append(item)
+        for item in [*(primary.fears or []), *(duplicate.fears or [])]:
+            if item and item not in seen_fears:
+                seen_fears.add(item)
+                fears.append(item)
+        primary.personality_tags = personality_tags
+        primary.motivations = motivations
+        primary.fears = fears
         primary.role = primary.role or duplicate.role
         primary.arc_summary = primary.arc_summary or duplicate.arc_summary
         primary.archetype = primary.archetype or duplicate.archetype
@@ -321,7 +381,7 @@ def strip_json_fence(content: str) -> str:
 # ─── Chapter intelligence / access ───────────────────────────────────────────
 
 async def require_summary_access(db: AsyncSession, book: Book, current_user, chapter_num: int | None = None) -> None:
-    if effective_tier(current_user.tier) in ("pro", "power", "admin"):
+    if user_access_tier(current_user) in ("reader", "author", "architect", "admin"):
         return
     if not book.is_truncated:
         return
@@ -359,8 +419,43 @@ async def read_available_chapter_set(
     return {chapter for chapter in read_set if availability.get(chapter, False)}
 
 
-async def queue_analysis_if_missing(db: AsyncSession, chapter: Chapter) -> None:
-    if await chapter_has_any_summary(db, chapter.id):
+async def full_available_chapter_set(
+    db: AsyncSession,
+    book: Book,
+    current_user,
+) -> set[int]:
+    availability = await chapter_intelligence_map(db, book, current_user)
+    return {chapter for chapter, available in availability.items() if available}
+
+
+async def summary_visible_chapter_set(
+    db: AsyncSession,
+    book: Book,
+    current_user,
+) -> set[int]:
+    if book.mode == "author":
+        return await full_available_chapter_set(db, book, current_user)
+    read_set = await read_chapter_set(db, current_user.id, book.id)
+    return await read_available_chapter_set(db, book, current_user, read_set)
+
+
+async def timeline_visible_chapter_set(
+    db: AsyncSession,
+    book: Book,
+    current_user,
+) -> set[int]:
+    if book.mode == "author":
+        return await full_available_chapter_set(db, book, current_user)
+    read_set = await read_chapter_set(db, current_user.id, book.id)
+    if not read_set:
+        return set()
+    # Keep the timeline cumulative to the furthest visible chapter so
+    # ongoing arcs still appear even when explicit read progress is sparse.
+    return set(range(1, max(read_set) + 1))
+
+
+async def queue_analysis_if_missing(db: AsyncSession, chapter: Chapter, current_user=None) -> None:
+    if await chapter_has_detailed_summary(db, chapter.id):
         return
     from app.workers.tasks.analysis_tasks import analyse_chapter_task
     try:
@@ -369,14 +464,17 @@ async def queue_analysis_if_missing(db: AsyncSession, chapter: Chapter) -> None:
         return
     analyse_chapter_task.apply_async(
         args=[str(chapter.id), chapter_text, chapter.title or ""],
-        queue="analysis",
+        queue=queue_for_user(current_user, "analysis") if current_user else "analysis",
     )
 
 
-async def chapter_has_any_summary(db: AsyncSession, chapter_id: uuid.UUID) -> bool:
+async def chapter_has_detailed_summary(db: AsyncSession, chapter_id: uuid.UUID) -> bool:
     row = (
         await db.execute(
-            select(ChapterSummary.id).where(ChapterSummary.chapter_id == chapter_id).limit(1)
+            select(ChapterSummary.id).where(
+                ChapterSummary.chapter_id == chapter_id,
+                ChapterSummary.mode == "detailed",
+            ).limit(1)
         )
     ).first()
     return row is not None
@@ -389,7 +487,7 @@ async def chapter_intelligence_available(db: AsyncSession, book: Book, current_u
 
 async def chapter_intelligence_map(db: AsyncSession, book: Book, current_user) -> dict[int, bool]:
     from app.models.book import Chapter as Ch
-    if effective_tier(current_user.tier) in ("pro", "power", "admin"):
+    if user_access_tier(current_user) in ("reader", "author", "architect", "admin"):
         rows = (await db.execute(
             select(Ch.number).where(Ch.book_id == book.id).order_by(Ch.number)
         )).all()
@@ -414,22 +512,25 @@ async def chapter_intelligence_map(db: AsyncSession, book: Book, current_user) -
 
 async def serialize_chapter_media(db: AsyncSession, chapter_id: uuid.UUID) -> list[dict]:
     rows = (await db.execute(
-        select(ChapterMedia)
+        select(ChapterMedia, Book.user_id)
+        .join(Book, Book.id == ChapterMedia.book_id)
         .where(ChapterMedia.chapter_id == chapter_id)
         .order_by(ChapterMedia.sort_order, ChapterMedia.created_at)
-    )).scalars().all()
+    )).all()
     items: list[dict] = []
-    for row in rows:
+    for row, user_id in rows:
+        token = create_asset_token(str(user_id), f"chapter-media:{row.id}", expires_minutes=120)
         item = {
+            "id": str(row.id),
             "marker": row.marker,
             "asset_type": row.asset_type,
             "content_type": row.content_type,
             "caption": row.caption,
             "sort_order": row.sort_order,
-            "url": get_presigned_url(row.storage_key),
+            "url": f"{settings.API_V1_PREFIX}/reader/media/{row.id}?token={token}",
             "content_base64": None,
         }
-        if item["url"] is None:
+        if get_presigned_url(row.storage_key) is None:
             try:
                 item["content_base64"] = base64.b64encode(download_book(row.storage_key)).decode("ascii")
             except Exception:
@@ -480,12 +581,20 @@ def parse_chapter_from_source(book: Book, chapter_num: int) -> dict | None:
     except Exception:
         return None
     try:
+        preserve_numbers = bool(book.preserve_chapter_numbers) and book.work_type != "screenplay"
         if book.format == "pdf":
             from app.parsers.pdf_parser import parse_pdf
-            chapters = parse_pdf(raw)
+
+            chapters = parse_pdf(raw, split_large_chapters=not preserve_numbers)
         else:
             from app.parsers.epub_parser import parse_epub
-            chapters = parse_epub(raw)
+
+            chapters = parse_epub(raw, split_large_chapters=not preserve_numbers)
+        chapters = apply_chapter_number_strategy(
+            chapters,
+            preserve_chapter_numbers=preserve_numbers,
+            generic_titles=book.work_type != "screenplay" and not preserve_numbers,
+        )
     except Exception:
         return None
     chapter = next((item for item in chapters if item.get("number") == chapter_num), None)
@@ -544,11 +653,10 @@ async def list_plot_threads(
     query = select(PlotThread).where(PlotThread.book_id == book_id)
     if chapter is not None:
         query = query.where(PlotThread.introduced_at <= chapter)
-    threads = (
-        await db.execute(
-            query.order_by(PlotThread.importance.desc(), desc(PlotThread.introduced_at), PlotThread.title)
-        )
-    ).scalars().all()
+    threads_result = await db.execute(
+        query.order_by(PlotThread.importance.desc(), desc(PlotThread.introduced_at), PlotThread.title)
+    )
+    threads = threads_result.scalars().all()
     return [serialize_plot_thread(thread) for thread in threads]
 
 
@@ -566,8 +674,7 @@ async def update_plot_thread_note(
     if thread is None:
         return None
 
-    import bleach  # type: ignore[import-untyped]
-    cleaned = bleach.clean(" ".join((note or "").split()).strip(), tags=[], strip=True) or None
+    cleaned = str(bleach.clean(" ".join(str(note or "").split()).strip(), tags=BLEACH_EMPTY_TAGS, strip=True)) or None
     thread.note = cleaned
     await db.commit()
     await db.refresh(thread)

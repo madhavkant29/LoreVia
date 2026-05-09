@@ -44,25 +44,25 @@ export function ReaderToolbar({
 
   const toneClass = theme === "dark"
     ? {
-        shell: "border-white/10 bg-[#0f1320]/92 text-stone-100",
-        subShell: "border-white/10 bg-[#121828]/88",
-        text: "text-stone-300",
-        muted: "text-stone-400 hover:bg-white/6 hover:text-white",
-        active: "bg-indigo-500 text-white hover:bg-indigo-400",
-        pill: "border-white/10 bg-white/5 text-stone-300",
-        border: "border-white/10",
-        heading: "text-white",
-      }
+      shell: "border-white/10 bg-[#0f1320]/92 text-stone-100",
+      subShell: "border-white/10 bg-[#121828]/88",
+      text: "text-stone-300",
+      muted: "text-stone-400 hover:bg-white/6 hover:text-white",
+      active: "bg-indigo-500 text-white hover:bg-indigo-400",
+      pill: "border-white/10 bg-white/5 text-stone-300",
+      border: "border-white/10",
+      heading: "text-white",
+    }
     : {
-        shell: "border-stone-200/80 bg-[#fcfaf4]/92 text-stone-950",
-        subShell: "border-stone-200/80 bg-white/72",
-        text: "text-stone-500",
-        muted: "text-stone-500 hover:bg-stone-100 hover:text-stone-900",
-        active: "bg-[linear-gradient(135deg,#4f46e5,#4338ca)] text-white hover:opacity-95",
-        pill: "border-stone-200 bg-white text-stone-600",
-        border: "border-stone-200",
-        heading: "text-stone-900",
-      }
+      shell: "border-stone-200/80 bg-[#fcfaf4]/92 text-stone-950",
+      subShell: "border-stone-200/80 bg-white/72",
+      text: "text-stone-500",
+      muted: "text-stone-500 hover:bg-stone-100 hover:text-stone-900",
+      active: "bg-[linear-gradient(135deg,#4f46e5,#4338ca)] text-white hover:opacity-95",
+      pill: "border-stone-200 bg-white text-stone-600",
+      border: "border-stone-200",
+      heading: "text-stone-900",
+    }
 
   const increaseFont = () => onSetFontSize(Math.min(fontSize + 2, 32))
   const decreaseFont = () => onSetFontSize(Math.max(fontSize - 2, 12))
@@ -94,7 +94,7 @@ export function ReaderToolbar({
               </nav>
             </div>
             <p className={`mt-2 hidden text-sm lg:block ${toneClass.text}`}>
-              {chapterTitle || `Chapter ${chapterNum}`} • {wordsRead.toLocaleString()} of {totalWords.toLocaleString()} words
+              {chapterTitle || `Chapter ${chapterNum}`} | {wordsRead.toLocaleString()} of {totalWords.toLocaleString()} words
             </p>
           </div>
 
@@ -148,9 +148,8 @@ export function ReaderToolbar({
                 <button
                   key={option}
                   onClick={() => onSetFontFamily(option)}
-                  className={`rounded-full px-2 py-1 text-[10px] font-bold uppercase tracking-[0.18em] transition ${
-                    fontFamily === option ? toneClass.active : toneClass.muted
-                  }`}
+                  className={`rounded-full px-2 py-1 text-[10px] font-bold uppercase tracking-[0.18em] transition ${fontFamily === option ? toneClass.active : toneClass.muted
+                    }`}
                 >
                   {option}
                 </button>
@@ -160,9 +159,8 @@ export function ReaderToolbar({
             {canUseQuoteMode ? (
               <button
                 onClick={onToggleQuoteMode}
-                className={`rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] transition ${
-                  quoteModeEnabled ? toneClass.active : toneClass.muted
-                }`}
+                className={`rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] transition ${quoteModeEnabled ? toneClass.active : toneClass.muted
+                  }`}
               >
                 {quoteModeEnabled ? "Quote mode" : "Quote select"}
               </button>
@@ -189,7 +187,7 @@ export function ReaderToolbar({
                 {chapterTitle || `Chapter ${chapterNum}`}
               </p>
               <p className={`mt-1 text-xs ${toneClass.text}`}>
-                {totalChapters ? `${chapterNum} of ${totalChapters}` : "Reader"} • {wordsRead.toLocaleString()} / {totalWords.toLocaleString()} words
+                {totalChapters ? `${chapterNum} of ${totalChapters}` : "Reader"} | {wordsRead.toLocaleString()} / {totalWords.toLocaleString()} words
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -236,9 +234,8 @@ export function ReaderToolbar({
                   <button
                     key={option}
                     onClick={() => onSetFontFamily(option)}
-                    className={`rounded-full px-3 py-2 text-[11px] uppercase tracking-[0.18em] transition ${
-                      fontFamily === option ? toneClass.active : toneClass.muted
-                    }`}
+                    className={`rounded-full px-3 py-2 text-[11px] uppercase tracking-[0.18em] transition ${fontFamily === option ? toneClass.active : toneClass.muted
+                      }`}
                   >
                     {option}
                   </button>

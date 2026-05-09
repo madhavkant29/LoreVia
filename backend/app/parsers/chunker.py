@@ -3,13 +3,23 @@ from dataclasses import dataclass
 
 import tiktoken
 
-_enc = tiktoken.encoding_for_model("gpt-4o")
+from app.core.config import settings
+
 MEDIA_MARKER_RE = re.compile(r"\[\[IMAGE:[^\]]+\]\]")
+
+_enc: tiktoken.Encoding | None = None
+
+
+def _get_encoding() -> tiktoken.Encoding:
+    global _enc
+    if _enc is None:
+        _enc = tiktoken.encoding_for_model(settings.OPENAI_ENCODING_MODEL)
+    return _enc
 
 
 def count_tokens(text: str) -> int:
     sanitized = MEDIA_MARKER_RE.sub(" ", text)
-    return len(_enc.encode(sanitized))
+    return len(_get_encoding().encode(sanitized))
 
 
 @dataclass(frozen=True)
@@ -24,9 +34,9 @@ class ChunkingConfig:
     - overlap_ratio: derived overlap proportion of target_tokens when overlap_tokens is None
     """
 
-    target_tokens: int = 900
-    max_tokens: int = 1200
-    min_tokens: int = 260
+    target_tokens: int = 4000
+    max_tokens: int = 7000
+    min_tokens: int = 1000
     overlap_tokens: int | None = None
     overlap_ratio: float = 0.07
 

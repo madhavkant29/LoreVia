@@ -6,12 +6,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps.auth import get_admin
 from app.core.database import get_db
-from app.core.redis import get_redis
+import app.core.redis
 from app.models.book import Book
 from app.models.character import Character
 from app.models.intelligence import BookChunk, ChapterSummary
 from app.models.user import User, UserRateLimitOverride
-from app.schemas.admin import RateLimitOverrideBody
+from app.schemas.admin import RateLimitOverrideBody, UpdateUserTierBody
+from app.utils.billing_utils import VALID_USER_TIERS, normalize_tier
+from app.utils.redis_utils import maybe_await
 
 router = APIRouter()
 
@@ -23,7 +25,7 @@ async def metrics(db: AsyncSession = Depends(get_db), _=Depends(get_admin)):
     chars = (await db.execute(select(func.count()).select_from(Character))).scalar()
     chunks = (await db.execute(select(func.count()).select_from(BookChunk))).scalar()
     summaries = (await db.execute(select(func.count()).select_from(ChapterSummary))).scalar()
-    r = await get_redis()
+    r = await app.core.redis.get_redis()
     mem = await r.info("memory")
     return {
         "users": users, "books": books, "characters": chars,
@@ -34,12 +36,12 @@ async def metrics(db: AsyncSession = Depends(get_db), _=Depends(get_admin)):
 
 @router.get("/queue-depth")
 async def queue_depth(_=Depends(get_admin)):
-    r = await get_redis()
+    r = await app.core.redis.get_redis()
     return {
-        "extraction": await r.llen("extraction"),
-        "analysis": await r.llen("analysis"),
-        "embedding": await r.llen("embedding"),
-        "intelligence": await r.llen("intelligence"),
+        "extraction": await maybe_await(r.llen("extraction")),
+        "analysis": await maybe_await(r.llen("analysis")),
+        "embedding": await maybe_await(r.llen("embedding")),
+        "intelligence": await maybe_await(r.llen("intelligence")),
     }
 
 
@@ -94,3 +96,23 @@ async def upsert_rate_limit_override(
     override.api_per_minute = body.api_per_minute
     await db.commit()
     return {"ok": True, "user_id": str(user_id)}
+
+
+@router.put("/users/{user_id}/tier")
+async def update_user_tier(
+    user_id: uuid.UUID,
+    body: UpdateUserTierBody,
+    db: AsyncSession = Depends(get_db),
+    _=Depends(get_admin),
+):
+    tier = normalize_tier(body.tier)
+    if tier not in VALID_USER_TIERS:
+        raise HTTPException(400, f"Invalid tier. Must be one of: {', '.join(sorted(VALID_USER_TIERS))}")
+
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(404, "User not found")
+
+    user.tier = tier
+    await db.commit()
+    return {"ok": True, "user_id": str(user_id), "tier": tier}

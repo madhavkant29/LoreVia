@@ -24,6 +24,13 @@ from app.core.config import settings
 from app.core.database import Base, get_db
 from app.core.storage import download_book
 from app.main import app
+from app.utils.migration_utils import is_local_database_url
+
+
+@pytest.fixture(autouse=True)
+def test_runtime_defaults(monkeypatch):
+    """Run tests with production-like auth and billing behavior by default."""
+    monkeypatch.setattr("app.core.config.settings.DEBUG", False, raising=False)
 
 
 @pytest.fixture(autouse=True)
@@ -40,6 +47,17 @@ def mock_storage_uploads(monkeypatch):
     monkeypatch.setattr("app.core.storage.upload_book_bytes", lambda raw, owner, filename: f"uploads/{owner}/{filename}", raising=False)
     monkeypatch.setattr("app.core.storage.upload_binary", lambda key, raw, content_type=None: key, raising=False)
     monkeypatch.setattr("app.core.storage.upload_book", lambda *args, **kwargs: "books/mock.pdf", raising=False)
+    monkeypatch.setattr("app.core.storage.upload_text", lambda key, content: key, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def mock_email_delivery(monkeypatch):
+    """Prevent tests from consuming Resend quota."""
+    def _fake_send(*args, **kwargs):
+        return {"id": "test-email-id"}
+
+    monkeypatch.setattr("app.services.email_service._send", lambda payload: True, raising=False)
+    monkeypatch.setattr("resend.Emails.send", _fake_send, raising=False)
 
 
 @pytest.fixture(autouse=True)
@@ -62,43 +80,75 @@ def mock_celery_tasks(monkeypatch):
 def mock_redis(monkeypatch):
     """Mock Redis to avoid event loop issues with global _redis connection."""
     from app.core import redis as redis_module
-    
+
     class FakeRedis:
+        def __init__(self):
+            self.store: dict[str, str] = {}
+
         async def ping(self):
             return True
+
         async def get(self, key):
-            return None
+            return self.store.get(key)
+
         async def set(self, key, value, ex=None, nx=False):
+            if nx and key in self.store:
+                return False
+            self.store[key] = str(value)
             return True
+
         async def setex(self, key, ttl, value):
+            self.store[key] = str(value)
             return True
+
         async def delete(self, *keys):
-            return 0
+            deleted = 0
+            for key in keys:
+                if key in self.store:
+                    deleted += 1
+                    del self.store[key]
+            return deleted
+
         async def exists(self, *keys):
-            return 0
+            return sum(1 for key in keys if key in self.store)
+
         async def incr(self, key):
-            return 1
-        async def pipeline(self, transaction=True):
+            value = int(self.store.get(key, "0")) + 1
+            self.store[key] = str(value)
+            return value
+
+        def pipeline(self, transaction=True):
+            outer = self
+
             class FakePipeline:
                 async def __aenter__(self):
                     return self
+
                 async def __aexit__(self, *args):
-                    pass
+                    return False
+
                 def delete(self, *keys):
+                    for key in keys:
+                        outer.store.pop(key, None)
                     return self
+
                 def setex(self, key, ttl, value):
+                    outer.store[key] = str(value)
                     return self
+
                 async def execute(self):
                     return []
+
             return FakePipeline()
+
         async def aclose(self):
             pass
-    
+
     monkeypatch.setattr(redis_module, "_redis", FakeRedis())
-    
+
     async def fake_get_redis():
         return redis_module._redis
-    
+
     monkeypatch.setattr(redis_module, "get_redis", fake_get_redis)
 
 if sys.platform == "win32":
@@ -122,9 +172,16 @@ async def setup_engine():
 
 @pytest_asyncio.fixture(scope="session")
 async def setup_db(setup_engine):
+    if not is_local_database_url(settings.DATABASE_URL):
+        raise RuntimeError(
+            "Refusing to reset the test schema against a non-local database URL. "
+            "Point DATABASE_URL at a disposable local test database before running tests."
+        )
+
     async with engine_test.begin() as conn:
         # Enable pgvector extension for vector columns
         await conn.execute(sa.text("CREATE EXTENSION IF NOT EXISTS vector"))
+        await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
     yield
     async with engine_test.begin() as conn:
@@ -161,8 +218,21 @@ async def client(db):
 
 @pytest_asyncio.fixture
 async def auth_headers(client):
+    from app.core.security import create_access_token
     import uuid
-    r = await client.post("/api/v1/auth/register", json={"email": f"user-{uuid.uuid4()}@lorevia.app", "password": "SecurePass456!@#", "accepted_terms": True})
+    uid = str(uuid.uuid4())[:8]
+    email = f"user-{uid}@lorevia.app"
+    r = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": email,
+            "username": f"user{uid}",
+            "password": "SecurePass456!@#",
+            "accepted_terms": True,
+            "device_id": f"device-{uuid.uuid4().hex}",
+        },
+    )
     if r.status_code != 201:
         raise Exception(f"Registration failed: {r.status_code} - {r.text}")
-    return {"Authorization": f"Bearer {r.json()['access_token']}"}
+    access_token = create_access_token(str(r.json()["id"]))
+    return {"Cookie": f"lorevia_access_token={access_token}"}

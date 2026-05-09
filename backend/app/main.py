@@ -1,14 +1,17 @@
 import time
 import uuid
 from contextlib import asynccontextmanager
+from typing import cast
 
 import sentry_sdk
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse, Response
 from sentry_sdk.integrations.celery import CeleryIntegration
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 from sqlalchemy import text
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -17,6 +20,7 @@ from app.core.config import allowed_hosts, cors_origins, settings
 from app.core.database import engine
 from app.core.events import on_shutdown, on_startup
 from app.core.redis import get_redis
+from app.utils.security_utils import apply_security_headers
 
 if settings.SENTRY_DSN and not settings.DEBUG:
     sentry_sdk.init(
@@ -29,8 +33,10 @@ if settings.SENTRY_DSN and not settings.DEBUG:
         profiles_sample_rate=0.1,
     )
 
-from app.utils.logging.logger import get_logger
+from app.utils.logging.errors import public_error_message, request_log_context, sanitize_validation_errors
+from app.utils.logging.logger import configure_logging, get_logger
 
+configure_logging()
 log = get_logger("lorevia.http")
 
 
@@ -52,6 +58,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins(),
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$",
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Accept", "Origin"],
@@ -94,14 +101,11 @@ class SecurityHeadersMiddleware:
             if message["type"] == "http.response.start":
                 response_started = True
                 headers = dict(message.get("headers", []))
-                headers[b"x-request-id"] = request_id.encode()
-                headers[b"x-frame-options"] = b"DENY"
-                headers[b"x-content-type-options"] = b"nosniff"
-                headers[b"referrer-policy"] = b"strict-origin-when-cross-origin"
-                headers[b"permissions-policy"] = b"camera=(), microphone=(), geolocation=()"
-                headers[b"content-security-policy"] = b"default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
-                if not settings.DEBUG:
-                    headers[b"strict-transport-security"] = b"max-age=31536000; includeSubDomains; preload"
+                headers = apply_security_headers(
+                    headers,
+                    request_id=request_id,
+                    include_hsts=not settings.DEBUG,
+                )
                 message["headers"] = list(headers.items())
             await send(message)
 
@@ -149,6 +153,47 @@ app.add_middleware(SecurityHeadersMiddleware)
 app.include_router(api_router, prefix=settings.API_V1_PREFIX)
 
 
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    log.warning(
+        "http_exception",
+        extra=request_log_context(
+            request,
+            status_code=exc.status_code,
+            detail=exc.detail,
+        ),
+    )
+    detail = public_error_message(exc.status_code)
+    if exc.status_code != 404 and isinstance(exc.detail, str) and exc.detail:
+        detail = exc.detail
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": detail},
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    log.warning(
+        "request_validation_failed",
+        extra=request_log_context(
+            request,
+            status_code=422,
+            errors=sanitize_validation_errors(cast(list[dict[str, object]], list(exc.errors()))),
+        ),
+    )
+    return JSONResponse(status_code=422, content={"detail": public_error_message(422)})
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    log.exception(
+        "unhandled_exception",
+        extra=request_log_context(request, status_code=500),
+    )
+    return JSONResponse(status_code=500, content={"detail": public_error_message(500)})
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok", "app": "LoreVia", "version": "2.0.0"}
@@ -162,5 +207,6 @@ async def ready():
         r = await get_redis()
         await r.ping()
     except Exception:
+        log.exception("readiness_check_failed")
         return Response(status_code=503, content="not ready")
     return {"status": "ready"}

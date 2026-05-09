@@ -1,5 +1,5 @@
 """
-Prediction engine - RAG over book chunks + GPT-4o reasoning.
+Prediction engine - RAG over book chunks + GPT-4o-mini reasoning.
 Phase 3 feature.
 """
 import json

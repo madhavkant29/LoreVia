@@ -7,19 +7,19 @@ FastAPI + Celery + PostgreSQL/pgvector + Redis
 ```bash
 cp .env.example .env       # fill in values
 pip install -r requirements.txt
-alembic upgrade head       # run migrations
+alembic upgrade heads     # run migrations for all active branches
 
 # API
 uvicorn app.main:app --reload
 
 # Workers (in separate terminals)
-# MVP (single worker, cost-minimal)
-celery -A app.workers.celery_app worker -Q intelligence,analysis,embedding,extraction -c 4 -Ofair --loglevel=info
-
-# Rollback (full queue isolation)
+# Default multi-worker layout
 celery -A app.workers.celery_app worker -Q intelligence -c 1 --loglevel=info
 celery -A app.workers.celery_app worker -Q analysis,embedding -c 2 --loglevel=info
 celery -A app.workers.celery_app worker -Q extraction -c 4 --loglevel=info
+
+# Cost-saving fallback
+celery -A app.workers.celery_app worker -Q intelligence,analysis,embedding,extraction -c 4 -Ofair --loglevel=info
 
 # Monitor
 celery -A app.workers.celery_app flower --port=5555
@@ -38,6 +38,19 @@ pip install -r requirements.txt
 pytest tests/ -v
 ```
 
+Preferred local test commands for this repo:
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe -m pytest tests -v
+```
+
+Notes:
+
+- Prefer the repo venv over a global Python install.
+- Some backend tests are DB-backed and require a safe local test database plus required extensions such as `pgvector`.
+- Backend tests are intended to pass in non-production environments; do not point them at production infrastructure.
+
 ## Key endpoints
 
 | Method | Path | Description |
@@ -49,5 +62,12 @@ pytest tests/ -v
 | GET | /api/v1/reader/{id}/relationships?chapter=N | Relationship graph |
 | GET | /api/v1/reader/{id}/search?q=X&chapter=N | Semantic search |
 | GET | /api/v1/reader/{id}/recall | Memory recall |
-| POST | /api/v1/intelligence/{id}/predict | Prediction engine |
 | POST | /api/v1/intelligence/{id}/chat/{char_id} | Character chat |
+
+
+## Targeted backend auth/security verification
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe -m pytest tests\unit\test_auth_deps.py tests\unit\test_core_security.py tests\unit\test_security_utils.py tests\integration\test_security_headers.py
+```

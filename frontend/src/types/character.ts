@@ -1,6 +1,6 @@
 export interface Trait {
   value: string
-  confidence: number      // 0.0–1.0
+  confidence: number      // 0.0-1.0
   type: "objective" | "subjective" | "abstract"
 }
 
@@ -27,10 +27,22 @@ export interface Character {
   fears: string[]
   archetype: string | null
   arc_summary: string | null
+  character_type?: "complex" | "normal" | "gag" | "meme" | null
+  character_type_score?: number | null
+  subtype_scores?: Record<string, number>
   growth_events?: Array<{
     chapter?: number | null
-    event: string
+    chapter_number?: number | null
+    event?: string
+    event_title?: string
+    description?: string | null
     impact?: string | null
+    impact_score?: number | null
+    role?: string | null
+    accomplishments?: string[]
+    growth_direction?: string | null
+    growth_magnitude?: number | null
+    is_major?: boolean
     tone?: string | null
   }>
   relationship_summaries?: string[]

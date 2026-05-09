@@ -5,7 +5,7 @@ screenplay statistics, and screenplay-specific operations.
 from __future__ import annotations
 
 import uuid
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import HTTPException
 from sqlalchemy import func, select
@@ -22,11 +22,12 @@ if TYPE_CHECKING:
 
 async def get_owned_scene(db: AsyncSession, scene_id: uuid.UUID, user_id: uuid.UUID) -> Scene:
     """Get a scene if it belongs to the user."""
-    scene = await db.execute(
+    result = await db.execute(
         select(Scene)
         .join(Book, Scene.book_id == Book.id)
         .where(Scene.id == scene_id, Book.user_id == user_id)
-    ).scalar()
+    )
+    scene = result.scalar()
     if not scene:
         raise HTTPException(404, "Scene not found")
     return scene
@@ -34,36 +35,39 @@ async def get_owned_scene(db: AsyncSession, scene_id: uuid.UUID, user_id: uuid.U
 
 async def list_scenes_for_book(db: AsyncSession, book_id: uuid.UUID, user_id: uuid.UUID) -> list[Scene]:
     """List all scenes for a book that belongs to the user."""
-    return await db.execute(
+    result = await db.execute(
         select(Scene)
         .join(Book, Scene.book_id == Book.id)
         .where(Book.id == book_id, Book.user_id == user_id)
         .order_by(Scene.number)
-    ).scalars().all()
+    )
+    return list(result.scalars().all())
 
 
 async def get_scene_with_dialogue(db: AsyncSession, scene_id: uuid.UUID, user_id: uuid.UUID) -> Scene:
     """Get a scene with all its dialogue."""
     scene = await get_owned_scene(db, scene_id, user_id)
-    
-    dialogue = await db.execute(
+
+    dialogue_result = await db.execute(
         select(Dialogue)
         .where(Dialogue.scene_id == scene_id)
         .order_by(Dialogue.line_number)
-    ).scalars().all()
-    
+    )
+    dialogue = list(dialogue_result.scalars().all())
+
     scene.dialogue = dialogue
     return scene
 
 
 async def scene_out(db: AsyncSession, scene: Scene) -> SceneOut:
     """Convert a scene to SceneOut schema with dialogue."""
-    dialogue = await db.execute(
+    dialogue_result = await db.execute(
         select(Dialogue)
         .where(Dialogue.scene_id == scene.id)
         .order_by(Dialogue.line_number)
-    ).scalars().all()
-    
+    )
+    dialogue = list(dialogue_result.scalars().all())
+
     dialogue_out = [DialogueOut.model_validate(d) for d in dialogue]
     
     return SceneOut(
@@ -90,14 +94,13 @@ async def scene_out(db: AsyncSession, scene: Scene) -> SceneOut:
 async def get_screenplay_stats(db: AsyncSession, book_id: uuid.UUID, user_id: uuid.UUID) -> ScreenplayStats:
     """Get comprehensive screenplay statistics."""
     # Verify book ownership
-    book = await db.execute(
-        select(Book).where(Book.id == book_id, Book.user_id == user_id)
-    ).scalar()
+    book_result = await db.execute(select(Book).where(Book.id == book_id, Book.user_id == user_id))
+    book = book_result.scalar()
     if not book:
         raise HTTPException(404, "Book not found")
     
     # Scene statistics
-    scene_stats = await db.execute(
+    scene_stats = cast(Any, (await db.execute(
         select(
             func.count(Scene.id).label('total_scenes'),
             func.sum(Scene.word_count).label('total_words'),
@@ -105,28 +108,30 @@ async def get_screenplay_stats(db: AsyncSession, book_id: uuid.UUID, user_id: uu
             func.sum(func.case((Scene.exterior, 1), else_=0)).label('ext_scenes')
         )
         .where(Scene.book_id == book_id)
-    ).first()
+    )).first())
     
     # Dialogue statistics
-    dialogue_stats = await db.execute(
+    dialogue_stats = cast(Any, (await db.execute(
         select(
             func.count(Dialogue.id).label('total_dialogue_lines'),
             func.sum(Dialogue.word_count).label('dialogue_words')
         )
         .join(Scene, Dialogue.scene_id == Scene.id)
         .where(Scene.book_id == book_id)
-    ).first()
+    )).first())
     
     # Character dialogue counts
-    character_dialogue = await db.execute(
-        select(
-            Dialogue.character_name,
-            func.count(Dialogue.id).label('line_count')
+    character_dialogue = (
+        await db.execute(
+            select(
+                Dialogue.character_name,
+                func.count(Dialogue.id).label('line_count')
+            )
+            .join(Scene, Dialogue.scene_id == Scene.id)
+            .where(Scene.book_id == book_id)
+            .group_by(Dialogue.character_name)
+            .order_by(func.count(Dialogue.id).desc())
         )
-        .join(Scene, Dialogue.scene_id == Scene.id)
-        .where(Scene.book_id == book_id)
-        .group_by(Dialogue.character_name)
-        .order_by(func.count(Dialogue.id).desc())
     ).all()
     
     # Build stats
@@ -154,14 +159,15 @@ async def get_screenplay_stats(db: AsyncSession, book_id: uuid.UUID, user_id: uu
 async def get_scene_analysis(db: AsyncSession, scene_id: uuid.UUID, user_id: uuid.UUID) -> SceneAnalysis:
     """Get detailed analysis of a specific scene."""
     scene = await get_owned_scene(db, scene_id, user_id)
-    
+
     # Get dialogue for this scene
-    dialogue = await db.execute(
+    dialogue_result = await db.execute(
         select(Dialogue)
         .where(Dialogue.scene_id == scene_id)
         .order_by(Dialogue.line_number)
-    ).scalars().all()
-    
+    )
+    dialogue = list(dialogue_result.scalars().all())
+
     # Extract unique characters
     characters_present = list(set(d.character_name for d in dialogue))
     
@@ -198,7 +204,7 @@ async def create_scenes_from_screenplay(
     scene_models = create_scene_models(scenes_data, book_id)
     
     # Save to database
-    created_scenes = []
+    created_scenes: list[Scene] = []
     for scene_model in scene_models:
         db.add(scene_model)
         await db.flush()  # Get the scene ID
@@ -214,6 +220,42 @@ async def create_scenes_from_screenplay(
     return created_scenes
 
 
+async def replace_book_scenes(
+    db: AsyncSession,
+    *,
+    book: Book,
+    parsed_scenes: list[Any],
+    chapter_ids_by_number: dict[int, uuid.UUID] | None = None,
+    starting_number: int = 1,
+    replace_scene_numbers: set[int] | None = None,
+) -> list[Scene]:
+    """Replace stored scene rows for a screenplay book."""
+    from app.parsers.screenplay_parser import create_scene_models
+
+    existing_query = select(Scene).where(Scene.book_id == book.id).order_by(Scene.number)
+    if replace_scene_numbers:
+        existing_query = existing_query.where(Scene.number.in_(replace_scene_numbers))
+    existing_scenes = (await db.execute(existing_query)).scalars().all()
+    for scene in existing_scenes:
+        await db.delete(scene)
+    await db.flush()
+
+    created_scenes: list[Scene] = []
+    for offset, scene_model in enumerate(create_scene_models(parsed_scenes, book.id), start=0):
+        scene_model.number = starting_number + offset
+        if chapter_ids_by_number:
+            scene_model.chapter_id = chapter_ids_by_number.get(scene_model.number)
+        db.add(scene_model)
+        await db.flush()
+        for dialogue_model in scene_model.dialogue:
+            dialogue_model.scene_id = scene_model.id
+            db.add(dialogue_model)
+        created_scenes.append(scene_model)
+
+    await db.flush()
+    return created_scenes
+
+
 # ─── Character dialogue extraction ───────────────────────────────────────
 
 async def get_character_dialogue(
@@ -224,13 +266,12 @@ async def get_character_dialogue(
 ) -> list[Dialogue]:
     """Get all dialogue lines for a specific character."""
     # Verify book ownership
-    book = await db.execute(
-        select(Book).where(Book.id == book_id, Book.user_id == user_id)
-    ).scalar()
+    book_result = await db.execute(select(Book).where(Book.id == book_id, Book.user_id == user_id))
+    book = book_result.scalar()
     if not book:
         raise HTTPException(404, "Book not found")
     
-    return await db.execute(
+    dialogue_result = await db.execute(
         select(Dialogue)
         .join(Scene, Dialogue.scene_id == Scene.id)
         .where(
@@ -238,7 +279,8 @@ async def get_character_dialogue(
             Dialogue.character_name == character_name
         )
         .order_by(Scene.number, Dialogue.line_number)
-    ).scalars().all()
+    )
+    return list(dialogue_result.scalars().all())
 
 
 async def get_scene_by_location(
@@ -249,20 +291,20 @@ async def get_scene_by_location(
 ) -> list[Scene]:
     """Get all scenes at a specific location."""
     # Verify book ownership
-    book = await db.execute(
-        select(Book).where(Book.id == book_id, Book.user_id == user_id)
-    ).scalar()
+    book_result = await db.execute(select(Book).where(Book.id == book_id, Book.user_id == user_id))
+    book = book_result.scalar()
     if not book:
         raise HTTPException(404, "Book not found")
     
-    return await db.execute(
+    scene_result = await db.execute(
         select(Scene)
         .where(
             Scene.book_id == book_id,
             func.lower(Scene.location) == func.lower(location)
         )
         .order_by(Scene.number)
-    ).scalars().all()
+    )
+    return list(scene_result.scalars().all())
 
 
 # ─── Scene search and filtering ───────────────────────────────────────────
@@ -275,15 +317,14 @@ async def search_scenes(
 ) -> list[Scene]:
     """Search scenes by heading, location, or description."""
     # Verify book ownership
-    book = await db.execute(
-        select(Book).where(Book.id == book_id, Book.user_id == user_id)
-    ).scalar()
+    book_result = await db.execute(select(Book).where(Book.id == book_id, Book.user_id == user_id))
+    book = book_result.scalar()
     if not book:
         raise HTTPException(404, "Book not found")
     
     search_pattern = f"%{query.lower()}%"
     
-    return await db.execute(
+    scene_result = await db.execute(
         select(Scene)
         .where(
             Scene.book_id == book_id,
@@ -294,7 +335,8 @@ async def search_scenes(
             )
         )
         .order_by(Scene.number)
-    ).scalars().all()
+    )
+    return list(scene_result.scalars().all())
 
 
 async def filter_scenes_by_type(
@@ -305,9 +347,8 @@ async def filter_scenes_by_type(
 ) -> list[Scene]:
     """Filter scenes by interior/exterior type."""
     # Verify book ownership
-    book = await db.execute(
-        select(Book).where(Book.id == book_id, Book.user_id == user_id)
-    ).scalar()
+    book_result = await db.execute(select(Book).where(Book.id == book_id, Book.user_id == user_id))
+    book = book_result.scalar()
     if not book:
         raise HTTPException(404, "Book not found")
     
@@ -318,6 +359,5 @@ async def filter_scenes_by_type(
     elif scene_type.upper() == "EXT":
         query = query.where(Scene.exterior)
     
-    return await db.execute(
-        query.order_by(Scene.number)
-    ).scalars().all()
+    scene_result = await db.execute(query.order_by(Scene.number))
+    return list(scene_result.scalars().all())

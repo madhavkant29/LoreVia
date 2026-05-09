@@ -3,7 +3,9 @@
 import Link from "next/link"
 import { useEffect, useMemo, useState } from "react"
 
+import { booksApi } from "@/lib/api/books"
 import { readerApi } from "@/lib/api/reader"
+import { saveContextualVaultNote } from "@/lib/utils/notes"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import type { PlotThread } from "@/types/reader"
 
@@ -38,6 +40,7 @@ export function PlotTracker({ bookId, chapter, mode = "compact" }: Props) {
   const [threads, setThreads] = useState<PlotThread[]>([])
   const [loading, setLoading] = useState(true)
   const [savingId, setSavingId] = useState<string | null>(null)
+  const [vaultSavingId, setVaultSavingId] = useState<string | null>(null)
   const [draftNotes, setDraftNotes] = useState<Record<string, string>>({})
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
@@ -71,6 +74,32 @@ export function PlotTracker({ bookId, chapter, mode = "compact" }: Props) {
       setDraftNotes((current) => ({ ...current, [threadId]: updated.note ?? "" }))
     } finally {
       setSavingId(null)
+    }
+  }
+
+  const saveToVault = async (thread: PlotThread) => {
+    setVaultSavingId(thread.id)
+    try {
+      const chapterBits = [
+        typeof thread.introduced_at === "number" ? `Introduced in chapter ${thread.introduced_at}.` : null,
+        typeof thread.resolved_at === "number" ? `Resolved in chapter ${thread.resolved_at}.` : null,
+      ].filter(Boolean)
+      const bodyParts = [
+        thread.description?.trim() || "",
+        chapterBits.length ? chapterBits.join("\n") : "",
+        draftNotes[thread.id]?.trim() ? `## Private note\n\n${draftNotes[thread.id].trim()}` : "",
+      ].filter(Boolean)
+
+      await saveContextualVaultNote({
+        bookId,
+        title: thread.title,
+        content: bodyParts.join("\n\n"),
+        context: "plot_threads",
+        folderSegments: [thread.type || "Threads"],
+      })
+    } finally {
+      setVaultSavingId(null)
+      void booksApi.listObsidianNotes(bookId).catch(() => null)
     }
   }
 
@@ -166,13 +195,29 @@ export function PlotTracker({ bookId, chapter, mode = "compact" }: Props) {
                     />
                     <div className="mt-3 flex items-center justify-between gap-3">
                       <p className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Only visible inside your LoreVia workspace.</p>
-                      <button
-                        onClick={() => saveNote(thread.id)}
-                        disabled={savingId === thread.id}
-                        className="rounded-full bg-[linear-gradient(135deg,#115e59,#0f766e)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-                      >
-                        {savingId === thread.id ? "Saving..." : "Save note"}
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void saveToVault(thread)}
+                          disabled={vaultSavingId === thread.id}
+                          className={`rounded-full px-4 py-2 text-sm font-medium ${isDark ? "bg-white/8 text-slate-100" : "bg-stone-100 text-stone-700"} disabled:opacity-50`}
+                        >
+                          {vaultSavingId === thread.id ? "Sending..." : "Save to vault"}
+                        </button>
+                        <Link
+                          href={`/${bookId}/notes`}
+                          className={`rounded-full px-4 py-2 text-sm font-medium ${isDark ? "bg-white/8 text-slate-100" : "bg-white text-stone-700"}`}
+                        >
+                          Open notes
+                        </Link>
+                        <button
+                          onClick={() => saveNote(thread.id)}
+                          disabled={savingId === thread.id}
+                          className="rounded-full bg-[linear-gradient(135deg,#115e59,#0f766e)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                        >
+                          {savingId === thread.id ? "Saving..." : "Save note"}
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>

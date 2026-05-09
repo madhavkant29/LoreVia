@@ -1,39 +1,18 @@
 import { create } from "zustand"
-import { persist } from "zustand/middleware"
 import type { User } from "@/types/user"
 
 interface AuthStore {
   user: User | null
-  accessToken: string | null
-  refreshToken: string | null
-  setAuth: (access: string, refresh: string) => void
+  hydrated: boolean
   setUser: (user: User) => void
+  setHydrated: () => void
   logout: () => void
 }
 
-export const useAuthStore = create<AuthStore>()(
-  persist(
-    (set) => ({
-      user: null,
-      accessToken: null,
-      refreshToken: null,
-      setAuth: (accessToken, refreshToken) => {
-        if (typeof window !== "undefined") {
-          localStorage.setItem("access_token", accessToken)
-          localStorage.setItem("refresh_token", refreshToken)
-        }
-        set({ accessToken, refreshToken })
-      },
-      setUser: (user) => set({ user }),
-      logout: () => {
-        if (typeof window !== "undefined") {
-          localStorage.removeItem("access_token")
-          localStorage.removeItem("refresh_token")
-          localStorage.removeItem("lorevia-auth")
-        }
-        set({ user: null, accessToken: null, refreshToken: null })
-      },
-    }),
-    { name: "lorevia-auth", partialize: (s) => ({ accessToken: s.accessToken, refreshToken: s.refreshToken, user: s.user }) }
-  )
-)
+export const useAuthStore = create<AuthStore>()((set) => ({
+  user: null,
+  hydrated: false,
+  setUser: (user) => set({ user, hydrated: true }),
+  setHydrated: () => set({ hydrated: true }),
+  logout: () => set({ user: null, hydrated: true }),
+}))

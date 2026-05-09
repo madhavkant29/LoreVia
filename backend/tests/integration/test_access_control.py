@@ -17,7 +17,6 @@ def _mock_storage_uploads(monkeypatch):
     def _noop_apply_async(*args, **kwargs):
         return None
 
-    monkeypatch.setattr("app.api.v1.routes.books.upload_book_bytes", _fake_upload_book_bytes)
     monkeypatch.setattr("app.core.storage.upload_book_bytes", _fake_upload_book_bytes)
     # Celery's @task decorator yields a lazy proxy in tests; stubbing the whole
     # task object is more reliable than patching proxy attributes.
@@ -28,18 +27,24 @@ def _mock_storage_uploads(monkeypatch):
 
 
 async def _register_user(client, email: str) -> tuple[dict[str, str], uuid.UUID]:
+    from app.core.security import create_access_token
+    username = email.split("@")[0][:32]
     response = await client.post(
         "/api/v1/auth/register",
-        json={"email": email, "password": "TestPass123!@#", "accepted_terms": True},
+        json={
+            "email": email,
+            "username": username,
+            "password": "TestPass123!@#",
+            "accepted_terms": True,
+            "device_id": f"device-{uuid.uuid4().hex[:24]}",
+        },
     )
     assert response.status_code == 201
-    payload = response.json()
-    me_response = await client.get(
-        "/api/v1/auth/me",
-        headers={"Authorization": f"Bearer {payload['access_token']}"},
-    )
+    token = create_access_token(str(response.json()["id"]))
+    assert token
+    me_response = await client.get("/api/v1/auth/me", headers={"Cookie": f"lorevia_access_token={token}"})
     assert me_response.status_code == 200
-    return {"Authorization": f"Bearer {payload['access_token']}"}, uuid.UUID(me_response.json()["id"])
+    return {"Cookie": f"lorevia_access_token={token}"}, uuid.UUID(me_response.json()["id"])
 
 
 @pytest.mark.asyncio

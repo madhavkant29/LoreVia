@@ -5,10 +5,20 @@ services:
     ports: ["8000:8000"]
     env_file: ./backend/.env
 
-  worker:
+  worker-extraction:
     build: { context: ./backend, dockerfile: Dockerfile.worker }
     env_file: ./backend/.env
-    command: celery -A app.workers.celery_app worker -Q intelligence,analysis,embedding,extraction -c 4 -Ofair --loglevel=info
+    command: celery -A app.workers.celery_app worker -Q extraction -c 4 --loglevel=info
+
+  worker-analysis:
+    build: { context: ./backend, dockerfile: Dockerfile.worker }
+    env_file: ./backend/.env
+    command: celery -A app.workers.celery_app worker -Q analysis,embedding -c 2 --loglevel=info
+
+  worker-intelligence:
+    build: { context: ./backend, dockerfile: Dockerfile.worker }
+    env_file: ./backend/.env
+    command: celery -A app.workers.celery_app worker -Q intelligence -c 1 --loglevel=info
 
   flower:
     build: { context: ./backend, dockerfile: Dockerfile.worker }

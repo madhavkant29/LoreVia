@@ -17,41 +17,57 @@ depends_on = None
 
 
 def upgrade() -> None:
-    bind = op.get_bind()
-    inspector = sa.inspect(bind)
+    inspector = sa.inspect(op.get_bind())
     tables = set(inspector.get_table_names())
 
     if "books" in tables:
-        op.add_column("books", sa.Column("mode", sa.String(), nullable=False, server_default="reader"))
-        op.add_column("books", sa.Column("source_kind", sa.String(), nullable=False, server_default="single_upload"))
+        book_columns = {column["name"] for column in inspector.get_columns("books")}
+        if "mode" not in book_columns:
+            op.add_column("books", sa.Column("mode", sa.String(), nullable=False, server_default="reader"))
+        if "source_kind" not in book_columns:
+            op.add_column("books", sa.Column("source_kind", sa.String(), nullable=False, server_default="single_upload"))
     if "characters" in tables:
-        op.add_column(
-            "characters",
-            sa.Column("growth_events", postgresql.JSONB(astext_type=sa.Text()), nullable=True, server_default=sa.text("'[]'::jsonb")),
-        )
+        character_columns = {column["name"] for column in inspector.get_columns("characters")}
+        if "growth_events" not in character_columns:
+            op.add_column(
+                "characters",
+                sa.Column("growth_events", postgresql.JSONB(astext_type=sa.Text()), nullable=True, server_default=sa.text("'[]'::jsonb")),
+            )
     if "character_states" in tables:
-        op.add_column(
-            "character_states",
-            sa.Column("growth_event", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-        )
+        character_state_columns = {column["name"] for column in inspector.get_columns("character_states")}
+        if "growth_event" not in character_state_columns:
+            op.add_column(
+                "character_states",
+                sa.Column("growth_event", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+            )
     if "chapter_summaries" in tables:
-        op.add_column(
-            "chapter_summaries",
-            sa.Column("themes", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-        )
+        chapter_summary_columns = {column["name"] for column in inspector.get_columns("chapter_summaries")}
+        if "themes" not in chapter_summary_columns:
+            op.add_column(
+                "chapter_summaries",
+                sa.Column("themes", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+            )
 
 
 def downgrade() -> None:
-    bind = op.get_bind()
-    inspector = sa.inspect(bind)
+    inspector = sa.inspect(op.get_bind())
     tables = set(inspector.get_table_names())
 
     if "chapter_summaries" in tables:
-        op.drop_column("chapter_summaries", "themes")
+        chapter_summary_columns = {column["name"] for column in inspector.get_columns("chapter_summaries")}
+        if "themes" in chapter_summary_columns:
+            op.drop_column("chapter_summaries", "themes")
     if "character_states" in tables:
-        op.drop_column("character_states", "growth_event")
+        character_state_columns = {column["name"] for column in inspector.get_columns("character_states")}
+        if "growth_event" in character_state_columns:
+            op.drop_column("character_states", "growth_event")
     if "characters" in tables:
-        op.drop_column("characters", "growth_events")
+        character_columns = {column["name"] for column in inspector.get_columns("characters")}
+        if "growth_events" in character_columns:
+            op.drop_column("characters", "growth_events")
     if "books" in tables:
-        op.drop_column("books", "source_kind")
-        op.drop_column("books", "mode")
+        book_columns = {column["name"] for column in inspector.get_columns("books")}
+        if "source_kind" in book_columns:
+            op.drop_column("books", "source_kind")
+        if "mode" in book_columns:
+            op.drop_column("books", "mode")

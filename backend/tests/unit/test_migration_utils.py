@@ -1,0 +1,130 @@
+from pathlib import Path
+from app.utils.migration_utils import (
+    destructive_downgrade_revisions,
+    destructive_upgrade_revisions,
+    is_local_database_url,
+    redact_database_target,
+    resolve_alembic_database_url,
+)
+
+
+def test_is_local_database_url_accepts_local_hosts() -> None:
+    assert is_local_database_url("postgresql://postgres:pass@localhost:5432/postgres")
+    assert is_local_database_url("postgresql://postgres:pass@127.0.0.1:5432/postgres")
+    assert is_local_database_url("postgresql://postgres:pass@[::1]:5432/postgres")
+    assert is_local_database_url("postgresql://postgres:pass@postgres:5432/postgres")
+
+
+def test_is_local_database_url_rejects_remote_hosts() -> None:
+    assert not is_local_database_url(
+        "postgresql://postgres:pass@aws-1-ap-south-1.pooler.supabase.com:5432/postgres"
+    )
+
+
+def test_redact_database_target_hides_credentials() -> None:
+    target = redact_database_target(
+        "postgresql://postgres:secret@aws-1-ap-south-1.pooler.supabase.com:5432/postgres"
+    )
+    assert target == "postgresql://aws-1-ap-south-1.pooler.supabase.com:5432/postgres"
+
+
+def test_resolve_alembic_database_url_prefers_explicit_url() -> None:
+    explicit_url, is_explicit = resolve_alembic_database_url(
+        "postgresql://postgres:secret@remote.example.com:5432/postgres",
+        "postgresql://postgres:secret@localhost:5432/postgres",
+    )
+
+    assert explicit_url == "postgresql://postgres:secret@remote.example.com:5432/postgres"
+    assert is_explicit is True
+
+
+def test_resolve_alembic_database_url_rejects_remote_fallback() -> None:
+    try:
+        resolve_alembic_database_url(
+            None,
+            "postgresql://postgres:secret@remote.example.com:5432/postgres",
+        )
+    except ValueError as exc:
+        assert "ALEMBIC_DATABASE_URL" in str(exc)
+    else:  # pragma: no cover - defensive
+        raise AssertionError("Expected ValueError for remote fallback URL")
+
+
+def test_destructive_upgrade_revisions_ignores_downgrade_only_drops(tmp_path: Path) -> None:
+    migration = tmp_path / "20260430_safe.py"
+    migration.write_text(
+        '''"""Safe migration.
+
+Revision ID: safe
+"""
+
+def upgrade() -> None:
+    pass
+
+def downgrade() -> None:
+    op.drop_table("unsafe")
+'''.strip(),
+        encoding="utf-8",
+    )
+
+    assert destructive_upgrade_revisions(tmp_path) == []
+
+
+def test_destructive_upgrade_revisions_detects_upgrade_drop_ops(tmp_path: Path) -> None:
+    migration = tmp_path / "20260430_bad.py"
+    migration.write_text(
+        '''"""Unsafe migration.
+
+Revision ID: unsafe
+"""
+
+def upgrade() -> None:
+    op.drop_table("books")
+
+def downgrade() -> None:
+    pass
+'''.strip(),
+        encoding="utf-8",
+    )
+
+    assert destructive_upgrade_revisions(tmp_path) == [migration]
+
+
+def test_destructive_downgrade_revisions_ignores_upgrade_only_drops(tmp_path: Path) -> None:
+    migration = tmp_path / "20260430_safe.py"
+    migration.write_text(
+        '''"""Safe migration.
+
+Revision ID: safe
+"""
+
+def upgrade() -> None:
+    op.drop_table("unsafe")
+
+def downgrade() -> None:
+    pass
+'''.strip(),
+        encoding="utf-8",
+    )
+
+    assert destructive_downgrade_revisions(tmp_path) == []
+
+
+def test_destructive_downgrade_revisions_detects_downgrade_drop_ops(tmp_path: Path) -> None:
+    migration = tmp_path / "20260430_bad.py"
+    migration.write_text(
+        '''"""Unsafe migration.
+
+Revision ID: unsafe
+"""
+
+def upgrade() -> None:
+    pass
+
+def downgrade() -> None:
+    op.drop_table("books")
+'''.strip(),
+        encoding="utf-8",
+    )
+
+    assert destructive_downgrade_revisions(tmp_path) == [migration]

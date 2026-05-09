@@ -54,11 +54,22 @@ export interface AdvisorPassage {
   relevance: number
 }
 
+export interface AdvisorWorldAnalysis {
+  mode: "gap_detection" | "story_integration" | string
+  answer: string
+  citations: Array<Record<string, unknown>>
+  suggestions: Array<Record<string, unknown>>
+  logic_alerts: Array<Record<string, unknown>>
+  simulation_steps: string[]
+}
+
 export interface AdvisorResponse {
   reply: string
   intent: "plothole" | "direction" | "opportunity" | "consistency" | "general"
   response_type: "standard" | "warning" | "opportunity" | "tradeoff"
   retrieved_passages: AdvisorPassage[]
+  world_analysis?: AdvisorWorldAnalysis | null
+  cached?: boolean
 }
 
 export interface AdvisorGreeting {
@@ -80,6 +91,8 @@ export type SuggestionType =
   | "foreshadowing_opportunity"
   | "unresolved_clue"
   | "future_direction"
+  | "manuscript_checkpoint"
+  | "editorial_focus"
 
 export interface AdvisorSuggestion {
   id: string
@@ -150,6 +163,27 @@ export interface EditorialReviewResponse {
   retrieved_passages: EditorialReviewPassage[]
 }
 
+export interface SeriesContinuityReview {
+  continuity_issues: Array<{ title: string; description: string; severity: string; suggestion?: string }>
+  cross_book_opportunities: Array<{ title: string; description: string }>
+  thematic_fit: { score: string; notes: string }
+  overall_verdict: string
+}
+
+export interface SeriesContinuityPassage {
+  book_title?: string
+  chapter_num: number
+  chapter_title?: string | null
+  excerpt: string
+  relevance: number
+}
+
+export interface SeriesContinuityResponse {
+  review: SeriesContinuityReview
+  retrieved_passages: SeriesContinuityPassage[]
+  cached?: boolean
+}
+
 export interface ManuscriptSynopsis {
   spoiler_level: "minimal" | "none"
   synopsis: string
@@ -174,8 +208,39 @@ export interface VoiceConsistencyReview {
   overall_verdict: string
 }
 
+export interface VoiceConsistencyMatch {
+  character_name: string
+  match_score: number
+  baseline_sample_size: number
+  sample_dialogue_count: number
+  strongest_signals: string[]
+  closest_other_character?: string | null
+  closest_other_score?: number | null
+}
+
 export interface VoiceConsistencyResponse {
   review: VoiceConsistencyReview
   retrieved_passages: EditorialReviewPassage[]
   characters_reviewed: string[]
+  character_matches?: VoiceConsistencyMatch[]
+}
+
+export interface ProseTightenResponse {
+  tightened_text: string
+  rationale: string[]
+  changed: boolean
+}
+
+export interface InlineContinuityIssue {
+  severity: string
+  title: string
+  snippet: string
+  explanation: string
+  suggestion: string
+}
+
+export interface InlineContinuityResponse {
+  issues: InlineContinuityIssue[]
+  memory_bank: string[]
+  overall_verdict: string
 }

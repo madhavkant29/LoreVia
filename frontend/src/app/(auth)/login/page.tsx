@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
+import axios from "axios"
 import { authApi } from "@/lib/api/auth"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
@@ -36,7 +37,6 @@ function LoginInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const user = useAuthStore((s) => s.user)
-  const setAuth = useAuthStore((s) => s.setAuth)
   const setUser = useAuthStore((s) => s.setUser)
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
@@ -55,13 +55,26 @@ function LoginInner() {
     setLoading(true)
     setError(null)
     try {
-      const res = await authApi.login(email, password)
-      setAuth(res.access_token, res.refresh_token)
-      const me = await authApi.me()
-      setUser(me)
+      const user = await authApi.login(email, password)
+      if (!user) {
+        setError("Could not load your account. Please try again.")
+        return
+      }
+      setUser(user)
       router.push("/library")
-    } catch {
-      setError("Invalid email or password.")
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        const detail = error.response?.data?.detail
+        if (error.response?.status === 401) {
+          setError("Invalid email or password.")
+          return
+        }
+        if (typeof detail === "string" && detail.trim()) {
+          setError(detail)
+          return
+        }
+      }
+      setError("Could not sign you in right now. Please try again.")
     } finally {
       setLoading(false)
     }
@@ -156,13 +169,23 @@ function LoginInner() {
           </div>
 
           {error && (
-            <p className={`rounded-xl border px-4 py-3 text-sm ${
+            <div className={`rounded-xl border px-4 py-3 text-sm ${
               isDark
                 ? "border-rose-500/25 bg-rose-500/[0.08] text-rose-300"
                 : "border-rose-200 bg-rose-50 text-rose-600"
             }`}>
-              {error}
-            </p>
+              <p>{error}</p>
+              {error.toLowerCase().includes("verify your email") && email ? (
+                <Link
+                  href={`/verify-email?email=${encodeURIComponent(email)}`}
+                  className={`mt-2 inline-flex font-medium underline-offset-2 hover:underline ${
+                    isDark ? "text-rose-200" : "text-rose-700"
+                  }`}
+                >
+                  Resend verification email
+                </Link>
+              ) : null}
+            </div>
           )}
 
           <button

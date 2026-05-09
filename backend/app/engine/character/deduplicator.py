@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.engine.embeddings.embedder import embed_character
 from app.models.character import Character
+from app.utils.character_utils import has_shared_surname, name_similarity
 
 ALIAS_STOPWORDS = {
     "after", "and", "are", "around", "association", "but", "considering", "creation",
@@ -30,6 +31,7 @@ ALIAS_SUFFIX_BLOCKLIST = (
     " Ritual",
     " Towers",
 )
+HONORIFIC_SUFFIXES = ("san", "kun", "chan", "sama", "sensei", "senpai", "dono", "tan", "nee", "nii")
 
 
 async def embed_for_dedup(name: str, traits: dict) -> list[float]:
@@ -41,6 +43,15 @@ def normalize_character_name(name: str | None) -> str:
         return ""
     normalized = re.sub(r"[^a-z0-9\s]", " ", name.lower())
     return re.sub(r"\s+", " ", normalized).strip()
+
+
+def _strip_honorific_suffixes(name: str | None) -> str:
+    normalized = normalize_character_name(name)
+    if not normalized:
+        return ""
+    for suffix in HONORIFIC_SUFFIXES:
+        normalized = re.sub(rf"(?:\s|^)([a-z0-9]+)[-\s]{suffix}$", r"\1", normalized)
+    return normalized.strip()
 
 
 def is_valid_alias(alias: str | None) -> bool:
@@ -68,7 +79,7 @@ def is_valid_alias(alias: str | None) -> bool:
 
 def _meaningful_tokens(name: str | None) -> list[str]:
     stopwords = {"mr", "mrs", "ms", "miss", "dr", "sir", "lady", "lord", "the"}
-    return [token for token in normalize_character_name(name).split() if token and token not in stopwords]
+    return [token for token in _strip_honorific_suffixes(name).split() if token and token not in stopwords]
 
 
 def character_name_keys(name: str | None, aliases: Iterable[str] | None = None) -> set[str]:
@@ -79,13 +90,19 @@ def character_name_keys(name: str | None, aliases: Iterable[str] | None = None) 
         if not normalized:
             return
         keys.add(normalized)
+        stripped = _strip_honorific_suffixes(candidate)
+        if stripped:
+            keys.add(stripped)
         tokens = normalized.split()
+        stripped_tokens = stripped.split() if stripped else []
         if len(tokens) >= 2:
             keys.add(" ".join(tokens[:2]))
         if len(tokens) >= 2:
             keys.add(f"{tokens[0]} {tokens[-1]}")
         if len(tokens) >= 3:
             keys.add(" ".join(tokens[:3]))
+        if len(stripped_tokens) == 1:
+            keys.add(stripped_tokens[0])
 
     _add(name)
     for alias in aliases or []:
@@ -104,8 +121,13 @@ def names_equivalent(
     if left_keys & right_keys:
         return True
 
+    if name_similarity(left_name, right_name) >= 0.85:
+        return True
+
     left_norm = normalize_character_name(left_name)
     right_norm = normalize_character_name(right_name)
+    left_base = _strip_honorific_suffixes(left_name)
+    right_base = _strip_honorific_suffixes(right_name)
     if not left_norm or not right_norm:
         return False
 
@@ -113,6 +135,31 @@ def names_equivalent(
     right_tokens = right_norm.split()
     left_meaningful = _meaningful_tokens(left_name)
     right_meaningful = _meaningful_tokens(right_name)
+    left_base_tokens = left_base.split() if left_base else []
+    right_base_tokens = right_base.split() if right_base else []
+
+    if len(left_tokens) == len(right_tokens) == 2:
+        if left_tokens[0] == right_tokens[0] and left_tokens[1] != right_tokens[1]:
+            return False
+        if left_tokens[-1] == right_tokens[-1] and left_tokens[0] != right_tokens[0]:
+            return False
+
+    if has_shared_surname(left_name, right_name):
+        left_given = left_tokens[0] if left_tokens else ""
+        right_given = right_tokens[0] if right_tokens else ""
+        if left_given and right_given and left_given != right_given:
+            return False
+
+    if left_base and right_base and left_base == right_base:
+        return True
+
+    if left_base_tokens and right_base_tokens:
+        if len(left_base_tokens) == 1 and left_base_tokens[0] in set(right_base_tokens):
+            return True
+        if len(right_base_tokens) == 1 and right_base_tokens[0] in set(left_base_tokens):
+            return True
+        if len(left_base_tokens) == len(right_base_tokens) == 2 and left_base_tokens == list(reversed(right_base_tokens)):
+            return True
 
     if (left_norm.startswith(right_norm) or right_norm.startswith(left_norm)) and min(len(left_tokens), len(right_tokens)) >= 2:
         return True
@@ -132,25 +179,37 @@ def names_equivalent(
         if len(overlap) >= 2:
             return True
 
+    if has_shared_surname(left_name, right_name) and name_similarity(left_name, right_name) >= 0.70:
+        return True
+
     return False
 
 
 async def find_similar(
-    db: AsyncSession, book_id: uuid.UUID, embedding: list[float], threshold: float = 0.88
+    db: AsyncSession,
+    book_id: uuid.UUID,
+    embedding: list[float],
+    threshold: float = 0.88,
+    excluded_ids: Iterable[uuid.UUID] | None = None,
 ) -> uuid.UUID | None:
+    max_distance = max(0.0, 1 - threshold)
     result = await db.execute(
         text("""
-            SELECT id, 1 - (embedding <=> CAST(:emb AS vector)) AS sim
+            SELECT id, embedding <=> CAST(:emb AS vector) AS distance
             FROM characters
             WHERE book_id = :bid
               AND embedding IS NOT NULL
-              AND 1 - (embedding <=> CAST(:emb AS vector)) > :thr
-            ORDER BY sim DESC LIMIT 1
+              AND embedding <=> CAST(:emb AS vector) < :max_distance
+            ORDER BY embedding <=> CAST(:emb AS vector) ASC
+            LIMIT 10
         """),
-        {"emb": str(embedding), "bid": str(book_id), "thr": threshold},
+        {"emb": str(embedding), "bid": str(book_id), "max_distance": max_distance},
     )
-    row = result.fetchone()
-    return uuid.UUID(str(row[0])) if row else None
+    excluded = {str(item) for item in (excluded_ids or [])}
+    for row in result.fetchall():
+        if str(row[0]) not in excluded:
+            return uuid.UUID(str(row[0]))
+    return None
 
 
 async def find_by_name_or_alias(

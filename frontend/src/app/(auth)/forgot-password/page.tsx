@@ -1,68 +1,66 @@
 "use client"
 
-import { useState } from "react"
 import Link from "next/link"
+import { useState } from "react"
+
 import { authApi } from "@/lib/api/auth"
+import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 
 export default function ForgotPasswordPage() {
+  const { theme } = usePreferencesStore()
+  const isDark = theme === "dark"
   const [email, setEmail] = useState("")
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
-  const [resetUrl, setResetUrl] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault()
+    const trimmed = email.trim()
+    if (!trimmed) return
     setLoading(true)
     setMessage(null)
-    setResetUrl(null)
+    setError(null)
     try {
-      const response = await authApi.forgotPassword(email) as { message?: string; reset_url?: string; delivered?: boolean }
-      setMessage(response?.message ?? "If that email exists, we just sent a reset link.")
-      if (response?.reset_url) {
-        setResetUrl(response.reset_url)
-      }
+      await authApi.forgotPassword(trimmed)
+      setMessage("If an account exists for that email, a reset link has been sent.")
     } catch {
-      setMessage("If that email exists, we just sent a reset link.")
+      setError("Could not start password reset. Please try again.")
     } finally {
       setLoading(false)
     }
   }
 
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-8 shadow-sm">
-      <h1 className="mb-2 text-2xl font-semibold">Reset your password</h1>
-      <p className="mb-6 text-sm text-gray-500">
-        Enter your email and we&apos;ll send you a secure reset link.
-      </p>
-      <form onSubmit={submit} className="flex flex-col gap-4">
-        <input
-          type="email"
-          placeholder="Email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
-          className="rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-        />
-        {message ? <p className="text-sm text-gray-600">{message}</p> : null}
-        {resetUrl ? (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-            <p className="font-medium">Local reset link</p>
-            <a href={resetUrl} className="mt-1 block break-all text-indigo-600 underline hover:text-indigo-700">
-              {resetUrl}
-            </a>
-          </div>
-        ) : null}
-        <button
-          type="submit"
-          disabled={loading}
-          className="rounded-lg bg-indigo-600 py-2.5 text-sm font-medium text-white transition-colors hover:bg-indigo-700 disabled:opacity-50"
-        >
+    <main className={`min-h-screen px-4 py-12 ${isDark ? "bg-black text-white" : "bg-[#f8f3ec] text-stone-950"}`}>
+      <form onSubmit={submit} className={`mx-auto mt-12 max-w-md rounded-[1.5rem] border p-6 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-white"}`}>
+        <p className={`text-[11px] font-semibold uppercase tracking-[0.28em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Account recovery</p>
+        <h1 className="mt-2 text-3xl font-semibold">Reset your password</h1>
+        <p className={`mt-3 text-sm leading-6 ${isDark ? "text-slate-400" : "text-stone-600"}`}>
+          Enter the email for your LoreVia account and we will send a reset link if the account exists.
+        </p>
+
+        <label className="mt-6 block space-y-2">
+          <span className={`text-sm font-medium ${isDark ? "text-slate-300" : "text-stone-700"}`}>Email</span>
+          <input
+            type="email"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            autoComplete="email"
+            className={`w-full rounded-xl border px-4 py-3 text-sm outline-none ${isDark ? "border-white/10 bg-black text-white" : "border-stone-200 bg-stone-50 text-stone-950"}`}
+          />
+        </label>
+
+        {message ? <p className="mt-4 text-sm text-emerald-500">{message}</p> : null}
+        {error ? <p className="mt-4 text-sm text-red-500">{error}</p> : null}
+
+        <button type="submit" disabled={loading || !email.trim()} className="mt-6 w-full rounded-xl bg-stone-950 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50">
           {loading ? "Sending..." : "Send reset link"}
         </button>
+        <Link href="/login" className={`mt-4 block text-center text-sm ${isDark ? "text-slate-400 hover:text-white" : "text-stone-500 hover:text-stone-900"}`}>
+          Back to login
+        </Link>
       </form>
-      <p className="mt-4 text-center text-sm text-gray-500">
-        Back to <Link href="/login" className="text-indigo-600 hover:underline">sign in</Link>
-      </p>
-    </div>
+    </main>
   )
 }

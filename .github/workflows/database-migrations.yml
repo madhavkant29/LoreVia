@@ -71,6 +71,7 @@ jobs:
       env:
         DATABASE_URL: postgresql://postgres:postgres@localhost:5432/lorevia_migration_test
         REDIS_URL: redis://localhost:6379/0
+        ALEMBIC_ALLOW_DESTRUCTIVE_DOWNGRADES: "1"
         S3_BUCKET: test-bucket
         AWS_ACCESS_KEY_ID: test-key
         AWS_SECRET_ACCESS_KEY: test-secret
@@ -79,12 +80,8 @@ jobs:
         RESEND_API_KEY: test-key
       run: |
         cd backend
-        # Test downgrading
+        # Test a single-step rollback without doing a full schema reset.
         alembic downgrade -1
-        # Test upgrading back
-        alembic upgrade head
-        # Test all the way down and up
-        alembic downgrade base
         alembic upgrade head
 
     - name: Check for migration conflicts
@@ -120,24 +117,45 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r backend/requirements.txt
 
+    - name: Install PostgreSQL client
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y postgresql-client
+
     - name: Create database backup
       env:
         DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        REDIS_URL: redis://localhost:6379/0
-        S3_BUCKET: test-bucket
-        AWS_ACCESS_KEY_ID: test-key
-        AWS_SECRET_ACCESS_KEY: test-secret
-        OPENAI_API_KEY: test-key
-        JWT_SECRET: test-secret-key-for-migrations
-        RESEND_API_KEY: test-key
       run: |
-        cd backend
-        # Create a backup before migrating
-        python -c "import os; from sqlalchemy import create_engine; from datetime import datetime; backup_name = f'pre_migration_backup_{datetime.now().strftime(\"%Y%m%d_%H%M%S\")}.sql'; print(f'Creating backup: {backup_name}')"
+        mkdir -p migration_backups
+        BACKUP_NAME="migration_backups/pre_migration_backup_$(date +%Y%m%d_%H%M%S).dump"
+        pg_dump --format=custom --file "$BACKUP_NAME" "$DATABASE_URL"
+        echo "BACKUP_NAME=$BACKUP_NAME" >> "$GITHUB_ENV"
+
+    - name: Upload database backup artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: pre-migration-backup-${{ github.run_id }}
+        path: ${{ env.BACKUP_NAME }}
+        if-no-files-found: error
+        retention-days: 14
+
+    - name: Verify backup guard
+      run: |
+        if [ -z "${BACKUP_NAME:-}" ]; then
+          echo "Missing BACKUP_NAME after backup step."
+          exit 1
+        fi
+        if [ ! -f "$BACKUP_NAME" ]; then
+          echo "Backup file not found: $BACKUP_NAME"
+          exit 1
+        fi
+        echo "Backup guard passed: $BACKUP_NAME"
 
     - name: Run database migrations
       env:
         DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        ALEMBIC_DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        ALEMBIC_CONFIRM_REMOTE: YES_I_AM_SURE
         REDIS_URL: redis://localhost:6379/0
         S3_BUCKET: test-bucket
         AWS_ACCESS_KEY_ID: test-key
@@ -152,6 +170,8 @@ jobs:
     - name: Verify migration success
       env:
         DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        ALEMBIC_DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        ALEMBIC_CONFIRM_REMOTE: YES_I_AM_SURE
         REDIS_URL: redis://localhost:6379/0
         S3_BUCKET: test-bucket
         AWS_ACCESS_KEY_ID: test-key

@@ -4,11 +4,14 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useParams } from "next/navigation"
 
+import { booksApi } from "@/lib/api/books"
 import { intelligenceApi } from "@/lib/api/intelligence"
 import { readerApi } from "@/lib/api/reader"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { capture } from "@/lib/analytics/posthog"
+import type { Book } from "@/types/book"
 import type { GroundedCitation } from "@/types/intelligence"
+import type { ChapterListResponse, ReadingProgress } from "@/types/reader"
 
 const QUICK_PROMPTS = [
   "When did this character last appear?",
@@ -28,7 +31,9 @@ export default function AskPage() {
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
 
-  const [currentChapter, setCurrentChapter] = useState(1)
+  const [book, setBook] = useState<Book | null>(null)
+  const [progress, setProgress] = useState<ReadingProgress | null>(null)
+  const [chapterList, setChapterList] = useState<ChapterListResponse | null>(null)
   const [bookTitle, setBookTitle] = useState<string | null>(null)
   const [input, setInput] = useState("")
   const [loading, setLoading] = useState(false)
@@ -39,13 +44,29 @@ export default function AskPage() {
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    readerApi.getProgress(bookId)
-      .then((progress) => setCurrentChapter(Math.max(1, progress?.current_chapter ?? 1)))
+    booksApi.get(bookId)
+      .then((nextBook) => {
+        setBook(nextBook)
+        setBookTitle(nextBook.title)
+      })
       .catch(() => {})
-    import("@/lib/api/books").then(({ booksApi }) =>
-      booksApi.get(bookId).then((book) => setBookTitle(book.title)).catch(() => {})
-    )
+    readerApi.getProgress(bookId).then(setProgress).catch(() => {})
+    readerApi.getChapterList(bookId).then(setChapterList).catch(() => {})
   }, [bookId])
+
+  const currentChapter = (() => {
+    if (book?.mode === "author") {
+      const processedChapters = (chapterList?.chapters ?? [])
+        .filter((chapter) => chapter.processed && chapter.intelligence_available !== false)
+        .map((chapter) => chapter.number)
+      return Math.max(1, ...(processedChapters.length > 0 ? processedChapters : [book.total_chapters ?? 1]))
+    }
+    return Math.max(1, progress?.current_chapter ?? 1)
+  })()
+
+  const scopeLabel = book?.mode === "author"
+    ? `All processed chapters through chapter ${currentChapter}`
+    : `Up to chapter ${currentChapter}`
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -57,7 +78,7 @@ export default function AskPage() {
     setInput("")
     setError(null)
     setLoading(true)
-    capture("ask_submitted", { book_id: bookId, chapter: currentChapter, question_len: question.length })
+    capture("ask_submitted", { book_id: bookId, chapter: currentChapter, question_len: question.length, mode: book?.mode ?? "reader" })
     try {
       const response = await intelligenceApi.answer(bookId, question, currentChapter)
       setHistory((previous) => [
@@ -79,7 +100,7 @@ export default function AskPage() {
       setLoading(false)
       setTimeout(() => inputRef.current?.focus(), 80)
     }
-  }, [bookId, currentChapter, loading])
+  }, [book?.mode, bookId, currentChapter, loading])
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey) {
@@ -125,7 +146,7 @@ export default function AskPage() {
               isDark ? "border-white/10 bg-white/5 text-slate-400" : "border-stone-200 bg-stone-50 text-stone-400"
             }`}
           >
-            Up to chapter {currentChapter}
+            {scopeLabel}
           </div>
         </div>
       </header>
@@ -144,7 +165,9 @@ export default function AskPage() {
           </h1>
           <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-400" : "text-stone-500"}`}>
             Ask plain-English questions about your story and get a short grounded answer with chapter citations.
-            Only chapters 1-{currentChapter} are used, so there are no spoilers.
+            {book?.mode === "author"
+              ? ` LoreVia is using all processed chapters through chapter ${currentChapter}.`
+              : ` Only chapters 1-${currentChapter} are used, so there are no spoilers.`}
           </p>
         </div>
 
@@ -176,7 +199,7 @@ export default function AskPage() {
                       isDark ? "text-indigo-300" : "text-violet-600"
                     }`}
                   >
-                    Answer - Chapters 1-{currentChapter}
+                    {book?.mode === "author" ? `Answer - Processed through chapter ${currentChapter}` : `Answer - Chapters 1-${currentChapter}`}
                   </p>
                   <p className={`whitespace-pre-wrap text-sm leading-7 ${isDark ? "text-slate-200" : "text-stone-700"}`}>
                     {entry.answer}
@@ -314,7 +337,9 @@ export default function AskPage() {
             </button>
           </div>
           <p className={`mt-2 text-[10px] ${isDark ? "text-slate-600" : "text-stone-400"}`}>
-            Enter to ask - Shift+Enter for new line - Answers grounded in chapters 1-{currentChapter}
+            {book?.mode === "author"
+              ? `Enter to ask - Shift+Enter for new line - Answers grounded through processed chapter ${currentChapter}`
+              : `Enter to ask - Shift+Enter for new line - Answers grounded in chapters 1-${currentChapter}`}
           </p>
         </div>
 

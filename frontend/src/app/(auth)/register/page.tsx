@@ -6,6 +6,7 @@ import { authApi } from "@/lib/api/auth"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { supabase } from "@/lib/supabase"
+import { getOrCreateDeviceId } from "@/lib/utils/device"
 
 function evaluatePassword(password: string, email: string) {
   const lengthScore = password.length >= 16 ? 3 : password.length >= 12 ? 2 : password.length >= 8 ? 1 : 0
@@ -60,14 +61,13 @@ function GoogleIcon() {
 
 export default function RegisterPage() {
   const [email, setEmail] = useState("")
+  const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
   const [acceptedTerms, setAcceptedTerms] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const router = useRouter()
   const user = useAuthStore(s => s.user)
-  const setAuth = useAuthStore(s => s.setAuth)
-  const setUser = useAuthStore(s => s.setUser)
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
   const passwordState = evaluatePassword(password, email)
@@ -85,12 +85,20 @@ export default function RegisterPage() {
     setLoading(true)
     setError(null)
     try {
-      const res = await authApi.register(email, password, acceptedTerms)
-      setAuth(res.access_token, res.refresh_token)
-      const me = await authApi.me()
-      setUser(me)
-      router.push("/library")
-    } catch {
+      const result = await authApi.register(email, username, password, acceptedTerms, getOrCreateDeviceId())
+      if (!result?.email) {
+        setError("Could not create your account. Please try again.")
+        return
+      }
+      router.push(`/verify-email?email=${encodeURIComponent(result.email)}`)
+    } catch (error: unknown) {
+      if (typeof error === "object" && error && "response" in error) {
+        const detail = (error as { response?: { data?: { detail?: unknown } } }).response?.data?.detail
+        if (typeof detail === "string" && detail.trim()) {
+          setError(detail)
+          return
+        }
+      }
       setError("Registration failed. Email may already be taken.")
     } finally {
       setLoading(false)
@@ -124,7 +132,7 @@ export default function RegisterPage() {
       <div className="mb-8 text-center">
         <h1 className={`text-3xl font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>Create account</h1>
         <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-          Set up your account to start using LoreVia.
+          Set up your account, then verify your email before signing in.
         </p>
       </div>
 
@@ -159,6 +167,18 @@ export default function RegisterPage() {
             isDark ? "border-white/10 bg-white/5 text-slate-100 placeholder:text-slate-500" : "border-stone-300 bg-white text-stone-900 placeholder:text-stone-400"
           }`}
           required
+        />
+        <input
+          type="text"
+          placeholder="Username"
+          value={username}
+          onChange={e => setUsername(e.target.value)}
+          className={`rounded-xl border px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
+            isDark ? "border-white/10 bg-white/5 text-slate-100 placeholder:text-slate-500" : "border-stone-300 bg-white text-stone-900 placeholder:text-stone-400"
+          }`}
+          required
+          minLength={3}
+          maxLength={32}
         />
         <div className="space-y-3">
           <input

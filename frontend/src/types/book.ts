@@ -1,17 +1,22 @@
 export type BookStatus = "pending" | "processing" | "ready" | "failed"
+export type BookFormat = "pdf" | "epub" | "docx" | "doc" | "fountain" | "txt" | "md" | "manual"
+export type BookWorkType = "novel" | "screenplay" | "other"
 
 export interface Book {
   id: string
   title: string
   author: string | null
   genre: string | null
-  format: "pdf" | "epub" | "manual"
+  format: BookFormat
+  work_type: BookWorkType
   status: BookStatus
   mode: "reader" | "author"
   source_kind?: string
+  preserve_chapter_numbers?: boolean
   cover_url?: string | null
   total_chapters: number | null
   total_tokens?: number | null
+  total_words?: number
   is_truncated?: boolean
   primary_series_id?: string | null
   series_name?: string | null
@@ -26,6 +31,7 @@ export interface Book {
   chapters_read_count?: number | null
   chapters_left?: number | null
   marked_complete_in_series?: boolean | null
+  processing?: BookProcessing | null
 }
 
 export interface BookSeries {
@@ -34,6 +40,66 @@ export interface BookSeries {
   description: string | null
   created_at: string
   books: Book[]
+}
+
+export interface SeriesBibleEpisode {
+  book_id: string
+  title: string
+  episode_number?: number | null
+  format: BookFormat
+  work_type: BookWorkType
+  total_scenes: number
+  total_dialogue_lines: number
+  total_words: number
+  status: BookStatus | string
+}
+
+export interface SeriesBibleCharacter {
+  name: string
+  normalized_name: string
+  episode_count: number
+  total_mentions: number
+  first_episode?: number | null
+  last_episode?: number | null
+  episodes: SeriesBibleEpisode[]
+}
+
+export interface SeriesBibleRelationship {
+  characters: string[]
+  relationship_type: string
+  episode_count: number
+  episodes: SeriesBibleEpisode[]
+  note?: string | null
+}
+
+export interface SeriesBiblePlotThread {
+  title: string
+  status: string
+  episode_count: number
+  episodes: SeriesBibleEpisode[]
+  note?: string | null
+}
+
+export interface SeriesBibleCanonEntry {
+  name: string
+  entry_type: string
+  episode_count: number
+  episodes: SeriesBibleEpisode[]
+  description?: string | null
+}
+
+export interface SeriesBible {
+  series_id: string
+  name: string
+  description?: string | null
+  work_type: BookWorkType | string
+  episode_count: number
+  episodes: SeriesBibleEpisode[]
+  recurring_characters: SeriesBibleCharacter[]
+  recurring_relationships: SeriesBibleRelationship[]
+  unresolved_plot_threads: SeriesBiblePlotThread[]
+  canon_entries: SeriesBibleCanonEntry[]
+  continuity_risks: string[]
 }
 
 export interface PublicChapterMeta {
@@ -48,7 +114,8 @@ export interface PublicBook {
   author: string | null
   genre: string | null
   description: string | null
-  format: "pdf" | "epub" | "manual"
+  format: BookFormat
+  work_type: BookWorkType
   status: BookStatus
   cover_url?: string | null
   total_chapters: number | null
@@ -96,6 +163,95 @@ export interface BookNote {
   updated_at: string
 }
 
+export interface ObsidianPreviewFile {
+  path: string
+  content: string
+}
+
+export interface ObsidianPreview {
+  root_folder: string
+  files: ObsidianPreviewFile[]
+}
+
+export interface ObsidianVaultNote {
+  id: string
+  book_id: string
+  path: string
+  source: string
+  content: string
+  created_at: string
+  updated_at: string
+}
+
+export interface ObsidianVaultNoteSaveResult {
+  path: string
+  source: string
+  content: string
+  persisted: boolean
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface ObsidianNoteLink {
+  id: string
+  book_id: string
+  source_note_id: string
+  source_note_path: string
+  target_note_id: string
+  target_note_path: string
+  link_type: string
+  target_label?: string | null
+  created_at: string
+}
+
+export interface ObsidianNoteTag {
+  id: string
+  book_id: string
+  note_id: string
+  note_path: string
+  tag_name: string
+  created_at: string
+}
+
+export interface ObsidianNoteSeriesLink {
+  id: string
+  series_id: string
+  source_book_id: string
+  target_book_id: string
+  source_note_id: string
+  source_note_path: string
+  target_note_id: string
+  target_note_path: string
+  link_type: string
+  created_at: string
+}
+
+export interface ObsidianNoteRelations {
+  links: ObsidianNoteLink[]
+  backlinks: ObsidianNoteLink[]
+  tags: ObsidianNoteTag[]
+  series_links: ObsidianNoteSeriesLink[]
+}
+
+export interface ObsidianGraphNode {
+  id: string
+  path: string
+  title: string
+  folder: string
+  link_count: number
+}
+
+export interface ObsidianGraphEdge {
+  source: string
+  target: string
+  label?: string | null
+}
+
+export interface ObsidianGraph {
+  nodes: ObsidianGraphNode[]
+  edges: ObsidianGraphEdge[]
+}
+
 export interface UserStats {
   public: {
     total_books_read: number
@@ -126,6 +282,19 @@ export interface ChapterConsistencyReport {
   plot_threads_opened: string[]
   plot_threads_resolved: string[]
   continuity_flags: string[]
+}
+
+export interface StoryHealthMetric {
+  label: string
+  score: number
+  detail: string
+}
+
+export interface StoryHealth {
+  score: number
+  status: string
+  summary: string
+  metrics: StoryHealthMetric[]
 }
 
 export interface PreWritingCharacter {
@@ -171,5 +340,199 @@ export interface ChapterVersion {
   title: string | null
   word_count: number | null
   note: string | null
+  snapshot_kind?: string
   created_at: string
+}
+
+export interface ChapterVersionDetail extends ChapterVersion {
+  text: string
+  html: string | null
+}
+
+export interface WordCountGoals {
+  chapter_target?: number | null
+  book_target?: number | null
+  session_target?: number | null
+}
+
+export interface CorkboardCard {
+  id: string
+  title: string
+  description: string
+  status: string
+  lane: string
+  chapter_number?: number | null
+  template_id?: string | null
+}
+
+export interface WritingTemplate {
+  id: string
+  kind: string
+  title: string
+  description: string
+  content: string
+}
+
+export interface PublishingPreset {
+  active_preset: "standard_manuscript" | "trade_paperback" | "kdp_paperback"
+  trim_size: string
+  include_title_page: boolean
+  mirror_margins: boolean
+}
+
+export interface ManuscriptFrontMatter {
+  author_name: string
+  pen_name: string
+  contact_email: string
+  contact_phone: string
+  contact_address: string
+  title: string
+  subtitle: string
+  header_last_name: string
+  header_title: string
+  approximate_word_count_override?: number | null
+  dedication: string
+  acknowledgments: string
+  epigraph: string
+  prologue: string
+  include_dedication: boolean
+  include_acknowledgments: boolean
+  include_epigraph: boolean
+  include_prologue: boolean
+}
+
+export interface GoalCalendarItem {
+  id: string
+  title: string
+  due_date: string
+  quota_value?: number | null
+  quota_unit?: string | null
+  completed: boolean
+}
+
+export interface WriterWorkspace {
+  word_count_goals: WordCountGoals
+  goal_calendar: GoalCalendarItem[]
+  corkboard_cards: CorkboardCard[]
+  templates: WritingTemplate[]
+  publishing: PublishingPreset
+  manuscript_front_matter: ManuscriptFrontMatter
+  processing?: BookProcessing | null
+}
+
+export interface NovelScene {
+  id: string
+  book_id: string
+  chapter_id?: string | null
+  chapter_number?: number | null
+  title: string
+  description?: string | null
+  body: string
+  html_body?: string | null
+  metadata?: Record<string, unknown>
+  path: string
+  status: string
+  sort_order: number
+  source: string
+  origin_chapter_number?: number | null
+  created_at: string
+  updated_at: string
+}
+
+export interface WorkspaceChapterNode {
+  chapter_number: number
+  title?: string | null
+  scene_count: number
+}
+
+export interface WorkspaceSceneGroup {
+  id: string
+  label: string
+  chapter_number?: number | null
+  collapsed_by_default: boolean
+  scenes: NovelScene[]
+}
+
+export interface ManuscriptWorkspaceTree {
+  chapters: WorkspaceChapterNode[]
+  scene_groups: WorkspaceSceneGroup[]
+  note_paths: string[]
+}
+
+export interface BookProcessing {
+  status?: string | null
+  stage?: string | null
+  progress_pct?: number | null
+  chapters_completed?: number | null
+  chapters_total?: number | null
+  eta_seconds?: number | null
+  queue_wait_ms?: number | null
+  last_chapter_number?: number | null
+  last_chapter_title?: string | null
+  started_at?: string | null
+  updated_at?: string | null
+  last_error?: string | null
+}
+
+export interface ReadabilityMetrics {
+  words: number
+  sentences: number
+  paragraphs: number
+  average_sentence_length: number
+  reading_ease: number
+  grade_level: number
+  label: string
+}
+
+export interface EmotionalArcPoint {
+  chapter_number: number
+  label: string
+  sentiment: number
+  impact_score: number
+  growth_direction: string
+}
+
+export interface EmotionalArcCharacter {
+  character_id: string
+  character_name: string
+  role?: string | null
+  arc_summary?: string | null
+  trajectory_score: number
+  points: EmotionalArcPoint[]
+}
+
+export interface EmotionalArcOverview {
+  focus_character_count: number
+  latest_turning_points: string[]
+  characters: EmotionalArcCharacter[]
+}
+
+export interface MajorEvent {
+  chapter_number: number
+  chapter_title: string | null
+  event_title: string
+  description: string
+  importance: number
+  involved_characters?: string[] | null
+  involved_character_names?: string[] | null
+  event_type?: string | null
+}
+
+export interface CharacterEvent {
+  character_id: string
+  character_name: string
+  chapter_number: number
+  event_title: string
+  description: string
+  impact_score: number
+  role?: string | null
+  accomplishments: string[]
+  growth_direction: string
+  growth_magnitude: number
+  is_major: boolean
+}
+
+export interface BookEvents {
+  major_events: MajorEvent[]
+  character_events: CharacterEvent[]
 }

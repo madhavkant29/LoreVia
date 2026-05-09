@@ -43,6 +43,10 @@ export function NotificationsPanel({ mode = "sidebar" }: { mode?: "sidebar" | "p
           <div className="space-y-3">
             {items.map((item) => {
               const chapterNumber = typeof item.data?.chapter_number === "number" ? item.data.chapter_number : null
+              const characterCount = typeof item.data?.character_count === "number" ? item.data.character_count : null
+              const relationshipCount = typeof item.data?.relationship_count === "number" ? item.data.relationship_count : null
+              const plotThreadCount = typeof item.data?.plot_thread_count === "number" ? item.data.plot_thread_count : null
+              const continuityIssueCount = typeof item.data?.continuity_issue_count === "number" ? item.data.continuity_issue_count : null
               return (
                 <article
                   key={item.id}
@@ -52,6 +56,14 @@ export function NotificationsPanel({ mode = "sidebar" }: { mode?: "sidebar" | "p
                     <div className="min-w-0">
                       <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{item.title}</p>
                       <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{item.body}</p>
+                      {item.kind === "book_ready" ? (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {characterCount !== null ? <span className={`rounded-full px-3 py-1 text-[11px] font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-white text-stone-700 border border-stone-200"}`}>{characterCount} characters</span> : null}
+                          {relationshipCount !== null ? <span className={`rounded-full px-3 py-1 text-[11px] font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-white text-stone-700 border border-stone-200"}`}>{relationshipCount} relationships</span> : null}
+                          {plotThreadCount !== null ? <span className={`rounded-full px-3 py-1 text-[11px] font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-white text-stone-700 border border-stone-200"}`}>{plotThreadCount} plot threads</span> : null}
+                          {continuityIssueCount !== null ? <span className={`rounded-full px-3 py-1 text-[11px] font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-white text-stone-700 border border-stone-200"}`}>{continuityIssueCount} continuity issues</span> : null}
+                        </div>
+                      ) : null}
                       <div className={`mt-3 flex flex-wrap items-center gap-3 text-xs ${isDark ? "text-slate-500" : "text-stone-400"}`}>
                         <span>{new Date(item.created_at).toLocaleString()}</span>
                         {chapterNumber ? <span>Chapter {chapterNumber}</span> : null}

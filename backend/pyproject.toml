@@ -14,3 +14,8 @@ ignore_missing_imports = true
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
 testpaths = ["tests"]
+filterwarnings = [
+    "ignore::DeprecationWarning:swigvarlink",
+    "ignore::DeprecationWarning:SwigPyObject",
+    "ignore::DeprecationWarning:SwigPyPacked",
+]

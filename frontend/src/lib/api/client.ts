@@ -4,29 +4,18 @@ import { API_BASE } from "@/lib/constants"
 export const apiClient = axios.create({
   baseURL: API_BASE,
   headers: { "Content-Type": "application/json" },
+  withCredentials: true,
 })
 
-let refreshPromise: Promise<string | null> | null = null
+let refreshPromise: Promise<boolean> | null = null
 
-async function refreshAccessToken(): Promise<string | null> {
-  const refreshToken = typeof window !== "undefined" ? localStorage.getItem("refresh_token") : null
-  if (!refreshToken) return null
-
+async function refreshAccessToken(): Promise<boolean> {
   if (!refreshPromise) {
     refreshPromise = axios
-      .post(`${API_BASE}/auth/refresh`, { refresh_token: refreshToken })
-      .then((response) => {
-        const nextAccess = response.data?.access_token as string | undefined
-        const nextRefresh = response.data?.refresh_token as string | undefined
-        if (!nextAccess || !nextRefresh) return null
-        localStorage.setItem("access_token", nextAccess)
-        localStorage.setItem("refresh_token", nextRefresh)
-        return nextAccess
-      })
+      .post(`${API_BASE}/auth/refresh`, null, { withCredentials: true })
+      .then(() => true)
       .catch(() => {
-        localStorage.removeItem("access_token")
-        localStorage.removeItem("refresh_token")
-        return null
+        return false
       })
       .finally(() => {
         refreshPromise = null
@@ -37,8 +26,15 @@ async function refreshAccessToken(): Promise<string | null> {
 }
 
 apiClient.interceptors.request.use((config) => {
-  const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null
-  if (token) config.headers.Authorization = `Bearer ${token}`
+  // Let the browser set the multipart boundary for FormData requests.
+  // Keeping a JSON default header here can make multipart bodies invalid and
+  // trigger FastAPI 422 validation/parsing errors.
+  if (typeof FormData !== "undefined" && config.data instanceof FormData) {
+    if (config.headers) {
+      delete config.headers["Content-Type"]
+      delete config.headers["content-type"]
+    }
+  }
   return config
 })
 
@@ -46,18 +42,21 @@ apiClient.interceptors.response.use(
   (r) => r,
   async (error) => {
     const originalRequest = error.config
-    if (error.response?.status === 401 && !originalRequest?._retry) {
+    const requestUrl = String(originalRequest?.url ?? "")
+    const requestPath = requestUrl.split("?")[0]
+    const isAuthEndpoint =
+      requestPath === "/auth/me" ||
+      requestPath === "/auth/refresh" ||
+      requestPath === "/auth/login" ||
+      requestPath === "/auth/register" ||
+      requestPath.startsWith("/auth/oauth/")
+    if (error.response?.status === 401 && !originalRequest?._retry && !isAuthEndpoint) {
       originalRequest._retry = true
-      const nextAccess = await refreshAccessToken()
-      if (nextAccess) {
-        originalRequest.headers = originalRequest.headers ?? {}
-        originalRequest.headers.Authorization = `Bearer ${nextAccess}`
+      const refreshed = await refreshAccessToken()
+      if (refreshed) {
         return apiClient(originalRequest)
       }
       if (typeof window !== "undefined") {
-        localStorage.removeItem("access_token")
-        localStorage.removeItem("refresh_token")
-        localStorage.removeItem("lorevia-auth")
         window.location.replace("/login")
       }
     }

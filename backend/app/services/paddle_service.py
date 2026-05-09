@@ -1,20 +1,23 @@
 import hashlib
 import hmac
+import time
 from typing import Any
 
 import httpx
 
 from app.core.config import settings
+from app.utils.billing_utils import (
+    any_paddle_plan_is_configured,
+    normalize_plan_code,
+    paddle_plan_is_configured,
+    price_id_for_plan,
+)
 
 PADDLE_API_BASE = "https://api.paddle.com"
 
 
 def paddle_is_configured() -> bool:
-    return bool(
-        settings.PADDLE_API_KEY
-        and settings.PADDLE_PRO_MONTHLY_PRICE_ID
-        and settings.PADDLE_POWER_MONTHLY_PRICE_ID
-    )
+    return any_paddle_plan_is_configured()
 
 
 def paddle_webhooks_configured() -> bool:
@@ -29,19 +32,6 @@ def _headers() -> dict[str, str]:
         "Content-Type": "application/json",
         "Paddle-Version": "1",
     }
-
-
-def _price_id_for_plan(plan: str) -> str:
-    mapping = {
-        "pro_monthly": settings.PADDLE_PRO_MONTHLY_PRICE_ID or "",
-        "pro_annual": settings.PADDLE_PRO_ANNUAL_PRICE_ID or settings.PADDLE_PRO_MONTHLY_PRICE_ID or "",
-        "power_monthly": settings.PADDLE_POWER_MONTHLY_PRICE_ID or "",
-        "power_annual": settings.PADDLE_POWER_ANNUAL_PRICE_ID or settings.PADDLE_POWER_MONTHLY_PRICE_ID or "",
-    }
-    price_id = mapping.get(plan, "")
-    if not price_id:
-        raise RuntimeError(f"Missing Paddle price mapping for plan: {plan}")
-    return price_id
 
 
 async def get_or_create_customer(email: str, existing_customer_id: str | None = None) -> str:
@@ -64,14 +54,18 @@ async def create_checkout_url(
     plan: str,
     existing_customer_id: str | None = None,
 ) -> tuple[str, str]:
+    normalized_plan = normalize_plan_code(plan)
+    if not paddle_plan_is_configured(normalized_plan):
+        raise RuntimeError(f"Paddle is not configured for plan: {normalized_plan}")
+
     customer_id = await get_or_create_customer(email, existing_customer_id)
     payload: dict[str, Any] = {
-        "items": [{"price_id": _price_id_for_plan(plan), "quantity": 1}],
+        "items": [{"price_id": price_id_for_plan(normalized_plan), "quantity": 1}],
         "customer_id": customer_id,
         "collection_mode": "automatic",
         "custom_data": {
             "user_id": user_id,
-            "plan": plan,
+            "plan": normalized_plan,
         },
     }
     if settings.PADDLE_DEFAULT_CHECKOUT_URL:
@@ -125,6 +119,15 @@ def verify_webhook_signature(raw_body: bytes, paddle_signature: str | None) -> b
             signatures.append(value)
 
     if not timestamp or not signatures:
+        return False
+
+    try:
+        timestamp_value = int(timestamp)
+    except ValueError:
+        return False
+
+    tolerance_seconds = max(settings.PADDLE_WEBHOOK_TOLERANCE_SECONDS, 0)
+    if tolerance_seconds and abs(int(time.time()) - timestamp_value) > tolerance_seconds:
         return False
 
     signed_payload = f"{timestamp}:{raw_body.decode('utf-8')}"

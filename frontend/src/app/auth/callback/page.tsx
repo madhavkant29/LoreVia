@@ -7,10 +7,10 @@ import axios from "axios"
 import { authApi } from "@/lib/api/auth"
 import { supabase } from "@/lib/supabase"
 import { useAuthStore } from "@/lib/stores/authStore"
+import { getOrCreateDeviceId } from "@/lib/utils/device"
 
 export default function AuthCallbackPage() {
   const router = useRouter()
-  const setAuth = useAuthStore((state) => state.setAuth)
   const setUser = useAuthStore((state) => state.setUser)
 
   useEffect(() => {
@@ -30,7 +30,7 @@ export default function AuthCallbackPage() {
         const code = url.searchParams.get("code")
 
         if (oauthError) {
-          fail(oauthError)
+          fail("Google sign-in failed. Please try again.")
           return
         }
 
@@ -39,7 +39,7 @@ export default function AuthCallbackPage() {
         if (!session && code) {
           const { data, error } = await supabase.auth.exchangeCodeForSession(code)
           if (error) {
-            fail(error.message || "Could not complete Google sign-in.")
+            fail("Could not complete Google sign-in.")
             return
           }
           session = data.session
@@ -51,23 +51,23 @@ export default function AuthCallbackPage() {
         }
 
         const acceptedTerms = window.sessionStorage.getItem("lorevia-oauth-accepted-terms") === "true"
-        window.sessionStorage.removeItem("lorevia-oauth-accepted-terms")
-        const tokens = await authApi.loginWithSupabaseToken(session.access_token, acceptedTerms)
+        const user = await authApi.loginWithSupabaseToken(session.access_token, getOrCreateDeviceId(), acceptedTerms)
         if (!active) return
 
-        setAuth(tokens.access_token, tokens.refresh_token)
-        const me = await authApi.me()
-        if (!active) return
-        setUser(me)
-        router.replace("/library")
+        if (!user) {
+          fail("Could not load your profile after Google sign-in.")
+          return
+        }
+        window.sessionStorage.removeItem("lorevia-oauth-accepted-terms")
+        setUser(user)
+        router.replace(user.username ? "/library" : "/complete-username")
       } catch (error) {
         if (axios.isAxiosError(error)) {
-          const message =
-            typeof error.response?.data?.detail === "string"
-              ? error.response.data.detail
-              : error.message
-          fail(message || "OAuth sign-in failed.")
-          return
+          const detail = error.response?.data?.detail
+          if (typeof detail === "string" && detail.trim()) {
+            fail(detail)
+            return
+          }
         }
         if (error instanceof Error) {
           fail(error.message || "OAuth sign-in failed.")
@@ -81,7 +81,7 @@ export default function AuthCallbackPage() {
     return () => {
       active = false
     }
-  }, [router, setAuth, setUser])
+  }, [router, setUser])
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-white px-4">

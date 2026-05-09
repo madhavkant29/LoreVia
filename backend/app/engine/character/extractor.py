@@ -3,8 +3,10 @@ LLM character + relationship extraction with confidence-weighted traits.
 Single LLM pass extracts both — cheaper and gives shared context.
 """
 import json
+import logging
 import re
 from collections import Counter
+from typing import cast
 
 from app.core.config import settings
 from app.core.llm import complete_with_fallback
@@ -13,12 +15,31 @@ from app.engine.character.entity_filters import (
     person_name_shape_score,
 )
 
+log = logging.getLogger("lorevia.character.extractor")
+
 CHARACTER_SYSTEM = """You are a careful literary extraction engine.
 
 Extract named characters actually present in the passage and relationships that are explicit or strongly implied.
 Prefer precision, but do not miss clearly named people who appear in the passage. If a named person is present but lightly described, still include them with minimal fields.
 Do not invent people, aliases, or relationships.
-If a capitalized phrase is a place, institution, magic system, event, title fragment, or sentence starter instead of a person, exclude it.
+If a capitalized phrase is a place, institution, magic system, event, title fragment, sentence starter, object, concept, or group instead of a person, exclude it.
+
+STRICT REJECTION RULES:
+- Reject locations, islands, schools, organizations, syndicates, conglomerates, concepts, techniques, objects, and sentence fragments.
+- Reject names with leading sentence words that are not part of the actual name, such as "Since Hime-nee" or "With Onii-chan".
+- Reject common one-word discourse markers or random nouns like "Well", "Right", "Even", "Yeah", or "Stairs".
+- Reject title-only references unless they clearly point to a recurring individual in this passage.
+- Treat honorific variants as the same person whenever the base name matches.
+- Never return a cleaned or canonical name unless it is directly supported by the passage text.
+
+CHARACTER TYPE SUGGESTION:
+For each character, suggest their main type based on this passage:
+- "complex": Has depth, growth, internal conflict, or significant narrative role
+- "normal": Standard character with some traits but limited depth
+- "gag": Comic relief, used primarily for humor or jokes
+- "meme": Meta-commentary, fourth-wall breaking, or reference-based
+
+This is a suggestion based on this passage only - the final classification will be computed from full character data.
 
 TRAIT CONFIDENCE RULES:
 - Explicit direct description → 0.85–1.0
@@ -31,7 +52,12 @@ Return ONLY valid JSON, no markdown, no commentary:
   "characters": [
     {
       "name": "primary name",
+      "canonical_name": "best canonical name from the passage or null",
       "aliases": ["other names"],
+      "entity_type": "person|alias|organization|location|object|concept|title|unknown",
+      "is_character": true,
+      "confidence": 0.0,
+      "suggested_type": "complex|normal|gag|meme",
       "traits": {
         "hair":   {"value": "...", "confidence": 0.0, "type": "objective|subjective|abstract"},
         "eyes":   {"value": "...", "confidence": 0.0, "type": "..."},
@@ -46,6 +72,7 @@ Return ONLY valid JSON, no markdown, no commentary:
       "arc_summary": "short natural summary of where this character seems to be emotionally or morally",
       "archetype": "japanese high school boy|mentor|trickster|villain|hero|etc",
       "first_appearance_context": "1 sentence",
+      "rejection_reason": null,
       "growth_event": {
         "chapter": 0,
         "event": "specific event that shaped the character here",
@@ -92,12 +119,14 @@ async def extract_characters_and_relationships(chunk_text: str) -> dict:
         characters = _clean_character_entries(parsed.get("characters", []), candidate_names, chunk_text)
         relationships = parsed.get("relationships", [])
         characters = _augment_with_named_mentions(chunk_text, characters, candidate_names)
+        characters = _apply_anti_merge_hints(chunk_text, characters)
         return {
             "characters": characters,
             "relationships": relationships,
         }
     except json.JSONDecodeError:
-        return {"characters": _augment_with_named_mentions(chunk_text, [], candidate_names), "relationships": []}
+        characters = _augment_with_named_mentions(chunk_text, [], candidate_names)
+        return {"characters": _apply_anti_merge_hints(chunk_text, characters), "relationships": []}
 
 
 HONORIFIC_RE = re.compile(r"\b(?:Mr|Mrs|Ms|Miss|Dr|Lady|Lord|Sir)\.?\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?\b")
@@ -137,6 +166,49 @@ ACTION_VERB_CONTEXT = {
     "cried", "screamed", "warned", "snapped", "grinned",
 }
 MAX_AUTO_AUGMENTED_CHARACTERS = 10
+MIN_CHARACTER_CONFIDENCE = 0.78
+MIN_BORDERLINE_CONFIDENCE = 0.55
+SAVE_SINGLE_MENTION_CONFIDENCE = 0.90
+FRAGMENT_PREFIXES = (
+    "about", "after", "before", "because", "but", "even", "following", "if", "just",
+    "meeting", "nodded", "right", "seeing", "since", "then", "what", "when", "where", "with",
+)
+TITLE_ONLY_WORDS = {
+    "doctor", "professor", "master", "assassin", "killer", "protagonist", "antagonist",
+    "contractor", "creator", "teacher", "nurse", "mentor", "sister", "brother",
+}
+TITLE_PREFIXES = (
+    "assistant professor",
+    "professor",
+    "doctor",
+    "mr",
+    "mrs",
+    "ms",
+    "miss",
+    "sir",
+    "lady",
+    "lord",
+)
+GENERIC_PROFILE_PHRASES = {
+    "appearance not yet described",
+    "mysterious figure",
+    "tragic figure",
+    "normal character",
+    "supporting character",
+    "protagonist",
+    "antagonist",
+    "puppet master",
+}
+NON_CHARACTER_EXACT = {
+    "back nozzle", "even", "feather island", "grim reaper", "imaginary weapon", "just",
+    "kendo", "mad demon", "ordinary world", "right", "space creator", "stairs",
+    "strongest contractor", "thirteen", "wet crow", "well", "yeah",
+}
+NON_CHARACTER_TOKENS = {
+    "academy", "agency", "association", "conglomerate", "contractor", "corporation", "creator",
+    "department", "island", "kingdom", "mansion", "object", "room", "school", "space",
+    "stairs", "syndicate", "technique", "university", "weapon", "world",
+}
 ENTITY_NON_PERSON_TOKENS = {
     "association", "convention", "crest", "energy", "fundamentals", "magecraft", "ritual",
     "spirit", "tower", "towers", "department", "academy", "school", "city", "country",
@@ -164,7 +236,11 @@ def _augment_with_named_mentions(chunk_text: str, characters: list[dict], candid
         characters.append(
             {
                 "name": candidate,
+                "canonical_name": candidate,
                 "aliases": [],
+                "entity_type": "person",
+                "is_character": True,
+                "confidence": MIN_CHARACTER_CONFIDENCE,
                 "traits": {},
                 "personality_tags": [],
                 "motivations": [],
@@ -172,6 +248,7 @@ def _augment_with_named_mentions(chunk_text: str, characters: list[dict], candid
                 "arc_summary": None,
                 "archetype": None,
                 "first_appearance_context": "Named in the passage but not yet richly described.",
+                "rejection_reason": None,
                 "growth_event": None,
             }
         )
@@ -223,6 +300,139 @@ def _normalize_name(name: str | None) -> str:
     return re.sub(r"\s+", " ", cleaned).strip()
 
 
+def _clean_name_fragment(name: str) -> str:
+    parts = name.strip().split()
+    while parts and parts[0].casefold() in FRAGMENT_PREFIXES:
+        parts.pop(0)
+    return " ".join(parts).strip(" .,:;!?\"'")
+
+
+def _split_titled_name(name: str) -> tuple[str, str | None]:
+    lowered = name.casefold()
+    for prefix in TITLE_PREFIXES:
+        token = f"{prefix} "
+        if lowered.startswith(token):
+            remainder = name[len(token):].strip()
+            if remainder:
+                return remainder, name
+    return name, None
+
+
+def _contains_supported_subspan(raw_name: str, cleaned_name: str, source_text: str) -> bool:
+    if not raw_name or not cleaned_name:
+        return False
+    if _find_name_mentions(source_text, raw_name):
+        return True
+    if cleaned_name != raw_name and cleaned_name in raw_name and _find_name_mentions(source_text, cleaned_name):
+        return True
+    return False
+
+
+def _is_title_only_name(name: str) -> bool:
+    tokens = [token.casefold() for token in re.findall(r"[A-Za-z][A-Za-z'-]*", name)]
+    return bool(tokens) and all(token in TITLE_ONLY_WORDS for token in tokens)
+
+
+def _reject_obvious_bad_name(name: str) -> str | None:
+    normalized = _normalize_name(name)
+    if not normalized:
+        return "empty_name"
+    if normalized in NON_CHARACTER_EXACT:
+        return "known_non_character_phrase"
+
+    tokens = normalized.split()
+    if len(tokens) <= 1 and len(normalized) <= 2:
+        return "name_too_short"
+    if tokens and tokens[0] in FRAGMENT_PREFIXES:
+        return "sentence_fragment_prefix"
+    if any(token in NON_CHARACTER_TOKENS or token in ENTITY_NON_PERSON_TOKENS for token in tokens):
+        return "non_person_token"
+    if _is_title_only_name(name):
+        return "title_only_reference"
+    return None
+
+
+def _sanitize_summary(value: object) -> str | None:
+    cleaned = " ".join(str(value or "").split()).strip()
+    if not cleaned:
+        return None
+    if cleaned.casefold() in GENERIC_PROFILE_PHRASES:
+        return None
+    return cleaned
+
+
+def _mention_support_score(source_text: str, name: str) -> tuple[int, int]:
+    mentions = _find_name_mentions(source_text, name)
+    strong_mentions = 0
+    for start, end in mentions:
+        context_before = source_text[max(0, start - 48):start]
+        context_after = source_text[end:min(len(source_text), end + 48)]
+        if _mention_has_person_context(context_before, context_after):
+            strong_mentions += 1
+    return len(mentions), strong_mentions
+
+
+def _build_evidence(source_text: str, name: str, traits: dict, aliases: list[str]) -> dict:
+    mention_count, strong_mentions = _mention_support_score(source_text, name)
+    alias_mentions = 0
+    for alias in aliases:
+        alias_count, alias_strong = _mention_support_score(source_text, alias)
+        alias_mentions += alias_count
+        strong_mentions += alias_strong
+    total_mentions = mention_count + alias_mentions
+    has_description = any(isinstance(value, dict) and value.get("value") for value in traits.values())
+    return {
+        "mention_count": total_mentions,
+        "strong_mention_count": strong_mentions,
+        "has_dialogue_or_action": strong_mentions >= 1,
+        "has_physical_description": has_description,
+        "appears_multiple_times": total_mentions >= 2,
+    }
+
+
+def _split_sentences(text: str) -> list[str]:
+    parts = re.split(r"(?<=[.!?])\s+|\n+", text)
+    return [part.strip() for part in parts if part and part.strip()]
+
+
+def _apply_anti_merge_hints(source_text: str, characters: list[dict]) -> list[dict]:
+    if len(characters) < 2:
+        return characters
+
+    sentence_blocks = _split_sentences(source_text)
+    if not sentence_blocks:
+        return characters
+
+    for index, character in enumerate(characters):
+        names = [character.get("name"), *(character.get("aliases") or [])]
+        blocked: set[str] = set()
+        for sentence in sentence_blocks:
+            if not any(candidate and _find_name_mentions(sentence, candidate) for candidate in names):
+                continue
+            for other_index, other in enumerate(characters):
+                if other_index == index:
+                    continue
+                other_names = [other.get("name"), *(other.get("aliases") or [])]
+                if any(candidate and _find_name_mentions(sentence, candidate) for candidate in other_names):
+                    if other.get("name"):
+                        blocked.add(str(other["name"]))
+        character["anti_merge_names"] = sorted(blocked)
+    return characters
+
+
+def _should_keep_character(name: str, confidence: float, source_text: str, traits: dict, arc_summary: str | None) -> bool:
+    mentions, strong_mentions = _mention_support_score(source_text, name)
+    if confidence < MIN_BORDERLINE_CONFIDENCE:
+        return False
+    if confidence >= MIN_CHARACTER_CONFIDENCE:
+        return True
+    if mentions >= 2 and strong_mentions >= 1:
+        return True
+    if confidence >= SAVE_SINGLE_MENTION_CONFIDENCE and (traits or arc_summary):
+        return True
+    return False
+
+
 def _looks_like_character_name(name: str, source_text: str) -> bool:
     cleaned = " ".join(name.split()).strip(" .,:;!?\"'")
     if not cleaned:
@@ -259,32 +469,80 @@ def _clean_character_entries(characters: list[dict], candidate_names: list[str],
         if not isinstance(item, dict):
             continue
         raw_name = " ".join(str(item.get("name") or "").split()).strip(" .,:;!?\"'")
-        normalized = _normalize_name(raw_name)
-        if not raw_name or not normalized:
+        cleaned_name = _clean_name_fragment(raw_name)
+        normalized = _normalize_name(cleaned_name)
+        if not raw_name or not cleaned_name or not normalized:
             continue
         if normalized in seen:
             continue
-        if normalized not in candidate_norms and not _looks_like_character_name(raw_name, source_text):
+
+        if not _contains_supported_subspan(raw_name, cleaned_name, source_text):
             continue
-        if normalized in candidate_norms and person_name_shape_score(raw_name) < 1 and not _looks_like_character_name(raw_name, source_text):
+
+        entity_type = str(item.get("entity_type") or "").strip().casefold() or "person"
+        is_character = bool(item.get("is_character", True))
+        confidence = float(item.get("confidence") or 0.0)
+        if entity_type not in {"person", "alias", "unknown"} or not is_character:
+            continue
+
+        rejection_reason = _reject_obvious_bad_name(cleaned_name)
+        if rejection_reason:
+            log.info("Rejected extracted character '%s': %s", raw_name, rejection_reason)
+            continue
+
+        if normalized not in candidate_norms and not _looks_like_character_name(cleaned_name, source_text):
+            continue
+        if normalized in candidate_norms and person_name_shape_score(cleaned_name) < 1 and not _looks_like_character_name(cleaned_name, source_text):
+            continue
+
+        traits = cast(dict[str, object], item.get("traits") if isinstance(item.get("traits"), dict) else {})
+        arc_summary = _sanitize_summary(item.get("arc_summary"))
+        if not _should_keep_character(cleaned_name, confidence, source_text, traits, arc_summary):
             continue
 
         aliases = []
         for alias in item.get("aliases") or []:
-            cleaned_alias = " ".join(str(alias or "").split()).strip(" .,:;!?\"'")
+            raw_alias = " ".join(str(alias or "").split()).strip(" .,:;!?\"'")
+            cleaned_alias = _clean_name_fragment(raw_alias)
             alias_norm = _normalize_name(cleaned_alias)
             if (
                 cleaned_alias
                 and alias_norm
                 and alias_norm != normalized
+                and _contains_supported_subspan(raw_alias, cleaned_alias, source_text)
+                and not _reject_obvious_bad_name(cleaned_alias)
                 and _looks_like_character_name(cleaned_alias, source_text)
             ):
                 aliases.append(cleaned_alias)
 
+        cleaned_name, titled_alias = _split_titled_name(cleaned_name)
+        normalized = _normalize_name(cleaned_name)
+        if titled_alias and titled_alias != cleaned_name:
+            aliases.append(titled_alias)
+
+        canonical_name = _clean_name_fragment(" ".join(str(item.get("canonical_name") or "").split()).strip(" .,:;!?\"'"))
+        if canonical_name and canonical_name != cleaned_name:
+            if _contains_supported_subspan(raw_name, canonical_name, source_text) and _looks_like_character_name(canonical_name, source_text):
+                aliases.append(cleaned_name)
+                cleaned_name = canonical_name
+                normalized = _normalize_name(cleaned_name)
+            else:
+                canonical_name = ""
+
+        evidence = _build_evidence(source_text, cleaned_name, traits, aliases)
+
         cleaned.append({
             **item,
-            "name": raw_name,
+            "name": cleaned_name,
+            "canonical_name": cleaned_name,
             "aliases": list(dict.fromkeys(aliases)),
+            "entity_type": "person" if entity_type == "unknown" else entity_type,
+            "confidence": confidence,
+            "arc_summary": arc_summary,
+            "archetype": _sanitize_summary(item.get("archetype")),
+            "mention_count": evidence["mention_count"],
+            "evidence": evidence,
+            "rejection_reason": None,
         })
         seen.add(normalized)
 
@@ -368,8 +626,8 @@ def _mention_has_person_context(before: str, after: str) -> bool:
 
 def _allow_auto_augmentation(text: str, name: str) -> bool:
     words = re.findall(r"[A-Za-z][A-Za-z'-]*", name)
-    if len(words) >= 2:
-        return True
+    if len(words) == 1:
+        return False
     mentions = _find_name_mentions(text, name)
     if not mentions:
         return False
@@ -382,7 +640,7 @@ def _allow_auto_augmentation(text: str, name: str) -> bool:
             non_sentence_start_mentions += 1
         if _mention_has_person_context(context_before, context_after):
             strong_mentions += 1
-    return strong_mentions >= 2 or (strong_mentions >= 1 and non_sentence_start_mentions >= 1 and len(mentions) >= 3)
+    return strong_mentions >= 1 and (non_sentence_start_mentions >= 1 or len(mentions) >= 2)
 
 
 def _looks_like_sentence_fragment(word: str) -> bool:

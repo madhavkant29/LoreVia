@@ -20,7 +20,7 @@ export default function RelationshipEvolutionPage() {
       setChapter(current)
       return readerApi.getRelationshipEvolution(bookId, current)
     }).then((res) => setPairs(res.pairs)).catch((e) => {
-      setError(e.response?.data?.detail ?? "Relationship evolution unavailable")
+      setError("Relationship evolution unavailable")
     })
   }, [bookId])
 

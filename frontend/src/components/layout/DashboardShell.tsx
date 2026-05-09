@@ -1,0 +1,22 @@
+"use client"
+
+import { useEffect } from "react"
+import { Navbar } from "@/components/layout/Navbar"
+import { usePreferencesStore } from "@/lib/stores/preferencesStore"
+
+export function DashboardShell({ children }: { children: React.ReactNode }) {
+  const { theme } = usePreferencesStore()
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+  }, [theme])
+
+  return (
+    <div className="min-h-screen bg-background text-foreground transition-colors duration-300">
+      <Navbar />
+      <main className="mx-auto max-w-7xl px-4 py-8 md:px-8 lg:px-10">
+        {children}
+      </main>
+    </div>
+  )
+}

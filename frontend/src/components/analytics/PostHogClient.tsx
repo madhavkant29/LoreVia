@@ -2,6 +2,7 @@
 
 import posthog from "posthog-js"
 import { PostHogProvider } from "posthog-js/react"
+import { usePathname } from "next/navigation"
 import React from "react"
 import CookieConsent, { getCookieConsentValue } from "react-cookie-consent"
 
@@ -23,6 +24,7 @@ function initPostHog() {
 
 export function PostHogClientProvider({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = React.useState(false)
+  const pathname = usePathname()
 
   React.useEffect(() => {
     if (!isEnabled()) return
@@ -41,12 +43,12 @@ export function PostHogClientProvider({ children }: { children: React.ReactNode 
   return (
     <>
       {ready ? <PostHogProvider client={posthog}>{children}</PostHogProvider> : <>{children}</>}
-      {isEnabled() ? (
+      {isEnabled() && pathname !== "/privacy" ? (
         <CookieConsent
           cookieName="lorevia_analytics_consent"
           enableDeclineButton
-          declineButtonText="Decline"
-          buttonText="Accept"
+          declineButtonText="Not now"
+          buttonText="Yes, for analytics"
           onAccept={enable}
           style={{
             background: "rgba(0,0,0,0.92)",
@@ -70,8 +72,7 @@ export function PostHogClientProvider({ children }: { children: React.ReactNode 
             padding: "10px 14px",
           }}
         >
-          We use PostHog analytics (EU region) to understand which features are useful. This stores a consent cookie and may
-          use localStorage for analytics identifiers. See our{" "}
+          Want to allow cookies for analytics? We use them to see which features people use and improve the app. See our{" "}
           <a href="/privacy" className="underline underline-offset-4">
             Privacy Policy
           </a>

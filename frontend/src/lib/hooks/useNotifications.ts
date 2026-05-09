@@ -5,6 +5,13 @@ import { notificationsApi } from "@/lib/api/notifications"
 import { useAuthStore } from "@/lib/stores/authStore"
 import type { NotificationItem } from "@/types/notifications"
 
+const NOTIFICATIONS_CHANGED_EVENT = "notifications:changed"
+
+function emitNotificationsChanged() {
+  if (typeof window === "undefined") return
+  window.dispatchEvent(new Event(NOTIFICATIONS_CHANGED_EVENT))
+}
+
 export function useNotifications(limit = 40) {
   const user = useAuthStore((state) => state.user)
   const [items, setItems] = useState<NotificationItem[]>([])
@@ -35,11 +42,21 @@ export function useNotifications(limit = 40) {
     refresh()
   }, [refresh])
 
+  useEffect(() => {
+    if (typeof window === "undefined") return
+
+    const handleNotificationsChanged = () => {
+      refresh()
+    }
+
+    window.addEventListener(NOTIFICATIONS_CHANGED_EVENT, handleNotificationsChanged)
+    return () => window.removeEventListener(NOTIFICATIONS_CHANGED_EVENT, handleNotificationsChanged)
+  }, [refresh])
+
   const markRead = useCallback(async (id: string) => {
     try {
-      const updated = await notificationsApi.markRead(id)
-      setItems((current) => current.map((item) => item.id === id ? updated : item))
-      setUnreadCount((current) => Math.max(0, current - 1))
+      await notificationsApi.markRead(id)
+      emitNotificationsChanged()
     } catch {
       setError("Could not update notification.")
     }
@@ -47,9 +64,8 @@ export function useNotifications(limit = 40) {
 
   const markAllRead = useCallback(async () => {
     try {
-      const response = await notificationsApi.markAllRead()
-      setItems(response.items)
-      setUnreadCount(response.unread_count)
+      await notificationsApi.markAllRead()
+      emitNotificationsChanged()
     } catch {
       setError("Could not update notifications.")
     }

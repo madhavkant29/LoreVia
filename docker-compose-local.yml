@@ -3,17 +3,72 @@ services:
     build: { context: ./backend, dockerfile: Dockerfile.api }
     ports: ["8000:8000"]
     env_file: ./backend/.env.local
-    depends_on: [redis, postgres]
+    environment:
+      NORMALIZE_LOCAL_STORAGE_PERMISSIONS: "1"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
     volumes:
       - local_storage:/app/storage
 
-  worker:
+  worker-extraction:
     build: { context: ./backend, dockerfile: Dockerfile.worker }
     env_file: ./backend/.env.local
-    depends_on: [redis, postgres]
-    command: celery -A app.workers.celery_app worker -Q intelligence,analysis,embedding,extraction -c 4 -Ofair --loglevel=info
+    environment:
+      NORMALIZE_LOCAL_STORAGE_PERMISSIONS: "1"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
     volumes:
       - local_storage:/app/storage
+
+  worker-analysis:
+    build: { context: ./backend, dockerfile: Dockerfile.worker }
+    env_file: ./backend/.env.local
+    environment:
+      NORMALIZE_LOCAL_STORAGE_PERMISSIONS: "1"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - local_storage:/app/storage
+
+  worker-intelligence:
+    build: { context: ./backend, dockerfile: Dockerfile.worker }
+    env_file: ./backend/.env.local
+    environment:
+      NORMALIZE_LOCAL_STORAGE_PERMISSIONS: "1"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - local_storage:/app/storage
+
+  migrate:
+    build: { context: ./backend, dockerfile: Dockerfile.api }
+    env_file: ./backend/.env.local
+    environment:
+      ALEMBIC_ALLOW_DESTRUCTIVE_UPGRADES: "1"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: python scripts/bootstrap_db.py
 
   postgres:
     image: pgvector/pgvector:pg16
@@ -22,6 +77,11 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
     ports: ["5432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d lorevia"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
@@ -32,8 +92,15 @@ services:
   flower:
     build: { context: ./backend, dockerfile: Dockerfile.worker }
     env_file: ./backend/.env.local
-    depends_on: [redis, postgres]
-    command: celery -A app.workers.celery_app flower --port=5555
+    environment:
+      NORMALIZE_LOCAL_STORAGE_PERMISSIONS: "1"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
     ports: ["5555:5555"]
     volumes:
       - local_storage:/app/storage

@@ -27,6 +27,16 @@ SUBJECTIVE_TRANSLATIONS = {
     "background character": "ordinary appearance",
     "average": "average-looking",
 }
+GENERIC_SUMMARY_PHRASES = {
+    "appearance not yet described",
+    "mysterious figure",
+    "tragic figure",
+    "normal character",
+    "supporting character",
+    "protagonist",
+    "antagonist",
+    "puppet master",
+}
 
 
 def merge_trait_states(existing: dict, new_traits: dict) -> dict:
@@ -70,7 +80,7 @@ def build_description(trait_state: dict, archetype: str | None) -> str:
     if not traits and archetype:
         return ARCHETYPE_PROMPTS.get(archetype.lower(), archetype)
     elif not traits:
-        return "appearance not yet described"
+        return ""
     
     # Build natural sentences
     sentences = []
@@ -182,6 +192,7 @@ def _clean_line(value: str | None) -> str:
 
 def choose_richer_text(*values: str | None) -> str | None:
     cleaned = [_clean_line(value) for value in values if value and value.strip()]
+    cleaned = [value for value in cleaned if value and value.casefold() not in GENERIC_SUMMARY_PHRASES]
     if not cleaned:
         return None
     return max(cleaned, key=len)

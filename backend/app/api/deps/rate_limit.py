@@ -1,14 +1,21 @@
 import time
 import uuid
+from datetime import UTC, datetime
 
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy import select
 
 from app.api.deps.auth import get_current_user
-from app.core.config import effective_tier, settings
+from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.core.redis import get_redis, key_ratelimit
 from app.models.user import User, UserRateLimitOverride
+from app.utils.billing_utils import (
+    DAILY_LIMIT_MESSAGE,
+    free_search_limit_per_day,
+    prediction_limit_per_day,
+    protected_authoring_limit_per_day,
+)
 
 
 async def _window(key: str, limit: int, window: int = 60) -> bool:
@@ -30,82 +37,63 @@ async def _require_window(key: str, limit: int, window: int, message: str) -> No
         raise HTTPException(429, message)
 
 
+def _current_utc(now: datetime | None = None) -> datetime:
+    current = now or datetime.now(UTC)
+    return current if current.tzinfo else current.replace(tzinfo=UTC)
+
+
+def _utc_day_bucket(action: str, now: datetime | None = None) -> tuple[str, int]:
+    current = _current_utc(now)
+    tomorrow = current.replace(hour=0, minute=0, second=0, microsecond=0).timestamp() + 86400
+    ttl_seconds = max(int(tomorrow - current.timestamp()), 1)
+    return current.strftime(f"{action}:%Y%m%d"), ttl_seconds
+
+
+async def _bump_daily_bucket(user_id: object, action: str, limit: int) -> None:
+    if limit <= 0:
+        raise HTTPException(403, DAILY_LIMIT_MESSAGE)
+
+    bucket, ttl_seconds = _utc_day_bucket(action)
+    key = key_ratelimit(str(user_id), bucket)
+    r = await get_redis()
+    await r.set(key, "0", ex=ttl_seconds, nx=True)
+    count = int(await r.incr(key))
+    if count > limit:
+        raise HTTPException(429, DAILY_LIMIT_MESSAGE)
+
+
 async def rate_limit_search(current_user: User = Depends(get_current_user)):
-    if effective_tier(current_user.tier) == "free":
-        limit = await _limit_for_user(current_user.id, "search_per_hour", settings.FREE_SEARCH_PER_HOUR)
-        ok = await _window(key_ratelimit(str(current_user.id), "search"), limit, 3600)
-        if not ok:
-            raise HTTPException(429, "Too many search requests right now. Please try again later.")
+    limit = free_search_limit_per_day(current_user)
+    if limit is None:
+        return
+    limit = await _limit_for_user(current_user.id, "search_per_hour", limit)
+    await _bump_daily_bucket(current_user.id, "search", limit)
 
 
 async def rate_limit_summary(current_user: User = Depends(get_current_user)):
-    if effective_tier(current_user.tier) == "free":
-        limit = await _limit_for_user(current_user.id, "summary_per_hour", settings.FREE_SUMMARY_PER_HOUR)
-        ok = await _window(key_ratelimit(str(current_user.id), "summary"), limit, 3600)
-        if not ok:
-            raise HTTPException(429, "Too many summary requests right now. Please try again later.")
+    return None
 
 
 async def rate_limit_chat(current_user: User = Depends(get_current_user)):
-    tier = effective_tier(current_user.tier)
-    daily_limit = {
-        "free": settings.FREE_CHAT_PER_DAY,
-        "pro": settings.PRO_CHAT_PER_DAY,
-        "power": 999999,
-    }.get(tier, settings.FREE_CHAT_PER_DAY)
+    daily_limit = prediction_limit_per_day(current_user)
     daily_limit = await _limit_for_user(current_user.id, "chat_per_day", daily_limit)
-    ok = await _window(key_ratelimit(str(current_user.id), "chat"), daily_limit, 86400)
-    if not ok:
-        raise HTTPException(429, "Too many chat requests right now. Please try again later.")
+    await _bump_daily_bucket(current_user.id, "prediction", daily_limit)
 
 
 async def rate_limit_advisor(current_user: User = Depends(get_current_user)):
-    tier = effective_tier(current_user.tier)
-    limits = {
-        "free": (
-            settings.FREE_ADVISOR_PER_DAY,
-            settings.FREE_ADVISOR_PER_WEEK,
-            settings.FREE_ADVISOR_PER_MONTH,
-        ),
-        "pro": (
-            settings.PRO_ADVISOR_PER_DAY,
-            settings.PRO_ADVISOR_PER_WEEK,
-            settings.PRO_ADVISOR_PER_MONTH,
-        ),
-        "power": (
-            settings.POWER_ADVISOR_PER_DAY,
-            settings.POWER_ADVISOR_PER_WEEK,
-            settings.POWER_ADVISOR_PER_MONTH,
-        ),
-    }
-    daily_limit, weekly_limit, monthly_limit = limits.get(
-        tier,
-        (
-            settings.FREE_ADVISOR_PER_DAY,
-            settings.FREE_ADVISOR_PER_WEEK,
-            settings.FREE_ADVISOR_PER_MONTH,
-        ),
-    )
+    daily_limit = protected_authoring_limit_per_day(current_user)
+    if daily_limit <= 0:
+        raise HTTPException(403, "Story Advisor is an authoring feature. Upgrade to Author for access.")
     daily_limit = await _limit_for_user(current_user.id, "advisor_per_day", daily_limit)
-    message = "Too many Story Advisor requests right now. Please try again later."
-    await _require_window(key_ratelimit(str(current_user.id), "advisor:day"), daily_limit, 86400, message)
-    await _require_window(key_ratelimit(str(current_user.id), "advisor:week"), weekly_limit, 604800, message)
-    await _require_window(key_ratelimit(str(current_user.id), "advisor:month"), monthly_limit, 2592000, message)
+    await _bump_daily_bucket(current_user.id, "high_cost_authoring", daily_limit)
 
 
 async def rate_limit_continuity_checker(current_user: User = Depends(get_current_user)):
-    tier = effective_tier(current_user.tier)
-    per_minute = {
-        "free": settings.FREE_CONTINUITY_PER_MINUTE,
-        "pro": settings.PRO_CONTINUITY_PER_MINUTE,
-        "power": settings.POWER_CONTINUITY_PER_MINUTE,
-    }.get(tier, settings.FREE_CONTINUITY_PER_MINUTE)
-    await _require_window(
-        key_ratelimit(str(current_user.id), "continuity"),
-        per_minute,
-        60,
-        "Too many continuity checks right now. Please try again in a minute.",
-    )
+    daily_limit = protected_authoring_limit_per_day(current_user)
+    if daily_limit <= 0:
+        raise HTTPException(403, "Continuity checks are authoring features. Upgrade to Author for access.")
+    daily_limit = await _limit_for_user(current_user.id, "advisor_per_day", daily_limit)
+    await _bump_daily_bucket(current_user.id, "high_cost_authoring", daily_limit)
 
 
 async def rate_limit_api(request: Request, current_user: User = Depends(get_current_user)):

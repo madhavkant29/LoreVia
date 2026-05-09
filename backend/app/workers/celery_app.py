@@ -1,8 +1,9 @@
 import ssl
+import time
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import sentry_sdk
-from celery import Celery, signals
+from celery import Celery, Task, signals
 from sentry_sdk.integrations.celery import CeleryIntegration
 
 from app.core.config import settings
@@ -32,7 +33,7 @@ def _normalize_celery_redis_url(raw_url: str) -> tuple[str, dict]:
 redis_url, redis_ssl_options = _normalize_celery_redis_url(settings.REDIS_URL)
 
 
-if settings.SENTRY_DSN:
+if settings.SENTRY_DSN and not settings.DEBUG:
     sentry_sdk.init(
         dsn=settings.SENTRY_DSN,
         integrations=[CeleryIntegration()],
@@ -41,13 +42,14 @@ if settings.SENTRY_DSN:
     )
 
 
-class RequestContextTask(Celery.Task):
+class RequestContextTask(Task):
     def apply_async(self, args=None, kwargs=None, task_id=None, producer=None, link=None, link_error=None, **options):
         headers = dict(options.get("headers") or {})
         if "request_id" not in headers:
             request_id = get_request_id()
             if request_id:
                 headers["request_id"] = request_id
+        headers.setdefault("enqueued_at", str(time.time()))
         options["headers"] = headers
         return super().apply_async(
             args=args,
@@ -90,11 +92,14 @@ celery_app.conf.update(
         "intelligence_tasks.*": {"queue": "intelligence"},
     },
     task_annotations={
-        # Single-worker MVP guardrails:
-        # - extraction is heavy/long-running → rate limit + generous timeouts
-        # - intelligence is user-facing → tight timeouts + higher rate
-        "extraction_tasks.*": {
-            "rate_limit": "2/m",
+        # Queue-specific guardrails:
+        # - extraction is heavy/long-running; use generous timeouts
+        # - intelligence is user-facing; keep tighter limits
+        "extraction_tasks.process_book": {
+            "soft_time_limit": 20 * 60,
+            "time_limit": 25 * 60,
+        },
+        "extraction_tasks.process_chapter": {
             "soft_time_limit": 20 * 60,
             "time_limit": 25 * 60,
         },

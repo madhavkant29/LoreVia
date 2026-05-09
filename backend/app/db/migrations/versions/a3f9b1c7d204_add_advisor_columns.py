@@ -8,7 +8,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "a3f9b1c7d204"
-down_revision = None   # first migration — no predecessor
+down_revision = "20260425_baseline_schema"
 branch_labels = None
 depends_on = None
 

@@ -1,11 +1,47 @@
+import os
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+_ORIGINAL_ENV_KEYS = frozenset(os.environ.keys())
+
+
+def _load_env_file(path: str | Path = ".env", *, override_loaded_values: bool = False) -> None:
+    env_path = Path(path)
+    if not env_path.exists():
+        return
+
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if not key:
+            continue
+        if key in _ORIGINAL_ENV_KEYS:
+            continue
+        if not override_loaded_values and key in os.environ:
+            continue
+
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+            value = value[1:-1]
+        os.environ[key] = value
+
+
+_BASE_DIR = Path(__file__).resolve().parents[2]
+_load_env_file(_BASE_DIR / ".env")
+_load_env_file(_BASE_DIR / ".env.local", override_loaded_values=True)
 
 
 class Settings(BaseSettings):
     APP_NAME: str = "LoreVia"
     DEBUG: bool = False
     API_V1_PREFIX: str = "/api/v1"
-    BACKEND_CORS_ORIGINS: str = "https://getlorevia.com,https://www.getlorevia.com,https://api.getlorevia.com,http://localhost:3000"
+    BACKEND_CORS_ORIGINS: str = "https://getlorevia.com,https://www.getlorevia.com,https://api.getlorevia.com,http://localhost:3000,http://127.0.0.1:3000"
     ALLOWED_HOSTS: str = "getlorevia.com,www.getlorevia.com,api.getlorevia.com,localhost,127.0.0.1"
 
     # Database
@@ -36,6 +72,7 @@ class Settings(BaseSettings):
     OPENAI_INTEL_MODEL: str = "gpt-4o-mini"           # chat, predictions #revert to gpt-4o-mini for now, gpt-4o is too costly and not significantly better for our use case
     OPENAI_EMBED_MODEL: str = "text-embedding-3-small"
     OPENAI_EMBED_DIM: int = 1536
+    OPENAI_ENCODING_MODEL: str = "gpt-4o-mini"   # tiktoken encoding for token counting
     ANTHROPIC_API_KEY: str | None = None         # fallback
     GEMINI_API_KEY: str | None = None
     GEMINI_EXTRACT_MODEL: str = "gemini-1.5-flash"
@@ -50,7 +87,16 @@ class Settings(BaseSettings):
     # Paddle
     PADDLE_API_KEY: str | None = None
     PADDLE_WEBHOOK_SECRET: str | None = None
+    PADDLE_WEBHOOK_TOLERANCE_SECONDS: int = 300
     PADDLE_DEFAULT_CHECKOUT_URL: str | None = None
+    PADDLE_READER_MONTHLY_PRICE_ID: str | None = None
+    PADDLE_READER_ANNUAL_PRICE_ID: str | None = None
+    PADDLE_AUTHOR_MONTHLY_PRICE_ID: str | None = None
+    PADDLE_AUTHOR_ANNUAL_PRICE_ID: str | None = None
+    PADDLE_ARCHITECT_MONTHLY_PRICE_ID: str | None = None
+    PADDLE_ARCHITECT_ANNUAL_PRICE_ID: str | None = None
+    # Legacy names kept so existing environments do not break while the new
+    # Reader/Author/Architect catalog is being rolled out.
     PADDLE_PRO_MONTHLY_PRICE_ID: str | None = None
     PADDLE_PRO_ANNUAL_PRICE_ID: str | None = None
     PADDLE_POWER_MONTHLY_PRICE_ID: str | None = None
@@ -62,6 +108,7 @@ class Settings(BaseSettings):
     EMAIL_FROM: str = "support@mail.getlorevia.com"
     SUPPORT_EMAIL: str = "support@getlorevia.com"
     LEGAL_EMAIL: str = "legal@getlorevia.com"
+    INTERNAL_JOB_SECRET: str | None = None
 
     # Monitoring
     SENTRY_DSN: str | None = None
@@ -71,46 +118,72 @@ class Settings(BaseSettings):
     SUPABASE_SERVICE_KEY: str | None = None
 
     # Processing
-    LAZY_PROCESS_INITIAL_CHAPTERS: int = 1
+    LAZY_PROCESS_INITIAL_CHAPTERS: int = 2
     CHUNK_TARGET_TOKENS: int = 900
     CHUNK_MAX_TOKENS: int = 1200
     CHUNK_MIN_TOKENS: int = 260
     CHUNK_OVERLAP_TOKENS: int = 80
     CHUNK_OVERLAP_RATIO: float = 0.07
-    EXTRACTION_BATCH_MAX_TOKENS: int = 5000
-    EXTRACTION_BATCH_MAX_CHUNKS: int = 4
+    EXTRACTION_BATCH_MAX_TOKENS: int = 7000
+    EXTRACTION_BATCH_MAX_CHUNKS: int = 6
+    EXTRACTION_EMBED_BATCH_SIZE: int = 24
+    EXTRACTION_EMBED_CONCURRENCY: int = 2
     DEDUP_SIMILARITY_THRESHOLD: float = 0.88
+    INGESTION_CHAPTER_UPLOAD_CONCURRENCY: int = 4
+    INGESTION_CHAPTER_DISPATCH_WINDOW: int = 3
+    INGESTION_CHAPTER_DISPATCH_DELAY_SECONDS: int = 1
     SEARCH_SIMILARITY_THRESHOLD: float = 0.65
     SEARCH_MAX_CONTEXT_CHUNKS: int = 3
     PASSWORD_RESET_TOKEN_TTL_SECONDS: int = 1800
-
+    EMAIL_VERIFICATION_TOKEN_TTL_SECONDS: int = 86400
     # Tier limits
     FREE_MAX_BOOKS: int = 2
     FREE_TOTAL_TOKEN_BUDGET: int = 250000
-    FREE_SEARCH_PER_HOUR: int = 20
+    FREE_SEARCH_PER_DAY: int = 5
     FREE_SUMMARY_PER_HOUR: int = 30
-    FREE_CHAT_PER_DAY: int = 10
-    PRO_CHAT_PER_DAY: int = 100
-    FREE_ADVISOR_PER_DAY: int = 20
-    FREE_ADVISOR_PER_WEEK: int = 80
-    FREE_ADVISOR_PER_MONTH: int = 240
-    PRO_ADVISOR_PER_DAY: int = 80
-    PRO_ADVISOR_PER_WEEK: int = 320
-    PRO_ADVISOR_PER_MONTH: int = 960
-    POWER_ADVISOR_PER_DAY: int = 200
-    POWER_ADVISOR_PER_WEEK: int = 800
-    POWER_ADVISOR_PER_MONTH: int = 2400
+    FREE_PREDICTION_PER_DAY: int = 3
+    READER_PREDICTION_PER_DAY: int = 10
+    AUTHOR_PREDICTION_PER_DAY: int = 30
+    ARCHITECT_PREDICTION_PER_DAY: int = 60
+    TRIAL_HIGH_COST_TURNS_PER_DAY: int = 20
+    AUTHOR_HIGH_COST_TURNS_PER_DAY: int = 30
+    ARCHITECT_HIGH_COST_TURNS_PER_DAY: int = 60
+    FREE_ADVISOR_PER_DAY: int = 0
+    FREE_ADVISOR_PER_WEEK: int = 0
+    FREE_ADVISOR_PER_MONTH: int = 0
+    TRIAL_AUTHOR_ADVISOR_PER_DAY: int = 20
+    READER_ADVISOR_PER_DAY: int = 0
+    READER_ADVISOR_PER_WEEK: int = 0
+    READER_ADVISOR_PER_MONTH: int = 0
+    AUTHOR_ADVISOR_PER_DAY: int = 30
+    AUTHOR_ADVISOR_PER_WEEK: int = 210
+    AUTHOR_ADVISOR_PER_MONTH: int = 900
+    ARCHITECT_ADVISOR_PER_DAY: int = 60
+    ARCHITECT_ADVISOR_PER_WEEK: int = 420
+    ARCHITECT_ADVISOR_PER_MONTH: int = 1800
     FREE_CONTINUITY_PER_MINUTE: int = 6
+    READER_CONTINUITY_PER_MINUTE: int = 0
+    AUTHOR_CONTINUITY_PER_MINUTE: int = 20
+    ARCHITECT_CONTINUITY_PER_MINUTE: int = 40
+    PRO_CHAT_PER_DAY: int = 30
+    PRO_ADVISOR_PER_DAY: int = 30
+    PRO_ADVISOR_PER_WEEK: int = 210
+    PRO_ADVISOR_PER_MONTH: int = 900
+    POWER_ADVISOR_PER_DAY: int = 60
+    POWER_ADVISOR_PER_WEEK: int = 420
+    POWER_ADVISOR_PER_MONTH: int = 1800
     PRO_CONTINUITY_PER_MINUTE: int = 20
     POWER_CONTINUITY_PER_MINUTE: int = 40
+    DEVICE_TRIAL_ENFORCEMENT_ENABLED: bool = True
+    DEVICE_TRIAL_MAX_ACCOUNTS: int = 2
 
     # Cloudflare Tunnel
     CLOUDFLARE_TUNNEL_TOKEN: str | None = None   # Option 1 security
 
-    model_config = SettingsConfigDict(env_file=".env", case_sensitive=True, extra="ignore")
+    model_config = SettingsConfigDict(case_sensitive=True, extra="ignore")
 
 
-settings = Settings()  # type: ignore[call-arg]
+settings = Settings()
 
 
 def cors_origins() -> list[str]:
@@ -130,5 +203,6 @@ def is_local_mode() -> bool:
 
 def effective_tier(tier: str) -> str:
     if settings.DEBUG:
-        return "pro"
-    return tier
+        return "architect"
+    normalized = (tier or "free").strip().lower()
+    return {"pro": "author", "power": "architect"}.get(normalized, normalized)
