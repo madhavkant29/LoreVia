@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import uuid
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -75,6 +76,7 @@ def _validate_cover_magic(raw: bytes) -> tuple[str, str]:
     raise HTTPException(400, "Cover image must be a JPEG, PNG, GIF, or WebP file.")
 
 from app.api.deps.auth import get_current_user
+from app.api.deps.rate_limit import rate_limit_manuscript_import, rate_limit_upload
 from app.api.deps.subscription import check_upload_limit
 from app.core.database import get_db
 from app.core.security import create_asset_token, decode_token
@@ -214,6 +216,7 @@ from app.workers.consumers.extraction_consumer import _process_chapter
 from app.workers.tasks.extraction_tasks import process_book_task
 
 router = APIRouter()
+log = logging.getLogger("lorevia.books")
 
 
 def _normalize_book_major_event(
@@ -272,6 +275,7 @@ async def upload_book_endpoint(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
     _=Depends(check_upload_limit),
+    __=Depends(rate_limit_upload),
 ):
     title = _clean_text(title) if title else ""
     if author:
@@ -454,6 +458,7 @@ async def import_manuscript_content(
     split_into_chapters: str = Form("true"),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
+    _=Depends(rate_limit_manuscript_import),
 ):
     book = await get_owned_book(db, book_id, current_user.id)
     require_author_access(current_user)
@@ -671,8 +676,16 @@ async def import_manuscript_content(
                 )
             )
             await db.commit()
-            await analyse_chapter(str(chapter.id), chapter_text, chapter.title or "")
-            chapter_reports.append(await build_chapter_consistency_report(db, book, number))
+            try:
+                await analyse_chapter(str(chapter.id), chapter_text, chapter.title or "")
+                chapter_reports.append(await build_chapter_consistency_report(db, book, number))
+            except Exception:
+                log.warning(
+                    "manuscript_import_analysis_failed book_id=%s chapter_number=%s",
+                    book.id,
+                    number,
+                    exc_info=True,
+                )
 
     if book.mode == "author" and len(chapter_reports) == 1:
         for report in chapter_reports:
@@ -1103,6 +1116,7 @@ async def import_book_obsidian_notes(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
+    _=Depends(rate_limit_manuscript_import),
 ):
     book = await get_owned_book(db, book_id, current_user.id)
     archive_bytes = await _read_upload_bounded(file, 25 * 1024 * 1024, "ZIP file")

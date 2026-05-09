@@ -89,7 +89,9 @@ LoreVia2/
 - Test both happy paths and error paths.
 - Use descriptive test names that clearly indicate what is being tested.
 - Maintain test coverage for critical paths.
-- When running backend tests locally, prefer `backend\.venv\Scripts\python.exe -m pytest` so the repo's pinned test environment is used.
+- When running backend tests locally, always use Docker Compose Local instead of the host venv so the repo's pinned app, database, Redis, and extension setup are consistent.
+- Preferred backend test command:
+  `docker compose -f docker-compose-local.yml exec -T api pytest tests -v`
 - When running frontend unit tests locally, prefer `cd frontend && npm.cmd test`.
 - When running frontend E2E smoke tests locally, prefer `cd frontend && npm.cmd run test:e2e`.
 - Frontend E2E smoke tests are designed for non-production environments: they boot the local Next dev server and mock API responses at the browser/network layer instead of requiring a live backend.

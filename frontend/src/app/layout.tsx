@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next"
 import { headers } from "next/headers"
+import { connection } from "next/server"
 import "./globals.css"
 import { Merriweather, Newsreader, Space_Grotesk } from "next/font/google"
 import { AuthBootstrap } from "@/components/auth/AuthBootstrap"
@@ -123,6 +124,7 @@ function stringifyJsonLd(data: Record<string, unknown>) {
 }
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  await connection()
   const nonce = (await headers()).get("x-nonce") ?? undefined
 
   return (

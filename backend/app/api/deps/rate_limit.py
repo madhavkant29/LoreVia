@@ -196,6 +196,63 @@ async def rate_limit_public_asset(request: Request):
         raise HTTPException(429, "Asset rate limit exceeded")
 
 
+async def _user_window_limit(
+    user_id: object,
+    action: str,
+    *,
+    field: str,
+    default: int,
+    window: int,
+    message: str,
+) -> None:
+    limit = await _limit_for_user(user_id, field, default)
+    await _require_window(key_ratelimit(str(user_id), action), limit, window, message)
+
+
+async def rate_limit_upload(current_user: User = Depends(get_current_user)):
+    await _user_window_limit(
+        current_user.id,
+        "upload",
+        field="uploads_per_hour",
+        default=6,
+        window=3600,
+        message="Upload rate limit exceeded. Please wait before uploading more files.",
+    )
+
+
+async def rate_limit_manuscript_import(current_user: User = Depends(get_current_user)):
+    await _user_window_limit(
+        current_user.id,
+        "manuscript_import",
+        field="manuscript_imports_per_hour",
+        default=12,
+        window=3600,
+        message="Manuscript import rate limit exceeded. Please wait before importing more files.",
+    )
+
+
+async def rate_limit_world_building_upload(current_user: User = Depends(get_current_user)):
+    await _user_window_limit(
+        current_user.id,
+        "world_building_upload",
+        field="world_building_uploads_per_hour",
+        default=10,
+        window=3600,
+        message="World-building upload rate limit exceeded. Please wait before uploading more documents.",
+    )
+
+
+async def rate_limit_world_building_ai(current_user: User = Depends(get_current_user)):
+    await _user_window_limit(
+        current_user.id,
+        "world_building_ai",
+        field="world_building_ai_per_hour",
+        default=30,
+        window=3600,
+        message="World-building analysis rate limit exceeded. Please wait before running more AI requests.",
+    )
+
+
 async def _limit_for_user(user_id, field: str, default: int) -> int:
     async with AsyncSessionLocal() as db:
         override = (

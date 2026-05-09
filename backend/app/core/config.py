@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from typing import Any
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -35,6 +36,7 @@ def _load_env_file(path: str | Path = ".env", *, override_loaded_values: bool = 
 _BASE_DIR = Path(__file__).resolve().parents[2]
 _load_env_file(_BASE_DIR / ".env")
 _load_env_file(_BASE_DIR / ".env.local", override_loaded_values=True)
+LOCALHOST_CORS_ORIGIN_REGEX = r"^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$"
 
 
 class Settings(BaseSettings):
@@ -188,6 +190,18 @@ settings = Settings()
 
 def cors_origins() -> list[str]:
     return [origin.strip() for origin in settings.BACKEND_CORS_ORIGINS.split(",") if origin.strip()]
+
+
+def cors_middleware_options() -> dict[str, Any]:
+    options: dict[str, Any] = {
+        "allow_origins": cors_origins(),
+        "allow_credentials": True,
+        "allow_methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        "allow_headers": ["Authorization", "Content-Type", "Accept", "Origin"],
+    }
+    if settings.DEBUG:
+        options["allow_origin_regex"] = LOCALHOST_CORS_ORIGIN_REGEX
+    return options
 
 
 def allowed_hosts() -> list[str]:

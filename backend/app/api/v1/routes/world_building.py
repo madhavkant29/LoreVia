@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps.auth import get_current_user
+from app.api.deps.rate_limit import rate_limit_world_building_ai, rate_limit_world_building_upload
 from app.core.database import get_db
 from app.core.storage import download_book
 from app.models.book import Book, Series
@@ -158,6 +159,7 @@ async def upload_world_documents(
     replace_existing: str = Form("false"),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
+    _=Depends(rate_limit_world_building_upload),
 ):
     book = await _get_owned_book(db, book_id, current_user.id)
     raw_files: list[tuple[str, bytes]] = []
@@ -238,6 +240,7 @@ async def analyze_world_building(
     body: GapAnalysisRequest,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
+    _=Depends(rate_limit_world_building_ai),
 ):
     book = await _get_owned_book(db, book_id, current_user.id)
     mode = body.mode or classify_world_intent(body.query)
@@ -297,6 +300,7 @@ async def get_world_gaps(
     book_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
+    _=Depends(rate_limit_world_building_ai),
 ):
     book = await _get_owned_book(db, book_id, current_user.id)
     payload = await detect_world_gaps(db, book)
@@ -385,6 +389,7 @@ async def query_world_building(
     body: WorldQueryRequest,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
+    _=Depends(rate_limit_world_building_ai),
 ):
     book = await _get_owned_book(db, book_id, current_user.id)
     mode = body.mode or classify_world_intent(body.query)

@@ -16,7 +16,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.api.v1.router import api_router
-from app.core.config import allowed_hosts, cors_origins, settings
+from app.core.config import allowed_hosts, cors_middleware_options, settings
 from app.core.database import engine
 from app.core.events import on_shutdown, on_startup
 from app.core.redis import get_redis
@@ -57,11 +57,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=cors_origins(),
-    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$",
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "Accept", "Origin"],
+    **cors_middleware_options(),
 )
 
 app.add_middleware(
