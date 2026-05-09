@@ -4,7 +4,10 @@ from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-def _load_env_file(path: str | Path = ".env") -> None:
+_ORIGINAL_ENV_KEYS = frozenset(os.environ.keys())
+
+
+def _load_env_file(path: str | Path = ".env", *, override_loaded_values: bool = False) -> None:
     env_path = Path(path)
     if not env_path.exists():
         return
@@ -16,7 +19,11 @@ def _load_env_file(path: str | Path = ".env") -> None:
 
         key, value = line.split("=", 1)
         key = key.strip()
-        if not key or key in os.environ:
+        if not key:
+            continue
+        if key in _ORIGINAL_ENV_KEYS:
+            continue
+        if not override_loaded_values and key in os.environ:
             continue
 
         value = value.strip()
@@ -27,7 +34,7 @@ def _load_env_file(path: str | Path = ".env") -> None:
 
 _BASE_DIR = Path(__file__).resolve().parents[2]
 _load_env_file(_BASE_DIR / ".env")
-_load_env_file(_BASE_DIR / ".env.local")
+_load_env_file(_BASE_DIR / ".env.local", override_loaded_values=True)
 
 
 class Settings(BaseSettings):
@@ -167,7 +174,7 @@ class Settings(BaseSettings):
     POWER_ADVISOR_PER_MONTH: int = 1800
     PRO_CONTINUITY_PER_MINUTE: int = 20
     POWER_CONTINUITY_PER_MINUTE: int = 40
-    DEVICE_TRIAL_ENFORCEMENT_ENABLED: bool = False
+    DEVICE_TRIAL_ENFORCEMENT_ENABLED: bool = True
     DEVICE_TRIAL_MAX_ACCOUNTS: int = 2
 
     # Cloudflare Tunnel

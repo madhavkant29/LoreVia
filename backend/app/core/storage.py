@@ -14,7 +14,10 @@ def _local_storage_root() -> Path:
     endpoint = settings.S3_ENDPOINT_URL or ""
     parsed = urlparse(endpoint)
     if parsed.scheme == "file":
-        path = parsed.path or "/app/storage"
+        if parsed.netloc:
+            path = f"{parsed.netloc}{parsed.path}"
+        else:
+            path = parsed.path or "/app/storage"
         return Path(path)
     return Path("/app/storage")
 

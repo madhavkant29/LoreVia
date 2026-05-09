@@ -38,6 +38,19 @@ pip install -r requirements.txt
 pytest tests/ -v
 ```
 
+Preferred local test commands for this repo:
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe -m pytest tests -v
+```
+
+Notes:
+
+- Prefer the repo venv over a global Python install.
+- Some backend tests are DB-backed and require a safe local test database plus required extensions such as `pgvector`.
+- Backend tests are intended to pass in non-production environments; do not point them at production infrastructure.
+
 ## Key endpoints
 
 | Method | Path | Description |
@@ -52,9 +65,9 @@ pytest tests/ -v
 | POST | /api/v1/intelligence/{id}/chat/{char_id} | Character chat |
 
 
-## to run backend tests -->
-```bash
-cd backend
-.\.venv\Scripts\python.exe -m pytest tests -v  
+## Targeted backend auth/security verification
 
- ```
+```powershell
+cd backend
+.\.venv\Scripts\python.exe -m pytest tests\unit\test_auth_deps.py tests\unit\test_core_security.py tests\unit\test_security_utils.py tests\integration\test_security_headers.py
+```

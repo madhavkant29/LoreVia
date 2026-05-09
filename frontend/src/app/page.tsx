@@ -541,6 +541,14 @@ function ScanProof({ ctaHref }: { ctaHref: Route }) {
 }
 
 function WorkspacePreview() {
+  const manuscriptRows = [
+    ["The Ashen Crown", "In Progress", "24", "94%"],
+    ["Forsaken Empire", "Draft", "18", "91%"],
+    ["Winds of Verdania", "In Progress", "31", "93%"],
+    ["Shadows of Elaris", "Draft", "14", "89%"],
+    ["Dawn of the Fifth", "Outlining", "10", "84%"],
+  ] as const
+
   return (
     <Section id="product">
       <div className="grid gap-12">
@@ -578,50 +586,46 @@ function WorkspacePreview() {
               </aside>
 
               <div className="min-w-0 p-5 md:p-6 lg:p-7">
-                <div className="flex flex-wrap items-center justify-between gap-4">
+                <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
                   <h3 className="text-2xl font-semibold text-white">Manuscripts</h3>
-                  <button type="button" className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white">
+                  <button
+                    type="button"
+                    className="w-full rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white sm:w-auto"
+                  >
                     + New Manuscript
                   </button>
                 </div>
                 <div className="mt-6">
-                  <table className="w-full table-fixed text-left text-sm">
-                    <colgroup>
-                      <col className="w-[34%]" />
-                      <col className="w-[18%]" />
-                      <col className="w-[14%]" />
-                      <col className="w-[18%]" />
-                      <col className="w-[16%]" />
-                    </colgroup>
-                    <thead className="text-slate-500">
-                      <tr>
-                        <th className="pb-3 pr-4 font-medium">Title</th>
-                        <th className="pb-3 pr-4 font-medium">Status</th>
-                        <th className="pb-3 pr-4 font-medium">Chapters</th>
-                        <th className="pb-3 pr-4 font-medium">Last Scan</th>
-                        <th className="pb-3 font-medium">Score</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-white/10 text-slate-200">
-                      {[
-                        ["The Ashen Crown", "In Progress", "24", "Apr 21", "94%"],
-                        ["Forsaken Empire", "Draft", "18", "Apr 18", "91%"],
-                        ["Winds of Verdania", "In Progress", "31", "Apr 17", "93%"],
-                        ["Shadows of Elaris", "Draft", "14", "Apr 10", "89%"],
-                        ["Dawn of the Fifth", "Outlining", "10", "Apr 5", "84%"],
-                      ].map((row) => (
-                        <tr key={row[0]}>
-                          <td className="py-3 pr-4 font-medium text-white">{row[0]}</td>
-                          <td className="py-3 pr-4">
-                            <span className="inline-flex rounded bg-white/8 px-2 py-1 text-xs">{row[1]}</span>
-                          </td>
-                          <td className="py-3 pr-4">{row[2]}</td>
-                          <td className="py-3 pr-4">{row[3]}</td>
-                          <td className="py-3 font-semibold text-emerald-300">{row[4]}</td>
+                  <div className="-mx-2 overflow-x-auto px-2 pb-2 [scrollbar-width:thin] [scrollbar-color:rgba(148,163,184,0.45)_transparent]">
+                    <table className="w-full min-w-[34rem] border-separate border-spacing-y-3 text-left text-sm sm:min-w-[38rem]">
+                      <colgroup>
+                        <col className="w-[44%]" />
+                        <col className="w-[22%]" />
+                        <col className="w-[16%]" />
+                        <col className="w-[18%]" />
+                      </colgroup>
+                      <thead className="text-slate-500">
+                        <tr>
+                          <th className="pb-3 pr-8 font-medium">Title</th>
+                          <th className="pb-3 pr-8 font-medium">Status</th>
+                          <th className="pb-3 pr-8 font-medium">Chapters</th>
+                          <th className="pb-3 pr-2 font-medium">Score</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody className="text-slate-200">
+                        {manuscriptRows.map((row) => (
+                          <tr key={row[0]}>
+                            <td className="border-y border-white/10 py-4 pr-8 font-medium leading-8 text-white">{row[0]}</td>
+                            <td className="border-y border-white/10 py-4 pr-8">
+                              <span className="inline-flex rounded bg-white/8 px-2 py-1 text-xs">{row[1]}</span>
+                            </td>
+                            <td className="border-y border-white/10 py-4 pr-8 text-base">{row[2]}</td>
+                            <td className="border-y border-white/10 py-4 pr-2 text-base font-semibold text-emerald-300">{row[3]}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </div>
 
@@ -717,9 +721,9 @@ function AudienceSection() {
         </Reveal>
 
         <Reveal delay={100}>
-          <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-[#080d18] p-6 md:p-8">
-            <div className="absolute inset-y-0 right-0 w-1/2 bg-[radial-gradient(circle_at_center,rgba(125,211,252,0.12),transparent_55%)]" />
-            <div className="relative grid gap-8 md:grid-cols-[1fr_0.85fr]">
+          <div className="relative isolate overflow-hidden rounded-2xl border border-white/10 bg-[#080d18] p-6 md:p-8">
+            <div className="pointer-events-none absolute inset-y-0 right-0 z-0 hidden w-[46%] bg-[radial-gradient(circle_at_center,rgba(125,211,252,0.12),transparent_55%)] lg:block" />
+            <div className="relative z-10 grid gap-10 lg:grid-cols-[1fr_0.85fr] lg:gap-8">
               <div>
                 <p className="text-sm font-semibold uppercase tracking-[0.2em] text-cyan-300">{activeAudience}</p>
                 <h3 className="mt-4 text-3xl font-semibold text-white">Concrete tools, not vague writing magic.</h3>
@@ -733,7 +737,7 @@ function AudienceSection() {
                 </div>
               </div>
 
-              <div className="relative min-h-[320px]">
+              <div className="relative mx-auto min-h-[220px] w-full max-w-[280px] overflow-hidden rounded-2xl bg-[linear-gradient(180deg,rgba(125,211,252,0.04),transparent)] lg:min-h-[320px] lg:max-w-none lg:bg-transparent">
                 <svg viewBox="0 0 320 320" className="h-full w-full text-cyan-200/70" aria-hidden>
                   <path d="M82 90 C140 34 223 52 250 112" stroke="currentColor" strokeWidth="1.4" fill="none" opacity="0.5" />
                   <path d="M77 96 C100 185 170 235 242 222" stroke="currentColor" strokeWidth="1.4" fill="none" opacity="0.35" />

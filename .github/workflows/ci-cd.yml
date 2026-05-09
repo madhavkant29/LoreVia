@@ -131,6 +131,16 @@ jobs:
         cd frontend
         npm ci
 
+    - name: Install Playwright browser
+      run: |
+        cd frontend
+        npx playwright install --with-deps chromium
+
+    - name: Run frontend unit tests
+      run: |
+        cd frontend
+        npm run test
+
     - name: Run type checking
       run: |
         cd frontend
@@ -142,16 +152,17 @@ jobs:
         npm run lint
       continue-on-error: true
 
-    - name: Run Prettier format check (warning mode)
-      run: |
-        cd frontend
-        npm run format:check
-      continue-on-error: true
-
     - name: Build application
       run: |
         cd frontend
         npm run build
+
+    - name: Run frontend E2E smoke tests
+      env:
+        CI: "true"
+      run: |
+        cd frontend
+        npm run test:e2e
 
   security-scan:
     runs-on: ubuntu-latest

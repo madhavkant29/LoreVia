@@ -12,7 +12,7 @@ def test_ensure_local_storage_permissions_relabels_existing_tree(monkeypatch, tm
 
     monkeypatch.setattr(storage.settings, "S3_ENDPOINT_URL", f"file://{storage_root.as_posix()}", raising=False)
     monkeypatch.setattr(storage.settings, "S3_BUCKET", "local-dev", raising=False)
-    monkeypatch.setattr(storage.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(storage.os, "geteuid", lambda: 0, raising=False)
     monkeypatch.setattr(storage, "_storage_owner_ids", lambda: (10001, 10001))
 
     chowned: list[Path] = []
@@ -24,8 +24,8 @@ def test_ensure_local_storage_permissions_relabels_existing_tree(monkeypatch, tm
     def _fake_chmod(path, mode):
         chmodded.append((Path(path), mode))
 
-    monkeypatch.setattr(storage.os, "chown", _fake_chown)
-    monkeypatch.setattr(storage.os, "chmod", _fake_chmod)
+    monkeypatch.setattr(storage.os, "chown", _fake_chown, raising=False)
+    monkeypatch.setattr(storage.os, "chmod", _fake_chmod, raising=False)
 
     storage.ensure_local_storage_permissions()
 
@@ -47,7 +47,7 @@ def test_ensure_local_storage_permissions_is_noop_for_non_root(monkeypatch, tmp_
 
     monkeypatch.setattr(storage.settings, "S3_ENDPOINT_URL", f"file://{storage_root.as_posix()}", raising=False)
     monkeypatch.setattr(storage.settings, "S3_BUCKET", "local-dev", raising=False)
-    monkeypatch.setattr(storage.os, "geteuid", lambda: 10001)
+    monkeypatch.setattr(storage.os, "geteuid", lambda: 10001, raising=False)
 
     called = False
 
@@ -55,7 +55,7 @@ def test_ensure_local_storage_permissions_is_noop_for_non_root(monkeypatch, tmp_
         nonlocal called
         called = True
 
-    monkeypatch.setattr(storage.os, "chown", _fake_chown)
+    monkeypatch.setattr(storage.os, "chown", _fake_chown, raising=False)
 
     storage.ensure_local_storage_permissions()
 

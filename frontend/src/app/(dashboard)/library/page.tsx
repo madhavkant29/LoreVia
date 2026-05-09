@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation"
 import { UploadModal } from "@/components/modals/UploadModal"
 import { booksApi } from "@/lib/api/books"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
+import { getBookHref } from "@/lib/utils/bookRoutes"
 import type { Book, BookStatus } from "@/types/book"
 
 type SortOption = "recent" | "title" | "progress"
@@ -281,7 +282,7 @@ export default function LibraryPage() {
   }
 
   function openBook(book: Book) {
-    router.push(`/${book.id}`)
+    router.push(getBookHref(book) as Route)
   }
 
   function togglePinned(bookId: string) {

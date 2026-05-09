@@ -284,7 +284,7 @@ def extract_world_elements_from_text(text: str, *, chapter_number: int | None = 
         key = phrase.lower()
         if key in seen:
             continue
-        if is_valid_world_element_candidate(
+        if _is_valid_labeled_world_candidate(
             phrase,
             raw_text,
             count=int(labeled_candidate.get("usage_count") or 1),
@@ -420,6 +420,38 @@ def is_valid_world_element_candidate(
     if len(words) == 1 and _looks_like_non_entity_usage(phrase, description, provenance=provenance):
         return False
 
+    return True
+
+
+def _is_valid_labeled_world_candidate(
+    phrase: str,
+    text: str,
+    *,
+    count: int = 1,
+    description: str = "",
+    provenance: dict | None = None,
+) -> bool:
+    if not is_valid_world_element_candidate(
+        phrase,
+        text,
+        count=count,
+        description=description,
+        provenance=provenance,
+    ):
+        normalized = normalize_entity_name(phrase)
+        if not normalized:
+            return False
+        words = normalized.split()
+        if len(words) != 1:
+            return False
+        if words[0] in WORLD_ELEMENT_BLOCKLIST or words[0] in COMMON_NON_NAME_WORDS:
+            return False
+        narrative_mode = str((provenance or {}).get("narrative_mode") or "")
+        if narrative_mode != "worldbuilding_note":
+            return False
+        element_type = infer_element_type(phrase, description)
+        if element_type not in {"country", "region", "race", "magic_system", "culture", "language", "religion", "creature", "technology"}:
+            return False
     return True
 
 

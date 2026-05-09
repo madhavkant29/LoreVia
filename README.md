@@ -198,6 +198,66 @@ To remove containers, networks, and volumes:
 docker compose -f docker-compose-local.yml down -v
 ```
 
+## Testing
+
+LoreVia now has backend tests, frontend unit tests, and frontend E2E smoke tests.
+
+### Backend tests
+
+From the repo root:
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe -m pytest tests -v
+```
+
+Notes:
+
+- Prefer the repo venv instead of a global Python install.
+- DB-backed backend tests require a safe local test database and required extensions such as `pgvector`.
+
+### Frontend unit tests
+
+From the repo root:
+
+```powershell
+cd frontend
+npm.cmd test
+```
+
+This runs the Vitest suite for frontend utilities, stores, API wrappers, config, and security-sensitive frontend logic.
+
+### Frontend E2E smoke tests
+
+From the repo root:
+
+```powershell
+cd frontend
+npm.cmd run test:e2e
+```
+
+Notes:
+
+- These smoke tests run against the local Next.js dev server, not production.
+- The suite mocks API traffic in the browser, so it does not require a live backend to verify the core UI flows.
+- The Playwright config uses Playwright-managed Chromium so the same browser engine can run locally and in CI.
+
+### Will these fail in non-production environments?
+
+Not just because the environment is non-production.
+
+- Backend tests should pass in local or CI-style non-production environments as long as the Python environment, local test database, and required extensions are present.
+- Frontend unit tests should pass in local or CI-style non-production environments as long as Node dependencies are installed.
+- Frontend E2E smoke tests are intentionally non-production-friendly because they run against a local dev server with mocked API responses.
+- The CI pipeline runs the same frontend unit and E2E smoke suites, so a passing local run should match CI as long as dependencies and browser prerequisites are present.
+
+They can still fail if the environment is missing prerequisites such as:
+
+- backend venv or Python dependencies
+- local test database / `pgvector`
+- frontend `node_modules`
+- a supported Playwright browser runtime
+
 ## Project Structure
 
 ```text

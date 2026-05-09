@@ -78,7 +78,7 @@ from app.api.deps.auth import get_current_user
 from app.api.deps.subscription import check_upload_limit
 from app.core.database import get_db
 from app.core.security import create_asset_token, decode_token
-from app.core.storage import download_book, upload_binary, upload_book_bytes
+from app.core import storage
 from app.engine.character.consolidator import consolidate_characters
 from app.engine.character.profile_builder import build_description
 from app.models.book import Book, Chapter, ObsidianVaultNoteSource, Series, SeriesBook
@@ -301,7 +301,7 @@ async def upload_book_endpoint(
     raw = await _read_upload_bounded(file, MAX_BOOK_UPLOAD_BYTES, "Book file")
     if not raw:
         raise HTTPException(400, "Uploaded file is empty")
-    s3_key = upload_book_bytes(raw, str(current_user.id), file.filename)
+    s3_key = storage.upload_book_bytes(raw, str(current_user.id), file.filename)
     cover_s3_key = None
     cover_raw = None
     if not as_bool(auto_extract_cover) and cover_file is not None and cover_file.filename:
@@ -309,7 +309,7 @@ async def upload_book_endpoint(
         if cover_raw:
             # Validate magic bytes — never trust client-supplied MIME or extension.
             suffix, content_type = _validate_cover_magic(cover_raw)
-            cover_s3_key = upload_binary(
+            cover_s3_key = storage.upload_binary(
                 f"covers/{current_user.id}/{uuid.uuid4()}.{suffix}",
                 cover_raw,
                 content_type,
@@ -662,7 +662,7 @@ async def import_manuscript_content(
             await db.execute(select(Chapter).where(Chapter.book_id == book.id, Chapter.number == number))
         ).scalar()
         if chapter is not None:
-            chapter_payload = deserialize_manuscript_content(await asyncio.to_thread(download_book, chapter.s3_key)) if chapter.s3_key else {"text": ""}
+            chapter_payload = deserialize_manuscript_content(await asyncio.to_thread(storage.download_book, chapter.s3_key)) if chapter.s3_key else {"text": ""}
             chapter_text = str(chapter_payload.get("text") or "")
             await db.execute(
                 delete(PlotThread).where(
@@ -1298,7 +1298,7 @@ async def export_manuscript(
         chapter_html = None
         if s3_key:
             try:
-                stored = deserialize_manuscript_content(await asyncio.to_thread(download_book, s3_key))
+                stored = deserialize_manuscript_content(await asyncio.to_thread(storage.download_book, s3_key))
                 chapter_text = str(stored.get("text") or "")
                 chapter_html = str(stored.get("html") or "") or None
             except Exception:
@@ -1397,7 +1397,7 @@ async def get_book_cover_public(book_id: uuid.UUID, token: str = Query(...), db:
         raise HTTPException(404, "Cover not found")
 
     import mimetypes
-    raw = await asyncio.to_thread(download_book, book.cover_s3_key)
+    raw = await asyncio.to_thread(storage.download_book, book.cover_s3_key)
     media_type = mimetypes.guess_type(book.cover_s3_key)[0] or "image/png"
     return Response(content=raw, media_type=media_type)
 

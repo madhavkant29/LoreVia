@@ -31,8 +31,11 @@ jobs:
     - name: Update requirements.txt
       run: |
         cd backend
-        pip-compile --upgrade --resolver=backtracking requirements.in
-        pip-compile --upgrade --resolver=backtracking requirements-dev.in
+        if [ -f requirements.in ]; then
+          pip-compile --upgrade --resolver=backtracking requirements.in
+        else
+          echo "No requirements.in found; skipping automated Python dependency refresh."
+        fi
     
     - name: Check for changes
       id: verify-changed-files
@@ -113,9 +116,11 @@ jobs:
       run: |
         cd frontend
         npm ci
+        npx playwright install --with-deps chromium
         npm run test
         npm run lint
         npm run type-check
+        CI=true npm run test:e2e
     
     - name: Create Pull Request
       if: steps.verify-changed-files.outputs.changed == 'true'
