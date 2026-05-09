@@ -96,11 +96,16 @@ export function buildContentSecurityPolicy(nonce: string) {
     `img-src ${Array.from(imageSources).join(" ")}`,
     "font-src 'self' data:",
     `connect-src ${Array.from(connectSources).join(" ")}`,
+    "frame-src 'self'",
     "frame-ancestors 'none'",
     "base-uri 'self'",
     "form-action 'self'",
     "object-src 'none'",
   ].join("; ")
+}
+
+function isNetlifyPreviewHost(hostname: string) {
+  return hostname.endsWith(".netlify.app")
 }
 
 function shouldSkipMiddleware(pathname: string) {
@@ -131,7 +136,9 @@ export function middleware(request: NextRequest) {
   }
 
   const nonce = createNonce()
-  const csp = buildContentSecurityPolicy(nonce)
+  const csp = isNetlifyPreviewHost(request.nextUrl.hostname)
+    ? `${buildContentSecurityPolicy(nonce)}; frame-src 'self' https://app.netlify.com`
+    : buildContentSecurityPolicy(nonce)
   const requestHeaders = new Headers(request.headers)
   requestHeaders.set(NONCE_HEADER, nonce)
   requestHeaders.set("Content-Security-Policy", csp)
