@@ -110,7 +110,7 @@ describe("api client", () => {
 
   it("refreshes and retries non-auth 401 responses", async () => {
     const { captured, apiClientMock } = await loadClientModule()
-    const originalRequest = { url: "/books/1" }
+    const originalRequest: { url: string; _retry?: boolean } = { url: "/books/1" }
     axiosPostMock.mockResolvedValue({ data: {} })
     apiClientMock.mockResolvedValue({ data: { retried: true } })
 
@@ -185,10 +185,14 @@ describe("api client", () => {
 
   it("reuses one refresh request across concurrent 401s", async () => {
     const { captured, apiClientMock } = await loadClientModule()
-    let resolveRefresh: (() => void) | null = null
+    let refreshCreated = false
+    let resolveRefresh: () => void = () => {
+      throw new Error("refresh promise was not created")
+    }
     axiosPostMock.mockImplementation(
       () =>
         new Promise((resolve) => {
+          refreshCreated = true
           resolveRefresh = () => resolve({ data: {} })
         })
     )
@@ -196,7 +200,10 @@ describe("api client", () => {
 
     const first = captured.responseError?.({ config: { url: "/books/1" }, response: { status: 401 } })
     const second = captured.responseError?.({ config: { url: "/books/2" }, response: { status: 401 } })
-    resolveRefresh?.()
+    if (!refreshCreated) {
+      throw new Error("refresh promise was not created")
+    }
+    resolveRefresh()
 
     await Promise.all([first, second])
     expect(axiosPostMock).toHaveBeenCalledTimes(1)

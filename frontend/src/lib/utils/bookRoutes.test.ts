@@ -17,6 +17,10 @@ describe("book route utils", () => {
     expect(normalizeBookRouteId("123e4567-e89b-12d3-a456-426614174000")).toBe("123e4567-e89b-12d3-a456-426614174000")
   })
 
+  it("extracts non-uuid ids from readable route segments too", () => {
+    expect(normalizeBookRouteId("sky-of-ash--book-1")).toBe("book-1")
+  })
+
   it("slugifies titles into readable route segments", () => {
     expect(slugifyBookTitle("The Queen's Gate: Draft #2")).toBe("the-queen-s-gate-draft-2")
   })

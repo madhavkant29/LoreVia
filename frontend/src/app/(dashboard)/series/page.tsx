@@ -11,6 +11,7 @@ import { worldBuildingApi } from "@/lib/api/worldBuilding"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { getBookHref } from "@/lib/utils/bookRoutes"
+import { renderMarkdownHtml } from "@/lib/utils/richText"
 import type { Book, BookSeries, SeriesBible } from "@/types/book"
 import type { AdvisorMessage, AdvisorResponse, SeriesContinuityResponse } from "@/types/intelligence"
 
@@ -27,16 +28,6 @@ function collectionUnitName(hasScreenplayEpisodes: boolean, plural = false) {
 function collectionUnitLabel(hasScreenplayEpisodes: boolean, order?: number | null) {
   if (!order) return ""
   return hasScreenplayEpisodes ? `Ep ${order} · ` : `Vol ${order} · `
-}
-
-function formatMarkdown(text: string): React.ReactNode {
-  const paragraphs = text.split(/\n\n+/)
-  return paragraphs.map((paragraph, pIndex) => {
-    let formatted = paragraph.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-    formatted = formatted.replace(/\*(.*?)\*/g, '<em>$1</em>')
-    formatted = formatted.replace(/\n/g, '<br />')
-    return <p key={pIndex} dangerouslySetInnerHTML={{ __html: formatted }} />
-  })
 }
 
 export default function SeriesPage() {
@@ -445,7 +436,7 @@ export default function SeriesPage() {
                             </span>
                             {msg.role === "assistant" ? (
                               <div className="prose prose-invert max-w-none">
-                                {formatMarkdown(msg.content)}
+                                <div dangerouslySetInnerHTML={{ __html: renderMarkdownHtml(msg.content) }} />
                               </div>
                             ) : (
                               msg.content

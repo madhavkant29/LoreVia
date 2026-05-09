@@ -5,13 +5,18 @@ import { PostHogProvider } from "posthog-js/react"
 import { usePathname } from "next/navigation"
 import React from "react"
 import CookieConsent, { getCookieConsentValue } from "react-cookie-consent"
+import {
+  ANALYTICS_CONSENT_COOKIE,
+  hasAnalyticsConsent,
+  shouldShowAnalyticsConsentBanner,
+} from "@/lib/analytics/posthogConsent"
 
-function isEnabled() {
+function isBrowserAnalyticsEnabled() {
   return typeof window !== "undefined" && Boolean(process.env.NEXT_PUBLIC_POSTHOG_KEY)
 }
 
 function initPostHog() {
-  if (!isEnabled()) return
+  if (!isBrowserAnalyticsEnabled()) return
   posthog.init(process.env.NEXT_PUBLIC_POSTHOG_KEY as string, {
     api_host: process.env.NEXT_PUBLIC_POSTHOG_HOST || "https://eu.posthog.com",
     ip: false,
@@ -24,32 +29,57 @@ function initPostHog() {
 
 export function PostHogClientProvider({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = React.useState(false)
+  const [hydrated, setHydrated] = React.useState(false)
+  const [consentValue, setConsentValue] = React.useState<string | undefined>(undefined)
   const pathname = usePathname()
+  const analyticsKey = process.env.NEXT_PUBLIC_POSTHOG_KEY
 
   React.useEffect(() => {
-    if (!isEnabled()) return
-    const consent = getCookieConsentValue("lorevia_analytics_consent")
-    if (consent === "true") {
+    if (!analyticsKey) {
+      setHydrated(true)
+      return
+    }
+
+    const consent = getCookieConsentValue(ANALYTICS_CONSENT_COOKIE) || undefined
+    setConsentValue(consent)
+    setHydrated(true)
+
+    if (hasAnalyticsConsent(consent)) {
       initPostHog()
       setReady(true)
     }
-  }, [])
+  }, [analyticsKey])
 
   const enable = () => {
     initPostHog()
     setReady(true)
+    setConsentValue("true")
   }
+
+  const dismiss = () => {
+    setConsentValue("false")
+  }
+
+  const showBanner = shouldShowAnalyticsConsentBanner({
+    analyticsKey,
+    consentValue,
+    pathname,
+    hydrated,
+  })
 
   return (
     <>
       {ready ? <PostHogProvider client={posthog}>{children}</PostHogProvider> : <>{children}</>}
-      {isEnabled() && pathname !== "/privacy" ? (
+      {showBanner ? (
         <CookieConsent
-          cookieName="lorevia_analytics_consent"
+          visible={showBanner ? "show" : "hidden"}
+          cookieName={ANALYTICS_CONSENT_COOKIE}
           enableDeclineButton
+          setDeclineCookie
           declineButtonText="Not now"
           buttonText="Yes, for analytics"
           onAccept={enable}
+          onDecline={dismiss}
           style={{
             background: "rgba(0,0,0,0.92)",
             color: "white",

@@ -38,6 +38,18 @@ export function renderRichTextHtml(value: string, onCharacterClick?: (characterN
   return sanitizeRichTextHtml(normalized, onCharacterClick)
 }
 
+export function renderMarkdownHtml(value: string) {
+  const cleaned = value.trim()
+  if (!cleaned) return "<p></p>"
+
+  const markdownHtml = cleaned
+    .split(/\n{2,}/)
+    .map((paragraph) => `<p>${inlineMarkdownToHtml(paragraph).replace(/\n/g, "<br>")}</p>`)
+    .join("")
+
+  return sanitizeRichTextHtml(markdownHtml)
+}
+
 export function sanitizeRichTextHtml(html: string, onCharacterClick?: (characterName: string) => void) {
   if (typeof window === "undefined") return html
   const container = document.createElement("div")
@@ -107,6 +119,13 @@ function plainTextToHtml(text: string) {
     .split(/\n{2,}/)
     .map((paragraph) => `<p>${escapeHtml(paragraph).replace(/\n/g, "<br>")}</p>`)
     .join("")
+}
+
+function inlineMarkdownToHtml(value: string) {
+  const escaped = escapeHtml(value)
+  return escaped
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*(.+?)\*/g, "<em>$1</em>")
 }
 
 function sanitizeHref(value: string) {
