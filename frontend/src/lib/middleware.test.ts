@@ -63,6 +63,8 @@ describe("middleware CSP", () => {
     expect(scriptDirective).not.toContain("'unsafe-eval'")
     expect(scriptDirective).not.toContain("'unsafe-inline'")
     expect(nonceMatch?.[1]).toBeTruthy()
+    expect(response.headers.get("x-middleware-request-content-security-policy")).toBe(csp)
+    expect(response.headers.get("x-middleware-request-x-nonce")).toBe(nonceMatch?.[1] ?? null)
   })
 
   it("skips static assets and metadata routes", () => {

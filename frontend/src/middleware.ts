@@ -134,6 +134,7 @@ export function middleware(request: NextRequest) {
   const csp = buildContentSecurityPolicy(nonce)
   const requestHeaders = new Headers(request.headers)
   requestHeaders.set(NONCE_HEADER, nonce)
+  requestHeaders.set("Content-Security-Policy", csp)
 
   const response = NextResponse.next({
     request: {
