@@ -8,6 +8,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
+from app.core.config import allowed_hosts
 from app.main import app
 from app.models.user import Subscription, User
 
@@ -22,6 +23,16 @@ def _sign_payload(payload: dict, timestamp: int, secret: str) -> tuple[bytes, st
     return raw_body, f"ts={timestamp};h1={digest}"
 
 
+def _trusted_base_url() -> str:
+    hosts = allowed_hosts()
+    for preferred in ("localhost", "127.0.0.1"):
+        if preferred in hosts:
+            return f"http://{preferred}"
+    if hosts:
+        return f"https://{hosts[0]}"
+    return "http://localhost"
+
+
 @pytest.mark.asyncio
 async def test_paddle_webhook_rejects_invalid_signature(monkeypatch):
     secret = "pdl_secret_test"
@@ -31,7 +42,7 @@ async def test_paddle_webhook_rejects_invalid_signature(monkeypatch):
     monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_WEBHOOK_TOLERANCE_SECONDS", 300, raising=False)
     monkeypatch.setattr("app.services.paddle_service.time.time", lambda: 1_700_000_060)
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://localhost") as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=_trusted_base_url()) as client:
         response = await client.post(
             "/api/v1/webhooks/paddle",
             content=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
@@ -53,7 +64,7 @@ async def test_paddle_webhook_rejects_stale_signature(monkeypatch):
     monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_WEBHOOK_TOLERANCE_SECONDS", 300, raising=False)
     monkeypatch.setattr("app.services.paddle_service.time.time", lambda: timestamp + 301)
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://localhost") as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=_trusted_base_url()) as client:
         response = await client.post(
             "/api/v1/webhooks/paddle",
             content=raw_body,
@@ -87,7 +98,7 @@ async def test_paddle_webhook_accepts_valid_recent_signature(monkeypatch):
     monkeypatch.setattr("app.services.paddle_service.time.time", lambda: timestamp + 60)
     monkeypatch.setattr("app.api.v1.routes.webhooks.AsyncSessionLocal", _fake_session_factory)
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://localhost") as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=_trusted_base_url()) as client:
         response = await client.post(
             "/api/v1/webhooks/paddle",
             content=raw_body,

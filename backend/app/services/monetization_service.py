@@ -1,28 +1,52 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.models.book import Book
-from app.models.user import PointLedgerEntry, Referral, TrialEmailEvent, User
+from app.models.user import PointLedgerEntry, Referral, RewardedAdSession, TrialEmailEvent, User
 from app.services.email_service import send_trial_email
-from app.utils.billing_utils import FREE_TIER, normalize_tier
+from app.utils.billing_utils import (
+    FREE_TIER,
+    free_search_limit_per_day,
+    normalize_tier,
+    prediction_limit_per_day,
+    protected_authoring_limit_per_day,
+)
 from app.utils.monetization_utils import (
     FIRST_PROCESSED_BOOK_POINTS,
+    POINT_ACTION_HIGH_COST,
+    POINT_ACTION_PREDICTION,
+    POINT_ACTION_SEARCH,
+    POINT_ENTRY_SPEND,
     POINT_ENTRY_EXPIRE,
     POINT_ENTRY_GRANT,
     POINT_SOURCE_FIRST_BOOK,
     POINT_SOURCE_REFERRAL,
+    POINT_SOURCE_REWARDED_AD,
+    POINT_SPEND_OFFERS,
     REFERRED_REWARD_POINTS,
+    REWARDED_AD_PROVIDER_GPT,
+    REWARDED_AD_STATUS_DISMISSED,
+    REWARDED_AD_STATUS_ERROR,
+    REWARDED_AD_STATUS_EXPIRED,
+    REWARDED_AD_STATUS_PENDING,
+    REWARDED_AD_STATUS_REWARDED,
+    REWARDED_AD_STATUS_UNSUPPORTED,
     REFERRAL_REWARD_POINTS,
     build_trial_email_schedule,
     generate_referral_code,
     normalize_referral_code,
+    normalize_rewarded_ad_outcome,
+    point_spend_offer_by_code,
+    point_spend_offer_for_action,
     points_expire_at,
+    utc_day_bounds,
     utc_now,
 )
 
@@ -143,6 +167,417 @@ async def point_balance(db: AsyncSession, user_id: uuid.UUID) -> int:
         )
     ).scalar_one()
     return max(int(balance or 0), 0)
+
+
+def rewarded_ads_are_enabled() -> bool:
+    return bool(settings.REWARDED_ADS_ENABLED and settings.REWARDED_AD_GPT_UNIT_PATH)
+
+
+def rewarded_ad_disabled_reason() -> str | None:
+    if not settings.REWARDED_ADS_ENABLED:
+        return "Rewarded ads are not enabled in this environment."
+    if not settings.REWARDED_AD_GPT_UNIT_PATH:
+        return "Rewarded ad unit path is not configured yet."
+    if settings.REWARDED_AD_REWARD_POINTS <= 0:
+        return "Rewarded ad reward points are set to zero."
+    if settings.REWARDED_AD_DAILY_CAP <= 0:
+        return "Rewarded ad daily cap is set to zero."
+    return None
+
+
+async def expire_stale_rewarded_ad_sessions(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    now: datetime | None = None,
+) -> int:
+    current = now or utc_now()
+    current = current if current.tzinfo else current.replace(tzinfo=UTC)
+    sessions = (
+        await db.execute(
+            select(RewardedAdSession)
+            .where(
+                RewardedAdSession.user_id == user_id,
+                RewardedAdSession.status == REWARDED_AD_STATUS_PENDING,
+                RewardedAdSession.expires_at <= current,
+            )
+        )
+    ).scalars().all()
+
+    for session in sessions:
+        session.status = REWARDED_AD_STATUS_EXPIRED
+        session.finalized_at = current
+        session.metadata_json = {
+            **(session.metadata_json or {}),
+            "expired_at": current.isoformat(),
+        }
+    return len(sessions)
+
+
+async def rewarded_ad_claims_today(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    now: datetime | None = None,
+) -> int:
+    start, end = utc_day_bounds(now)
+    count = (
+        await db.execute(
+            select(func.count(RewardedAdSession.id)).where(
+                RewardedAdSession.user_id == user_id,
+                RewardedAdSession.status == REWARDED_AD_STATUS_REWARDED,
+                RewardedAdSession.reward_granted_at.is_not(None),
+                RewardedAdSession.reward_granted_at >= start,
+                RewardedAdSession.reward_granted_at < end,
+            )
+        )
+    ).scalar_one()
+    return int(count or 0)
+
+
+async def rewarded_ad_status_for_user(
+    db: AsyncSession,
+    user: User,
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    await expire_stale_rewarded_ad_sessions(db, user.id, now=now)
+    claims_used = await rewarded_ad_claims_today(db, user.id, now=now)
+    daily_cap = max(int(settings.REWARDED_AD_DAILY_CAP), 0)
+    reward_points = max(int(settings.REWARDED_AD_REWARD_POINTS), 0)
+    enabled = rewarded_ads_are_enabled() and daily_cap > 0 and reward_points > 0
+    claims_remaining = max(daily_cap - claims_used, 0) if enabled else 0
+    return {
+        "enabled": enabled,
+        "provider": REWARDED_AD_PROVIDER_GPT,
+        "reward_points": reward_points,
+        "daily_cap": daily_cap,
+        "claims_used_today": claims_used,
+        "claims_remaining_today": claims_remaining,
+        "session_ttl_seconds": max(int(settings.REWARDED_AD_SESSION_TTL_SECONDS), 60),
+        "min_grant_seconds": max(int(settings.REWARDED_AD_MIN_GRANT_SECONDS), 0),
+        "reason": None if enabled else rewarded_ad_disabled_reason(),
+    }
+
+
+async def _active_rewarded_ad_session(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    now: datetime | None = None,
+) -> RewardedAdSession | None:
+    current = now or utc_now()
+    current = current if current.tzinfo else current.replace(tzinfo=UTC)
+    return (
+        await db.execute(
+            select(RewardedAdSession)
+            .where(
+                RewardedAdSession.user_id == user_id,
+                RewardedAdSession.status == REWARDED_AD_STATUS_PENDING,
+                RewardedAdSession.expires_at > current,
+            )
+            .order_by(RewardedAdSession.created_at.desc())
+            .limit(1)
+        )
+    ).scalar()
+
+
+def _rewarded_ad_session_payload(session: RewardedAdSession, claims_remaining_today: int) -> dict[str, Any]:
+    return {
+        "session_token": session.claim_token,
+        "provider": session.provider,
+        "reward_points": session.reward_points,
+        "ad_unit_path": session.ad_unit_path,
+        "expires_at": session.expires_at,
+        "claims_remaining_today": claims_remaining_today,
+    }
+
+
+async def start_rewarded_ad_session(
+    db: AsyncSession,
+    user: User,
+    placement: str,
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    status = await rewarded_ad_status_for_user(db, user, now=now)
+    if not status["enabled"]:
+        raise ValueError(status["reason"] or "Rewarded ads are unavailable right now.")
+    if status["claims_remaining_today"] <= 0:
+        raise ValueError("You already used today's rewarded ad.")
+
+    current = now or utc_now()
+    current = current if current.tzinfo else current.replace(tzinfo=UTC)
+    active_session = await _active_rewarded_ad_session(db, user.id, now=current)
+    if active_session is not None:
+        return _rewarded_ad_session_payload(
+            active_session,
+            claims_remaining_today=status["claims_remaining_today"],
+        )
+
+    ttl_seconds = max(int(settings.REWARDED_AD_SESSION_TTL_SECONDS), 60)
+    session = RewardedAdSession(
+        user_id=user.id,
+        provider=REWARDED_AD_PROVIDER_GPT,
+        claim_token=uuid.uuid4().hex,
+        ad_unit_path=settings.REWARDED_AD_GPT_UNIT_PATH or "",
+        placement=placement.strip().lower()[:64],
+        status=REWARDED_AD_STATUS_PENDING,
+        reward_points=max(int(settings.REWARDED_AD_REWARD_POINTS), 0),
+        expires_at=current + timedelta(seconds=ttl_seconds),
+        metadata_json={"placement": placement.strip().lower()[:64]},
+    )
+    db.add(session)
+    await db.flush()
+    return _rewarded_ad_session_payload(
+        session,
+        claims_remaining_today=status["claims_remaining_today"],
+    )
+
+
+async def resolve_rewarded_ad_session(
+    db: AsyncSession,
+    user: User,
+    *,
+    session_token: str,
+    outcome: str,
+    reward_type: str | None = None,
+    reward_amount: int | None = None,
+    error_message: str | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    current = now or utc_now()
+    current = current if current.tzinfo else current.replace(tzinfo=UTC)
+    normalized_outcome = normalize_rewarded_ad_outcome(outcome)
+    await expire_stale_rewarded_ad_sessions(db, user.id, now=current)
+
+    session = (
+        await db.execute(
+            select(RewardedAdSession)
+            .where(
+                RewardedAdSession.user_id == user.id,
+                RewardedAdSession.claim_token == session_token,
+            )
+            .limit(1)
+        )
+    ).scalar()
+    if session is None:
+        raise ValueError("Rewarded ad session was not found.")
+
+    claims_used = await rewarded_ad_claims_today(db, user.id, now=current)
+    daily_cap = max(int(settings.REWARDED_AD_DAILY_CAP), 0)
+    if session.status == REWARDED_AD_STATUS_REWARDED:
+        return {
+            "status": session.status,
+            "balance": await point_balance(db, user.id),
+            "reward_points_granted": session.reward_points,
+            "claims_remaining_today": max(daily_cap - claims_used, 0),
+            "confirmation_message": f"You already earned {session.reward_points} points from this ad.",
+        }
+    if session.status != REWARDED_AD_STATUS_PENDING:
+        raise ValueError("This rewarded ad session is no longer active.")
+    if session.expires_at <= current:
+        session.status = REWARDED_AD_STATUS_EXPIRED
+        session.finalized_at = current
+        session.metadata_json = {
+            **(session.metadata_json or {}),
+            "expired_at": current.isoformat(),
+        }
+        raise ValueError("This rewarded ad session expired. Please start a new one.")
+
+    metadata = {
+        **(session.metadata_json or {}),
+        "client_outcome": normalized_outcome,
+        "reward_type": reward_type,
+        "reward_amount": reward_amount,
+        "error_message": error_message,
+        "resolved_at": current.isoformat(),
+    }
+
+    if normalized_outcome == REWARDED_AD_STATUS_REWARDED:
+        minimum_seconds = max(int(settings.REWARDED_AD_MIN_GRANT_SECONDS), 0)
+        if (current - session.created_at).total_seconds() < minimum_seconds:
+            raise ValueError("Reward confirmation arrived too quickly. Please try again.")
+        if daily_cap <= claims_used:
+            raise ValueError("You already used today's rewarded ad.")
+        await grant_points(
+            db,
+            user.id,
+            session.reward_points,
+            POINT_SOURCE_REWARDED_AD,
+            source_id=str(session.id),
+            metadata={
+                "provider": session.provider,
+                "placement": session.placement,
+                "reward_type": reward_type,
+                "reward_amount": reward_amount,
+            },
+        )
+        session.status = REWARDED_AD_STATUS_REWARDED
+        session.reward_granted_at = current
+        session.finalized_at = current
+        session.metadata_json = metadata
+        await db.flush()
+        return {
+            "status": session.status,
+            "balance": await point_balance(db, user.id),
+            "reward_points_granted": session.reward_points,
+            "claims_remaining_today": max(daily_cap - claims_used - 1, 0),
+            "confirmation_message": f"You earned {session.reward_points} LoreVia points.",
+        }
+
+    if normalized_outcome == REWARDED_AD_STATUS_DISMISSED:
+        session.status = REWARDED_AD_STATUS_DISMISSED
+        confirmation_message = "No reward was granted because the ad was closed early."
+    elif normalized_outcome == REWARDED_AD_STATUS_UNSUPPORTED:
+        session.status = REWARDED_AD_STATUS_UNSUPPORTED
+        confirmation_message = "Rewarded ads are not supported on this device or page."
+    else:
+        session.status = REWARDED_AD_STATUS_ERROR
+        confirmation_message = "Rewarded ad playback failed before a reward was granted."
+
+    session.finalized_at = current
+    session.metadata_json = metadata
+    return {
+        "status": session.status,
+        "balance": await point_balance(db, user.id),
+        "reward_points_granted": 0,
+        "claims_remaining_today": max(daily_cap - claims_used, 0),
+        "confirmation_message": confirmation_message,
+    }
+
+
+def _offer_is_useful_for_user(user: User, action: str) -> bool:
+    if action == POINT_ACTION_SEARCH:
+        return free_search_limit_per_day(user) is not None
+    if action == POINT_ACTION_PREDICTION:
+        limit = prediction_limit_per_day(user)
+        return 0 < limit < 999999
+    if action == POINT_ACTION_HIGH_COST:
+        limit = protected_authoring_limit_per_day(user)
+        return 0 < limit < 999999
+    return False
+
+
+def point_spend_offers_for_user(user: User) -> list[dict[str, Any]]:
+    offers: list[dict[str, Any]] = []
+    for offer in POINT_SPEND_OFFERS:
+        eligible = _offer_is_useful_for_user(user, offer.action)
+        reason = None
+        if not eligible:
+            if offer.action == POINT_ACTION_SEARCH:
+                reason = "Your current plan does not use a daily semantic-search cap."
+            elif offer.action == POINT_ACTION_PREDICTION:
+                reason = "Your current plan does not need extra prediction overflow."
+            elif offer.action == POINT_ACTION_HIGH_COST:
+                reason = "This overflow only works for plans that already include author tools."
+        offers.append(
+            {
+                "code": offer.code,
+                "action": offer.action,
+                "title": offer.title,
+                "description": offer.description,
+                "points_cost": offer.points_cost,
+                "units": offer.units,
+                "eligible": eligible,
+                "reason": reason,
+            }
+        )
+    return offers
+
+
+async def purchased_overflow_units_for_action(
+    db: AsyncSession,
+    user_id: object,
+    action: str,
+    *,
+    now: datetime | None = None,
+) -> int:
+    offer = point_spend_offer_for_action(action)
+    if offer is None:
+        return 0
+    start, end = utc_day_bounds(now)
+    purchase_count = (
+        await db.execute(
+            select(func.count(PointLedgerEntry.id)).where(
+                PointLedgerEntry.user_id == user_id,
+                PointLedgerEntry.entry_type == POINT_ENTRY_SPEND,
+                PointLedgerEntry.source_type == offer.source_type,
+                PointLedgerEntry.created_at >= start,
+                PointLedgerEntry.created_at < end,
+            )
+        )
+    ).scalar_one()
+    return int(purchase_count or 0) * offer.units
+
+
+async def purchased_overflow_units_for_action_via_session(
+    user_id: object,
+    action: str,
+    *,
+    now: datetime | None = None,
+) -> int:
+    from app.core.database import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as db:
+        return await purchased_overflow_units_for_action(db, user_id, action, now=now)
+
+
+async def spend_points_on_offer(
+    db: AsyncSession,
+    user: User,
+    offer_code: str,
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    offer = point_spend_offer_by_code(offer_code)
+    if offer is None:
+        raise ValueError("Unknown point offer.")
+
+    if not _offer_is_useful_for_user(user, offer.action):
+        raise ValueError("That point offer is not available on your current plan.")
+
+    await db.execute(select(User.id).where(User.id == user.id).with_for_update())
+    await expire_due_points_for_user(db, user.id, now=now)
+
+    balance = await point_balance(db, user.id)
+    if balance < offer.points_cost:
+        raise ValueError("Not enough points for this overflow purchase.")
+
+    db.add(
+        PointLedgerEntry(
+            user_id=user.id,
+            entry_type=POINT_ENTRY_SPEND,
+            source_type=offer.source_type,
+            source_id=uuid.uuid4().hex,
+            points_delta=-offer.points_cost,
+            metadata_json={
+                "offer_code": offer.code,
+                "action": offer.action,
+                "units": offer.units,
+                "title": offer.title,
+            },
+        )
+    )
+    await db.flush()
+
+    new_balance = await point_balance(db, user.id)
+    purchased_units_today = await purchased_overflow_units_for_action(db, user.id, offer.action, now=now)
+    return {
+        "balance": new_balance,
+        "purchased_units_today": purchased_units_today,
+        "offer": {
+            "code": offer.code,
+            "action": offer.action,
+            "title": offer.title,
+            "description": offer.description,
+            "points_cost": offer.points_cost,
+            "units": offer.units,
+            "eligible": True,
+            "reason": None,
+        },
+        "confirmation_message": f"Spent {offer.points_cost} points. Your {offer.title.lower()} is ready for today.",
+    }
 
 
 async def send_due_trial_emails(

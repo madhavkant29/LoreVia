@@ -117,6 +117,7 @@ def _user_response_with_cookies(response: Response, user_out: UserOut | None, ac
 
 def _build_user_out(user: User) -> UserOut:
     tier = build_tier_presentation(user)
+    created_at = user.created_at or datetime.now(UTC)
     return UserOut(
         id=user.id,
         email=user.email,
@@ -126,7 +127,7 @@ def _build_user_out(user: User) -> UserOut:
         tier_label=tier.tier_label,
         trial_active=tier.trial_active,
         trial_ends_at=tier.trial_ends_at,
-        reading_mode=user.reading_mode,
+        reading_mode=user.reading_mode or "casual",
         daily_word_goal=current_daily_word_goal(user),
         today_word_count=current_daily_word_count(user),
         last_login_at=user.last_login_at,
@@ -134,7 +135,7 @@ def _build_user_out(user: User) -> UserOut:
         longest_login_streak_days=max(int(user.longest_login_streak_days or 0), 0),
         login_activity_dates=login_activity_dates(user),
         email_verified=bool(user.email_verified_at),
-        created_at=user.created_at,
+        created_at=created_at,
     )
 
 
@@ -266,54 +267,66 @@ async def oauth_supabase(
     if not email:
         raise HTTPException(401, "Invalid Supabase token")
 
-    existing = (await db.execute(select(User).where(func.lower(User.email) == email))).scalar()
-    created = False
-    if not existing:
-        try:
-            device_id = normalize_device_id(body.device_id)
-        except ValueError as exc:
-            raise HTTPException(400, str(exc))
-        if not body.accepted_terms:
-            raise HTTPException(400, "You must accept the Terms, Compliance notice, and EULA before creating an account with Google.")
-        try:
-            await ensure_device_trial_available(db, device_id)
-        except DeviceTrialLimitError as exc:
-            raise HTTPException(403, str(exc))
-        existing = User(
-            email=email,
-            password_hash=hash_password(str(uuid.uuid4())),
-            legal_accepted_at=datetime.now(UTC),
-            legal_version=LEGAL_VERSION,
-            email_verified_at=datetime.now(UTC),
-        )
-        try:
-            db.add(existing)
-            await db.flush()
+    try:
+        existing = (await db.execute(select(User).where(func.lower(User.email) == email))).scalar()
+        created = False
+        if not existing:
+            try:
+                device_id = normalize_device_id(body.device_id)
+            except ValueError as exc:
+                raise HTTPException(400, str(exc))
+            local_supabase_recovery = settings.DEBUG
+            if not body.accepted_terms and not local_supabase_recovery:
+                raise HTTPException(400, "You must accept the Terms, Compliance notice, and EULA before creating an account with Google.")
+            if not local_supabase_recovery:
+                try:
+                    await ensure_device_trial_available(db, device_id)
+                except DeviceTrialLimitError as exc:
+                    raise HTTPException(403, str(exc))
+            existing = User(
+                email=email,
+                password_hash=hash_password(str(uuid.uuid4())),
+                legal_accepted_at=datetime.now(UTC) if (body.accepted_terms or local_supabase_recovery) else None,
+                legal_version=LEGAL_VERSION,
+                email_verified_at=datetime.now(UTC),
+            )
+            try:
+                db.add(existing)
+                await db.flush()
+                await ensure_referral_code(db, existing)
+                await create_referral_if_valid(db, existing, body.referral_code)
+                await schedule_trial_email_events(db, existing)
+                if not local_supabase_recovery:
+                    db.add(build_device_trial(existing.id, device_id))
+                await db.commit()
+            except IntegrityError:
+                await db.rollback()
+                raise HTTPException(403, f"This device has already used the maximum of {settings.DEVICE_TRIAL_MAX_ACCOUNTS} trial accounts.")
+            await db.refresh(existing)
+            created = True
+        elif not existing.email_verified_at:
+            existing.email_verified_at = datetime.now(UTC)
             await ensure_referral_code(db, existing)
-            await create_referral_if_valid(db, existing, body.referral_code)
             await schedule_trial_email_events(db, existing)
-            db.add(build_device_trial(existing.id, device_id))
             await db.commit()
-        except IntegrityError:
-            await db.rollback()
-            raise HTTPException(403, f"This device has already used the maximum of {settings.DEVICE_TRIAL_MAX_ACCOUNTS} trial accounts.")
-        await db.refresh(existing)
-        created = True
-    elif not existing.email_verified_at:
-        existing.email_verified_at = datetime.now(UTC)
-        await ensure_referral_code(db, existing)
-        await schedule_trial_email_events(db, existing)
+            await db.refresh(existing)
+
+        if created:
+            await send_onboarding_email(existing.email)
+
+        record_login_activity(existing)
         await db.commit()
         await db.refresh(existing)
-
-    if created:
-        await send_onboarding_email(existing.email)
-
-    record_login_activity(existing)
-    await db.commit()
-    await db.refresh(existing)
-    user_out, access_token, refresh_token = await _mint_token_pair(str(existing.id), existing)
-    return _user_response_with_cookies(response, user_out, access_token, refresh_token)
+        user_out, access_token, refresh_token = await _mint_token_pair(str(existing.id), existing)
+        return _user_response_with_cookies(response, user_out, access_token, refresh_token)
+    except HTTPException:
+        raise
+    except Exception:
+        log.exception(
+            "Supabase OAuth login failed after verification",
+            extra={"email": email, "has_existing_user": bool(existing) if "existing" in locals() else False},
+        )
+        raise
 
 
 @router.post("/forgot-password")

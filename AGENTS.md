@@ -22,6 +22,11 @@ LoreVia2/
 └── frontend/              ← React / Next.js frontend
 ```
 
+## Deployment Note
+
+- Treat the current deployment target as **Render** unless the user explicitly says this has changed.
+- Prefer Render-aware guidance for public hostnames, custom domains, `onrender.com` subdomains, and private/public service exposure.
+
 ---
 
 ## Rules — follow every one of these

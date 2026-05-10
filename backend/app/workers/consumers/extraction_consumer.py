@@ -127,14 +127,15 @@ async def process_book(book_id: str, queue_wait_ms: int | None = None) -> dict:
             work_type=book.work_type,
             raw=raw,
             preserve_chapter_numbers=book.preserve_chapter_numbers,
+            preserve_source_chapters=book.preserve_source_chapters,
         )
         chapters = cast(list[dict[str, Any]], parsed_payload["chapters"])
         screenplay_payload = cast(dict[str, Any] | None, parsed_payload.get("screenplay_payload"))
         parser_diagnostics = cast(dict[str, Any] | None, parsed_payload.get("parser_diagnostics"))
         all_chapters = apply_chapter_number_strategy(
             chapters,
-            preserve_chapter_numbers=book.preserve_chapter_numbers and book.work_type != "screenplay",
-            generic_titles=book.work_type != "screenplay" and not book.preserve_chapter_numbers,
+            preserve_chapter_numbers=(book.preserve_chapter_numbers or book.preserve_source_chapters) and book.work_type != "screenplay",
+            generic_titles=book.work_type != "screenplay" and not (book.preserve_chapter_numbers or book.preserve_source_chapters),
         )
         log.info(
             "ingestion_timing stage=parse book_id=%s elapsed_ms=%s chapters=%s",

@@ -15,11 +15,11 @@ uvicorn app.main:app --reload
 # Workers (in separate terminals)
 # Default multi-worker layout
 celery -A app.workers.celery_app worker -Q intelligence -c 1 --loglevel=info
-celery -A app.workers.celery_app worker -Q analysis,embedding -c 2 --loglevel=info
-celery -A app.workers.celery_app worker -Q extraction -c 4 --loglevel=info
+celery -A app.workers.celery_app worker -Q analysis,analysis_priority,embedding -c 2 --loglevel=info
+celery -A app.workers.celery_app worker -Q extraction,extraction_priority -c 4 --loglevel=info
 
 # Cost-saving fallback
-celery -A app.workers.celery_app worker -Q intelligence,analysis,embedding,extraction -c 4 -Ofair --loglevel=info
+celery -A app.workers.celery_app worker -Q intelligence,analysis,analysis_priority,embedding,extraction,extraction_priority -c 4 -Ofair --loglevel=info
 
 # Monitor
 celery -A app.workers.celery_app flower --port=5555
@@ -34,20 +34,18 @@ celery -A app.workers.celery_app flower --port=5555
 ## Testing
 
 ```bash
-pip install -r requirements.txt
-pytest tests/ -v
+docker compose -f ../docker-compose-local.yml exec -T api pytest tests -v
 ```
 
 Preferred local test commands for this repo:
 
 ```powershell
-cd backend
-.\.venv\Scripts\python.exe -m pytest tests -v
+docker compose -f docker-compose-local.yml exec -T api pytest tests -v
 ```
 
 Notes:
 
-- Prefer the repo venv over a global Python install.
+- Prefer Docker Compose Local so tests run against the repo's pinned app image, Postgres, Redis, and extensions.
 - Some backend tests are DB-backed and require a safe local test database plus required extensions such as `pgvector`.
 - Backend tests are intended to pass in non-production environments; do not point them at production infrastructure.
 
@@ -68,6 +66,5 @@ Notes:
 ## Targeted backend auth/security verification
 
 ```powershell
-cd backend
-.\.venv\Scripts\python.exe -m pytest tests\unit\test_auth_deps.py tests\unit\test_core_security.py tests\unit\test_security_utils.py tests\integration\test_security_headers.py
+docker compose -f docker-compose-local.yml exec -T api pytest tests\unit\test_auth_deps.py tests\unit\test_core_security.py tests\unit\test_security_utils.py tests\integration\test_security_headers.py -v
 ```

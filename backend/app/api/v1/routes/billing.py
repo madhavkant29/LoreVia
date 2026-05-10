@@ -5,13 +5,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps.auth import get_current_user
 from app.core.database import get_db
 from app.models.user import Subscription, User
-from app.schemas.billing import CheckoutBody
+from app.schemas.billing import BillingStatusOut, CheckoutBody
 from app.services.paddle_service import create_checkout_url, create_portal_url, paddle_is_configured
-from app.utils.billing_utils import VALID_PAID_PLAN_CODES, normalize_plan_code, paddle_plan_is_configured
+from app.utils.billing_utils import (
+    VALID_PAID_PLAN_CODES,
+    billing_configuration_status,
+    normalize_plan_code,
+    paddle_plan_is_configured,
+)
 from app.utils.logging import get_logger
 
 router = APIRouter()
 log = get_logger("lorevia.billing")
+
+
+@router.get("/status", response_model=BillingStatusOut)
+async def get_billing_status():
+    return BillingStatusOut(**billing_configuration_status())
 
 
 @router.post("/checkout")

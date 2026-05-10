@@ -13,6 +13,7 @@ export interface Book {
   mode: "reader" | "author"
   source_kind?: string
   preserve_chapter_numbers?: boolean
+  preserve_source_chapters?: boolean
   cover_url?: string | null
   total_chapters: number | null
   total_tokens?: number | null

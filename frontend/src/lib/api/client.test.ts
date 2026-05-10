@@ -1,9 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-const { axiosCreateMock, axiosPostMock, isAxiosErrorMock } = vi.hoisted(() => ({
+const {
+  axiosCreateMock,
+  axiosPostMock,
+  isAxiosErrorMock,
+  buildDailyCapEventDetailMock,
+  dispatchDailyCapEventMock,
+} = vi.hoisted(() => ({
   axiosCreateMock: vi.fn(),
   axiosPostMock: vi.fn(),
   isAxiosErrorMock: vi.fn(),
+  buildDailyCapEventDetailMock: vi.fn(),
+  dispatchDailyCapEventMock: vi.fn(),
 }))
 
 vi.mock("axios", () => ({
@@ -15,6 +23,11 @@ vi.mock("axios", () => ({
   create: axiosCreateMock,
   post: axiosPostMock,
   isAxiosError: isAxiosErrorMock,
+}))
+
+vi.mock("@/lib/monetization/limitRecovery", () => ({
+  buildDailyCapEventDetail: buildDailyCapEventDetailMock,
+  dispatchDailyCapEvent: dispatchDailyCapEventMock,
 }))
 
 async function loadClientModule() {
@@ -53,10 +66,25 @@ describe("api client", () => {
     axiosCreateMock.mockReset()
     axiosPostMock.mockReset()
     isAxiosErrorMock.mockReset()
+    buildDailyCapEventDetailMock.mockReset()
+    dispatchDailyCapEventMock.mockReset()
     vi.restoreAllMocks()
+    delete process.env.NEXT_PUBLIC_API_URL
   })
 
   it("creates an axios client with the expected defaults", async () => {
+    await loadClientModule()
+
+    expect(axiosCreateMock).toHaveBeenCalledWith({
+      baseURL: "/api/v1",
+      headers: { "Content-Type": "application/json" },
+      withCredentials: true,
+    })
+  })
+
+  it("uses NEXT_PUBLIC_API_URL when provided", async () => {
+    process.env.NEXT_PUBLIC_API_URL = "http://localhost:8000/api/v1"
+
     await loadClientModule()
 
     expect(axiosCreateMock).toHaveBeenCalledWith({
@@ -108,6 +136,26 @@ describe("api client", () => {
     expect(captured.responseSuccess?.(response)).toBe(response)
   })
 
+  it("dispatches a daily cap event before handling the rejected response", async () => {
+    const { captured } = await loadClientModule()
+    const error = { config: { url: "/intelligence/book-1/qa" }, response: { status: 429 } }
+    buildDailyCapEventDetailMock.mockReturnValue({
+      action: "prediction",
+      detail: "cap",
+      requestPath: "/intelligence/book-1/qa",
+      status: 429,
+    })
+
+    await expect(captured.responseError?.(error)).rejects.toBe(error)
+    expect(buildDailyCapEventDetailMock).toHaveBeenCalledWith(error)
+    expect(dispatchDailyCapEventMock).toHaveBeenCalledWith({
+      action: "prediction",
+      detail: "cap",
+      requestPath: "/intelligence/book-1/qa",
+      status: 429,
+    })
+  })
+
   it("refreshes and retries non-auth 401 responses", async () => {
     const { captured, apiClientMock } = await loadClientModule()
     const originalRequest: { url: string; _retry?: boolean } = { url: "/books/1" }
@@ -123,6 +171,21 @@ describe("api client", () => {
     expect(originalRequest._retry).toBe(true)
     expect(apiClientMock).toHaveBeenCalledWith(originalRequest)
     expect(result).toEqual({ data: { retried: true } })
+  })
+
+  it("uses the configured api base for refresh requests", async () => {
+    process.env.NEXT_PUBLIC_API_URL = "http://localhost:8000/api/v1"
+    const { captured, apiClientMock } = await loadClientModule()
+    const originalRequest: { url: string; _retry?: boolean } = { url: "/books/1" }
+    axiosPostMock.mockResolvedValue({ data: {} })
+    apiClientMock.mockResolvedValue({ data: { retried: true } })
+
+    await captured.responseError?.({
+      config: originalRequest,
+      response: { status: 401 },
+    })
+
+    expect(axiosPostMock).toHaveBeenCalledWith("/api/v1/auth/refresh", null, { withCredentials: true })
   })
 
   it("does not refresh auth me failures", async () => {

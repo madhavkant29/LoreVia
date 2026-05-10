@@ -8,6 +8,8 @@ import { authApi } from "@/lib/api/auth"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 
+const PENDING_OAUTH_USER_KEY = "lorevia-pending-oauth-user"
+
 export default function CompleteUsernamePage() {
   const router = useRouter()
   const user = useAuthStore((state) => state.user)
@@ -17,12 +19,19 @@ export default function CompleteUsernamePage() {
   const [username, setUsername] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [checkingSession, setCheckingSession] = useState(false)
 
   useEffect(() => {
     if (!user) {
+      const pendingUser = typeof window !== "undefined" ? window.sessionStorage.getItem(PENDING_OAUTH_USER_KEY) : null
+      setCheckingSession(true)
       void authApi.me().then((me) => {
         if (!me) {
-          router.replace("/login")
+          if (!pendingUser) {
+            router.replace("/login")
+            return
+          }
+          setError("Finish choosing a username to complete Google sign-in. If this page refreshes again, start from Google sign-in once more.")
           return
         }
         setUser(me)
@@ -30,7 +39,13 @@ export default function CompleteUsernamePage() {
           router.replace("/library")
         }
       }).catch(() => {
-        router.replace("/login")
+        if (!pendingUser) {
+          router.replace("/login")
+          return
+        }
+        setError("Finish choosing a username to complete Google sign-in. If this page refreshes again, start from Google sign-in once more.")
+      }).finally(() => {
+        setCheckingSession(false)
       })
       return
     }
@@ -52,9 +67,10 @@ export default function CompleteUsernamePage() {
     setLoading(true)
     setError(null)
     try {
-      const refreshedUser = await authApi.refresh()
-      setUser(refreshedUser)
       const updatedUser = await authApi.setUsername(trimmedUsername)
+      if (typeof window !== "undefined") {
+        window.sessionStorage.removeItem(PENDING_OAUTH_USER_KEY)
+      }
       setUser(updatedUser)
       router.replace("/library")
     } catch (error) {
@@ -98,6 +114,12 @@ export default function CompleteUsernamePage() {
             isDark ? "border-white/10 bg-white/5 text-slate-100 placeholder:text-slate-500" : "border-stone-300 bg-white text-stone-900 placeholder:text-stone-400"
           }`}
         />
+
+        {checkingSession && !error ? (
+          <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+            Reconnecting your session...
+          </p>
+        ) : null}
 
         {error && (
           <p

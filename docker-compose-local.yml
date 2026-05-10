@@ -17,6 +17,7 @@ services:
 
   worker-extraction:
     build: { context: ./backend, dockerfile: Dockerfile.worker }
+    command: celery -A app.workers.celery_app worker -Q extraction,extraction_priority --loglevel=info -c 4
     env_file: ./backend/.env.local
     environment:
       NORMALIZE_LOCAL_STORAGE_PERMISSIONS: "1"
@@ -32,6 +33,7 @@ services:
 
   worker-analysis:
     build: { context: ./backend, dockerfile: Dockerfile.worker }
+    command: celery -A app.workers.celery_app worker -Q analysis,analysis_priority,embedding --loglevel=info -c 2
     env_file: ./backend/.env.local
     environment:
       NORMALIZE_LOCAL_STORAGE_PERMISSIONS: "1"
@@ -47,6 +49,7 @@ services:
 
   worker-intelligence:
     build: { context: ./backend, dockerfile: Dockerfile.worker }
+    command: celery -A app.workers.celery_app worker -Q intelligence --loglevel=info -c 1
     env_file: ./backend/.env.local
     environment:
       NORMALIZE_LOCAL_STORAGE_PERMISSIONS: "1"
@@ -91,6 +94,7 @@ services:
 
   flower:
     build: { context: ./backend, dockerfile: Dockerfile.worker }
+    command: celery -A app.workers.celery_app flower --port=5555
     env_file: ./backend/.env.local
     environment:
       NORMALIZE_LOCAL_STORAGE_PERMISSIONS: "1"

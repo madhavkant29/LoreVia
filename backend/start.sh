@@ -1,14 +1,15 @@
 #!/bin/bash
-# Start cloudflared tunnel in background if token is set,
-# then start uvicorn in foreground.
+# Cloudflared tunnel startup is intentionally disabled for Render deployments.
+# Keep the block below commented for reference in case a non-Render deployment
+# needs to restore tunnel-based ingress later.
 
 set -e
 
-if [ -n "$CLOUDFLARE_TUNNEL_TOKEN" ]; then
-  echo "Starting Cloudflare tunnel..."
-  cloudflared tunnel run --token "$CLOUDFLARE_TUNNEL_TOKEN" &
-  sleep 2
-fi
+# if [ -n "$CLOUDFLARE_TUNNEL_TOKEN" ]; then
+#   echo "Starting Cloudflare tunnel..."
+#   cloudflared tunnel run --token "$CLOUDFLARE_TUNNEL_TOKEN" &
+#   sleep 2
+# fi
 
 if [ "${NORMALIZE_LOCAL_STORAGE_PERMISSIONS:-}" = "1" ] && [ "$(id -u)" = "0" ]; then
   echo "Normalizing local storage permissions for local compose..."

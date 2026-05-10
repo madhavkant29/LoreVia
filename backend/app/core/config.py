@@ -112,6 +112,14 @@ class Settings(BaseSettings):
     LEGAL_EMAIL: str = "legal@getlorevia.com"
     INTERNAL_JOB_SECRET: str | None = None
 
+    # Rewarded ads
+    REWARDED_ADS_ENABLED: bool = False
+    REWARDED_AD_GPT_UNIT_PATH: str | None = None
+    REWARDED_AD_REWARD_POINTS: int = 3
+    REWARDED_AD_DAILY_CAP: int = 1
+    REWARDED_AD_SESSION_TTL_SECONDS: int = 900
+    REWARDED_AD_MIN_GRANT_SECONDS: int = 5
+
     # Monitoring
     SENTRY_DSN: str | None = None
 
@@ -185,7 +193,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(case_sensitive=True, extra="ignore")
 
 
-settings = Settings()
+# Pydantic Settings resolves required values from environment variables at runtime.
+settings = Settings()  # pyright: ignore[reportCallIssue]
 
 
 def cors_origins() -> list[str]:

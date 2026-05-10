@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
 
 import { booksApi } from "@/lib/api/books"
+import { buildDailyCapEventDetail } from "@/lib/monetization/limitRecovery"
 import { readerApi } from "@/lib/api/reader"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { capture } from "@/lib/analytics/posthog"
@@ -55,10 +56,11 @@ export default function SearchPage() {
         setThematicResults([])
         capture("search_results_loaded", { book_id: bookId, result_count: data.length, mode })
       }
-    } catch {
+    } catch (err: unknown) {
       setResults([])
       setThematicResults([])
-      setError("Search failed. Please try again.")
+      const dailyCap = buildDailyCapEventDetail(err)
+      setError(dailyCap ? "You reached today's search limit. Use the upgrade or points options to keep going." : "Search failed. Please try again.")
     } finally {
       setLoading(false)
     }

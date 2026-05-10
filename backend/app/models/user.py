@@ -53,6 +53,7 @@ class User(Base):
         uselist=False,
     )
     trial_email_events = relationship("TrialEmailEvent", back_populates="user", cascade="all, delete-orphan")
+    rewarded_ad_sessions = relationship("RewardedAdSession", back_populates="user", cascade="all, delete-orphan")
 
 
 class Subscription(Base):
@@ -152,3 +153,25 @@ class TrialEmailEvent(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     user = relationship("User", back_populates="trial_email_events")
+
+
+class RewardedAdSession(Base):
+    __tablename__ = "rewarded_ad_sessions"
+    __table_args__ = (UniqueConstraint("claim_token", name="uq_rewarded_ad_sessions_claim_token"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    provider: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    claim_token: Mapped[str] = mapped_column(String, nullable=False, unique=True, index=True)
+    ad_unit_path: Mapped[str] = mapped_column(String, nullable=False)
+    placement: Mapped[str | None] = mapped_column(String, index=True)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="pending", server_default="pending", index=True)
+    reward_points: Mapped[int] = mapped_column(Integer, nullable=False)
+    reward_granted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    finalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    metadata_json: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    user = relationship("User", back_populates="rewarded_ad_sessions")

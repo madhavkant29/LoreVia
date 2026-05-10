@@ -336,6 +336,7 @@ describe("books api", () => {
       seriesIds: ["series-1"],
       autoExtractCover: false,
       preserveChapterNumbers: true,
+      preserveSourceChapters: true,
       workType: "novel",
       coverFile,
       mode: "author",
@@ -351,6 +352,7 @@ describe("books api", () => {
     expect(form.get("series_ids")).toBe("series-1")
     expect(form.get("auto_extract_cover")).toBe("false")
     expect(form.get("preserve_chapter_numbers")).toBe("true")
+    expect(form.get("preserve_source_chapters")).toBe("true")
     expect(form.get("work_type")).toBe("novel")
     expect(form.get("mode")).toBe("author")
     expect(progress).toHaveBeenCalledWith(25)

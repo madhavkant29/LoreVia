@@ -6,6 +6,7 @@ import { useParams } from "next/navigation"
 
 import { booksApi } from "@/lib/api/books"
 import { intelligenceApi } from "@/lib/api/intelligence"
+import { buildDailyCapEventDetail } from "@/lib/monetization/limitRecovery"
 import { readerApi } from "@/lib/api/reader"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { capture } from "@/lib/analytics/posthog"
@@ -90,8 +91,11 @@ export default function AskPage() {
         },
       ])
     } catch (err: unknown) {
+      const dailyCap = buildDailyCapEventDetail(err)
       const message = err instanceof Error ? err.message : ""
-      if (message.includes("429")) {
+      if (dailyCap) {
+        setError("You reached today's question limit. Use the upgrade or points options to keep going.")
+      } else if (message.includes("429")) {
         setError("Too many questions right now. Please try again in a bit.")
       } else {
         setError("Couldn't get an answer right now. Try again.")

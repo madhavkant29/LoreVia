@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
 import axios from "axios"
 import { authApi } from "@/lib/api/auth"
+import { isGoogleSignupRedirectError, normalizeOAuthLoginError } from "@/lib/auth/oauthMessages"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { supabase } from "@/lib/supabase"
@@ -47,7 +48,7 @@ function LoginInner() {
 
   useEffect(() => {
     const oauthError = searchParams.get("error")
-    if (oauthError) setError(oauthError)
+    if (oauthError) setError(normalizeOAuthLoginError(oauthError))
   }, [searchParams])
 
   const submit = async (e: React.FormEvent) => {
@@ -126,6 +127,9 @@ function LoginInner() {
           <GoogleIcon />
           Continue with Google
         </button>
+        <p className={`mt-2 text-center text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>
+          First time with Google? Use <Link href="/register" className="font-medium underline-offset-2 hover:underline">Create one</Link> so you can accept the required terms first.
+        </p>
 
         <div className="relative my-6 flex items-center">
           <div className={`h-px flex-1 ${isDark ? "bg-white/[0.07]" : "bg-stone-200"}`} />
@@ -183,6 +187,16 @@ function LoginInner() {
                   }`}
                 >
                   Resend verification email
+                </Link>
+              ) : null}
+              {isGoogleSignupRedirectError(error) ? (
+                <Link
+                  href="/register"
+                  className={`mt-2 inline-flex font-medium underline-offset-2 hover:underline ${
+                    isDark ? "text-rose-200" : "text-rose-700"
+                  }`}
+                >
+                  Go to Create one
                 </Link>
               ) : null}
             </div>

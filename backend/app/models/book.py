@@ -33,6 +33,7 @@ class Book(Base):
     mode: Mapped[str] = mapped_column(String, default="reader")
     source_kind: Mapped[str] = mapped_column(String, default="single_upload")
     preserve_chapter_numbers: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    preserve_source_chapters: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     total_chapters: Mapped[int | None] = mapped_column(Integer)
     total_tokens: Mapped[int | None] = mapped_column(Integer)
     total_chunks: Mapped[int | None] = mapped_column(Integer)

@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any, cast
 import bleach  # type: ignore[import-untyped]
 from bleach.css_sanitizer import CSSSanitizer
 from fastapi import HTTPException
+from PIL import Image, ImageDraw, ImageFont
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
@@ -2544,6 +2545,7 @@ async def book_out(db: AsyncSession, book: Book, user_id: uuid.UUID) -> BookOut:
         mode=book.mode or "reader",
         source_kind=book.source_kind or "single_upload",
         preserve_chapter_numbers=bool(book.preserve_chapter_numbers),
+        preserve_source_chapters=bool(book.preserve_source_chapters),
         cover_url=cover_url,
         total_chapters=book.total_chapters,
         total_tokens=book.total_tokens,
@@ -2577,6 +2579,65 @@ def cover_url_for_book(book: Book) -> str | None:
     return f"{settings.API_V1_PREFIX}/books/{book.id}/cover?token={token}"
 
 
+def build_blank_cover_image(title: str, author: str | None = None) -> tuple[bytes, str]:
+    image = Image.new("RGB", (1200, 1800), color=(248, 245, 238))
+    draw = ImageDraw.Draw(image)
+
+    def load_font(size: int) -> ImageFont.ImageFont:
+        for candidate in ("DejaVuSans.ttf", "arial.ttf"):
+            try:
+                return ImageFont.truetype(candidate, size)
+            except OSError:
+                continue
+        return ImageFont.load_default()
+
+    title_font = load_font(72)
+    author_font = load_font(40)
+    text_color = (28, 25, 23)
+    accent_color = (79, 70, 229)
+    max_text_width = 860
+
+    def wrap_text(value: str, font: ImageFont.ImageFont) -> list[str]:
+        words = [part for part in value.split() if part]
+        if not words:
+            return []
+        lines: list[str] = []
+        current = words[0]
+        for word in words[1:]:
+            candidate = f"{current} {word}"
+            width = draw.textbbox((0, 0), candidate, font=font)[2]
+            if width <= max_text_width:
+                current = candidate
+            else:
+                lines.append(current)
+                current = word
+        lines.append(current)
+        return lines
+
+    normalized_title = " ".join((title or "").split()).strip() or "Untitled"
+    normalized_author = " ".join((author or "").split()).strip()
+    title_lines = wrap_text(normalized_title, title_font)[:5]
+    if not title_lines:
+        title_lines = ["Untitled"]
+    author_line = normalized_author or "Unknown author"
+
+    draw.rounded_rectangle((180, 220, 1020, 1540), radius=36, outline=accent_color, width=8, fill=(255, 255, 255))
+    draw.rectangle((180, 220, 1020, 290), fill=accent_color)
+    draw.text((600, 245), "LoreVia", font=author_font, fill=(255, 255, 255), anchor="mm")
+
+    y = 520
+    for line in title_lines:
+        draw.text((600, y), line, font=title_font, fill=text_color, anchor="mm")
+        y += 70
+
+    draw.line((330, y + 30, 870, y + 30), fill=(203, 213, 225), width=3)
+    draw.text((600, y + 110), author_line, font=author_font, fill=(68, 64, 60), anchor="mm")
+
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue(), "image/png"
+
+
 async def ensure_book_cover(db: AsyncSession, book: Book) -> None:
     if book.format == "pdf" and not book.cover_s3_key and book.s3_key:
         from app.parsers.pdf_parser import extract_first_page_cover
@@ -2602,7 +2663,17 @@ async def ensure_book_cover(db: AsyncSession, book: Book) -> None:
                     return
 
     if not book.cover_s3_key:
-        return
+        try:
+            cover_bytes, content_type = await asyncio.to_thread(build_blank_cover_image, book.title, book.author)
+            book.cover_s3_key = await asyncio.to_thread(
+                upload_binary,
+                f"covers/{book.user_id}/{uuid.uuid4()}.png",
+                cover_bytes,
+                content_type,
+            )
+            await db.flush()
+        except Exception:
+            return
 
 
 # ─── Progress / word-count helpers ───────────────────────────────────────────
@@ -2975,6 +3046,7 @@ async def parse_book_upload_for_ingestion(
     work_type: str,
     raw: bytes,
     preserve_chapter_numbers: bool,
+    preserve_source_chapters: bool,
 ) -> dict[str, Any]:
     if work_type == "screenplay":
         screenplay_payload = await parse_screenplay_upload(upload_filename_for_format(format_name), raw)
@@ -2984,13 +3056,15 @@ async def parse_book_upload_for_ingestion(
             "parser_diagnostics": None,
         }
 
+    preserve_exact_structure = preserve_chapter_numbers or preserve_source_chapters
+
     if format_name == "pdf":
         from app.parsers.pdf_parser import parse_pdf_with_diagnostics
 
         chapters, parser_diagnostics = await asyncio.to_thread(
             parse_pdf_with_diagnostics,
             raw,
-            split_large_chapters=not preserve_chapter_numbers,
+            split_large_chapters=not preserve_exact_structure,
         )
         return {"chapters": chapters, "screenplay_payload": None, "parser_diagnostics": parser_diagnostics}
 
@@ -3000,7 +3074,7 @@ async def parse_book_upload_for_ingestion(
         chapters = await asyncio.to_thread(
             parse_epub,
             raw,
-            split_large_chapters=not preserve_chapter_numbers,
+            split_large_chapters=not preserve_exact_structure,
         )
         return {"chapters": chapters, "screenplay_payload": None, "parser_diagnostics": None}
 

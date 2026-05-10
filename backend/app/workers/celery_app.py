@@ -8,6 +8,7 @@ from sentry_sdk.integrations.celery import CeleryIntegration
 
 from app.core.config import settings
 from app.utils.request_context import get_request_id, set_request_id
+from app.workers.queues.queues import TASK_QUEUES
 
 
 def _normalize_celery_redis_url(raw_url: str) -> tuple[str, dict]:
@@ -80,6 +81,7 @@ celery_app.conf.update(
     result_serializer="json",
     accept_content=["json"],
     timezone="UTC",
+    task_queues=TASK_QUEUES,
     task_track_started=True,
     task_acks_late=True,
     task_reject_on_worker_lost=True,

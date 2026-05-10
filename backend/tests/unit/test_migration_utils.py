@@ -1,10 +1,12 @@
 from pathlib import Path
 from app.utils.migration_utils import (
+    CORE_APPLICATION_TABLES,
     destructive_downgrade_revisions,
     destructive_upgrade_revisions,
     is_local_database_url,
     redact_database_target,
     resolve_alembic_database_url,
+    should_reset_local_alembic_state,
 )
 
 
@@ -128,3 +130,13 @@ def downgrade() -> None:
     )
 
     assert destructive_downgrade_revisions(tmp_path) == [migration]
+
+
+def test_should_reset_local_alembic_state_requires_core_tables() -> None:
+    assert should_reset_local_alembic_state({"alembic_version"}) is True
+    assert should_reset_local_alembic_state({"alembic_version", "users"}) is True
+
+
+def test_should_reset_local_alembic_state_allows_bootstrapped_schema() -> None:
+    assert should_reset_local_alembic_state({"alembic_version", *CORE_APPLICATION_TABLES}) is False
+    assert should_reset_local_alembic_state(set(CORE_APPLICATION_TABLES)) is False
