@@ -186,12 +186,12 @@ def test_billing_configuration_status_reports_fully_configured_catalog(monkeypat
 def test_billing_configuration_status_treats_placeholder_values_as_missing(monkeypatch):
     monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_API_KEY", "pdl_live_or_sandbox_key_here", raising=False)
     monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_WEBHOOK_SECRET", "pdl_webhook_secret_here", raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_READER_MONTHLY_PRICE_ID", "pri_reader_monthly", raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_READER_ANNUAL_PRICE_ID", "pri_reader_annual", raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_AUTHOR_MONTHLY_PRICE_ID", "pri_author_monthly", raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_AUTHOR_ANNUAL_PRICE_ID", "pri_author_annual", raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_ARCHITECT_MONTHLY_PRICE_ID", "pri_architect_monthly", raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_ARCHITECT_ANNUAL_PRICE_ID", "pri_architect_annual", raising=False)
+    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_READER_MONTHLY_PRICE_ID", "price_reader_monthly_here", raising=False)
+    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_READER_ANNUAL_PRICE_ID", "price_reader_annual_here", raising=False)
+    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_AUTHOR_MONTHLY_PRICE_ID", "price_author_monthly_here", raising=False)
+    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_AUTHOR_ANNUAL_PRICE_ID", "price_author_annual_here", raising=False)
+    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_ARCHITECT_MONTHLY_PRICE_ID", "price_architect_monthly_here", raising=False)
+    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_ARCHITECT_ANNUAL_PRICE_ID", "price_architect_annual_here", raising=False)
     monkeypatch.setattr("app.utils.billing_utils.settings.RESEND_API_KEY", "dummy", raising=False)
     monkeypatch.setattr("app.utils.billing_utils.settings.INTERNAL_JOB_SECRET", "replace_with_an_internal_job_secret", raising=False)
 

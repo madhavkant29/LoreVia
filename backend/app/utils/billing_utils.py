@@ -46,12 +46,12 @@ PRIORITY_QUEUE_NAMES = (
 PLACEHOLDER_ENV_VALUES = {
     "pdl_live_or_sandbox_key_here",
     "pdl_webhook_secret_here",
-    "pri_reader_monthly",
-    "pri_reader_annual",
-    "pri_author_monthly",
-    "pri_author_annual",
-    "pri_architect_monthly",
-    "pri_architect_annual",
+    "price_reader_monthly_here",
+    "price_reader_annual_here",
+    "price_author_monthly_here",
+    "price_author_annual_here",
+    "price_architect_monthly_here",
+    "price_architect_annual_here",
     "replace_with_an_internal_job_secret",
     "dummy",
 }
