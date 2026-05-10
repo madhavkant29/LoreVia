@@ -358,6 +358,7 @@ export const booksApi = {
       seriesIds?: string[]
       autoExtractCover?: boolean
       preserveChapterNumbers?: boolean
+      preserveSourceChapters?: boolean
       workType?: BookWorkType
       coverFile?: File | null
       mode?: "reader" | "author"
@@ -378,6 +379,7 @@ export const booksApi = {
     if (options?.mode) form.append("mode", options.mode)
     form.append("auto_extract_cover", options?.autoExtractCover === false ? "false" : "true")
     form.append("preserve_chapter_numbers", options?.preserveChapterNumbers ? "true" : "false")
+    form.append("preserve_source_chapters", options?.preserveSourceChapters ? "true" : "false")
     if (options?.coverFile) form.append("cover_file", options.coverFile)
     return apiClient.post("/books/upload", form, {
       onUploadProgress: (event) => {

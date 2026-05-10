@@ -21,6 +21,7 @@ from app.core.database import engine
 from app.core.events import on_shutdown, on_startup
 from app.core.redis import get_redis
 from app.utils.security_utils import apply_security_headers
+from app.utils.tunnel.cloudflare import CloudflareTunnelMiddleware
 
 if settings.SENTRY_DSN and not settings.DEBUG:
     sentry_sdk.init(
@@ -60,10 +61,14 @@ app.add_middleware(
     **cors_middleware_options(),
 )
 
-app.add_middleware(
-    TrustedHostMiddleware,
-    allowed_hosts=allowed_hosts(),
-)
+if not settings.DEBUG:
+    app.add_middleware(
+        TrustedHostMiddleware,
+        allowed_hosts=allowed_hosts(),
+    )
+
+if settings.CLOUDFLARE_TUNNEL_TOKEN:
+    app.add_middleware(CloudflareTunnelMiddleware)
 
 
 class SecurityHeadersMiddleware:

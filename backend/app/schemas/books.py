@@ -20,6 +20,7 @@ class BookOut(BaseModel):
     mode: str
     source_kind: str
     preserve_chapter_numbers: bool = False
+    preserve_source_chapters: bool = False
     cover_url: str | None = None
     total_chapters: int | None
     total_tokens: int | None

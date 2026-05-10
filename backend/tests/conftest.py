@@ -24,7 +24,7 @@ from app.api.deps.rate_limit import (
     rate_limit_world_building_ai,
     rate_limit_world_building_upload,
 )
-from app.core.config import settings
+from app.core.config import allowed_hosts, settings
 from app.core.database import Base, get_db
 from app.core.storage import download_book
 from app.main import app
@@ -197,6 +197,16 @@ engine_test = None
 TestSession = None
 
 
+def _test_base_url() -> str:
+    hosts = allowed_hosts()
+    for preferred in ("localhost", "127.0.0.1"):
+        if preferred in hosts:
+            return f"http://{preferred}"
+    if hosts:
+        return f"https://{hosts[0]}"
+    return "http://localhost"
+
+
 @pytest_asyncio.fixture(scope="session")
 async def setup_engine():
     global engine_test, TestSession
@@ -253,7 +263,7 @@ async def client(db):
     app.dependency_overrides[rate_limit_manuscript_import] = lambda: None
     app.dependency_overrides[rate_limit_world_building_upload] = lambda: None
     app.dependency_overrides[rate_limit_world_building_ai] = lambda: None
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://localhost") as c:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=_test_base_url()) as c:
         yield c
     app.dependency_overrides.clear()
 

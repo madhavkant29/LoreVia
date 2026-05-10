@@ -581,7 +581,7 @@ def parse_chapter_from_source(book: Book, chapter_num: int) -> dict | None:
     except Exception:
         return None
     try:
-        preserve_numbers = bool(book.preserve_chapter_numbers) and book.work_type != "screenplay"
+        preserve_numbers = bool(book.preserve_chapter_numbers or getattr(book, "preserve_source_chapters", False)) and book.work_type != "screenplay"
         if book.format == "pdf":
             from app.parsers.pdf_parser import parse_pdf
 

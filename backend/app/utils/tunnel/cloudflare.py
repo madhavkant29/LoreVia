@@ -1,17 +1,44 @@
 """
-Cloudflare Tunnel security — Option 1.
+Cloudflare Tunnel request enforcement helpers.
 
-With cloudflared installed, the Railway service is only reachable through
-the tunnel. The public Railway URL becomes unreachable from the internet.
-
-Setup:
-1. Install cloudflared on Railway via Dockerfile.api
-2. Set CLOUDFLARE_TUNNEL_TOKEN env var
-3. cloudflared tunnel run --token $CLOUDFLARE_TUNNEL_TOKEN
-   (started automatically by start.sh alongside uvicorn)
-
-This module provides a FastAPI middleware that validates the
-CF-Connecting-IP header is present (set by Cloudflare on tunnelled requests).
-When running via tunnel, all requests will have this header.
-Direct requests to the Railway URL will not — and get rejected.
+When Cloudflare Tunnel is enabled, public application traffic should arrive
+through Cloudflare and include tunnel-managed headers such as
+``CF-Connecting-IP``. This middleware rejects ordinary application requests
+that do not include those headers while still allowing platform health checks.
 """
+
+from __future__ import annotations
+
+from starlette.responses import JSONResponse
+from starlette.types import ASGIApp, Receive, Scope, Send
+
+
+_HEALTHCHECK_PATHS = frozenset({"/health", "/ready"})
+
+
+class CloudflareTunnelMiddleware:
+    """Reject direct origin traffic when tunnel enforcement is enabled."""
+
+    def __init__(self, app: ASGIApp):
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        path = scope.get("path", "")
+        if path in _HEALTHCHECK_PATHS:
+            await self.app(scope, receive, send)
+            return
+
+        headers = dict(scope.get("headers", []))
+        if b"cf-connecting-ip" not in headers:
+            response = JSONResponse(
+                status_code=403,
+                content={"detail": "Cloudflare tunnel enforcement rejected this request."},
+            )
+            await response(scope, receive, send)
+            return
+
+        await self.app(scope, receive, send)

@@ -25,6 +25,7 @@ htmlcov/
 ## Config
 .env
 .env.*
+!backend/.env.example
 
 # Node.js
 node_modules/
@@ -99,4 +100,3 @@ local_settings.py
 
 # Exclude generated files
 *.pb.go
-

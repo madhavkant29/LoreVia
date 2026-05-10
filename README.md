@@ -50,7 +50,7 @@ The app is built as a full-stack system with asynchronous processing so that ing
   Keep books in the library, archive them, or hide them from the UI while still preserving usage accounting.
 
 - `Authentication and Billing Foundations`
-  Includes JWT auth, refresh flows, session handling, and Stripe billing hooks for pricing plans.
+  Includes JWT auth, refresh flows, session handling, Paddle checkout and portal flows, and webhook-backed subscription updates for pricing plans.
 
 ## Architecture
 
@@ -126,7 +126,7 @@ REDIS_URL=redis://redis:6379/0
 
 OPENAI_API_KEY=your_openai_api_key_here
 OPENAI_EXTRACT_MODEL=gpt-4o-mini
-OPENAI_INTEL_MODEL=gpt-4o
+OPENAI_INTEL_MODEL=gpt-4o-mini
 OPENAI_EMBED_MODEL=text-embedding-3-small
 
 S3_BUCKET=local-dev
@@ -136,10 +136,18 @@ AWS_SECRET_ACCESS_KEY=local-dev
 
 JWT_SECRET=replace_with_a_long_random_secret
 
-STRIPE_SECRET_KEY=sk_test_placeholder
-STRIPE_WEBHOOK_SECRET=whsec_placeholder
+PADDLE_API_KEY=pdl_live_or_sandbox_key_here
+PADDLE_WEBHOOK_SECRET=pdl_webhook_secret_here
+PADDLE_READER_MONTHLY_PRICE_ID=pri_reader_monthly
+PADDLE_READER_ANNUAL_PRICE_ID=pri_reader_annual
+PADDLE_AUTHOR_MONTHLY_PRICE_ID=pri_author_monthly
+PADDLE_AUTHOR_ANNUAL_PRICE_ID=pri_author_annual
+PADDLE_ARCHITECT_MONTHLY_PRICE_ID=pri_architect_monthly
+PADDLE_ARCHITECT_ANNUAL_PRICE_ID=pri_architect_annual
+PADDLE_DEFAULT_CHECKOUT_URL=http://localhost:3000/pricing
 
 RESEND_API_KEY=dummy
+INTERNAL_JOB_SECRET=replace_with_an_internal_job_secret
 SENTRY_DSN=
 CLOUDFLARE_TUNNEL_TOKEN=
 
@@ -151,6 +159,8 @@ Notes:
 - Do not paste any real secret values into this README.
 - Keep `backend/.env.local` out of version control.
 - For local development, file storage is mounted to a Docker volume instead of cloud storage.
+- Paddle checkout requires the API key, webhook secret, and plan price IDs to be set together.
+- Trial lifecycle emails can be run from a scheduler with `python backend/scripts/run_due_trial_emails.py --limit 100` or through the protected internal job endpoint.
 
 ### 2. Create frontend environment file
 
@@ -207,14 +217,13 @@ LoreVia now has backend tests, frontend unit tests, and frontend E2E smoke tests
 From the repo root:
 
 ```powershell
-cd backend
-.\.venv\Scripts\python.exe -m pytest tests -v
+docker compose -f docker-compose-local.yml exec -T api pytest tests -v
 ```
 
 Notes:
 
-- Prefer the repo venv instead of a global Python install.
-- DB-backed backend tests require a safe local test database and required extensions such as `pgvector`.
+- Prefer Docker Compose Local so tests run against the repo's pinned app image, Postgres, Redis, and extensions.
+- DB-backed backend tests require the local compose stack and required extensions such as `pgvector`.
 
 ### Frontend unit tests
 

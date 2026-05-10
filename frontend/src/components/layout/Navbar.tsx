@@ -91,7 +91,7 @@ export function Navbar() {
         </div>
 
         <div className={`${mobileMenuOpen ? "block" : "hidden"} lg:block`}>
-          <div className="flex flex-wrap items-center gap-1">
+          <div className="flex flex-wrap items-center gap-1 lg:justify-center">
             {navItems.map((item) => (
               <Link
                 key={item.href}

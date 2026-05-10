@@ -4,6 +4,7 @@ import Link from "next/link"
 import type { Route } from "next"
 import { useEffect, useRef, useState, type ReactNode } from "react"
 import { BrandLockup } from "@/components/layout/BrandLockup"
+import { pricingTiers as billingPricingTiers } from "@/lib/billing/catalog"
 import { useAuthStore } from "@/lib/stores/authStore"
 
 const navItems = [
@@ -129,65 +130,60 @@ const comparisonRows = [
   ["Character voice consistency checks", "No", "No", "No", "Yes"],
 ]
 
-const pricingTiers = [
-  {
-    name: "Free",
-    price: 0,
-    subtitle: "Explore LoreVia with a single project.",
-    bullets: [
-      "2 active books",
-      "Character tracking and story recall",
-      "Basic chapter summaries",
-      "Standard usage limits",
-    ],
-    cta: "Start free",
-    highlighted: false,
-  },
-  {
-    name: "Reader",
-    price: 12,
-    subtitle: "For readers following long stories and series.",
-    bullets: [
-      "Everything in Free, plus",
-      "Unlimited books",
-      "Multi-chapter summaries",
-      "Advanced story questions",
-      "Reader-focused workspace",
-    ],
-    cta: "Continue reading",
-    highlighted: false,
-  },
-  {
-    name: "Author",
-    price: 24,
-    subtitle: "For active manuscript drafting and revision.",
-    bullets: [
-      "Everything in Reader, plus",
-      "Continuity scans",
-      "Manuscript feedback",
-      "Character reference generation",
-      "Relationship and timeline tracking",
-      "High monthly usage limits",
-    ],
-    cta: "Start writing",
-    highlighted: true,
-  },
-  {
-    name: "Lore Architect",
-    price: 36,
-    subtitle: "For multi-book projects and expansive story worlds.",
-    bullets: [
-      "Everything in Author, plus",
-      "Cross-book continuity analysis",
-      "Advanced world consistency checks",
-      "Series-wide relationship tracking",
-      "Early access to new features",
-      "Extended analysis capacity",
-    ],
-    cta: "Build your world",
-    highlighted: false,
-  },
-]
+const pricingTiers = billingPricingTiers.map((tier) => ({
+  name: tier.name,
+  price: tier.priceMonthly,
+  subtitle:
+    tier.name === "Free"
+      ? "Explore LoreVia with a single project."
+      : tier.name === "Reader"
+        ? "For readers following long stories and series."
+        : tier.name === "Author"
+          ? "For active manuscript drafting and revision."
+          : "For multi-book projects and expansive story worlds.",
+  bullets:
+    tier.name === "Free"
+      ? [
+          "2 active books",
+          "Character tracking and story recall",
+          "Basic chapter summaries",
+          "Standard usage limits",
+        ]
+      : tier.name === "Reader"
+        ? [
+            "Everything in Free, plus",
+            "Unlimited books",
+            "Multi-chapter summaries",
+            "Advanced story questions",
+            "Reader-focused workspace",
+          ]
+        : tier.name === "Author"
+          ? [
+              "Everything in Reader, plus",
+              "Continuity scans",
+              "Manuscript feedback",
+              "Character reference generation",
+              "Relationship and timeline tracking",
+              "High monthly usage limits",
+            ]
+          : [
+              "Everything in Author, plus",
+              "Cross-book continuity analysis",
+              "Advanced world consistency checks",
+              "Series-wide relationship tracking",
+              "Early access to new features",
+              "Extended analysis capacity",
+            ],
+  cta:
+    tier.name === "Free"
+      ? "Start free"
+      : tier.name === "Reader"
+        ? "Continue reading"
+        : tier.name === "Author"
+          ? "Start writing"
+          : "Build your world",
+  highlighted: tier.name === "Author",
+}))
 
 const faqItems = [
   {

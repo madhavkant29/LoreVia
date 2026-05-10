@@ -78,6 +78,7 @@ def process_chapter_task(self, book_id: str, chapter_num: int):
                     work_type=book.work_type,
                     raw=raw,
                     preserve_chapter_numbers=book.preserve_chapter_numbers,
+                    preserve_source_chapters=book.preserve_source_chapters,
                 )
                 chapters = parsed_payload["chapters"]
                 chapter_data = next((ch for ch in chapters if ch["number"] == chapter_num), None)

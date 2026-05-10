@@ -28,6 +28,33 @@ VALID_PAID_PLAN_CODES = {
     "architect_monthly",
     "architect_annual",
 }
+SUPPORTED_PADDLE_WEBHOOK_EVENTS = (
+    "transaction.completed",
+    "subscription.created",
+    "subscription.updated",
+    "subscription.canceled",
+    "subscription.past_due",
+    "subscription.paused",
+)
+PADDLE_WEBHOOK_ENDPOINT_PATH = "/api/v1/webhooks/paddle"
+TRIAL_EMAIL_JOB_ENDPOINT_PATH = "/api/v1/internal/jobs/send-due-trial-emails"
+TRIAL_EMAIL_RUNNER_SCRIPT = "backend/scripts/run_due_trial_emails.py"
+PRIORITY_QUEUE_NAMES = (
+    "extraction_priority",
+    "analysis_priority",
+)
+PLACEHOLDER_ENV_VALUES = {
+    "pdl_live_or_sandbox_key_here",
+    "pdl_webhook_secret_here",
+    "pri_reader_monthly",
+    "pri_reader_annual",
+    "pri_author_monthly",
+    "pri_author_annual",
+    "pri_architect_monthly",
+    "pri_architect_annual",
+    "replace_with_an_internal_job_secret",
+    "dummy",
+}
 
 LEGACY_TIER_ALIASES = {
     "pro": AUTHOR_TIER,
@@ -39,6 +66,24 @@ LEGACY_PLAN_ALIASES = {
     "pro_annual": "reader_annual",
     "power_monthly": "author_monthly",
     "power_annual": "author_annual",
+}
+
+PLAN_PRICES_USD = {
+    "reader_monthly": 12,
+    "reader_annual": 120,
+    "author_monthly": 29,
+    "author_annual": 290,
+    "architect_monthly": 49,
+    "architect_annual": 490,
+}
+
+PLAN_DISPLAY_NAMES = {
+    "reader_monthly": "Reader",
+    "reader_annual": "Reader",
+    "author_monthly": "Author",
+    "author_annual": "Author",
+    "architect_monthly": "Lore Architect",
+    "architect_annual": "Lore Architect",
 }
 
 
@@ -59,6 +104,11 @@ def normalize_tier(tier: str | None) -> str:
 def normalize_plan_code(plan: str | None) -> str:
     cleaned = (plan or "").strip().lower()
     return LEGACY_PLAN_ALIASES.get(cleaned, cleaned)
+
+
+def has_meaningful_setting_value(value: str | None) -> bool:
+    cleaned = (value or "").strip()
+    return bool(cleaned) and cleaned.lower() not in PLACEHOLDER_ENV_VALUES
 
 
 def tier_from_plan_code(plan: str | None, price_id: str = "", plan_name: str = "") -> str:
@@ -158,15 +208,98 @@ def price_id_for_plan(plan: str) -> str:
     return price_id
 
 
+def billing_interval_for_plan(plan: str) -> str:
+    normalized = normalize_plan_code(plan)
+    return "annual" if normalized.endswith("_annual") else "monthly"
+
+
 def paddle_plan_is_configured(plan: str) -> bool:
     try:
-        return bool(settings.PADDLE_API_KEY and price_id_for_plan(plan))
+        return has_meaningful_setting_value(settings.PADDLE_API_KEY) and has_meaningful_setting_value(price_id_for_plan(plan))
     except RuntimeError:
         return False
 
 
 def any_paddle_plan_is_configured() -> bool:
-    return bool(settings.PADDLE_API_KEY) and any(paddle_plan_is_configured(plan) for plan in VALID_PAID_PLAN_CODES)
+    return has_meaningful_setting_value(settings.PADDLE_API_KEY) and any(
+        paddle_plan_is_configured(plan) for plan in VALID_PAID_PLAN_CODES
+    )
+
+
+def billing_configuration_status() -> dict[str, Any]:
+    plan_price_ids: dict[str, str] = {}
+    plans: list[dict[str, Any]] = []
+    missing_configuration: list[str] = []
+
+    paddle_api_key_present = has_meaningful_setting_value(settings.PADDLE_API_KEY)
+    webhook_secret_present = has_meaningful_setting_value(settings.PADDLE_WEBHOOK_SECRET)
+    default_checkout_url_present = has_meaningful_setting_value(settings.PADDLE_DEFAULT_CHECKOUT_URL)
+    resend_api_key_present = has_meaningful_setting_value(settings.RESEND_API_KEY)
+    internal_job_secret_present = has_meaningful_setting_value(settings.INTERNAL_JOB_SECRET)
+
+    if not paddle_api_key_present:
+        missing_configuration.append("PADDLE_API_KEY")
+    if not webhook_secret_present:
+        missing_configuration.append("PADDLE_WEBHOOK_SECRET")
+    if not resend_api_key_present:
+        missing_configuration.append("RESEND_API_KEY")
+    if not internal_job_secret_present:
+        missing_configuration.append("INTERNAL_JOB_SECRET")
+
+    for plan in sorted(VALID_PAID_PLAN_CODES):
+        normalized = normalize_plan_code(plan)
+        price_id = ""
+        try:
+            price_id = price_id_for_plan(normalized)
+        except RuntimeError:
+            price_id = ""
+
+        env_key = f"PADDLE_{normalized.upper()}_PRICE_ID"
+        if not has_meaningful_setting_value(price_id):
+            missing_configuration.append(env_key)
+
+        plan_price_ids[normalized] = price_id
+        plans.append(
+            {
+                "code": normalized,
+                "display_name": PLAN_DISPLAY_NAMES.get(normalized, normalized.replace("_", " ").title()),
+                "billing_interval": billing_interval_for_plan(normalized),
+                "price_usd": PLAN_PRICES_USD.get(normalized, 0),
+                "configured": bool(paddle_api_key_present and has_meaningful_setting_value(price_id)),
+                "price_id_present": has_meaningful_setting_value(price_id),
+            }
+        )
+
+    fully_configured_plan_count = sum(1 for plan in plans if plan["configured"])
+    external_action_items = [
+        f"Register `{PADDLE_WEBHOOK_ENDPOINT_PATH}` in Paddle and subscribe it to the supported events.",
+        "Run one live or sandbox checkout end to end and confirm the paid tier upgrades after the webhook lands.",
+        f"Run a scheduler that calls `POST {TRIAL_EMAIL_JOB_ENDPOINT_PATH}` or invokes `{TRIAL_EMAIL_RUNNER_SCRIPT} --limit 100`.",
+        "Mirror the repo's priority-queue worker commands in production so Architect priority processing matches local behavior.",
+    ]
+    return {
+        "billing_enabled": paddle_api_key_present and fully_configured_plan_count > 0,
+        "payments_ready": paddle_api_key_present and webhook_secret_present and fully_configured_plan_count == len(VALID_PAID_PLAN_CODES),
+        "paddle_api_key_present": paddle_api_key_present,
+        "webhook_secret_present": webhook_secret_present,
+        "default_checkout_url_present": default_checkout_url_present,
+        "resend_api_key_present": resend_api_key_present,
+        "internal_job_secret_present": internal_job_secret_present,
+        "fully_configured_plan_count": fully_configured_plan_count,
+        "missing_configuration": missing_configuration,
+        "plans": plans,
+        "webhook_endpoint_path": PADDLE_WEBHOOK_ENDPOINT_PATH,
+        "supported_webhook_events": list(SUPPORTED_PADDLE_WEBHOOK_EVENTS),
+        "trial_email_job_endpoint_path": TRIAL_EMAIL_JOB_ENDPOINT_PATH,
+        "trial_email_runner_script": TRIAL_EMAIL_RUNNER_SCRIPT,
+        "trial_email_automation_code_ready": True,
+        "priority_processing_code_ready": True,
+        "priority_queue_names": list(PRIORITY_QUEUE_NAMES),
+        "points_wallet_ready": True,
+        "points_spend_ready": True,
+        "rewarded_ads_code_ready": True,
+        "external_action_items": external_action_items,
+    }
 
 
 def event_id_from_paddle_payload(payload: dict[str, Any]) -> str:

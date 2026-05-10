@@ -130,7 +130,7 @@ async def send_trial_email(email: str, email_type: str) -> bool:
         "html": f"""
         <h2>{heading}</h2>
         <p>{body}</p>
-        <p><a href="{app_url}/billing">{cta}</a></p>
+        <p><a href="{app_url}/pricing">{cta}</a></p>
         <p>Questions? Reach us at <a href="mailto:{settings.SUPPORT_EMAIL}">{settings.SUPPORT_EMAIL}</a>.</p>
         """,
     })

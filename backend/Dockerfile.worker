@@ -18,7 +18,7 @@ RUN chmod +x worker-start.sh
 # volume before dropping back to the non-root app user.
 ENTRYPOINT ["./worker-start.sh"]
 # CMD overridden per Railway service:
-# extraction: celery -A app.workers.celery_app worker -Q extraction -c 4
-# analysis:   celery -A app.workers.celery_app worker -Q analysis,embedding -c 2
+# extraction: celery -A app.workers.celery_app worker -Q extraction,extraction_priority -c 4
+# analysis:   celery -A app.workers.celery_app worker -Q analysis,analysis_priority,embedding -c 2
 # intelligence: celery -A app.workers.celery_app worker -Q intelligence -c 1
-CMD ["celery", "-A", "app.workers.celery_app", "worker", "-Q", "extraction", "--loglevel=info", "-c", "4"]
+CMD ["celery", "-A", "app.workers.celery_app", "worker", "-Q", "extraction,extraction_priority", "--loglevel=info", "-c", "4"]

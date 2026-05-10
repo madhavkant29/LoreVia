@@ -182,6 +182,81 @@ async def test_supabase_oauth_allows_existing_user_without_terms(client, db, mon
 
 
 @pytest.mark.asyncio
+async def test_supabase_oauth_creates_new_user_and_allows_missing_username(client, monkeypatch):
+    class FakeResponse:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"email": "oauth-created@lorevia.app"}
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, headers):
+            return FakeResponse()
+
+    monkeypatch.setattr("app.api.v1.routes.auth.settings.SUPABASE_URL", "https://supabase.example.com", raising=False)
+    monkeypatch.setattr("app.api.v1.routes.auth.settings.SUPABASE_SERVICE_KEY", "service-key", raising=False)
+    monkeypatch.setattr("app.api.v1.routes.auth.httpx.AsyncClient", FakeAsyncClient)
+
+    response = await client.post(
+        "/api/v1/auth/oauth/supabase",
+        json={"token": "oauth-token", "accepted_terms": True, "device_id": "oauth-create-device0001"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["email"] == "oauth-created@lorevia.app"
+    assert response.json()["username"] is None
+    assert response.json()["email_verified"] is True
+
+
+@pytest.mark.asyncio
+async def test_supabase_oauth_recovers_local_debug_user_without_terms_or_device_trial(client, monkeypatch):
+    class FakeResponse:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"email": "oauth-local-recovery@lorevia.app"}
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, headers):
+            return FakeResponse()
+
+    monkeypatch.setattr("app.api.v1.routes.auth.settings.DEBUG", True, raising=False)
+    monkeypatch.setattr("app.api.v1.routes.auth.settings.SUPABASE_URL", "https://supabase.example.com", raising=False)
+    monkeypatch.setattr("app.api.v1.routes.auth.settings.SUPABASE_SERVICE_KEY", "service-key", raising=False)
+    monkeypatch.setattr("app.api.v1.routes.auth.httpx.AsyncClient", FakeAsyncClient)
+
+    response = await client.post(
+        "/api/v1/auth/oauth/supabase",
+        json={"token": "oauth-token", "accepted_terms": False, "device_id": "oauth-recovery-device01"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["email"] == "oauth-local-recovery@lorevia.app"
+    assert response.json()["username"] is None
+    assert response.json()["email_verified"] is True
+
+
+@pytest.mark.asyncio
 async def test_refresh_and_logout_use_cookies(client):
     register_response = await client.post(
         "/api/v1/auth/register",
@@ -393,6 +468,54 @@ async def test_supabase_oauth_blocks_new_user_when_device_trial_limit_is_reached
 
     assert response.status_code == 403
     assert "maximum of 2 trial accounts" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_supabase_oauth_handles_legacy_user_with_missing_reading_mode(client, db, monkeypatch):
+    class FakeResponse:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"email": "oauth-legacy@lorevia.app"}
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, headers):
+            return FakeResponse()
+
+    legacy_user = User(
+        email="oauth-legacy@lorevia.app",
+        username="oauthlegacy",
+        password_hash=hash_password("SafePass123!@#"),
+        legal_accepted_at=datetime.now(UTC),
+        legal_version="2026-04",
+        reading_mode=None,
+        email_verified_at=datetime.now(UTC),
+    )
+    db.add(legacy_user)
+    await db.commit()
+
+    monkeypatch.setattr("app.api.v1.routes.auth.settings.SUPABASE_URL", "https://supabase.example.com", raising=False)
+    monkeypatch.setattr("app.api.v1.routes.auth.settings.SUPABASE_SERVICE_KEY", "service-key", raising=False)
+    monkeypatch.setattr("app.api.v1.routes.auth.httpx.AsyncClient", FakeAsyncClient)
+
+    response = await client.post(
+        "/api/v1/auth/oauth/supabase",
+        json={"token": "oauth-token", "accepted_terms": False, "device_id": "oauth-legacy-device001"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["email"] == "oauth-legacy@lorevia.app"
+    assert response.json()["reading_mode"] == "casual"
 
 
 @pytest.mark.asyncio

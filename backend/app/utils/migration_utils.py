@@ -5,6 +5,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 LOCAL_DATABASE_HOSTS = {"localhost", "127.0.0.1", "::1", "postgres", "db"}
+CORE_APPLICATION_TABLES = frozenset({"users", "books", "chapters"})
 
 _UPGRADE_BLOCK_PATTERN = re.compile(
     r"(?ms)^def upgrade\(\)(?: -> None)?:\n(?P<body>.*?)(?=^def downgrade\(\)(?: -> None)?:|\Z)"
@@ -88,3 +89,7 @@ def destructive_downgrade_revisions(versions_dir: Path) -> list[Path]:
             offending.append(path)
 
     return offending
+
+
+def should_reset_local_alembic_state(existing_tables: set[str]) -> bool:
+    return "alembic_version" in existing_tables and not CORE_APPLICATION_TABLES.issubset(existing_tables)

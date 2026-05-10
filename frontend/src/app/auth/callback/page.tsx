@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import axios from "axios"
 
@@ -9,13 +9,28 @@ import { supabase } from "@/lib/supabase"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { getOrCreateDeviceId } from "@/lib/utils/device"
 
+const PENDING_OAUTH_USER_KEY = "lorevia-pending-oauth-user"
+
 export default function AuthCallbackPage() {
   const router = useRouter()
   const setUser = useAuthStore((state) => state.setUser)
+  const [status, setStatus] = useState("Preparing Google sign-in...")
 
   useEffect(() => {
     let active = true
+    const withTimeout = async <T,>(promise: Promise<T>, label: string, timeoutMs = 15000): Promise<T> => {
+      return await Promise.race([
+        promise,
+        new Promise<T>((_, reject) => {
+          window.setTimeout(() => reject(new Error(`${label} timed out.`)), timeoutMs)
+        }),
+      ])
+    }
+
     const fail = (reason: string) => {
+      if (active) {
+        setStatus(reason)
+      }
       router.replace(`/login?error=${encodeURIComponent(reason)}`)
     }
 
@@ -24,6 +39,9 @@ export default function AuthCallbackPage() {
         if (!supabase) {
           fail("Google sign-in is not configured.")
           return
+        }
+        if (active) {
+          setStatus("Reading Google callback...")
         }
         const url = new URL(window.location.href)
         const oauthError = url.searchParams.get("error_description") || url.searchParams.get("error")
@@ -34,10 +52,19 @@ export default function AuthCallbackPage() {
           return
         }
 
-        let session = (await supabase.auth.getSession()).data.session
+        if (active) {
+          setStatus("Checking Supabase session...")
+        }
+        let session = (await withTimeout(supabase.auth.getSession(), "Checking Supabase session")).data.session
 
         if (!session && code) {
-          const { data, error } = await supabase.auth.exchangeCodeForSession(code)
+          if (active) {
+            setStatus("Completing Google sign-in with Supabase...")
+          }
+          const { data, error } = await withTimeout(
+            supabase.auth.exchangeCodeForSession(code),
+            "Completing Google sign-in with Supabase",
+          )
           if (error) {
             fail("Could not complete Google sign-in.")
             return
@@ -51,7 +78,13 @@ export default function AuthCallbackPage() {
         }
 
         const acceptedTerms = window.sessionStorage.getItem("lorevia-oauth-accepted-terms") === "true"
-        const user = await authApi.loginWithSupabaseToken(session.access_token, getOrCreateDeviceId(), acceptedTerms)
+        if (active) {
+          setStatus("Signing you into LoreVia...")
+        }
+        const user = await withTimeout(
+          authApi.loginWithSupabaseToken(session.access_token, getOrCreateDeviceId(), acceptedTerms),
+          "Signing you into LoreVia",
+        )
         if (!active) return
 
         if (!user) {
@@ -60,6 +93,18 @@ export default function AuthCallbackPage() {
         }
         window.sessionStorage.removeItem("lorevia-oauth-accepted-terms")
         setUser(user)
+        if (user.username) {
+          window.sessionStorage.removeItem(PENDING_OAUTH_USER_KEY)
+        } else {
+          window.sessionStorage.setItem(
+            PENDING_OAUTH_USER_KEY,
+            JSON.stringify({
+              id: user.id,
+              email: user.email,
+            }),
+          )
+        }
+        setStatus("Redirecting to your workspace...")
         router.replace(user.username ? "/library" : "/complete-username")
       } catch (error) {
         if (axios.isAxiosError(error)) {
@@ -85,7 +130,7 @@ export default function AuthCallbackPage() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-white px-4">
-      <p className="text-sm text-gray-500">Signing you in...</p>
+      <p className="text-sm text-gray-500">{status}</p>
     </div>
   )
 }

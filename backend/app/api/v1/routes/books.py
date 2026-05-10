@@ -272,6 +272,7 @@ async def upload_book_endpoint(
     mode: str = Form("reader"),
     auto_extract_cover: str = Form("true"),
     preserve_chapter_numbers: str = Form("false"),
+    preserve_source_chapters: str = Form("false"),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
     _=Depends(check_upload_limit),
@@ -333,6 +334,7 @@ async def upload_book_endpoint(
         mode=mode,
         source_kind="single_upload",
         preserve_chapter_numbers=as_bool(preserve_chapter_numbers),
+        preserve_source_chapters=as_bool(preserve_source_chapters),
     )
     db.add(book)
     await db.flush()

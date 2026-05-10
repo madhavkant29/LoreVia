@@ -6,6 +6,7 @@ import { Merriweather, Newsreader, Space_Grotesk } from "next/font/google"
 import { AuthBootstrap } from "@/components/auth/AuthBootstrap"
 import { PWARegister } from "@/components/app/PWARegister"
 import { SiteFooter } from "@/components/layout/SiteFooter"
+import { DailyCapPrompt } from "@/components/monetization/DailyCapPrompt"
 import { PostHogClientProvider } from "@/components/analytics/PostHogClient"
 import {
   DEFAULT_OG_IMAGE,
@@ -102,8 +103,12 @@ export const metadata: Metadata = {
   },
   manifest: "/manifest.webmanifest",
   icons: {
-    icon: "/image.png",
-    apple: "/image.png",
+    icon: [
+      { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+    shortcut: "/icon-192.png",
   },
   appleWebApp: {
     capable: true,
@@ -131,6 +136,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     <html
       lang="en"
       suppressHydrationWarning
+      data-scroll-behavior="smooth"
       className={`${uiFont.variable} ${merriweather.variable} ${newsreader.variable}`}
     >
       <head>
@@ -148,6 +154,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       <body className="antialiased">
         <PostHogClientProvider>
           <AuthBootstrap />
+          <DailyCapPrompt />
           <PWARegister />
           {children}
           <SiteFooter />

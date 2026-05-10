@@ -50,6 +50,7 @@ export function UploadModal({
   const [workTypeDirty, setWorkTypeDirty] = useState(false)
   const [autoExtractCover, setAutoExtractCover] = useState(true)
   const [preserveChapterNumbers, setPreserveChapterNumbers] = useState(false)
+  const [preserveSourceChapters, setPreserveSourceChapters] = useState(false)
   const [coverFile, setCoverFile] = useState<File | null>(null)
   const [usernameInput, setUsernameInput] = useState("")
   const [usernameError, setUsernameError] = useState<string | null>(null)
@@ -317,6 +318,7 @@ export function UploadModal({
           seriesIds: selectedSeriesIds,
           autoExtractCover,
           preserveChapterNumbers,
+          preserveSourceChapters,
           workType,
           coverFile: autoExtractCover ? null : coverFile,
           mode,
@@ -333,6 +335,7 @@ export function UploadModal({
           work_type: workType,
           has_cover_file: Boolean(coverFile) && !autoExtractCover,
           preserve_chapter_numbers: preserveChapterNumbers,
+          preserve_source_chapters: preserveSourceChapters,
           tag_count: selectedTags.length,
           in_series: selectedSeriesIds.length > 0,
         })
@@ -382,9 +385,10 @@ export function UploadModal({
   const storyUnitLabelTitle = isScreenplayWorkspace ? "Scene" : "Chapter"
   const storyUnitCollectionLabel = isScreenplayWorkspace ? "scenes" : "chapters"
   const newUploadAccept = isScreenplayWorkspace ? ".pdf,.fountain,.txt,.md" : ".pdf,.epub,.docx,.txt,.md,.fountain"
-  const newUploadHelp = isScreenplayWorkspace
-    ? "Screenplay mode accepts screenplay PDFs, Fountain, TXT, and Markdown scripts. LoreVia will normalize scenes and dialogue automatically."
-    : "Novel and prose mode accepts PDF, EPUB, DOCX, TXT, Markdown, and Fountain uploads."
+  const newUploadPrompt = "Upload"
+  const primaryFile = files[0] ?? null
+  const primaryFileIsPdf = Boolean(primaryFile?.name?.toLowerCase().endsWith(".pdf"))
+  const willUseBlankCoverFallback = !coverFile && (!primaryFileIsPdf || !autoExtractCover)
   const chapterUploadHelp = isScreenplayWorkspace
     ? "Upload a screenplay PDF, Fountain, TXT, or Markdown script segment. LoreVia will turn scenes into synthetic chapters for the rest of the pipeline."
     : "Click to select a chapter file. Use PDF, EPUB, DOCX, TXT, or Markdown."
@@ -410,7 +414,7 @@ export function UploadModal({
   }`
 
   const content = (
-      <div className={shellClassName}>
+      <div className={shellClassName} onClick={(e) => e.stopPropagation()}>
         <div className="mb-5 flex items-center justify-between">
           <div>
             <h2 className="text-lg font-semibold">{isManagingExisting ? `Add New ${storyUnitLabelTitle}` : "Upload Book"}</h2>
@@ -471,37 +475,43 @@ export function UploadModal({
           ) : null}
 
           {!isManagingExisting ? (
-            <input
-              type="text"
-              placeholder="Author (optional)"
-              value={author}
-              onChange={e => setAuthor(e.target.value)}
-              className={`rounded-lg border px-3 py-2.5 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
-                isDark
-                  ? "border-white/10 bg-white/5 text-slate-100 placeholder:text-slate-500"
-                  : "border-gray-300 bg-white text-slate-950 placeholder:text-slate-400"
-              }`}
-            />
+            <div className="space-y-2">
+              <input
+                type="text"
+                placeholder={willUseBlankCoverFallback ? "Author (shown on blank cover if no cover is found)" : "Author (optional)"}
+                value={author}
+                onChange={e => setAuthor(e.target.value)}
+                className={`w-full rounded-lg border px-3 py-2.5 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
+                  isDark
+                    ? "border-white/10 bg-white/5 text-slate-100 placeholder:text-slate-500"
+                    : "border-gray-300 bg-white text-slate-950 placeholder:text-slate-400"
+                }`}
+              />
+              {willUseBlankCoverFallback ? (
+                <p className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                  If LoreVia cannot find a cover, it will generate a blank cover page using the title and author.
+                </p>
+              ) : null}
+            </div>
           ) : null}
 
           <div className={`rounded-xl border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-gray-200 bg-gray-50"}`}>
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>Work type</p>
-                <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                  {isManagingExisting
-                    ? selectedExistingBook
+                {isManagingExisting ? (
+                  <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                    {selectedExistingBook
                       ? `This workspace is set to ${selectedExistingBook.work_type}.`
-                      : "Choose how LoreVia should interpret this manuscript."
-                    : "Tell LoreVia whether this upload is a novel, a screenplay, or another prose/script document."}
-                </p>
+                      : "Choose how LoreVia should interpret this manuscript."}
+                  </p>
+                ) : null}
               </div>
             </div>
-            <div className="mt-3 grid gap-2 sm:grid-cols-3">
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
               {([
-                { value: "novel", label: "Novel", detail: "Chapter-oriented prose parsing." },
-                { value: "screenplay", label: "Screenplay", detail: "Scene and dialogue-aware ingestion." },
-                { value: "other", label: "Other", detail: "General prose or script document." },
+                { value: "novel", label: "Novel" },
+                { value: "screenplay", label: "Screenplay" },
               ] as const).map((option) => {
                 const active = effectiveWorkType === option.value
                 return (
@@ -525,12 +535,10 @@ export function UploadModal({
                     }`}
                   >
                     <p className="text-sm font-semibold">{option.label}</p>
-                    <p className={`mt-1 text-xs leading-5 ${active ? isDark ? "text-slate-200" : "text-stone-700" : isDark ? "text-slate-500" : "text-stone-500"}`}>{option.detail}</p>
                   </button>
                 )
               })}
             </div>
-            <p className={`mt-3 text-xs leading-5 ${isDark ? "text-slate-500" : "text-stone-500"}`}>{newUploadHelp}</p>
           </div>
 
           <div className={`rounded-xl border p-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-gray-200 bg-gray-50"}`}>
@@ -945,8 +953,8 @@ export function UploadModal({
                   {files[0].name}
                 </p>
               ) : (
-                <p className={`text-sm ${isDark ? "text-slate-400" : "text-slate-400"}`}>
-                  {newUploadHelp}
+                <p className="text-sm font-medium text-indigo-600">
+                  {newUploadPrompt}
                 </p>
               )}
             </div>
@@ -958,16 +966,34 @@ export function UploadModal({
               <label className="flex items-start gap-3">
                 <input
                   type="checkbox"
-                  checked={preserveChapterNumbers}
+                  checked={preserveChapterNumbers || preserveSourceChapters}
                   onChange={(e) => setPreserveChapterNumbers(e.target.checked)}
-                  className="mt-1 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                  disabled={preserveSourceChapters}
+                  className="mt-1 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:cursor-not-allowed"
                 />
                 <div>
                   <p className={`text-sm font-medium ${isDark ? "text-slate-100" : "text-slate-900"}`}>{isScreenplayWorkspace ? "Preserve detected scene order from the source file" : "Preserve chapter numbers from the source file"}</p>
-                  <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                    {isScreenplayWorkspace
-                      ? "Best for scripts with clean scene headings. LoreVia will keep the detected scene order stable and only fall back to sequential numbering if the source layout is noisy."
-                      : "Best for novels that already have clean Chapter 1, 2, 3 headings. LoreVia will keep whole detected chapters together and only fall back to the current sequential chunking path if the source numbering is inconsistent."}
+                </div>
+              </label>
+            </div>
+
+            <div className="mb-4">
+              <label className="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  checked={preserveSourceChapters}
+                  onChange={(e) => {
+                    const nextChecked = e.target.checked
+                    setPreserveSourceChapters(nextChecked)
+                    if (nextChecked) {
+                      setPreserveChapterNumbers(true)
+                    }
+                  }}
+                  className="mt-1 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                />
+                <div>
+                  <p className={`text-sm font-medium ${isDark ? "text-slate-100" : "text-slate-900"}`}>
+                    {isScreenplayWorkspace ? "Keep each detected scene exactly as uploaded" : "Keep each detected chapter exactly as uploaded"}
                   </p>
                 </div>
               </label>
@@ -1018,9 +1044,6 @@ export function UploadModal({
               />
               <div>
                 <p className={`text-sm font-medium ${isDark ? "text-slate-100" : "text-slate-900"}`}>Use the first PDF page as the book cover</p>
-                <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                  Enabled by default for PDFs. Turn this off if you want to upload a separate cover image instead.
-                </p>
               </div>
             </label>
           </div>
@@ -1267,7 +1290,10 @@ export function UploadModal({
   )
 
   return isInline ? content : (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-md p-4">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-md p-4"
+      onClick={onClose}
+    >
       {content}
     </div>
   )

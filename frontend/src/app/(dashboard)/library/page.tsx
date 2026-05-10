@@ -291,35 +291,35 @@ export default function LibraryPage() {
   }
 
   const pageBackground = isDark
-    ? "bg-[#07070b] text-[#f4f1ea]"
+    ? "bg-[radial-gradient(circle_at_top,rgba(122,92,255,0.1),transparent_24%),linear-gradient(180deg,#09090e_0%,#0c0c12_55%,#0a0a10_100%)] text-[#f4f1ea]"
     : "bg-[radial-gradient(circle_at_top,rgba(236,228,255,0.38),transparent_24%),linear-gradient(180deg,#faf7f1_0%,#f5f1ea_100%)] text-stone-950"
   const surfaceClass = isDark
-    ? "border-white/[0.06] bg-[#0c0c12]"
+    ? "border-white/[0.08] bg-[#111119]"
     : "border-stone-200/80 bg-white/80"
-  const mutedText = isDark ? "text-[#9b9aa6]" : "text-stone-500"
+  const mutedText = isDark ? "text-[#9f9ca8]" : "text-stone-500"
   const headingText = isDark ? "text-[#f7f3ed]" : "text-stone-950"
   const controlClass = isDark
-    ? "border-white/[0.08] bg-[#111118] text-[#ebe7df]"
+    ? "border-white/[0.08] bg-[#111118] text-[#ebe7df] shadow-[0_18px_40px_-34px_rgba(0,0,0,0.92)]"
     : "border-stone-200 bg-white text-stone-800"
 
   return (
     <div className={`relative left-1/2 min-h-screen w-screen -translate-x-1/2 transition-colors duration-300 ${pageBackground}`}>
-      <div className="mx-auto w-full max-w-none px-4 pb-16 pt-4 sm:px-8 lg:px-16">
-        <section className="space-y-7">
-          <div className="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
-            <div className="space-y-3">
-              <h1 className={`font-serif text-[3rem] leading-none tracking-normal sm:text-[4.15rem] ${headingText}`}>Library</h1>
-              <p className={`max-w-xl text-lg ${mutedText}`}>All your projects. All your worlds.</p>
+      <div className="mx-auto w-full max-w-[1520px] px-4 pb-20 pt-8 sm:px-8 lg:px-16">
+        <section className="space-y-10">
+          <div className="flex flex-col gap-8 xl:flex-row xl:items-end xl:justify-between">
+            <div className="space-y-3 pt-1">
+              <h1 className={`font-serif text-[3.25rem] leading-[0.94] tracking-[-0.04em] sm:text-[3.5rem] ${headingText}`}>Library</h1>
+              <p className={`max-w-xl text-lg leading-8 ${mutedText}`}>All your projects. All your worlds.</p>
             </div>
 
-            <div className="flex w-full flex-col gap-3 xl:w-auto xl:flex-row xl:items-center">
-              <label className={`flex min-h-[3.25rem] flex-1 items-center gap-3 rounded-lg border px-4 xl:min-w-[17.5rem] ${controlClass}`}>
+            <div className="flex w-full flex-col gap-3 xl:w-auto xl:flex-row xl:items-center xl:justify-end">
+              <label className={`flex min-h-[3.35rem] flex-1 items-center gap-3 rounded-xl border px-4 xl:min-w-[18.5rem] ${controlClass}`}>
                 <SearchIcon className={isDark ? "text-[#7c7a87]" : "text-stone-400"} />
                 <input
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
                   placeholder="Search projects..."
-                  className={`w-full bg-transparent text-sm outline-none ${isDark ? "placeholder:text-[#66636f]" : "placeholder:text-stone-400"}`}
+                  className={`w-full bg-transparent text-[0.95rem] outline-none ${isDark ? "placeholder:text-[#66636f]" : "placeholder:text-stone-400"}`}
                 />
               </label>
 
@@ -327,14 +327,14 @@ export default function LibraryPage() {
                 <button
                   type="button"
                   onClick={() => setFilterOpen((current) => !current)}
-                  className={`inline-flex min-h-[3.25rem] items-center gap-3 rounded-lg border px-5 text-sm font-medium ${controlClass}`}
+                  className={`inline-flex min-h-[3.35rem] items-center gap-3 rounded-xl border px-5 text-sm font-medium ${controlClass}`}
                 >
                   <FilterIcon className={isDark ? "text-[#c8c4bd]" : "text-stone-600"} />
                   {filterSummary}
                 </button>
 
                 {filterOpen ? (
-                  <div className={`absolute right-0 z-30 mt-3 w-[18rem] rounded-xl border p-4 shadow-[0_24px_80px_-40px_rgba(0,0,0,0.75)] ${surfaceClass}`}>
+                  <div className={`absolute right-0 z-30 mt-3 w-[18rem] rounded-2xl border p-4 shadow-[0_24px_80px_-40px_rgba(0,0,0,0.75)] ${surfaceClass}`}>
                     <div className="space-y-4">
                       <div>
                         <p className={`text-[0.68rem] font-semibold uppercase tracking-[0.28em] ${mutedText}`}>Project mode</p>
@@ -405,11 +405,11 @@ export default function LibraryPage() {
                 ) : null}
               </div>
 
-              <div className={`flex min-h-[3.25rem] items-center rounded-lg border px-4 ${controlClass}`}>
+              <div className={`flex min-h-[3.35rem] items-center rounded-xl border px-4 ${controlClass}`}>
                 <select
                   value={sortBy}
                   onChange={(event) => setSortBy(event.target.value as SortOption)}
-                  className="min-w-[10rem] bg-transparent pr-6 text-sm outline-none [color-scheme:dark] cursor-pointer"
+                  className="min-w-[10.8rem] bg-transparent pr-6 text-sm outline-none [color-scheme:dark] cursor-pointer"
                 >
                   <option value="recent" className="bg-[#121212] text-white">Recently Updated</option>
                   <option value="progress" className="bg-[#121212] text-white">Most Progress</option>
@@ -417,7 +417,7 @@ export default function LibraryPage() {
                 </select>
               </div>
 
-              <div className={`inline-flex min-h-[3.25rem] items-center overflow-hidden rounded-lg border ${controlClass}`}>
+              <div className={`inline-flex min-h-[3.35rem] items-center overflow-hidden rounded-xl border ${controlClass}`}>
                 <button
                   type="button"
                   onClick={() => setViewMode("grid")}
@@ -442,7 +442,7 @@ export default function LibraryPage() {
                   setUploadPreset({})
                   setShowUpload(true)
                 }}
-                className="inline-flex min-h-[3.25rem] items-center justify-center gap-3 rounded-lg bg-[#33206f] px-6 text-sm font-semibold text-white shadow-[0_22px_44px_-28px_rgba(109,40,217,0.78)] transition hover:translate-y-[-1px] hover:bg-[#3d2782]"
+                className="inline-flex min-h-[3.35rem] items-center justify-center gap-3 rounded-xl bg-[#33206f] px-6 text-sm font-semibold text-white shadow-[0_22px_44px_-28px_rgba(109,40,217,0.78)] transition hover:translate-y-[-1px] hover:bg-[#3d2782]"
               >
                 <PlusIcon />
                 New Project
@@ -450,7 +450,7 @@ export default function LibraryPage() {
             </div>
           </div>
 
-          <section className="space-y-4">
+          <section className="space-y-5">
             <SectionHeading
               icon={<PinIcon className={isDark ? "text-violet-300" : "text-violet-600"} />}
               title="Pinned Projects"
@@ -468,7 +468,7 @@ export default function LibraryPage() {
                 body="Use the project menu to pin the stories you want on top."
               />
             ) : viewMode === "grid" ? (
-              <div className="grid gap-4 lg:grid-cols-3">
+              <div className="grid gap-4 xl:grid-cols-3">
                 {pinnedBooks.map((book) => (
                   <ProjectCard
                     key={book.id}
@@ -510,7 +510,7 @@ export default function LibraryPage() {
             )}
           </section>
 
-          <section className="space-y-4">
+          <section className="space-y-5">
             <SectionHeading
               icon={<PinIcon className={isDark ? "text-violet-300" : "text-violet-600"} />}
               title="All Projects"
@@ -533,7 +533,7 @@ export default function LibraryPage() {
                 body="Try a different filter, or start a new project from the button above."
               />
             ) : viewMode === "grid" ? (
-              <div className="grid gap-4 lg:grid-cols-3">
+              <div className="grid gap-4 xl:grid-cols-3">
                 {allProjectBooks.map((book) => (
                   <ProjectCard
                     key={book.id}
@@ -623,9 +623,9 @@ function SectionHeading({
 }) {
   return (
     <div className="flex items-center justify-between gap-4">
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2.5">
         {icon}
-        <h2 className={`text-lg font-medium ${isDark ? "text-[#f5f0e8]" : "text-stone-900"}`}>{title}</h2>
+        <h2 className={`text-[1.05rem] font-medium tracking-[-0.01em] ${isDark ? "text-[#f5f0e8]" : "text-stone-900"}`}>{title}</h2>
       </div>
 
       {actionLabel && actionHandler ? (
@@ -644,7 +644,7 @@ function SectionHeading({
 
 function LoadingPanel({ isDark, label }: { isDark: boolean; label: string }) {
   return (
-    <div className={`rounded-lg border border-dashed px-6 py-16 text-center ${isDark ? "border-white/[0.08] bg-[#0d0d14] text-[#9f9da7]" : "border-stone-300 bg-white/60 text-stone-500"}`}>
+    <div className={`rounded-[1.35rem] border border-dashed px-6 py-16 text-center ${isDark ? "border-white/[0.08] bg-[#0d0d14] text-[#9f9da7]" : "border-stone-300 bg-white/60 text-stone-500"}`}>
       {label}
     </div>
   )
@@ -652,7 +652,7 @@ function LoadingPanel({ isDark, label }: { isDark: boolean; label: string }) {
 
 function EmptyPanel({ isDark, title, body }: { isDark: boolean; title: string; body: string }) {
   return (
-    <div className={`rounded-lg border border-dashed px-6 py-16 text-center ${isDark ? "border-white/[0.08] bg-[#0d0d14]" : "border-stone-300 bg-white/60"}`}>
+    <div className={`rounded-[1.35rem] border border-dashed px-6 py-16 text-center ${isDark ? "border-white/[0.08] bg-[#0d0d14]" : "border-stone-300 bg-white/60"}`}>
       <p className={`text-xl font-medium ${isDark ? "text-[#f5f0e8]" : "text-stone-900"}`}>{title}</p>
       <p className={`mx-auto mt-3 max-w-lg text-sm ${isDark ? "text-[#9f9da7]" : "text-stone-500"}`}>{body}</p>
     </div>
@@ -704,25 +704,25 @@ function ProjectCard({
           onOpen()
         }
       }}
-      className={`group relative cursor-pointer rounded-lg border p-5 transition duration-300 hover:-translate-y-0.5 hover:border-violet-400/20 hover:shadow-[0_24px_60px_-44px_rgba(109,40,217,0.72)] focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/45 ${
-        isDark ? "border-white/[0.06] bg-[#0f0f16]" : "border-stone-200/80 bg-white/82"
+      className={`group relative cursor-pointer rounded-[1.35rem] border p-6 transition duration-300 hover:-translate-y-0.5 hover:border-violet-400/20 hover:shadow-[0_24px_60px_-44px_rgba(109,40,217,0.72)] focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/45 ${
+        isDark ? "border-white/[0.06] bg-[#101018]" : "border-stone-200/80 bg-white/82"
       }`}
     >
       <div className="flex h-full flex-col">
         <div className="flex items-start justify-between gap-4">
           <div className="flex min-w-0 items-start gap-4">
-            <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-full border ${accentClass}`}>
+            <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-full border shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] ${accentClass}`}>
               <ProjectGlyph glyph={getProjectGlyph(book)} />
             </div>
 
             <div className="min-w-0">
               <div className="flex items-center gap-3">
-                <h3 className={`truncate font-serif text-2xl leading-tight tracking-normal ${isDark ? "text-[#f7f3ed]" : "text-stone-950"}`}>
+                <h3 className={`truncate font-serif text-[2rem] leading-tight tracking-[-0.03em] ${isDark ? "text-[#f7f3ed]" : "text-stone-950"}`}>
                   {book.title}
                 </h3>
                 <span className={`h-2.5 w-2.5 rounded-full ${DOT_CLASSES[book.status]}`} />
               </div>
-              <p className={`truncate text-sm ${isDark ? "text-[#b7b4bd]" : "text-stone-600"}`}>{getGenreLabel(book)}</p>
+              <p className={`truncate text-[0.95rem] ${isDark ? "text-[#b7b4bd]" : "text-stone-600"}`}>{getGenreLabel(book)}</p>
             </div>
           </div>
 
@@ -757,22 +757,22 @@ function ProjectCard({
           </div>
         </div>
 
-        <p className={`mt-6 text-sm ${isDark ? "text-[#d8d3cb]" : "text-stone-700"}`}>{getProgressLine(book)}</p>
+        <p className={`mt-7 text-[1.05rem] ${isDark ? "text-[#d8d3cb]" : "text-stone-700"}`}>{getProgressLine(book)}</p>
 
-        <div className="mt-4">
+        <div className="mt-5">
           <div className={`h-1.5 overflow-hidden rounded-full ${isDark ? "bg-white/[0.08]" : "bg-stone-200"}`}>
             <div className="h-full rounded-full bg-[linear-gradient(90deg,#8b5cf6,#a78bfa)]" style={{ width: `${progress}%` }} />
           </div>
 
-          <div className={`mt-3 flex items-center justify-between gap-4 text-sm ${isDark ? "text-[#c8c4bd]" : "text-stone-700"}`}>
+          <div className={`mt-4 flex items-center justify-between gap-4 text-[0.95rem] ${isDark ? "text-[#c8c4bd]" : "text-stone-700"}`}>
             <span>{formatNumber(currentWords)} / {formatNumber(targetWords)} words</span>
             <span>{progress}%</span>
           </div>
 
-          <p className={`mt-1 text-sm ${isDark ? "text-[#8c8994]" : "text-stone-500"}`}>{formatRelativeTime(getBookUpdatedAt(book))}</p>
+          <p className={`mt-1.5 text-[0.95rem] ${isDark ? "text-[#8c8994]" : "text-stone-500"}`}>{formatRelativeTime(getBookUpdatedAt(book))}</p>
         </div>
 
-        <div className={`mt-6 flex items-center gap-10 text-sm ${isDark ? "text-[#b7b4bd]" : "text-stone-600"}`}>
+        <div className={`mt-auto flex items-center gap-10 pt-8 text-[0.95rem] ${isDark ? "text-[#b7b4bd]" : "text-stone-600"}`}>
           <MetaBadge icon={<GroupIcon />} value={String(book.total_chapters ?? 0)} />
           <MetaBadge icon={<PageIcon />} value={String(Math.max(1, Math.round(currentWords / 1000)))} />
           <MetaBadge icon={<AlertIcon />} value={String(warningCount)} />
@@ -826,21 +826,21 @@ function ProjectRow({
           onOpen()
         }
       }}
-      className={`relative cursor-pointer rounded-lg border px-5 py-4 transition hover:border-violet-400/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/45 ${isDark ? "border-white/[0.06] bg-[#0f0f16]" : "border-stone-200/80 bg-white/82"}`}
+      className={`relative cursor-pointer rounded-[1.35rem] border px-6 py-5 transition hover:border-violet-400/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/45 ${isDark ? "border-white/[0.06] bg-[#101018]" : "border-stone-200/80 bg-white/82"}`}
     >
       <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
         <div className="flex min-w-0 items-center gap-4">
-          <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-full border ${accentClass}`}>
+          <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-full border shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] ${accentClass}`}>
             <ProjectGlyph glyph={getProjectGlyph(book)} />
           </div>
 
           <div className="min-w-0">
             <div className="flex items-center gap-3">
-              <h3 className={`truncate font-serif text-2xl tracking-normal ${isDark ? "text-[#f7f3ed]" : "text-stone-950"}`}>{book.title}</h3>
+              <h3 className={`truncate font-serif text-[2rem] tracking-[-0.03em] ${isDark ? "text-[#f7f3ed]" : "text-stone-950"}`}>{book.title}</h3>
               <span className={`h-2.5 w-2.5 rounded-full ${DOT_CLASSES[book.status]}`} />
             </div>
-            <p className={`mt-1 truncate ${isDark ? "text-[#b7b4bd]" : "text-stone-600"}`}>{getGenreLabel(book)}</p>
-            <p className={`mt-1 text-sm ${isDark ? "text-[#8c8994]" : "text-stone-500"}`}>{getProgressLine(book)}</p>
+            <p className={`mt-1 truncate text-[0.95rem] ${isDark ? "text-[#b7b4bd]" : "text-stone-600"}`}>{getGenreLabel(book)}</p>
+            <p className={`mt-1.5 text-[0.95rem] ${isDark ? "text-[#8c8994]" : "text-stone-500"}`}>{getProgressLine(book)}</p>
           </div>
         </div>
 
@@ -848,7 +848,7 @@ function ProjectRow({
           <div className={`h-1.5 overflow-hidden rounded-full ${isDark ? "bg-white/[0.08]" : "bg-stone-200"}`}>
             <div className="h-full rounded-full bg-[linear-gradient(90deg,#8b5cf6,#a78bfa)]" style={{ width: `${progress}%` }} />
           </div>
-          <div className={`flex flex-wrap items-center gap-x-5 gap-y-2 text-sm ${isDark ? "text-[#b7b4bd]" : "text-stone-600"}`}>
+          <div className={`flex flex-wrap items-center gap-x-5 gap-y-2 text-[0.95rem] ${isDark ? "text-[#b7b4bd]" : "text-stone-600"}`}>
             <span>{formatNumber(currentWords)} / {formatNumber(targetWords)} words</span>
             <span>{progress}% complete</span>
             <span>{formatRelativeTime(getBookUpdatedAt(book))}</span>
@@ -934,7 +934,7 @@ function ProjectMenu({
   return (
     <div
       onClick={(event) => event.stopPropagation()}
-      className={`absolute right-0 top-full z-30 mt-2 w-48 overflow-hidden rounded-lg border py-2 shadow-[0_30px_90px_-40px_rgba(0,0,0,0.85)] ${isDark ? "border-white/[0.08] bg-[#12121a]" : "border-stone-200 bg-white"}`}
+      className={`absolute right-0 top-full z-30 mt-2 w-48 overflow-hidden rounded-[1.15rem] border py-2 shadow-[0_30px_90px_-40px_rgba(0,0,0,0.85)] ${isDark ? "border-white/[0.08] bg-[#12121a]" : "border-stone-200 bg-white"}`}
     >
       <MenuButton isDark={isDark} onClick={onTogglePinned} label={isPinned ? "Unpin project" : "Pin project"} />
       {isAuthor ? <MenuButton isDark={isDark} onClick={onAddChapter} label={`Add ${storyUnitLabel(workType)}`} /> : null}
@@ -986,7 +986,7 @@ function MenuButton({
 
 function MetaBadge({ icon, value }: { icon: ReactNode; value: string }) {
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-2.5">
       <span>{icon}</span>
       <span>{value}</span>
     </div>
@@ -998,16 +998,16 @@ function CreateProjectCard({ isDark, onCreate }: { isDark: boolean; onCreate: ()
     <button
       type="button"
       onClick={onCreate}
-      className={`flex min-h-[16rem] flex-col items-center justify-center rounded-lg border border-dashed p-8 text-center transition hover:-translate-y-0.5 ${
+      className={`flex min-h-[18.25rem] flex-col items-center justify-center rounded-[1.35rem] border border-dashed p-8 text-center transition hover:-translate-y-0.5 ${
         isDark
           ? "border-white/[0.08] bg-[#0d0d14] hover:border-violet-400/30 hover:bg-[#11111a]"
           : "border-stone-300 bg-white/65 hover:border-violet-300 hover:bg-white"
       }`}
     >
-      <div className={`flex h-20 w-20 items-center justify-center rounded-full border ${isDark ? "border-white/[0.08] text-[#b7b4bd]" : "border-stone-300 text-stone-500"}`}>
+      <div className={`flex h-20 w-20 items-center justify-center rounded-full border ${isDark ? "border-white/[0.1] text-[#b7b4bd]" : "border-stone-300 text-stone-500"}`}>
         <PlusLargeIcon />
       </div>
-      <h3 className={`mt-8 font-serif text-2xl tracking-normal ${isDark ? "text-[#f7f3ed]" : "text-stone-900"}`}>Create New Project</h3>
+      <h3 className={`mt-8 font-serif text-[2rem] tracking-[-0.03em] ${isDark ? "text-[#f7f3ed]" : "text-stone-900"}`}>Create New Project</h3>
       <p className={`mt-3 text-lg ${isDark ? "text-[#9f9da7]" : "text-stone-500"}`}>Start a new story</p>
     </button>
   )
@@ -1018,14 +1018,14 @@ function CreateProjectRow({ isDark, onCreate }: { isDark: boolean; onCreate: () 
     <button
       type="button"
       onClick={onCreate}
-      className={`flex items-center justify-between rounded-lg border border-dashed px-5 py-5 text-left transition ${
+      className={`flex items-center justify-between rounded-[1.35rem] border border-dashed px-5 py-5 text-left transition ${
         isDark
           ? "border-white/[0.08] bg-[#0d0d14] hover:border-violet-400/30 hover:bg-[#11111a]"
           : "border-stone-300 bg-white/65 hover:border-violet-300 hover:bg-white"
       }`}
     >
       <div>
-        <h3 className={`font-serif text-2xl tracking-normal ${isDark ? "text-[#f7f3ed]" : "text-stone-900"}`}>Create New Project</h3>
+        <h3 className={`font-serif text-[2rem] tracking-[-0.03em] ${isDark ? "text-[#f7f3ed]" : "text-stone-900"}`}>Create New Project</h3>
         <p className={`mt-2 ${isDark ? "text-[#9f9da7]" : "text-stone-500"}`}>Start a new story</p>
       </div>
       <div className={`flex h-14 w-14 items-center justify-center rounded-full border ${isDark ? "border-white/[0.08] text-[#b7b4bd]" : "border-stone-300 text-stone-500"}`}>

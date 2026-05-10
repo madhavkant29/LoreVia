@@ -10,6 +10,7 @@ from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.core.redis import get_redis, key_ratelimit
 from app.models.user import User, UserRateLimitOverride
+from app.services.monetization_service import purchased_overflow_units_for_action_via_session
 from app.utils.billing_utils import (
     DAILY_LIMIT_MESSAGE,
     free_search_limit_per_day,
@@ -54,11 +55,12 @@ async def _bump_daily_bucket(user_id: object, action: str, limit: int) -> None:
         raise HTTPException(403, DAILY_LIMIT_MESSAGE)
 
     bucket, ttl_seconds = _utc_day_bucket(action)
+    overflow_units = await purchased_overflow_units_for_action_via_session(user_id, action)
     key = key_ratelimit(str(user_id), bucket)
     r = await get_redis()
     await r.set(key, "0", ex=ttl_seconds, nx=True)
     count = int(await r.incr(key))
-    if count > limit:
+    if count > (limit + overflow_units):
         raise HTTPException(429, DAILY_LIMIT_MESSAGE)
 
 

@@ -311,6 +311,65 @@ async def test_upload_pipeline_preserves_chapter_numbers_when_requested(client, 
 
 
 @pytest.mark.asyncio
+async def test_upload_pipeline_preserves_source_chapters_exactly_when_requested(client, db, auth_headers, monkeypatch):
+    captured_book_tasks: list[dict] = []
+    captured_chapter_tasks: list[dict] = []
+
+    class _ProcessBookTask:
+        @staticmethod
+        def apply_async(*, args, queue, **kwargs):
+            captured_book_tasks.append({"args": args, "queue": queue, "kwargs": kwargs})
+            return None
+
+    class _ChapterTask:
+        @staticmethod
+        def apply_async(*, args, queue, **kwargs):
+            captured_chapter_tasks.append({"args": args, "queue": queue, "kwargs": kwargs})
+            return None
+
+    parsed_chapters = [
+        {"number": 1, "source_number": 1, "title": "Chapter 1", "text": "Very long intact opening text."},
+        {"number": 2, "source_number": 2, "title": "Chapter 2", "text": "Very long intact middle text."},
+    ]
+    parse_calls: list[bool] = []
+
+    monkeypatch.setattr("app.api.v1.routes.books.process_book_task", _ProcessBookTask())
+    monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_chapter_task", _ChapterTask())
+    monkeypatch.setattr("app.workers.consumers.extraction_consumer.download_book", lambda key: b"%PDF-1.4 mock")
+
+    def _fake_parse_pdf(raw: bytes, *, split_large_chapters: bool = True):
+        parse_calls.append(split_large_chapters)
+        return parsed_chapters, {"source": "pdf", "chapter_count": len(parsed_chapters)}
+
+    monkeypatch.setattr("app.parsers.pdf_parser.parse_pdf_with_diagnostics", _fake_parse_pdf)
+    monkeypatch.setattr("app.parsers.pdf_parser.extract_first_page_cover", lambda raw: None)
+
+    response = await client.post(
+        "/api/v1/books/upload",
+        headers=auth_headers,
+        data={
+            "title": "Exact Source",
+            "mode": "reader",
+            "preserve_source_chapters": "true",
+        },
+        files={"file": ("exact-source.pdf", b"%PDF-1.4 mock", "application/pdf")},
+    )
+
+    assert response.status_code == 202
+    book_id = uuid.UUID(str(captured_book_tasks[0]["args"][0]))
+
+    result = await process_book(str(book_id), queue_wait_ms=8)
+
+    assert result == {"book_id": str(book_id), "chapters": 2}
+    assert parse_calls == [False]
+    assert [item["args"][1] for item in captured_chapter_tasks] == [1, 2]
+
+    book = await db.get(Book, book_id)
+    assert book is not None
+    assert book.preserve_source_chapters is True
+
+
+@pytest.mark.asyncio
 async def test_upload_pipeline_stops_when_book_is_hidden_mid_processing(client, db, auth_headers, monkeypatch):
     captured_book_tasks: list[dict] = []
     captured_chapter_tasks: list[dict] = []

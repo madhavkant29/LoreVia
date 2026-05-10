@@ -1,5 +1,6 @@
 import axios from "axios"
 import { API_BASE } from "@/lib/constants"
+import { buildDailyCapEventDetail, dispatchDailyCapEvent } from "@/lib/monetization/limitRecovery"
 
 export const apiClient = axios.create({
   baseURL: API_BASE,
@@ -41,6 +42,10 @@ apiClient.interceptors.request.use((config) => {
 apiClient.interceptors.response.use(
   (r) => r,
   async (error) => {
+    const dailyCapEvent = buildDailyCapEventDetail(error)
+    if (dailyCapEvent) {
+      dispatchDailyCapEvent(dailyCapEvent)
+    }
     const originalRequest = error.config
     const requestUrl = String(originalRequest?.url ?? "")
     const requestPath = requestUrl.split("?")[0]

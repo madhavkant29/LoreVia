@@ -1,13 +1,17 @@
 """Unit tests for book_utils functions."""
+import io
 import uuid
 import pytest
+from PIL import Image
 
 from app.utils.book_utils import (
     build_emotional_arc_payload,
     build_book_processing_payload,
+    build_blank_cover_image,
     clean_markdown_asterisks_str,
     clean_manuscript_html,
     deserialize_manuscript_content,
+    ensure_book_cover,
     estimate_readability,
     extract_novel_scene_candidates,
     build_scene_chapter_import_text,
@@ -147,6 +151,52 @@ class TestManuscriptHtmlImages:
         assert payload["html"] and "<img" in payload["html"]
         assert 'src="data:image/png;base64,AAA"' in payload["html"]
         assert payload["text"] == "Intro"
+
+
+def test_build_blank_cover_image_renders_title_and_author_placeholder():
+    raw, content_type = build_blank_cover_image("The Silent Archive", "Mira Vale")
+
+    assert content_type == "image/png"
+    image = Image.open(io.BytesIO(raw))
+    assert image.size == (1200, 1800)
+    assert image.format == "PNG"
+
+
+@pytest.mark.asyncio
+async def test_ensure_book_cover_generates_blank_cover_when_missing(monkeypatch):
+    uploaded: dict[str, object] = {}
+
+    class _FakeDB:
+        async def flush(self):
+            return None
+
+    def _upload_binary(key: str, raw: bytes, content_type: str) -> str:
+        uploaded["key"] = key
+        uploaded["raw"] = raw
+        uploaded["content_type"] = content_type
+        return key
+
+    monkeypatch.setattr("app.utils.book_utils.upload_binary", _upload_binary)
+
+    book = Book(
+        id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        title="No Cover Yet",
+        author="A. Writer",
+        format="txt",
+        work_type="novel",
+        s3_key="books/user/story.txt",
+        cover_s3_key=None,
+        status="pending",
+        is_public=False,
+    )
+
+    await ensure_book_cover(_FakeDB(), book)
+
+    assert book.cover_s3_key == uploaded["key"]
+    assert uploaded["content_type"] == "image/png"
+    image = Image.open(io.BytesIO(uploaded["raw"]))
+    assert image.size == (1200, 1800)
 
 
 def test_normalize_writer_workspace_preserves_defaults_and_sanitizes_cards():
@@ -361,7 +411,30 @@ async def test_parse_book_upload_for_ingestion_returns_pdf_parser_diagnostics(mo
         work_type="novel",
         raw=b"%PDF-1.4 mock",
         preserve_chapter_numbers=False,
+        preserve_source_chapters=False,
     )
 
     assert payload["chapters"] == chapters
     assert payload["parser_diagnostics"] == diagnostics
+
+
+@pytest.mark.asyncio
+async def test_parse_book_upload_for_ingestion_disables_large_split_for_exact_source_preservation(monkeypatch):
+    parse_calls: list[bool] = []
+
+    def _fake_parse_pdf(raw, *, split_large_chapters=True):
+        parse_calls.append(split_large_chapters)
+        return ([{"number": 1, "title": "Chapter 7", "text": "Original full chapter"}], {"source": "pdf"})
+
+    monkeypatch.setattr("app.parsers.pdf_parser.parse_pdf_with_diagnostics", _fake_parse_pdf)
+
+    payload = await parse_book_upload_for_ingestion(
+        format_name="pdf",
+        work_type="novel",
+        raw=b"%PDF-1.4 mock",
+        preserve_chapter_numbers=False,
+        preserve_source_chapters=True,
+    )
+
+    assert parse_calls == [False]
+    assert payload["chapters"][0]["title"] == "Chapter 7"
