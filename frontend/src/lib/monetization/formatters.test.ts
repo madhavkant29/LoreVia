@@ -19,5 +19,15 @@ describe("monetization formatters", () => {
         created_at: new Date().toISOString(),
       })
     ).toBe("Referral reward")
+    expect(
+      formatPointEntryLabel({
+        id: "2",
+        entry_type: "grant",
+        source_type: "rewarded_ad",
+        points_delta: 3,
+        metadata_json: {},
+        created_at: new Date().toISOString(),
+      })
+    ).toBe("Rewarded ad")
   })
 })

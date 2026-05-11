@@ -8,6 +8,7 @@ from app.api.v1.routes import (
     billing,
     books,
     characters,
+    collaboration,
     internal,
     intelligence,
     manuscript,
@@ -42,6 +43,7 @@ api_router.add_api_route(
     dependencies=[Depends(rate_limit_public_asset)],
 )
 
+api_router.include_router(collaboration.router, prefix="/books",         tags=["collaboration"], dependencies=[Depends(rate_limit_api)])
 api_router.include_router(books.router,         prefix="/books",         tags=["books"], dependencies=[Depends(rate_limit_api)])
 api_router.include_router(manuscript.router,    prefix="/books",         tags=["manuscript"], dependencies=[Depends(rate_limit_api)])
 api_router.include_router(public.router,        prefix="/public",        tags=["public"], dependencies=[Depends(rate_limit_public)])

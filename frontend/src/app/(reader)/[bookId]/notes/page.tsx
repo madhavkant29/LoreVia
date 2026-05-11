@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import type { Route } from "next"
 import Link from "next/link"
 import { useParams } from "next/navigation"
 
@@ -106,6 +107,12 @@ export default function BookNotesPage() {
                   className={`inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-medium ${isDark ? "bg-white/10 text-slate-100" : "bg-white text-stone-700"}`}
                 >
                   Open scene workspace
+                </Link>
+                <Link
+                  href={`/${bookId}/voice` as Route}
+                  className={`inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-medium ${isDark ? "bg-white/10 text-slate-100" : "bg-white text-stone-700"}`}
+                >
+                  Open voice workspace
                 </Link>
               </div>
 

@@ -75,7 +75,7 @@ class ForgotPasswordBody(BaseModel):
 
 
 class ResetPasswordBody(BaseModel):
-    token: str
+    token: str = Field(..., min_length=20, max_length=256)
     password: str = Field(..., min_length=12, max_length=128)
 
 

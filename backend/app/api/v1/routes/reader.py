@@ -47,9 +47,15 @@ from app.schemas.reader import (
 )
 from app.schemas.books import BookEventsOut, CharacterEventOut, MajorEventOut
 from app.services.summary_service import get_or_generate_summary
-from app.utils.book_utils import deserialize_manuscript_content
+from app.utils.book_utils import (
+    collaboration_allows_chapter,
+    deserialize_manuscript_content,
+    get_book_with_collaboration_access,
+    normalize_collaboration_scope,
+)
 from app.utils.billing_utils import summary_mode_allowed
 from app.utils.queue_utils import queue_for_user
+from app.utils.plot_thread_utils import derive_plot_thread_status
 
 # ── Utils imports ──────────────────────────────────────────────────────────────
 from app.utils.reader_utils import (
@@ -160,9 +166,9 @@ async def get_chapter(
     current_user=Depends(get_current_user),
 ):
     """Returns chapter text URL + all characters introduced up to this chapter."""
-    book = await db.get(Book, book_id)
-    if not book or book.user_id != current_user.id:
-        raise HTTPException(404, "Book not found")
+    book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
+    if not collaboration_allows_chapter(collaborator, chapter_num):
+        raise HTTPException(403, "This share does not include that chapter.")
     await consolidate_characters(db, book_id, up_to_chapter=chapter_num)
 
     chapter = (await db.execute(
@@ -281,9 +287,9 @@ async def smart_tap(
     Tap any word → get character context, wiki entry, or relevant passage.
     Always spoiler-gated to current chapter.
     """
-    book = await db.get(Book, book_id)
-    if not book or book.user_id != current_user.id:
-        raise HTTPException(404)
+    book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
+    if not collaboration_allows_chapter(collaborator, chapter):
+        raise HTTPException(403, "This share does not include that chapter.")
     
     # Check if book has embeddings (processing complete)
     chunk_count = await db.scalar(
@@ -376,9 +382,9 @@ async def get_summary(
     current_user=Depends(get_current_user),
     _=Depends(rate_limit_summary),
 ):
-    book = await db.get(Book, book_id)
-    if not book or book.user_id != current_user.id:
-        raise HTTPException(404)
+    book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
+    if not collaboration_allows_chapter(collaborator, chapter_num):
+        raise HTTPException(403, "This share does not include that chapter.")
 
     if mode not in ("short", "detailed", "key_points"):
         raise HTTPException(400, "Invalid mode")
@@ -619,9 +625,8 @@ async def get_chapter_list(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    book = await db.get(Book, book_id)
-    if not book or book.user_id != current_user.id:
-        raise HTTPException(404)
+    book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
+    collaboration_scope = normalize_collaboration_scope(collaborator.scope) if collaborator else None
 
     progress = (await db.execute(
         select(ReadingProgress).where(
@@ -634,15 +639,22 @@ async def get_chapter_list(
     chapters_result = await db.execute(
         select(Chapter).where(Chapter.book_id == book_id).order_by(Chapter.number)
     )
-    chapters = chapters_result.scalars().all()
+    chapters = [
+        chapter for chapter in chapters_result.scalars().all()
+        if collaboration_allows_chapter(collaborator, chapter.number)
+    ]
+    chapter_start = collaboration_scope.get("chapter_start") if collaboration_scope else None
+    chapter_end = collaboration_scope.get("chapter_end") if collaboration_scope else None
     if not chapters and book.total_chapters:
+        first = chapter_start or 1
+        last = chapter_end or book.total_chapters
         return {
             "read_upto": read_upto,
             "current_chapter": read_upto,
             "chapters": [
                 {"number": number, "title": f"Chapter {number}", "processed": False,
                  "intelligence_available": True, "read": number in read_set}
-                for number in range(1, book.total_chapters + 1)
+                for number in range(first, min(last, book.total_chapters) + 1)
             ],
         }
     intelligence_map = await chapter_intelligence_map(db, book, current_user)
@@ -836,7 +848,16 @@ async def get_timeline(
     chapter_titles = {number: title for number, title in chapter_meta_rows}
     chapter_points = [{"number": number, "title": title} for number, title in sorted(chapter_meta_rows, key=lambda item: item[0])]
     thread_rows = (await db.execute(
-        select(PlotThread.id, PlotThread.title, PlotThread.introduced_at, PlotThread.resolved_at, PlotThread.status, PlotThread.note, PlotThread.description)
+        select(
+            PlotThread.id,
+            PlotThread.title,
+            PlotThread.introduced_at,
+            PlotThread.last_mentioned_at,
+            PlotThread.resolved_at,
+            PlotThread.status,
+            PlotThread.note,
+            PlotThread.description,
+        )
         .where(PlotThread.book_id == book_id)
         .order_by(PlotThread.introduced_at, PlotThread.importance.desc())
     )).all()
@@ -883,10 +904,17 @@ async def get_timeline(
             "end_chapter": max(start_chapter, min(end_chapter, max(read_set))),
             "detail": timeline_character_detail(char.name, char.role, char.aliases, char.arc_summary),
         })
-    for thread_id, title, introduced_at, resolved_at, status, note, description in thread_rows:
+    for thread_id, title, introduced_at, last_mentioned_at, resolved_at, status, note, description in thread_rows:
+        display_status = derive_plot_thread_status(
+            status,
+            introduced_at=introduced_at,
+            last_mentioned_at=last_mentioned_at or introduced_at,
+            resolved_at=resolved_at,
+            current_chapter=max(read_set) if read_set else None,
+        )
         if introduced_at and introduced_at in read_set:
             events.append({"chapter_number": introduced_at, "chapter_title": chapter_titles.get(introduced_at),
-                            "kind": "thread_start", "title": title, "detail": status})
+                            "kind": "thread_start", "title": title, "detail": display_status})
         if resolved_at and resolved_at in read_set:
             events.append({"chapter_number": resolved_at, "chapter_title": chapter_titles.get(int(resolved_at)),
                             "kind": "thread_end", "title": title, "detail": "Resolved"})
@@ -896,7 +924,7 @@ async def get_timeline(
             thread_tracks.append({
                 "id": str(thread_id),
                 "title": title,
-                "status": status,
+                "status": display_status,
                 "start_chapter": start_chapter,
                 "end_chapter": end_chapter,
                 "note": note,
@@ -1081,7 +1109,7 @@ async def save_plot_thread_note(
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
 
-    thread = await update_plot_thread_note(db, book_id, thread_id, body.note)
+    thread = await update_plot_thread_note(db, book_id, thread_id, body.note, body.status)
     if thread is None:
         raise HTTPException(404, "Plot thread not found")
     return thread
@@ -1128,13 +1156,24 @@ async def memory_recall(
     chars = chars_result.scalars().all()
 
     open_threads_result = await db.execute(
-        select(PlotThread.title).where(
+        select(PlotThread.title, PlotThread.status, PlotThread.introduced_at, PlotThread.last_mentioned_at, PlotThread.resolved_at)
+        .where(
             PlotThread.book_id == book_id,
-            PlotThread.status.in_(["ongoing", "introduced"]),
             PlotThread.introduced_at <= last_chapter,
-        ).limit(3)
+        )
+        .limit(6)
     )
-    open_threads = open_threads_result.scalars().all()
+    open_threads = [
+        title
+        for title, status, introduced_at, last_mentioned_at, resolved_at in open_threads_result.all()
+        if derive_plot_thread_status(
+            status,
+            introduced_at=introduced_at,
+            last_mentioned_at=last_mentioned_at or introduced_at,
+            resolved_at=resolved_at,
+            current_chapter=last_chapter,
+        ) not in {"resolved", "abandoned"}
+    ][:3]
 
     recall_text = await generate_recall(
         title=book.title,
@@ -1150,21 +1189,25 @@ async def memory_recall(
 
 @router.get("/{book_id}/progress")
 async def get_progress(book_id: uuid.UUID, db: AsyncSession = Depends(get_db), current_user=Depends(get_current_user)):
-    book = await db.get(Book, book_id)
-    if not book or book.user_id != current_user.id:
-        raise HTTPException(404)
+    book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
+    scope = normalize_collaboration_scope(collaborator.scope) if collaborator else None
     p_result = await db.execute(
         select(ReadingProgress).where(ReadingProgress.user_id == current_user.id, ReadingProgress.book_id == book_id)
     )
     p = p_result.scalar()
     total = book.total_chapters or 0
+    if scope:
+        start = scope.get("chapter_start") or 1
+        end = scope.get("chapter_end") or total
+        total = max(0, min(end, total) - start + 1)
     chapters_read = sorted(set((p.chapters_read or []) if p else []))
+    chapters_read = [chapter for chapter in chapters_read if collaboration_allows_chapter(collaborator, chapter)]
     if not chapters_read and p and p.current_chapter:
         chapters_read = list(range(1, p.current_chapter + 1))
     chapters_read_count = len(chapters_read)
     percent_complete = round((chapters_read_count / total) * 100, 1) if total else 0.0
     return {
-        "current_chapter": p.current_chapter if p else 1,
+        "current_chapter": p.current_chapter if p and collaboration_allows_chapter(collaborator, p.current_chapter) else ((scope.get("chapter_start") or 1) if scope else 1),
         "scroll_pct": p.scroll_pct if p else 0.0,
         "chapters_read_count": chapters_read_count,
         "percent_complete": percent_complete,
@@ -1180,9 +1223,9 @@ async def update_progress(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    book = await db.get(Book, book_id)
-    if not book or book.user_id != current_user.id:
-        raise HTTPException(404)
+    book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
+    if not collaboration_allows_chapter(collaborator, current_chapter):
+        raise HTTPException(403, "This share does not include that chapter.")
 
     p = (await db.execute(
         select(ReadingProgress).where(ReadingProgress.user_id == current_user.id, ReadingProgress.book_id == book_id)
@@ -1228,31 +1271,31 @@ async def mark_book_read(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    book = await db.get(Book, book_id)
-    if not book or book.user_id != current_user.id:
-        raise HTTPException(404)
+    book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
 
     total = book.total_chapters or 0
     if total <= 0:
         raise HTTPException(400, "Book has no chapters to mark as read")
 
-    chapters_read = list(range(1, total + 1))
+    chapters_read = [number for number in range(1, total + 1) if collaboration_allows_chapter(collaborator, number)]
+    if not chapters_read:
+        raise HTTPException(403, "This share does not include any chapters.")
     progress = (await db.execute(
         select(ReadingProgress).where(ReadingProgress.user_id == current_user.id, ReadingProgress.book_id == book_id)
     )).scalar()
 
     if progress is None:
         progress = ReadingProgress(user_id=current_user.id, book_id=book_id,
-                                   current_chapter=total, scroll_pct=1.0, chapters_read=chapters_read)
+                                   current_chapter=max(chapters_read), scroll_pct=1.0, chapters_read=chapters_read)
         db.add(progress)
     else:
-        progress.current_chapter = total
+        progress.current_chapter = max(chapters_read)
         progress.scroll_pct = 1.0
         progress.chapters_read = chapters_read
         progress.last_read = datetime.now(UTC)
 
     await db.commit()
-    return {"ok": True, "current_chapter": total, "chapters_read_count": total, "percent_complete": 100.0, "chapters_left": 0}
+    return {"ok": True, "current_chapter": max(chapters_read), "chapters_read_count": len(chapters_read), "percent_complete": 100.0, "chapters_left": 0}
 
 
 @router.put("/{book_id}/progress/chapter-status")
@@ -1263,9 +1306,9 @@ async def update_chapter_read_status(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    book = await db.get(Book, book_id)
-    if not book or book.user_id != current_user.id:
-        raise HTTPException(404)
+    book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
+    if not collaboration_allows_chapter(collaborator, chapter):
+        raise HTTPException(403, "This share does not include that chapter.")
 
     progress = (await db.execute(
         select(ReadingProgress).where(ReadingProgress.user_id == current_user.id, ReadingProgress.book_id == book_id)

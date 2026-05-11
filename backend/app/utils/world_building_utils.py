@@ -63,19 +63,24 @@ WORLD_KEEPABLE_TYPES = {
     "country",
     "creature",
     "culture",
+    "currency",
     "era",
     "event",
     "language",
+    "law",
     "magic_system",
     "object",
     "organization",
     "place",
+    "politics",
+    "power_limit",
     "race",
     "region",
     "religion",
     "technology",
+    "travel_rule",
 }
-WORLD_HIGH_SIGNAL_TYPES = {"character", "country", "place", "organization", "object", "event", "race", "region", "magic_system"}
+WORLD_HIGH_SIGNAL_TYPES = {"character", "country", "currency", "law", "magic_system", "object", "organization", "place", "politics", "power_limit", "race", "region", "travel_rule"}
 STOPWORDS = {
     "the",
     "a",
@@ -469,6 +474,66 @@ async def prepare_world_building_uploads(
         )
 
     return uploads
+
+
+async def _collect_story_candidate_records(db: AsyncSession, book: Book) -> list[dict]:
+    chapter_rows = (
+        await db.execute(
+            select(Chapter.number, Chapter.title, Chapter.s3_key)
+            .where(Chapter.book_id == book.id)
+            .order_by(Chapter.number.asc())
+        )
+    ).all()
+    if not chapter_rows:
+        return []
+
+    character_registry = await _load_character_registry(db, book)
+    override_lookup = await _load_canon_override_lookup(db, book)
+    records: list[dict] = []
+    for chapter_number, chapter_title, s3_key in chapter_rows:
+        if not s3_key:
+            continue
+        try:
+            stored = deserialize_manuscript_content(download_book(s3_key))
+        except Exception:
+            continue
+        text = str(stored.get("text") or "")
+        for candidate in _apply_character_and_override_resolution(
+            extract_world_elements_from_text(text, chapter_number=chapter_number),
+            character_registry=character_registry,
+            override_lookup=override_lookup,
+        ):
+            candidate_record = dict(candidate)
+            candidate_record["chapter_number"] = chapter_number
+            candidate_record["chapter_title"] = chapter_title
+            records.append(candidate_record)
+    return records
+
+
+async def _collect_world_document_candidate_records(
+    db: AsyncSession,
+    book: Book,
+    documents: list[WorldBuildingDocument],
+) -> list[dict]:
+    if not documents:
+        return []
+
+    character_registry = await _load_character_registry(db, book)
+    override_lookup = await _load_canon_override_lookup(db, book)
+    records: list[dict] = []
+    for document in documents:
+        payload = await load_world_building_document_payload(document)
+        text = str(payload.get("text") or "")
+        for candidate in _apply_character_and_override_resolution(
+            extract_world_elements_from_text(text),
+            character_registry=character_registry,
+            override_lookup=override_lookup,
+        ):
+            candidate_record = dict(candidate)
+            candidate_record["world_document_id"] = str(document.id)
+            candidate_record["world_document_title"] = document.title
+            records.append(candidate_record)
+    return records
 
 
 async def create_world_building_documents(
@@ -903,6 +968,8 @@ async def detect_world_gaps(db: AsyncSession, book: Book) -> dict:
     document_elements = await sync_world_document_elements(db, book)
     story_elements = await _collect_story_elements(db, book)
     characters = await _collect_story_characters(db, book)
+    story_candidate_records = await _collect_story_candidate_records(db, book)
+    world_candidate_records = await _collect_world_document_candidate_records(db, book, documents)
     return await _build_world_gap_analysis_payload(
         db,
         book_id=book.id,
@@ -912,6 +979,8 @@ async def detect_world_gaps(db: AsyncSession, book: Book) -> dict:
         document_elements=document_elements,
         story_elements=story_elements,
         characters=characters,
+        story_candidate_records=story_candidate_records,
+        world_candidate_records=world_candidate_records,
     )
 
 
@@ -1025,6 +1094,8 @@ async def _build_world_gap_analysis_payload(
     document_elements: list[WorldElement],
     story_elements: list[WorldElement],
     characters: list[dict],
+    story_candidate_records: list[dict] | None = None,
+    world_candidate_records: list[dict] | None = None,
     consistency_elements: list[WorldElement] | None = None,
     persist: bool = True,
 ) -> dict:
@@ -1036,6 +1107,10 @@ async def _build_world_gap_analysis_payload(
     ).lower()
 
     grouped_items: dict[str, list[dict]] = defaultdict(list)
+    for item in _detect_internal_candidate_conflicts(world_candidate_records or [], source_kind="world"):
+        grouped_items["story_conflicts"].append(item)
+    for item in _detect_internal_candidate_conflicts(story_candidate_records or [], source_kind="story"):
+        grouped_items["story_conflicts"].append(item)
 
     for key, world_item in world_by_name.items():
         if not _should_surface_world_item(world_item):
@@ -1055,17 +1130,20 @@ async def _build_world_gap_analysis_payload(
             )
             continue
 
-        if _items_conflict(world_item, story_match):
+        conflict_detail = _build_cross_source_conflict_detail(world_item, story_match)
+        if conflict_detail is not None:
             grouped_items["story_conflicts"].append(
                 _build_gap_item(
                     category="story_conflicts",
                     severity="critical",
-                    title=f"{world_item['name']} conflicts with the story manuscript",
-                    description="The story manuscript describes this lore differently from the world-building corpus.",
-                    suggested_fix=f"Choose the canonical version of {world_item['name']} and update either the world document or the relevant story chapter to match it.",
+                    title=conflict_detail["title"],
+                    description=conflict_detail["description"],
+                    suggested_fix=conflict_detail["suggested_fix"],
                     world_item=world_item,
                     story_item=story_match,
                     priority=10,
+                    world_evidence=conflict_detail.get("world_evidence"),
+                    story_evidence=conflict_detail.get("story_evidence"),
                 )
             )
             continue
@@ -1616,9 +1694,9 @@ def _map_element_to_wiki_type(element_type: str) -> str:
     normalized = " ".join((element_type or "").split()).strip().lower()
     if normalized in {"place", "geography", "location", "city", "country", "kingdom", "realm", "region", "territory", "province"}:
         return "location"
-    if normalized in {"organization", "faction", "religion", "culture", "government", "race", "species", "people"}:
+    if normalized in {"organization", "faction", "religion", "culture", "government", "politics", "law", "race", "species", "people"}:
         return "faction"
-    if normalized in {"object", "artifact", "item", "technology", "weapon"}:
+    if normalized in {"object", "artifact", "item", "technology", "weapon", "currency"}:
         return "item"
     if normalized in {"event", "history"}:
         return "event"
@@ -1753,23 +1831,25 @@ def _build_gap_item(
     priority: int,
     world_item: dict | None = None,
     story_item: dict | None = None,
+    world_evidence: str | None = None,
+    story_evidence: str | None = None,
 ) -> dict:
     if world_item is not None:
         item_name = str(world_item.get("name") or "")
-        world_evidence = str(world_item.get("description") or "").strip() or None
+        resolved_world_evidence = world_evidence or str(world_item.get("description") or "").strip() or None
         world_document_id = str(world_item.get("world_document_id") or "") or None
         world_document_title = str(world_item.get("world_document_title") or "").strip() or None
     else:
         item_name = str(story_item.get("name") or "") if story_item else ""
-        world_evidence = None
+        resolved_world_evidence = world_evidence
         world_document_id = None
         world_document_title = None
     if story_item is not None:
-        story_evidence = str(story_item.get("description") or "").strip() or None
+        resolved_story_evidence = story_evidence or str(story_item.get("description") or "").strip() or None
         story_chapter_number = int(story_item.get("chapter_number") or 0) or None
         story_chapter_title = str(story_item.get("chapter_title") or "").strip() or None
     else:
-        story_evidence = None
+        resolved_story_evidence = story_evidence
         story_chapter_number = None
         story_chapter_title = None
     return {
@@ -1779,8 +1859,8 @@ def _build_gap_item(
         "title": title,
         "description": description,
         "suggested_fix": suggested_fix,
-        "world_evidence": world_evidence,
-        "story_evidence": story_evidence,
+        "world_evidence": resolved_world_evidence,
+        "story_evidence": resolved_story_evidence,
         "world_document_id": world_document_id,
         "world_document_title": world_document_title,
         "story_chapter_number": story_chapter_number,
@@ -1833,10 +1913,89 @@ def _is_underintegrated_story_match(story_item: dict) -> bool:
     return presence_score < 0.58 or usage_count <= 1 or chapter_count <= 1
 
 
-def _items_conflict(world_item: dict, story_item: dict) -> bool:
-    if not _descriptions_conflict(str(world_item.get("description") or ""), str(story_item.get("description") or "")):
-        return False
+def _detect_internal_candidate_conflicts(records: list[dict], *, source_kind: str) -> list[dict]:
+    grouped: dict[str, list[dict]] = defaultdict(list)
+    for record in records:
+        normalized_name = _normalize_world_name(str(record.get("canonical_name") or record.get("name") or ""))
+        if not normalized_name:
+            continue
+        grouped[normalized_name].append(record)
 
+    items: list[dict] = []
+    for candidates in grouped.values():
+        if len(candidates) < 2:
+            continue
+        ordered = sorted(
+            candidates,
+            key=lambda item: (
+                int(item.get("chapter_number") or 0),
+                str(item.get("world_document_title") or ""),
+                str(item.get("description") or ""),
+            ),
+        )
+        conflict_detail: dict | None = None
+        for index, left_item in enumerate(ordered):
+            for right_item in ordered[index + 1:]:
+                if _same_source_reference(left_item, right_item, source_kind=source_kind):
+                    continue
+                conflict_detail = _build_internal_conflict_detail(left_item, right_item, source_kind=source_kind)
+                if conflict_detail is not None:
+                    break
+            if conflict_detail is not None:
+                break
+        if conflict_detail is not None:
+            items.append(conflict_detail)
+    return items
+
+
+def _same_source_reference(left_item: dict, right_item: dict, *, source_kind: str) -> bool:
+    if source_kind == "story":
+        return int(left_item.get("chapter_number") or 0) == int(right_item.get("chapter_number") or 0)
+    return str(left_item.get("world_document_id") or "") == str(right_item.get("world_document_id") or "")
+
+
+def _build_internal_conflict_detail(left_item: dict, right_item: dict, *, source_kind: str) -> dict | None:
+    name = str(left_item.get("canonical_name") or left_item.get("name") or right_item.get("name") or "").strip()
+    left_claims = _claims_by_attribute(left_item.get("claims") or [])
+    right_claims = _claims_by_attribute(right_item.get("claims") or [])
+    for attribute, attribute_left_claims in left_claims.items():
+        attribute_right_claims = right_claims.get(attribute) or []
+        for left_claim in attribute_left_claims:
+            for right_claim in attribute_right_claims:
+                if _claims_contradict(left_claim, right_claim):
+                    detail = _build_conflict_detail(name, left_item, right_item, left_claim, right_claim, source_kind=source_kind)
+                    detail["id"] = f"story_conflicts-{_normalize_world_name(name)}-{source_kind}"
+                    return detail
+    if not _descriptions_conflict(str(left_item.get("description") or ""), str(right_item.get("description") or "")):
+        return None
+    left_label = _source_label(left_item, source_kind=source_kind)
+    right_label = _source_label(right_item, source_kind=source_kind)
+    return {
+        "id": f"story_conflicts-{_normalize_world_name(name)}-{source_kind}",
+        "category": "story_conflicts",
+        "severity": "critical",
+        "title": f"{name} conflicts across the {'manuscript' if source_kind == 'story' else 'world notes'}",
+        "description": f"{name} is described differently in {left_label} and {right_label}.",
+        "suggested_fix": f"Choose the canonical version of {name} and revise the conflicting {'chapter' if source_kind == 'story' else 'worldbuilding note'} so both references align.",
+        "world_evidence": _best_evidence_text(left_item),
+        "story_evidence": _best_evidence_text(right_item),
+        "world_document_id": str(left_item.get("world_document_id") or "") or None,
+        "world_document_title": str(left_item.get("world_document_title") or "") or None,
+        "story_chapter_number": int(right_item.get("chapter_number") or 0) or None,
+        "story_chapter_title": str(right_item.get("chapter_title") or "") or None,
+        "character_name": None,
+        "priority": 10,
+        "entity_type": str(left_item.get("element_type") or right_item.get("element_type") or ""),
+        "canonical_name": name,
+        "confidence": max(float(left_item.get("confidence") or 0.0), float(right_item.get("confidence") or 0.0)),
+        "provenance": {
+            "world": list(left_item.get("provenance") or [])[:2],
+            "story": list(right_item.get("provenance") or [])[:2],
+        },
+    }
+
+
+def _build_cross_source_conflict_detail(world_item: dict, story_item: dict) -> dict | None:
     world_claims = _claims_by_attribute(world_item.get("claims") or [])
     story_claims = _claims_by_attribute(story_item.get("claims") or [])
     if world_claims and story_claims:
@@ -1847,10 +2006,131 @@ def _items_conflict(world_item: dict, story_item: dict) -> bool:
             for left_claim in left_claims:
                 for right_claim in right_claims:
                     if _claims_contradict(left_claim, right_claim):
-                        return True
-        return False
+                        return _build_conflict_detail(
+                            str(world_item.get("name") or ""),
+                            world_item,
+                            story_item,
+                            left_claim,
+                            right_claim,
+                            source_kind="cross_source",
+                        )
+        return None
 
-    return True
+    if not _descriptions_conflict(str(world_item.get("description") or ""), str(story_item.get("description") or "")):
+        return None
+    return {
+        "title": f"{world_item['name']} conflicts with the story manuscript",
+        "description": "The story manuscript describes this lore differently from the world-building corpus.",
+        "suggested_fix": f"Choose the canonical version of {world_item['name']} and update either the world document or the relevant story chapter to match it.",
+        "world_evidence": _best_evidence_text(world_item),
+        "story_evidence": _best_evidence_text(story_item),
+    }
+
+
+def _build_conflict_detail(
+    name: str,
+    left_item: dict,
+    right_item: dict,
+    left_claim: dict,
+    right_claim: dict,
+    *,
+    source_kind: str,
+) -> dict:
+    left_label = _source_label(left_item, source_kind=source_kind)
+    right_label = _source_label(right_item, source_kind=source_kind)
+    subject = _conflict_subject(name, str(left_item.get("element_type") or right_item.get("element_type") or ""))
+    description = (
+        f"{subject} is described as {_claim_phrase(left_claim)} in {left_label}, "
+        f"but {_claim_phrase(right_claim)} in {right_label}. No explanation found in the extracted canon."
+    )
+    return {
+        "title": f"{name} conflicts with the {'story manuscript' if source_kind == 'cross_source' else ('manuscript itself' if source_kind == 'story' else 'world notes')}",
+        "description": description,
+        "suggested_fix": f"Choose whether {left_label} or {right_label} is canonical for {name}, then update the conflicting reference and add an explicit explanation if the change is intentional.",
+        "world_evidence": _best_evidence_text(left_item),
+        "story_evidence": _best_evidence_text(right_item),
+        "world_document_id": str(left_item.get("world_document_id") or "") or None,
+        "world_document_title": str(left_item.get("world_document_title") or "") or None,
+        "story_chapter_number": int(right_item.get("chapter_number") or 0) or None,
+        "story_chapter_title": str(right_item.get("chapter_title") or "") or None,
+        "character_name": None,
+        "priority": 10,
+        "entity_type": str(left_item.get("element_type") or right_item.get("element_type") or ""),
+        "canonical_name": name,
+        "confidence": max(float(left_item.get("confidence") or 0.0), float(right_item.get("confidence") or 0.0)),
+        "provenance": {
+            "world": list(left_item.get("provenance") or [])[:2],
+            "story": list(right_item.get("provenance") or [])[:2],
+        },
+    }
+
+
+def _conflict_subject(name: str, element_type: str) -> str:
+    if name == "Magic System":
+        return "Magic"
+    if name == "Political System":
+        return "Politics"
+    if name == "Travel Constraints":
+        return "Travel"
+    if name == "Power Limits":
+        return "Power use"
+    return name
+
+
+def _source_label(item: dict, *, source_kind: str) -> str:
+    if source_kind == "story":
+        chapter_number = int(item.get("chapter_number") or 0)
+        return f"Chapter {chapter_number}" if chapter_number else "the manuscript"
+    if source_kind == "world":
+        title = str(item.get("world_document_title") or "").strip()
+        return title or "the world corpus"
+    if str(item.get("world_document_title") or "").strip():
+        return str(item.get("world_document_title")).strip()
+    chapter_number = int(item.get("chapter_number") or 0)
+    return f"Chapter {chapter_number}" if chapter_number else "the story manuscript"
+
+
+def _best_evidence_text(item: dict) -> str | None:
+    excerpt = str(item.get("source_excerpt") or "").strip()
+    if excerpt:
+        return excerpt
+    provenance = list(item.get("provenance") or [])
+    for entry in provenance:
+        excerpt = " ".join(str((entry or {}).get("excerpt") or "").split()).strip()
+        if excerpt:
+            return excerpt
+    return " ".join(str(item.get("description") or "").split()).strip() or None
+
+
+def _claim_phrase(claim: dict) -> str:
+    attribute = str(claim.get("attribute") or "").strip().lower()
+    value = " ".join(str(claim.get("value") or "").split()).strip()
+    negated = bool(claim.get("negated"))
+    if attribute == "requirement":
+        return f"{'works without' if negated else 'requires'} {value}"
+    if attribute == "cost":
+        return f"{'happens without' if negated else 'costs'} {value}"
+    if attribute == "relative_position":
+        return f"is {value}"
+    if attribute == "governance":
+        return f"is ruled by {value}"
+    if attribute == "travel_time":
+        return f"takes {value}"
+    if attribute == "power_limit":
+        return f"{'is not limited by' if negated else 'can only'} {value}"
+    if attribute == "currency":
+        return f"uses {value}"
+    if attribute == "legality":
+        return f"{value} is {'legal' if not negated else 'illegal'}"
+    if attribute == "location":
+        return f"{'is not in' if negated else 'is in'} {value}"
+    if attribute == "climate":
+        return f"{'is not' if negated else 'is'} {value}"
+    if attribute == "descriptor":
+        return f"{'is not a' if negated else 'is a'} {value}"
+    if attribute == "occupation":
+        return f"{'is not a' if negated else 'is a'} {value}"
+    return f"{'is not' if negated else 'is'} {value}"
 
 
 def _claims_by_attribute(claims: list[dict]) -> dict[str, list[dict]]:
@@ -1873,6 +2153,7 @@ def _claims_by_attribute(claims: list[dict]) -> dict[str, list[dict]]:
 
 
 def _claims_contradict(left_claim: dict, right_claim: dict) -> bool:
+    attribute = str(left_claim.get("attribute") or "")
     left_value = _normalize_text(str(left_claim.get("value") or ""))
     right_value = _normalize_text(str(right_claim.get("value") or ""))
     left_negated = bool(left_claim.get("negated"))
@@ -1887,7 +2168,19 @@ def _claims_contradict(left_claim: dict, right_claim: dict) -> bool:
     if left_numbers and right_numbers and left_numbers != right_numbers and left_negated == right_negated:
         return True
 
-    if (left_claim.get("attribute") or "") == "climate":
+    if attribute == "relative_position":
+        left_anchor = left_value.split(" of ", 1)[1] if " of " in left_value else left_value
+        right_anchor = right_value.split(" of ", 1)[1] if " of " in right_value else right_value
+        if left_anchor == right_anchor and left_value != right_value and left_negated == right_negated:
+            return True
+
+    if attribute == "travel_time" and left_value != right_value and left_negated == right_negated:
+        return True
+
+    if attribute in {"requirement", "cost", "power_limit", "governance", "currency", "legality"} and left_value != right_value and left_negated == right_negated:
+        return True
+
+    if attribute == "climate":
         left_bucket = _climate_bucket(left_value)
         right_bucket = _climate_bucket(right_value)
         if left_bucket and right_bucket:

@@ -6,6 +6,7 @@ from the books route.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import io
 import json
 import os
@@ -28,6 +29,7 @@ from app.core.security import create_asset_token
 from app.core.storage import download_book, get_presigned_url, upload_binary
 from app.models.book import (
     Book,
+    BookCollaborator,
     BookNote,
     Chapter,
     ChapterVersion,
@@ -43,7 +45,7 @@ from app.models.book import (
     Series,
     SeriesBook,
 )
-from app.models.character import Character, CharacterState
+from app.models.character import Character, CharacterState, CharacterVoiceProfile
 from app.models.intelligence import (
     ChapterSummary,
     CharacterRelationship,
@@ -53,11 +55,19 @@ from app.models.intelligence import (
     WorldGapAnalysis,
 )
 from app.models.progress import ReadingProgress
+from app.models.user import User
+from app.utils.plot_thread_utils import (
+    derive_plot_thread_status,
+    is_plot_thread_closed,
+    is_plot_thread_open,
+)
 from app.schemas.books import (
     BookOut,
+    BookCollaboratorOut,
     BookProcessingOut,
     ChapterConsistencyReport,
     ChapterReportCharacter,
+    CollaborationScope,
     SeriesBibleCanonEntryOut,
     SeriesBibleCharacterOut,
     SeriesBibleEpisodeOut,
@@ -216,6 +226,10 @@ DEFAULT_WRITER_WORKSPACE = {
         "include_epigraph": False,
         "include_prologue": False,
     },
+    "revision_board": {
+        "items": [],
+        "last_generated_at": None,
+    },
     "processing": None,
 }
 
@@ -268,6 +282,145 @@ SCENE_METADATA_ALIASES = {
     "plot threads": "plot_threads",
 }
 SCENE_METADATA_LIST_FIELDS = {"characters", "objects", "goals", "plot_threads", "mood"}
+REVISION_ITEM_STATUSES = {"pending", "fixed", "ignored", "task_created"}
+REVISION_GENRE_CHECKS = {
+    "fantasy": {
+        "label": "Fantasy",
+        "checks": [
+            "magic system consistency",
+            "faction politics",
+            "invented terms",
+            "worldbuilding contradictions",
+        ],
+    },
+    "sci-fi": {
+        "label": "Sci-Fi",
+        "checks": [
+            "technology rule consistency",
+            "future setting logic",
+            "scientific consequence tracking",
+            "faction or colony systems",
+        ],
+    },
+    "science fiction": {
+        "label": "Sci-Fi",
+        "checks": [
+            "technology rule consistency",
+            "future setting logic",
+            "scientific consequence tracking",
+            "faction or colony systems",
+        ],
+    },
+    "romance": {
+        "label": "Romance",
+        "checks": [
+            "relationship escalation",
+            "emotional reciprocity",
+            "conflict-resolution rhythm",
+            "payoff timing",
+        ],
+    },
+    "mystery": {
+        "label": "Mystery / Thriller",
+        "checks": [
+            "clue placement",
+            "suspect timelines",
+            "alibi consistency",
+            "reveal fairness",
+        ],
+    },
+    "thriller": {
+        "label": "Mystery / Thriller",
+        "checks": [
+            "clue placement",
+            "suspect timelines",
+            "alibi consistency",
+            "reveal fairness",
+        ],
+    },
+    "litrpg": {
+        "label": "LitRPG",
+        "checks": [
+            "power progression",
+            "system rule continuity",
+            "reward cadence",
+            "stat escalation clarity",
+        ],
+    },
+    "web novel": {
+        "label": "Web Novels",
+        "checks": [
+            "recap support",
+            "long-running arc tracking",
+            "power progression",
+            "character reintroduction",
+        ],
+    },
+    "webnovel": {
+        "label": "Web Novels",
+        "checks": [
+            "recap support",
+            "long-running arc tracking",
+            "power progression",
+            "character reintroduction",
+        ],
+    },
+    "historical": {
+        "label": "Historical Fiction",
+        "checks": [
+            "era vocabulary fit",
+            "social custom continuity",
+            "political timeline accuracy",
+            "material culture consistency",
+        ],
+    },
+    "horror": {
+        "label": "Horror",
+        "checks": [
+            "dread escalation",
+            "threat visibility control",
+            "rules of the haunting or creature",
+            "payoff of ominous setup",
+        ],
+    },
+    "young adult": {
+        "label": "Young Adult",
+        "checks": [
+            "voice age fit",
+            "emotional immediacy",
+            "coming-of-age pivot clarity",
+            "peer relationship continuity",
+        ],
+    },
+    "ya": {
+        "label": "Young Adult",
+        "checks": [
+            "voice age fit",
+            "emotional immediacy",
+            "coming-of-age pivot clarity",
+            "peer relationship continuity",
+        ],
+    },
+    "epic": {
+        "label": "Epic Series",
+        "checks": [
+            "long-range arc tracking",
+            "cast handoff clarity",
+            "faction continuity",
+            "promise-payoff bookkeeping",
+        ],
+    },
+}
+MODERN_VOICE_MARKERS = {
+    "okay",
+    "yeah",
+    "gonna",
+    "kinda",
+    "sort of",
+    "awesome",
+    "you guys",
+    "totally",
+}
 
 
 def normalize_book_work_type(value: str | None, *, default: str = "novel") -> str:
@@ -431,6 +584,38 @@ def _derive_front_matter_defaults(raw: dict | None = None, *, title: str = "", a
     return payload
 
 
+def _normalize_revision_board(raw: dict | None) -> dict[str, Any]:
+    source = raw if isinstance(raw, dict) else {}
+    items: list[dict[str, Any]] = []
+    seen_item_ids: set[str] = set()
+    for item in source.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        item_id = " ".join(str(item.get("item_id") or "").split()).strip()
+        if not item_id or item_id in seen_item_ids:
+            continue
+        seen_item_ids.add(item_id)
+        status = " ".join(str(item.get("status") or "pending").split()).strip().lower() or "pending"
+        if status not in REVISION_ITEM_STATUSES:
+            status = "pending"
+        assigned_version_id = " ".join(str(item.get("assigned_version_id") or "").split()).strip() or None
+        task_id = " ".join(str(item.get("task_id") or "").split()).strip() or None
+        updated_at = " ".join(str(item.get("updated_at") or "").split()).strip() or None
+        items.append(
+            {
+                "item_id": item_id,
+                "status": status,
+                "assigned_version_id": assigned_version_id,
+                "task_id": task_id,
+                "updated_at": updated_at,
+            }
+        )
+    return {
+        "items": items,
+        "last_generated_at": " ".join(str(source.get("last_generated_at") or "").split()).strip() or None,
+    }
+
+
 def normalize_writer_workspace(raw: dict | None) -> dict:
     payload = json.loads(json.dumps(DEFAULT_WRITER_WORKSPACE))
     source = raw if isinstance(raw, dict) else {}
@@ -515,6 +700,7 @@ def normalize_writer_workspace(raw: dict | None) -> dict:
         }
 
     payload["manuscript_front_matter"] = _derive_front_matter_defaults(source.get("manuscript_front_matter"))
+    payload["revision_board"] = _normalize_revision_board(source.get("revision_board"))
     payload["processing"] = _normalize_processing_state(source.get("processing")) if isinstance(source.get("processing"), dict) else None
 
     return payload
@@ -536,6 +722,515 @@ def build_book_processing_payload(book: Book) -> dict[str, Any] | None:
     if not isinstance(processing, dict) or not processing:
         return None
     return BookProcessingOut.model_validate(processing).model_dump(mode="json")
+
+
+def _stable_revision_item_id(*parts: object) -> str:
+    payload = "||".join(" ".join(str(part or "").split()).strip().lower() for part in parts)
+    return f"rev-{hashlib.sha1(payload.encode('utf-8')).hexdigest()[:12]}"
+
+
+def _revision_board_state_map(workspace: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    board = workspace.get("revision_board") if isinstance(workspace.get("revision_board"), dict) else {}
+    items = board.get("items") if isinstance(board, dict) else []
+    state_map: dict[str, dict[str, Any]] = {}
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        item_id = str(item.get("item_id") or "").strip()
+        if not item_id:
+            continue
+        state_map[item_id] = item
+    return state_map
+
+
+def _overlay_revision_state(item: dict[str, Any], state_map: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    payload = dict(item)
+    state = state_map.get(str(item.get("id") or ""))
+    payload["status"] = str(state.get("status") or payload.get("status") or "pending") if state else str(payload.get("status") or "pending")
+    payload["assigned_version_id"] = str(state.get("assigned_version_id") or "").strip() or payload.get("assigned_version_id")
+    payload["task_id"] = str(state.get("task_id") or "").strip() or payload.get("task_id")
+    return payload
+
+
+def _make_revision_action_item(
+    *,
+    category: str,
+    title: str,
+    description: str,
+    severity: str,
+    chapter_ref: int | None = None,
+    source_label: str | None = None,
+    recommendation: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "id": _stable_revision_item_id(category, chapter_ref or 0, title, description[:160]),
+        "category": category,
+        "title": title,
+        "description": description,
+        "severity": severity,
+        "chapter_ref": chapter_ref,
+        "source_label": source_label,
+        "recommendation": recommendation,
+        "status": "pending",
+        "assigned_version_id": None,
+        "task_id": None,
+    }
+
+
+def _severity_from_text(text: str, *, high_threshold: int = 2) -> str:
+    lowered = text.lower()
+    hits = sum(
+        1
+        for marker in ("contradiction", "impossible", "no evidence", "break", "unforeshadowed", "no earlier", "inconsistent")
+        if marker in lowered
+    )
+    if hits >= high_threshold:
+        return "high"
+    if hits >= 1:
+        return "medium"
+    return "low"
+
+
+def _flatten_summary_points(value: object) -> list[str]:
+    if isinstance(value, list):
+        return [" ".join(str(item).split()).strip() for item in value if " ".join(str(item).split()).strip()]
+    if isinstance(value, dict):
+        flattened: list[str] = []
+        for nested in value.values():
+            flattened.extend(_flatten_summary_points(nested))
+        return flattened
+    if value:
+        cleaned = " ".join(str(value).split()).strip()
+        return [cleaned] if cleaned else []
+    return []
+
+
+def _scene_keyword_set(text: str, *, character_names: set[str], thread_terms: set[str]) -> set[str]:
+    tokens = {token.lower() for token in re.findall(r"[A-Za-z][A-Za-z'-]{2,}", text or "")}
+    tokens -= {"chapter", "scene", "their", "there", "about", "after", "before", "because", "through", "while"}
+    tokens |= {name.lower() for name in character_names if name.lower() in (text or "").lower()}
+    tokens |= {term.lower() for term in thread_terms if term.lower() in (text or "").lower()}
+    return tokens
+
+
+def _extract_chapter_text(raw: bytes | str) -> str:
+    try:
+        payload = deserialize_manuscript_content(raw)
+        return str(payload.get("text") or "").strip()
+    except Exception:
+        if isinstance(raw, bytes):
+            return raw.decode("utf-8", errors="ignore").strip()
+        return str(raw).strip()
+
+
+async def _load_chapter_texts(chapters: list[Chapter]) -> dict[int, str]:
+    loaded: dict[int, str] = {}
+    for chapter in chapters:
+        if not chapter.s3_key:
+            loaded[chapter.number] = ""
+            continue
+        try:
+            raw = await asyncio.to_thread(download_book, chapter.s3_key)
+        except Exception:
+            loaded[chapter.number] = ""
+            continue
+        loaded[chapter.number] = _extract_chapter_text(raw)
+    return loaded
+
+
+def _select_genre_checks(genre: str | None) -> list[dict[str, Any]]:
+    normalized = " ".join((genre or "").split()).strip().lower()
+    if not normalized:
+        return []
+    selected: list[dict[str, Any]] = []
+    seen_labels: set[str] = set()
+    for key, config in REVISION_GENRE_CHECKS.items():
+        if key not in normalized:
+            continue
+        label = str(config["label"])
+        if label in seen_labels:
+            continue
+        seen_labels.add(label)
+        selected.append(
+            {
+                "genre": normalized,
+                "label": label,
+                "checks": list(config["checks"]),
+                "rationale": f"LoreVia is weighting revision checks toward the story promises and failure modes that usually matter most in {label.lower()} manuscripts.",
+            }
+        )
+    return selected[:3]
+
+
+def _build_knowledge_matrix(
+    *,
+    plot_threads: list[PlotThread],
+    major_characters: list[Character],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    knowledge_facts: list[dict[str, Any]] = []
+    surfaced_items: list[dict[str, Any]] = []
+    major_names = [character.name for character in major_characters[:4]]
+
+    for thread in plot_threads[:3]:
+        related_names = [str(name).strip() for name in (thread.character_ids or []) if str(name).strip()]
+        if not related_names and thread.description:
+            related_names = [name for name in major_names if name.lower() in thread.description.lower()]
+        entries = [
+            {
+                "character_name": name,
+                "chapter_learned": thread.introduced_at,
+                "source": f"Tracked through the \"{thread.title}\" thread",
+            }
+            for name in related_names[:3]
+        ]
+        unknown_names = [name for name in major_names if name not in related_names][:2]
+        entries.extend(
+            {
+                "character_name": name,
+                "chapter_learned": None,
+                "source": "No earlier evidence surfaced yet",
+            }
+            for name in unknown_names
+        )
+        warning = None
+        if unknown_names:
+            unknown_label = ", ".join(unknown_names)
+            warning = f"LoreVia has no clear evidence yet that {unknown_label} learned this before later story beats could depend on it."
+            surfaced_items.append(
+                _make_revision_action_item(
+                    category="knowledge",
+                    title=f"Knowledge dependency around \"{thread.title}\"",
+                    description=warning,
+                    severity="medium" if (thread.importance or 0) < 8 else "high",
+                    chapter_ref=thread.last_mentioned_at or thread.introduced_at,
+                    source_label="Character knowledge state",
+                    recommendation="Either plant the knowledge transfer earlier or keep later dialogue from assuming it happened off-page.",
+                )
+            )
+        knowledge_facts.append(
+            {
+                "fact": thread.title,
+                "chapter_ref": thread.introduced_at,
+                "entries": entries,
+                "warning": warning,
+            }
+        )
+    return knowledge_facts, surfaced_items
+
+
+def _build_revision_plan(
+    *,
+    change_impacts: list[dict[str, Any]],
+    voice_alerts: list[dict[str, Any]],
+    scene_advice: list[dict[str, Any]],
+    confusion_map: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "title": "Pass 1: Fix story logic",
+            "summary": "Resolve the items most likely to create downstream contradictions or broken assumptions.",
+            "items": change_impacts[:3],
+        },
+        {
+            "title": "Pass 2: Strengthen character arcs",
+            "summary": "Tighten voice, knowledge transfer, and emotional cause-and-effect before polishing prose.",
+            "items": voice_alerts[:2],
+        },
+        {
+            "title": "Pass 3: Clarity and pacing cleanup",
+            "summary": "Trim duplicate scene work and smooth places where readers are likely to get lost.",
+            "items": [*scene_advice[:2], *confusion_map[:2]][:3],
+        },
+    ]
+
+
+async def build_revision_intelligence_payload(db: AsyncSession, book: Book) -> dict[str, Any]:
+    workspace = build_writer_workspace_payload(book)
+    revision_state_map = _revision_board_state_map(workspace)
+    chapters = (
+        await db.execute(select(Chapter).where(Chapter.book_id == book.id).order_by(Chapter.number.asc()))
+    ).scalars().all()
+    characters = (
+        await db.execute(select(Character).where(Character.book_id == book.id).order_by(Character.mention_count.desc(), Character.name))
+    ).scalars().all()
+    plot_threads = (
+        await db.execute(
+            select(PlotThread)
+            .where(PlotThread.book_id == book.id)
+            .order_by(PlotThread.importance.desc(), PlotThread.introduced_at.asc())
+        )
+    ).scalars().all()
+    chapter_summary_rows = (
+        await db.execute(
+            select(Chapter.number, Chapter.title, ChapterSummary.key_events, ChapterSummary.clues)
+            .join(ChapterSummary, ChapterSummary.chapter_id == Chapter.id)
+            .where(Chapter.book_id == book.id)
+            .order_by(Chapter.number.asc())
+        )
+    ).all()
+    scenes = (
+        await db.execute(select(NovelScene).where(NovelScene.book_id == book.id).order_by(NovelScene.chapter_number.asc(), NovelScene.sort_order.asc()))
+    ).scalars().all()
+    wiki_entries = (
+        await db.execute(select(WikiEntry).where(WikiEntry.book_id == book.id).order_by(WikiEntry.first_mention.asc(), WikiEntry.name.asc()))
+    ).scalars().all()
+    voice_profiles = (
+        await db.execute(select(CharacterVoiceProfile).where(CharacterVoiceProfile.book_id == book.id))
+    ).scalars().all()
+    chapter_reports = await list_chapter_consistency_reports(db, book, limit=6)
+
+    major_characters = [character for character in characters if (character.mention_count or 0) >= 3][:5] or list(characters[:3])
+    character_name_set = {character.name for character in major_characters}
+    thread_terms = {thread.title for thread in plot_threads[:6]}
+
+    change_impacts: list[dict[str, Any]] = []
+    for report in chapter_reports:
+        for flag in report.continuity_flags[:2]:
+            change_impacts.append(
+                _make_revision_action_item(
+                    category="impact",
+                    title=f"Chapter {report.chapter_number} assumption may break later payoff",
+                    description=flag,
+                    severity=_severity_from_text(flag),
+                    chapter_ref=report.chapter_number,
+                    source_label=report.chapter_title or "Continuity scan",
+                    recommendation="Trace where the assumption is re-used in later chapters and either restore the setup or revise the downstream reference.",
+                )
+            )
+
+    for thread in plot_threads[:4]:
+        if not thread.introduced_at:
+            continue
+        last_touch = thread.last_mentioned_at or thread.introduced_at
+        if last_touch <= thread.introduced_at:
+            continue
+        change_impacts.append(
+            _make_revision_action_item(
+                category="impact",
+                title=f"Downstream logic still depends on \"{thread.title}\"",
+                description=(
+                    f"This thread was introduced in chapter {thread.introduced_at} and is still active by chapter {last_touch}. "
+                    f"Revising its setup could ripple into later payoffs. {(thread.description or '').strip()}".strip()
+                ),
+                severity="high" if (thread.importance or 0) >= 8 else "medium",
+                chapter_ref=last_touch,
+                source_label="Plot thread tracker",
+                recommendation="Check the last payoff scene that references this thread before you finalize any rewrite to its setup.",
+            )
+        )
+
+    knowledge_matrix, knowledge_items = _build_knowledge_matrix(plot_threads=plot_threads, major_characters=major_characters)
+    change_impacts.extend(knowledge_items)
+
+    scene_advice: list[dict[str, Any]] = []
+    for left, right in zip(scenes, scenes[1:]):
+        if left.chapter_number is None or right.chapter_number is None:
+            continue
+        if right.chapter_number - left.chapter_number > 1:
+            continue
+        left_text = " ".join(filter(None, [left.title, left.description, left.body]))
+        right_text = " ".join(filter(None, [right.title, right.description, right.body]))
+        overlap = _scene_keyword_set(left_text, character_names=character_name_set, thread_terms=thread_terms) & _scene_keyword_set(
+            right_text,
+            character_names=character_name_set,
+            thread_terms=thread_terms,
+        )
+        if len(overlap) >= 2:
+            scene_advice.append(
+                _make_revision_action_item(
+                    category="scene",
+                    title=f"Scenes in Chapters {left.chapter_number} and {right.chapter_number} may be doing duplicate work",
+                    description=(
+                        f"These scenes share the same story pressure around {', '.join(sorted(list(overlap))[:3])}. "
+                        "LoreVia sees a possible merge or compression opportunity."
+                    ),
+                    severity="medium",
+                    chapter_ref=right.chapter_number,
+                    source_label="Scene cut / merge advisor",
+                    recommendation="Keep the strongest emotional beat and fold the duplicate exposition or delay beat into one scene.",
+                )
+            )
+            break
+
+    for scene in scenes[:6]:
+        scene_text = " ".join(filter(None, [scene.title, scene.description, scene.body]))
+        keyword_hits = len(_scene_keyword_set(scene_text, character_names=character_name_set, thread_terms=thread_terms))
+        if _count_words(scene.body or "") < 90 or keyword_hits <= 2:
+            scene_advice.append(
+                _make_revision_action_item(
+                    category="scene",
+                    title=f"Scene \"{scene.title}\" may be low-impact right now",
+                    description=(
+                        "LoreVia could not find a strong tie from this scene into major plot threads, major character arc movement, or later payoff scaffolding."
+                    ),
+                    severity="low",
+                    chapter_ref=scene.chapter_number,
+                    source_label="Scene cut / merge advisor",
+                    recommendation="Cut it, compress it, or add a stronger consequence that changes what later chapters can assume.",
+                )
+            )
+            break
+
+    confusion_map: list[dict[str, Any]] = []
+    chapter_texts = await _load_chapter_texts(list(chapters[:6]))
+    for chapter in chapters[:6]:
+        chapter_text = chapter_texts.get(chapter.number, "")
+        introduced_characters = [character.name for character in characters if character.first_chapter == chapter.number]
+        introduced_terms = [entry.name for entry in wiki_entries if entry.first_mention == chapter.number]
+        pronoun_count = len(re.findall(r"\b(?:he|she|they|them|his|her|their)\b", chapter_text.lower()))
+        density_score = (len(introduced_characters) * 2) + (len(introduced_terms) * 2) + (1 if pronoun_count >= 12 else 0)
+        if density_score < 5:
+            continue
+        signals = []
+        if introduced_characters:
+            signals.append(f"{len(introduced_characters)} named characters arrive here")
+        if introduced_terms:
+            signals.append(f"{len(introduced_terms)} lore terms appear here")
+        if pronoun_count >= 12:
+            signals.append("pronoun density is high relative to stable anchors")
+        confusion_map.append(
+            _make_revision_action_item(
+                category="confusion",
+                title=f"Reader confusion risk in Chapter {chapter.number}",
+                description="; ".join(signals).strip().capitalize() + ".",
+                severity="high" if density_score >= 8 else "medium",
+                chapter_ref=chapter.number,
+                source_label=chapter.title or "Reader confusion map",
+                recommendation="Delay some names or terms until the immediate scene goal is clear, or restate the anchor the reader should hold onto first.",
+            )
+        )
+
+    voice_alerts: list[dict[str, Any]] = []
+    character_rows = [{"id": str(character.id), "name": character.name, "aliases": character.aliases or []} for character in characters]
+    profiles_by_character_id = {str(profile.character_id): profile for profile in voice_profiles}
+    for chapter in chapters[-3:]:
+        chapter_text = chapter_texts.get(chapter.number)
+        if chapter_text is None:
+            chapter_text = (await _load_chapter_texts([chapter])).get(chapter.number, "")
+        attributed_dialogue = extract_dialogue_samples_by_character(chapter_text, character_rows)
+        for character in major_characters[:3]:
+            profile = profiles_by_character_id.get(str(character.id))
+            if profile is None:
+                continue
+            samples = attributed_dialogue.get(character.name, [])
+            sample_metrics = compute_voice_metrics(samples)
+            if int(sample_metrics.get("sample_dialogue_count") or 0) <= 0:
+                continue
+            profile_payload = {
+                "sample_dialogue_count": profile.sample_dialogue_count,
+                "avg_sentence_length": profile.avg_sentence_length or 0,
+                "formality_score_x1000": profile.formality_score_x1000 or 0,
+                "contraction_rate_x1000": profile.contraction_rate_x1000 or 0,
+                "question_rate_x1000": profile.question_rate_x1000 or 0,
+                "exclamation_rate_x1000": profile.exclamation_rate_x1000 or 0,
+                "ellipsis_rate_x1000": profile.ellipsis_rate_x1000 or 0,
+                "dash_rate_x1000": profile.dash_rate_x1000 or 0,
+                "lexical_complexity_x1000": profile.lexical_complexity_x1000 or 0,
+                "emotional_intensity_x1000": profile.emotional_intensity_x1000 or 0,
+            }
+            match_score, signals = score_voice_match(profile_payload, sample_metrics)
+            if match_score >= 70:
+                continue
+            voice_alerts.append(
+                _make_revision_action_item(
+                    category="voice",
+                    title=f"{character.name}'s voice drifts in Chapter {chapter.number}",
+                    description=(
+                        f"Match score dropped to {match_score}/100. "
+                        + ("; ".join(signals[:2]) if signals else "Dialogue cadence feels off against the established baseline.")
+                    ),
+                    severity="high" if match_score < 55 else "medium",
+                    chapter_ref=chapter.number,
+                    source_label=chapter.title or "Voice consistency checker",
+                    recommendation="Let the scene carry less exposition through this character, or rewrite the dialogue back toward their established rhythm and vocabulary.",
+                )
+            )
+            break
+        normalized_genre = " ".join((book.genre or "").split()).strip().lower()
+        if any(marker in chapter_text.lower() for marker in MODERN_VOICE_MARKERS) and ("historical" in normalized_genre or "fantasy" in normalized_genre):
+            voice_alerts.append(
+                _make_revision_action_item(
+                    category="voice",
+                    title=f"Setting voice drift in Chapter {chapter.number}",
+                    description="Modern conversational markers appear in a setting that reads as historical or secondary-world fantasy.",
+                    severity="medium",
+                    chapter_ref=chapter.number,
+                    source_label=chapter.title or "Voice consistency checker",
+                    recommendation="Swap the modern phrasing for diction that matches the manuscript's established setting voice.",
+                )
+            )
+            break
+
+    change_impacts = change_impacts[:6]
+    scene_advice = scene_advice[:3]
+    confusion_map = confusion_map[:3]
+    voice_alerts = voice_alerts[:3]
+
+    revision_plan = _build_revision_plan(
+        change_impacts=change_impacts,
+        voice_alerts=voice_alerts,
+        scene_advice=scene_advice,
+        confusion_map=confusion_map,
+    )
+
+    surfaced_lists = [change_impacts, scene_advice, confusion_map, voice_alerts]
+    for collection in surfaced_lists:
+        for index, item in enumerate(collection):
+            collection[index] = _overlay_revision_state(item, revision_state_map)
+    for revision_pass in revision_plan:
+        revision_pass["items"] = [_overlay_revision_state(item, revision_state_map) for item in revision_pass["items"]]
+
+    all_items_by_id: dict[str, dict[str, Any]] = {}
+    for collection in [*surfaced_lists, *[revision_pass["items"] for revision_pass in revision_plan]]:
+        for item in collection:
+            all_items_by_id[str(item["id"])] = item
+
+    active_items = [item for item in all_items_by_id.values() if item.get("status") not in {"fixed", "ignored"}]
+    high_items = [item for item in active_items if item.get("severity") == "high"]
+    task_ready_items = [item for item in active_items if item.get("status") != "task_created"]
+    hero_message = (
+        f"{len(high_items)} downstream logic risk{'s' if len(high_items) != 1 else ''} need attention first."
+        if high_items
+        else f"{len(active_items)} revision item{'s' if len(active_items) != 1 else ''} are worth a structured pass."
+    )
+
+    if not knowledge_matrix and chapter_summary_rows:
+        for chapter_number, _, key_events, clues in chapter_summary_rows[:2]:
+            facts = [*_flatten_summary_points(clues), *_flatten_summary_points(key_events)]
+            if not facts:
+                continue
+            knowledge_matrix.append(
+                {
+                    "fact": facts[0],
+                    "chapter_ref": chapter_number,
+                    "entries": [
+                        {
+                            "character_name": character.name,
+                            "chapter_learned": chapter_number if index == 0 else None,
+                            "source": "Chapter summary evidence" if index == 0 else "No earlier evidence surfaced yet",
+                        }
+                        for index, character in enumerate(major_characters[:2])
+                    ],
+                    "warning": None,
+                }
+            )
+
+    return {
+        "tagline": "Know what your edit breaks before your readers do.",
+        "summary": {
+            "hero_message": hero_message,
+            "active_item_count": len(active_items),
+            "high_severity_count": len(high_items),
+            "task_ready_count": len(task_ready_items),
+        },
+        "change_impacts": change_impacts,
+        "genre_checks": _select_genre_checks(book.genre),
+        "revision_plan": revision_plan,
+        "knowledge_matrix": knowledge_matrix[:3],
+        "scene_advice": scene_advice,
+        "confusion_map": confusion_map,
+        "voice_alerts": voice_alerts,
+    }
 
 
 def estimate_readability(text: str) -> dict[str, Any]:
@@ -602,6 +1297,14 @@ async def build_story_health_payload(db: AsyncSession, book: Book) -> StoryHealt
         relationship_counts[relationship.character_a_id] = relationship_counts.get(relationship.character_a_id, 0) + 1
         relationship_counts[relationship.character_b_id] = relationship_counts.get(relationship.character_b_id, 0) + 1
 
+    major_characters = [
+        character
+        for character in visible_characters
+        if (character.mention_count or 0) >= 6 or character.role in {"mc", "sc"}
+    ]
+    if not major_characters:
+        major_characters = visible_characters[: max(1, min(3, len(visible_characters)))]
+
     character_scores: list[float] = []
     for character in visible_characters:
         evidence_points = 0
@@ -613,28 +1316,121 @@ async def build_story_health_payload(db: AsyncSession, book: Book) -> StoryHealt
             evidence_points += 1
         if character.motivations or character.fears:
             evidence_points += 1
+        if character.growth_events:
+            evidence_points += 1
         if relationship_counts.get(character.id, 0) > 0:
             evidence_points += 1
-        character_scores.append((evidence_points / 5) * 100)
+        character_scores.append((evidence_points / 6) * 100)
 
-    character_score = _clamp_score(statistics.fmean(character_scores), minimum=0, maximum=100) if character_scores else 0
-    character_detail = f"{len(visible_characters)} visible character profiles scored from actual role, arc, trait, motive, and relationship coverage."
+    state_rows = (
+        await db.execute(
+            select(CharacterState.character_id, func.count(CharacterState.id))
+            .join(Character, Character.id == CharacterState.character_id)
+            .where(Character.book_id == book.id)
+            .group_by(CharacterState.character_id)
+        )
+    ).all()
+    state_counts = {character_id: int(count or 0) for character_id, count in state_rows}
+    major_with_states = sum(1 for character in major_characters if state_counts.get(character.id, 0) > 0)
+    state_coverage = (major_with_states / len(major_characters)) if major_characters else 0.0
+
+    character_score = _clamp_score(
+        (statistics.fmean(character_scores) if character_scores else 0) * 0.78 + (state_coverage * 22),
+        minimum=0,
+        maximum=100,
+    )
+    character_detail = (
+        f"{len(visible_characters)} visible profiles scored from role, arc, trait, motive, growth, and relationship coverage; "
+        f"{major_with_states}/{len(major_characters) or 1} major characters have tracked state snapshots."
+    )
 
     chapter_reports = await list_chapter_consistency_reports(db, book, limit=6)
     continuity_issue_count = sum(len(report.continuity_flags) for report in chapter_reports)
+    continuity_score = _clamp_score(
+        95
+        - (continuity_issue_count * 10)
+        - (max(0, len(major_characters) - major_with_states) * 4)
+        + min(len(chapter_reports) * 2, 6),
+        minimum=0,
+        maximum=96,
+    )
+    continuity_detail = (
+        f"{continuity_issue_count} recent continuity flags across {len(chapter_reports)} reports; "
+        f"{major_with_states}/{len(major_characters) or 1} major characters are backed by state history. "
+        "Even when no acute break is logged, keep pressure-testing chapter-to-chapter state drift and role labeling."
+    )
 
     plot_threads = (
         await db.execute(select(PlotThread).where(PlotThread.book_id == book.id))
     ).scalars().all()
-    resolved_threads = sum(1 for thread in plot_threads if thread.status == "resolved")
-    abandoned_threads = sum(1 for thread in plot_threads if thread.status == "abandoned")
+    resolved_threads = sum(1 for thread in plot_threads if derive_plot_thread_status(
+        thread.status,
+        introduced_at=thread.introduced_at,
+        last_mentioned_at=thread.last_mentioned_at or thread.introduced_at,
+        resolved_at=thread.resolved_at,
+        current_chapter=book.total_chapters,
+    ) == "resolved")
+    abandoned_threads = sum(1 for thread in plot_threads if derive_plot_thread_status(
+        thread.status,
+        introduced_at=thread.introduced_at,
+        last_mentioned_at=thread.last_mentioned_at or thread.introduced_at,
+        resolved_at=thread.resolved_at,
+        current_chapter=book.total_chapters,
+    ) == "abandoned")
+    open_threads = sum(1 for thread in plot_threads if is_plot_thread_open(derive_plot_thread_status(
+        thread.status,
+        introduced_at=thread.introduced_at,
+        last_mentioned_at=thread.last_mentioned_at or thread.introduced_at,
+        resolved_at=thread.resolved_at,
+        current_chapter=book.total_chapters,
+    )))
     total_threads = len(plot_threads)
-    plot_score = _clamp_score(
-        62 + min(total_threads * 3, 18) + min(resolved_threads * 2, 12) - (continuity_issue_count * 8) - (abandoned_threads * 5),
-        minimum=0,
-        maximum=100,
+    anchored_threads = sum(1 for thread in plot_threads if thread.introduced_at is not None)
+    chronology_conflicts = sum(
+        1 for thread in plot_threads if thread.introduced_at is not None and thread.resolved_at is not None and thread.resolved_at < thread.introduced_at
     )
-    plot_detail = f"{continuity_issue_count} recent continuity flags across {len(chapter_reports)} reports and {resolved_threads}/{total_threads} resolved plot threads."
+    stale_open_threads = sum(
+        1
+        for thread in plot_threads
+        if is_plot_thread_open(derive_plot_thread_status(
+            thread.status,
+            introduced_at=thread.introduced_at,
+            last_mentioned_at=thread.last_mentioned_at or thread.introduced_at,
+            resolved_at=thread.resolved_at,
+            current_chapter=book.total_chapters,
+        ))
+        and (thread.last_mentioned_at or thread.introduced_at) is not None
+        and (book.total_chapters or 0) - int(thread.last_mentioned_at or thread.introduced_at or 0) >= 8
+    )
+    timeline_score = _clamp_score(
+        58
+        + (((anchored_threads / total_threads) if total_threads else 1.0) * 22)
+        + ((((book.total_chapters or 0) - min(continuity_issue_count, book.total_chapters or 0)) / (book.total_chapters or 1)) * 20 if (book.total_chapters or 0) > 0 else 10)
+        - (continuity_issue_count * 4)
+        - (chronology_conflicts * 12),
+        minimum=0,
+        maximum=96,
+    )
+    timeline_detail = (
+        f"{anchored_threads}/{total_threads or 1} plot threads have chapter anchors, with {chronology_conflicts} chronology conflicts "
+        f"and {continuity_issue_count} recent continuity flags. "
+        "Timeline clarity should still be stress-tested for implied travel time, off-page gaps, and stale open beats."
+    )
+
+    plot_score = _clamp_score(
+        52
+        + (((resolved_threads / total_threads) if total_threads else 1.0) * 30)
+        + min(total_threads * 2, 12)
+        - (stale_open_threads * 7)
+        - (abandoned_threads * 5)
+        - max(0, open_threads - resolved_threads) * 2,
+        minimum=0,
+        maximum=96,
+    )
+    plot_detail = (
+        f"{resolved_threads}/{total_threads or 1} plot threads resolved, {open_threads} still open, "
+        f"and {stale_open_threads} have been hanging open for 8+ chapters."
+    )
 
     wiki_count = (
         await db.scalar(select(func.count(WikiEntry.id)).where(WikiEntry.book_id == book.id))
@@ -661,9 +1457,41 @@ async def build_story_health_payload(db: AsyncSession, book: Book) -> StoryHealt
     world_score = _clamp_score(
         58 + min(world_document_count * 8, 24) + min(wiki_count * 2, 18) - (priority_gaps * 7) - (consistency_flags * 6),
         minimum=0,
-        maximum=100,
+        maximum=96,
     )
-    world_detail = f"{world_document_count} active world documents, {wiki_count} wiki entries, and {priority_gaps + consistency_flags} cached world-analysis issues."
+    world_detail = (
+        f"{world_document_count} active world documents, {wiki_count} wiki entries, and {priority_gaps + consistency_flags} cached world-analysis issues. "
+        "Lore coverage still benefits from ongoing contradiction hunts and missing-rule checks."
+    )
+
+    voice_profiles = (
+        await db.execute(select(CharacterVoiceProfile).where(CharacterVoiceProfile.book_id == book.id))
+    ).scalars().all()
+    voice_profiles_by_character = {profile.character_id: profile for profile in voice_profiles}
+    major_with_voice = sum(
+        1
+        for character in major_characters
+        if (voice_profiles_by_character.get(character.id).sample_dialogue_count if voice_profiles_by_character.get(character.id) else 0) >= 3
+    )
+    voice_marker_profiles = sum(
+        1
+        for profile in voice_profiles
+        if (profile.signature_phrases and len(profile.signature_phrases) > 0)
+        or (profile.dominant_markers and len(profile.dominant_markers) > 0)
+    )
+    dialogue_score = _clamp_score(
+        44
+        + (((major_with_voice / len(major_characters)) if major_characters else 0.0) * 36)
+        + (((voice_marker_profiles / len(voice_profiles)) if voice_profiles else 0.0) * 20)
+        + min(sum(profile.sample_dialogue_count for profile in voice_profiles), 20),
+        minimum=0,
+        maximum=96,
+    )
+    dialogue_detail = (
+        f"{major_with_voice}/{len(major_characters) or 1} major characters have reusable voice samples; "
+        f"{voice_marker_profiles}/{len(voice_profiles) or 1} voice profiles include markers or signature phrases. "
+        "Voice review should still keep looking for flattening, over-shared phrasing, and missing contrast."
+    )
 
     chapter_word_counts = [
         int(word_count)
@@ -689,7 +1517,7 @@ async def build_story_health_payload(db: AsyncSession, book: Book) -> StoryHealt
         pacing_score = _clamp_score(
             100 - (coefficient_of_variation * 85) - (outlier_rate * 35),
             minimum=0,
-            maximum=100,
+            maximum=96,
         )
         pacing_detail = f"{len(chapter_word_counts)} chapter word counts measured; {outlier_count} pacing outliers against a {int(round(median_word_count))}-word median."
     elif len(chapter_word_counts) == 1:
@@ -700,9 +1528,9 @@ async def build_story_health_payload(db: AsyncSession, book: Book) -> StoryHealt
         pacing_detail = "No persisted chapter word counts are available yet for pacing analysis."
 
     overall_score = _clamp_score(
-        statistics.fmean([character_score, world_score, plot_score, pacing_score]),
+        statistics.fmean([continuity_score, character_score, timeline_score, plot_score, world_score, pacing_score, dialogue_score]),
         minimum=0,
-        maximum=100,
+        maximum=94,
     )
     status, summary = _story_health_status(overall_score)
     return StoryHealthOut(
@@ -710,10 +1538,13 @@ async def build_story_health_payload(db: AsyncSession, book: Book) -> StoryHealt
         status=status,
         summary=summary,
         metrics=[
-            {"label": "Characters", "score": character_score, "detail": character_detail},
-            {"label": "World Coherence", "score": world_score, "detail": world_detail},
-            {"label": "Plot Consistency", "score": plot_score, "detail": plot_detail},
+            {"label": "Continuity", "score": continuity_score, "detail": continuity_detail},
+            {"label": "Character consistency", "score": character_score, "detail": character_detail},
+            {"label": "Timeline clarity", "score": timeline_score, "detail": timeline_detail},
+            {"label": "Plot thread closure", "score": plot_score, "detail": plot_detail},
+            {"label": "Worldbuilding consistency", "score": world_score, "detail": world_detail},
             {"label": "Pacing", "score": pacing_score, "detail": pacing_detail},
+            {"label": "Dialogue/voice consistency", "score": dialogue_score, "detail": dialogue_detail},
         ],
     )
 
@@ -730,6 +1561,230 @@ def _estimate_syllables(word: str) -> int:
 
 
 # ─── Ownership guards ─────────────────────────────────────────────────────────
+
+COLLABORATION_ROLES = {
+    "viewer",
+    "commenter",
+    "editor",
+    "beta_reader",
+    "developmental_editor",
+    "coauthor",
+}
+COLLABORATION_EDIT_ROLES = {"editor", "developmental_editor", "coauthor"}
+COLLABORATION_COMMENT_ROLES = COLLABORATION_EDIT_ROLES | {"commenter", "beta_reader"}
+COLLABORATION_DEFAULT_SCOPE = {
+    "chapter_start": None,
+    "chapter_end": None,
+    "character_bible": False,
+    "continuity_report": False,
+    "reader_confusion_report": False,
+}
+
+
+def normalize_collaboration_email(email: str) -> str:
+    cleaned = str(email or "").strip().lower()
+    if not cleaned or "@" not in cleaned or len(cleaned) > 320:
+        raise HTTPException(400, "Valid collaborator email is required")
+    return cleaned
+
+
+def normalize_collaboration_role(role: str) -> str:
+    cleaned = str(role or "").strip().lower()
+    if cleaned not in COLLABORATION_ROLES:
+        raise HTTPException(400, "Invalid collaborator role")
+    return cleaned
+
+
+def normalize_collaboration_scope(raw_scope: dict | CollaborationScope | None) -> dict:
+    source = raw_scope.model_dump() if isinstance(raw_scope, CollaborationScope) else dict(raw_scope or {})
+    scope = dict(COLLABORATION_DEFAULT_SCOPE)
+    scope.update({key: source.get(key) for key in scope if key in source})
+
+    chapter_start = scope.get("chapter_start")
+    chapter_end = scope.get("chapter_end")
+    if chapter_start is not None:
+        chapter_start = int(chapter_start)
+        if chapter_start < 1:
+            raise HTTPException(400, "chapter_start must be at least 1")
+    if chapter_end is not None:
+        chapter_end = int(chapter_end)
+        if chapter_end < 1:
+            raise HTTPException(400, "chapter_end must be at least 1")
+    if chapter_start is not None and chapter_end is not None and chapter_end < chapter_start:
+        raise HTTPException(400, "chapter_end cannot be earlier than chapter_start")
+
+    scope["chapter_start"] = chapter_start
+    scope["chapter_end"] = chapter_end
+    scope["character_bible"] = bool(scope.get("character_bible"))
+    scope["continuity_report"] = bool(scope.get("continuity_report"))
+    scope["reader_confusion_report"] = bool(scope.get("reader_confusion_report"))
+    return scope
+
+
+def collaboration_scope_model(scope: dict | None) -> CollaborationScope:
+    return CollaborationScope(**normalize_collaboration_scope(scope))
+
+
+def serialize_book_collaborator(collaborator: BookCollaborator) -> BookCollaboratorOut:
+    return BookCollaboratorOut(
+        id=str(collaborator.id),
+        book_id=str(collaborator.book_id),
+        email=collaborator.email,
+        display_name=collaborator.display_name,
+        role=collaborator.role,
+        scope=collaboration_scope_model(collaborator.scope),
+        invite_status=collaborator.invite_status,
+        invited_at=collaborator.invited_at,
+        updated_at=collaborator.updated_at,
+    )
+
+
+def collaboration_allows_chapter(collaborator: BookCollaborator | None, chapter_number: int) -> bool:
+    if collaborator is None:
+        return True
+    scope = normalize_collaboration_scope(collaborator.scope)
+    chapter_start = scope.get("chapter_start")
+    chapter_end = scope.get("chapter_end")
+    if chapter_start is not None and chapter_number < chapter_start:
+        return False
+    if chapter_end is not None and chapter_number > chapter_end:
+        return False
+    return True
+
+
+def collaboration_can_comment(collaborator: BookCollaborator | None) -> bool:
+    if collaborator is None:
+        return True
+    return collaborator.role in COLLABORATION_COMMENT_ROLES
+
+
+def collaboration_can_edit(collaborator: BookCollaborator | None) -> bool:
+    if collaborator is None:
+        return True
+    return collaborator.role in COLLABORATION_EDIT_ROLES
+
+
+def collaboration_has_resource(collaborator: BookCollaborator | None, resource: str) -> bool:
+    if collaborator is None:
+        return True
+    return bool(normalize_collaboration_scope(collaborator.scope).get(resource))
+
+
+async def find_active_book_collaboration(
+    db: AsyncSession,
+    book_id: uuid.UUID,
+    user: User,
+) -> BookCollaborator | None:
+    email = normalize_collaboration_email(user.email)
+    return (
+        await db.execute(
+            select(BookCollaborator).where(
+                BookCollaborator.book_id == book_id,
+                BookCollaborator.email == email,
+                BookCollaborator.invite_status == "active",
+            )
+        )
+    ).scalar_one_or_none()
+
+
+async def get_book_with_collaboration_access(
+    db: AsyncSession,
+    book_id: uuid.UUID,
+    user: User,
+) -> tuple[Book, BookCollaborator | None]:
+    book = await db.get(Book, book_id)
+    if not book:
+        raise HTTPException(404, "Book not found")
+    if book.user_id == user.id:
+        return book, None
+    collaborator = await find_active_book_collaboration(db, book_id, user)
+    if collaborator:
+        return book, collaborator
+    raise HTTPException(404, "Book not found")
+
+
+async def list_book_collaborators(db: AsyncSession, book: Book) -> list[BookCollaboratorOut]:
+    rows = (
+        await db.execute(
+            select(BookCollaborator)
+            .where(BookCollaborator.book_id == book.id)
+            .order_by(BookCollaborator.invited_at.desc())
+        )
+    ).scalars().all()
+    return [serialize_book_collaborator(row) for row in rows]
+
+
+async def create_book_collaborator(
+    db: AsyncSession,
+    book: Book,
+    *,
+    email: str,
+    role: str,
+    scope: CollaborationScope,
+    display_name: str | None = None,
+) -> BookCollaboratorOut:
+    normalized_email = normalize_collaboration_email(email)
+    normalized_role = normalize_collaboration_role(role)
+    normalized_scope = normalize_collaboration_scope(scope)
+    invited_user = (
+        await db.execute(select(User).where(User.email == normalized_email))
+    ).scalar_one_or_none()
+    collaborator = (
+        await db.execute(
+            select(BookCollaborator).where(
+                BookCollaborator.book_id == book.id,
+                BookCollaborator.email == normalized_email,
+            )
+        )
+    ).scalar_one_or_none()
+    if collaborator is None:
+        collaborator = BookCollaborator(book_id=book.id, email=normalized_email)
+        db.add(collaborator)
+    collaborator.display_name = str(display_name or "").strip() or None
+    collaborator.role = normalized_role
+    collaborator.scope = normalized_scope
+    collaborator.invite_status = "active"
+    collaborator.invited_user_id = invited_user.id if invited_user else None
+    await db.commit()
+    await db.refresh(collaborator)
+    return serialize_book_collaborator(collaborator)
+
+
+async def update_book_collaborator(
+    db: AsyncSession,
+    book: Book,
+    collaboration_id: uuid.UUID,
+    *,
+    role: str | None = None,
+    scope: CollaborationScope | None = None,
+    display_name: str | None = None,
+    invite_status: str | None = None,
+) -> BookCollaboratorOut:
+    collaborator = await db.get(BookCollaborator, collaboration_id)
+    if not collaborator or collaborator.book_id != book.id:
+        raise HTTPException(404, "Collaborator not found")
+    if role is not None:
+        collaborator.role = normalize_collaboration_role(role)
+    if scope is not None:
+        collaborator.scope = normalize_collaboration_scope(scope)
+    if display_name is not None:
+        collaborator.display_name = str(display_name or "").strip() or None
+    if invite_status is not None:
+        if invite_status not in {"active", "revoked"}:
+            raise HTTPException(400, "Invalid invite status")
+        collaborator.invite_status = invite_status
+    await db.commit()
+    await db.refresh(collaborator)
+    return serialize_book_collaborator(collaborator)
+
+
+async def delete_book_collaborator(db: AsyncSession, book: Book, collaboration_id: uuid.UUID) -> None:
+    collaborator = await db.get(BookCollaborator, collaboration_id)
+    if not collaborator or collaborator.book_id != book.id:
+        raise HTTPException(404, "Collaborator not found")
+    await db.delete(collaborator)
+    await db.commit()
+
 
 async def get_owned_book(db: AsyncSession, book_id: uuid.UUID, user_id: uuid.UUID) -> Book:
     book = await db.get(Book, book_id)
@@ -2412,7 +3467,7 @@ async def build_series_bible_payload(
                 "note": thread.note,
             },
         )
-        if thread.status not in {"resolved", "abandoned"}:
+        if not is_plot_thread_closed(thread.status):
             bucket["episodes"].add(thread.book_id)
         bucket["statuses"].add(thread.status)
         if not bucket.get("note") and thread.note:
@@ -2422,7 +3477,7 @@ async def build_series_bible_payload(
         (
             SeriesBiblePlotThreadOut(
                 title=bucket["title"],
-                status="ongoing" if "ongoing" in bucket["statuses"] else sorted(bucket["statuses"])[0],
+                status="developing" if "developing" in bucket["statuses"] or "ongoing" in bucket["statuses"] else sorted(bucket["statuses"])[0],
                 episode_count=len(bucket["episodes"]),
                 episodes=[
                     episode_lookup[book_id]
@@ -2514,7 +3569,12 @@ async def build_series_bible_payload(
 
 # ─── BookOut construction ─────────────────────────────────────────────────────
 
-async def book_out(db: AsyncSession, book: Book, user_id: uuid.UUID) -> BookOut:
+async def book_out(
+    db: AsyncSession,
+    book: Book,
+    user_id: uuid.UUID,
+    collaborator: BookCollaborator | None = None,
+) -> BookOut:
     await ensure_book_cover(db, book)
     progress = (
         await db.execute(
@@ -2564,6 +3624,8 @@ async def book_out(db: AsyncSession, book: Book, user_id: uuid.UUID) -> BookOut:
         chapters_read_count=chapters_read_count,
         chapters_left=chapters_left,
         processing=build_book_processing_payload(book),
+        collaboration_role=collaborator.role if collaborator else None,
+        collaboration_scope=collaboration_scope_model(collaborator.scope) if collaborator else None,
     )
 
 
@@ -3360,9 +4422,10 @@ async def build_character_card_payload(db: AsyncSession, book: Book, character: 
         await db.execute(select(Character).where(Character.id.in_(other_ids)))
     ).scalars().all() if other_ids else []
     others_by_id = {other.id: other for other in others}
+    counterpart_names = {other.id: other.name for other in others}
 
     from app.engine.character.profile_builder import build_description
-    from app.utils.character_utils import character_status
+    from app.utils.character_utils import build_character_arc_tracker, character_status
 
     relationship_rows = []
     for rel in rels:
@@ -3406,9 +4469,21 @@ async def build_character_card_payload(db: AsyncSession, book: Book, character: 
             f"{character.name} has not appeared for {book.total_chapters - character.last_seen_chapter} {story_units}."
         )
     if character_threads:
-        unresolved = [thread["title"] for thread in character_threads if thread["status"] not in {"resolved", "abandoned"}]
+        unresolved = [thread["title"] for thread in character_threads if not is_plot_thread_closed(thread["status"])]
         if unresolved:
             continuity_watch.append(f"Still tied to unresolved threads: {', '.join(unresolved[:3])}.")
+    states = (
+        await db.execute(
+            select(CharacterState)
+            .where(CharacterState.character_id == character.id)
+            .order_by(CharacterState.at_chapter)
+        )
+    ).scalars().all()
+    voice_profile = (
+        await db.execute(
+            select(CharacterVoiceProfile).where(CharacterVoiceProfile.character_id == character.id)
+        )
+    ).scalar_one_or_none()
     return {
         "book_title": book.title,
         "work_type": book.work_type,
@@ -3422,13 +4497,25 @@ async def build_character_card_payload(db: AsyncSession, book: Book, character: 
         "last_appearance": character.last_seen_chapter,
         "mentions_count": character.mention_count or 0,
         "personality_tags": character.personality_tags or [],
+        "goal": character.goal,
         "motivations": character.motivations or [],
         "fears": character.fears or [],
+        "lie_they_believe": character.lie_they_believe,
+        "backstory_wound": character.backstory_wound,
+        "arc_type": character.arc_type,
         "arc_summary": character.arc_summary,
         "growth_events": character.growth_events or [],
         "relationships": relationship_rows,
         "plot_threads": character_threads,
         "continuity_watch": continuity_watch,
+        "arc_tracker": build_character_arc_tracker(
+            character,
+            states=list(states),
+            relationships=list(rels),
+            counterpart_names=counterpart_names,
+            voice_profile=voice_profile,
+            total_chapters=book.total_chapters,
+        ),
         "filename_base": safe_name,
     }
 
@@ -3740,7 +4827,7 @@ async def build_prewriting_check(
     unresolved_threads_rows = (
         await db.execute(
             select(PlotThread)
-            .where(PlotThread.book_id == book.id, PlotThread.status.in_(["introduced", "ongoing", "unknown"]))
+            .where(PlotThread.book_id == book.id)
             .order_by(PlotThread.importance.desc(), PlotThread.introduced_at, PlotThread.title)
             .limit(8)
         )
@@ -3749,11 +4836,26 @@ async def build_prewriting_check(
         {
             "id": str(thread.id),
             "title": thread.title,
-            "status": thread.status,
+            "status": derive_plot_thread_status(
+                thread.status,
+                introduced_at=thread.introduced_at,
+                last_mentioned_at=thread.last_mentioned_at or thread.introduced_at,
+                resolved_at=thread.resolved_at,
+                current_chapter=book.total_chapters,
+            ),
             "introduced_at": thread.introduced_at,
             "note": thread.note,
         }
         for thread in unresolved_threads_rows
+        if is_plot_thread_open(
+            derive_plot_thread_status(
+                thread.status,
+                introduced_at=thread.introduced_at,
+                last_mentioned_at=thread.last_mentioned_at or thread.introduced_at,
+                resolved_at=thread.resolved_at,
+                current_chapter=book.total_chapters,
+            )
+        )
     ]
 
     recent_summary_rows = (

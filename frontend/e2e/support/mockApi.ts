@@ -96,7 +96,14 @@ const chapter = {
   intelligence_available: true,
   text_url: null,
   text_content:
-    "Nora crossed the ember gate with ash on her sleeves. The city bells rang beyond the bridge.",
+    [
+      "Nora crossed the ember gate with ash on her sleeves. The city bells rang beyond the bridge.",
+      "The courier behind her whispered that the old road remembered every footstep.",
+      "* * *",
+      "Morning came with a hard white sun and the smell of metal in the rain.",
+      "RADIO: All westbound gates remain closed until the ashfall advisory is lifted.",
+      "> CITY BULLETIN\n> Curfew begins at ninth bell. Keep identification papers ready.",
+    ].join("\n\n"),
   html_content:
     "<p>Nora crossed the ember gate with ash on her sleeves.</p><p>The city bells rang beyond the bridge.</p>",
   media: [],
@@ -196,7 +203,114 @@ const writerWorkspace = {
     include_epigraph: false,
     include_prologue: false,
   },
+  revision_board: {
+    items: [],
+    last_generated_at: null,
+  },
   processing: book.processing,
+}
+
+const revisionIntelligence = {
+  tagline: "Know what your edit breaks before your readers do.",
+  summary: {
+    hero_message: "2 downstream logic risks need attention first.",
+    active_item_count: 5,
+    high_severity_count: 2,
+    task_ready_count: 5,
+  },
+  change_impacts: [
+    {
+      id: "rev-impact-1",
+      category: "impact",
+      title: "Chapter 2 assumption may break later payoff",
+      description: "Chapter 3 still assumes Nora and Kael already understand the silver gate blood rule.",
+      severity: "high",
+      chapter_ref: 2,
+      source_label: "The Ember Gate",
+      recommendation: "Restore the setup or revise the later dialogue so the reveal still tracks.",
+      status: "pending",
+      assigned_version_id: null,
+      task_id: null,
+    },
+  ],
+  genre_checks: [
+    {
+      genre: "epic fantasy",
+      label: "Fantasy",
+      checks: ["magic system consistency", "faction politics", "invented terms", "worldbuilding contradictions"],
+      rationale: "LoreVia is weighting revision checks toward the story promises and failure modes that usually matter most in fantasy manuscripts.",
+    },
+  ],
+  revision_plan: [
+    {
+      title: "Pass 1: Fix story logic",
+      summary: "Resolve the items most likely to create downstream contradictions or broken assumptions.",
+      items: [
+        {
+          id: "rev-impact-1",
+          category: "impact",
+          title: "Chapter 2 assumption may break later payoff",
+          description: "Chapter 3 still assumes Nora and Kael already understand the silver gate blood rule.",
+          severity: "high",
+          chapter_ref: 2,
+          status: "pending",
+          assigned_version_id: null,
+          task_id: null,
+        },
+      ],
+    },
+  ],
+  knowledge_matrix: [
+    {
+      fact: "Silver gate blood rule",
+      chapter_ref: 2,
+      entries: [
+        { character_name: "Nora", chapter_learned: 2, source: "Tracked through the silver gate thread" },
+        { character_name: "Kael", chapter_learned: 2, source: "Tracked through the silver gate thread" },
+        { character_name: "Mira", chapter_learned: null, source: "No earlier evidence surfaced yet" },
+      ],
+      warning: "LoreVia has no clear evidence yet that Mira learned this before later story beats could depend on it.",
+    },
+  ],
+  scene_advice: [
+    {
+      id: "rev-scene-1",
+      category: "scene",
+      title: "Scenes in Chapters 2 and 3 may be doing duplicate work",
+      description: "Both scenes repeat the gate warning and delay the same reveal beat.",
+      severity: "medium",
+      chapter_ref: 3,
+      status: "pending",
+      assigned_version_id: null,
+      task_id: null,
+    },
+  ],
+  confusion_map: [
+    {
+      id: "rev-confusion-1",
+      category: "confusion",
+      title: "Reader confusion risk in Chapter 1",
+      description: "4 named characters arrive here; 3 lore terms appear here.",
+      severity: "medium",
+      chapter_ref: 1,
+      status: "pending",
+      assigned_version_id: null,
+      task_id: null,
+    },
+  ],
+  voice_alerts: [
+    {
+      id: "rev-voice-1",
+      category: "voice",
+      title: "Nora's voice drifts in Chapter 3",
+      description: "The dialogue turns unusually formal and exposition-heavy for Nora's baseline.",
+      severity: "medium",
+      chapter_ref: 3,
+      status: "pending",
+      assigned_version_id: null,
+      task_id: null,
+    },
+  ],
 }
 
 const workspaceTree = {
@@ -300,6 +414,67 @@ const notifications = {
   unread_count: 0,
 }
 
+const pointsBalance = {
+  balance: 18,
+}
+
+const pointsLedger = [
+  {
+    id: "ledger-1",
+    entry_type: "grant",
+    source_type: "rewarded_ad",
+    source_id: "ad-session-1",
+    points_delta: 3,
+    expires_at: null,
+    metadata_json: {},
+    created_at: "2026-05-08T13:00:00Z",
+  },
+  {
+    id: "ledger-2",
+    entry_type: "spend",
+    source_type: "overflow_search",
+    source_id: "spend-1",
+    points_delta: -3,
+    expires_at: null,
+    metadata_json: {},
+    created_at: "2026-05-08T14:00:00Z",
+  },
+]
+
+const referralSummary = {
+  referral_code: "LOREAUTHOR",
+  referral_url: "https://getlorevia.com/register?ref=LOREAUTHOR",
+  points_balance: 18,
+  rewards: [],
+}
+
+const pointOffers = {
+  offers: [
+    {
+      code: "search_pack_5",
+      action: "search",
+      title: "Search pack",
+      description: "Add five same-day semantic searches.",
+      points_cost: 3,
+      units: 5,
+      eligible: true,
+      reason: null,
+    },
+  ],
+}
+
+const rewardedAdStatus = {
+  enabled: true,
+  provider: "google_publisher_tag",
+  reward_points: 3,
+  daily_cap: 3,
+  claims_used_today: 1,
+  claims_remaining_today: 2,
+  session_ttl_seconds: 900,
+  min_grant_seconds: 0,
+  reason: null,
+}
+
 const notes = [
   {
     id: "note-1",
@@ -310,6 +485,26 @@ const notes = [
     title: "Gate imagery",
     body: "Revisit the bell motif.",
     created_at: "2026-05-08T10:00:00Z",
+    updated_at: "2026-05-08T10:00:00Z",
+  },
+]
+
+const collaborators = [
+  {
+    id: "collab-1",
+    book_id: "book-1",
+    email: "beta@example.com",
+    display_name: "Beta Reader",
+    role: "beta_reader",
+    scope: {
+      chapter_start: 1,
+      chapter_end: 10,
+      character_bible: true,
+      continuity_report: true,
+      reader_confusion_report: true,
+    },
+    invite_status: "active",
+    invited_at: "2026-05-08T10:00:00Z",
     updated_at: "2026-05-08T10:00:00Z",
   },
 ]
@@ -329,6 +524,7 @@ function notFound(route: Route) {
 export async function installMockApi(page: Page, options: MockOptions = {}) {
   const session = options.session ?? "authenticated"
   const login = options.login ?? "success"
+  let mockWriterWorkspace = JSON.parse(JSON.stringify(writerWorkspace))
 
   await page.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url())
@@ -355,12 +551,51 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
       return json(route, notifications)
     }
 
+    if (path === "/api/v1/monetization/points" && method === "GET") {
+      return json(route, pointsBalance)
+    }
+
+    if (path === "/api/v1/monetization/points/ledger" && method === "GET") {
+      return json(route, pointsLedger)
+    }
+
+    if (path === "/api/v1/monetization/referrals" && method === "GET") {
+      return json(route, referralSummary)
+    }
+
+    if (path === "/api/v1/monetization/offers" && method === "GET") {
+      return json(route, pointOffers)
+    }
+
+    if (path === "/api/v1/monetization/rewarded-ads/status" && method === "GET") {
+      return json(route, rewardedAdStatus)
+    }
+
     if (path === "/api/v1/books" && method === "GET") {
       return json(route, [book])
     }
 
     if (path === "/api/v1/books/book-1" && method === "GET") {
       return json(route, book)
+    }
+
+    if (path === "/api/v1/books/book-1/collaborators" && method === "GET") {
+      return json(route, collaborators)
+    }
+
+    if (path === "/api/v1/books/book-1/collaborators" && method === "POST") {
+      const payload = JSON.parse(route.request().postData() || "{}")
+      return json(route, {
+        id: "collab-2",
+        book_id: "book-1",
+        email: payload.email,
+        display_name: payload.display_name,
+        role: payload.role,
+        scope: payload.scope,
+        invite_status: "active",
+        invited_at: "2026-05-11T10:00:00Z",
+        updated_at: "2026-05-11T10:00:00Z",
+      }, 201)
     }
 
     if (path === "/api/v1/books/book-1/characters" && method === "GET") {
@@ -380,11 +615,24 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
     }
 
     if (path === "/api/v1/books/book-1/writer-workspace" && method === "GET") {
-      return json(route, writerWorkspace)
+      return json(route, mockWriterWorkspace)
+    }
+
+    if (path === "/api/v1/books/book-1/writer-workspace" && method === "PUT") {
+      const body = route.request().postDataJSON() as Record<string, unknown> | null
+      mockWriterWorkspace = {
+        ...mockWriterWorkspace,
+        ...(body ?? {}),
+      }
+      return json(route, mockWriterWorkspace)
     }
 
     if (path === "/api/v1/books/book-1/emotional-arc" && method === "GET") {
       return json(route, emotionalArc)
+    }
+
+    if (path === "/api/v1/books/book-1/revision-intelligence" && method === "GET") {
+      return json(route, revisionIntelligence)
     }
 
     if (path === "/api/v1/books/book-1/workspace/tree" && method === "GET") {

@@ -81,7 +81,7 @@ async def test_rewarded_ad_status_reports_enabled_configuration(client, auth_hea
     monkeypatch.setattr("app.core.config.settings.REWARDED_ADS_ENABLED", True, raising=False)
     monkeypatch.setattr("app.core.config.settings.REWARDED_AD_GPT_UNIT_PATH", "/1234567/lorevia/rewarded", raising=False)
     monkeypatch.setattr("app.core.config.settings.REWARDED_AD_REWARD_POINTS", 3, raising=False)
-    monkeypatch.setattr("app.core.config.settings.REWARDED_AD_DAILY_CAP", 1, raising=False)
+    monkeypatch.setattr("app.core.config.settings.REWARDED_AD_DAILY_CAP", 8, raising=False)
     monkeypatch.setattr("app.core.config.settings.REWARDED_AD_SESSION_TTL_SECONDS", 900, raising=False)
     monkeypatch.setattr("app.core.config.settings.REWARDED_AD_MIN_GRANT_SECONDS", 0, raising=False)
 
@@ -92,7 +92,8 @@ async def test_rewarded_ad_status_reports_enabled_configuration(client, auth_hea
     assert payload["enabled"] is True
     assert payload["provider"] == "google_publisher_tag"
     assert payload["reward_points"] == 3
-    assert payload["claims_remaining_today"] == 1
+    assert payload["daily_cap"] == 3
+    assert payload["claims_remaining_today"] == 3
 
 
 @pytest.mark.asyncio

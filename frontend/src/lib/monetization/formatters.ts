@@ -14,6 +14,9 @@ export function formatPointEntryLabel(entry: PointLedgerEntry): string {
   if (entry.entry_type === "grant" && entry.source_type === "first_processed_book") {
     return "First processed book"
   }
+  if (entry.entry_type === "grant" && entry.source_type === "rewarded_ad") {
+    return "Rewarded ad"
+  }
   if (entry.entry_type === "spend" && entry.source_type === "overflow_search") {
     return "Search overflow"
   }

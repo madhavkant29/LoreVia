@@ -7,6 +7,7 @@ from sqlalchemy import select
 
 from app.models.book import Book, Chapter, Series, SeriesBook
 from app.models.character import Character
+from app.models.user import User
 
 
 @pytest.fixture(autouse=True)
@@ -254,3 +255,68 @@ async def test_upload_rejects_foreign_series_ids(client, db):
         )
     ).scalars().all()
     assert books == []
+
+
+@pytest.mark.asyncio
+async def test_story_scoped_collaboration_limits_shared_book_access(client, db):
+    owner_headers, owner_id = await _register_user(client, "owner-collab@lorevia.app")
+    collaborator_headers, _ = await _register_user(client, "beta-collab@lorevia.app")
+    owner = await db.get(User, owner_id)
+    assert owner is not None
+    owner.tier = "author"
+
+    book = Book(
+        user_id=owner_id,
+        title="Shared Draft",
+        format="docx",
+        s3_key="shared/draft.docx",
+        status="ready",
+        total_chapters=3,
+        mode="author",
+    )
+    db.add(book)
+    await db.flush()
+    for number in range(1, 4):
+        db.add(Chapter(book_id=book.id, number=number, title=f"Chapter {number}", s3_key=f"chapter-{number}.txt"))
+    db.add(Character(book_id=book.id, name="Nora Vale", first_chapter=1, role="mc"))
+    await db.commit()
+
+    create = await client.post(
+        f"/api/v1/books/{book.id}/collaborators",
+        headers=owner_headers,
+        json={
+            "email": "beta-collab@lorevia.app",
+            "display_name": "Beta Reader",
+            "role": "beta_reader",
+            "scope": {
+                "chapter_start": 1,
+                "chapter_end": 2,
+                "character_bible": True,
+                "continuity_report": False,
+                "reader_confusion_report": False,
+            },
+        },
+    )
+
+    assert create.status_code == 201
+    assert create.json()["scope"]["chapter_end"] == 2
+
+    shared_books = await client.get("/api/v1/books", headers=collaborator_headers)
+    assert shared_books.status_code == 200
+    shared_payload = shared_books.json()
+    assert shared_payload[0]["id"] == str(book.id)
+    assert shared_payload[0]["collaboration_role"] == "beta_reader"
+
+    chapters = await client.get(f"/api/v1/reader/{book.id}/chapters", headers=collaborator_headers)
+    assert chapters.status_code == 200
+    assert [item["number"] for item in chapters.json()["chapters"]] == [1, 2]
+
+    allowed_chapter = await client.get(f"/api/v1/reader/{book.id}/chapter/2", headers=collaborator_headers)
+    blocked_chapter = await client.get(f"/api/v1/reader/{book.id}/chapter/3", headers=collaborator_headers)
+    assert allowed_chapter.status_code == 200
+    assert blocked_chapter.status_code == 403
+
+    characters = await client.get(f"/api/v1/books/{book.id}/characters", headers=collaborator_headers)
+    continuity = await client.get(f"/api/v1/books/{book.id}/chapter-reports", headers=collaborator_headers)
+    assert characters.status_code == 200
+    assert continuity.status_code == 403

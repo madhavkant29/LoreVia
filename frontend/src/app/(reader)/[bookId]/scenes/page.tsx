@@ -1,12 +1,14 @@
 "use client"
 
 import { useEffect, useMemo, useState, type DragEvent as ReactDragEvent } from "react"
+import type { Route } from "next"
 import Link from "next/link"
 import { useParams } from "next/navigation"
 
 import { AuthorToolsNav } from "@/components/layout/AuthorToolsNav"
 import { booksApi } from "@/lib/api/books"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
+import { buildSceneChapterOptions, extractChapterNumberFromSceneFolder } from "@/lib/utils/sceneWorkspace"
 import {
   buildUniqueWorkspacePathFromCandidate,
   buildWorkspaceFolderTree,
@@ -96,6 +98,10 @@ export default function ScenesPage() {
     const chapterFolders = (tree?.chapters ?? []).map((chapter) => defaultSceneFolder(chapter.chapter_number))
     return [...new Set([...chapterFolders, ...customFolders])]
   }, [customFolders, tree])
+  const chapterOptions = useMemo(
+    () => buildSceneChapterOptions(tree?.chapters ?? [], [...sceneFolders, ...scenes.map((scene) => scene.path)]),
+    [sceneFolders, scenes, tree]
+  )
   const folderTree = useMemo(
     () => buildWorkspaceFolderTree(scenes.map((scene) => scene.path), sceneFolders),
     [sceneFolders, scenes]
@@ -162,24 +168,27 @@ export default function ScenesPage() {
   }, [bookId])
 
   function selectScene(scene: NovelScene) {
+    const inferredChapterNumber = scene.chapter_number ?? extractChapterNumberFromSceneFolder(scene.path)
+    const folderPath = sceneFolder(scene.path) || defaultSceneFolder(inferredChapterNumber)
     setSelectedSceneId(scene.id)
     setSelectedFolder(sceneFolder(scene.path) || null)
     setTitle(scene.title)
     setDescription(scene.description ?? "")
     setBody(scene.body)
-    setChapterNumber(scene.chapter_number ?? null)
-    setSceneFolderDraft(sceneFolder(scene.path) || defaultSceneFolder(scene.chapter_number ?? null))
+    setChapterNumber(inferredChapterNumber)
+    setSceneFolderDraft(folderPath)
     setStatus(null)
   }
 
   function newScene(folderOverride?: string | null) {
     const destinationFolder = normalizeWorkspaceFolderPath(folderOverride ?? selectedFolder) || defaultSceneFolder(chapterNumber)
+    const inferredChapterNumber = extractChapterNumberFromSceneFolder(destinationFolder)
     rememberFolder(destinationFolder)
     setSelectedSceneId(null)
     setTitle("")
     setDescription("")
     setBody("")
-    setChapterNumber(tree?.chapters[0]?.chapter_number ?? null)
+    setChapterNumber(inferredChapterNumber ?? chapterOptions[0] ?? null)
     setSceneFolderDraft(destinationFolder)
     setStatus(null)
   }
@@ -196,6 +205,7 @@ export default function ScenesPage() {
     }
     rememberFolder(cleanFolder)
     setSelectedFolder(cleanFolder)
+    setChapterNumber((current) => extractChapterNumberFromSceneFolder(cleanFolder) ?? current)
     setSceneFolderDraft(cleanFolder)
     setCollapsed((current) => ({ ...current, [cleanFolder]: false }))
     setStatus(`Created folder ${cleanFolder}`)
@@ -301,6 +311,9 @@ export default function ScenesPage() {
                     </button>
                     <Link href={`/${bookId}/notes`} className={`rounded-full px-4 py-2 text-sm font-semibold ${isDark ? "bg-white/10 text-slate-100" : "bg-white text-stone-800"}`}>
                       Open notes
+                    </Link>
+                    <Link href={`/${bookId}/voice` as Route} className={`rounded-full px-4 py-2 text-sm font-semibold ${isDark ? "bg-white/10 text-slate-100" : "bg-white text-stone-800"}`}>
+                      Open voice workspace
                     </Link>
                     <Link href={`/${bookId}/manuscript`} className={`rounded-full px-4 py-2 text-sm font-semibold ${isDark ? "bg-white/10 text-slate-100" : "bg-stone-900 text-white"}`}>
                       Open manuscript
@@ -420,8 +433,8 @@ export default function ScenesPage() {
                       <span className={labelClass(isDark)}>Chapter</span>
                       <select value={chapterNumber ?? ""} onChange={(event) => setChapterNumber(event.target.value ? Number(event.target.value) : null)} className={inputClass(isDark)}>
                         <option value="">Unassigned</option>
-                        {(tree?.chapters ?? []).map((chapter) => (
-                          <option key={chapter.chapter_number} value={chapter.chapter_number}>Chapter {chapter.chapter_number}</option>
+                        {chapterOptions.map((chapterNumberOption) => (
+                          <option key={chapterNumberOption} value={chapterNumberOption}>Chapter {chapterNumberOption}</option>
                         ))}
                       </select>
                     </label>

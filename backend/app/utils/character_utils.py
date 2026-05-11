@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 import math
 import uuid
-from collections import Counter
+from collections import Counter, defaultdict
 from difflib import SequenceMatcher
 from typing import Any
 
@@ -17,6 +17,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.engine.character.extractor import extract_characters_and_relationships
 from app.engine.character.entity_filters import (
     complex_character_score,
     compute_all_subtype_scores,
@@ -25,9 +26,17 @@ from app.engine.character.entity_filters import (
     VISIBILITY_THRESHOLD,
     is_displayable_character_entity,
 )
-from app.engine.character.profile_builder import merge_profile_fields
+from app.engine.character.profile_builder import (
+    choose_richer_text,
+    flat,
+    merge_growth_events,
+    merge_list_values,
+    merge_profile_fields,
+    merge_trait_states,
+)
+from app.models.book import Chapter
 from app.models.character import Character, CharacterState, CharacterVoiceProfile
-from app.models.intelligence import ChapterSummary, CharacterRelationship, PlotThread, QuoteEntry, WikiEntry
+from app.models.intelligence import BookChunk, ChapterSummary, CharacterRelationship, PlotThread, QuoteEntry, WikiEntry
 
 BLEACH_EMPTY_TAGS: Any = frozenset()
 
@@ -169,6 +178,15 @@ _NAME_TITLES = {
     "mr", "mrs", "ms", "miss", "dr", "sir", "lady", "lord", "prof", "professor",
     "capt", "captain", "commander", "master", "mistress",
 }
+_TITLE_IDENTITY_GROUPS = {
+    "mr": "male",
+    "master": "male",
+    "sir": "male",
+    "mrs": "female",
+    "ms": "female",
+    "miss": "female",
+    "mistress": "female",
+}
 
 
 def normalize_character_name(name: str | None) -> str:
@@ -176,6 +194,17 @@ def normalize_character_name(name: str | None) -> str:
         return ""
     tokens = [token for token in re.findall(r"[A-Za-z][A-Za-z'-]*", name) if token.casefold() not in _NAME_TITLES]
     return " ".join(tokens).casefold().strip()
+
+
+def _leading_title(name: str | None) -> str:
+    tokens = [token.casefold() for token in re.findall(r"[A-Za-z][A-Za-z'-]*", name or "")]
+    return tokens[0] if tokens and tokens[0] in _NAME_TITLES else ""
+
+
+def has_conflicting_title_identity(name1: str | None, name2: str | None) -> bool:
+    left_group = _TITLE_IDENTITY_GROUPS.get(_leading_title(name1))
+    right_group = _TITLE_IDENTITY_GROUPS.get(_leading_title(name2))
+    return bool(left_group and right_group and left_group != right_group)
 
 
 def _name_tokens(name: str | None) -> list[str]:
@@ -221,12 +250,17 @@ def name_similarity(name1: str | None, name2: str | None) -> float:
     if not left or not right:
         return 0.0
     if left == right:
+        if has_conflicting_title_identity(name1, name2):
+            return 0.35
         return 1.0
 
     jw = _sequence_ratio(left, right)
     token_sort = _sequence_ratio(" ".join(sorted(left.split())), " ".join(sorted(right.split())))
     token_set = _sequence_ratio(" ".join(sorted(set(left.split()))), " ".join(sorted(set(right.split()))))
     score = max(jw, token_sort, token_set)
+
+    if has_conflicting_title_identity(name1, name2):
+        score = min(score, 0.35)
 
     if has_shared_surname(name1, name2) and score >= 0.70:
         score = min(1.0, score + 0.15)
@@ -336,6 +370,386 @@ def _replace_reference_list(values: list[object] | None, *, matches: set[str], r
         seen.add(next_value.lower())
         replaced.append(next_value)
     return replaced
+
+
+def _expand_reference_list(values: list[object] | None, *, matches: set[str], replacements: list[str]) -> list[str]:
+    expanded: list[str] = []
+    seen: set[str] = set()
+    normalized_replacements = [" ".join(item.split()).strip() for item in replacements if " ".join(item.split()).strip()]
+    for item in values or []:
+        candidate = " ".join(str(item or "").split()).strip()
+        if not candidate:
+            continue
+        next_values = normalized_replacements if _normalize_character_reference(candidate) in matches else [candidate]
+        for next_value in next_values:
+            key = next_value.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            expanded.append(next_value)
+    return expanded
+
+
+def _find_name_occurrences(text: str, candidate: str) -> int:
+    cleaned = " ".join(str(candidate or "").split()).strip()
+    if not cleaned:
+        return 0
+    pattern = re.compile(rf"(?<![A-Za-z]){re.escape(cleaned)}(?![A-Za-z])")
+    return len(pattern.findall(text or ""))
+
+
+def _collect_partition_evidence(
+    chapter_rows: list[tuple[int, str]],
+    *,
+    name: str,
+    aliases: list[str],
+) -> dict[str, Any]:
+    candidates = merge_list_values([name], aliases)
+    snippets: list[str] = []
+    chapter_counts: dict[int, int] = {}
+    mention_count = 0
+    for chapter_number, text in chapter_rows:
+        score = sum(_find_name_occurrences(text, candidate) for candidate in candidates)
+        if score <= 0:
+            continue
+        mention_count += score
+        chapter_counts[chapter_number] = chapter_counts.get(chapter_number, 0) + score
+        if len(snippets) < 6:
+            snippets.append(text[:2200])
+    ordered_chapters = sorted(chapter_counts)
+    return {
+        "chapter_counts": chapter_counts,
+        "snippets": snippets,
+        "mention_count": mention_count,
+        "first_chapter": ordered_chapters[0] if ordered_chapters else None,
+        "last_seen_chapter": ordered_chapters[-1] if ordered_chapters else None,
+    }
+
+
+def _partition_matches_entity(name: str, aliases: list[str], entity: dict[str, Any]) -> bool:
+    from app.engine.character.deduplicator import names_equivalent
+
+    entity_name = str(entity.get("name") or "").strip()
+    entity_aliases = [str(alias) for alias in (entity.get("aliases") or []) if str(alias).strip()]
+    if not entity_name:
+        return False
+    if names_equivalent(name, aliases, entity_name, entity_aliases):
+        return True
+    partition_keys = {normalize_character_name(name), *(normalize_character_name(alias) for alias in aliases)}
+    entity_keys = {normalize_character_name(entity_name), *(normalize_character_name(alias) for alias in entity_aliases)}
+    partition_keys.discard("")
+    entity_keys.discard("")
+    return bool(partition_keys & entity_keys)
+
+
+def _merge_partition_entities(name: str, aliases: list[str], entities: list[dict[str, Any]]) -> dict[str, Any]:
+    merged_traits: dict[str, Any] = {}
+    merged_growth_events: list[dict] = []
+    merged_personality: list[str] = []
+    merged_motivations: list[str] = []
+    merged_fears: list[str] = []
+    merged_aliases = merge_list_values([name], aliases)
+    merged: dict[str, Any] = {
+        "name": name,
+        "aliases": aliases,
+        "role": None,
+        "goal": None,
+        "lie_they_believe": None,
+        "backstory_wound": None,
+        "arc_type": None,
+        "arc_summary": None,
+        "archetype": None,
+    }
+
+    for entity in entities:
+        merged_traits = merge_trait_states(merged_traits, entity.get("traits") if isinstance(entity.get("traits"), dict) else {})
+        merged_aliases = merge_list_values(merged_aliases, entity.get("aliases") if isinstance(entity.get("aliases"), list) else [])
+        merged_personality = merge_list_values(merged_personality, entity.get("personality_tags") if isinstance(entity.get("personality_tags"), list) else [])
+        merged_motivations = merge_list_values(merged_motivations, entity.get("motivations") if isinstance(entity.get("motivations"), list) else [])
+        merged_fears = merge_list_values(merged_fears, entity.get("fears") if isinstance(entity.get("fears"), list) else [])
+        if not merged["role"]:
+            merged["role"] = entity.get("role")
+        merged["goal"] = choose_richer_text(merged["goal"], entity.get("goal"))
+        merged["lie_they_believe"] = choose_richer_text(merged["lie_they_believe"], entity.get("lie_they_believe"))
+        merged["backstory_wound"] = choose_richer_text(merged["backstory_wound"], entity.get("backstory_wound"))
+        merged["arc_type"] = choose_richer_text(merged["arc_type"], entity.get("arc_type"))
+        merged["arc_summary"] = choose_richer_text(merged["arc_summary"], entity.get("arc_summary"))
+        merged["archetype"] = choose_richer_text(merged["archetype"], entity.get("archetype"))
+        growth_event = entity.get("growth_event")
+        merged_growth_events = merge_growth_events(merged_growth_events, [growth_event] if isinstance(growth_event, dict) else [])
+
+    merged["traits"] = merged_traits
+    merged["aliases"] = [alias for alias in merged_aliases if normalize_character_name(alias) != normalize_character_name(name)]
+    merged["personality_tags"] = merged_personality
+    merged["motivations"] = merged_motivations
+    merged["fears"] = merged_fears
+    merged["growth_events"] = merged_growth_events
+    return merged
+
+
+async def _build_partition_payload(
+    *,
+    source: Character,
+    book_id: uuid.UUID,
+    name: str,
+    aliases: list[str],
+    evidence: dict[str, Any],
+) -> dict[str, Any]:
+    entities: list[dict[str, Any]] = []
+    if evidence["snippets"]:
+        try:
+            extracted = await extract_characters_and_relationships("\n\n".join(evidence["snippets"])[:12000])
+            entities = [
+                entity
+                for entity in extracted.get("characters", [])
+                if isinstance(entity, dict) and _partition_matches_entity(name, aliases, entity)
+            ]
+        except Exception:
+            entities = []
+
+    merged_entity = _merge_partition_entities(name, aliases, entities)
+    trait_state = merge_trait_states({}, merged_entity.get("traits") if isinstance(merged_entity.get("traits"), dict) else {})
+    first_chapter = int(evidence.get("first_chapter") or source.first_chapter or 1)
+    last_seen_chapter = int(
+        evidence.get("last_seen_chapter")
+        or source.last_seen_chapter
+        or source.first_chapter
+        or first_chapter
+    )
+    mention_count = max(1, int(evidence.get("mention_count") or 0))
+
+    return {
+        "book_id": book_id,
+        "name": name,
+        "aliases": merged_entity.get("aliases") or aliases,
+        "role": merged_entity.get("role") or source.role,
+        "first_chapter": first_chapter,
+        "last_seen_chapter": last_seen_chapter,
+        "mention_count": mention_count,
+        "trait_state": trait_state,
+        "hair": flat(trait_state, "hair"),
+        "eyes": flat(trait_state, "eyes"),
+        "build": flat(trait_state, "build"),
+        "age_descriptor": flat(trait_state, "age"),
+        "distinguishing": flat(trait_state, "distinguishing"),
+        "personality_tags": merged_entity.get("personality_tags") or [],
+        "goal": merged_entity.get("goal"),
+        "motivations": merged_entity.get("motivations") or [],
+        "fears": merged_entity.get("fears") or [],
+        "lie_they_believe": merged_entity.get("lie_they_believe"),
+        "backstory_wound": merged_entity.get("backstory_wound"),
+        "arc_type": merged_entity.get("arc_type"),
+        "arc_summary": merged_entity.get("arc_summary"),
+        "archetype": merged_entity.get("archetype"),
+        "growth_events": merged_entity.get("growth_events") or [],
+    }
+
+
+def _best_partition_for_chapter(
+    partitions: list[Character],
+    evidence_by_character_id: dict[uuid.UUID, dict[str, Any]],
+    chapter_number: int | None,
+) -> Character | None:
+    if chapter_number is None:
+        return None
+    scored = [
+        (int((evidence_by_character_id.get(character.id) or {}).get("chapter_counts", {}).get(chapter_number, 0)), character)
+        for character in partitions
+    ]
+    scored = [item for item in scored if item[0] > 0]
+    if not scored:
+        return None
+    scored.sort(key=lambda item: item[0], reverse=True)
+    if len(scored) > 1 and scored[0][0] == scored[1][0]:
+        return None
+    return scored[0][1]
+
+
+def _best_partition_for_text(
+    partitions: list[Character],
+    evidence_by_character_id: dict[uuid.UUID, dict[str, Any]],
+    text: str | None,
+) -> Character | None:
+    scored = []
+    for character in partitions:
+        candidates = merge_list_values([character.name], character.aliases or [])
+        score = sum(_find_name_occurrences(text or "", candidate) for candidate in candidates)
+        if score > 0:
+            scored.append((score, character))
+    if scored:
+        scored.sort(key=lambda item: item[0], reverse=True)
+        if len(scored) > 1 and scored[0][0] == scored[1][0]:
+            return None
+        return scored[0][1]
+    return None
+
+
+async def _reassign_partition_references(
+    db: AsyncSession,
+    *,
+    source: Character,
+    partitions: list[Character],
+    evidence_by_character_id: dict[uuid.UUID, dict[str, Any]],
+) -> None:
+    primary_partition = max(
+        partitions,
+        key=lambda character: int((evidence_by_character_id.get(character.id) or {}).get("mention_count", 0)),
+    )
+    reference_values = _character_reference_values(source)
+
+    state_rows = (await db.execute(select(CharacterState).where(CharacterState.character_id == source.id))).scalars().all()
+    for state in state_rows:
+        target = _best_partition_for_chapter(partitions, evidence_by_character_id, state.at_chapter) or primary_partition
+        state.character_id = target.id
+
+    relationships = (
+        await db.execute(
+            select(CharacterRelationship).where(
+                CharacterRelationship.book_id == source.book_id,
+                or_(
+                    CharacterRelationship.character_a_id == source.id,
+                    CharacterRelationship.character_b_id == source.id,
+                ),
+            )
+        )
+    ).scalars().all()
+    for relationship in relationships:
+        target = _best_partition_for_chapter(partitions, evidence_by_character_id, relationship.from_chapter) or primary_partition
+        if relationship.character_a_id == source.id:
+            relationship.character_a_id = target.id
+        if relationship.character_b_id == source.id:
+            relationship.character_b_id = target.id
+        if relationship.character_a_id == relationship.character_b_id:
+            await db.delete(relationship)
+
+    plot_threads = (await db.execute(select(PlotThread).where(PlotThread.book_id == source.book_id))).scalars().all()
+    for thread in plot_threads:
+        updated_ids = _expand_reference_list(
+            thread.character_ids,
+            matches=reference_values,
+            replacements=[character.name for character in partitions],
+        )
+        if updated_ids:
+            thread.character_ids = updated_ids
+
+    wiki_entries = (await db.execute(select(WikiEntry).where(WikiEntry.book_id == source.book_id))).scalars().all()
+    for entry in wiki_entries:
+        updated_related = _expand_reference_list(
+            entry.related_char_ids,
+            matches=reference_values,
+            replacements=[str(character.id) for character in partitions],
+        )
+        if updated_related:
+            entry.related_char_ids = updated_related
+
+    chapter_summaries = (
+        await db.execute(
+            select(ChapterSummary, Chapter.number)
+            .join(ChapterSummary.chapter)
+            .where(Chapter.book_id == source.book_id)
+        )
+    ).all()
+    for summary, chapter_number in chapter_summaries:
+        target = _best_partition_for_chapter(partitions, evidence_by_character_id, chapter_number) or primary_partition
+        key_events = [dict(event) if isinstance(event, dict) else event for event in (summary.key_events or [])]
+        key_events_changed = False
+        for event in key_events:
+            if not isinstance(event, dict):
+                continue
+            involved = _expand_reference_list(
+                event.get("involved_characters"),
+                matches=reference_values,
+                replacements=[str(target.id)],
+            )
+            if involved != list(event.get("involved_characters") or []):
+                event["involved_characters"] = involved
+                key_events_changed = True
+        if key_events_changed:
+            summary.key_events = key_events
+
+        char_changes = [dict(change) if isinstance(change, dict) else change for change in (summary.char_changes or [])]
+        char_changes_changed = False
+        for change in char_changes:
+            if not isinstance(change, dict):
+                continue
+            candidate = " ".join(str(change.get("character") or "").split()).strip()
+            if candidate and _normalize_character_reference(candidate) in reference_values:
+                change["character"] = target.name
+                char_changes_changed = True
+        if char_changes_changed:
+            summary.char_changes = char_changes
+
+    quotes = (await db.execute(select(QuoteEntry).where(QuoteEntry.book_id == source.book_id))).scalars().all()
+    for quote in quotes:
+        if _normalize_character_reference(quote.character_name) not in reference_values:
+            continue
+        target = _best_partition_for_text(partitions, evidence_by_character_id, quote.quote_text) or primary_partition
+        quote.character_name = target.name
+
+
+async def partition_character(
+    db: AsyncSession,
+    *,
+    source: Character,
+    partitions: list[dict[str, list[str] | str]],
+) -> list[Character]:
+    cleaned_partitions: list[dict[str, Any]] = []
+    seen_names: set[str] = set()
+    for partition in partitions:
+        cleaned_name = clean_optional_text(partition.get("name"))
+        if not cleaned_name:
+            continue
+        key = normalize_character_name(cleaned_name)
+        if not key or key in seen_names:
+            continue
+        seen_names.add(key)
+        aliases = [alias for alias in clean_string_list(partition.get("aliases") if isinstance(partition.get("aliases"), list) else []) if normalize_character_name(alias) != key]
+        cleaned_partitions.append({"name": cleaned_name, "aliases": aliases})
+
+    if len(cleaned_partitions) < 2:
+        raise ValueError("At least two distinct partition targets are required")
+
+    chapter_rows = (
+        await db.execute(
+            select(Chapter.number, BookChunk.text)
+            .join(BookChunk, BookChunk.chapter_id == Chapter.id)
+            .where(BookChunk.book_id == source.book_id)
+            .order_by(Chapter.number.asc(), BookChunk.chunk_index.asc())
+        )
+    ).all()
+
+    created_partitions: list[Character] = []
+    evidence_by_character_id: dict[uuid.UUID, dict[str, Any]] = {}
+    for partition in cleaned_partitions:
+        evidence = _collect_partition_evidence(
+            chapter_rows,
+            name=str(partition["name"]),
+            aliases=[str(alias) for alias in partition["aliases"]],
+        )
+        payload = await _build_partition_payload(
+            source=source,
+            book_id=source.book_id,
+            name=str(partition["name"]),
+            aliases=[str(alias) for alias in partition["aliases"]],
+            evidence=evidence,
+        )
+        character = Character(**payload)
+        db.add(character)
+        await db.flush()
+        update_character_classification(character)
+        created_partitions.append(character)
+        evidence_by_character_id[character.id] = evidence
+
+    await _reassign_partition_references(
+        db,
+        source=source,
+        partitions=created_partitions,
+        evidence_by_character_id=evidence_by_character_id,
+    )
+    await _dedupe_relationships(db, source.book_id)
+    await db.delete(source)
+    await db.flush()
+    return created_partitions
 
 
 def _merge_voice_profiles(primary_profile: CharacterVoiceProfile | None, secondary_profile: CharacterVoiceProfile | None) -> None:
@@ -467,8 +881,12 @@ async def merge_characters(
     primary.age_descriptor = merged["age_descriptor"]
     primary.distinguishing = merged["distinguishing"]
     primary.personality_tags = merged["personality_tags"]
+    primary.goal = merged["goal"]
     primary.motivations = merged["motivations"]
     primary.fears = merged["fears"]
+    primary.lie_they_believe = merged["lie_they_believe"]
+    primary.backstory_wound = merged["backstory_wound"]
+    primary.arc_type = merged["arc_type"]
     primary.arc_summary = merged["arc_summary"]
     primary.archetype = merged["archetype"]
     primary.growth_events = merged["growth_events"]
@@ -494,6 +912,10 @@ async def merge_characters(
         ).scalar()
         if existing_state:
             existing_state.trait_snapshot = state.trait_snapshot or existing_state.trait_snapshot
+            if state.motivations_snapshot and not existing_state.motivations_snapshot:
+                existing_state.motivations_snapshot = state.motivations_snapshot
+            if state.fears_snapshot and not existing_state.fears_snapshot:
+                existing_state.fears_snapshot = state.fears_snapshot
             if state.prompt_delta and not existing_state.prompt_delta:
                 existing_state.prompt_delta = state.prompt_delta
             if state.arc_note and not existing_state.arc_note:
@@ -548,6 +970,239 @@ async def _dedupe_relationships(db: AsyncSession, book_id: uuid.UUID) -> None:
             await db.delete(rel)
             continue
         seen.add(key)
+
+
+def _clean_tracker_text(value: object | None) -> str | None:
+    cleaned = " ".join(str(value or "").split()).strip()
+    return cleaned or None
+
+
+def _event_chapter(event: dict[str, Any], fallback: int) -> int:
+    raw = event.get("chapter_number") or event.get("chapter") or fallback
+    try:
+        return max(int(raw), 0)
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _trait_value_for_history(raw: object) -> str | None:
+    if isinstance(raw, dict):
+        value = raw.get("value")
+        return _clean_tracker_text(value)
+    return _clean_tracker_text(raw)
+
+
+def _dominant_marker_lines(profile: CharacterVoiceProfile | None) -> list[str]:
+    if profile is None:
+        return []
+    markers: list[str] = []
+    for key, value in (profile.dominant_markers or {}).items():
+        cleaned_key = _clean_tracker_text(key)
+        cleaned_value = _clean_tracker_text(value)
+        if cleaned_key and cleaned_value:
+            markers.append(f"{cleaned_key.replace('_', ' ').title()}: {cleaned_value}")
+        elif cleaned_key:
+            markers.append(cleaned_key.replace("_", " ").title())
+    for phrase in profile.signature_phrases or []:
+        cleaned_phrase = _clean_tracker_text(phrase)
+        if cleaned_phrase:
+            markers.append(f'Signature phrase: "{cleaned_phrase}"')
+    return dedupe_preserve_order(markers)
+
+
+def _trait_label(trait_key: str) -> str:
+    labels = {
+        "hair": "Hair",
+        "eyes": "Eyes",
+        "build": "Build",
+        "age": "Age",
+        "face": "Face",
+        "distinguishing": "Distinguishing details",
+        "manual_description": "Description",
+    }
+    return labels.get(trait_key, trait_key.replace("_", " ").title())
+
+
+def build_physical_description_history(states: list[CharacterState]) -> list[dict[str, Any]]:
+    tracked_keys = ("hair", "eyes", "build", "age", "face", "distinguishing", "manual_description")
+    history: list[dict[str, Any]] = []
+    previous_values: dict[str, str] = {}
+    for state in sorted(states, key=lambda row: row.at_chapter):
+        snapshot = state.trait_snapshot or {}
+        for trait_key in tracked_keys:
+            current_value = _trait_value_for_history(snapshot.get(trait_key))
+            if not current_value:
+                continue
+            if previous_values.get(trait_key, "").casefold() == current_value.casefold():
+                continue
+            history.append(
+                {
+                    "chapter_number": state.at_chapter,
+                    "trait": trait_key,
+                    "label": _trait_label(trait_key),
+                    "value": current_value,
+                    "previous_value": previous_values.get(trait_key),
+                }
+            )
+            previous_values[trait_key] = current_value
+    return history
+
+
+def build_relationship_change_entries(
+    character: Character,
+    relationships: list[CharacterRelationship],
+    counterpart_names: dict[uuid.UUID, str],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for rel in sorted(relationships, key=lambda item: (item.from_chapter or 0, item.to_chapter or 10**6, str(item.id))):
+        counterpart_id = rel.character_b_id if rel.character_a_id == character.id else rel.character_a_id
+        rows.append(
+            {
+                "counterpart_id": str(counterpart_id),
+                "counterpart_name": counterpart_names.get(counterpart_id, "Unknown character"),
+                "chapter_number": rel.from_chapter or character.first_chapter,
+                "to_chapter": rel.to_chapter,
+                "type": rel.rel_type or "connection",
+                "sentiment": rel.sentiment,
+                "description": _clean_tracker_text(rel.description),
+            }
+        )
+    return rows
+
+
+def build_character_contradictions(
+    character: Character,
+    states: list[CharacterState],
+    physical_history: list[dict[str, Any]],
+) -> list[str]:
+    contradictions: list[str] = []
+    for item in physical_history:
+        previous_value = _clean_tracker_text(item.get("previous_value"))
+        current_value = _clean_tracker_text(item.get("value"))
+        label = _clean_tracker_text(item.get("label"))
+        chapter_number = item.get("chapter_number")
+        if previous_value and current_value and label:
+            contradictions.append(
+                f"{label} shifts from {previous_value} to {current_value} by chapter {chapter_number}."
+            )
+
+    previous_motivations: list[str] | None = None
+    previous_fears: list[str] | None = None
+    for state in sorted(states, key=lambda row: row.at_chapter):
+        current_motivations = [item for item in (state.motivations_snapshot or []) if _clean_tracker_text(item)]
+        current_fears = [item for item in (state.fears_snapshot or []) if _clean_tracker_text(item)]
+        if previous_motivations and current_motivations and previous_motivations != current_motivations:
+            contradictions.append(
+                f"Motivation profile changes by chapter {state.at_chapter}: {', '.join(previous_motivations[:2])} -> {', '.join(current_motivations[:2])}."
+            )
+        if previous_fears and current_fears and previous_fears != current_fears:
+            contradictions.append(
+                f"Fear profile changes by chapter {state.at_chapter}: {', '.join(previous_fears[:2])} -> {', '.join(current_fears[:2])}."
+            )
+        if current_motivations:
+            previous_motivations = current_motivations
+        if current_fears:
+            previous_fears = current_fears
+    return dedupe_preserve_order(contradictions)[:10]
+
+
+def build_character_arc_tracker(
+    character: Character,
+    *,
+    states: list[CharacterState],
+    relationships: list[CharacterRelationship],
+    counterpart_names: dict[uuid.UUID, str],
+    voice_profile: CharacterVoiceProfile | None,
+    total_chapters: int | None = None,
+) -> dict[str, Any]:
+    sorted_states = sorted(states, key=lambda row: row.at_chapter)
+    raw_events = [event for event in (character.growth_events or []) if isinstance(event, dict)]
+    raw_events.sort(key=lambda event: (_event_chapter(event, character.first_chapter), _clean_tracker_text(event.get("event_title") or event.get("event")) or ""))
+
+    turning_points: list[dict[str, Any]] = []
+    arc_timeline: list[str] = []
+    for event in raw_events:
+        chapter_number = _event_chapter(event, character.first_chapter)
+        if chapter_number <= 0:
+            continue
+        title = _clean_tracker_text(event.get("event_title") or event.get("event")) or f"Shift in chapter {chapter_number}"
+        description = _clean_tracker_text(event.get("description") or event.get("impact"))
+        turning_points.append(
+            {
+                "chapter_number": chapter_number,
+                "title": title,
+                "description": description,
+                "impact_score": event.get("impact_score") or event.get("importance"),
+                "growth_direction": _clean_tracker_text(event.get("growth_direction") or event.get("tone")),
+                "is_major": bool(event.get("is_major", False)),
+            }
+        )
+        arc_timeline.append(
+            f"Chapter {chapter_number}: {title}" + (f" - {description}" if description else "")
+        )
+
+    relationship_changes = build_relationship_change_entries(character, relationships, counterpart_names)
+    physical_history = build_physical_description_history(sorted_states)
+    contradictions = build_character_contradictions(character, sorted_states, physical_history)
+    voice_markers = _dominant_marker_lines(voice_profile)
+
+    diagnostics: list[str] = []
+    last_change_chapter = max([character.first_chapter, *[item["chapter_number"] for item in turning_points]], default=character.first_chapter)
+    last_seen = character.last_seen_chapter or character.first_chapter
+    if last_seen - last_change_chapter >= 14:
+        diagnostics.append("Character has not changed meaningfully in 14 chapters.")
+
+    previous_motivations: list[str] | None = None
+    for state in sorted_states:
+        current_motivations = [item for item in (state.motivations_snapshot or []) if _clean_tracker_text(item)]
+        if previous_motivations and current_motivations and previous_motivations != current_motivations:
+            explained = any(abs(item["chapter_number"] - state.at_chapter) <= 1 for item in turning_points)
+            if not explained:
+                diagnostics.append("Motivation changed, but no scene explains why.")
+                break
+        if current_motivations:
+            previous_motivations = current_motivations
+
+    pair_history: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for item in relationship_changes:
+        pair_history[item["counterpart_name"]].append(item)
+    for counterpart_name, items in pair_history.items():
+        ordered = sorted(items, key=lambda row: row["chapter_number"])
+        for previous, current in zip(ordered, ordered[1:]):
+            previous_negative = (previous.get("sentiment") or 0) <= -0.35 or str(previous.get("type") or "").lower() in {"enemy", "rival", "hostile"}
+            current_positive = (current.get("sentiment") or 0) >= 0.35 or str(current.get("type") or "").lower() in {"ally", "friend", "romantic", "family", "mentor"}
+            if previous_negative and current_positive and (current["chapter_number"] - previous["chapter_number"]) <= 2:
+                diagnostics.append(
+                    f"Relationship with {counterpart_name} shifts from hostile to trusting too abruptly."
+                )
+                break
+        if diagnostics and diagnostics[-1].endswith("too abruptly."):
+            break
+
+    if total_chapters and character.last_seen_chapter and total_chapters - character.last_seen_chapter >= 25:
+        diagnostics.append(f"Character is absent for {total_chapters - character.last_seen_chapter} chapters after the latest appearance.")
+
+    latest_description = _clean_tracker_text(character.description if hasattr(character, "description") else None)
+    return {
+        "goal": _clean_tracker_text(getattr(character, "goal", None)) or (character.motivations or [None])[0],
+        "motivation": (character.motivations or [None])[0],
+        "motivations": character.motivations or [],
+        "fear": (character.fears or [None])[0],
+        "fears": character.fears or [],
+        "lie_they_believe": _clean_tracker_text(getattr(character, "lie_they_believe", None)),
+        "wound_backstory": _clean_tracker_text(getattr(character, "backstory_wound", None)),
+        "arc_type": _clean_tracker_text(getattr(character, "arc_type", None) or character.archetype),
+        "first_appearance": character.first_chapter,
+        "major_turning_points": turning_points,
+        "relationship_changes": relationship_changes,
+        "contradictions": contradictions,
+        "voice_markers": voice_markers,
+        "physical_description_history": physical_history,
+        "arc_timeline": arc_timeline,
+        "diagnostics": dedupe_preserve_order(diagnostics),
+        "latest_arc_note": _clean_tracker_text(sorted_states[-1].arc_note) if sorted_states else character.arc_summary,
+        "summary": _clean_tracker_text(character.arc_summary) or latest_description,
+    }
 
 
 # ─── Character classification scoring ───────────────────────────────────────────

@@ -33,6 +33,7 @@ from app.engine.search.semantic import semantic_search
 from app.models.book import Book, Chapter, Series, SeriesBook
 from app.models.character import Character, CharacterState, CharacterVoiceProfile
 from app.models.intelligence import ChapterSummary, PlotThread
+from app.utils.plot_thread_utils import derive_plot_thread_status, is_plot_thread_open
 from app.schemas.advisor import (
     AdvisorRequest,
     EditorialReviewRequest,
@@ -393,13 +394,24 @@ async def advisor_suggestions(
         select(PlotThread)
         .where(
             PlotThread.book_id == book_id,
-            PlotThread.status.in_(["introduced", "ongoing"]),
             PlotThread.introduced_at <= total_ch - 30,
         )
         .order_by(PlotThread.importance.desc())
-        .limit(5)
+        .limit(12)
     )
-    dropped_threads = dropped_threads_result.scalars().all()
+    dropped_threads = [
+        thread
+        for thread in dropped_threads_result.scalars().all()
+        if is_plot_thread_open(
+            derive_plot_thread_status(
+                thread.status,
+                introduced_at=thread.introduced_at,
+                last_mentioned_at=thread.last_mentioned_at or thread.introduced_at,
+                resolved_at=thread.resolved_at,
+                current_chapter=total_ch,
+            )
+        )
+    ][:5]
 
     for thread in dropped_threads:
         suggestions.append({
@@ -409,7 +421,7 @@ async def advisor_suggestions(
             "title": f"Unresolved thread: \"{thread.title}\"",
             "description": (
                 f"Introduced at chapter {thread.introduced_at}, "
-                f"still marked '{thread.status}' with {total_ch - (thread.introduced_at or 0)} chapters elapsed. "
+                f"still marked '{derive_plot_thread_status(thread.status, introduced_at=thread.introduced_at, last_mentioned_at=thread.last_mentioned_at or thread.introduced_at, resolved_at=thread.resolved_at, current_chapter=total_ch)}' with {total_ch - (thread.introduced_at or 0)} chapters elapsed. "
                 f"{thread.description or 'No additional detail recorded.'}"
             ),
             "chapter_ref": thread.introduced_at,
@@ -455,13 +467,22 @@ async def advisor_suggestions(
         select(PlotThread)
         .where(
             PlotThread.book_id == book_id,
-            PlotThread.status == "ongoing",
             PlotThread.importance >= 7,
         )
         .order_by(PlotThread.importance.desc())
-        .limit(3)
+        .limit(8)
     )
-    hot_threads = hot_threads_result.scalars().all()
+    hot_threads = [
+        thread
+        for thread in hot_threads_result.scalars().all()
+        if derive_plot_thread_status(
+            thread.status,
+            introduced_at=thread.introduced_at,
+            last_mentioned_at=thread.last_mentioned_at or thread.introduced_at,
+            resolved_at=thread.resolved_at,
+            current_chapter=total_ch,
+        ) in {"developing", "paused", "possibly_abandoned", "forgotten", "introduced"}
+    ][:3]
 
     for thread in hot_threads:
         if thread.introduced_at and total_ch - thread.introduced_at > 15:
@@ -472,7 +493,7 @@ async def advisor_suggestions(
                 "title": f"Arc decision point: \"{thread.title}\"",
                 "description": (
                     f"High-importance thread (importance {thread.importance}/10), "
-                    f"ongoing since chapter {thread.introduced_at}. "
+                    f"active since chapter {thread.introduced_at}. "
                     f"Decision points examined now can be planted as foreshadowing retroactively. "
                     f"{thread.description or ''}"
                 ),
@@ -487,14 +508,25 @@ async def advisor_suggestions(
             select(PlotThread)
             .where(
                 PlotThread.book_id == book_id,
-                PlotThread.status.in_(["ongoing", "introduced"]),
                 PlotThread.introduced_at <= int(total_ch * 0.4),
                 PlotThread.importance >= 5,
             )
             .order_by(PlotThread.importance.desc())
-            .limit(3)
+            .limit(8)
         )
-        late_threads = late_threads_result.scalars().all()
+        late_threads = [
+            thread
+            for thread in late_threads_result.scalars().all()
+            if is_plot_thread_open(
+                derive_plot_thread_status(
+                    thread.status,
+                    introduced_at=thread.introduced_at,
+                    last_mentioned_at=thread.last_mentioned_at or thread.introduced_at,
+                    resolved_at=thread.resolved_at,
+                    current_chapter=total_ch,
+                )
+            )
+        ][:3]
 
         for thread in late_threads:
             already_covered = any(s["id"] == f"arc-{thread.id}" for s in suggestions)
@@ -799,7 +831,7 @@ async def inline_continuity_check(
         for item in review_payload.get("retrieved_passages", [])[:4]
     ]
     overall_verdict = review_payload["review"].get("overall_verdict") or (
-        "No major continuity issues were surfaced in this inline pass." if not issues else "Inline continuity pass found issues worth checking before you lock the scene."
+        "No hard continuity contradiction surfaced in this inline pass, but keep pressure-testing setup, memory, and scene-to-scene logic before you lock the scene." if not issues else "Inline continuity pass found issues worth checking before you lock the scene."
     )
     return InlineContinuityResponse(issues=issues, memory_bank=memory_bank, overall_verdict=overall_verdict)
 

@@ -5,8 +5,8 @@ import { useEffect, useMemo, useState } from "react"
 
 import { booksApi } from "@/lib/api/books"
 import { readerApi } from "@/lib/api/reader"
-import { saveContextualVaultNote } from "@/lib/utils/notes"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
+import { saveContextualVaultNote } from "@/lib/utils/notes"
 import type { PlotThread } from "@/types/reader"
 
 interface Props {
@@ -17,19 +17,30 @@ interface Props {
 
 const STATUS_LABELS: Record<string, string> = {
   introduced: "Introduced",
-  ongoing: "Ongoing",
+  developing: "Developing",
+  ongoing: "Developing",
+  paused: "Paused",
   resolved: "Resolved",
+  contradicted: "Contradicted",
+  forgotten: "Forgotten",
+  possibly_abandoned: "Possibly abandoned",
   abandoned: "Abandoned",
   unknown: "Unknown",
 }
 
-const STATUS_ORDER = ["ongoing", "introduced", "resolved", "abandoned", "unknown"] as const
+const STATUS_ORDER = ["developing", "introduced", "paused", "possibly_abandoned", "forgotten", "contradicted", "resolved", "abandoned", "unknown"] as const
+const STATUS_OPTIONS = ["introduced", "developing", "paused", "resolved", "contradicted", "forgotten", "possibly_abandoned", "abandoned", "unknown"] as const
 
 function statusClasses(status: string, isDark: boolean) {
   const palette: Record<string, string> = {
     introduced: isDark ? "border-cyan-400/20 bg-cyan-400/10 text-cyan-200" : "border-cyan-200 bg-cyan-50 text-cyan-800",
+    developing: isDark ? "border-emerald-400/20 bg-emerald-400/10 text-emerald-200" : "border-emerald-200 bg-emerald-50 text-emerald-800",
     ongoing: isDark ? "border-emerald-400/20 bg-emerald-400/10 text-emerald-200" : "border-emerald-200 bg-emerald-50 text-emerald-800",
+    paused: isDark ? "border-amber-400/20 bg-amber-400/10 text-amber-200" : "border-amber-200 bg-amber-50 text-amber-800",
     resolved: isDark ? "border-stone-300/20 bg-stone-200/10 text-stone-200" : "border-stone-300 bg-stone-100 text-stone-700",
+    contradicted: isDark ? "border-fuchsia-400/20 bg-fuchsia-400/10 text-fuchsia-200" : "border-fuchsia-200 bg-fuchsia-50 text-fuchsia-800",
+    forgotten: isDark ? "border-orange-400/20 bg-orange-400/10 text-orange-200" : "border-orange-200 bg-orange-50 text-orange-800",
+    possibly_abandoned: isDark ? "border-rose-300/20 bg-rose-300/10 text-rose-200" : "border-rose-200 bg-rose-50 text-rose-800",
     abandoned: isDark ? "border-rose-400/20 bg-rose-400/10 text-rose-200" : "border-rose-200 bg-rose-50 text-rose-800",
     unknown: isDark ? "border-slate-400/20 bg-slate-400/10 text-slate-200" : "border-slate-200 bg-slate-100 text-slate-700",
   }
@@ -42,6 +53,7 @@ export function PlotTracker({ bookId, chapter, mode = "compact" }: Props) {
   const [savingId, setSavingId] = useState<string | null>(null)
   const [vaultSavingId, setVaultSavingId] = useState<string | null>(null)
   const [draftNotes, setDraftNotes] = useState<Record<string, string>>({})
+  const [draftStatuses, setDraftStatuses] = useState<Record<string, string>>({})
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
 
@@ -51,6 +63,7 @@ export function PlotTracker({ bookId, chapter, mode = "compact" }: Props) {
       .then((items) => {
         setThreads(items)
         setDraftNotes(Object.fromEntries(items.map((item) => [item.id, item.note ?? ""])))
+        setDraftStatuses(Object.fromEntries(items.map((item) => [item.id, item.status ?? "unknown"])))
       })
       .finally(() => setLoading(false))
   }, [bookId, chapter])
@@ -69,9 +82,11 @@ export function PlotTracker({ bookId, chapter, mode = "compact" }: Props) {
     try {
       const updated = await readerApi.updatePlotThread(bookId, threadId, {
         note: draftNotes[threadId]?.trim() ? draftNotes[threadId].trim() : null,
+        status: draftStatuses[threadId] ?? null,
       })
       setThreads((current) => current.map((item) => item.id === threadId ? updated : item))
       setDraftNotes((current) => ({ ...current, [threadId]: updated.note ?? "" }))
+      setDraftStatuses((current) => ({ ...current, [threadId]: updated.status ?? "unknown" }))
     } finally {
       setSavingId(null)
     }
@@ -81,12 +96,15 @@ export function PlotTracker({ bookId, chapter, mode = "compact" }: Props) {
     setVaultSavingId(thread.id)
     try {
       const chapterBits = [
-        typeof thread.introduced_at === "number" ? `Introduced in chapter ${thread.introduced_at}.` : null,
+        typeof thread.first_mentioned === "number" ? `First mentioned in chapter ${thread.first_mentioned}.` : null,
+        typeof thread.last_mentioned === "number" ? `Last mentioned in chapter ${thread.last_mentioned}.` : null,
         typeof thread.resolved_at === "number" ? `Resolved in chapter ${thread.resolved_at}.` : null,
       ].filter(Boolean)
       const bodyParts = [
         thread.description?.trim() || "",
         chapterBits.length ? chapterBits.join("\n") : "",
+        thread.risk?.trim() ? `## Risk\n\n${thread.risk.trim()}` : "",
+        thread.suggested_action?.trim() ? `## Suggested action\n\n${thread.suggested_action.trim()}` : "",
         draftNotes[thread.id]?.trim() ? `## Private note\n\n${draftNotes[thread.id].trim()}` : "",
       ].filter(Boolean)
 
@@ -115,7 +133,8 @@ export function PlotTracker({ bookId, chapter, mode = "compact" }: Props) {
               <div>
                 <p className="font-semibold">{thread.title}</p>
                 <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-                  Introduced in chapter {thread.introduced_at ?? "?"}
+                  First mentioned in chapter {thread.first_mentioned ?? thread.introduced_at ?? "?"}
+                  {thread.last_mentioned ? ` • Last mentioned in chapter ${thread.last_mentioned}` : ""}
                   {thread.resolved_at ? ` • Resolved in chapter ${thread.resolved_at}` : ""}
                 </p>
               </div>
@@ -123,7 +142,7 @@ export function PlotTracker({ bookId, chapter, mode = "compact" }: Props) {
                 {STATUS_LABELS[thread.status] ?? STATUS_LABELS.unknown}
               </span>
             </div>
-            {thread.note ? <p className={`mt-2 text-xs leading-5 ${isDark ? "text-amber-200" : "text-amber-800"}`}>Note: {thread.note}</p> : null}
+            {thread.risk ? <p className={`mt-2 text-xs leading-5 ${isDark ? "text-amber-200" : "text-amber-800"}`}>{thread.risk}</p> : null}
           </div>
         ))}
         <Link
@@ -172,9 +191,11 @@ export function PlotTracker({ bookId, chapter, mode = "compact" }: Props) {
                       </div>
                       {thread.description ? <p className={`mt-2 max-w-3xl text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{thread.description}</p> : null}
                       <p className={`mt-2 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>
-                        Introduced in chapter {thread.introduced_at ?? "?"}
+                        First mentioned in chapter {thread.first_mentioned ?? thread.introduced_at ?? "?"}
+                        {thread.last_mentioned ? ` • Last mentioned in chapter ${thread.last_mentioned}` : ""}
                         {thread.resolved_at ? ` • Resolved in chapter ${thread.resolved_at}` : ""}
-                        {thread.character_ids.length > 0 ? ` • ${thread.character_ids.length} linked characters` : ""}
+                        {thread.related_characters.length > 0 ? ` • ${thread.related_characters.length} linked characters` : ""}
+                        {thread.mention_count > 0 ? ` • ${thread.mention_count} mentions tracked` : ""}
                       </p>
                     </div>
                     <span className={`rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] ${statusClasses(thread.status, isDark)}`}>
@@ -182,17 +203,54 @@ export function PlotTracker({ bookId, chapter, mode = "compact" }: Props) {
                     </span>
                   </div>
 
+                  {(thread.related_characters.length > 0 || thread.risk || thread.suggested_action) ? (
+                    <div className="mt-4 grid gap-3 lg:grid-cols-3">
+                      <div className={`rounded-[1rem] border px-3 py-3 text-sm ${isDark ? "border-white/10 bg-black/40 text-slate-300" : "border-stone-200 bg-stone-50 text-stone-700"}`}>
+                        <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Related characters</p>
+                        <p className="mt-2 leading-6">{thread.related_characters.length ? thread.related_characters.join(", ") : "No linked characters yet."}</p>
+                      </div>
+                      <div className={`rounded-[1rem] border px-3 py-3 text-sm ${isDark ? "border-white/10 bg-black/40 text-slate-300" : "border-stone-200 bg-stone-50 text-stone-700"}`}>
+                        <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Risk</p>
+                        <p className="mt-2 leading-6">{thread.risk || "No immediate closure risk flagged."}</p>
+                      </div>
+                      <div className={`rounded-[1rem] border px-3 py-3 text-sm ${isDark ? "border-white/10 bg-black/40 text-slate-300" : "border-stone-200 bg-stone-50 text-stone-700"}`}>
+                        <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Suggested action</p>
+                        <p className="mt-2 leading-6">{thread.suggested_action || "No action suggested yet."}</p>
+                      </div>
+                    </div>
+                  ) : null}
+
                   <div className="mt-4">
-                    <label className={`mb-2 block text-xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>
-                      Private note
-                    </label>
-                    <textarea
-                      value={draftNotes[thread.id] ?? ""}
-                      onChange={(event) => setDraftNotes((current) => ({ ...current, [thread.id]: event.target.value }))}
-                      placeholder="Resolve this in arc 5."
-                      rows={3}
-                      className={`w-full rounded-[1rem] border px-3 py-3 text-sm leading-6 outline-none ${isDark ? "border-white/10 bg-black text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-stone-50 text-stone-900 placeholder:text-stone-400"}`}
-                    />
+                    <div className="grid gap-3 lg:grid-cols-[220px_minmax(0,1fr)]">
+                      <div>
+                        <label className={`mb-2 block text-xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>
+                          Lifecycle status
+                        </label>
+                        <select
+                          value={draftStatuses[thread.id] ?? thread.status}
+                          onChange={(event) => setDraftStatuses((current) => ({ ...current, [thread.id]: event.target.value }))}
+                          className={`w-full rounded-[1rem] border px-3 py-3 text-sm outline-none ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-stone-50 text-stone-900"}`}
+                        >
+                          {STATUS_OPTIONS.map((value) => (
+                            <option key={value} value={value}>
+                              {STATUS_LABELS[value]}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className={`mb-2 block text-xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>
+                          Private note
+                        </label>
+                        <textarea
+                          value={draftNotes[thread.id] ?? ""}
+                          onChange={(event) => setDraftNotes((current) => ({ ...current, [thread.id]: event.target.value }))}
+                          placeholder="Resolve this in arc 5."
+                          rows={3}
+                          className={`w-full rounded-[1rem] border px-3 py-3 text-sm leading-6 outline-none ${isDark ? "border-white/10 bg-black text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-stone-50 text-stone-900 placeholder:text-stone-400"}`}
+                        />
+                      </div>
+                    </div>
                     <div className="mt-3 flex items-center justify-between gap-3">
                       <p className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Only visible inside your LoreVia workspace.</p>
                       <div className="flex items-center gap-2">
@@ -211,11 +269,11 @@ export function PlotTracker({ bookId, chapter, mode = "compact" }: Props) {
                           Open notes
                         </Link>
                         <button
-                          onClick={() => saveNote(thread.id)}
+                          onClick={() => void saveNote(thread.id)}
                           disabled={savingId === thread.id}
                           className="rounded-full bg-[linear-gradient(135deg,#115e59,#0f766e)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
                         >
-                          {savingId === thread.id ? "Saving..." : "Save note"}
+                          {savingId === thread.id ? "Saving..." : "Save thread"}
                         </button>
                       </div>
                     </div>

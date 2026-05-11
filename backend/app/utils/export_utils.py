@@ -751,10 +751,18 @@ def character_card_markdown(payload: dict) -> tuple[bytes, str]:
     ]
     if payload["personality_tags"]:
         lines.extend(["## Personality", "", *bullets(payload["personality_tags"]), ""])
+    if payload.get("goal"):
+        lines.extend(["## Goal", "", payload["goal"], ""])
     if payload["motivations"]:
         lines.extend(["## Motivations", "", *bullets(payload["motivations"]), ""])
     if payload["fears"]:
         lines.extend(["## Fears", "", *bullets(payload["fears"]), ""])
+    if payload.get("lie_they_believe"):
+        lines.extend(["## Lie They Believe", "", payload["lie_they_believe"], ""])
+    if payload.get("backstory_wound"):
+        lines.extend(["## Wound / Backstory", "", payload["backstory_wound"], ""])
+    if payload.get("arc_type"):
+        lines.extend(["## Arc Type", "", payload["arc_type"], ""])
     if payload["arc_summary"]:
         lines.extend(["## Arc Summary", "", payload["arc_summary"], ""])
     if payload["growth_events"]:
@@ -924,6 +932,16 @@ def character_card_docx(payload: dict) -> bytes:
         doc.add_heading(heading, level=2)
         for item in items:
             doc.add_paragraph(item, style="List Bullet")
+    for heading, value in [
+        ("Goal", payload.get("goal")),
+        ("Lie They Believe", payload.get("lie_they_believe")),
+        ("Wound / Backstory", payload.get("backstory_wound")),
+        ("Arc Type", payload.get("arc_type")),
+    ]:
+        if not value:
+            continue
+        doc.add_heading(heading, level=2)
+        doc.add_paragraph(str(value))
     if payload["arc_summary"]:
         doc.add_heading("Arc Summary", level=2)
         doc.add_paragraph(payload["arc_summary"])
@@ -1023,6 +1041,10 @@ def character_bible_markdown(
             body.append("Personality")
             body.append(_bullets(tags[:10]))
             body.append("")
+        if _clean_line(getattr(char, "goal", None)):
+            body.append("Goal")
+            body.append(_bullets([_clean_line(getattr(char, "goal", None))]))
+            body.append("")
         if motivations:
             body.append("Motivations")
             body.append(_bullets(motivations[:8]))
@@ -1030,6 +1052,18 @@ def character_bible_markdown(
         if fears:
             body.append("Fears")
             body.append(_bullets(fears[:8]))
+            body.append("")
+        if _clean_line(getattr(char, "lie_they_believe", None)):
+            body.append("Lie they believe")
+            body.append(_bullets([_clean_line(getattr(char, "lie_they_believe", None))]))
+            body.append("")
+        if _clean_line(getattr(char, "backstory_wound", None)):
+            body.append("Wound / backstory")
+            body.append(_bullets([_clean_line(getattr(char, "backstory_wound", None))]))
+            body.append("")
+        if _clean_line(getattr(char, "arc_type", None)):
+            body.append("Arc type")
+            body.append(_bullets([_clean_line(getattr(char, "arc_type", None))]))
             body.append("")
         if _clean_line(char.arc_summary):
             body.append("Arc summary")

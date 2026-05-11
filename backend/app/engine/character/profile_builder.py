@@ -218,8 +218,12 @@ def build_character_profile(extracted: dict, book_id: uuid.UUID, first_chapter: 
         "age_descriptor": flat(trait_state, "age"),
         "distinguishing": flat(trait_state, "distinguishing"),
         "personality_tags": extracted.get("personality_tags", []),
+        "goal": extracted.get("goal"),
         "motivations": extracted.get("motivations", []),
         "fears": extracted.get("fears", []),
+        "lie_they_believe": extracted.get("lie_they_believe"),
+        "backstory_wound": extracted.get("backstory_wound"),
+        "arc_type": extracted.get("arc_type"),
         "arc_summary": extracted.get("arc_summary"),
         "archetype": archetype,
         "growth_events": merge_growth_events(_growth_event_group(extracted.get("growth_event"))),
@@ -241,8 +245,12 @@ def merge_profile_fields(existing, incoming) -> dict:
     incoming_role = incoming.get("role") if isinstance(incoming, dict) else incoming.role
     incoming_first_chapter = incoming.get("first_chapter", existing.first_chapter) if isinstance(incoming, dict) else incoming.first_chapter
     incoming_personality = incoming.get("personality_tags") if isinstance(incoming, dict) else incoming.personality_tags
+    incoming_goal = incoming.get("goal") if isinstance(incoming, dict) else getattr(incoming, "goal", None)
     incoming_motivations = incoming.get("motivations") if isinstance(incoming, dict) else incoming.motivations
     incoming_fears = incoming.get("fears") if isinstance(incoming, dict) else incoming.fears
+    incoming_lie = incoming.get("lie_they_believe") if isinstance(incoming, dict) else getattr(incoming, "lie_they_believe", None)
+    incoming_wound = incoming.get("backstory_wound") if isinstance(incoming, dict) else getattr(incoming, "backstory_wound", None)
+    incoming_arc_type = incoming.get("arc_type") if isinstance(incoming, dict) else getattr(incoming, "arc_type", None)
     incoming_arc = incoming.get("arc_summary") if isinstance(incoming, dict) else incoming.arc_summary
     incoming_archetype = incoming.get("archetype") if isinstance(incoming, dict) else incoming.archetype
     incoming_last_seen = incoming.get("last_seen_chapter") if isinstance(incoming, dict) else getattr(incoming, "last_seen_chapter", None)
@@ -268,8 +276,12 @@ def merge_profile_fields(existing, incoming) -> dict:
         "age_descriptor": flat(merged_traits, "age"),
         "distinguishing": flat(merged_traits, "distinguishing"),
         "personality_tags": merge_list_values(existing.personality_tags, incoming_personality),
+        "goal": choose_richer_text(getattr(existing, "goal", None), incoming_goal),
         "motivations": merge_list_values(existing.motivations, incoming_motivations),
         "fears": merge_list_values(existing.fears, incoming_fears),
+        "lie_they_believe": choose_richer_text(getattr(existing, "lie_they_believe", None), incoming_lie),
+        "backstory_wound": choose_richer_text(getattr(existing, "backstory_wound", None), incoming_wound),
+        "arc_type": choose_richer_text(getattr(existing, "arc_type", None), incoming_arc_type),
         "arc_summary": choose_richer_text(existing.arc_summary, incoming_arc),
         "archetype": choose_richer_text(existing.archetype, incoming_archetype),
         "growth_events": merge_growth_events(existing.growth_events, incoming_growth_events),
@@ -285,8 +297,12 @@ def update_profile(existing, extracted: dict) -> dict:
         "last_seen_chapter": chapter,   # chapter currently being processed
         "trait_state": extracted.get("traits", {}),
         "personality_tags": extracted.get("personality_tags", []),
+        "goal": extracted.get("goal"),
         "motivations": extracted.get("motivations", []),
         "fears": extracted.get("fears", []),
+        "lie_they_believe": extracted.get("lie_they_believe"),
+        "backstory_wound": extracted.get("backstory_wound"),
+        "arc_type": extracted.get("arc_type"),
         "arc_summary": extracted.get("arc_summary"),
         "archetype": extracted.get("archetype"),
         "growth_events": merge_growth_events(_growth_event_group(extracted.get("growth_event"))),

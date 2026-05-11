@@ -1,13 +1,9 @@
 import type { Metadata, Viewport } from "next"
-import { headers } from "next/headers"
-import { connection } from "next/server"
+import Script from "next/script"
 import "./globals.css"
 import { Merriweather, Newsreader, Space_Grotesk } from "next/font/google"
-import { AuthBootstrap } from "@/components/auth/AuthBootstrap"
-import { PWARegister } from "@/components/app/PWARegister"
-import { SiteFooter } from "@/components/layout/SiteFooter"
-import { DailyCapPrompt } from "@/components/monetization/DailyCapPrompt"
 import { PostHogClientProvider } from "@/components/analytics/PostHogClient"
+import { SiteFooter } from "@/components/layout/SiteFooter"
 import {
   DEFAULT_OG_IMAGE,
   SITE_DESCRIPTION,
@@ -124,14 +120,7 @@ export const viewport: Viewport = {
   themeColor: "#000000",
 }
 
-function stringifyJsonLd(data: Record<string, unknown>) {
-  return JSON.stringify(data).replace(/</g, "\\u003c")
-}
-
-export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  await connection()
-  const nonce = (await headers()).get("x-nonce") ?? undefined
-
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html
       lang="en"
@@ -140,22 +129,15 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       className={`${uiFont.variable} ${merriweather.variable} ${newsreader.variable}`}
     >
       <head>
-        <script
-          nonce={nonce}
-          type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: stringifyJsonLd(websiteJsonLd) }}
-        />
-        <script
-          nonce={nonce}
-          type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: stringifyJsonLd(organizationJsonLd) }}
-        />
+        <Script id="website-jsonld" type="application/ld+json" strategy="beforeInteractive">
+          {JSON.stringify(websiteJsonLd).replace(/</g, "\\u003c")}
+        </Script>
+        <Script id="organization-jsonld" type="application/ld+json" strategy="beforeInteractive">
+          {JSON.stringify(organizationJsonLd).replace(/</g, "\\u003c")}
+        </Script>
       </head>
       <body className="antialiased">
         <PostHogClientProvider>
-          <AuthBootstrap />
-          <DailyCapPrompt />
-          <PWARegister />
           {children}
           <SiteFooter />
         </PostHogClientProvider>

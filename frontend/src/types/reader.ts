@@ -1,5 +1,6 @@
 export type VisualMode = "off" | "minimal" | "full"
 export type SummaryMode = "short" | "detailed" | "key_points"
+export type ReaderDisplayStyle = "relaxed" | "published"
 
 export interface ChapterData {
   chapter_number: number
@@ -93,9 +94,15 @@ export interface PlotThread {
   description: string | null
   introduced_at: number | null
   resolved_at: number | null
+  first_mentioned: number | null
+  last_mentioned: number | null
+  mention_count: number
   importance: number
   note: string | null
   character_ids: string[]
+  related_characters: string[]
+  risk: string | null
+  suggested_action: string | null
 }
 
 export interface ForeshadowingItem {

@@ -155,8 +155,12 @@ def test_character_card_exports_use_scene_language_for_screenplays():
         "last_appearance": 8,
         "mentions_count": 22,
         "personality_tags": [],
+        "goal": "Find the missing witness.",
         "motivations": [],
         "fears": [],
+        "lie_they_believe": "She cannot rely on anyone else.",
+        "backstory_wound": "She lost a prior witness under her watch.",
+        "arc_type": "positive change",
         "arc_summary": None,
         "growth_events": [{"chapter_number": 3, "event_title": "Refuses the order"}],
         "relationships": [
@@ -174,6 +178,8 @@ def test_character_card_exports_use_scene_language_for_screenplays():
 
     assert "First appearance: Scene 1" in markdown_text
     assert "Last appearance: Scene 8" in markdown_text
+    assert "## Goal" in markdown_text
+    assert "Find the missing witness." in markdown_text
     assert "Introduced in Scene 1, resolved in Scene 6" in markdown_text
     assert "Scene 2 to Scene 8" in markdown_text
 
@@ -186,6 +192,7 @@ def test_character_card_exports_use_scene_language_for_screenplays():
 
     assert "Scene 1" in table_text
     assert "Scene 8" in table_text
+    assert "Find the missing witness." in doc_text
     assert "Introduced in Scene 1, resolved in Scene 6" in doc_text
     assert "Scene 2 to Scene 8" in table_text
 

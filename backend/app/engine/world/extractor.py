@@ -17,9 +17,14 @@ ELEMENT_PATTERNS: dict[str, tuple[str, ...]] = {
     "region": ("area", "province", "region", "territory", "borderland", "frontier", "wastes"),
     "race": ("race", "species", "people", "folk", "tribe", "clan", "bloodline"),
     "magic_system": ("aether", "arcana", "magic", "mana", "spell", "spellcraft", "sorcery", "witchcraft"),
+    "politics": ("council", "court", "crown", "emperor", "king", "parliament", "politics", "queen", "regent", "senate", "throne"),
     "culture": ("culture", "custom", "festival", "holiday", "taboo", "tradition"),
     "language": ("dialect", "language", "script", "tongue"),
     "religion": ("church", "deity", "faith", "god", "goddess", "pantheon", "religion", "ritual", "temple"),
+    "law": ("ban", "banned", "forbidden", "illegal", "law", "laws", "outlawed", "penalty", "prohibited", "punishable"),
+    "currency": ("coin", "coins", "copper", "credit", "credits", "currency", "gold", "mark", "marks", "silver"),
+    "travel_rule": ("crossing", "journey", "ride", "road", "route", "sail", "ship", "travel", "travel time", "trip", "walk"),
+    "power_limit": ("cost", "drain", "exhaustion", "limit", "only once", "price", "restriction"),
     "creature": ("beast", "creature", "dragon", "monster", "spirit"),
     "technology": ("device", "engine", "machine", "technology"),
     "place": ("city", "street", "lane", "square", "river", "canal", "bridge", "palace", "district", "island", "mountain", "forest", "desert", "capital"),
@@ -63,10 +68,14 @@ SECTION_LABEL_TYPES: dict[str, str] = {
     "gods": "religion",
     "government": "organization",
     "governments": "organization",
+    "law": "law",
+    "laws": "law",
     "kingdom": "country",
     "kingdoms": "country",
     "language": "language",
     "languages": "language",
+    "legal system": "law",
+    "legal systems": "law",
     "location": "place",
     "locations": "place",
     "magic": "magic_system",
@@ -81,6 +90,11 @@ SECTION_LABEL_TYPES: dict[str, str] = {
     "peoples": "race",
     "place": "place",
     "places": "place",
+    "political system": "politics",
+    "political systems": "politics",
+    "politics": "politics",
+    "power limit": "power_limit",
+    "power limits": "power_limit",
     "power system": "magic_system",
     "power systems": "magic_system",
     "province": "region",
@@ -98,25 +112,37 @@ SECTION_LABEL_TYPES: dict[str, str] = {
     "technology": "technology",
     "territories": "region",
     "territory": "region",
+    "travel constraint": "travel_rule",
+    "travel constraints": "travel_rule",
+    "travel rule": "travel_rule",
+    "travel rules": "travel_rule",
     "tribe": "race",
     "tribes": "race",
+    "currency": "currency",
+    "currencies": "currency",
+    "coinage": "currency",
 }
 SECTION_BOUNDARY_WORDS = {
     "areas",
     "countries",
     "cultures",
+    "currencies",
     "factions",
     "geography",
     "languages",
+    "laws",
     "locations",
     "magic",
     "pantheons",
     "places",
+    "politics",
+    "power",
     "races",
     "regions",
     "religions",
     "spellcasting",
     "technology",
+    "travel",
 }
 
 WORLD_ELEMENT_BLOCKLIST = {
@@ -224,6 +250,77 @@ COMMON_VERB_LEMMAS = {
 }
 NON_ENTITY_POS_TAGS = {"VERB", "AUX", "DET", "PRON", "ADV", "ADP", "CCONJ", "SCONJ", "PART", "INTJ"}
 NEGATION_TERMS = {"no", "not", "never", "neither", "nor", "without", "hardly"}
+NUMBER_WORDS = {
+    "one": "1",
+    "two": "2",
+    "three": "3",
+    "four": "4",
+    "five": "5",
+    "six": "6",
+    "seven": "7",
+    "eight": "8",
+    "nine": "9",
+    "ten": "10",
+    "eleven": "11",
+    "twelve": "12",
+}
+DOMAIN_RULE_DEFINITIONS: tuple[dict[str, object], ...] = (
+    {
+        "name": "Magic System",
+        "element_type": "magic_system",
+        "keywords": ("arcana", "cast", "casting", "magic", "mana", "ritual", "sorcery", "spell", "spellcraft"),
+    },
+    {
+        "name": "Political System",
+        "element_type": "politics",
+        "keywords": ("council", "crown", "emperor", "govern", "king", "parliament", "queen", "regent", "rule", "senate", "throne"),
+    },
+    {
+        "name": "Religion",
+        "element_type": "religion",
+        "keywords": ("deity", "faith", "god", "goddess", "pantheon", "priest", "ritual", "temple", "worship"),
+    },
+    {
+        "name": "Geography",
+        "element_type": "region",
+        "keywords": ("border", "east", "north", "river", "south", "upstream", "valley", "west"),
+    },
+    {
+        "name": "Technology",
+        "element_type": "technology",
+        "keywords": ("device", "engine", "firearm", "machine", "powder", "steam", "technology"),
+    },
+    {
+        "name": "Species",
+        "element_type": "race",
+        "keywords": ("bloodline", "folk", "kin", "race", "species", "tribe"),
+    },
+    {
+        "name": "Laws",
+        "element_type": "law",
+        "keywords": ("banned", "forbidden", "illegal", "law", "laws", "outlawed", "penalty", "prohibited", "punishable"),
+    },
+    {
+        "name": "Languages",
+        "element_type": "language",
+        "keywords": ("dialect", "language", "script", "tongue"),
+    },
+    {
+        "name": "Currency",
+        "element_type": "currency",
+        "keywords": ("coin", "coins", "copper", "credit", "credits", "currency", "gold", "mark", "silver"),
+    },
+    {
+        "name": "Travel Constraints",
+        "element_type": "travel_rule",
+        "keywords": ("crossing", "days", "ferry", "journey", "ride", "road", "route", "sail", "travel", "weeks"),
+    },
+    {
+        "name": "Power Limits",
+        "element_type": "power_limit",
+        "keywords": ("cost", "drain", "exhaust", "limit", "once", "only", "price", "restriction"),
+    },
+)
 
 _pos_nlp = None
 _pos_nlp_loaded = False
@@ -295,6 +392,13 @@ def extract_world_elements_from_text(text: str, *, chapter_number: int | None = 
             candidates.append(labeled_candidate)
 
     sentence_spans = _split_sentences_with_offsets(cleaned)
+    for domain_candidate in _extract_domain_rule_candidates(cleaned, sentence_spans, chapter_number=chapter_number):
+        key = f"{str(domain_candidate.get('name') or '').lower()}::{str(domain_candidate.get('description') or '').lower()}"
+        if key in seen:
+            continue
+        seen.add(key)
+        candidates.append(domain_candidate)
+
     matches = list(re.finditer(r"\b(?:[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\b", cleaned))
     phrases = [match.group(0) for match in matches]
     counts = Counter(phrases)
@@ -788,7 +892,144 @@ def _extract_claims(phrase: str, description: str, element_type: str) -> list[di
         negation = _window_negation(lowered, climate_match.start(1))
         claims.append(_claim("climate", climate_match.group(1), 0.7, negated=bool(negation), cue=negation))
 
+    direction_match = re.search(
+        r"\b(north|south|east|west|upstream|downstream)\s+of\s+([a-z][a-z\s'-]{1,40})\b",
+        lowered,
+    )
+    if direction_match:
+        claims.append(
+            _claim(
+                "relative_position",
+                f"{direction_match.group(1)} of {direction_match.group(2).strip(' .,;:')}",
+                0.82,
+                negated=False,
+            )
+        )
+
+    governance_match = re.search(
+        r"\b(?:ruled|governed)\s+by\s+(?:an?\s+|the\s+)?([a-z][a-z\s'-]{2,40})\b",
+        lowered,
+    )
+    if governance_match:
+        claims.append(_claim("governance", governance_match.group(1).strip(" .,;:"), 0.78, negated=False))
+
+    currency_match = re.search(
+        r"\b(?:uses?|used|paid in|priced in|minted in)\s+([a-z][a-z\s'-]{1,24})\s+(?:coins?|currency|credits?)\b",
+        lowered,
+    )
+    if currency_match:
+        claims.append(_claim("currency", currency_match.group(1).strip(" .,;:"), 0.8, negated=False))
+
+    travel_match = re.search(
+        r"\b(?:takes?|took|requires?)\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+(hours?|days?|weeks?)\b",
+        lowered,
+    )
+    if travel_match:
+        duration = f"{_normalize_number_token(travel_match.group(1))} {travel_match.group(2)}"
+        claims.append(_claim("travel_time", duration, 0.82, negated=False))
+
+    requirement_match = re.search(
+        r"\b(?:requires?|demands?|needs?)\s+(?:an?\s+|the\s+)?([a-z][a-z\s'-]{2,48})\b",
+        lowered,
+    )
+    if requirement_match:
+        claims.append(_claim("requirement", requirement_match.group(1).strip(" .,;:"), 0.8, negated=False))
+
+    without_requirement_match = re.search(
+        r"\b(?:cast|casting|spell|magic|ritual|sorcery)[^.]{0,80}\bwithout\s+([a-z][a-z\s'-]{1,40})\b",
+        lowered,
+    )
+    if without_requirement_match:
+        claims.append(_claim("requirement", without_requirement_match.group(1).strip(" .,;:"), 0.86, negated=True, cue="without"))
+
+    cost_match = re.search(
+        r"\b(?:costs?|price(?:d)? at|at the cost of)\s+([a-z][a-z\s'-]{1,40})\b",
+        lowered,
+    )
+    if cost_match:
+        claims.append(_claim("cost", cost_match.group(1).strip(" .,;:"), 0.8, negated=False))
+
+    no_cost_match = re.search(
+        r"\b(?:without|for no)\s+(cost|price|payment|blood sacrifice|sacrifice|mana)\b",
+        lowered,
+    )
+    if no_cost_match:
+        claims.append(_claim("cost", no_cost_match.group(1).strip(" .,;:"), 0.86, negated=True, cue="without"))
+
+    legality_match = re.search(
+        r"\b([a-z][a-z\s'-]{2,40})\s+is\s+(illegal|forbidden|banned|prohibited|outlawed)\b",
+        lowered,
+    )
+    if legality_match:
+        claims.append(_claim("legality", legality_match.group(1).strip(" .,;:"), 0.84, negated=True, cue=legality_match.group(2)))
+
+    power_limit_match = re.search(
+        r"\b(?:can only|may only|able to only)\s+([a-z][a-z\s'-]{2,50})\b",
+        lowered,
+    )
+    if power_limit_match:
+        claims.append(_claim("power_limit", power_limit_match.group(1).strip(" .,;:"), 0.8, negated=False))
+
+    once_match = re.search(
+        r"\b(?:only once|once per day|once each day|once a day)\b",
+        lowered,
+    )
+    if once_match:
+        claims.append(_claim("power_limit", once_match.group(0).strip(" .,;:"), 0.78, negated=False))
+
     return claims
+
+
+def _normalize_number_token(value: str) -> str:
+    cleaned = (value or "").strip().lower()
+    return NUMBER_WORDS.get(cleaned, cleaned)
+
+
+def _extract_domain_rule_candidates(text: str, sentence_spans: list[dict], *, chapter_number: int | None) -> list[dict]:
+    candidates: list[dict] = []
+    best_by_name: dict[str, tuple[int, dict]] = {}
+    for sentence in sentence_spans:
+        excerpt = " ".join(str(sentence.get("excerpt") or "").split()).strip()
+        if not excerpt:
+            continue
+        lowered = excerpt.lower()
+        for rule in DOMAIN_RULE_DEFINITIONS:
+            keywords = tuple(str(token) for token in (rule.get("keywords") or ()))
+            overlap = sum(1 for token in keywords if token in lowered)
+            if overlap == 0:
+                continue
+            name = str(rule["name"])
+            element_type = str(rule["element_type"])
+            claims = _extract_claims(name, excerpt, element_type)
+            if not claims and overlap < 2:
+                continue
+            score = overlap + (len(claims) * 2)
+            candidate = {
+                "name": name,
+                "element_type": element_type,
+                "description": excerpt,
+                "chapter_number": chapter_number,
+                "usage_count": 1,
+                "canonical_name": name,
+                "aliases": [],
+                "confidence": min(0.98, 0.62 + (overlap * 0.07) + (len(claims) * 0.06)),
+                "provenance": {
+                    "sentence_index": sentence_spans.index(sentence),
+                    "sentence_start": int(sentence["start"]),
+                    "sentence_end": int(sentence["end"]),
+                    "match_start": int(sentence["start"]),
+                    "match_end": int(sentence["start"]) + len(name),
+                    "excerpt": excerpt,
+                    "narrative_mode": _narrative_mode(excerpt),
+                },
+                "claims": claims,
+            }
+            current = best_by_name.get(name)
+            if current is None or score > current[0]:
+                best_by_name[name] = (score, candidate)
+    for _, candidate in best_by_name.values():
+        candidates.append(candidate)
+    return candidates
 
 
 def _sentence_snippet(text: str, phrase: str) -> str | None:

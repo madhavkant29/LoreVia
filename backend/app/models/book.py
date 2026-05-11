@@ -79,6 +79,27 @@ class Book(Base):
     series_memberships = relationship("SeriesBook", back_populates="book", cascade="all, delete-orphan")
     scenes = relationship("Scene", back_populates="book", cascade="all, delete-orphan")
     novel_scenes = relationship("NovelScene", back_populates="book", cascade="all, delete-orphan")
+    collaborators = relationship("BookCollaborator", back_populates="book", cascade="all, delete-orphan")
+
+
+class BookCollaborator(Base):
+    __tablename__ = "book_collaborators"
+    __table_args__ = (
+        UniqueConstraint("book_id", "email", name="uq_book_collaborators_book_email"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    book_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
+    invited_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), index=True)
+    email: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    display_name: Mapped[str | None] = mapped_column(String)
+    role: Mapped[str] = mapped_column(String, nullable=False, default="viewer", server_default="viewer", index=True)
+    scope: Mapped[dict | None] = mapped_column(JSONB, default=dict, server_default="{}")
+    invite_status: Mapped[str] = mapped_column(String, nullable=False, default="active", server_default="active", index=True)
+    invited_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), index=True)
+
+    book = relationship("Book", back_populates="collaborators")
 
 
 class Chapter(Base):

@@ -6,6 +6,7 @@ import { ChapterText } from "./ChapterText"
 import { ContextPanel } from "./ContextPanel"
 import { SummaryPanel } from "./SummaryPanel"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
+import type { ReaderDisplayStyle } from "@/types/reader"
 
 interface Props { bookId: string; chapterNum: number }
 type ReaderTheme = "light" | "dark"
@@ -26,6 +27,7 @@ export function ReaderView({ bookId, chapterNum }: Props) {
   const [theme, setTheme] = useState<ReaderTheme>(appTheme)
   const [fontSize, setFontSize] = useState(20)
   const [fontFamily, setFontFamily] = useState<"serif" | "sans" | "mono">("serif")
+  const [displayStyle, setDisplayStyle] = useState<ReaderDisplayStyle>("published")
   const [quoteModeEnabled, setQuoteModeEnabled] = useState(false)
   const [canUseQuoteMode, setCanUseQuoteMode] = useState(false)
   const [scrollPct, setScrollPct] = useState(0)
@@ -52,6 +54,9 @@ export function ReaderView({ bookId, chapterNum }: Props) {
 
     const storedFont = window.localStorage.getItem("reader-font-family")
     if (storedFont === "serif" || storedFont === "sans" || storedFont === "mono") setFontFamily(storedFont)
+
+    const storedDisplayStyle = window.localStorage.getItem("reader-display-style")
+    if (storedDisplayStyle === "relaxed" || storedDisplayStyle === "published") setDisplayStyle(storedDisplayStyle)
 
     if (!storedTheme) {
       setTheme(window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
@@ -86,8 +91,9 @@ export function ReaderView({ bookId, chapterNum }: Props) {
     window.localStorage.setItem("app-theme", theme)
     window.localStorage.setItem("reader-font-size", fontSize.toString())
     window.localStorage.setItem("reader-font-family", fontFamily)
+    window.localStorage.setItem("reader-display-style", displayStyle)
     setAppTheme(theme)
-  }, [theme, fontSize, fontFamily])
+  }, [theme, fontSize, fontFamily, displayStyle, setAppTheme])
 
   const chapterText = useMemo(() => data?.text_content ?? "", [data?.text_content])
 
@@ -177,7 +183,7 @@ export function ReaderView({ bookId, chapterNum }: Props) {
   if (error || !data) return <div className="flex justify-center py-20 text-gray-400">{error ?? "Chapter not found"}</div>
 
   return (
-    <div className={`flex h-[100dvh] min-h-[100dvh] overflow-hidden transition-colors ${theme === "dark"
+    <div className={`reader-display-shell flex h-[100dvh] min-h-[100dvh] overflow-hidden transition-colors ${theme === "dark"
         ? "bg-[radial-gradient(circle_at_top,#20253f,#0b1020_58%,#090b12)] text-stone-100"
         : "bg-[linear-gradient(180deg,#fcf7ef_0%,#f7f2eb_45%,#f3efe9_100%)] text-slate-950"
       }`}>
@@ -196,6 +202,8 @@ export function ReaderView({ bookId, chapterNum }: Props) {
           onSetFontSize={setFontSize}
           fontFamily={fontFamily}
           onSetFontFamily={setFontFamily}
+          displayStyle={displayStyle}
+          onSetDisplayStyle={setDisplayStyle}
           quoteModeEnabled={quoteModeEnabled}
           canUseQuoteMode={canUseQuoteMode}
           onToggleQuoteMode={toggleQuoteMode}
@@ -216,6 +224,7 @@ export function ReaderView({ bookId, chapterNum }: Props) {
             theme={theme}
             fontSize={fontSize}
             fontFamily={fontFamily}
+            displayStyle={displayStyle}
             quoteModeEnabled={quoteModeEnabled}
             canUseQuoteMode={canUseQuoteMode}
           />

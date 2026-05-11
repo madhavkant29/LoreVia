@@ -3,7 +3,7 @@ import uuid
 import pytest
 
 from app.models.book import Book, Chapter
-from app.models.character import Character
+from app.models.character import Character, CharacterState, CharacterVoiceProfile
 from app.models.intelligence import PlotThread, WikiEntry, WorldBuildingDocument, WorldGapAnalysis
 
 
@@ -45,6 +45,25 @@ async def test_story_health_endpoint_returns_dynamic_book_metrics(client, db, au
         arc_summary="Learns to trust the council again.",
     )
     db.add(protagonist)
+    await db.flush()
+    db.add(
+        CharacterState(
+            character_id=protagonist.id,
+            at_chapter=2,
+            trait_snapshot={"eyes": {"value": "green", "confidence": 0.9}},
+            arc_note="Still hiding what she knows.",
+        )
+    )
+    db.add(
+        CharacterVoiceProfile(
+            book_id=book.id,
+            character_id=protagonist.id,
+            sample_dialogue_count=6,
+            sample_word_count=84,
+            dominant_markers={"questions": 2},
+            signature_phrases=["Keep the signal burning"],
+        )
+    )
     db.add(
         PlotThread(
             book_id=book.id,
@@ -74,7 +93,17 @@ async def test_story_health_endpoint_returns_dynamic_book_metrics(client, db, au
     assert 0 <= payload["score"] <= 100
     assert payload["status"]
     assert payload["summary"]
-    assert len(payload["metrics"]) == 4
-    labels = {item["label"] for item in payload["metrics"]}
-    assert labels == {"Characters", "World Coherence", "Plot Consistency", "Pacing"}
+    assert len(payload["metrics"]) == 7
+    labels = [item["label"] for item in payload["metrics"]]
+    assert labels == [
+        "Continuity",
+        "Character consistency",
+        "Timeline clarity",
+        "Plot thread closure",
+        "Worldbuilding consistency",
+        "Pacing",
+        "Dialogue/voice consistency",
+    ]
     assert all(0 <= item["score"] <= 100 for item in payload["metrics"])
+    assert payload["score"] < 100
+    assert all(item["score"] < 100 for item in payload["metrics"])

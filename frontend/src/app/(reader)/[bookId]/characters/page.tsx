@@ -19,6 +19,10 @@ type EditDraft = {
   name: string
   aliases: string
   description: string
+  goal: string
+  lieTheyBelieve: string
+  backstoryWound: string
+  arcType: string
   arcSummary: string
   personalityTags: string
   motivations: string
@@ -63,6 +67,21 @@ type EvidenceCacheEntry = {
   results: SearchResult[]
 }
 
+function relationshipChangeKey(
+  item: NonNullable<NonNullable<Character["arc_tracker"]>["relationship_changes"]>[number],
+  index: number,
+) {
+  return [
+    item.counterpart_id,
+    item.chapter_number,
+    item.type,
+    item.to_chapter ?? "open",
+    item.sentiment ?? "neutral",
+    item.description ?? "",
+    index,
+  ].join(":")
+}
+
 function listToString(values: string[] | undefined) {
   return (values ?? []).join(", ")
 }
@@ -72,6 +91,24 @@ function stringToList(value: string) {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean)
+}
+
+function parsePartitionTargets(value: string) {
+  return value
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [rawName, rawAliases] = line.split("|")
+      return {
+        name: rawName.trim(),
+        aliases: (rawAliases ?? "")
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean),
+      }
+    })
+    .filter((item) => item.name)
 }
 
 function normalizeText(value: string | null | undefined) {
@@ -125,6 +162,10 @@ function buildDraft(character: Character | null): EditDraft {
     name: character?.name ?? "",
     aliases: listToString(character?.aliases),
     description: character?.description ?? "",
+    goal: character?.goal ?? character?.arc_tracker?.goal ?? "",
+    lieTheyBelieve: character?.lie_they_believe ?? character?.arc_tracker?.lie_they_believe ?? "",
+    backstoryWound: character?.backstory_wound ?? character?.arc_tracker?.wound_backstory ?? "",
+    arcType: character?.arc_type ?? character?.arc_tracker?.arc_type ?? "",
     arcSummary: character?.arc_summary ?? "",
     personalityTags: listToString(character?.personality_tags),
     motivations: listToString(character?.motivations),
@@ -282,11 +323,23 @@ function buildCharacterHealth(character: Character, mergeSuggestionIds: Set<stri
     score -= 10
     issues.push(`Arc has no update after chapter ${lastSeenChapter}`)
   }
+  for (const diagnostic of character.arc_tracker?.diagnostics ?? []) {
+    score -= diagnostic.includes("too abruptly") ? 12 : 8
+    issues.push(diagnostic)
+  }
+  if (!(character.arc_tracker?.voice_markers?.length ?? 0)) {
+    score -= 6
+    issues.push("Voice markers are not grounded yet")
+  }
+  if (!(character.goal ?? character.arc_tracker?.goal)) {
+    score -= 8
+    issues.push("Goal is missing")
+  }
   if (visibleTraitEntries(character).length < 2) {
     score -= 10
   }
 
-  const normalizedScore = Math.max(24, Math.min(98, Math.round(score)))
+  const normalizedScore = Math.max(24, Math.min(issues.length > 0 ? 86 : 94, Math.round(score)))
   const tone = healthTone(normalizedScore)
   const summary = tone === "strong"
     ? "Well-grounded across traits, continuity, and relationships."
@@ -525,6 +578,8 @@ export default function CharactersPage() {
   const [search, setSearch] = useState("")
   const [selectedId, setSelectedId] = useState("")
   const [selectedMergeKey, setSelectedMergeKey] = useState("")
+  const [manualMergePrimaryId, setManualMergePrimaryId] = useState("")
+  const [manualMergeSecondaryId, setManualMergeSecondaryId] = useState("")
   const [activeTab, setActiveTab] = useState<CharacterTab>("overview")
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>("insights")
   const [castFilter, setCastFilter] = useState<CastFilter>("all")
@@ -536,6 +591,7 @@ export default function CharactersPage() {
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [partitioning, setPartitioning] = useState(false)
   const [shareState, setShareState] = useState<"idle" | "copied" | "error">("idle")
   const [exporting, setExporting] = useState<false | "character" | "bible">()
   const [refreshingGraph, setRefreshingGraph] = useState(false)
@@ -745,12 +801,24 @@ export default function CharactersPage() {
   const selectedHealth = selectedCharacter ? healthByCharacter.get(selectedCharacter.id) ?? null : null
   const selectedCharacterSummary = buildSelectedCharacterSummary(selectedCharacter, selectedConnections)
   const selectedEvidence = selectedCharacter ? evidenceCache[selectedCharacter.id]?.results ?? [] : []
+  const selectedArcTracker = selectedCharacter?.arc_tracker ?? null
   const selectedGrowthEvents = (selectedCharacter?.growth_events ?? [])
     .slice()
     .sort((left, right) => (right.chapter_number ?? right.chapter ?? 0) - (left.chapter_number ?? left.chapter ?? 0))
 
-  const selectedMergePrimary = selectedMergeSuggestion ? chars.find((char) => char.id === selectedMergeSuggestion.primaryId) ?? null : null
-  const selectedMergeSecondary = selectedMergeSuggestion ? chars.find((char) => char.id === selectedMergeSuggestion.secondaryId) ?? null : null
+  const mergeableCharacters = useMemo(
+    () => chars.slice().sort((left, right) => left.name.localeCompare(right.name)),
+    [chars],
+  )
+  const manualMergePrimary = manualMergePrimaryId ? chars.find((char) => char.id === manualMergePrimaryId) ?? null : null
+  const manualMergeSecondary = manualMergeSecondaryId ? chars.find((char) => char.id === manualMergeSecondaryId) ?? null : null
+  const isManualMerge = Boolean(manualMergePrimary && manualMergeSecondary)
+  const selectedMergePrimary = isManualMerge
+    ? manualMergePrimary
+    : selectedMergeSuggestion ? chars.find((char) => char.id === selectedMergeSuggestion.primaryId) ?? null : null
+  const selectedMergeSecondary = isManualMerge
+    ? manualMergeSecondary
+    : selectedMergeSuggestion ? chars.find((char) => char.id === selectedMergeSuggestion.secondaryId) ?? null : null
   const selectedMergePrimaryEvidence = selectedMergePrimary ? evidenceCache[selectedMergePrimary.id]?.results ?? [] : []
   const selectedMergeSecondaryEvidence = selectedMergeSecondary ? evidenceCache[selectedMergeSecondary.id]?.results ?? [] : []
 
@@ -771,6 +839,20 @@ export default function CharactersPage() {
     setCharacterMenuOpen(false)
     setPageMenuOpen(false)
   }, [selectedId, selectedMergeKey, workspaceMode])
+
+  useEffect(() => {
+    if (workspaceMode !== "duplicates" || !manualMergePrimaryId) return
+    if (!chars.some((char) => char.id === manualMergePrimaryId)) {
+      setManualMergePrimaryId("")
+    }
+  }, [chars, manualMergePrimaryId, workspaceMode])
+
+  useEffect(() => {
+    if (workspaceMode !== "duplicates" || !manualMergeSecondaryId) return
+    if (!chars.some((char) => char.id === manualMergeSecondaryId)) {
+      setManualMergeSecondaryId("")
+    }
+  }, [chars, manualMergeSecondaryId, workspaceMode])
 
   async function loadCharacterEvidence(character: Character, force = false) {
     const cached = evidenceCache[character.id]
@@ -858,6 +940,10 @@ export default function CharactersPage() {
         name: draft.name.trim(),
         aliases: stringToList(draft.aliases),
         description: draft.description.trim() || null,
+        goal: draft.goal.trim() || null,
+        lieTheyBelieve: draft.lieTheyBelieve.trim() || null,
+        backstoryWound: draft.backstoryWound.trim() || null,
+        arcType: draft.arcType.trim() || null,
         arcSummary: draft.arcSummary.trim() || null,
         personalityTags: stringToList(draft.personalityTags),
         motivations: stringToList(draft.motivations),
@@ -928,6 +1014,40 @@ export default function CharactersPage() {
       setActionError("Could not delete this character.")
     } finally {
       setDeleting(false)
+    }
+  }
+
+  async function handlePartitionCharacter() {
+    if (!selectedCharacter) return
+    const suggestedTargets = selectedCharacter.aliases.length >= 2
+      ? selectedCharacter.aliases.slice(0, 4).join("\n")
+      : [selectedCharacter.name, ...selectedCharacter.aliases].filter(Boolean).join("\n")
+    const input = window.prompt(
+      "Split this character into separate cards.\nEnter one character per line.\nOptional aliases: Name | alias one, alias two",
+      suggestedTargets,
+    )
+    if (!input) return
+
+    const partitions = parsePartitionTargets(input)
+    if (partitions.length < 2) {
+      setActionError("Enter at least two distinct character names to split this card.")
+      return
+    }
+
+    setPartitioning(true)
+    setActionError(null)
+    try {
+      const response = await booksApi.partitionCharacter(bookId, selectedCharacter.id, { partitions })
+      const refreshed = await booksApi.getCharacters(bookId)
+      setChars(refreshed)
+      setSelectedId(response.created[0] ?? refreshed[0]?.id ?? "")
+      setEditing(false)
+      setWorkspaceMode("profile")
+      setCharacterMenuOpen(false)
+    } catch {
+      setActionError("Could not split this character card.")
+    } finally {
+      setPartitioning(false)
     }
   }
 
@@ -1007,10 +1127,27 @@ export default function CharactersPage() {
 
   function openDuplicateReview(targetCharacterId?: string) {
     setWorkspaceMode("duplicates")
+    setManualMergePrimaryId("")
+    setManualMergeSecondaryId("")
     if (targetCharacterId) {
       const preferred = filteredMergeSuggestions.find((suggestion) => suggestion.primaryId === targetCharacterId || suggestion.secondaryId === targetCharacterId)
-      if (preferred) setSelectedMergeKey(preferred.key)
+      if (preferred) {
+        setSelectedMergeKey(preferred.key)
+        return
+      }
+      const fallbackSecondary = chars.find((char) => char.id !== targetCharacterId)?.id ?? ""
+      setManualMergePrimaryId(targetCharacterId)
+      setManualMergeSecondaryId(fallbackSecondary)
     }
+  }
+
+  function openManualMerge(primaryId?: string, secondaryId?: string) {
+    const primary = primaryId || selectedCharacter?.id || chars[0]?.id || ""
+    const fallbackSecondary = chars.find((char) => char.id !== primary)?.id ?? ""
+    setWorkspaceMode("duplicates")
+    setManualMergePrimaryId(primary)
+    setManualMergeSecondaryId(secondaryId && secondaryId !== primary ? secondaryId : fallbackSecondary)
+    setSelectedMergeKey("")
   }
 
   function resetFilters() {
@@ -1028,7 +1165,8 @@ export default function CharactersPage() {
   const pageMenuActions: MenuAction[] = [
     { label: exporting === "bible" ? "Exporting bible..." : "Export character bible", onClick: () => void handleExportCharacterBible("md"), disabled: exporting === "bible" },
     { label: exporting === "bible" ? "Exporting PDF..." : "Export as PDF", onClick: () => void handleExportCharacterBible("pdf"), disabled: exporting === "bible" },
-    { label: "Review duplicate suggestions", onClick: () => { setWorkspaceMode("duplicates"); setPageMenuOpen(false) } },
+    { label: "Review duplicate suggestions", onClick: () => { openDuplicateReview(); setPageMenuOpen(false) } },
+    { label: "Start manual merge", onClick: () => { openManualMerge(); setPageMenuOpen(false) } },
     { label: refreshingGraph ? "Rebuilding graph..." : "Rebuild relationship graph", onClick: () => void refreshGraph(), disabled: refreshingGraph },
     { label: "Reset filters", onClick: resetFilters },
   ]
@@ -1068,6 +1206,18 @@ export default function CharactersPage() {
         openDuplicateReview(selectedCharacter.id)
         setCharacterMenuOpen(false)
       },
+    },
+    {
+      label: "Merge with another character",
+      onClick: () => {
+        openManualMerge(selectedCharacter.id)
+        setCharacterMenuOpen(false)
+      },
+    },
+    {
+      label: partitioning ? "Splitting character..." : "Split character card",
+      onClick: () => void handlePartitionCharacter(),
+      disabled: partitioning || !isAuthorMode,
     },
     {
       label: exporting === "character" ? "Exporting character..." : "Export character PDF",
@@ -1154,7 +1304,9 @@ export default function CharactersPage() {
                     {workspaceMode === "duplicates" ? "Duplicate review" : "Cast"}
                   </p>
                   <p className={`mt-1 text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>
-                    {workspaceMode === "duplicates" ? `${filteredMergeSuggestions.length} suggestions` : `${filteredChars.length} characters`}
+                    {workspaceMode === "duplicates"
+                      ? `${filteredMergeSuggestions.length} suggestions${isManualMerge ? " · manual pair selected" : ""}`
+                      : `${filteredChars.length} characters`}
                   </p>
 
                   <div className={`mt-4 flex items-center gap-3 rounded-[1rem] border px-3 py-3 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50"}`}>
@@ -1298,7 +1450,7 @@ export default function CharactersPage() {
 
                     {filteredMergeSuggestions.length === 0 ? (
                       <div className="px-3 py-6">
-                        <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No duplicate suggestions match the current search.</p>
+                        <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No duplicate suggestions match the current search. Use the manual merge tools in the main panel to compare any two records directly.</p>
                       </div>
                     ) : null}
                   </div>
@@ -1460,6 +1612,22 @@ export default function CharactersPage() {
                                 <span className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Description</span>
                                 <textarea value={draft.description} onChange={(event) => setDraft((value) => ({ ...value, description: event.target.value }))} rows={4} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
                               </label>
+                              <label className="space-y-1">
+                                <span className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Goal</span>
+                                <input value={draft.goal} onChange={(event) => setDraft((value) => ({ ...value, goal: event.target.value }))} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
+                              </label>
+                              <label className="space-y-1">
+                                <span className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Arc type</span>
+                                <input value={draft.arcType} onChange={(event) => setDraft((value) => ({ ...value, arcType: event.target.value }))} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
+                              </label>
+                              <label className="space-y-1 md:col-span-2">
+                                <span className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Lie they believe</span>
+                                <textarea value={draft.lieTheyBelieve} onChange={(event) => setDraft((value) => ({ ...value, lieTheyBelieve: event.target.value }))} rows={2} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
+                              </label>
+                              <label className="space-y-1 md:col-span-2">
+                                <span className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Wound / backstory</span>
+                                <textarea value={draft.backstoryWound} onChange={(event) => setDraft((value) => ({ ...value, backstoryWound: event.target.value }))} rows={3} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
+                              </label>
                               <label className="space-y-1 md:col-span-2">
                                 <span className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Arc summary</span>
                                 <textarea value={draft.arcSummary} onChange={(event) => setDraft((value) => ({ ...value, arcSummary: event.target.value }))} rows={3} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
@@ -1540,19 +1708,78 @@ export default function CharactersPage() {
                       <div className="mt-5 space-y-4">
                         <SurfaceCard title="Arc summary" isDark={isDark}>
                           <p className={`text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
-                            {selectedCharacter.arc_summary || "Current role and progression are still being inferred from the manuscript."}
+                            {selectedArcTracker?.summary || selectedCharacter.arc_summary || "Current role and progression are still being inferred from the manuscript."}
                           </p>
                         </SurfaceCard>
 
-                        <SurfaceCard title="Arc checkpoints" isDark={isDark}>
-                          {selectedGrowthEvents.length > 0 ? (
+                        <div className="grid gap-4 xl:grid-cols-2">
+                          <SurfaceCard title="Core arc profile" isDark={isDark}>
+                            <dl className="grid gap-3 text-sm">
+                              <div className="grid grid-cols-[132px_minmax(0,1fr)] gap-3">
+                                <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Goal</dt>
+                                <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedArcTracker?.goal || selectedCharacter.goal || "Not grounded yet"}</dd>
+                              </div>
+                              <div className="grid grid-cols-[132px_minmax(0,1fr)] gap-3">
+                                <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Motivation</dt>
+                                <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedArcTracker?.motivation || "Not grounded yet"}</dd>
+                              </div>
+                              <div className="grid grid-cols-[132px_minmax(0,1fr)] gap-3">
+                                <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Fear</dt>
+                                <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedArcTracker?.fear || "Not grounded yet"}</dd>
+                              </div>
+                              <div className="grid grid-cols-[132px_minmax(0,1fr)] gap-3">
+                                <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Lie</dt>
+                                <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedArcTracker?.lie_they_believe || selectedCharacter.lie_they_believe || "Not grounded yet"}</dd>
+                              </div>
+                              <div className="grid grid-cols-[132px_minmax(0,1fr)] gap-3">
+                                <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Wound</dt>
+                                <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedArcTracker?.wound_backstory || selectedCharacter.backstory_wound || "Not grounded yet"}</dd>
+                              </div>
+                              <div className="grid grid-cols-[132px_minmax(0,1fr)] gap-3">
+                                <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Arc type</dt>
+                                <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedArcTracker?.arc_type || selectedCharacter.arc_type || selectedCharacter.archetype || "Still inferring"}</dd>
+                              </div>
+                            </dl>
+                          </SurfaceCard>
+
+                          <SurfaceCard title="Voice markers" isDark={isDark}>
+                            {(selectedArcTracker?.voice_markers?.length ?? 0) > 0 ? (
+                              <div className="space-y-2">
+                                {selectedArcTracker?.voice_markers?.map((marker) => (
+                                  <div key={marker} className={`rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/8 bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+                                    {marker}
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No voice markers are grounded yet.</p>
+                            )}
+                          </SurfaceCard>
+                        </div>
+
+                        <SurfaceCard title="Arc timeline" isDark={isDark}>
+                          {(selectedArcTracker?.arc_timeline?.length ?? 0) > 0 ? (
                             <div className="space-y-3">
-                              {selectedGrowthEvents.map((event, index) => (
+                              {selectedArcTracker?.arc_timeline?.map((line) => (
+                                <div key={line} className={`rounded-xl border px-4 py-3 text-sm leading-6 ${isDark ? "border-white/8 bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+                                  {line}
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No chapter-by-chapter arc timeline has been captured yet.</p>
+                          )}
+                        </SurfaceCard>
+
+                        <SurfaceCard title="Arc checkpoints" isDark={isDark}>
+                          {(selectedArcTracker?.major_turning_points?.length ?? selectedGrowthEvents.length) > 0 ? (
+                            <div className="space-y-3">
+                              {(selectedArcTracker?.major_turning_points?.length ? selectedArcTracker.major_turning_points : selectedGrowthEvents).map((event, index) => (
                                 <div key={`${selectedCharacter.id}-growth-${index}`} className={`rounded-xl border px-4 py-3 ${isDark ? "border-white/8 bg-black/20" : "border-stone-200 bg-white"}`}>
                                   <div className="flex flex-wrap items-center gap-2">
-                                    {growthChapter(event) ? (
+                                    {("chapter_number" in event ? event.chapter_number : growthChapter(event)) ? (
                                       <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] ${isDark ? "bg-violet-500/15 text-violet-100" : "bg-violet-100 text-violet-700"}`}>
-                                        Chapter {growthChapter(event)}
+                                        Chapter {"chapter_number" in event ? event.chapter_number : growthChapter(event)}
                                       </span>
                                     ) : null}
                                     {event.is_major ? (
@@ -1561,10 +1788,10 @@ export default function CharactersPage() {
                                       </span>
                                     ) : null}
                                   </div>
-                                  <p className={`mt-2 text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{growthTitle(event)}</p>
-                                  {event.description || event.impact ? (
+                                  <p className={`mt-2 text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{"title" in event ? event.title : growthTitle(event)}</p>
+                                  {(event.description || ("impact" in event ? event.impact : null)) ? (
                                     <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
-                                      {event.description || event.impact}
+                                      {event.description || ("impact" in event ? event.impact : null)}
                                     </p>
                                   ) : null}
                                 </div>
@@ -1574,6 +1801,40 @@ export default function CharactersPage() {
                             <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No explicit arc checkpoints have been captured yet.</p>
                           )}
                         </SurfaceCard>
+
+                        <div className="grid gap-4 xl:grid-cols-2">
+                          <SurfaceCard title="Relationship changes" isDark={isDark}>
+                            {(selectedArcTracker?.relationship_changes?.length ?? 0) > 0 ? (
+                              <div className="space-y-3">
+                                {selectedArcTracker?.relationship_changes?.map((item, index) => (
+                                  <div key={relationshipChangeKey(item, index)} className={`rounded-xl border px-4 py-3 ${isDark ? "border-white/8 bg-black/20" : "border-stone-200 bg-white"}`}>
+                                    <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>Chapter {item.chapter_number}: {item.counterpart_name}</p>
+                                    <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{formatRelationshipType(item.type)} / {sentimentLabel(item.sentiment)}</p>
+                                    {item.description ? <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{item.description}</p> : null}
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No explicit relationship shifts are tracked yet.</p>
+                            )}
+                          </SurfaceCard>
+
+                          <SurfaceCard title="Physical description history" isDark={isDark}>
+                            {(selectedArcTracker?.physical_description_history?.length ?? 0) > 0 ? (
+                              <div className="space-y-3">
+                                {selectedArcTracker?.physical_description_history?.map((item) => (
+                                  <div key={`${item.chapter_number}-${item.trait}-${item.value}`} className={`rounded-xl border px-4 py-3 text-sm ${isDark ? "border-white/8 bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+                                    <span className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Chapter {item.chapter_number}</span>
+                                    <p className={`mt-1 font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{item.label}</p>
+                                    <p className="mt-1">{item.previous_value ? `${item.previous_value} -> ${item.value}` : item.value}</p>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No description history has been tracked yet.</p>
+                            )}
+                          </SurfaceCard>
+                        </div>
                       </div>
                     ) : null}
 
@@ -1648,17 +1909,31 @@ export default function CharactersPage() {
                         </SurfaceCard>
 
                         <SurfaceCard title="Continuity checklist" isDark={isDark}>
-                          {selectedHealth?.issues.length ? (
+                          {(selectedHealth?.issues.length || selectedArcTracker?.diagnostics?.length) ? (
                             <div className="space-y-3">
-                            {selectedHealth.issues.map((issue) => (
-                              <div key={issue} className={`flex items-start justify-between gap-3 rounded-xl border px-3 py-3 ${isDark ? "border-white/8 bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+                            {[...(selectedHealth?.issues ?? []), ...(selectedArcTracker?.diagnostics ?? [])].map((issue, index) => (
+                              <div key={`${issue}-${index}`} className={`flex items-start justify-between gap-3 rounded-xl border px-3 py-3 ${isDark ? "border-white/8 bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
                                 <span>{issue}</span>
                                 <span className={isDark ? "text-slate-500" : "text-stone-400"}>{">"}</span>
                               </div>
                             ))}
                             </div>
                           ) : (
-                            <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No continuity warnings are active.</p>
+                            <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No hard continuity breaks are tracked yet, but this profile still benefits from a fresh pass on motive drift, scene-to-scene state, and relationship evidence.</p>
+                          )}
+                        </SurfaceCard>
+
+                        <SurfaceCard title="Contradictions" isDark={isDark} className="xl:col-span-2">
+                          {(selectedArcTracker?.contradictions?.length ?? 0) > 0 ? (
+                            <div className="space-y-3">
+                              {selectedArcTracker?.contradictions?.map((item, index) => (
+                                <div key={`${item}-${index}`} className={`rounded-xl border px-4 py-3 text-sm leading-6 ${isDark ? "border-white/8 bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+                                  {item}
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No explicit contradiction is tracked yet, so the next useful check is pressure-testing this character&apos;s role labels, family aliases, and late-chapter motivation shifts.</p>
                           )}
                         </SurfaceCard>
                       </div>
@@ -1711,15 +1986,66 @@ export default function CharactersPage() {
 
                 {workspaceMode === "duplicates" ? (
                   <div className="p-5">
-                    {selectedMergeSuggestion && selectedMergePrimary && selectedMergeSecondary ? (
+                    {selectedMergePrimary && selectedMergeSecondary ? (
                       <div className="space-y-5">
                         <div>
                           <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-violet-300" : "text-violet-600"}`}>Duplicate review</p>
-                          <h2 className={`mt-2 text-3xl font-semibold tracking-tight ${isDark ? "text-white" : "text-stone-950"}`}>Merge suggestion</h2>
+                          <h2 className={`mt-2 text-3xl font-semibold tracking-tight ${isDark ? "text-white" : "text-stone-950"}`}>{isManualMerge ? "Manual merge" : "Merge suggestion"}</h2>
                           <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
                             Compare evidence before merging duplicate character records.
                           </p>
                         </div>
+
+                        <SurfaceCard title="Manual pair" isDark={isDark}>
+                          <div className="grid gap-3 xl:grid-cols-2">
+                            <label className="text-sm">
+                              <span className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Primary record</span>
+                              <select
+                                value={selectedMergePrimary.id}
+                                onChange={(event) => {
+                                  const nextPrimaryId = event.target.value
+                                  setManualMergePrimaryId(nextPrimaryId)
+                                  if (nextPrimaryId === selectedMergeSecondary.id) {
+                                    const fallbackSecondary = mergeableCharacters.find((char) => char.id !== nextPrimaryId)?.id ?? ""
+                                    setManualMergeSecondaryId(fallbackSecondary)
+                                  }
+                                }}
+                                className={`mt-2 w-full rounded-[0.9rem] border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-[#0b1220] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
+                              >
+                                {mergeableCharacters.map((character) => (
+                                  <option key={`manual-primary-${character.id}`} value={character.id}>{character.name}</option>
+                                ))}
+                              </select>
+                            </label>
+                            <label className="text-sm">
+                              <span className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Merge into primary</span>
+                              <select
+                                value={selectedMergeSecondary.id}
+                                onChange={(event) => setManualMergeSecondaryId(event.target.value)}
+                                className={`mt-2 w-full rounded-[0.9rem] border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-[#0b1220] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
+                              >
+                                {mergeableCharacters.filter((character) => character.id !== selectedMergePrimary.id).map((character) => (
+                                  <option key={`manual-secondary-${character.id}`} value={character.id}>{character.name}</option>
+                                ))}
+                              </select>
+                            </label>
+                          </div>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <button type="button" onClick={() => openManualMerge(selectedMergePrimary.id, selectedMergeSecondary.id)} className={actionButtonClasses(isDark)}>
+                              Use manual pair
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setManualMergePrimaryId("")
+                                setManualMergeSecondaryId("")
+                              }}
+                              className={actionButtonClasses(isDark)}
+                            >
+                              Return to suggestions
+                            </button>
+                          </div>
+                        </SurfaceCard>
 
                         <div className="grid gap-4 xl:grid-cols-2">
                           {[selectedMergePrimary, selectedMergeSecondary].map((character, index) => {
@@ -1826,25 +2152,40 @@ export default function CharactersPage() {
                             >
                               {mergeBusy ? "Merging..." : "Merge"}
                             </button>
-                            <button
-                              type="button"
-                              onClick={() => dismissMergeSuggestion(selectedMergeSuggestion.key)}
-                              className={actionButtonClasses(isDark)}
-                            >
-                              Keep separate
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => dismissMergeSuggestion(selectedMergeSuggestion.key)}
-                              className={actionButtonClasses(isDark)}
-                            >
-                              Dismiss
-                            </button>
+                            {selectedMergeSuggestion && !isManualMerge ? (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => dismissMergeSuggestion(selectedMergeSuggestion.key)}
+                                  className={actionButtonClasses(isDark)}
+                                >
+                                  Keep separate
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => dismissMergeSuggestion(selectedMergeSuggestion.key)}
+                                  className={actionButtonClasses(isDark)}
+                                >
+                                  Dismiss
+                                </button>
+                              </>
+                            ) : null}
                           </div>
                         </SurfaceCard>
                       </div>
                     ) : (
-                      <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No duplicate suggestions are available right now.</p>
+                      <div className="space-y-4">
+                        <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No duplicate suggestion is selected right now. Start with a manual pair and compare any two character records directly.</p>
+                        {chars.length >= 2 ? (
+                          <button
+                            type="button"
+                            onClick={() => openManualMerge()}
+                            className="rounded-[1rem] bg-[linear-gradient(135deg,#8b5cf6,#6d28d9)] px-5 py-3 text-sm font-semibold text-white shadow-[0_15px_35px_rgba(109,40,217,0.22)] transition hover:translate-y-[-1px]"
+                          >
+                            Start manual merge
+                          </button>
+                        ) : null}
+                      </div>
                     )}
                   </div>
                 ) : null}
@@ -1888,8 +2229,8 @@ export default function CharactersPage() {
                           </div>
 
                           <div className="mt-4 space-y-2">
-                            {selectedHealth.issues.map((issue) => (
-                              <div key={issue} className={`flex items-center justify-between rounded-xl border px-3 py-2.5 ${isDark ? "border-white/8 bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+                            {selectedHealth.issues.map((issue, index) => (
+                              <div key={`${issue}-${index}`} className={`flex items-center justify-between rounded-xl border px-3 py-2.5 ${isDark ? "border-white/8 bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
                                 <span className="text-sm">{issue}</span>
                                 <span className={isDark ? "text-slate-500" : "text-stone-400"}>{">"}</span>
                               </div>
@@ -1902,7 +2243,9 @@ export default function CharactersPage() {
                           <div className="mt-4 grid gap-3 sm:grid-cols-2">
                             <QuickActionTile isDark={isDark} title="Find evidence" description="Search scenes and grounded passages." onClick={openCharacterEvidence} />
                             <QuickActionTile isDark={isDark} title="Open relationships" description="View the full relationship graph." onClick={openRelationships} />
-                            <QuickActionTile isDark={isDark} title="Review duplicates" description={`${mergeSuggestions.length} suggestions ready for review.`} onClick={() => openDuplicateReview(selectedCharacter.id)} />
+                            <QuickActionTile isDark={isDark} title="Review duplicates" description={mergeSuggestions.length > 0 ? `${mergeSuggestions.length} suggestions ready for review.` : "No suggestion yet? Start a manual merge for this character."} onClick={() => openDuplicateReview(selectedCharacter.id)} />
+                            <QuickActionTile isDark={isDark} title="Manual merge" description="Choose another record and merge it yourself." onClick={() => openManualMerge(selectedCharacter.id)} />
+                            <QuickActionTile isDark={isDark} title={partitioning ? "Splitting..." : "Split card"} description="Break one merged record into separate character cards and keep the new profiles." onClick={() => void handlePartitionCharacter()} />
                             <QuickActionTile isDark={isDark} title="Ask as character" description="Simulate a grounded reply in voice." onClick={openCharacterChat} />
                           </div>
                         </section>
@@ -2045,19 +2388,21 @@ export default function CharactersPage() {
 
                 {workspaceMode === "duplicates" ? (
                   <div className="p-4">
-                    {selectedMergeSuggestion && selectedMergePrimary && selectedMergeSecondary ? (
+                    {selectedMergePrimary && selectedMergeSecondary ? (
                       <div className="space-y-4">
                         <section className={`rounded-[1.2rem] border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50/75"}`}>
-                          <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Merge suggestion</p>
-                          <p className={`mt-3 text-2xl font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{selectedMergeSuggestion.confidence}%</p>
-                          <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>Confidence based on name overlap, alias collisions, and shared chapter context.</p>
-                          <div className="mt-4 space-y-2">
-                            {selectedMergeSuggestion.reasons.map((reason) => (
-                              <div key={reason} className={`rounded-xl border px-3 py-2.5 text-sm ${isDark ? "border-white/8 bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
-                                {reason}
-                              </div>
-                            ))}
-                          </div>
+                          <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{isManualMerge ? "Manual merge" : "Merge suggestion"}</p>
+                          <p className={`mt-3 text-2xl font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{selectedMergeSuggestion && !isManualMerge ? `${selectedMergeSuggestion.confidence}%` : "Manual review"}</p>
+                          <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{selectedMergeSuggestion && !isManualMerge ? "Confidence based on name overlap, alias collisions, and shared chapter context." : "Use this when a family-role alias or late rename was missed by automatic duplicate suggestions."}</p>
+                          {selectedMergeSuggestion && !isManualMerge ? (
+                            <div className="mt-4 space-y-2">
+                              {selectedMergeSuggestion.reasons.map((reason) => (
+                                <div key={reason} className={`rounded-xl border px-3 py-2.5 text-sm ${isDark ? "border-white/8 bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+                                  {reason}
+                                </div>
+                              ))}
+                            </div>
+                          ) : null}
                         </section>
 
                         <section className={`rounded-[1.2rem] border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50/75"}`}>
@@ -2084,13 +2429,31 @@ export default function CharactersPage() {
                               isDark={isDark}
                               title="Keep separate"
                               description="Dismiss this suggestion and leave both records untouched."
-                              onClick={() => dismissMergeSuggestion(selectedMergeSuggestion.key)}
+                              onClick={() => {
+                                if (selectedMergeSuggestion && !isManualMerge) {
+                                  dismissMergeSuggestion(selectedMergeSuggestion.key)
+                                  return
+                                }
+                                setManualMergePrimaryId("")
+                                setManualMergeSecondaryId("")
+                              }}
                             />
                           </div>
                         </section>
                       </div>
                     ) : (
-                      <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>Choose a merge suggestion to review.</p>
+                      <div className="space-y-4">
+                        <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>Choose a suggestion or start a manual merge to compare records the detector did not catch yet.</p>
+                        {chars.length >= 2 ? (
+                          <button
+                            type="button"
+                            onClick={() => openManualMerge()}
+                            className="w-full rounded-[1rem] bg-[linear-gradient(135deg,#8b5cf6,#6d28d9)] px-5 py-3 text-sm font-semibold text-white shadow-[0_15px_35px_rgba(109,40,217,0.22)] transition hover:translate-y-[-1px]"
+                          >
+                            Start manual merge
+                          </button>
+                        ) : null}
+                      </div>
                     )}
                   </div>
                 ) : null}

@@ -7,6 +7,14 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class CollaborationScope(BaseModel):
+    chapter_start: int | None = Field(None, ge=1)
+    chapter_end: int | None = Field(None, ge=1)
+    character_bible: bool = False
+    continuity_report: bool = False
+    reader_confusion_report: bool = False
+
+
 class BookOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -40,6 +48,8 @@ class BookOut(BaseModel):
     chapters_left: int | None = None
     marked_complete_in_series: bool | None = None
     processing: BookProcessingOut | None = None
+    collaboration_role: str | None = None
+    collaboration_scope: CollaborationScope | None = None
 
 
 class SeriesOut(BaseModel):
@@ -137,6 +147,10 @@ class CharacterUpdateBody(BaseModel):
     aliases: list[str] | None = None
     role: str | None = None
     description: str | None = None
+    goal: str | None = None
+    lie_they_believe: str | None = None
+    backstory_wound: str | None = None
+    arc_type: str | None = None
     arc_summary: str | None = None
     personality_tags: list[str] | None = None
     motivations: list[str] | None = None
@@ -156,9 +170,44 @@ class CharacterShareOut(BaseModel):
     expires_in_minutes: int
 
 
+class BookCollaboratorCreateBody(BaseModel):
+    email: str = Field(..., min_length=3, max_length=320)
+    display_name: str | None = Field(None, max_length=120)
+    role: Literal["viewer", "commenter", "editor", "beta_reader", "developmental_editor", "coauthor"]
+    scope: CollaborationScope = Field(default_factory=CollaborationScope)
+
+
+class BookCollaboratorUpdateBody(BaseModel):
+    display_name: str | None = Field(None, max_length=120)
+    role: Literal["viewer", "commenter", "editor", "beta_reader", "developmental_editor", "coauthor"] | None = None
+    scope: CollaborationScope | None = None
+    invite_status: Literal["active", "revoked"] | None = None
+
+
+class BookCollaboratorOut(BaseModel):
+    id: str
+    book_id: str
+    email: str
+    display_name: str | None = None
+    role: str
+    scope: CollaborationScope
+    invite_status: str
+    invited_at: datetime
+    updated_at: datetime
+
+
 class CharacterMergeBody(BaseModel):
     primary_id: uuid.UUID
     secondary_id: uuid.UUID
+
+
+class CharacterPartitionTargetBody(BaseModel):
+    name: str
+    aliases: list[str] = Field(default_factory=list)
+
+
+class CharacterPartitionBody(BaseModel):
+    partitions: list[CharacterPartitionTargetBody]
 
 
 class ChapterReportCharacter(BaseModel):
@@ -345,6 +394,19 @@ class ManuscriptFrontMatterOut(BaseModel):
     include_prologue: bool = False
 
 
+class RevisionBoardItemStateOut(BaseModel):
+    item_id: str
+    status: str = "pending"
+    assigned_version_id: str | None = None
+    task_id: str | None = None
+    updated_at: str | None = None
+
+
+class RevisionBoardOut(BaseModel):
+    items: list[RevisionBoardItemStateOut] = Field(default_factory=list)
+    last_generated_at: str | None = None
+
+
 class BookProcessingOut(BaseModel):
     status: str | None = None
     stage: str | None = None
@@ -368,6 +430,7 @@ class WriterWorkspaceOut(BaseModel):
     templates: list[WritingTemplateOut]
     publishing: PublishingPresetOut
     manuscript_front_matter: ManuscriptFrontMatterOut
+    revision_board: RevisionBoardOut
     processing: BookProcessingOut | None = None
 
 
@@ -432,6 +495,19 @@ class ManuscriptFrontMatterBody(BaseModel):
     include_prologue: bool | None = None
 
 
+class RevisionBoardItemStateBody(BaseModel):
+    item_id: str
+    status: str = "pending"
+    assigned_version_id: str | None = None
+    task_id: str | None = None
+    updated_at: str | None = None
+
+
+class RevisionBoardBody(BaseModel):
+    items: list[RevisionBoardItemStateBody] | None = None
+    last_generated_at: str | None = None
+
+
 class WriterWorkspaceBody(BaseModel):
     word_count_goals: WordCountGoalsBody | None = None
     goal_calendar: list[GoalCalendarItemBody] | None = None
@@ -439,6 +515,66 @@ class WriterWorkspaceBody(BaseModel):
     templates: list[WritingTemplateBody] | None = None
     publishing: PublishingPresetBody | None = None
     manuscript_front_matter: ManuscriptFrontMatterBody | None = None
+    revision_board: RevisionBoardBody | None = None
+
+
+class RevisionActionItemOut(BaseModel):
+    id: str
+    category: str
+    title: str
+    description: str
+    severity: str
+    chapter_ref: int | None = None
+    source_label: str | None = None
+    recommendation: str | None = None
+    status: str = "pending"
+    assigned_version_id: str | None = None
+    task_id: str | None = None
+
+
+class RevisionGenreCheckOut(BaseModel):
+    genre: str
+    label: str
+    checks: list[str] = Field(default_factory=list)
+    rationale: str
+
+
+class RevisionPlanPassOut(BaseModel):
+    title: str
+    summary: str
+    items: list[RevisionActionItemOut] = Field(default_factory=list)
+
+
+class CharacterKnowledgeEntryOut(BaseModel):
+    character_name: str
+    chapter_learned: int | None = None
+    source: str
+
+
+class CharacterKnowledgeFactOut(BaseModel):
+    fact: str
+    chapter_ref: int | None = None
+    entries: list[CharacterKnowledgeEntryOut] = Field(default_factory=list)
+    warning: str | None = None
+
+
+class RevisionSummaryOut(BaseModel):
+    hero_message: str
+    active_item_count: int
+    high_severity_count: int
+    task_ready_count: int
+
+
+class RevisionIntelligenceOut(BaseModel):
+    tagline: str
+    summary: RevisionSummaryOut
+    change_impacts: list[RevisionActionItemOut] = Field(default_factory=list)
+    genre_checks: list[RevisionGenreCheckOut] = Field(default_factory=list)
+    revision_plan: list[RevisionPlanPassOut] = Field(default_factory=list)
+    knowledge_matrix: list[CharacterKnowledgeFactOut] = Field(default_factory=list)
+    scene_advice: list[RevisionActionItemOut] = Field(default_factory=list)
+    confusion_map: list[RevisionActionItemOut] = Field(default_factory=list)
+    voice_alerts: list[RevisionActionItemOut] = Field(default_factory=list)
 
 
 class ReadabilityMetricsOut(BaseModel):

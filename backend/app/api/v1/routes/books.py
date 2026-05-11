@@ -83,8 +83,8 @@ from app.core.security import create_asset_token, decode_token
 from app.core import storage
 from app.engine.character.consolidator import consolidate_characters
 from app.engine.character.profile_builder import build_description
-from app.models.book import Book, Chapter, ObsidianVaultNoteSource, Series, SeriesBook
-from app.models.character import Character
+from app.models.book import Book, BookCollaborator, Chapter, ObsidianVaultNoteSource, Series, SeriesBook
+from app.models.character import Character, CharacterState, CharacterVoiceProfile
 from app.models.intelligence import ChapterSummary, CharacterRelationship, PlotThread, QuoteEntry
 from app.models.progress import ReadingProgress
 from app.schemas.books import (
@@ -97,6 +97,7 @@ from app.schemas.books import (
     ChapterVersionOut,
     CharacterEventOut,
     CharacterMergeBody,
+    CharacterPartitionBody,
     CharacterShareOut,
     CharacterUpdateBody,
     CorkboardCardOut,
@@ -115,6 +116,7 @@ from app.schemas.books import (
     ReadabilityMetricsOut,
     ReadabilityRequestBody,
     RelationshipUpdateBody,
+    RevisionIntelligenceOut,
     SeriesBibleOut,
     SeriesBody,
     SeriesBookStatusBody,
@@ -135,10 +137,12 @@ from app.utils.book_utils import (
     build_emotional_arc_payload,
     build_obsidian_graph,
     build_prewriting_check,
+    build_revision_intelligence_payload,
     build_series_bible_payload,
     build_story_health_payload,
     build_writer_workspace_payload,
     clean_manuscript_html,
+    collaboration_has_resource,
     compute_words_read_for_book,
     delete_book_note,
     delete_obsidian_note,
@@ -148,6 +152,7 @@ from app.utils.book_utils import (
     export_obsidian_notes_zip,
     extract_novel_scene_candidates,
     get_owned_book,
+    get_book_with_collaboration_access,
     get_owned_series,
     import_obsidian_notes_zip,
     list_book_notes,
@@ -180,6 +185,7 @@ from app.utils.book_utils import (
 from app.utils.character_utils import (
     append_unique_summary,
     apply_manual_character_description,
+    build_character_arc_tracker,
     character_status,
     clean_optional_text,
     clean_string_list,
@@ -187,6 +193,7 @@ from app.utils.character_utils import (
     is_displayable_character,
     merge_characters,
     merge_description_with_relationships,
+    partition_character,
     relationship_summary_for_character,
 )
 from app.utils.export_utils import (
@@ -237,6 +244,56 @@ def _normalize_book_major_event(
         "involved_characters": involved_ids or None,
         "involved_character_names": involved_names or None,
         "event_type": event.get("event_type"),
+    }
+
+
+def _serialize_book_character(
+    char: Character,
+    *,
+    rel_summaries: dict[str, list[str]],
+    states: list[CharacterState],
+    relationships: list[CharacterRelationship],
+    counterpart_names: dict[uuid.UUID, str],
+    voice_profile: CharacterVoiceProfile | None,
+    total_chapters: int | None,
+) -> dict[str, Any]:
+    return {
+        "id": str(char.id),
+        "book_id": str(char.book_id),
+        "name": char.name,
+        "aliases": char.aliases or [],
+        "role": char.role,
+        "first_chapter": char.first_chapter,
+        "last_seen_chapter": char.last_seen_chapter,
+        "mention_count": char.mention_count or 0,
+        "status": character_status(char),
+        "trait_state": char.trait_state or {},
+        "description": merge_description_with_relationships(
+            build_description(char.trait_state or {}, char.archetype),
+            dedupe_preserve_order(rel_summaries.get(str(char.id), [])),
+        ),
+        "personality_tags": char.personality_tags or [],
+        "goal": char.goal,
+        "motivations": char.motivations or [],
+        "fears": char.fears or [],
+        "lie_they_believe": char.lie_they_believe,
+        "backstory_wound": char.backstory_wound,
+        "arc_type": char.arc_type,
+        "archetype": char.archetype,
+        "arc_summary": char.arc_summary,
+        "growth_events": char.growth_events or [],
+        "relationship_summaries": dedupe_preserve_order(rel_summaries.get(str(char.id), [])),
+        "character_type": char.character_type,
+        "character_type_score": char.character_type_score,
+        "subtype_scores": char.subtype_scores or {},
+        "arc_tracker": build_character_arc_tracker(
+            char,
+            states=states,
+            relationships=relationships,
+            counterpart_names=counterpart_names,
+            voice_profile=voice_profile,
+            total_chapters=total_chapters,
+        ),
     }
 
 
@@ -935,7 +992,24 @@ async def list_books(
         stmt = stmt.where(Book.hidden_at.is_(None))
     result = await db.execute(stmt.order_by(Book.created_at.desc()))
     books = list(result.scalars().all())
-    return [await book_out(db, book, current_user.id) for book in books]
+    shared_rows = (
+        await db.execute(
+            select(Book, BookCollaborator)
+            .join(BookCollaborator, BookCollaborator.book_id == Book.id)
+            .where(
+                BookCollaborator.email == str(current_user.email).strip().lower(),
+                BookCollaborator.invite_status == "active",
+                Book.user_id != current_user.id,
+            )
+            .order_by(BookCollaborator.invited_at.desc())
+        )
+    ).all()
+    if not include_hidden:
+        shared_rows = [row for row in shared_rows if row[0].hidden_at is None]
+
+    owned_payloads = [await book_out(db, book, current_user.id) for book in books]
+    shared_payloads = [await book_out(db, book, current_user.id, collaborator) for book, collaborator in shared_rows]
+    return owned_payloads + shared_payloads
 
 
 @router.get("/stats", response_model=UserStatsOut)
@@ -1014,10 +1088,8 @@ async def list_saved_notes(
 
 @router.get("/{book_id}", response_model=BookOut)
 async def get_book(book_id: uuid.UUID, db: AsyncSession = Depends(get_db), current_user=Depends(get_current_user)):
-    book = await db.get(Book, book_id)
-    if not book or book.user_id != current_user.id:
-        raise HTTPException(404, "Book not found")
-    return await book_out(db, book, current_user.id)
+    book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
+    return await book_out(db, book, current_user.id, collaborator)
 
 
 @router.get("/{book_id}/notes", response_model=list[BookNoteOut])
@@ -1193,7 +1265,9 @@ async def get_prewriting_check(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    book = await get_owned_book(db, book_id, current_user.id)
+    book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
+    if not collaboration_has_resource(collaborator, "reader_confusion_report"):
+        raise HTTPException(403, "This share does not include the reader confusion report.")
     next_chapter = upcoming_chapter or ((book.total_chapters or 0) + 1)
     return await build_prewriting_check(db, book, next_chapter)
 
@@ -1204,8 +1278,21 @@ async def get_story_health(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    book = await get_owned_book(db, book_id, current_user.id)
+    book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
+    if not collaboration_has_resource(collaborator, "reader_confusion_report"):
+        raise HTTPException(403, "This share does not include the reader confusion report.")
     return await build_story_health_payload(db, book)
+
+
+@router.get("/{book_id}/revision-intelligence", response_model=RevisionIntelligenceOut)
+async def get_revision_intelligence(
+    book_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
+    return RevisionIntelligenceOut(**(await build_revision_intelligence_payload(db, book)))
 
 
 @router.get("/{book_id}/chapter-reports", response_model=list[ChapterConsistencyReport])
@@ -1215,7 +1302,9 @@ async def get_book_chapter_reports(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    book = await get_owned_book(db, book_id, current_user.id)
+    book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
+    if not collaboration_has_resource(collaborator, "continuity_report"):
+        raise HTTPException(403, "This share does not include the continuity report.")
     return await list_chapter_consistency_reports(db, book, limit)
 
 
@@ -1456,19 +1545,20 @@ async def hide_book(
 
 @router.get("/{book_id}/characters")
 async def get_book_characters(book_id: uuid.UUID, db: AsyncSession = Depends(get_db), current_user=Depends(get_current_user)):
-    book = await db.get(Book, book_id)
-    if not book or book.user_id != current_user.id:
-        raise HTTPException(404)
+    book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
+    if not collaboration_has_resource(collaborator, "character_bible"):
+        raise HTTPException(403, "This share does not include the character bible.")
     await consolidate_characters(db, book_id)
     result = await db.execute(select(Character).where(Character.book_id == book_id).order_by(Character.first_chapter, Character.name))
     characters = [char for char in result.scalars().all() if is_displayable_character(char)]
     rel_result = await db.execute(select(CharacterRelationship).where(CharacterRelationship.book_id == book_id))
     relationships = list(rel_result.scalars().all())
-    # Plot threads data available if needed later
-
     char_by_id = {char.id: char for char in characters}
+    character_ids = list(char_by_id.keys())
     rel_summaries: dict[str, list[str]] = {}
     rel_keys: dict[str, set[str]] = {}
+    states_by_character: dict[uuid.UUID, list[CharacterState]] = {char_id: [] for char_id in character_ids}
+    voice_profiles_by_character: dict[uuid.UUID, CharacterVoiceProfile] = {}
 
     for rel in relationships:
         a = char_by_id.get(rel.character_a_id)
@@ -1481,34 +1571,40 @@ async def get_book_characters(book_id: uuid.UUID, db: AsyncSession = Depends(get
             append_unique_summary(rel_summaries, rel_keys, str(a.id), f"{rel.rel_type}:{b.name}".lower(), summary_a)
         if summary_b:
             append_unique_summary(rel_summaries, rel_keys, str(b.id), f"{rel.rel_type}:{a.name}".lower(), summary_b)
+    if character_ids:
+        state_rows = (
+            await db.execute(
+                select(CharacterState)
+                .where(CharacterState.character_id.in_(character_ids))
+                .order_by(CharacterState.character_id, CharacterState.at_chapter)
+            )
+        ).scalars().all()
+        for state in state_rows:
+            states_by_character.setdefault(state.character_id, []).append(state)
+
+        voice_profiles = (
+            await db.execute(select(CharacterVoiceProfile).where(CharacterVoiceProfile.book_id == book_id))
+        ).scalars().all()
+        voice_profiles_by_character = {profile.character_id: profile for profile in voice_profiles}
+
+    counterpart_names = {char.id: char.name for char in characters}
+    relationships_by_character: dict[uuid.UUID, list[CharacterRelationship]] = {char_id: [] for char_id in character_ids}
+    for rel in relationships:
+        if rel.character_a_id in relationships_by_character:
+            relationships_by_character[rel.character_a_id].append(rel)
+        if rel.character_b_id in relationships_by_character:
+            relationships_by_character[rel.character_b_id].append(rel)
 
     return [
-        {
-            "id": str(char.id),
-            "book_id": str(char.book_id),
-            "name": char.name,
-            "aliases": char.aliases or [],
-            "role": char.role,
-            "first_chapter": char.first_chapter,
-            "last_seen_chapter": char.last_seen_chapter,
-            "mention_count": char.mention_count or 0,
-            "status": character_status(char),
-            "trait_state": char.trait_state or {},
-            "description": merge_description_with_relationships(
-                build_description(char.trait_state or {}, char.archetype),
-                dedupe_preserve_order(rel_summaries.get(str(char.id), [])),
-            ),
-            "personality_tags": char.personality_tags or [],
-            "motivations": char.motivations or [],
-            "fears": char.fears or [],
-            "archetype": char.archetype,
-            "arc_summary": char.arc_summary,
-            "growth_events": char.growth_events or [],
-            "relationship_summaries": dedupe_preserve_order(rel_summaries.get(str(char.id), [])),
-            "character_type": char.character_type,
-            "character_type_score": char.character_type_score,
-            "subtype_scores": char.subtype_scores or {},
-        }
+        _serialize_book_character(
+            char,
+            rel_summaries=rel_summaries,
+            states=states_by_character.get(char.id, []),
+            relationships=relationships_by_character.get(char.id, []),
+            counterpart_names=counterpart_names,
+            voice_profile=voice_profiles_by_character.get(char.id),
+            total_chapters=book.total_chapters,
+        )
         for char in characters
     ]
 
@@ -1532,6 +1628,38 @@ async def merge_book_characters(
     await db.commit()
     await db.refresh(merged)
     return {"merged": str(merged.id)}
+
+
+@router.post("/{book_id}/characters/{character_id}/partition")
+async def partition_book_character(
+    book_id: uuid.UUID,
+    character_id: uuid.UUID,
+    body: CharacterPartitionBody,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
+    character = await db.get(Character, character_id)
+    if not character or character.book_id != book.id:
+        raise HTTPException(404, "Character not found")
+    if book.mode != "author":
+        raise HTTPException(400, "Character partition is only available in author mode")
+
+    try:
+        created = await partition_character(
+            db,
+            source=character,
+            partitions=[{"name": item.name, "aliases": item.aliases} for item in body.partitions],
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    await db.commit()
+    return {
+        "replaced": str(character_id),
+        "created": [str(item.id) for item in created],
+    }
 
 
 @router.put("/{book_id}/characters/{character_id}")
@@ -1563,6 +1691,14 @@ async def update_book_character(
         cast(Any, character).role = role
     if body.description is not None:
         apply_manual_character_description(character, body.description)
+    if body.goal is not None:
+        character.goal = clean_optional_text(body.goal)
+    if body.lie_they_believe is not None:
+        character.lie_they_believe = clean_optional_text(body.lie_they_believe)
+    if body.backstory_wound is not None:
+        character.backstory_wound = clean_optional_text(body.backstory_wound)
+    if body.arc_type is not None:
+        character.arc_type = clean_optional_text(body.arc_type)
     if body.arc_summary is not None:
         character.arc_summary = clean_optional_text(body.arc_summary)
     if body.personality_tags is not None:
@@ -1574,27 +1710,44 @@ async def update_book_character(
 
     await db.commit()
     await db.refresh(character)
-
-    return {
-        "id": str(character.id),
-        "book_id": str(character.book_id),
-        "name": character.name,
-        "aliases": character.aliases or [],
-        "role": character.role,
-        "first_chapter": character.first_chapter,
-        "last_seen_chapter": character.last_seen_chapter,
-        "mention_count": character.mention_count or 0,
-        "status": character_status(character),
-        "trait_state": character.trait_state or {},
-        "description": build_description(character.trait_state or {}, character.archetype),
-        "personality_tags": character.personality_tags or [],
-        "motivations": character.motivations or [],
-        "fears": character.fears or [],
-        "archetype": character.archetype,
-        "arc_summary": character.arc_summary,
-        "growth_events": character.growth_events or [],
-        "relationship_summaries": [],
+    states = (
+        await db.execute(
+            select(CharacterState)
+            .where(CharacterState.character_id == character.id)
+            .order_by(CharacterState.at_chapter)
+        )
+    ).scalars().all()
+    relationships = (
+        await db.execute(
+            select(CharacterRelationship).where(
+                CharacterRelationship.book_id == book.id,
+                (CharacterRelationship.character_a_id == character.id) | (CharacterRelationship.character_b_id == character.id),
+            )
+        )
+    ).scalars().all()
+    counterpart_ids = {
+        rel.character_b_id if rel.character_a_id == character.id else rel.character_a_id
+        for rel in relationships
     }
+    counterparts = (
+        await db.execute(select(Character).where(Character.id.in_(counterpart_ids)))
+    ).scalars().all() if counterpart_ids else []
+    counterpart_names = {item.id: item.name for item in counterparts}
+    voice_profile = (
+        await db.execute(
+            select(CharacterVoiceProfile).where(CharacterVoiceProfile.character_id == character.id)
+        )
+    ).scalar_one_or_none()
+
+    return _serialize_book_character(
+        character,
+        rel_summaries={},
+        states=list(states),
+        relationships=list(relationships),
+        counterpart_names=counterpart_names,
+        voice_profile=voice_profile,
+        total_chapters=book.total_chapters,
+    )
 
 
 @router.delete("/{book_id}/characters/{character_id}")

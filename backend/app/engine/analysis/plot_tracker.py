@@ -12,9 +12,9 @@ PLOT_SYSTEM = """Analyse this chapter for meaningful plot threads. Return JSON o
 {
   "threads": [
     {
-      "title": "short title e.g. The revenge arc",
-      "type": "main|sub|mystery|romance|political",
-      "status": "introduced|ongoing|resolved|abandoned|unknown",
+      "title": "short title e.g. Joren promised to return the amulet",
+      "type": "promise|mystery|conflict|prophecy|goal|object|clue|relationship_tension|open_question|subplot|political|romance|main",
+      "status": "introduced|developing|paused|resolved|contradicted|abandoned|unknown",
       "description": "1 sentence",
       "characters_involved": ["name1", "name2"],
       "importance": 1-10
@@ -25,7 +25,9 @@ Rules:
 - Focus on meaningful story threads, not minor events.
 - Use specific titles grounded in the text, not generic labels.
 - Only emit a thread if it has clear stakes or ongoing narrative importance.
+- Track promises, mysteries, conflicts, prophecies, goals, objects, clues, relationship tensions, and open questions when they carry reader expectation.
 - Track psychological and philosophical tensions when they meaningfully drive the plot, including false altruism, self-hatred, denial, obsession, moral injury, or unreliable narration.
+- Use "paused" when a thread is intentionally quiet in this chapter, "contradicted" when the chapter undermines prior setup, and "abandoned" only when the text strongly implies the thread is being dropped.
 - Return raw JSON only. No markdown fences.
 - Return [] if nothing significant."""
 

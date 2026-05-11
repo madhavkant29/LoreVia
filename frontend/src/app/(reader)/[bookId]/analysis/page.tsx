@@ -11,6 +11,12 @@ import type { Book } from "@/types/book"
 
 const ANALYSIS_TOOLS_BASE = [
   {
+    href: "voice",
+    eyebrow: "Dialogue drift",
+    title: "Voice consistency",
+    description: "Run dedicated character voice checks and save the findings back into notes or scenes.",
+  },
+  {
     href: "foreshadowing",
     eyebrow: "Signals and hints",
     title: "Foreshadowing",

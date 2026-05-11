@@ -154,7 +154,7 @@ export function DailyCapPrompt() {
               type="button"
               onClick={() => {
                 close()
-                router.push("/settings#points-wallet")
+                router.push("/points")
               }}
               className={`rounded-full px-4 py-2 text-sm font-semibold ${isDark ? "bg-white/10 text-slate-100" : "bg-stone-100 text-stone-800"}`}
             >

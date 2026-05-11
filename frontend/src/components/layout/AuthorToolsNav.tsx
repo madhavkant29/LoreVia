@@ -27,8 +27,10 @@ type NavIcon =
   | "read"
   | "chapters"
   | "pen"
+  | "voice"
   | "plus"
   | "spark"
+  | "quill"
   | "chat"
   | "gap"
   | "users"
@@ -79,6 +81,8 @@ const NAV_SECTIONS = (bookId: string, currentChapter = 1): NavSection[] => [
     authorOnly: true,
     items: [
       { id: "advisor", label: "Story Advisor", href: `/${bookId}/advisor` as Route, tone: "Continuity", icon: "spark" },
+      { id: "editorial-review", label: "Editorial Review", href: `/${bookId}/editorial-review` as Route, tone: "Line edit", icon: "quill" },
+      { id: "voice", label: "Voice Consistency", href: `/${bookId}/voice` as Route, tone: "Dialogue drift", icon: "voice" },
       { id: "ask", label: "Ask LoreVia", href: `/${bookId}/ask` as Route, tone: "Questions", icon: "chat" },
       { id: "world-gap", label: "World Gap Detection", href: `/${bookId}/world-gap` as Route, tone: "Lore cleanup", icon: "gap" },
       { id: "characters", label: "Character Bible", href: `/${bookId}/characters` as Route, tone: "Profiles", icon: "users" },
@@ -101,6 +105,7 @@ const NAV_SECTIONS = (bookId: string, currentChapter = 1): NavSection[] => [
     authorOnly: true,
     items: [
       { id: "notes", label: "Notes", href: `/${bookId}/notes` as Route, tone: "Vault", icon: "notes" },
+      { id: "collaboration", label: "Collaboration", href: `/${bookId}/collaboration` as Route, tone: "Share", icon: "users" },
       { id: "export", label: "Import & Export", href: `/${bookId}/export` as Route, tone: "Files", icon: "files" },
     ],
   },
@@ -214,6 +219,10 @@ function NavSvg({ icon }: { icon: NavIcon }) {
       return <svg className={common} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M7 4h10M7 8h10M6 12h12M6 16h12M8 20h8" /></svg>
     case "pen":
       return <svg className={common} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M4 20h4l11-11a2.6 2.6 0 10-4-4L4 16v4z" /></svg>
+    case "voice":
+      return <svg className={common} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v8" /><path strokeLinecap="round" strokeLinejoin="round" d="M8.5 8.5a3.5 3.5 0 107 0" /><path strokeLinecap="round" strokeLinejoin="round" d="M6 11a6 6 0 0012 0" /><path strokeLinecap="round" strokeLinejoin="round" d="M9 20h6" /><path strokeLinecap="round" strokeLinejoin="round" d="M12 17v3" /></svg>
+    case "quill":
+      return <svg className={common} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M20 7c0 6-5 11-11 11H4v-5C4 7 9 2 15 2c2.5 0 5 2.5 5 5z" /><path strokeLinecap="round" strokeLinejoin="round" d="M13 11l4-4" /></svg>
     case "plus":
       return <svg className={common} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.9}><path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14M5 12h14" /></svg>
     case "spark":

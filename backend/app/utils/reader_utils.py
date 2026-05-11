@@ -24,6 +24,10 @@ from app.engine.character.entity_filters import (
     VISIBILITY_THRESHOLD,
     character_visibility_score,
 )
+from app.utils.plot_thread_utils import (
+    build_plot_thread_payload,
+    normalize_plot_thread_status,
+)
 from app.utils.billing_utils import user_access_tier
 from app.utils.queue_utils import queue_for_user
 from app.engine.character.profile_builder import build_description
@@ -630,19 +634,8 @@ def build_timeline_track_payload(
     }
 
 
-def serialize_plot_thread(thread: PlotThread) -> dict:
-    return {
-        "id": str(thread.id),
-        "title": thread.title,
-        "type": thread.thread_type,
-        "status": thread.status,
-        "description": thread.description,
-        "introduced_at": thread.introduced_at,
-        "resolved_at": thread.resolved_at,
-        "importance": thread.importance,
-        "note": thread.note,
-        "character_ids": thread.character_ids or [],
-    }
+def serialize_plot_thread(thread: PlotThread, *, current_chapter: int | None) -> dict:
+    return build_plot_thread_payload(thread, current_chapter=current_chapter)
 
 
 async def list_plot_threads(
@@ -657,7 +650,10 @@ async def list_plot_threads(
         query.order_by(PlotThread.importance.desc(), desc(PlotThread.introduced_at), PlotThread.title)
     )
     threads = threads_result.scalars().all()
-    return [serialize_plot_thread(thread) for thread in threads]
+    current_chapter = chapter
+    if current_chapter is None:
+        current_chapter = await db.scalar(select(Book.total_chapters).where(Book.id == book_id))
+    return [serialize_plot_thread(thread, current_chapter=current_chapter) for thread in threads]
 
 
 async def update_plot_thread_note(
@@ -665,6 +661,7 @@ async def update_plot_thread_note(
     book_id: uuid.UUID,
     thread_id: uuid.UUID,
     note: str | None,
+    status: str | None = None,
 ) -> dict | None:
     thread = (
         await db.execute(
@@ -676,6 +673,14 @@ async def update_plot_thread_note(
 
     cleaned = str(bleach.clean(" ".join(str(note or "").split()).strip(), tags=BLEACH_EMPTY_TAGS, strip=True)) or None
     thread.note = cleaned
+    if status is not None:
+        normalized_status = normalize_plot_thread_status(status, default=thread.status)
+        thread.status = normalized_status
+        if normalized_status in {"resolved", "abandoned"} and thread.resolved_at is None:
+            thread.resolved_at = thread.last_mentioned_at or thread.introduced_at
+        elif normalized_status not in {"resolved", "abandoned"}:
+            thread.resolved_at = None
     await db.commit()
     await db.refresh(thread)
-    return serialize_plot_thread(thread)
+    current_chapter = await db.scalar(select(Book.total_chapters).where(Book.id == book_id))
+    return serialize_plot_thread(thread, current_chapter=current_chapter)

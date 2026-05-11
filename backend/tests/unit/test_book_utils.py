@@ -237,6 +237,7 @@ def test_normalize_writer_workspace_preserves_defaults_and_sanitizes_cards():
     assert workspace["corkboard_cards"][0]["title"] == "Opening turn"
     assert workspace["corkboard_cards"][0]["lane"] == "drafting"
     assert workspace["publishing"]["active_preset"] == "kdp_paperback"
+    assert workspace["revision_board"]["items"] == []
     assert workspace["processing"]["status"] == "processing"
     assert workspace["processing"]["last_chapter_title"] == "Chapter 2"
     assert build_book_processing_payload(type("DummyBook", (), {"writer_workspace": workspace})())["chapters_total"] == 3
@@ -363,10 +364,37 @@ def test_normalize_writer_workspace_includes_front_matter_defaults():
     front_matter = workspace["manuscript_front_matter"]
 
     assert workspace["goal_calendar"] == []
+    assert workspace["revision_board"]["items"] == []
     assert front_matter["author_name"] == ""
     assert front_matter["title"] == ""
     assert front_matter["include_dedication"] is False
     assert front_matter["include_acknowledgments"] is False
+
+
+def test_normalize_writer_workspace_sanitizes_revision_board_items():
+    workspace = normalize_writer_workspace(
+        {
+            "revision_board": {
+                "items": [
+                    {"item_id": " impact-1 ", "status": "fixed", "assigned_version_id": " version-1 "},
+                    {"item_id": "impact-1", "status": "ignored"},
+                    {"item_id": " ", "status": "pending"},
+                ],
+                "last_generated_at": " 2026-05-11T10:00:00Z ",
+            }
+        }
+    )
+
+    assert workspace["revision_board"]["last_generated_at"] == "2026-05-11T10:00:00Z"
+    assert workspace["revision_board"]["items"] == [
+        {
+            "item_id": "impact-1",
+            "status": "fixed",
+            "assigned_version_id": "version-1",
+            "task_id": None,
+            "updated_at": None,
+        }
+    ]
 
 
 @pytest.mark.asyncio

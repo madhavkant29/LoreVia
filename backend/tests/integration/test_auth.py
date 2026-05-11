@@ -3,7 +3,13 @@ from datetime import UTC, datetime
 
 import pytest
 
-from app.core.redis import get_redis, key_email_verification_user
+from app.core.redis import (
+    consume_password_reset_token,
+    get_redis,
+    key_email_verification_user,
+    key_password_reset_cooldown,
+    key_password_reset_user,
+)
 from app.core.security import create_access_token, create_refresh_token, hash_password
 from app.models.book import Book
 from app.models.user import User
@@ -522,6 +528,100 @@ async def test_supabase_oauth_handles_legacy_user_with_missing_reading_mode(clie
 async def test_me_requires_auth(client):
     r = await client.get("/api/v1/auth/me")
     assert r.status_code in (401, 403)
+
+
+@pytest.mark.asyncio
+async def test_forgot_password_rotates_to_latest_reset_token_only(client, db):
+    user = User(
+        email="reset-rotate@lorevia.app",
+        username="resetrotate",
+        password_hash=hash_password("SafePass123!@#"),
+        legal_accepted_at=datetime.now(UTC),
+        legal_version="2026-04",
+        email_verified_at=datetime.now(UTC),
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+
+    first = await client.post("/api/v1/auth/forgot-password", json={"email": user.email})
+    assert first.status_code == 200
+    redis = await get_redis()
+    first_token = await redis.get(key_password_reset_user(str(user.id)))
+    assert first_token
+
+    await redis.delete(key_password_reset_cooldown(str(user.id)))
+
+    second = await client.post("/api/v1/auth/forgot-password", json={"email": user.email})
+    assert second.status_code == 200
+    second_token = await redis.get(key_password_reset_user(str(user.id)))
+    assert second_token
+    assert second_token != first_token
+
+    assert await consume_password_reset_token(first_token) is None
+    assert await consume_password_reset_token(second_token) == str(user.id)
+
+
+@pytest.mark.asyncio
+async def test_forgot_password_cooldown_suppresses_repeat_emails_for_same_account(client, db, monkeypatch):
+    deliveries: list[str] = []
+
+    async def _fake_deliver(email: str, token: str) -> tuple[bool, str]:
+        deliveries.append(token)
+        return True, f"https://app.example/reset-password?token={token}"
+
+    monkeypatch.setattr("app.api.v1.routes.auth.deliver_password_reset_email", _fake_deliver)
+
+    user = User(
+        email="reset-cooldown@lorevia.app",
+        username="resetcooldown",
+        password_hash=hash_password("SafePass123!@#"),
+        legal_accepted_at=datetime.now(UTC),
+        legal_version="2026-04",
+        email_verified_at=datetime.now(UTC),
+    )
+    db.add(user)
+    await db.commit()
+
+    first = await client.post("/api/v1/auth/forgot-password", json={"email": user.email})
+    second = await client.post("/api/v1/auth/forgot-password", json={"email": user.email})
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert len(deliveries) == 1
+
+
+@pytest.mark.asyncio
+async def test_reset_password_token_is_single_use(client, db):
+    user = User(
+        email="single-use-reset@lorevia.app",
+        username="singleusereset",
+        password_hash=hash_password("SafePass123!@#"),
+        legal_accepted_at=datetime.now(UTC),
+        legal_version="2026-04",
+        email_verified_at=datetime.now(UTC),
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+
+    forgot = await client.post("/api/v1/auth/forgot-password", json={"email": user.email})
+    assert forgot.status_code == 200
+    token = await (await get_redis()).get(key_password_reset_user(str(user.id)))
+    assert token
+
+    first_reset = await client.post(
+        "/api/v1/auth/reset-password",
+        json={"token": token, "password": "NewResetPass123!@"},
+    )
+    assert first_reset.status_code == 200
+
+    second_reset = await client.post(
+        "/api/v1/auth/reset-password",
+        json={"token": token, "password": "AnotherPass123!@"},
+    )
+    assert second_reset.status_code == 400
+    assert second_reset.json()["detail"] == "Invalid or expired reset token"
 
 
 @pytest.mark.asyncio

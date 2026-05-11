@@ -33,6 +33,36 @@ export interface Book {
   chapters_left?: number | null
   marked_complete_in_series?: boolean | null
   processing?: BookProcessing | null
+  collaboration_role?: CollaborationRole | null
+  collaboration_scope?: CollaborationScope | null
+}
+
+export type CollaborationRole =
+  | "viewer"
+  | "commenter"
+  | "editor"
+  | "beta_reader"
+  | "developmental_editor"
+  | "coauthor"
+
+export interface CollaborationScope {
+  chapter_start?: number | null
+  chapter_end?: number | null
+  character_bible: boolean
+  continuity_report: boolean
+  reader_confusion_report: boolean
+}
+
+export interface BookCollaborator {
+  id: string
+  book_id: string
+  email: string
+  display_name?: string | null
+  role: CollaborationRole
+  scope: CollaborationScope
+  invite_status: "active" | "revoked" | string
+  invited_at: string
+  updated_at: string
 }
 
 export interface BookSeries {
@@ -402,6 +432,19 @@ export interface ManuscriptFrontMatter {
   include_prologue: boolean
 }
 
+export interface RevisionBoardItemState {
+  item_id: string
+  status: "pending" | "fixed" | "ignored" | "task_created" | string
+  assigned_version_id?: string | null
+  task_id?: string | null
+  updated_at?: string | null
+}
+
+export interface RevisionBoard {
+  items: RevisionBoardItemState[]
+  last_generated_at?: string | null
+}
+
 export interface GoalCalendarItem {
   id: string
   title: string
@@ -418,7 +461,67 @@ export interface WriterWorkspace {
   templates: WritingTemplate[]
   publishing: PublishingPreset
   manuscript_front_matter: ManuscriptFrontMatter
+  revision_board: RevisionBoard
   processing?: BookProcessing | null
+}
+
+export interface RevisionActionItem {
+  id: string
+  category: string
+  title: string
+  description: string
+  severity: "high" | "medium" | "low" | string
+  chapter_ref?: number | null
+  source_label?: string | null
+  recommendation?: string | null
+  status: "pending" | "fixed" | "ignored" | "task_created" | string
+  assigned_version_id?: string | null
+  task_id?: string | null
+}
+
+export interface RevisionGenreCheck {
+  genre: string
+  label: string
+  checks: string[]
+  rationale: string
+}
+
+export interface RevisionPlanPass {
+  title: string
+  summary: string
+  items: RevisionActionItem[]
+}
+
+export interface CharacterKnowledgeEntry {
+  character_name: string
+  chapter_learned?: number | null
+  source: string
+}
+
+export interface CharacterKnowledgeFact {
+  fact: string
+  chapter_ref?: number | null
+  entries: CharacterKnowledgeEntry[]
+  warning?: string | null
+}
+
+export interface RevisionIntelligenceSummary {
+  hero_message: string
+  active_item_count: number
+  high_severity_count: number
+  task_ready_count: number
+}
+
+export interface RevisionIntelligence {
+  tagline: string
+  summary: RevisionIntelligenceSummary
+  change_impacts: RevisionActionItem[]
+  genre_checks: RevisionGenreCheck[]
+  revision_plan: RevisionPlanPass[]
+  knowledge_matrix: CharacterKnowledgeFact[]
+  scene_advice: RevisionActionItem[]
+  confusion_map: RevisionActionItem[]
+  voice_alerts: RevisionActionItem[]
 }
 
 export interface NovelScene {

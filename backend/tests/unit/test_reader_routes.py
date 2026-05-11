@@ -398,7 +398,7 @@ async def test_reader_highlight_timeline_and_thematic_routes(monkeypatch):
             _Result(all_rows=[(1, "One", [{"event": "Start"}]), (2, "Two", [{"event": "Shift"}])]),
             _Result(all_rows=[("Iris", 1, "mc", [], "arc")]),
             _Result(all_rows=[(1, "One"), (2, "Two")]),
-            _Result(all_rows=[(uuid.uuid4(), "Door", 1, 2, "ongoing", None, "mystery")]),
+            _Result(all_rows=[(uuid.uuid4(), "Door", 1, 2, 2, "ongoing", None, "mystery")]),
             _Result(all_rows=[(rel, "Iris", "mc")]),
             _Result(scalars=[character]),
             _Result(scalars=[character]),
@@ -505,14 +505,15 @@ async def test_plot_thread_routes_and_relationship_evolution(monkeypatch):
     async def _fake_list_threads(*_args, **_kwargs):
         return [{"id": "1", "title": "Door", "status": "ongoing", "importance": 8, "character_ids": []}]
     async def _fake_update(*_args, **_kwargs):
-        return {"id": "1", "title": "Door", "status": "ongoing", "importance": 8, "character_ids": [], "note": "Updated"}
+        return {"id": "1", "title": "Door", "status": "paused", "importance": 8, "character_ids": [], "related_characters": [], "mention_count": 2, "note": "Updated"}
     monkeypatch.setattr(reader, "list_plot_threads", _fake_list_threads)
     monkeypatch.setattr(reader, "update_plot_thread_note", _fake_update)
 
     evolution = await reader.get_relationship_evolution(book.id, chapter=3, db=db, current_user=_user(user_id))
     threads = await reader.get_plot_threads(book.id, chapter=3, db=db, current_user=_user(user_id))
-    updated = await reader.save_plot_thread_note(book.id, uuid.uuid4(), UpdatePlotThreadBody(note="Updated"), db=db, current_user=_user(user_id))
+    updated = await reader.save_plot_thread_note(book.id, uuid.uuid4(), UpdatePlotThreadBody(note="Updated", status="paused"), db=db, current_user=_user(user_id))
 
     assert evolution["pairs"][0]["characters"] == ["Iris", "Milo"]
     assert threads[0]["title"] == "Door"
     assert updated["note"] == "Updated"
+    assert updated["status"] == "paused"

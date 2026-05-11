@@ -369,7 +369,6 @@ export default function AdvisorPage() {
   const [suggestionsLoaded, setSuggestionsLoaded] = useState(false)
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set())
   const [intentionalIds, setIntentionalIds] = useState<Set<string>>(new Set())
-
   const [sugTab, setSugTab] = useState<"scan" | "editorial">("scan")
   const [editText, setEditText] = useState("")
   const [editChapter, setEditChapter] = useState<string>("")
@@ -591,8 +590,8 @@ export default function AdvisorPage() {
             </button>
             <button
               id="advisor-tab-scan"
-              onClick={() => { setTab("suggestions"); setSugTab("scan") }}
-              className={`relative px-5 py-2.5 text-sm font-medium transition ${tab === "suggestions" && sugTab === "scan" ? isDark ? "bg-white text-slate-950" : "bg-stone-900 text-white" : isDark ? "text-slate-300 hover:bg-white/8" : "text-stone-600 hover:bg-stone-50"}`}
+              onClick={() => setTab("suggestions")}
+              className={`relative px-5 py-2.5 text-sm font-medium transition ${tab === "suggestions" ? isDark ? "bg-white text-slate-950" : "bg-stone-900 text-white" : isDark ? "text-slate-300 hover:bg-white/8" : "text-stone-600 hover:bg-stone-50"}`}
             >
               Continuity Scan
               {warnCount > 0 && (
@@ -600,13 +599,6 @@ export default function AdvisorPage() {
                   {warnCount}
                 </span>
               )}
-            </button>
-            <button
-              id="advisor-tab-editorial"
-              onClick={() => { setTab("suggestions"); setSugTab("editorial") }}
-              className={`px-5 py-2.5 text-sm font-medium transition ${tab === "suggestions" && sugTab === "editorial" ? isDark ? "bg-white text-slate-950" : "bg-stone-900 text-white" : isDark ? "text-slate-300 hover:bg-white/8" : "text-stone-600 hover:bg-stone-50"}`}
-            >
-              Editorial Review
             </button>
           </div>
 

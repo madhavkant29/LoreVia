@@ -19,6 +19,7 @@ from app.api.deps.rate_limit import (
 from app.core.config import is_local_mode, settings
 from app.core.database import get_db
 from app.core.redis import (
+    begin_password_reset_cooldown,
     bump_token_version,
     consume_email_verification_token,
     consume_password_reset_token,
@@ -338,6 +339,12 @@ async def forgot_password(
     email = normalize_email(body.email)
     user = (await db.execute(select(User).where(func.lower(User.email) == email))).scalar()
     if user:
+        cooldown_started = await begin_password_reset_cooldown(
+            str(user.id),
+            settings.PASSWORD_RESET_REQUEST_COOLDOWN_SECONDS,
+        )
+        if not cooldown_started:
+            return {"ok": True, "delivered": True}
         token = secrets.token_urlsafe(32)
         await store_password_reset_token(
             token,

@@ -13,6 +13,8 @@ from app.schemas.books import (
     BookModeBody,
     BookNoteBody,
     CharacterMergeBody,
+    CharacterPartitionBody,
+    CharacterPartitionTargetBody,
     CharacterUpdateBody,
     CharacterEventOut,
     ChapterConsistencyReport,
@@ -50,6 +52,9 @@ class _Result:
 
     def scalars(self):
         return _ScalarList(self._scalars)
+
+    def scalar_one_or_none(self):
+        return self._scalar
 
 
 class _FakeDB:
@@ -664,8 +669,12 @@ async def test_character_routes_cover_crud_and_exports(monkeypatch):
         mention_count=7,
         trait_state={"eyes": "green"},
         personality_tags=["brave"],
+        goal="Protect the city",
         motivations=["survive"],
         fears=["loss"],
+        lie_they_believe="She has to do everything alone.",
+        backstory_wound="Failed her brother once.",
+        arc_type="positive change",
         archetype="hero",
         arc_summary="Growing",
         growth_events=[],
@@ -684,8 +693,12 @@ async def test_character_routes_cover_crud_and_exports(monkeypatch):
         mention_count=3,
         trait_state={},
         personality_tags=[],
+        goal=None,
         motivations=[],
         fears=[],
+        lie_they_believe=None,
+        backstory_wound=None,
+        arc_type=None,
         archetype="ally",
         arc_summary=None,
         growth_events=[],
@@ -721,7 +734,9 @@ async def test_character_routes_cover_crud_and_exports(monkeypatch):
     monkeypatch.setattr(books, "build_description", lambda traits, archetype: f"{archetype}:{traits.get('eyes', 'na')}")
     monkeypatch.setattr(books, "merge_description_with_relationships", lambda description, rels: f"{description}|{len(rels)}")
     monkeypatch.setattr(books, "character_status", lambda _character: "active")
+    monkeypatch.setattr(books, "build_character_arc_tracker", lambda *_args, **_kwargs: {"goal": "Protect the city", "diagnostics": []})
     monkeypatch.setattr(books, "merge_characters", _async_value(character))
+    monkeypatch.setattr(books, "partition_character", _async_value([character, other_character]))
     monkeypatch.setattr(books, "clean_string_list", lambda values: [value.strip() for value in values if value.strip()])
     monkeypatch.setattr(books, "apply_manual_character_description", _apply_description)
     monkeypatch.setattr(books, "require_author_access", lambda *_args, **_kwargs: None)
@@ -753,9 +768,19 @@ async def test_character_routes_cover_crud_and_exports(monkeypatch):
     monkeypatch.setattr(books, "list_obsidian_vault_notes", _async_value([{"path": "Characters/Iris.md", "source": "character_bible", "content": "bio"}]))
     monkeypatch.setattr(books, "save_obsidian_vault_note", _async_value({"path": "Characters/Iris.md", "source": "character_bible", "content": "bio", "persisted": True}))
 
-    db = _FakeDB(get_values=[book], execute_values=[_Result(scalars=[character, other_character]), _Result(scalars=[relationship])])
+    db = _FakeDB(
+        get_values=[book],
+        execute_values=[
+            _Result(scalars=[character, other_character]),
+            _Result(scalars=[relationship]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+        ],
+    )
     payload = await books.get_book_characters(book.id, db=db, current_user=user)
     assert payload[0]["description"] == "hero:green|1"
+    assert payload[0]["goal"] == "Protect the city"
+    assert payload[0]["arc_tracker"]["goal"] == "Protect the city"
 
     db = _FakeDB(get_values=[character, character])
     merged = await books.merge_book_characters(
@@ -775,6 +800,21 @@ async def test_character_routes_cover_crud_and_exports(monkeypatch):
     )
     assert merged["merged"] == str(character.id)
 
+    partitioned = await books.partition_book_character(
+        book.id,
+        character.id,
+        CharacterPartitionBody(
+            partitions=[
+                CharacterPartitionTargetBody(name="Mr. Samsa", aliases=[]),
+                CharacterPartitionTargetBody(name="Mrs. Samsa", aliases=[]),
+            ]
+        ),
+        db=_FakeDB(get_values=[character]),
+        current_user=user,
+    )
+    assert partitioned["replaced"] == str(character.id)
+    assert partitioned["created"] == [str(character.id), str(other_character.id)]
+
     with pytest.raises(HTTPException) as exc:
         await books.update_book_character(
             book.id,
@@ -793,17 +833,25 @@ async def test_character_routes_cover_crud_and_exports(monkeypatch):
             aliases=[" Iris ", ""],
             role="sc",
             description=" Hardened by loss ",
+            goal=" Keep the archive safe ",
+            lie_they_believe=" She cannot trust anyone ",
+            backstory_wound=" A failed mission ",
+            arc_type=" redemptive ",
             arc_summary=" Arc ",
             personality_tags=[" calm ", ""],
             motivations=[" truth "],
             fears=["failure"],
         ),
-        db=_FakeDB(get_values=[character]),
+        db=_FakeDB(
+            get_values=[character],
+            execute_values=[_Result(scalars=[]), _Result(scalars=[]), _Result(scalars=[]), _Result(scalar=None)],
+        ),
         current_user=user,
     )
     assert updated["name"] == "Iris Prime"
     assert updated["role"] == "sc"
     assert updated["aliases"] == ["Iris"]
+    assert updated["goal"] == "Keep the archive safe"
 
     deleted = await books.delete_book_character(book.id, character.id, db=_FakeDB(get_values=[character]), current_user=user)
     assert deleted["deleted"] == str(character.id)

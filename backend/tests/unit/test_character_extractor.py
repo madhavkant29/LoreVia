@@ -80,3 +80,31 @@ def test_apply_anti_merge_hints_marks_same_sentence_characters_as_distinct():
 
     assert "Saitou Masami" in hinted[0]["anti_merge_names"]
     assert "Saitou Kengo" in hinted[1]["anti_merge_names"]
+
+
+def test_clean_character_entries_keeps_titled_surname_only_names_distinct():
+    source_text = "Mr. Samsa spoke first. Mrs. Samsa answered him from the doorway."
+    characters = [
+        {
+            "name": "Mr. Samsa",
+            "entity_type": "person",
+            "is_character": True,
+            "confidence": 0.91,
+            "aliases": [],
+            "traits": {},
+            "arc_summary": "stern and worried",
+        },
+        {
+            "name": "Mrs. Samsa",
+            "entity_type": "person",
+            "is_character": True,
+            "confidence": 0.9,
+            "aliases": [],
+            "traits": {},
+            "arc_summary": "protective and anxious",
+        },
+    ]
+
+    cleaned = _clean_character_entries(characters, ["Mr. Samsa", "Mrs. Samsa"], source_text)
+
+    assert [item["name"] for item in cleaned] == ["Mr. Samsa", "Mrs. Samsa"]

@@ -1,6 +1,7 @@
 "use client"
 import { useState } from "react"
 import Link from "next/link"
+import type { ReaderDisplayStyle } from "@/types/reader"
 
 interface Props {
   bookId: string
@@ -16,6 +17,8 @@ interface Props {
   onSetFontSize: (s: number) => void
   fontFamily: "serif" | "sans" | "mono"
   onSetFontFamily: (f: "serif" | "sans" | "mono") => void
+  displayStyle: ReaderDisplayStyle
+  onSetDisplayStyle: (style: ReaderDisplayStyle) => void
   quoteModeEnabled: boolean
   canUseQuoteMode: boolean
   onToggleQuoteMode: () => void
@@ -35,6 +38,8 @@ export function ReaderToolbar({
   onSetFontSize,
   fontFamily,
   onSetFontFamily,
+  displayStyle,
+  onSetDisplayStyle,
   quoteModeEnabled,
   canUseQuoteMode,
   onToggleQuoteMode,
@@ -68,7 +73,7 @@ export function ReaderToolbar({
   const decreaseFont = () => onSetFontSize(Math.max(fontSize - 2, 12))
 
   return (
-    <header className="sticky top-0 z-20 shrink-0">
+    <header className="reader-app-chrome sticky top-0 z-20 shrink-0">
       <div className={`border-b backdrop-blur-xl ${toneClass.shell}`}>
         <div className="flex items-center justify-between gap-4 px-4 py-4 sm:px-8">
           <div className="min-w-0">
@@ -156,6 +161,19 @@ export function ReaderToolbar({
               ))}
             </div>
 
+            <div className={`flex items-center gap-1 rounded-full border px-1.5 py-1 ${toneClass.pill}`}>
+              {(["published", "relaxed"] as const).map((option) => (
+                <button
+                  key={option}
+                  onClick={() => onSetDisplayStyle(option)}
+                  className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] transition ${displayStyle === option ? toneClass.active : toneClass.muted}`}
+                  aria-pressed={displayStyle === option}
+                >
+                  {option === "published" ? "Published" : "Relaxed"}
+                </button>
+              ))}
+            </div>
+
             {canUseQuoteMode ? (
               <button
                 onClick={onToggleQuoteMode}
@@ -238,6 +256,18 @@ export function ReaderToolbar({
                       }`}
                   >
                     {option}
+                  </button>
+                ))}
+              </div>
+              <div className={`mt-3 flex flex-wrap items-center gap-2 border-t pt-3 ${toneClass.border}`}>
+                {(["published", "relaxed"] as const).map((option) => (
+                  <button
+                    key={option}
+                    onClick={() => onSetDisplayStyle(option)}
+                    className={`rounded-full px-3 py-2 text-[11px] uppercase tracking-[0.18em] transition ${displayStyle === option ? toneClass.active : toneClass.muted}`}
+                    aria-pressed={displayStyle === option}
+                  >
+                    {option === "published" ? "Published layout" : "Relaxed layout"}
                   </button>
                 ))}
               </div>

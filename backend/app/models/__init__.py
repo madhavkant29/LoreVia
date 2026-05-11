@@ -1,5 +1,6 @@
 from app.models.book import (
     Book,
+    BookCollaborator,
     BookNote,
     Chapter,
     ChapterMedia,

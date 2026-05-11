@@ -371,6 +371,132 @@ body::before {
 }
 .reader-text mark { background: #fef08a; border-radius: 2px; padding: 0 1px; }
 
+.reader-display-published {
+  --book-page-bg: rgba(var(--card), 0.88);
+  --book-page-border: rgba(var(--border), 0.74);
+  --book-ink: rgb(var(--foreground));
+  --book-muted: rgb(var(--muted-foreground));
+  --book-inset-bg: rgba(var(--muted), 0.42);
+  --book-inset-border: rgba(var(--border), 0.78);
+  --book-accent: rgb(var(--accent));
+}
+
+.dark .reader-display-published {
+  --book-page-bg: rgba(8, 13, 24, 0.84);
+  --book-page-border: rgba(255, 255, 255, 0.1);
+  --book-inset-bg: rgba(255, 255, 255, 0.045);
+  --book-inset-border: rgba(255, 255, 255, 0.12);
+}
+
+.reader-display-published .book-layout {
+  background:
+    radial-gradient(circle at 50% 0%, rgba(var(--accent), 0.08), transparent 34%),
+    var(--book-page-bg);
+  border-color: var(--book-page-border);
+}
+
+.reader-display-published .book-layout__page {
+  width: 100%;
+  max-width: 720px;
+}
+
+.reader-display-published .book-layout__chapter-heading {
+  margin: clamp(3rem, 8vw, 5.5rem) auto 2.75rem;
+  max-width: 680px;
+  text-align: center;
+}
+
+.reader-display-published .book-layout__chapter-heading p {
+  color: var(--book-muted);
+  letter-spacing: 0.34em;
+}
+
+.reader-display-published .book-layout__chapter-heading h1 {
+  color: var(--book-ink);
+  font-size: clamp(2.3rem, 6vw, 4.2rem);
+  letter-spacing: -0.025em;
+}
+
+.reader-display-published .book-layout__title-rule {
+  margin-inline: auto;
+  width: 3.25rem;
+  background: var(--book-accent);
+  opacity: 0.55;
+}
+
+.reader-display-published .book-layout__body {
+  max-width: 680px;
+  margin-inline: auto;
+  color: var(--book-ink);
+  font-family: Georgia, "Times New Roman", Times, serif;
+  line-height: 1.68;
+  text-align: justify;
+  text-wrap: pretty;
+  overflow-wrap: break-word;
+  hyphens: auto;
+}
+
+.reader-display-published .book-layout__body p,
+.reader-display-published .book-layout__body .book-block--paragraph {
+  margin: 0;
+  text-indent: 1.5em;
+}
+
+.reader-display-published .book-layout__chapter-heading + .book-layout__body > .book-block--paragraph:first-child,
+.reader-display-published .book-layout__body > .book-block--paragraph:first-child,
+.reader-display-published .book-layout__body.note-rich-content p:first-child,
+.reader-display-published .book-layout__body .scene-break + .book-block--paragraph {
+  text-indent: 0;
+}
+
+.reader-display-published .book-special-block,
+.reader-display-published .book-layout__body.note-rich-content blockquote {
+  margin: 1.45rem clamp(1rem, 5vw, 2.8rem);
+  border: 1px solid var(--book-inset-border);
+  border-left: 4px solid rgba(var(--accent), 0.55);
+  border-radius: 1rem;
+  background: var(--book-inset-bg);
+  padding: 1rem 1.25rem;
+  text-align: left;
+  text-indent: 0;
+  white-space: pre-line;
+}
+
+.reader-display-published .book-block--quote,
+.reader-display-published .book-block--letter,
+.reader-display-published .book-block--poem,
+.reader-display-published .book-layout__body.note-rich-content blockquote {
+  font-style: italic;
+}
+
+.reader-display-published .book-block--broadcast {
+  font-variant-numeric: tabular-nums;
+}
+
+.reader-display-published .book-block--artifact {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 0.92em;
+}
+
+.reader-display-published .book-block--poem {
+  margin-inline: clamp(1.4rem, 8vw, 4rem);
+}
+
+.reader-display-published .scene-break {
+  margin: 2.3rem auto;
+  text-align: center;
+  text-indent: 0;
+  letter-spacing: 0.38em;
+  color: var(--book-muted);
+  white-space: normal;
+}
+
+.reader-display-published .book-layout__body.note-rich-content p {
+  margin-top: 0;
+  margin-bottom: 0;
+  text-indent: 1.5em;
+}
+
 .reader-scrollbar {
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
@@ -396,6 +522,107 @@ body::before {
   :root {
     --reader-size: 19px;
     --reader-line-height: 1.95;
+  }
+
+  .reader-display-published .book-layout__page {
+    max-width: 100%;
+    padding-inline: 1.2rem;
+  }
+
+  .reader-display-published .book-layout__chapter-heading {
+    margin-top: 2.25rem;
+    margin-bottom: 2rem;
+  }
+
+  .reader-display-published .book-layout__body {
+    max-width: 100%;
+    line-height: 1.64;
+    text-align: left;
+    hyphens: manual;
+  }
+
+  .reader-display-published .book-layout__body p,
+  .reader-display-published .book-layout__body .book-block--paragraph,
+  .reader-display-published .book-layout__body.note-rich-content p {
+    text-indent: 1.1em;
+  }
+
+  .reader-display-published .book-special-block,
+  .reader-display-published .book-layout__body.note-rich-content blockquote {
+    margin-inline: 0;
+    padding: 0.95rem 1rem;
+  }
+}
+
+@media print {
+  @page {
+    margin: 0.75in 0.7in;
+  }
+
+  html,
+  body {
+    height: auto !important;
+    overflow: visible !important;
+    background: #fff !important;
+    color: #111 !important;
+  }
+
+  body::before,
+  .reader-app-chrome,
+  .reader-nonprint {
+    display: none !important;
+  }
+
+  .reader-display-shell,
+  .reader-scrollbar {
+    height: auto !important;
+    min-height: auto !important;
+    overflow: visible !important;
+    background: #fff !important;
+    color: #111 !important;
+  }
+
+  .reader-display-published {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+
+  .reader-display-published .book-layout {
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: #fff !important;
+    box-shadow: none !important;
+  }
+
+  .reader-display-published .book-layout__page {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+
+  .reader-display-published .book-layout__chapter-heading {
+    break-after: avoid;
+    page-break-after: avoid;
+    margin: 0.35in auto 0.28in;
+  }
+
+  .reader-display-published .book-layout__body {
+    max-width: none !important;
+    color: #111 !important;
+    font-size: 11.5pt !important;
+    line-height: 1.65 !important;
+    text-align: justify !important;
+  }
+
+  .reader-display-published .book-layout__body .book-block--paragraph {
+    orphans: 2;
+    widows: 2;
+  }
+
+  .reader-display-published .book-special-block,
+  .reader-display-published .book-layout__body.note-rich-content blockquote,
+  .reader-display-published .scene-break {
+    break-inside: avoid;
+    page-break-inside: avoid;
   }
 }
 

@@ -61,7 +61,7 @@ export const readerApi = {
     cachedGet(readerCacheKey(bookId, `plot-threads:${chapter ?? "all"}`), 45 * 1000, () =>
       apiClient.get<PlotThread[]>(readerPath(bookId, "/plot-threads"), { params: chapter ? { chapter } : undefined }).then(r => r.data)
     ),
-  updatePlotThread: (bookId: string, threadId: string, payload: { note: string | null }) =>
+  updatePlotThread: (bookId: string, threadId: string, payload: { note: string | null; status?: string | null }) =>
     apiClient.put<PlotThread>(readerPath(bookId, `/plot-threads/${threadId}`), payload).then(r => {
       invalidateCachedGets(readerCacheKey(bookId, "plot-threads:"))
       invalidateCachedGets(readerCacheKey(bookId, "timeline"))

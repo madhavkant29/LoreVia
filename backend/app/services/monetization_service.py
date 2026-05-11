@@ -243,7 +243,7 @@ async def rewarded_ad_status_for_user(
 ) -> dict[str, Any]:
     await expire_stale_rewarded_ad_sessions(db, user.id, now=now)
     claims_used = await rewarded_ad_claims_today(db, user.id, now=now)
-    daily_cap = max(int(settings.REWARDED_AD_DAILY_CAP), 0)
+    daily_cap = min(max(int(settings.REWARDED_AD_DAILY_CAP), 0), 3)
     reward_points = max(int(settings.REWARDED_AD_REWARD_POINTS), 0)
     enabled = rewarded_ads_are_enabled() and daily_cap > 0 and reward_points > 0
     claims_remaining = max(daily_cap - claims_used, 0) if enabled else 0
@@ -365,7 +365,7 @@ async def resolve_rewarded_ad_session(
         raise ValueError("Rewarded ad session was not found.")
 
     claims_used = await rewarded_ad_claims_today(db, user.id, now=current)
-    daily_cap = max(int(settings.REWARDED_AD_DAILY_CAP), 0)
+    daily_cap = min(max(int(settings.REWARDED_AD_DAILY_CAP), 0), 3)
     if session.status == REWARDED_AD_STATUS_REWARDED:
         return {
             "status": session.status,

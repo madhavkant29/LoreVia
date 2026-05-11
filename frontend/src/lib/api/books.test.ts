@@ -87,6 +87,35 @@ describe("books api", () => {
     expect(getMock).toHaveBeenCalledWith("/books/book-1")
   })
 
+  it("creates story-scoped collaborators with backend field names", async () => {
+    await booksApi.createCollaborator("book-1", {
+      email: "editor@example.com",
+      displayName: "Editor",
+      role: "developmental_editor",
+      scope: {
+        chapter_start: 1,
+        chapter_end: 10,
+        character_bible: true,
+        continuity_report: true,
+        reader_confusion_report: false,
+      },
+    })
+
+    expect(postMock).toHaveBeenCalledWith("/books/book-1/collaborators", {
+      email: "editor@example.com",
+      display_name: "Editor",
+      role: "developmental_editor",
+      scope: {
+        chapter_start: 1,
+        chapter_end: 10,
+        character_bible: true,
+        continuity_report: true,
+        reader_confusion_report: false,
+      },
+    })
+    expect(invalidateCachedGetsMock).toHaveBeenCalledWith("book:book-1:")
+  })
+
   it("normalizes readable route segments before loading book detail", async () => {
     await booksApi.get("sky-harbor--123e4567-e89b-12d3-a456-426614174000")
 
@@ -193,6 +222,23 @@ describe("books api", () => {
     expect(postMock).toHaveBeenCalledWith("/books/book-1/characters/merge", {
       primary_id: "a",
       secondary_id: "b",
+    })
+    expect(invalidateCachedGetsMock).toHaveBeenCalledWith("book:book-1:")
+  })
+
+  it("partitions characters with backend field names", async () => {
+    await booksApi.partitionCharacter("book-1", "char-1", {
+      partitions: [
+        { name: "Mr. Samsa", aliases: ["Samsa patriarch"] },
+        { name: "Mrs. Samsa" },
+      ],
+    })
+
+    expect(postMock).toHaveBeenCalledWith("/books/book-1/characters/char-1/partition", {
+      partitions: [
+        { name: "Mr. Samsa", aliases: ["Samsa patriarch"] },
+        { name: "Mrs. Samsa", aliases: [] },
+      ],
     })
     expect(invalidateCachedGetsMock).toHaveBeenCalledWith("book:book-1:")
   })

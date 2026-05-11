@@ -2,7 +2,7 @@ import axios from "axios"
 import { apiClient } from "./client"
 import { cachedGet, invalidateCachedGets } from "./requestCache"
 import { normalizeBookRouteId } from "@/lib/utils/bookRoutes"
-import type { Book, BookEvents, BookNote, BookSeries, BookWorkType, ChapterConsistencyReport, ChapterVersion, ChapterVersionDetail, EmotionalArcOverview, ManuscriptWorkspaceTree, NovelScene, ObsidianGraph, ObsidianNoteRelations, ObsidianPreview, ObsidianVaultNote, ObsidianVaultNoteSaveResult, PreWritingCheck, PublicBook, PublicBookDetail, PublicChapter, ReadabilityMetrics, SavedQuote, SeriesBible, StoryHealth, UserStats, WriterWorkspace } from "@/types/book"
+import type { Book, BookCollaborator, BookEvents, BookNote, BookSeries, BookWorkType, ChapterConsistencyReport, ChapterVersion, ChapterVersionDetail, CollaborationRole, CollaborationScope, EmotionalArcOverview, ManuscriptWorkspaceTree, NovelScene, ObsidianGraph, ObsidianNoteRelations, ObsidianPreview, ObsidianVaultNote, ObsidianVaultNoteSaveResult, PreWritingCheck, PublicBook, PublicBookDetail, PublicChapter, ReadabilityMetrics, RevisionIntelligence, SavedQuote, SeriesBible, StoryHealth, UserStats, WriterWorkspace } from "@/types/book"
 import type { Character, CharacterShareResponse } from "@/types/character"
 
 export interface ManuscriptImportResponse {
@@ -38,6 +38,37 @@ export const booksApi = {
   listQuotes: () => cachedGet("books:quotes", 45 * 1000, () => apiClient.get<SavedQuote[]>("/books/quotes").then(r => r.data)),
   listNotes: () => cachedGet("books:notes", 30 * 1000, () => apiClient.get<BookNote[]>("/books/notes").then(r => r.data)),
   get: (id: string) => cachedGet(bookCacheKey(id, "detail"), 20 * 1000, () => apiClient.get<Book>(bookPath(id)).then(r => r.data)),
+  listCollaborators: (id: string) =>
+    apiClient.get<BookCollaborator[]>(bookPath(id, "/collaborators")).then(r => r.data),
+  createCollaborator: (
+    id: string,
+    payload: { email: string; displayName?: string | null; role: CollaborationRole; scope: CollaborationScope }
+  ) => apiClient.post<BookCollaborator>(bookPath(id, "/collaborators"), {
+    email: payload.email,
+    display_name: payload.displayName,
+    role: payload.role,
+    scope: payload.scope,
+  }).then(r => {
+    invalidateBookCache(id)
+    return r.data
+  }),
+  updateCollaborator: (
+    id: string,
+    collaborationId: string,
+    payload: { displayName?: string | null; role?: CollaborationRole; scope?: CollaborationScope; inviteStatus?: "active" | "revoked" }
+  ) => apiClient.put<BookCollaborator>(bookPath(id, `/collaborators/${collaborationId}`), {
+    display_name: payload.displayName,
+    role: payload.role,
+    scope: payload.scope,
+    invite_status: payload.inviteStatus,
+  }).then(r => {
+    invalidateBookCache(id)
+    return r.data
+  }),
+  deleteCollaborator: (id: string, collaborationId: string) =>
+    apiClient.delete(bookPath(id, `/collaborators/${collaborationId}`)).then(() => {
+      invalidateBookCache(id)
+    }),
   getBookNotes: (id: string) =>
     cachedGet(bookCacheKey(id, "notes"), 20 * 1000, () =>
       apiClient.get<BookNote[]>(bookPath(id, "/notes")).then(r => r.data)
@@ -53,6 +84,10 @@ export const booksApi = {
   getStoryHealth: (id: string) =>
     cachedGet(bookCacheKey(id, "story-health"), 30 * 1000, () =>
       apiClient.get<StoryHealth>(bookPath(id, "/story-health")).then(r => r.data)
+    ),
+  getRevisionIntelligence: (id: string) =>
+    cachedGet(bookCacheKey(id, "revision-intelligence"), 20 * 1000, () =>
+      apiClient.get<RevisionIntelligence>(bookPath(id, "/revision-intelligence")).then(r => r.data)
     ),
   getChapterVersions: (id: string, chapterNumber: number, limit = 12) =>
     cachedGet(bookCacheKey(id, `chapter-versions:${chapterNumber}:${limit}`), 30 * 1000, () =>
@@ -139,6 +174,7 @@ export const booksApi = {
     payload: Partial<WriterWorkspace>
   ) => apiClient.put<WriterWorkspace>(bookPath(id, "/writer-workspace"), payload).then(r => {
     invalidateCachedGets(bookCacheKey(id, "writer-workspace"))
+    invalidateCachedGets(bookCacheKey(id, "revision-intelligence"))
     return r.data
   }),
   getEmotionalArc: (id: string) =>
@@ -167,6 +203,10 @@ export const booksApi = {
       aliases?: string[]
       role?: "mc" | "sc" | "background" | null
       description?: string | null
+      goal?: string | null
+      lieTheyBelieve?: string | null
+      backstoryWound?: string | null
+      arcType?: string | null
       arcSummary?: string | null
       personalityTags?: string[]
       motivations?: string[]
@@ -177,6 +217,10 @@ export const booksApi = {
     aliases: payload.aliases,
     role: payload.role,
     description: payload.description,
+    goal: payload.goal,
+    lie_they_believe: payload.lieTheyBelieve,
+    backstory_wound: payload.backstoryWound,
+    arc_type: payload.arcType,
     arc_summary: payload.arcSummary,
     personality_tags: payload.personalityTags,
     motivations: payload.motivations,
@@ -193,6 +237,19 @@ export const booksApi = {
       invalidateBookCache(bookId)
       return r.data
     }),
+  partitionCharacter: (
+    bookId: string,
+    characterId: string,
+    payload: { partitions: Array<{ name: string; aliases?: string[] }> },
+  ) => apiClient.post<{ replaced: string; created: string[] }>(bookPath(bookId, `/characters/${characterId}/partition`), {
+    partitions: payload.partitions.map((partition) => ({
+      name: partition.name,
+      aliases: partition.aliases ?? [],
+    })),
+  }).then(r => {
+    invalidateBookCache(bookId)
+    return r.data
+  }),
   deleteCharacter: (bookId: string, characterId: string) =>
     apiClient.delete<{ deleted: string }>(bookPath(bookId, `/characters/${characterId}`)).then(r => {
       invalidateBookCache(bookId)

@@ -67,8 +67,12 @@ Return ONLY valid JSON, no markdown, no commentary:
         "distinguishing": {"value": "...", "confidence": 0.0, "type": "..."}
       },
       "personality_tags": ["max 3"],
+      "goal": "what they are trying to achieve in this passage or larger arc",
       "motivations": ["what drives them"],
       "fears": ["what they fear"],
+      "lie_they_believe": "false belief shaping their choices",
+      "backstory_wound": "relevant wound or backstory pressure visible here",
+      "arc_type": "positive change|negative change|flat|fall|disillusionment|redemption|corruption|etc",
       "arc_summary": "short natural summary of where this character seems to be emotionally or morally",
       "archetype": "japanese high school boy|mentor|trickster|villain|hero|etc",
       "first_appearance_context": "1 sentence",
@@ -243,8 +247,12 @@ def _augment_with_named_mentions(chunk_text: str, characters: list[dict], candid
                 "confidence": MIN_CHARACTER_CONFIDENCE,
                 "traits": {},
                 "personality_tags": [],
+                "goal": None,
                 "motivations": [],
                 "fears": [],
+                "lie_they_believe": None,
+                "backstory_wound": None,
+                "arc_type": None,
                 "arc_summary": None,
                 "archetype": None,
                 "first_appearance_context": "Named in the passage but not yet richly described.",
@@ -307,14 +315,22 @@ def _clean_name_fragment(name: str) -> str:
     return " ".join(parts).strip(" .,:;!?\"'")
 
 
-def _split_titled_name(name: str) -> tuple[str, str | None]:
+def _split_titled_name(name: str, source_text: str) -> tuple[str, str | None]:
     lowered = name.casefold()
     for prefix in TITLE_PREFIXES:
         token = f"{prefix} "
         if lowered.startswith(token):
             remainder = name[len(token):].strip()
             if remainder:
-                return remainder, name
+                remainder_tokens = re.findall(r"[A-Za-z][A-Za-z'-]*", remainder)
+                if len(remainder_tokens) <= 1:
+                    # Keep titled surname-only forms distinct. "Mr. Samsa" and
+                    # "Mrs. Samsa" are often separate characters, while bare
+                    # "Samsa" is too ambiguous to use as the canonical name.
+                    return name, None
+                if _find_name_mentions(source_text, remainder):
+                    return remainder, name
+                return name, None
     return name, None
 
 
@@ -515,7 +531,7 @@ def _clean_character_entries(characters: list[dict], candidate_names: list[str],
             ):
                 aliases.append(cleaned_alias)
 
-        cleaned_name, titled_alias = _split_titled_name(cleaned_name)
+        cleaned_name, titled_alias = _split_titled_name(cleaned_name, source_text)
         normalized = _normalize_name(cleaned_name)
         if titled_alias and titled_alias != cleaned_name:
             aliases.append(titled_alias)
@@ -538,6 +554,10 @@ def _clean_character_entries(characters: list[dict], candidate_names: list[str],
             "aliases": list(dict.fromkeys(aliases)),
             "entity_type": "person" if entity_type == "unknown" else entity_type,
             "confidence": confidence,
+            "goal": _sanitize_summary(item.get("goal")),
+            "lie_they_believe": _sanitize_summary(item.get("lie_they_believe")),
+            "backstory_wound": _sanitize_summary(item.get("backstory_wound")),
+            "arc_type": _sanitize_summary(item.get("arc_type")),
             "arc_summary": arc_summary,
             "archetype": _sanitize_summary(item.get("archetype")),
             "mention_count": evidence["mention_count"],

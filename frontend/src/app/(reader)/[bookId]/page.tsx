@@ -6,13 +6,15 @@ import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
 
 import { AuthorToolsNav } from "@/components/layout/AuthorToolsNav"
+import { RevisionIntelligencePanel } from "@/components/revision/RevisionIntelligencePanel"
 import { booksApi } from "@/lib/api/books"
 import { readerApi } from "@/lib/api/reader"
 import { canUseAuthorFeatures } from "@/lib/billing/plans"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { useBookModeStore } from "@/lib/stores/bookModeStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
-import type { Book, ChapterConsistencyReport, GoalCalendarItem, PreWritingCheck, StoryHealth, WriterWorkspace } from "@/types/book"
+import { buildIssueDisplay } from "@/lib/utils/storyFeedback"
+import type { Book, ChapterConsistencyReport, GoalCalendarItem, PreWritingCheck, RevisionIntelligence, StoryHealth, WriterWorkspace } from "@/types/book"
 import type { Character } from "@/types/character"
 import type { ChapterListResponse, ReadingProgress } from "@/types/reader"
 
@@ -231,6 +233,7 @@ export default function BookOverviewPage() {
   const [preWritingCheck, setPreWritingCheck] = useState<PreWritingCheck | null>(null)
   const [storyHealth, setStoryHealth] = useState<StoryHealth | null>(null)
   const [writerWorkspace, setWriterWorkspace] = useState<WriterWorkspace | null>(null)
+  const [revisionIntelligence, setRevisionIntelligence] = useState<RevisionIntelligence | null>(null)
   const [workspaceSaveState, setWorkspaceSaveState] = useState<WorkspaceSaveState>("idle")
   const [workspaceSaveMessage, setWorkspaceSaveMessage] = useState<string | null>(null)
   const [modeSaving, setModeSaving] = useState(false)
@@ -253,6 +256,7 @@ export default function BookOverviewPage() {
     booksApi.getPreWritingCheck(bookId).then(setPreWritingCheck).catch(() => setPreWritingCheck(null))
     booksApi.getStoryHealth(bookId).then(setStoryHealth).catch(() => setStoryHealth(null))
     booksApi.getWriterWorkspace(bookId).then(setWriterWorkspace).catch(() => setWriterWorkspace(null))
+    booksApi.getRevisionIntelligence(bookId).then(setRevisionIntelligence).catch(() => setRevisionIntelligence(null))
   }, [bookId])
 
   useEffect(() => {
@@ -381,6 +385,7 @@ export default function BookOverviewPage() {
       routes.push(
         `/${bookId}/manuscript` as Route,
         `/${bookId}/notes` as Route,
+        `/${bookId}/collaboration` as Route,
         `/${bookId}/export` as Route,
         `/${bookId}/characters` as Route,
         `/${bookId}/advisor` as Route,
@@ -503,6 +508,17 @@ export default function BookOverviewPage() {
             <WritingStreakCard isDark={isDark} streakDays={loginStreakDays} weekActivity={weeklyLoginActivity} />
             <DailyGoalCard isDark={isDark} dailyWords={dailyWords} dailyTarget={dailyTarget} />
           </div>
+
+          {activeBookMode === "author" && revisionIntelligence ? (
+            <RevisionIntelligencePanel
+              bookId={bookId}
+              revision={revisionIntelligence}
+              writerWorkspace={writerWorkspace}
+              isDark={isDark}
+              onRevisionChange={setRevisionIntelligence}
+              onWriterWorkspaceChange={setWriterWorkspace}
+            />
+          ) : null}
 
           <GoalCalendarCard
             isDark={isDark}
@@ -695,12 +711,16 @@ function StoryHealthCard({
   const status = storyHealth?.status ?? "Loading"
   const summary = storyHealth?.summary ?? "Syncing story metrics from your book data."
   const healthColor = score >= 85 ? "#45d483" : score >= 70 ? "#8b5cf6" : score >= 55 ? "#f5bf3d" : "#fb7185"
-  const metrics = [
-    { label: "Characters", value: storyHealth?.metrics.find((metric) => metric.label === "Characters")?.score ?? 0, color: "text-emerald-400" },
-    { label: "World Coherence", value: storyHealth?.metrics.find((metric) => metric.label === "World Coherence")?.score ?? 0, color: "text-amber-400" },
-    { label: "Plot Consistency", value: storyHealth?.metrics.find((metric) => metric.label === "Plot Consistency")?.score ?? 0, color: "text-violet-400" },
-    { label: "Pacing", value: storyHealth?.metrics.find((metric) => metric.label === "Pacing")?.score ?? 0, color: "text-rose-400" },
-  ]
+  const metricColors: Record<string, { text: string; bar: string }> = {
+    Continuity: { text: "text-emerald-400", bar: "bg-emerald-400" },
+    "Character consistency": { text: "text-sky-400", bar: "bg-sky-400" },
+    "Timeline clarity": { text: "text-violet-400", bar: "bg-violet-400" },
+    "Plot thread closure": { text: "text-amber-400", bar: "bg-amber-400" },
+    "Worldbuilding consistency": { text: "text-cyan-400", bar: "bg-cyan-400" },
+    Pacing: { text: "text-rose-400", bar: "bg-rose-400" },
+    "Dialogue/voice consistency": { text: "text-fuchsia-400", bar: "bg-fuchsia-400" },
+  }
+  const metrics = storyHealth?.metrics ?? []
 
   return (
     <section className={panelClass(isDark, "p-4 sm:p-5")}>
@@ -723,12 +743,24 @@ function StoryHealthCard({
         </div>
 
         <div className="space-y-3">
-          {metrics.map((metric) => (
-            <div key={metric.label} className="flex items-center justify-between gap-3 text-xs">
-              <span className={isDark ? "text-slate-400" : "text-slate-500"}>{metric.label}</span>
-              <span className={`font-bold ${metric.color}`}>{metric.value}%</span>
-            </div>
-          ))}
+          {metrics.map((metric) => {
+            const colors = metricColors[metric.label] ?? { text: "text-violet-400", bar: "bg-violet-400" }
+            return (
+              <div key={metric.label} className={`rounded-md border p-3 ${isDark ? "border-white/[0.06] bg-white/[0.025]" : "border-slate-200/70 bg-slate-50/70"}`}>
+                <div className="flex items-center justify-between gap-3 text-xs">
+                  <span className={isDark ? "text-slate-300" : "text-slate-700"}>{metric.label}</span>
+                  <span className={`font-bold ${colors.text}`}>{metric.score}%</span>
+                </div>
+                <div className={`mt-2 h-1.5 overflow-hidden rounded-full ${isDark ? "bg-white/[0.08]" : "bg-slate-200"}`}>
+                  <div
+                    className={`h-full rounded-full ${colors.bar}`}
+                    style={{ width: `${metric.score}%` }}
+                  />
+                </div>
+                <p className={`mt-2 text-[11px] leading-5 ${isDark ? "text-slate-500" : "text-slate-500"}`}>{metric.detail}</p>
+              </div>
+            )
+          })}
         </div>
       </div>
 
@@ -757,16 +789,20 @@ function ActiveIssuesCard({
   bookId: string
 }) {
   const issues = [
-    { title: "Character Inconsistencies", count: continuityIssueCount, severity: "High", icon: "users" as IconName, color: "text-rose-400", href: `/${bookId}/reports` },
-    { title: "World Gaps", count: worldGapCount, severity: "Medium", icon: "gap" as IconName, color: "text-amber-400", href: `/${bookId}/world-gap` },
-    { title: "Timeline Conflicts", count: timelineIssueCount, severity: "Low", icon: "timeline" as IconName, color: "text-violet-400", href: `/${bookId}/timeline` },
-  ]
+    { title: "Character Inconsistencies", rawCount: continuityIssueCount, severity: "High", icon: "users" as IconName, color: "text-rose-400", href: `/${bookId}/reports` },
+    { title: "World Gaps", rawCount: worldGapCount, severity: "Medium", icon: "gap" as IconName, color: "text-amber-400", href: `/${bookId}/world-gap` },
+    { title: "Timeline Conflicts", rawCount: timelineIssueCount, severity: "Low", icon: "timeline" as IconName, color: "text-violet-400", href: `/${bookId}/timeline` },
+  ].map((issue) => ({
+    ...issue,
+    ...buildIssueDisplay(issue.rawCount),
+  }))
+  const totalDisplayedIssues = issues.reduce((sum, issue) => sum + issue.displayCount, 0)
 
   return (
     <section className={panelClass(isDark, "p-4 sm:p-5")}>
       <div className="flex items-center gap-2">
         <PanelTitle isDark={isDark}>Active Issues</PanelTitle>
-        <span className="rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">{continuityIssueCount + worldGapCount + timelineIssueCount}</span>
+        <span className="rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">{totalDisplayedIssues}</span>
       </div>
 
       <div className="mt-4 space-y-3">
@@ -779,7 +815,7 @@ function ActiveIssuesCard({
             <Icon name={issue.icon} className={`h-6 w-6 ${issue.color}`} />
             <div className="min-w-0 flex-1">
               <p className={`truncate text-sm font-semibold ${isDark ? "text-slate-200" : "text-slate-700"}`}>{issue.title}</p>
-              <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>{issue.count} issues detected</p>
+              <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>{issue.label}</p>
             </div>
             <span className={`rounded px-2 py-1 text-[10px] font-semibold ${severityClass(issue.severity, isDark)}`}>{issue.severity}</span>
             <Icon name="chevron" className={isDark ? "h-3.5 w-3.5 text-slate-600" : "h-3.5 w-3.5 text-slate-400"} />
@@ -801,7 +837,7 @@ function QuickToolsCard({ isDark, bookId, onNavigate }: { isDark: boolean; bookI
     { title: "Ask LoreVia", body: "Ask anything about your story", href: `/${bookId}/ask`, icon: "chat" as IconName, color: "text-blue-400" },
     { title: "World Gap Detection", body: "Find missing or inconsistent details", href: `/${bookId}/world-gap`, icon: "gap" as IconName, color: "text-amber-400" },
     { title: "Character Bible", body: "Manage your characters", href: `/${bookId}/characters`, icon: "file" as IconName, color: "text-emerald-400" },
-    { title: "Voice Inconsistency", body: "Detect character voice drift", href: `/${bookId}/analysis`, icon: "voice" as IconName, color: "text-rose-400" },
+    { title: "Voice Inconsistency", body: "Detect character voice drift", href: `/${bookId}/voice`, icon: "voice" as IconName, color: "text-rose-400" },
     { title: "Manuscript Editor", body: "Write and edit your manuscript", href: `/${bookId}/manuscript`, icon: "book" as IconName, color: "text-violet-400" },
   ]
 

@@ -9,6 +9,10 @@ from app.core.config import settings
 _redis: aioredis.Redis | None = None
 
 
+def _hash_ephemeral_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
 def _normalize_redis_url(raw_url: str) -> tuple[str, dict]:
     if not raw_url.startswith("rediss://"):
         return raw_url, {}
@@ -85,17 +89,18 @@ async def remember_webhook_event(event_id: str, ttl_seconds: int = 7 * 24 * 3600
 async def store_password_reset_token(token: str, user_id: str, ttl_seconds: int) -> None:
     r = await get_redis()
     previous_token = await r.get(key_password_reset_user(user_id))
+    token_hash = _hash_ephemeral_token(token)
     async with r.pipeline(transaction=True) as pipe:
         if previous_token:
             pipe.delete(key_password_reset(previous_token))
-        pipe.setex(key_password_reset(token), ttl_seconds, user_id)
+        pipe.setex(key_password_reset(token_hash), ttl_seconds, user_id)
         pipe.setex(key_password_reset_user(user_id), ttl_seconds, token)
         await pipe.execute()
 
 
 async def consume_password_reset_token(token: str) -> str | None:
     r = await get_redis()
-    key = key_password_reset(token)
+    key = key_password_reset(_hash_ephemeral_token(token))
     value = await r.get(key)
     if not value:
         return None
@@ -104,6 +109,11 @@ async def consume_password_reset_token(token: str) -> str | None:
         pipe.delete(key_password_reset_user(value))
         await pipe.execute()
     return value
+
+
+async def begin_password_reset_cooldown(user_id: str, ttl_seconds: int) -> bool:
+    r = await get_redis()
+    return bool(await r.set(key_password_reset_cooldown(user_id), "1", ex=ttl_seconds, nx=True))
 
 
 async def store_email_verification_token(token: str, user_id: str, ttl_seconds: int) -> None:
@@ -172,6 +182,10 @@ def key_password_reset(token: str) -> str:
 
 def key_password_reset_user(user_id: str) -> str:
     return f"password_reset_user:{user_id}"
+
+
+def key_password_reset_cooldown(user_id: str) -> str:
+    return f"password_reset_cooldown:{user_id}"
 
 
 def key_email_verification(token: str) -> str:
