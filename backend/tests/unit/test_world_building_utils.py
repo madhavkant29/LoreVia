@@ -573,3 +573,73 @@ async def test_save_canon_override_persists_alias_merges(db):
     assert "Sonia" in (stored_identity.aliases or [])
     assert "Sonya" in (stored_identity.aliases or [])
     assert stored_identity.source == "author_override"
+
+
+@pytest.mark.asyncio
+async def test_detect_world_gaps_adds_coverage_watchlist_when_no_hard_conflicts_exist(db, monkeypatch):
+    stored: dict[str, bytes] = {}
+
+    def fake_upload_binary(key: str, raw: bytes, content_type: str | None = None) -> str:
+        stored[key] = raw
+        return key
+
+    def fake_download_book(key: str) -> bytes:
+        return stored[key]
+
+    monkeypatch.setattr("app.core.storage.upload_binary", fake_upload_binary)
+    monkeypatch.setattr("app.core.storage.download_book", fake_download_book)
+    monkeypatch.setattr("app.utils.world_building_utils.upload_binary", fake_upload_binary)
+    monkeypatch.setattr("app.utils.world_building_utils.download_book", fake_download_book)
+
+    user = User(email="world-watchlist@lorevia.app", username="worldwatchlist", password_hash="hash")
+    db.add(user)
+    await db.flush()
+    book = Book(user_id=user.id, title="Coverage Watchlist", format="pdf", s3_key="story/watchlist.pdf", status="ready")
+    db.add(book)
+    await db.flush()
+
+    chapter_key = f"chapters/{book.id}/1.txt"
+    stored[chapter_key] = serialize_manuscript_content(
+        "Northreach is a desert capital. Travelers cross the Glass Road using Salt Marks.",
+        "<p>Northreach is a desert capital. Travelers cross the Glass Road using Salt Marks.</p>",
+    ).encode("utf-8")
+    db.add(
+        Chapter(
+            book_id=book.id,
+            number=1,
+            title="Road Toll",
+            s3_key=chapter_key,
+            word_count=12,
+            processed=True,
+        )
+    )
+
+    await create_world_building_documents(
+        db,
+        book=book,
+        user_id=user.id,
+        documents=[
+            {
+                "title": "Lean World Notes",
+                "source_name": "lean-world-notes.txt",
+                "text": (
+                    "Countries: Northreach: desert capital.\n"
+                    "Travel Constraints: Glass Road: three-day caravan route.\n"
+                    "Currency: Salt Marks: market scrip."
+                ),
+                "html": None,
+            }
+        ],
+    )
+    await db.commit()
+
+    payload = await detect_world_gaps(db, book)
+    total_review_targets = len(payload["priority_gaps"]) + len(payload["consistency_flags"])
+    coverage_group = next(group for group in payload["gap_groups"] if group["key"] == "coverage_watchlist")
+
+    assert total_review_targets >= 3
+    assert coverage_group["items"]
+    assert any(
+        "needs a clearer canon note" in item["title"] or "needs one more story anchor" in item["title"]
+        for item in coverage_group["items"]
+    )

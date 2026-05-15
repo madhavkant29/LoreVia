@@ -194,7 +194,11 @@ export function RevisionIntelligencePanel({
     }
     setBusyItemId(item.id)
     try {
-      const versions = await booksApi.getChapterVersions(bookId, item.chapter_ref, 6)
+      let versions = await booksApi.getChapterVersions(bookId, item.chapter_ref, 6)
+      if (versions.length === 0) {
+        await booksApi.createChapterSnapshot(bookId, item.chapter_ref, `Auto snapshot for ${item.title}`)
+        versions = await booksApi.getChapterVersions(bookId, item.chapter_ref, 6)
+      }
       if (versions.length === 0) {
         setStatusMessage(`No saved draft snapshots exist yet for Chapter ${item.chapter_ref}.`)
         return
@@ -270,11 +274,14 @@ export function RevisionIntelligencePanel({
 
   return (
     <section className={panelClass(isDark)}>
-      <div className="flex flex-col gap-4 border-b px-5 py-5 sm:flex-row sm:items-end sm:justify-between">
+        <div className="flex flex-col gap-4 border-b px-5 py-5 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Revision command center</p>
           <h2 className={`mt-2 text-2xl font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>Know what your edit breaks before your readers do.</h2>
           <p className={`mt-2 max-w-3xl text-sm leading-7 ${isDark ? "text-slate-300" : "text-slate-600"}`}>{revision.summary.hero_message}</p>
+          {revision.summary.recent_edit_label ? (
+            <p className={`mt-2 max-w-3xl text-sm leading-7 ${isDark ? "text-violet-300" : "text-violet-700"}`}>{revision.summary.recent_edit_label}</p>
+          ) : null}
         </div>
         <button
           type="button"
@@ -361,7 +368,7 @@ export function RevisionIntelligencePanel({
 
           <SectionFrame
             title="Knowledge state"
-            body="What key story facts characters appear to know, and where LoreVia cannot yet prove the handoff."
+            body="What key story facts characters appear to know, including a chapter-by-chapter matrix across the current manuscript."
             isDark={isDark}
           >
             <div className="space-y-4">
@@ -381,6 +388,44 @@ export function RevisionIntelligencePanel({
                       </div>
                     ))}
                   </div>
+                  {fact.warning ? <p className={`mt-3 text-xs leading-5 ${isDark ? "text-amber-300" : "text-amber-700"}`}>{fact.warning}</p> : null}
+                </div>
+              ))}
+              {revision.knowledge_timeline.map((fact) => (
+                <div key={`timeline-${fact.fact}`} className={`overflow-x-auto rounded-md border p-4 ${isDark ? "border-white/[0.06] bg-black/20" : "border-slate-200 bg-slate-50"}`}>
+                  <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{fact.fact} timeline</p>
+                  <table className="mt-3 min-w-full border-separate border-spacing-2 text-xs">
+                    <thead>
+                      <tr>
+                        <th className={`text-left font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Character</th>
+                        {fact.rows[0]?.cells.map((cell) => (
+                          <th key={`${fact.fact}-chapter-${cell.chapter_number}`} className={`text-left font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Ch {cell.chapter_number}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {fact.rows.map((row) => (
+                        <tr key={`${fact.fact}-${row.character_name}`}>
+                          <td className={`pr-4 font-medium ${isDark ? "text-slate-200" : "text-slate-700"}`}>{row.character_name}</td>
+                          {row.cells.map((cell) => (
+                            <td key={`${fact.fact}-${row.character_name}-${cell.chapter_number}`}>
+                              <span
+                                className={`inline-flex rounded-full px-2 py-1 font-semibold ${
+                                  cell.state === "learned"
+                                    ? isDark ? "bg-emerald-500/15 text-emerald-200" : "bg-emerald-50 text-emerald-700"
+                                    : cell.state === "known"
+                                      ? isDark ? "bg-sky-500/15 text-sky-200" : "bg-sky-50 text-sky-700"
+                                      : isDark ? "bg-white/8 text-slate-400" : "bg-white text-slate-500 border border-slate-200"
+                                }`}
+                              >
+                                {cell.state}
+                              </span>
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                   {fact.warning ? <p className={`mt-3 text-xs leading-5 ${isDark ? "text-amber-300" : "text-amber-700"}`}>{fact.warning}</p> : null}
                 </div>
               ))}

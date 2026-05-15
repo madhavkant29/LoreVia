@@ -6,7 +6,7 @@ import { TRUST_EFFECTIVE_DATE } from "@/lib/constants/trust"
 
 export const metadata: Metadata = {
   title: "Status",
-  description: "See how LoreVia communicates uptime, incidents, maintenance, and service-level expectations.",
+  description: "See how LoreVia for authors communicates uptime, incidents, maintenance, and service-level expectations.",
   alternates: {
     canonical: "/status",
   },

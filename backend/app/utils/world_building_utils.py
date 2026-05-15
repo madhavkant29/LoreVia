@@ -14,7 +14,7 @@ from app.core.storage import download_book, upload_binary
 from app.engine.character.deduplicator import names_equivalent
 from app.engine.world.dependency_graph import build_dependency_graph
 from app.engine.world.extractor import extract_claims_from_text, extract_world_elements_from_text, infer_element_type
-from app.engine.world.gap_detector import detect_consistency_flags
+from app.engine.world.gap_detector import detect_consistency_flags, detect_gap_categories
 from app.models.book import Book, Chapter, SeriesBook
 from app.models.character import Character
 from app.models.intelligence import (
@@ -55,6 +55,10 @@ GAP_GROUP_META: dict[str, tuple[str, str]] = {
         "Timeline watchlist",
         "Lore only appears late or too lightly in the manuscript to feel grounded.",
     ),
+    "coverage_watchlist": (
+        "Coverage watchlist",
+        "LoreVia keeps a short queue of under-specified canon areas so there are always concrete worldbuilding review targets to tighten.",
+    ),
 }
 CANON_OVERRIDE_NOTE_TYPE = "canon_override"
 WORLD_KEEPABLE_TYPES = {
@@ -81,6 +85,7 @@ WORLD_KEEPABLE_TYPES = {
     "travel_rule",
 }
 WORLD_HIGH_SIGNAL_TYPES = {"character", "country", "currency", "law", "magic_system", "object", "organization", "place", "politics", "power_limit", "race", "region", "travel_rule"}
+MIN_WORLD_REVIEW_TARGETS = 3
 STOPWORDS = {
     "the",
     "a",
@@ -1221,8 +1226,35 @@ async def _build_world_gap_analysis_payload(
     gap_categories = {group["key"]: group["items"] for group in gap_groups}
     priority_gaps = [item for group in gap_groups for item in group["items"]]
     priority_gaps.sort(key=lambda item: (-int(item.get("priority") or 0), str(item.get("title") or "")))
-    priority_gaps = priority_gaps[:12]
     consistency_flags = detect_consistency_flags([_serialize_world_element(item) for item in (consistency_elements or document_elements)])
+    supplemental_needed = max(0, MIN_WORLD_REVIEW_TARGETS - (len(priority_gaps) + len(consistency_flags)))
+    if supplemental_needed:
+        supplemental_items = _build_coverage_watchlist_items(
+            story_by_name=story_by_name,
+            world_by_name=world_by_name,
+            characters=characters,
+            limit=supplemental_needed,
+            existing_items=priority_gaps,
+        )
+        if supplemental_items:
+            grouped_items["coverage_watchlist"].extend(supplemental_items)
+            gap_groups = []
+            for key, items in grouped_items.items():
+                label, description = GAP_GROUP_META.get(key, (key.replace("_", " ").title(), None))
+                ordered_items = sorted(items, key=lambda item: (-int(item.get("priority") or 0), str(item.get("title") or "")))
+                gap_groups.append(
+                    {
+                        "key": key,
+                        "label": label,
+                        "description": description,
+                        "items": ordered_items,
+                    }
+                )
+            gap_groups.sort(key=lambda item: max((int(entry.get("priority") or 0) for entry in item["items"]), default=0), reverse=True)
+            gap_categories = {group["key"]: group["items"] for group in gap_groups}
+            priority_gaps = [item for group in gap_groups for item in group["items"]]
+            priority_gaps.sort(key=lambda item: (-int(item.get("priority") or 0), str(item.get("title") or "")))
+    priority_gaps = priority_gaps[:12]
 
     generated_at = datetime.now(UTC)
     if persist:
@@ -1878,6 +1910,173 @@ def _build_gap_item(
             "story": list((story_item or {}).get("provenance") or [])[:2],
         },
     }
+
+
+def _build_coverage_watchlist_items(
+    *,
+    story_by_name: dict[str, dict],
+    world_by_name: dict[str, dict],
+    characters: list[dict],
+    limit: int,
+    existing_items: list[dict],
+) -> list[dict]:
+    if limit <= 0:
+        return []
+
+    existing_ids = {str(item.get("id") or "") for item in existing_items}
+    existing_titles = {str(item.get("title") or "").strip().lower() for item in existing_items}
+    supplemental: list[dict] = []
+
+    def add_candidate(item: dict | None) -> None:
+        if item is None:
+            return
+        item_id = str(item.get("id") or "")
+        item_title = str(item.get("title") or "").strip().lower()
+        if not item_id or item_id in existing_ids or item_title in existing_titles:
+            return
+        existing_ids.add(item_id)
+        existing_titles.add(item_title)
+        supplemental.append(item)
+
+    for world_item in sorted(
+        world_by_name.values(),
+        key=lambda item: (
+            int(item.get("usage_count") or 0),
+            float(item.get("confidence") or 0.0),
+            str(item.get("name") or "").lower(),
+        ),
+        reverse=True,
+    ):
+        if len(supplemental) >= limit:
+            break
+        if not _should_surface_world_item(world_item):
+            continue
+        description = str(world_item.get("description") or "").strip()
+        claims = list(world_item.get("claims") or [])
+        provenance = list(world_item.get("provenance") or [])
+        story_match = _find_matching_item(world_item["name"], story_by_name, aliases=world_item.get("aliases") or [])
+        if len(description) < 90 or (not claims and len(provenance) < 2):
+            add_candidate(
+                _build_gap_item(
+                    category="coverage_watchlist",
+                    severity="low",
+                    title=f"{world_item['name']} needs a clearer canon note",
+                    description="This lore is present in the active world corpus, but the canon detail is still thin for continuity checks and later retrieval.",
+                    suggested_fix=f"Expand {world_item['name']} with stable facts, limits, relationships, and consequences so later chapters can reuse the same canon cleanly.",
+                    world_item=world_item,
+                    story_item=story_match,
+                    priority=4,
+                )
+            )
+        if len(supplemental) >= limit:
+            break
+        if story_match is not None:
+            chapter_count = int(story_match.get("chapter_count") or len(story_match.get("chapter_numbers") or []))
+            presence_score = float(story_match.get("presence_score") or 0.0)
+            if chapter_count <= 1 or presence_score < 0.75:
+                add_candidate(
+                    _build_gap_item(
+                        category="coverage_watchlist",
+                        severity="low",
+                        title=f"{world_item['name']} needs one more story anchor",
+                        description="The canon exists, but the manuscript still gives readers only light runway for this world element.",
+                        suggested_fix=f"Reinforce {world_item['name']} in one earlier scene, summary beat, or dialogue exchange so readers can track it before later payoff.",
+                        world_item=world_item,
+                        story_item=story_match,
+                        priority=4,
+                    )
+                )
+
+    for story_item in sorted(
+        story_by_name.values(),
+        key=lambda item: (
+            int(item.get("usage_count") or 0),
+            float(item.get("presence_score") or 0.0),
+            str(item.get("name") or "").lower(),
+        ),
+        reverse=True,
+    ):
+        if len(supplemental) >= limit:
+            break
+        if _find_matching_item(story_item["name"], world_by_name, aliases=story_item.get("aliases") or []) is not None:
+            continue
+        if int(story_item.get("usage_count") or 0) < 2 and float(story_item.get("confidence") or 0.0) < 0.55:
+            continue
+        add_candidate(
+            _build_gap_item(
+                category="coverage_watchlist",
+                severity="medium",
+                title=f"{story_item['name']} deserves a world note",
+                description="This lore is active enough in the manuscript that it is worth pinning down in the canon workspace, even before it becomes a hard contradiction.",
+                suggested_fix=f"Create a short worldbuilding note for {story_item['name']} with a stable definition, affected characters, and any rules readers need to remember.",
+                story_item=story_item,
+                priority=5,
+            )
+        )
+
+    for character in characters:
+        if len(supplemental) >= limit:
+            break
+        if not character.get("should_watch"):
+            continue
+        world_match = _find_matching_item(str(character.get("name") or ""), world_by_name, aliases=list(character.get("aliases") or []))
+        if world_match is not None:
+            continue
+        add_candidate(
+            {
+                "id": f"coverage-watch-character-{character['id']}",
+                "category": "coverage_watchlist",
+                "severity": "medium",
+                "title": f"{character['name']} needs a canon-facing reference note",
+                "description": "This character is carrying enough story weight that the worldbuilding workspace should track how lore, factions, or rules interact with them.",
+                "suggested_fix": f"Add a concise canon note for {character['name']} covering role, affiliations, pressures, and any world rules tied to their arc.",
+                "world_evidence": None,
+                "story_evidence": character.get("story_evidence"),
+                "world_document_id": None,
+                "world_document_title": None,
+                "story_chapter_number": character.get("chapter_number"),
+                "story_chapter_title": None,
+                "character_name": character.get("name"),
+                "priority": 4,
+                "entity_type": "character",
+                "canonical_name": character.get("name"),
+                "confidence": 0.0,
+                "provenance": {"world": [], "story": []},
+            }
+        )
+
+    if len(supplemental) < limit:
+        baseline_candidates = detect_gap_categories([*world_by_name.values(), *story_by_name.values()])
+        for category, items in baseline_candidates.items():
+            if len(supplemental) >= limit:
+                break
+            for item in items:
+                if len(supplemental) >= limit:
+                    break
+                add_candidate(
+                    {
+                        "id": f"coverage-watch-{category}",
+                        "category": "coverage_watchlist",
+                        "severity": "low",
+                        "title": str(item.get("title") or f"Missing {category.replace('_', ' ')} coverage"),
+                        "description": f"LoreVia could not find a stable {category.replace('_', ' ')} reference layer in the extracted canon, which makes future continuity checks thinner.",
+                        "suggested_fix": f"Add or expand notes that clarify the story's {category.replace('_', ' ')} frame, even if the answer is intentionally minimal.",
+                        "world_evidence": None,
+                        "story_evidence": None,
+                        "world_document_id": None,
+                        "world_document_title": None,
+                        "story_chapter_number": None,
+                        "story_chapter_title": None,
+                        "character_name": None,
+                        "priority": 3,
+                        "entity_type": category,
+                        "canonical_name": None,
+                        "confidence": 0.0,
+                        "provenance": {"world": [], "story": []},
+                    }
+                )
+
+    return supplemental[:limit]
 
 
 def _should_surface_world_item(world_item: dict) -> bool:

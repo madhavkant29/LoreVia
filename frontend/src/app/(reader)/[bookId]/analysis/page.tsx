@@ -1,11 +1,12 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
 import type { Route } from "next"
 import Link from "next/link"
 import { useParams } from "next/navigation"
 
 import { booksApi } from "@/lib/api/books"
+import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import type { Book } from "@/types/book"
 
@@ -64,13 +65,11 @@ export default function AnalysisPage() {
   const { bookId } = useParams<{ bookId: string }>()
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
-  const [book, setBook] = useState<Book | null>(null)
-
-  useEffect(() => {
-    if (bookId) {
-      booksApi.get(bookId).then(setBook).catch(() => {})
-    }
-  }, [bookId])
+  const { data: book = null } = useQuery<Book>({
+    queryKey: asQueryKey(bookCacheKey(bookId, "detail")),
+    queryFn: () => booksApi.get(bookId),
+    staleTime: 20_000,
+  })
 
   const analysisTools = ANALYSIS_TOOLS_BASE.map((tool) => {
     if (tool.href === "series-ask" && book?.primary_series_id) {

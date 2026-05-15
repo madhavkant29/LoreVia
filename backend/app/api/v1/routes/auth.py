@@ -65,6 +65,7 @@ from app.services.email_service import (
 from app.services.monetization_service import (
     create_referral_if_valid,
     ensure_referral_code,
+    grant_daily_login_points,
     schedule_trial_email_events,
 )
 from app.utils.auth_cookies import (
@@ -138,6 +139,11 @@ def _build_user_out(user: User) -> UserOut:
         email_verified=bool(user.email_verified_at),
         created_at=created_at,
     )
+
+
+async def _record_login_and_apply_points(db: AsyncSession, user: User) -> None:
+    record_login_activity(user)
+    await grant_daily_login_points(db, user)
 
 
 async def _issue_email_verification(user: User) -> tuple[bool, str]:
@@ -223,7 +229,7 @@ async def login(
         raise HTTPException(401, "Invalid credentials")
     if not user.email_verified_at:
         raise HTTPException(403, "Please verify your email before signing in.")
-    record_login_activity(user)
+    await _record_login_and_apply_points(db, user)
     await db.commit()
     await db.refresh(user)
     user_out, access_token, refresh_token = await _mint_token_pair(str(user.id), user)
@@ -315,7 +321,7 @@ async def oauth_supabase(
         if created:
             await send_onboarding_email(existing.email)
 
-        record_login_activity(existing)
+        await _record_login_and_apply_points(db, existing)
         await db.commit()
         await db.refresh(existing)
         user_out, access_token, refresh_token = await _mint_token_pair(str(existing.id), existing)
@@ -414,7 +420,7 @@ async def refresh(
     if not user.email_verified_at:
         raise HTTPException(403, "Please verify your email before signing in.")
     await revoke_refresh_session(payload["sub"], session_id)
-    record_login_activity(user)
+    await _record_login_and_apply_points(db, user)
     await db.commit()
     await db.refresh(user)
     user_out, access_token, refresh_token = await _mint_token_pair(str(user.id), user)
@@ -445,7 +451,7 @@ async def verify_email(
         await db.commit()
         await send_onboarding_email(user.email)
 
-    record_login_activity(user)
+    await _record_login_and_apply_points(db, user)
     await db.commit()
     await db.refresh(user)
     user_out, access_token, refresh_token = await _mint_token_pair(str(user.id), user)
@@ -483,7 +489,7 @@ async def me(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    record_login_activity(current_user)
+    await _record_login_and_apply_points(db, current_user)
     await db.commit()
     await db.refresh(current_user)
     return _build_user_out(current_user)
@@ -519,6 +525,8 @@ async def get_tier_limits():
     """Return configured tier limits from backend config."""
     return TierLimitsOut(
         free_max_books=settings.FREE_MAX_BOOKS,
+        author_max_uploads=settings.AUTHOR_MAX_UPLOADS,
+        architect_uploads_unlimited=True,
         free_total_token_budget=settings.FREE_TOTAL_TOKEN_BUDGET,
         free_search_per_day=settings.FREE_SEARCH_PER_DAY,
         free_summary_per_hour=settings.FREE_SUMMARY_PER_HOUR,

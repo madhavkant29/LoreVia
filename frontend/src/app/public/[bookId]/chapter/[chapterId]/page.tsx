@@ -5,7 +5,7 @@ import type { Route } from "next"
 import { useEffect, useState } from "react"
 import { useParams } from "next/navigation"
 
-import { booksApi } from "@/lib/api/books"
+import { publicApi } from "@/lib/api/public"
 import { renderRichTextHtml } from "@/lib/utils/richText"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import type { PublicChapter } from "@/types/book"
@@ -19,7 +19,7 @@ export default function PublicChapterPage() {
   const chapterNum = parseInt(chapterId)
 
   useEffect(() => {
-    booksApi.getPublicChapter(bookId, chapterNum).then((payload) => {
+    publicApi.getChapter(bookId, chapterNum).then((payload) => {
       setChapter(payload)
       if (payload.text_content) {
         setText(payload.text_content)

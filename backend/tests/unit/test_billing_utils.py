@@ -1,205 +1,100 @@
-from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
+import pytest
+from fastapi import HTTPException
 
+from app.models.book import Book, Series, SeriesBook
+from app.models.intelligence import WorldBuildingDocument
+from app.models.user import User
 from app.utils.billing_utils import (
-    billing_configuration_status,
-    build_tier_presentation,
-    free_search_limit_per_day,
-    normalize_plan_code,
+    calculate_upload_usage_summary,
+    ensure_upload_capacity,
     paddle_plan_from_event_data,
-    prediction_limit_per_day,
-    protected_authoring_limit_per_day,
-    summary_mode_allowed,
-    tier_from_plan_code,
-    user_access_tier,
+    worldbuilding_upload_cost_for_book,
 )
 
 
-def test_trial_user_gets_author_access_and_trial_label(monkeypatch):
-    monkeypatch.setattr("app.utils.billing_utils.settings.DEBUG", False, raising=False)
-    user = SimpleNamespace(tier="free", created_at=datetime.now(UTC) - timedelta(days=2))
+@pytest.mark.asyncio
+async def test_worldbuilding_upload_cost_scales_with_series_book_count(db):
+    user = User(email="billing-series@lorevia.app", username="billingseries", password_hash="hash", tier="author")
+    db.add(user)
+    await db.flush()
 
-    presentation = build_tier_presentation(user)
+    series = Series(user_id=user.id, name="Atlas Cycle")
+    db.add(series)
+    await db.flush()
 
-    assert presentation.plan_tier == "free"
-    assert presentation.access_tier == "author"
-    assert presentation.trial_active is True
-    assert presentation.tier_label == "Author (free trial)"
+    books = [
+        Book(user_id=user.id, title="Book One", format="txt", s3_key="books/one.txt", status="ready", primary_series_id=series.id),
+        Book(user_id=user.id, title="Book Two", format="txt", s3_key="books/two.txt", status="ready", primary_series_id=series.id),
+        Book(user_id=user.id, title="Book Three", format="txt", s3_key="books/three.txt", status="ready", primary_series_id=series.id),
+    ]
+    db.add_all(books)
+    await db.flush()
+    db.add_all([SeriesBook(series_id=series.id, book_id=book.id) for book in books])
+    await db.commit()
 
-
-def test_expired_trial_reverts_to_free(monkeypatch):
-    monkeypatch.setattr("app.utils.billing_utils.settings.DEBUG", False, raising=False)
-    user = SimpleNamespace(tier="free", created_at=datetime.now(UTC) - timedelta(days=11))
-
-    assert user_access_tier(user) == "free"
-
-
-def test_local_debug_grants_architect_access(monkeypatch):
-    monkeypatch.setattr("app.utils.billing_utils.settings.DEBUG", True, raising=False)
-    user = SimpleNamespace(tier="free", created_at=datetime.now(UTC) - timedelta(days=11))
-
-    assert user_access_tier(user) == "architect"
+    assert await worldbuilding_upload_cost_for_book(db, books[0]) == 3
 
 
-def test_plan_and_tier_mapping_supports_new_and_legacy_codes():
-    assert normalize_plan_code("pro_monthly") == "reader_monthly"
-    assert normalize_plan_code("power_annual") == "author_annual"
-    assert tier_from_plan_code("reader_monthly") == "reader"
-    assert tier_from_plan_code("author_annual") == "author"
-    assert tier_from_plan_code("architect_monthly") == "architect"
+@pytest.mark.asyncio
+async def test_calculate_upload_usage_counts_weighted_worldbuilding_documents(db):
+    user = User(email="billing-usage@lorevia.app", username="billingusage", password_hash="hash", tier="author")
+    db.add(user)
+    await db.flush()
 
+    series = Series(user_id=user.id, name="Northreach")
+    db.add(series)
+    await db.flush()
 
-def test_paddle_event_plan_falls_back_to_price_names():
-    payload = {
-        "items": [
-            {
-                "price": {
-                    "name": "Lore Architect annual",
-                    "billing_cycle": {"interval": "year"},
-                    "product": {"name": "LoreVia"},
-                }
-            }
+    series_books = [
+        Book(user_id=user.id, title="Volume I", format="txt", s3_key="books/i.txt", status="ready", primary_series_id=series.id),
+        Book(user_id=user.id, title="Volume II", format="txt", s3_key="books/ii.txt", status="ready", primary_series_id=series.id),
+    ]
+    solo_book = Book(user_id=user.id, title="Standalone", format="txt", s3_key="books/solo.txt", status="ready")
+    db.add_all([*series_books, solo_book])
+    await db.flush()
+    db.add_all([SeriesBook(series_id=series.id, book_id=book.id) for book in series_books])
+    db.add_all(
+        [
+            WorldBuildingDocument(book_id=series_books[0].id, title="Series Bible", s3_key="world/series.json", is_active=True),
+            WorldBuildingDocument(book_id=solo_book.id, title="Solo Notes", s3_key="world/solo.json", is_active=True),
         ]
-    }
-
-    assert paddle_plan_from_event_data(payload) == "architect_annual"
-
-
-def test_trial_users_get_trial_high_cost_limit(monkeypatch):
-    monkeypatch.setattr("app.utils.billing_utils.settings.DEBUG", False, raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.TRIAL_HIGH_COST_TURNS_PER_DAY", 20, raising=False)
-    user = SimpleNamespace(tier="free", created_at=datetime.now(UTC) - timedelta(days=2))
-
-    assert protected_authoring_limit_per_day(user) == 20
-
-
-def test_paid_reader_keeps_reader_access_without_trial_overlay(monkeypatch):
-    monkeypatch.setattr("app.utils.billing_utils.settings.DEBUG", False, raising=False)
-    user = SimpleNamespace(tier="reader", created_at=datetime.now(UTC) - timedelta(days=2))
-
-    presentation = build_tier_presentation(user)
-
-    assert presentation.access_tier == "reader"
-    assert presentation.trial_active is False
-
-
-def test_free_summary_mode_rules_follow_launch_plan(monkeypatch):
-    monkeypatch.setattr("app.utils.billing_utils.settings.DEBUG", False, raising=False)
-    expired_free_user = SimpleNamespace(tier="free", created_at=datetime.now(UTC) - timedelta(days=20))
-    reader_user = SimpleNamespace(tier="reader", created_at=datetime.now(UTC) - timedelta(days=1))
-
-    assert summary_mode_allowed(expired_free_user, "short") is True
-    assert summary_mode_allowed(expired_free_user, "detailed") is False
-    assert summary_mode_allowed(reader_user, "detailed") is True
-
-
-def test_daily_search_and_prediction_limits_match_launch_tiers(monkeypatch):
-    monkeypatch.setattr("app.utils.billing_utils.settings.DEBUG", False, raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.FREE_SEARCH_PER_DAY", 5, raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.FREE_PREDICTION_PER_DAY", 3, raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.READER_PREDICTION_PER_DAY", 10, raising=False)
-
-    free_user = SimpleNamespace(tier="free", created_at=datetime.now(UTC) - timedelta(days=20))
-    reader_user = SimpleNamespace(tier="reader", created_at=datetime.now(UTC) - timedelta(days=20))
-
-    assert free_search_limit_per_day(free_user) == 5
-    assert free_search_limit_per_day(reader_user) is None
-    assert prediction_limit_per_day(free_user) == 3
-    assert prediction_limit_per_day(reader_user) == 10
-
-
-def test_billing_configuration_status_reports_missing_paddle_values(monkeypatch):
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_API_KEY", None, raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_WEBHOOK_SECRET", None, raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_READER_MONTHLY_PRICE_ID", None, raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_READER_ANNUAL_PRICE_ID", None, raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_AUTHOR_MONTHLY_PRICE_ID", None, raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_AUTHOR_ANNUAL_PRICE_ID", None, raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_ARCHITECT_MONTHLY_PRICE_ID", None, raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_ARCHITECT_ANNUAL_PRICE_ID", None, raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.RESEND_API_KEY", "", raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.INTERNAL_JOB_SECRET", None, raising=False)
-
-    status = billing_configuration_status()
-
-    assert status["billing_enabled"] is False
-    assert status["payments_ready"] is False
-    assert status["paddle_api_key_present"] is False
-    assert status["webhook_secret_present"] is False
-    assert status["resend_api_key_present"] is False
-    assert status["internal_job_secret_present"] is False
-    assert status["fully_configured_plan_count"] == 0
-    assert "PADDLE_API_KEY" in status["missing_configuration"]
-    assert "PADDLE_WEBHOOK_SECRET" in status["missing_configuration"]
-    assert "RESEND_API_KEY" in status["missing_configuration"]
-    assert "INTERNAL_JOB_SECRET" in status["missing_configuration"]
-    assert any(plan["code"] == "reader_monthly" and plan["configured"] is False for plan in status["plans"])
-    assert status["trial_email_automation_code_ready"] is True
-    assert status["priority_processing_code_ready"] is True
-    assert status["points_wallet_ready"] is True
-    assert status["points_spend_ready"] is True
-    assert status["rewarded_ads_code_ready"] is True
-    assert status["webhook_endpoint_path"] == "/api/v1/webhooks/paddle"
-    assert "transaction.completed" in status["supported_webhook_events"]
-    assert status["trial_email_job_endpoint_path"] == "/api/v1/internal/jobs/send-due-trial-emails"
-    assert status["trial_email_runner_script"] == "backend/scripts/run_due_trial_emails.py"
-    assert "Register `/api/v1/webhooks/paddle` in Paddle" in status["external_action_items"][0]
-    assert any(
-        plan["code"] == "author_monthly"
-        and plan["display_name"] == "Author"
-        and plan["billing_interval"] == "monthly"
-        and plan["price_usd"] == 29
-        for plan in status["plans"]
     )
-    assert any(
-        plan["code"] == "architect_monthly"
-        and plan["display_name"] == "Lore Architect"
-        and plan["billing_interval"] == "monthly"
-        and plan["price_usd"] == 49
-        for plan in status["plans"]
-    )
+    await db.commit()
+
+    usage = await calculate_upload_usage_summary(db, user)
+
+    assert usage.manuscript_uploads == 3
+    assert usage.worldbuilding_uploads == 3
+    assert usage.total_uploads == 6
+    assert usage.upload_limit == 15
+    assert usage.uploads_remaining == 9
 
 
-def test_billing_configuration_status_reports_fully_configured_catalog(monkeypatch):
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_API_KEY", "pdl_test_key", raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_WEBHOOK_SECRET", "whsec_test", raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_READER_MONTHLY_PRICE_ID", "pri_reader_monthly", raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_READER_ANNUAL_PRICE_ID", "pri_reader_annual", raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_AUTHOR_MONTHLY_PRICE_ID", "pri_author_monthly", raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_AUTHOR_ANNUAL_PRICE_ID", "pri_author_annual", raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_ARCHITECT_MONTHLY_PRICE_ID", "pri_architect_monthly", raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_ARCHITECT_ANNUAL_PRICE_ID", "pri_architect_annual", raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.RESEND_API_KEY", "re_live_test", raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.INTERNAL_JOB_SECRET", "internal_job_secret_value", raising=False)
+@pytest.mark.asyncio
+async def test_ensure_upload_capacity_blocks_author_when_series_weight_pushes_past_cap(db):
+    user = User(email="billing-cap@lorevia.app", username="billingcap", password_hash="hash", tier="author")
+    db.add(user)
+    await db.flush()
 
-    status = billing_configuration_status()
+    books = [
+        Book(user_id=user.id, title=f"Project {index}", format="txt", s3_key=f"books/{index}.txt", status="ready")
+        for index in range(1, 15)
+    ]
+    db.add_all(books)
+    await db.commit()
 
-    assert status["billing_enabled"] is True
-    assert status["payments_ready"] is True
-    assert status["resend_api_key_present"] is True
-    assert status["internal_job_secret_present"] is True
-    assert status["fully_configured_plan_count"] == 6
-    assert status["missing_configuration"] == []
-    assert all(plan["configured"] is True for plan in status["plans"])
+    with pytest.raises(HTTPException) as exc:
+        await ensure_upload_capacity(
+            db,
+            user,
+            requested_uploads=2,
+            context="This worldbuilding upload counts as 2 uploads for this book.",
+        )
+
+    assert exc.value.status_code == 403
+    assert "Author tier includes 15 uploads" in exc.value.detail
+    assert "counts as 2 uploads" in exc.value.detail
 
 
-def test_billing_configuration_status_treats_placeholder_values_as_missing(monkeypatch):
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_API_KEY", "pdl_live_or_sandbox_key_here", raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_WEBHOOK_SECRET", "pdl_webhook_secret_here", raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_READER_MONTHLY_PRICE_ID", "price_reader_monthly_here", raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_READER_ANNUAL_PRICE_ID", "price_reader_annual_here", raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_AUTHOR_MONTHLY_PRICE_ID", "price_author_monthly_here", raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_AUTHOR_ANNUAL_PRICE_ID", "price_author_annual_here", raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_ARCHITECT_MONTHLY_PRICE_ID", "price_architect_monthly_here", raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_ARCHITECT_ANNUAL_PRICE_ID", "price_architect_annual_here", raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.RESEND_API_KEY", "dummy", raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.INTERNAL_JOB_SECRET", "replace_with_an_internal_job_secret", raising=False)
-
-    status = billing_configuration_status()
-
-    assert status["billing_enabled"] is False
-    assert status["payments_ready"] is False
-    assert status["paddle_api_key_present"] is False
-    assert status["webhook_secret_present"] is False
-    assert status["resend_api_key_present"] is False
-    assert status["internal_job_secret_present"] is False
+def test_paddle_plan_from_event_data_does_not_default_unknown_events_to_reader():
+    assert paddle_plan_from_event_data({"items": []}) == ""

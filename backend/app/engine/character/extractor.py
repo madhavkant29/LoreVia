@@ -5,6 +5,7 @@ Single LLM pass extracts both — cheaper and gives shared context.
 import json
 import logging
 import re
+import uuid
 from collections import Counter
 from typing import cast
 
@@ -101,7 +102,12 @@ Omit null trait fields entirely.
 Return raw JSON only."""
 
 
-async def extract_characters_and_relationships(chunk_text: str) -> dict:
+async def extract_characters_and_relationships(
+    chunk_text: str,
+    *,
+    user_id: uuid.UUID | None = None,
+    book_id: uuid.UUID | None = None,
+) -> dict:
     candidate_names = _candidate_names(chunk_text)
     candidate_hint = (
         "\n\nPotential person names seen in this passage:\n- "
@@ -117,6 +123,9 @@ async def extract_characters_and_relationships(chunk_text: str) -> dict:
         temperature=0.1,
         max_tokens=3000,
         response_format={"type": "json_object"},
+        usage_feature="character_relationship_extraction",
+        usage_user_id=user_id,
+        usage_book_id=book_id,
     )
     try:
         parsed = json.loads(raw)
@@ -167,7 +176,10 @@ SINGLE_NAME_TIME_WORDS = {
 ACTION_VERB_CONTEXT = {
     "said", "asked", "replied", "called", "told", "whispered", "shouted", "muttered",
     "smiled", "laughed", "sighed", "nodded", "stared", "looked", "turned", "answered",
-    "cried", "screamed", "warned", "snapped", "grinned",
+    "cried", "screamed", "warned", "snapped", "grinned", "awoke", "woke", "watched",
+    "walked", "stepped", "moved", "stood", "sat", "rose", "opened", "closed", "reached",
+    "grabbed", "held", "took", "came", "went", "ran", "hurried", "followed", "glanced",
+    "noticed", "saw", "heard", "felt",
 }
 MAX_AUTO_AUGMENTED_CHARACTERS = 10
 MIN_CHARACTER_CONFIDENCE = 0.78

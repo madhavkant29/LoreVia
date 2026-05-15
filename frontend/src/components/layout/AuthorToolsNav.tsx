@@ -1,13 +1,15 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useMemo, useState } from "react"
 import type { Route } from "next"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 
 import { AuthorFeatureComponent } from "@/components/billing/AuthorFeatureComponent"
+import { booksApi } from "@/lib/api/books"
 import { canUseAuthorFeatures } from "@/lib/billing/plans"
 import { useAuthStore } from "@/lib/stores/authStore"
+import type { CollaborationPermissions } from "@/types/book"
 
 type BookMode = "reader" | "author"
 
@@ -58,6 +60,35 @@ type NavSection = {
   authorOnly?: boolean
 }
 
+function canSeeCollaboratorItem(itemId: string, permissions: CollaborationPermissions | null) {
+  if (!permissions) return false
+  switch (itemId) {
+    case "manuscript":
+    case "scenes":
+    case "add-scene":
+      return permissions.can_edit_manuscript
+    case "advisor":
+    case "editorial-review":
+    case "voice":
+    case "ask":
+    case "world-gap":
+      return permissions.can_run_ai_scans
+    case "characters":
+    case "relationships":
+    case "plot-threads":
+      return permissions.can_view_story_bible
+    case "notes":
+    case "beta-feedback":
+      return permissions.can_comment || permissions.can_edit_manuscript
+    case "export":
+      return permissions.can_export
+    case "collaboration":
+      return false
+    default:
+      return true
+  }
+}
+
 const NAV_SECTIONS = (bookId: string, currentChapter = 1): NavSection[] => [
   {
     title: "Book",
@@ -105,6 +136,7 @@ const NAV_SECTIONS = (bookId: string, currentChapter = 1): NavSection[] => [
     authorOnly: true,
     items: [
       { id: "notes", label: "Notes", href: `/${bookId}/notes` as Route, tone: "Vault", icon: "notes" },
+      { id: "beta-feedback", label: "Beta Feedback", href: `/${bookId}/beta-feedback` as Route, tone: "Reader loop", icon: "users" },
       { id: "collaboration", label: "Collaboration", href: `/${bookId}/collaboration` as Route, tone: "Share", icon: "users" },
       { id: "export", label: "Import & Export", href: `/${bookId}/export` as Route, tone: "Files", icon: "files" },
     ],
@@ -123,8 +155,42 @@ export function AuthorToolsNav({
 }: AuthorToolsNavProps) {
   const router = useRouter()
   const tier = useAuthStore((state) => state.user?.tier)
-  const showAuthorSections = mode === "author" && canUseAuthorFeatures(tier)
-  const sections = NAV_SECTIONS(bookId, currentChapter).filter((section) => showAuthorSections || !section.authorOnly)
+  const [collaborationRole, setCollaborationRole] = useState<string | null>(null)
+  const [collaborationPermissions, setCollaborationPermissions] = useState<CollaborationPermissions | null>(null)
+  const hasOwnAuthorAccess = canUseAuthorFeatures(tier)
+  const hasCollaboratorAccess = Boolean(collaborationRole && collaborationPermissions)
+  const showAuthorSections = mode === "author" && (hasOwnAuthorAccess || hasCollaboratorAccess)
+
+  useEffect(() => {
+    let active = true
+    booksApi.get(bookId).then((book) => {
+      if (!active) return
+      setCollaborationRole(book.collaboration_role ?? null)
+      setCollaborationPermissions(book.collaboration_permissions ?? null)
+    }).catch(() => {
+      if (!active) return
+      setCollaborationRole(null)
+      setCollaborationPermissions(null)
+    })
+    return () => {
+      active = false
+    }
+  }, [bookId])
+
+  const sections = useMemo(
+    () =>
+      NAV_SECTIONS(bookId, currentChapter)
+        .filter((section) => showAuthorSections || !section.authorOnly)
+        .map((section) => ({
+          ...section,
+          items: section.items.filter((item) => {
+            if (hasOwnAuthorAccess || !collaborationRole) return true
+            return canSeeCollaboratorItem(item.id, collaborationPermissions)
+          }),
+        }))
+        .filter((section) => section.items.length > 0),
+    [bookId, collaborationPermissions, collaborationRole, currentChapter, hasOwnAuthorAccess, showAuthorSections]
+  )
   const items = sections.flatMap((section) => section.items)
 
   useEffect(() => {
@@ -198,7 +264,7 @@ export function AuthorToolsNav({
           </div>
           )
           return section.authorOnly ? (
-            <AuthorFeatureComponent key={section.title} locked={null}>
+            <AuthorFeatureComponent key={section.title} locked={null} allowAccess={hasCollaboratorAccess}>
               {sectionMarkup}
             </AuthorFeatureComponent>
           ) : (

@@ -34,6 +34,33 @@ def _safe_name(value: object | None) -> str:
     return "".join(ch for ch in cleaned if ch.isalnum() or ch in {" ", "-", "_", "(", ")"}).strip().replace(" ", "-")
 
 
+def export_filename_base(value: object | None, fallback: str = "lorevia") -> str:
+    return _safe_name(value) or _safe_name(fallback) or "lorevia"
+
+
+def _set_docx_core_properties(doc: Any, *, title: str, author: str = "LoreVia", subject: str | None = None) -> None:
+    core = doc.core_properties
+    core.title = _clean_line(title) or "LoreVia Export"
+    core.author = _clean_line(author) or "LoreVia"
+    if subject is not None:
+        core.subject = _clean_line(subject)
+    core.comments = EXPORT_ATTRIBUTION
+
+
+def _apply_pdf_metadata(canvas: Any, *, title: str, author: str = "LoreVia", subject: str | None = None) -> None:
+    safe_title = _clean_line(title) or "LoreVia Export"
+    safe_author = _clean_line(author) or "LoreVia"
+    safe_subject = _clean_line(subject)
+    if hasattr(canvas, "setTitle"):
+        canvas.setTitle(safe_title)
+    if hasattr(canvas, "setAuthor"):
+        canvas.setAuthor(safe_author)
+    if safe_subject and hasattr(canvas, "setSubject"):
+        canvas.setSubject(safe_subject)
+    if hasattr(canvas, "setCreator"):
+        canvas.setCreator("LoreVia")
+
+
 def _obsidian_note_title(value: object | None) -> str:
     cleaned = _clean_line(value)
     return cleaned or "Untitled"
@@ -126,6 +153,23 @@ def _major_event_path(root_folder: str, title: str) -> str:
 
 def _plot_thread_path(root_folder: str, title: str) -> str:
     return f"{root_folder}/Plot Threads/{_obsidian_safe_name(title)}.md"
+
+
+def _dedupe_obsidian_path(path: str, used_paths: set[str]) -> str:
+    if path not in used_paths:
+        used_paths.add(path)
+        return path
+
+    stem, dot, extension = path.rpartition(".")
+    base = stem if dot else path
+    suffix = f".{extension}" if dot else ""
+    counter = 2
+    candidate = f"{base} ({counter}){suffix}"
+    while candidate in used_paths:
+        counter += 1
+        candidate = f"{base} ({counter}){suffix}"
+    used_paths.add(candidate)
+    return candidate
 
 
 def _linkify_text(value: str | None, targets: dict[str, str], *, skip: str | None = None) -> str:
@@ -299,9 +343,10 @@ def _build_obsidian_manifest(
         return _linkify_text(text, link_targets, skip=skip)
 
     def add_file(path: str, content: str) -> None:
-        files.append({"path": path, "content": _append_export_attribution(content)})
+        files.append({"path": _dedupe_obsidian_path(path, used_paths), "content": _append_export_attribution(content)})
 
     files: list[dict[str, str]] = []
+    used_paths: set[str] = set()
     character_keys = {str(char.id): _character_reference_keys(char) for char in characters}
     character_note_paths = {char.name: f"{root_folder}/Characters/{_obsidian_safe_name(char.name)}.md" for char in characters if char.name}
     chapter_lookup = {int(row["number"]): row for row in chapter_rows if row.get("number") is not None}
@@ -810,6 +855,11 @@ def character_card_pdf(payload: dict) -> bytes:
                             leftMargin=0.75 * inch, rightMargin=0.75 * inch,
                             topMargin=0.7 * inch, bottomMargin=0.7 * inch)
     styles = getSampleStyleSheet()
+    export_title = (
+        f"{payload['book_title']} - {payload['name']} Character Card"
+        if _clean_line(payload.get("book_title"))
+        else f"{payload['name']} - Character Card"
+    )
     story = [Paragraph(f"{payload['name']} - Character Card", styles["Heading1"]), Spacer(1, 0.14 * inch)]
 
     metadata = [
@@ -895,7 +945,10 @@ def character_card_pdf(payload: dict) -> bytes:
     else:
         story.append(Paragraph("No tracked relationships yet.", styles["BodyText"]))
 
-    doc.build(story)
+    def _decorate_pdf(canvas, _doc_obj) -> None:
+        _apply_pdf_metadata(canvas, title=export_title, subject="Character Card")
+
+    doc.build(story, onFirstPage=_decorate_pdf, onLaterPages=_decorate_pdf)
     return buffer.getvalue()
 
 
@@ -905,6 +958,12 @@ def character_card_docx(payload: dict) -> bytes:
     from docx import Document
 
     doc = Document()
+    export_title = (
+        f"{payload['book_title']} - {payload['name']} Character Card"
+        if _clean_line(payload.get("book_title"))
+        else f"{payload['name']} - Character Card"
+    )
+    _set_docx_core_properties(doc, title=export_title, subject="Character Card")
     doc.add_heading(f"{payload['name']} - Character Card", level=1)
     table = doc.add_table(rows=0, cols=2)
     table.style = "Table Grid"
@@ -1090,8 +1149,7 @@ def character_bible_markdown(
         body.append("")
 
     markdown = _append_export_attribution("\n".join(header + body)).encode("utf-8")
-    safe_name = "".join(ch for ch in (book.title or "lorevia") if ch.isalnum() or ch in {" ", "-", "_"}).strip().replace(" ", "-")
-    return markdown, safe_name or "lorevia"
+    return markdown, export_filename_base(book.title)
 
 
 def character_bible_pdf(*, markdown: bytes, title: str) -> bytes:
@@ -1118,6 +1176,7 @@ def character_bible_pdf(*, markdown: bytes, title: str) -> bytes:
 
     def _draw_footer(canvas, doc_obj) -> None:
         canvas.saveState()
+        _apply_pdf_metadata(canvas, title=title, subject="Character Bible")
         canvas.setFont("Helvetica", 8)
         canvas.drawCentredString(doc_obj.pagesize[0] / 2, 0.45 * inch, EXPORT_ATTRIBUTION)
         canvas.restoreState()
@@ -1156,6 +1215,7 @@ def character_bible_docx(*, markdown: bytes, title: str) -> bytes:
     from docx import Document
 
     doc = Document()
+    _set_docx_core_properties(doc, title=title, subject="Character Bible")
     doc.add_heading(title, level=1)
     doc.add_paragraph("")
 
@@ -1425,6 +1485,12 @@ def manuscript_docx(
     export_preset = _manuscript_export_preset(preset)
     front = _manuscript_front_matter(title, chapters, front_matter)
     doc = Document()
+    _set_docx_core_properties(
+        doc,
+        title=front["title"],
+        author=front["display_author"] or "LoreVia",
+        subject="Manuscript",
+    )
     section = doc.sections[0]
     section.top_margin = Inches(1)
     section.bottom_margin = Inches(1)
@@ -1623,6 +1689,7 @@ def manuscript_pdf(*, title: str, chapters: list[dict], preset: str = "standard_
 
     def _draw_footer(canvas, doc_obj) -> None:
         canvas.saveState()
+        _apply_pdf_metadata(canvas, title=title or "LoreVia Manuscript Export", subject="Manuscript")
         canvas.setFont("Helvetica", 8)
         canvas.drawCentredString(doc_obj.pagesize[0] / 2, 0.45 * inch, EXPORT_ATTRIBUTION)
         canvas.restoreState()
@@ -1795,6 +1862,12 @@ def manuscript_pdf_compiled(
 
     def _draw_later_pages(canvas, doc_obj) -> None:
         canvas.saveState()
+        _apply_pdf_metadata(
+            canvas,
+            title=front["title"],
+            author=front["display_author"] or "LoreVia",
+            subject="Manuscript",
+        )
         canvas.setFont("Times-Roman", 10)
         canvas.drawRightString(
             doc_obj.pagesize[0] - doc.rightMargin,

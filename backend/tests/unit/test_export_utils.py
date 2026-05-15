@@ -16,6 +16,7 @@ from app.utils.export_utils import (
     character_bible_docx,
     character_bible_markdown,
     character_bible_pdf,
+    export_filename_base,
     manuscript_docx,
     manuscript_obsidian_vault_zip,
 )
@@ -66,6 +67,11 @@ def test_character_bible_markdown_appends_attribution_once():
     assert text.count(EXPORT_ATTRIBUTION) == 1
 
 
+def test_export_filename_base_falls_back_cleanly():
+    assert export_filename_base("Atlas Draft") == "Atlas-Draft"
+    assert export_filename_base("   ", fallback="character-bible") == "character-bible"
+
+
 def test_character_bible_docx_writes_attribution_to_document_footer():
     book = _build_book()
     characters = _build_characters(book)[:1]
@@ -79,6 +85,9 @@ def test_character_bible_docx_writes_attribution_to_document_footer():
     raw = character_bible_docx(markdown=markdown, title="Atlas - Character Bible")
     doc = Document(BytesIO(raw))
 
+    assert doc.core_properties.title == "Atlas - Character Bible"
+    assert doc.core_properties.author == "LoreVia"
+    assert doc.core_properties.subject == "Character Bible"
     assert any(
         EXPORT_ATTRIBUTION in paragraph.text
         for section in doc.sections
@@ -93,6 +102,7 @@ def test_character_bible_pdf_draws_footer_on_every_page(monkeypatch):
     class FakeCanvas:
         def __init__(self):
             self.drawn: list[str] = []
+            self.metadata: dict[str, str] = {}
 
         def saveState(self) -> None:
             return None
@@ -102,6 +112,18 @@ def test_character_bible_pdf_draws_footer_on_every_page(monkeypatch):
 
         def setFont(self, *_args) -> None:
             return None
+
+        def setTitle(self, value: str) -> None:
+            self.metadata["title"] = value
+
+        def setAuthor(self, value: str) -> None:
+            self.metadata["author"] = value
+
+        def setSubject(self, value: str) -> None:
+            self.metadata["subject"] = value
+
+        def setCreator(self, value: str) -> None:
+            self.metadata["creator"] = value
 
         def drawCentredString(self, _x, _y, text: str) -> None:
             self.drawn.append(text)
@@ -121,6 +143,7 @@ def test_character_bible_pdf_draws_footer_on_every_page(monkeypatch):
             if onLaterPages is not None:
                 onLaterPages(canvas, self)
             captured["drawn"] = canvas.drawn
+            captured["metadata"] = canvas.metadata
 
     monkeypatch.setattr(reportlab.platypus, "SimpleDocTemplate", FakeDoc)
     try:
@@ -139,6 +162,12 @@ def test_character_bible_pdf_draws_footer_on_every_page(monkeypatch):
     assert callable(captured["onFirstPage"])
     assert callable(captured["onLaterPages"])
     assert captured["drawn"] == [EXPORT_ATTRIBUTION, EXPORT_ATTRIBUTION]
+    assert captured["metadata"] == {
+        "title": "Atlas - Character Bible",
+        "author": "LoreVia",
+        "subject": "Character Bible",
+        "creator": "LoreVia",
+    }
 
 
 def test_character_card_exports_use_scene_language_for_screenplays():
@@ -190,6 +219,9 @@ def test_character_card_exports_use_scene_language_for_screenplays():
     doc_text = "\n".join(paragraph.text for paragraph in doc.paragraphs)
     table_text = "\n".join(cell.text for table in doc.tables for row in table.rows for cell in row.cells)
 
+    assert doc.core_properties.title == "Pilot - Maya Character Card"
+    assert doc.core_properties.author == "LoreVia"
+    assert doc.core_properties.subject == "Character Card"
     assert "Scene 1" in table_text
     assert "Scene 8" in table_text
     assert "Find the missing witness." in doc_text
@@ -213,6 +245,9 @@ def test_manuscript_docx_uses_front_matter_for_title_page():
     doc = Document(BytesIO(raw))
     text = "\n".join(paragraph.text for paragraph in doc.paragraphs)
 
+    assert doc.core_properties.title == "Atlas Rising"
+    assert doc.core_properties.author == "A. Writer"
+    assert doc.core_properties.subject == "Manuscript"
     assert "Atlas Rising" in text
     assert "A. Writer" in text
     assert "writer@example.com" in text

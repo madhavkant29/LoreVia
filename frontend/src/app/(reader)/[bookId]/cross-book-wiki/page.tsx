@@ -1,11 +1,13 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
 import Link from "next/link"
 import { useParams } from "next/navigation"
 
 import { intelligenceApi } from "@/lib/api/intelligence"
 import { booksApi } from "@/lib/api/books"
+import { asQueryKey, booksListCacheKey } from "@/lib/query/cacheKeys"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import type { Book } from "@/types/book"
 import type { CrossBookIntelligence, CrossBookMatch } from "@/types/intelligence"
@@ -22,33 +24,29 @@ export default function CrossBookWikiPage() {
   const { bookId } = useParams<{ bookId: string }>()
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
-  const [data, setData] = useState<CrossBookIntelligence | null>(null)
-  const [books, setBooks] = useState<Map<string, Book>>(new Map())
-  const [loading, setLoading] = useState(true)
+  const { data: intelligenceData = null, isLoading: intelligenceLoading } = useQuery<CrossBookIntelligence | null>({
+    queryKey: asQueryKey(`cross-book-wiki:${bookId}`),
+    queryFn: () => intelligenceApi.getCrossBookIntelligence(bookId),
+  })
+  const { data: booksData = [], isLoading: booksLoading } = useQuery<Book[]>({
+    queryKey: asQueryKey(booksListCacheKey()),
+    queryFn: () => booksApi.list(),
+  })
   const [mode, setMode] = useState<MatchMode>("all")
   const [threshold, setThreshold] = useState(60)
   const [query, setQuery] = useState("")
-
-  useEffect(() => {
-    Promise.all([
-      intelligenceApi.getCrossBookIntelligence(bookId),
-      booksApi.list(),
-    ]).then(([intelligenceData, booksData]) => {
-      setData(intelligenceData)
-      const bookMap = new Map(booksData.map((book) => [book.id, book]))
-      setBooks(bookMap)
-    }).finally(() => setLoading(false))
-  }, [bookId])
+  const loading = intelligenceLoading || booksLoading
+  const books = useMemo(() => new Map(booksData.map((book) => [book.id, book])), [booksData])
 
   const matches = useMemo(() => {
     const allMatches: MatchWithBooks[] = [
-      ...((data?.character_matches ?? []).map((item) => ({
+      ...((intelligenceData?.character_matches ?? []).map((item) => ({
         ...item,
         source: "characters" as const,
         left_book_title: books.get(item.left_book_id)?.title,
         right_book_title: books.get(item.right_book_id)?.title,
       }))),
-      ...((data?.wiki_matches ?? []).map((item) => ({
+      ...((intelligenceData?.wiki_matches ?? []).map((item) => ({
         ...item,
         source: "wiki" as const,
         left_book_title: books.get(item.left_book_id)?.title,
@@ -70,7 +68,7 @@ export default function CrossBookWikiPage() {
         ].some((value) => value.toLowerCase().includes(normalizedQuery))
       })
       .sort((a, b) => b.similarity - a.similarity)
-  }, [data, mode, query, threshold, books])
+  }, [intelligenceData, mode, query, threshold, books])
 
   return (
     <div className={`min-h-screen px-4 py-10 ${isDark ? "bg-[radial-gradient(circle_at_top,#111827,#05070d_65%)] text-stone-100" : "bg-[linear-gradient(180deg,#fcfdff,#eef3f9)] text-slate-950"}`}>
@@ -139,7 +137,7 @@ export default function CrossBookWikiPage() {
             <div className={`grid grid-cols-1 gap-3 text-sm ${isDark ? "text-stone-300" : "text-slate-600"} lg:w-[18rem]`}>
               <div className={`rounded-2xl border p-3 ${isDark ? "border-white/10 bg-white/5" : "border-slate-200 bg-slate-50"}`}>
                 <p className="text-xs uppercase tracking-[0.2em] opacity-70">Series</p>
-                <p className="mt-2 font-semibold">{data?.series_name ?? "Unassigned"}</p>
+                <p className="mt-2 font-semibold">{intelligenceData?.series_name ?? "Unassigned"}</p>
               </div>
               <div className={`rounded-2xl border p-3 ${isDark ? "border-white/10 bg-white/5" : "border-slate-200 bg-slate-50"}`}>
                 <p className="text-xs uppercase tracking-[0.2em] opacity-70">Matches found</p>
@@ -147,7 +145,7 @@ export default function CrossBookWikiPage() {
               </div>
               <div className={`rounded-2xl border p-3 ${isDark ? "border-white/10 bg-white/5" : "border-slate-200 bg-slate-50"}`}>
                 <p className="text-xs uppercase tracking-[0.2em] opacity-70">Books compared</p>
-                <p className="mt-2 font-semibold">{data?.comparison_book_ids.length ?? 0}</p>
+                <p className="mt-2 font-semibold">{intelligenceData?.comparison_book_ids.length ?? 0}</p>
               </div>
             </div>
           </div>
@@ -159,7 +157,7 @@ export default function CrossBookWikiPage() {
           <div className={`rounded-[1.8rem] border p-8 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-slate-200 bg-white/85"}`}>
             <h2 className={`text-2xl font-semibold ${isDark ? "text-white" : "text-slate-950"}`}>No matches found</h2>
             <p className={`mt-3 max-w-2xl text-sm leading-7 ${isDark ? "text-stone-300" : "text-slate-600"}`}>
-              {data?.comparison_book_ids.length === 0 || (data?.comparison_book_ids.length ?? 0) < 2
+              {intelligenceData?.comparison_book_ids.length === 0 || (intelligenceData?.comparison_book_ids.length ?? 0) < 2
                 ? "You need at least 2 books in the same series to find cross-book connections. Add more books to your series and try again."
                 : "Try lowering the similarity threshold or clearing the search filters to see more results."
               }

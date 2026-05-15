@@ -29,5 +29,25 @@ describe("monetization formatters", () => {
         created_at: new Date().toISOString(),
       })
     ).toBe("Rewarded ad")
+    expect(
+      formatPointEntryLabel({
+        id: "3",
+        entry_type: "grant",
+        source_type: "daily_login",
+        points_delta: 1,
+        metadata_json: {},
+        created_at: new Date().toISOString(),
+      })
+    ).toBe("Daily login")
+    expect(
+      formatPointEntryLabel({
+        id: "4",
+        entry_type: "spend",
+        source_type: "public_share",
+        points_delta: -10,
+        metadata_json: {},
+        created_at: new Date().toISOString(),
+      })
+    ).toBe("Public sharing")
   })
 })

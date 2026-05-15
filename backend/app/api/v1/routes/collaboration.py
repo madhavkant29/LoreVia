@@ -45,6 +45,7 @@ async def create_collaborator(
         display_name=body.display_name,
         role=body.role,
         scope=body.scope,
+        permissions=body.permissions,
     )
 
 
@@ -65,6 +66,7 @@ async def update_collaborator(
         display_name=body.display_name,
         role=body.role,
         scope=body.scope,
+        permissions=body.permissions,
         invite_status=body.invite_status,
     )
 

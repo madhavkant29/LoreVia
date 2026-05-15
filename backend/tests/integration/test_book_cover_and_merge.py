@@ -173,3 +173,51 @@ async def test_delete_character_endpoint_removes_false_positive(client, db):
     assert response.status_code == 200
     assert response.json()["deleted"] == str(false_positive.id)
     assert await db.get(Character, false_positive.id) is None
+
+
+@pytest.mark.asyncio
+async def test_create_character_endpoint_supports_manual_profiles(client, db):
+    headers, user_id = await _register_user(client, "create-owner@lorevia.app")
+
+    book = Book(
+        user_id=user_id,
+        title="Create Test",
+        format="pdf",
+        s3_key="books/create-test.pdf",
+        status="ready",
+        mode="author",
+    )
+    db.add(book)
+    await db.commit()
+
+    response = await client.post(
+        f"/api/v1/books/{book.id}/characters",
+        headers=headers,
+        json={
+            "name": "Mom",
+            "first_chapter": 2,
+            "role": "sc",
+            "description": "The family matriarch with a sharp memory.",
+            "aliases": ["Mother"],
+            "motivations": ["Protect the family"],
+        },
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["name"] == "Mom"
+    assert payload["first_chapter"] == 2
+    assert payload["role"] == "sc"
+    assert payload["is_manual"] is True
+    assert payload["description"] == "The family matriarch with a sharp memory."
+    assert payload["aliases"] == ["Mother"]
+
+    characters = (await db.execute(select(Character).where(Character.book_id == book.id))).scalars().all()
+    assert len(characters) == 1
+    assert characters[0].name == "Mom"
+    assert characters[0].last_seen_chapter == 2
+    assert characters[0].is_manual is True
+
+    characters_response = await client.get(f"/api/v1/books/{book.id}/characters", headers=headers)
+    assert characters_response.status_code == 200
+    assert characters_response.json()[0]["name"] == "Mom"

@@ -82,7 +82,7 @@ async def paddle_webhook(request: Request, paddle_signature: str | None = Header
             if existing is None and user_id is not None:
                 existing = Subscription(
                     user_id=user_id,
-                    plan=plan,
+                    plan=plan or "free",
                     status=status,
                     paddle_customer_id=customer_id,
                     paddle_sub_id=subscription_id,
@@ -91,13 +91,14 @@ async def paddle_webhook(request: Request, paddle_signature: str | None = Header
                 db.add(existing)
 
             if existing is not None:
-                existing.plan = plan
+                existing.plan = plan or existing.plan
                 existing.status = status
                 existing.paddle_customer_id = customer_id or existing.paddle_customer_id
                 existing.paddle_sub_id = subscription_id or existing.paddle_sub_id
                 existing.paddle_transaction_id = transaction_id or existing.paddle_transaction_id
+                effective_plan = plan or existing.plan
                 next_tier = (
-                    tier_from_plan_code(plan, paddle_price_id_from_event_data(data))
+                    tier_from_plan_code(effective_plan, paddle_price_id_from_event_data(data))
                     if _service_is_active(event_type, status)
                     else "free"
                 )

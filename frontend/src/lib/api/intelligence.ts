@@ -8,17 +8,52 @@ import type {
   AdvisorResponse,
   AdvisorGreeting,
   AdvisorSuggestionsResponse,
+  AdvisorTaskStatusResponse,
+  AdvisorAsyncAccepted,
   EditorialReviewResponse,
   InlineContinuityResponse,
   SeriesContinuityResponse,
   ManuscriptSynopsis,
   ContinuityReportFormat,
   ProseTightenResponse,
+  WhatsTheWordResponse,
   VoiceConsistencyResponse,
 } from "@/types/intelligence"
 
 function intelligencePath(bookId: string, suffix = "") {
   return `/intelligence/${normalizeBookRouteId(bookId)}${suffix}`
+}
+
+async function pollAdvisorMessage(bookId: string, taskId: string): Promise<AdvisorResponse> {
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    const response = await apiClient.get<AdvisorTaskStatusResponse>(
+      intelligencePath(bookId, `/advisor/message-async/${taskId}`),
+    ).then(r => r.data)
+    if (response.status === "complete" && response.result) {
+      return response.result
+    }
+    if (response.status === "failed") {
+      throw new Error(response.error || "Advisor generation failed")
+    }
+    await new Promise(resolve => globalThis.setTimeout(resolve, attempt < 10 ? 600 : 1000))
+  }
+  throw new Error("Advisor generation timed out")
+}
+
+async function pollSeriesAdvisorMessage(seriesId: string, taskId: string): Promise<AdvisorResponse> {
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    const response = await apiClient.get<AdvisorTaskStatusResponse>(
+      `/intelligence/series/${seriesId}/advisor/message/${taskId}`,
+    ).then(r => r.data)
+    if (response.status === "complete" && response.result) {
+      return response.result
+    }
+    if (response.status === "failed") {
+      throw new Error(response.error || "Advisor generation failed")
+    }
+    await new Promise(resolve => globalThis.setTimeout(resolve, attempt < 10 ? 600 : 1000))
+  }
+  throw new Error("Advisor generation timed out")
 }
 
 export const intelligenceApi = {
@@ -41,10 +76,16 @@ export const intelligenceApi = {
     apiClient.get<AdvisorGreeting>(intelligencePath(bookId, "/advisor/greeting")).then(r => r.data),
 
   advisorMessage: (bookId: string, messages: AdvisorMessage[], totalChapters: number) =>
-    apiClient.post<AdvisorResponse>(intelligencePath(bookId, "/advisor/message"), {
+    apiClient.post<AdvisorResponse | AdvisorAsyncAccepted>(intelligencePath(bookId, "/advisor/message-async"), {
       messages,
       total_chapters: totalChapters,
-    }).then(r => r.data),
+    }).then(async r => {
+      const payload = r.data
+      if ("reply" in payload) {
+        return payload
+      }
+      return pollAdvisorMessage(bookId, payload.task_id)
+    }),
 
   advisorSuggestions: (bookId: string) =>
     apiClient.get<AdvisorSuggestionsResponse>(intelligencePath(bookId, "/advisor/suggestions")).then(r => r.data),
@@ -58,6 +99,11 @@ export const intelligenceApi = {
     apiClient.post<ProseTightenResponse>(intelligencePath(bookId, "/advisor/prose-tighten"), {
       text,
       chapter_num: chapterNum ?? null,
+    }).then(r => r.data),
+  whatsTheWord: (bookId: string, description: string, previousWord?: string | null) =>
+    apiClient.post<WhatsTheWordResponse>(intelligencePath(bookId, "/advisor/whats-the-word"), {
+      description,
+      previous_word: previousWord ?? null,
     }).then(r => r.data),
   inlineContinuity: (bookId: string, text: string, chapterNum?: number) =>
     apiClient.post<InlineContinuityResponse>(intelligencePath(bookId, "/advisor/inline-continuity"), {
@@ -81,9 +127,15 @@ export const intelligenceApi = {
 
   // Series-wide operations
   seriesAdvisorMessage: (seriesId: string, messages: AdvisorMessage[]) =>
-    apiClient.post<AdvisorResponse>(`/intelligence/series/${seriesId}/advisor/message`, {
+    apiClient.post<AdvisorResponse | AdvisorAsyncAccepted>(`/intelligence/series/${seriesId}/advisor/message`, {
       messages,
-    }).then(r => r.data),
+    }).then(async r => {
+      const payload = r.data
+      if ("reply" in payload) {
+        return payload
+      }
+      return pollSeriesAdvisorMessage(seriesId, payload.task_id)
+    }),
 
   seriesContinuityCheck: (seriesId: string, bookId: string, text: string, chapterNum?: number) =>
     apiClient.post<SeriesContinuityResponse>(`/intelligence/series/${seriesId}/continuity-check`, {

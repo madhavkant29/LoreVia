@@ -5,6 +5,7 @@ from app.api.v1.routes import (
     admin,
     advisor,
     auth,
+    beta_reads,
     billing,
     books,
     characters,
@@ -49,6 +50,7 @@ api_router.include_router(manuscript.router,    prefix="/books",         tags=["
 api_router.include_router(public.router,        prefix="/public",        tags=["public"], dependencies=[Depends(rate_limit_public)])
 api_router.include_router(billing.router,       prefix="/billing",       tags=["billing"], dependencies=[Depends(rate_limit_api)])
 api_router.include_router(monetization.router,  prefix="/monetization",  tags=["monetization"], dependencies=[Depends(rate_limit_api)])
+api_router.include_router(beta_reads.router,    tags=["beta-reads"], dependencies=[Depends(rate_limit_api)])
 api_router.include_router(internal.router,      prefix="/internal",      tags=["internal"])
 api_router.include_router(webhooks.router,      prefix="/webhooks",      tags=["webhooks"])
 api_router.include_router(characters.router,    prefix="/characters",    tags=["characters"], dependencies=[Depends(rate_limit_api)])

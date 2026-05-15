@@ -4,14 +4,14 @@ import type { ReactNode } from "react"
 import { AudienceSection } from "@/components/marketing/AudienceSection"
 import { Reveal } from "@/components/marketing/Reveal"
 import { BrandLockup } from "@/components/layout/BrandLockup"
-import { pricingTiers as billingPricingTiers } from "@/lib/billing/catalog"
+import { pricingTierAccessLabel, pricingTiers as billingPricingTiers } from "@/lib/billing/catalog"
 
 const navItems = [
   { label: "Product", href: "#product" },
-  { label: "Authors", href: "#audiences" },
-  { label: "Readers", href: "#audiences" },
+  { label: "For Authors", href: "#audiences" },
+  { label: "Continuity", href: "#scan" },
   { label: "Pricing", href: "#pricing" },
-  { label: "About", href: "#faq" },
+  { label: "FAQ", href: "#faq" },
 ]
 
 const fileFormats = ["DOCX", "PDF", "EPUB", "MD", "TXT", "Obsidian"]
@@ -107,56 +107,47 @@ const comparisonRows = [
 
 const pricingTiers = billingPricingTiers.map((tier) => ({
   name: tier.name,
+  accessLabel: pricingTierAccessLabel(tier),
   price: tier.priceMonthly,
   subtitle:
     tier.name === "Free"
       ? "Explore LoreVia with a single project."
-      : tier.name === "Reader"
-        ? "For readers following long stories and series."
-        : tier.name === "Author"
-          ? "For active manuscript drafting and revision."
-          : "For multi-book projects and expansive story worlds.",
+      : tier.name === "Author"
+        ? "For active manuscript drafting, revision, beta feedback, and continuity work."
+        : "For multi-book projects and expansive story worlds.",
   bullets:
     tier.name === "Free"
       ? [
           "2 active books",
+          "Read public demo books",
+          "Join invited beta reads for free",
           "Character tracking and story recall",
           "Basic chapter summaries",
           "Standard usage limits",
         ]
-      : tier.name === "Reader"
+      : tier.name === "Author"
         ? [
             "Everything in Free, plus",
-            "Unlimited books",
-            "Multi-chapter summaries",
-            "Advanced story questions",
-            "Reader-focused workspace",
+            "Continuity scans and manuscript feedback",
+            "Author collaboration workflows",
+            "Character reference generation",
+            "Relationship and timeline tracking",
+            "High monthly usage limits",
           ]
-        : tier.name === "Author"
-          ? [
-              "Everything in Reader, plus",
-              "Continuity scans",
-              "Manuscript feedback",
-              "Character reference generation",
-              "Relationship and timeline tracking",
-              "High monthly usage limits",
-            ]
-          : [
-              "Everything in Author, plus",
-              "Cross-book continuity analysis",
-              "Advanced world consistency checks",
-              "Series-wide relationship tracking",
-              "Early access to new features",
-              "Extended analysis capacity",
-            ],
+        : [
+            "Everything in Author, plus",
+            "Cross-book continuity analysis",
+            "Advanced world consistency checks",
+            "Series-wide relationship tracking",
+            "Early access to new features",
+            "Extended analysis capacity",
+          ],
   cta:
     tier.name === "Free"
       ? "Start free"
-      : tier.name === "Reader"
-        ? "Continue reading"
-        : tier.name === "Author"
-          ? "Start writing"
-          : "Build your world",
+      : tier.name === "Author"
+        ? "Start writing"
+        : "Build your world",
   highlighted: tier.name === "Author",
 }))
 
@@ -483,7 +474,7 @@ function WorkspacePreview() {
           <div className="max-w-3xl">
             <SectionHeader
               title="Everything your story needs, in one workspace."
-              body="Upload a manuscript and LoreVia turns it into a living workspace for chapters, characters, continuity checks, notes, timelines, and grounded story questions."
+              body="Upload a manuscript and LoreVia turns it into an author workspace for chapters, characters, continuity checks, notes, timelines, and grounded story questions."
             />
             <div className="mt-10 grid gap-px overflow-hidden rounded-2xl border border-white/10 bg-white/10 sm:grid-cols-2">
               {workspaceModules.map((item) => (
@@ -596,7 +587,7 @@ function ProcessSection() {
     <Section>
       <SectionHeader
         title="Three steps to a stronger story memory."
-        body="The process is simple, but the output is useful enough for real revision: import, extract, then ask or scan with evidence."
+        body="The process is simple, but the output is built for real author revision: import, extract, then ask or scan with evidence."
         align="center"
       />
       <div className="relative mt-14 grid gap-6 lg:grid-cols-3">
@@ -622,7 +613,7 @@ function ComparisonSection() {
     <Section id="comparison">
       <SectionHeader
         title="Where traditional writing tools stop."
-        body="Traditional writing tools help organize stories. LoreVia actively understands them."
+        body="Traditional writing tools help organize stories. LoreVia gives authors searchable story memory and continuity intelligence."
       />
       <Reveal>
         <div className="mt-10 overflow-hidden rounded-2xl border border-white/10 bg-[#080d18]">
@@ -673,7 +664,7 @@ function PricingSection({ ctaHref }: { ctaHref: Route }) {
     <Section id="pricing">
       <SectionHeader
         title="Choose the workspace that fits your writing."
-        body="From casual reading to full manuscript management."
+        body="Every signup starts with a 10-day Author trial at no charge. After that, Free remains available and only Author or Lore Architect are paid."
         align="center"
       />
       <div className="mt-12 grid gap-5 md:grid-cols-2 lg:grid-cols-4">
@@ -694,6 +685,9 @@ function PricingSection({ ctaHref }: { ctaHref: Route }) {
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <h3 className="text-xl font-semibold text-white">{tier.name}</h3>
+                  <p className="mt-2 text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200">
+                    {tier.accessLabel}
+                  </p>
                   <p className="mt-2 text-sm leading-6 text-slate-400">{tier.subtitle}</p>
                 </div>
               </div>
@@ -730,7 +724,7 @@ function PricingSection({ ctaHref }: { ctaHref: Route }) {
 function FAQSection() {
   return (
     <Section id="faq">
-      <SectionHeader title="Questions authors ask before uploading." align="center" />
+      <SectionHeader title="Questions authors ask before trusting a manuscript workspace." align="center" />
       <div className="mt-12 grid gap-px overflow-hidden rounded-2xl border border-white/10 bg-white/10 md:grid-cols-2">
         {faqItems.map((item) => (
           <Reveal key={item.q}>
@@ -770,6 +764,12 @@ export default function HomePage() {
           </nav>
           <div className="flex items-center gap-3">
             <Link
+              href="/blog"
+              className="hidden px-4 py-2 text-[14px] font-medium tracking-[0.01em] text-white/70 transition hover:text-white sm:inline-flex"
+            >
+              Blog
+            </Link>
+            <Link
               href="/login"
               className="hidden px-4 py-2 text-[14px] font-medium tracking-[0.01em] text-white/70 transition hover:text-white sm:inline-flex"
             >
@@ -789,16 +789,16 @@ export default function HomePage() {
         <Reveal>
           <div>
             <p className="inline-flex rounded-full border border-white/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-300">
-              For fiction authors and serious readers
+              LoreVia for authors
             </p>
             <h1
               className="mt-7 text-5xl font-[650] leading-[0.98] tracking-[-0.04em] text-white md:text-7xl xl:text-[5.15rem]"
               style={{ fontFamily: '"Inter", "Geist", "Satoshi", var(--font-ui), sans-serif' }}
             >
-              Never lose track of your story again.
+              LoreVia for authors who never want to lose the thread.
             </h1>
             <p className="mt-6 max-w-2xl text-lg leading-9 text-slate-300 md:text-xl">
-              LoreVia tracks your characters, relationships, timelines, and continuity issues directly from your manuscript, so you can revise complex stories without losing the thread.
+              LoreVia turns your manuscript into an author workspace with character tracking, relationship memory, timeline recall, grounded story questions, and continuity scans that stay tied to the draft.
             </p>
             <div className="mt-8 flex flex-col gap-4 xl:flex-row">
               <Link
@@ -849,7 +849,7 @@ export default function HomePage() {
               Start with one chapter. See what LoreVia remembers.
             </h2>
             <p className="mt-5 max-w-2xl text-lg leading-8 text-slate-400">
-              Upload a manuscript and get your first continuity scan, character map, and grounded story memory.
+              Upload a manuscript and get your first author-facing continuity scan, character map, and grounded story memory.
             </p>
           </div>
           <div className="flex flex-col gap-4 sm:flex-row lg:justify-end">

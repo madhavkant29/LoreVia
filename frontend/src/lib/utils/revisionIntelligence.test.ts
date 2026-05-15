@@ -60,6 +60,7 @@ describe("revision intelligence helpers", () => {
         },
       ],
       knowledge_matrix: [],
+      knowledge_timeline: [],
       scene_advice: [],
       confusion_map: [],
       voice_alerts: [],

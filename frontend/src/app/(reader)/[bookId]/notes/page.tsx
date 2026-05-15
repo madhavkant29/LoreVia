@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useState } from "react"
+import { useQuery } from "@tanstack/react-query"
 import type { Route } from "next"
 import Link from "next/link"
 import { useParams } from "next/navigation"
@@ -8,6 +9,7 @@ import { useParams } from "next/navigation"
 import { AuthorToolsNav } from "@/components/layout/AuthorToolsNav"
 import { ObsidianNotesEditor } from "@/components/reader/ObsidianNotesEditor"
 import { booksApi } from "@/lib/api/books"
+import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
 import { renderRichTextHtml } from "@/lib/utils/richText"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import type { Book, BookNote, ObsidianGraph, ObsidianVaultNote } from "@/types/book"
@@ -16,51 +18,22 @@ export default function BookNotesPage() {
   const { bookId } = useParams<{ bookId: string }>()
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
-  const [book, setBook] = useState<Book | null>(null)
-  const [bookNotes, setBookNotes] = useState<BookNote[]>([])
-  const [notes, setNotes] = useState<ObsidianVaultNote[]>([])
-  const [graph, setGraph] = useState<ObsidianGraph>({ nodes: [], edges: [] })
-  const [notesLoading, setNotesLoading] = useState(true)
-
-  useEffect(() => {
-    let active = true
-    setNotesLoading(true)
-
-    booksApi.get(bookId)
-      .then((bookData) => {
-        if (!active) return
-        setBook(bookData)
-      })
-      .catch(() => {})
-
-    booksApi.getBookNotes(bookId)
-      .then((bookNotesData) => {
-        if (!active) return
-        setBookNotes(bookNotesData)
-      })
-      .catch(() => {})
-
-    booksApi.listObsidianNotes(bookId)
-      .then((notesData) => {
-        if (!active) return
-        setNotes(notesData)
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (active) setNotesLoading(false)
-      })
-
-    booksApi.getObsidianGraph(bookId)
-      .then((graphData) => {
-        if (!active) return
-        setGraph(graphData)
-      })
-      .catch(() => {})
-
-    return () => {
-      active = false
-    }
-  }, [bookId])
+  const { data: book = null } = useQuery<Book | null>({
+    queryKey: asQueryKey(bookCacheKey(bookId, "detail")),
+    queryFn: () => booksApi.get(bookId),
+  })
+  const { data: bookNotes = [] } = useQuery<BookNote[]>({
+    queryKey: asQueryKey(bookCacheKey(bookId, "notes")),
+    queryFn: () => booksApi.getBookNotes(bookId),
+  })
+  const { data: notes = [], isLoading: notesLoading } = useQuery<ObsidianVaultNote[]>({
+    queryKey: asQueryKey(bookCacheKey(bookId, "obsidian-notes")),
+    queryFn: () => booksApi.listObsidianNotes(bookId),
+  })
+  const { data: graph = { nodes: [], edges: [] } } = useQuery<ObsidianGraph>({
+    queryKey: asQueryKey(bookCacheKey(bookId, "obsidian-graph")),
+    queryFn: () => booksApi.getObsidianGraph(bookId),
+  })
 
   return (
     <div className={`min-h-screen ${isDark ? "bg-[linear-gradient(180deg,#010409_0%,#07111c_50%,#0b1523_100%)] text-slate-100" : "bg-[linear-gradient(180deg,#f6f3ea_0%,#eef5ef_50%,#eef3f8_100%)] text-stone-950"}`}>

@@ -1,6 +1,7 @@
 "use client"
 import { useState, useEffect, useRef, useMemo } from "react"
 import { useReader } from "@/lib/hooks/useReader"
+import type { ReaderFontFamily } from "@/lib/utils/readerTypography"
 import { ReaderToolbar } from "./ReaderToolbar"
 import { ChapterText } from "./ChapterText"
 import { ContextPanel } from "./ContextPanel"
@@ -26,7 +27,7 @@ export function ReaderView({ bookId, chapterNum }: Props) {
   const [selectedQuote, setSelectedQuote] = useState<string | null>(null)
   const [theme, setTheme] = useState<ReaderTheme>(appTheme)
   const [fontSize, setFontSize] = useState(20)
-  const [fontFamily, setFontFamily] = useState<"serif" | "sans" | "mono">("serif")
+  const [fontFamily, setFontFamily] = useState<ReaderFontFamily>("serif")
   const [displayStyle, setDisplayStyle] = useState<ReaderDisplayStyle>("published")
   const [quoteModeEnabled, setQuoteModeEnabled] = useState(false)
   const [canUseQuoteMode, setCanUseQuoteMode] = useState(false)
@@ -214,6 +215,7 @@ export function ReaderView({ bookId, chapterNum }: Props) {
             chapterNum={chapterNum}
             chapterTitle={data.chapter_title}
             totalChapters={data.total_chapters ?? null}
+            canCopyManuscript={data.can_copy_manuscript ?? true}
             textUrl={data.text_url}
             textContent={data.text_content ?? null}
             htmlContent={data.html_content ?? null}

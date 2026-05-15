@@ -168,3 +168,36 @@ def test_character_bible_obsidian_manifest_preserves_spaces_in_character_note_pa
 
     assert f"{root_folder}/Characters/Mayoi Hachikuji.md" in paths
     assert f"{root_folder}/Characters/Mayoi-Hachikuji.md" not in paths
+
+
+def test_character_bible_obsidian_manifest_dedupes_colliding_obsidian_paths():
+    book = Book(
+        id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        title="Metarphosis",
+        format="pdf",
+        s3_key="books/metarphosis.pdf",
+        status="ready",
+    )
+
+    root_folder, files = character_bible_obsidian_manifest(
+        book=book,
+        characters=[],
+        relationships=[],
+        plot_threads=[],
+        wiki_entries=[],
+        chapter_rows=[
+            {"number": 2, "title": "2", "content": "First reading log entry."},
+            {"number": 2, "title": "2", "content": "Second reading log entry."},
+        ],
+        chapter_events=[],
+        rel_summaries={},
+        thread_summaries={},
+    )
+
+    reading_log_paths = [file["path"] for file in files if "/Reading Log/" in file["path"]]
+
+    assert reading_log_paths == [
+        f"{root_folder}/Reading Log/Chapter 2 - 2.md",
+        f"{root_folder}/Reading Log/Chapter 2 - 2 (2).md",
+    ]

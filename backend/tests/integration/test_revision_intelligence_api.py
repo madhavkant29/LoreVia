@@ -23,6 +23,19 @@ async def test_revision_intelligence_endpoint_surfaces_revision_sections_and_per
         s3_key="books/sky-of-ash.txt",
         status="ready",
         mode="author",
+        writer_workspace={
+            "revision_recent_edits": [
+                {
+                    "id": "edit-1",
+                    "kind": "chapter",
+                    "chapter_number": 2,
+                    "unit_label": "Chapter 2",
+                    "before_text": "Nora learns the silver gate needs royal blood.",
+                    "after_text": '\"I can\'t open it,\" Nora said. Kael whispered, \"Then we wait.\"',
+                    "updated_at": "2026-05-13T12:00:00Z",
+                }
+            ]
+        },
     )
     db.add(book)
     await db.flush()
@@ -31,6 +44,10 @@ async def test_revision_intelligence_endpoint_surfaces_revision_sections_and_per
         Chapter(book_id=book.id, number=1, title="Ashfall", s3_key="chapters/1.txt", word_count=1700, processed=True),
         Chapter(book_id=book.id, number=2, title="The Ember Gate", s3_key="chapters/2.txt", word_count=1800, processed=True),
         Chapter(book_id=book.id, number=3, title="Council of Bells", s3_key="chapters/3.txt", word_count=1650, processed=True),
+        Chapter(book_id=book.id, number=4, title="River Terms", s3_key="chapters/4.txt", word_count=1500, processed=True),
+        Chapter(book_id=book.id, number=5, title="North Watch", s3_key="chapters/5.txt", word_count=1550, processed=True),
+        Chapter(book_id=book.id, number=6, title="Archive Oath", s3_key="chapters/6.txt", word_count=1600, processed=True),
+        Chapter(book_id=book.id, number=7, title="Bell Reckoning", s3_key="chapters/7.txt", word_count=1625, processed=True),
     ]
     db.add_all(chapters)
     await db.flush()
@@ -91,6 +108,40 @@ async def test_revision_intelligence_endpoint_surfaces_revision_sections_and_per
             importance=9,
             character_ids=["Nora", "Kael"],
         )
+    )
+    db.add_all(
+        [
+            PlotThread(
+                book_id=book.id,
+                title="Ash Court conspiracy",
+                description="Mira uncovers the Ash Court conspiracy in whispers.",
+                status="developing",
+                introduced_at=2,
+                last_mentioned_at=6,
+                importance=8,
+                character_ids=["Mira"],
+            ),
+            PlotThread(
+                book_id=book.id,
+                title="North Watch alarm",
+                description="Kael triggers the North Watch alarm before dawn.",
+                status="developing",
+                introduced_at=4,
+                last_mentioned_at=7,
+                importance=7,
+                character_ids=["Kael"],
+            ),
+            PlotThread(
+                book_id=book.id,
+                title="Archive oath",
+                description="Nora swears the Ember Archive oath in secret.",
+                status="developing",
+                introduced_at=6,
+                last_mentioned_at=7,
+                importance=6,
+                character_ids=["Nora"],
+            ),
+        ]
     )
     db.add(
         WikiEntry(
@@ -162,6 +213,22 @@ async def test_revision_intelligence_endpoint_surfaces_revision_sections_and_per
             '"Indeed, the royal mechanism necessitates a ceremonial lineage," Nora said. "This is totally impossible otherwise."',
             None,
         ),
+        "chapters/4.txt": serialize_manuscript_content(
+            "Mira crossed the river archive bridge before dawn while Kael watched the North Watch braziers.",
+            None,
+        ),
+        "chapters/5.txt": serialize_manuscript_content(
+            "The Ash Court account spread through the watch posts while Mira kept her counsel.",
+            None,
+        ),
+        "chapters/6.txt": serialize_manuscript_content(
+            "Nora took the archive oath and said nothing as the bells answered.",
+            None,
+        ),
+        "chapters/7.txt": serialize_manuscript_content(
+            "Kael triggered the watch alarm at dawn and the reckoning began.",
+            None,
+        ),
     }
 
     monkeypatch.setattr("app.utils.book_utils.download_book", lambda key: chapter_payloads[key])
@@ -172,9 +239,14 @@ async def test_revision_intelligence_endpoint_surfaces_revision_sections_and_per
     payload = response.json()
     assert payload["tagline"] == "Know what your edit breaks before your readers do."
     assert payload["summary"]["active_item_count"] >= 1
+    assert payload["summary"]["recent_edit_label"].startswith("You changed Chapter 2")
     assert payload["genre_checks"][0]["label"] == "Fantasy"
     assert payload["revision_plan"][0]["title"] == "Pass 1: Fix story logic"
     assert payload["knowledge_matrix"][0]["fact"] == "Silver gate blood rule"
+    assert payload["knowledge_timeline"][0]["rows"][0]["cells"][1]["state"] == "learned"
+    assert len(payload["knowledge_timeline"]) == 4
+    assert len(payload["knowledge_timeline"][0]["rows"][0]["cells"]) == 7
+    assert payload["knowledge_timeline"][0]["rows"][0]["cells"][-1]["chapter_number"] == 7
     assert payload["scene_advice"]
     assert payload["confusion_map"]
     assert payload["voice_alerts"]
@@ -200,3 +272,70 @@ async def test_revision_intelligence_endpoint_surfaces_revision_sections_and_per
     assert refreshed.status_code == 200
     updated_item = next(item for item in refreshed.json()["change_impacts"] if item["id"] == first_item_id)
     assert updated_item["status"] == "fixed"
+
+
+@pytest.mark.asyncio
+async def test_notifications_include_revision_digest_for_author_books(client, db, auth_headers, monkeypatch):
+    me = await client.get("/api/v1/auth/me", headers=auth_headers)
+    assert me.status_code == 200
+    user_id = uuid.UUID(me.json()["id"])
+
+    book = Book(
+        user_id=user_id,
+        title="Ash Ledger",
+        genre="Mystery Thriller",
+        format="manual",
+        work_type="novel",
+        s3_key="books/ash-ledger.txt",
+        status="ready",
+        mode="author",
+    )
+    db.add(book)
+    await db.flush()
+
+    chapter = Chapter(book_id=book.id, number=1, title="The Vial", s3_key="chapters/ash-ledger-1.txt", word_count=1500, processed=True)
+    db.add(chapter)
+    db.add(
+        Character(
+            book_id=book.id,
+            name="Lina",
+            role="mc",
+            first_chapter=1,
+            last_seen_chapter=1,
+            mention_count=10,
+        )
+    )
+    db.add(
+        PlotThread(
+            book_id=book.id,
+            title="Who poisoned the king",
+            description="Lina hears about the poison plot in the opening movement.",
+            status="developing",
+            introduced_at=1,
+            last_mentioned_at=3,
+            importance=9,
+            character_ids=["Lina"],
+        )
+    )
+    await db.commit()
+
+    monkeypatch.setattr(
+        "app.utils.book_utils.download_book",
+        lambda key: serialize_manuscript_content(
+            "Lina finds the vial and wonders who used it. The court speaks in fragments around the poison.",
+            None,
+        ),
+    )
+
+    response = await client.get("/api/v1/notifications", headers=auth_headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    revision_item = next(item for item in payload["items"] if item["kind"] == "revision_digest")
+    assert revision_item["book_id"] == str(book.id)
+    assert revision_item["data"]["active_item_count"] >= 1
+    assert revision_item["data"]["high_severity_count"] >= 1
+
+    mark_read = await client.put(f"/api/v1/notifications/{revision_item['id']}/read", headers=auth_headers)
+    assert mark_read.status_code == 200
+    assert mark_read.json()["read_at"] is not None

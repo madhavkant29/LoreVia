@@ -4,11 +4,25 @@ import pytest
 from sqlalchemy import select
 
 from app.engine.character.entity_filters import VISIBILITY_THRESHOLD, character_visibility_score
+from app.engine.character.profile_builder import build_description
 from app.models.book import Book, Chapter
 from app.models.character import Character, CharacterState, CharacterVoiceProfile
-from app.models.intelligence import ChapterSummary, CharacterRelationship, PlotThread, QuoteEntry, WikiEntry
+from app.models.intelligence import (
+    ChapterSummary,
+    CharacterRelationship,
+    PlotThread,
+    QuoteEntry,
+    WikiEntry,
+)
 from app.models.user import User
-from app.utils.character_utils import description_similarity, merge_characters, name_similarity, partition_character
+from app.utils.character_utils import (
+    apply_manual_character_description,
+    compose_character_description,
+    description_similarity,
+    merge_characters,
+    name_similarity,
+    partition_character,
+)
 
 
 def test_name_similarity_scores_shared_surname_high():
@@ -77,6 +91,21 @@ def test_visibility_score_penalizes_phrase_like_noise():
     ) >= VISIBILITY_THRESHOLD
 
 
+def test_compose_character_description_prefers_arc_summary_and_relationships_when_traits_are_sparse():
+    description = compose_character_description(
+        trait_state={},
+        archetype=None,
+        arc_summary="Gregor is the family provider, now trapped in a body he cannot control",
+        personality_tags=["anxious"],
+        motivations=["protect his sister"],
+        relationship_summaries=["Family bond with Grete."],
+    )
+
+    assert description == (
+        "Gregor is the family provider, now trapped in a body he cannot control. Family bond with Grete."
+    )
+
+
 @pytest.mark.asyncio
 async def test_merge_characters_reparents_related_rows(db):
     user = User(email="dedup-user@lorevia.app", username="dedup-user", password_hash="hash")
@@ -123,6 +152,9 @@ async def test_merge_characters_reparents_related_rows(db):
     )
     db.add_all([primary, secondary])
     await db.flush()
+
+    apply_manual_character_description(primary, "A dry-witted mentor with a watchful presence.")
+    apply_manual_character_description(secondary, "He hides concern behind teasing advice.")
 
     db.add(
         CharacterVoiceProfile(
@@ -196,6 +228,9 @@ async def test_merge_characters_reparents_related_rows(db):
     assert "Mister Oshino" in (merged.aliases or [])
     assert "Mr. Oshino" in (merged.aliases or [])
     assert merged.mention_count == 5
+    assert build_description(merged.trait_state or {}, merged.archetype) == (
+        "A dry-witted mentor with a watchful presence. He hides concern behind teasing advice."
+    )
     await db.refresh(merged, ["voice_profile"])
     assert merged.voice_profile is not None
     assert merged.voice_profile.sample_dialogue_count == 5

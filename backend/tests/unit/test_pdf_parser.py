@@ -47,6 +47,14 @@ def test_extract_heading_does_not_promote_regular_sentence_with_part_keyword():
     assert _extract_heading("Er no not that part I was talking about um her given name") is None
 
 
+def test_extract_heading_does_not_promote_prose_starting_with_part():
+    assert _extract_heading("part of his body was in serious pain but he no longer gave any attention to it") is None
+
+
+def test_extract_heading_does_not_promote_wrapped_prose_starting_with_part():
+    assert _extract_heading("part of his body was in\nserious pain but he no longer gave any attention to it") is None
+
+
 def test_heading_remainder_keeps_following_text():
     text = "\u2600 Prologue \U0001F312\nThis is the actual first paragraph."
     assert _extract_heading(text) == "Prologue"

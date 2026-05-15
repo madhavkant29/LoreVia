@@ -1,8 +1,6 @@
 import type { UserTier } from "@/types/user"
 
 export type PaidPlanCode =
-  | "reader_monthly"
-  | "reader_annual"
   | "author_monthly"
   | "author_annual"
   | "architect_monthly"
@@ -19,7 +17,7 @@ export function isPaidTier(tier?: UserTier | null) {
 export function tierLabel(tier?: UserTier | null) {
   switch (tier) {
     case "reader":
-      return "Reader"
+      return "Collaboration access"
     case "author":
       return "Author"
     case "architect":

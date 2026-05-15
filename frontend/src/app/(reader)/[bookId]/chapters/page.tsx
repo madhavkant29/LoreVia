@@ -1,10 +1,12 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
 import { useParams, useRouter } from "next/navigation"
 
 import { booksApi } from "@/lib/api/books"
 import { readerApi } from "@/lib/api/reader"
+import { asQueryKey, bookCacheKey, readerCacheKey } from "@/lib/query/cacheKeys"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import type { Book } from "@/types/book"
 import type { ChapterListResponse } from "@/types/reader"
@@ -19,32 +21,27 @@ export default function ChapterListPage() {
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
 
-  const [book, setBook] = useState<Book | null>(null)
-  const [data, setData] = useState<ChapterListResponse | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
   const [readBusy, setReadBusy] = useState<string | null>(null)
-
-  async function loadChapters() {
-    setLoading(true)
-    setError(null)
-    await Promise.all([
-      booksApi.get(bookId).then(setBook),
-      readerApi.getChapterList(bookId).then(setData),
-    ])
-      .catch(() => setError("Could not load the full chapter list."))
-      .finally(() => setLoading(false))
-  }
-
-  useEffect(() => {
-    loadChapters().catch(() => {})
-  }, [bookId])
+  const bookQuery = useQuery<Book>({
+    queryKey: asQueryKey(bookCacheKey(bookId, "detail")),
+    queryFn: () => booksApi.get(bookId),
+    staleTime: 20_000,
+  })
+  const chapterListQuery = useQuery<ChapterListResponse>({
+    queryKey: asQueryKey(readerCacheKey(bookId, "chapters")),
+    queryFn: () => readerApi.getChapterList(bookId),
+    staleTime: 30_000,
+  })
+  const book = bookQuery.data ?? null
+  const data = chapterListQuery.data ?? null
+  const loading = bookQuery.isLoading || chapterListQuery.isLoading
+  const error = bookQuery.isError || chapterListQuery.isError ? "Could not load the full chapter list." : null
 
   async function setChapterRead(chapter: number, read: boolean) {
     setReadBusy(`chapter:${chapter}`)
     try {
       await readerApi.updateChapterReadStatus(bookId, chapter, read)
-      await readerApi.getChapterList(bookId).then(setData)
+      await chapterListQuery.refetch()
     } finally {
       setReadBusy(null)
     }
@@ -54,7 +51,7 @@ export default function ChapterListPage() {
     setReadBusy("book")
     try {
       await readerApi.markBookRead(bookId)
-      await readerApi.getChapterList(bookId).then(setData)
+      await chapterListQuery.refetch()
     } finally {
       setReadBusy(null)
     }

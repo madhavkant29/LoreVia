@@ -17,6 +17,7 @@ from typing import Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
+from celery.states import FAILURE, PENDING, RETRY, STARTED, SUCCESS
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
 from sqlalchemy import func, select
@@ -27,26 +28,33 @@ from app.api.deps.auth import get_current_user
 from app.api.deps.rate_limit import rate_limit_advisor, rate_limit_continuity_checker
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.redis import cache_del, cache_get, cache_set, key_advisor_task
 from app.core.storage import download_book
 from app.engine.embeddings.embedder import embed_text
 from app.engine.search.semantic import semantic_search
 from app.models.book import Book, Chapter, Series, SeriesBook
 from app.models.character import Character, CharacterState, CharacterVoiceProfile
-from app.models.intelligence import ChapterSummary, PlotThread
+from app.models.intelligence import ChapterSummary, CharacterRelationship, PlotThread, WorldElement
 from app.utils.plot_thread_utils import derive_plot_thread_status, is_plot_thread_open
 from app.schemas.advisor import (
     AdvisorRequest,
+    AdvisorTaskStatusResponse,
+    AdvisorSuggestionsResponse,
     EditorialReviewRequest,
     InlineContinuityRequest,
     InlineContinuityResponse,
     ProseTightenRequest,
     ProseTightenResponse,
     VoiceConsistencyRequest,
+    WhatsTheWordRequest,
+    WhatsTheWordResponse,
 )
 from app.utils.advisor_utils import (
     ADVISOR_SYSTEM,
     EDITORIAL_SYSTEM,
     EDITORIAL_USER,
+    PROACTIVE_SCAN_SYSTEM,
+    PROACTIVE_SCAN_USER,
     PROSE_TIGHTEN_SYSTEM,
     PROSE_TIGHTEN_USER,
     SERIES_ADVISOR_SYSTEM,
@@ -62,6 +70,7 @@ from app.utils.advisor_utils import (
     build_continuity_report_markdown,
     build_continuity_report_pdf,
     build_fallback_advisor_suggestions,
+    generate_whats_the_word_result,
     build_series_story_context,
     build_story_context,
     classify_intent,
@@ -71,13 +80,18 @@ from app.utils.advisor_utils import (
     make_advisor_cache_key,
     make_editorial_cache_key,
     normalize_editorial_review_result,
+    normalize_proactive_scan_result,
     normalize_prose_tighten_result,
     normalize_series_continuity_result,
     normalize_synopsis_result,
     normalize_voice_consistency_result,
 )
 from app.utils.book_utils import detect_chapter_continuity_flags
+from app.utils.export_utils import export_filename_base
 from app.utils.intelligence_utils import compute_voice_metrics, extract_dialogue_samples_by_character, score_voice_match
+from app.utils.llm_usage_utils import create_tracked_chat_completion
+from app.workers.tasks.intelligence_tasks import generate_advisor_reply_task
+from app.workers.tasks.intelligence_tasks import generate_series_advisor_reply_task
 
 router = APIRouter()
 
@@ -106,12 +120,71 @@ def _best_issue_snippet(text: str, description: str) -> str:
     )
     return ranked[0][:220]
 
+
+async def _enqueue_book_advisor_task(
+    *,
+    book: Book,
+    body: AdvisorRequest,
+    current_user_id: uuid.UUID,
+    response: Response,
+) -> dict[str, Any]:
+
+    cache_key = make_advisor_cache_key(book.id, last_user_msg)
+    cached = advisor_response_cache.get(cache_key)
+    if cached is not None:
+        return {**cached, "cached": True}
+
+    task = generate_advisor_reply_task.apply_async(
+        kwargs={
+            "book_id": str(book.id),
+            "user_id": str(current_user_id),
+            "messages": [{"role": msg.role, "content": msg.content} for msg in body.messages],
+            "total_chapters": body.total_chapters,
+        }
+    )
+    await cache_set(
+        key_advisor_task(task.id),
+        {"scope": "book", "book_id": str(book.id), "user_id": str(current_user_id)},
+        3600,
+    )
+    response.status_code = 202
+    return {"task_id": task.id, "status": "queued", "cached": False}
+
+
+async def _enqueue_series_advisor_task(
+    *,
+    series: Series,
+    body: AdvisorRequest,
+    current_user_id: uuid.UUID,
+    response: Response,
+) -> dict[str, Any]:
+    cache_key = make_advisor_cache_key(f"series:{series.id}", last_user_msg)
+    cached = advisor_response_cache.get(cache_key)
+    if cached is not None:
+        return {**cached, "cached": True}
+
+    task = generate_series_advisor_reply_task.apply_async(
+        kwargs={
+            "series_id": str(series.id),
+            "user_id": str(current_user_id),
+            "messages": [{"role": msg.role, "content": msg.content} for msg in body.messages],
+        }
+    )
+    await cache_set(
+        key_advisor_task(task.id),
+        {"scope": "series", "series_id": str(series.id), "user_id": str(current_user_id)},
+        3600,
+    )
+    response.status_code = 202
+    return {"task_id": task.id, "status": "queued", "cached": False}
+
 # ─── Main advisor conversation endpoint ──────────────────────────────────────
 
 @router.post("/{book_id}/advisor/message")
 async def advisor_message(
     book_id: uuid.UUID,
     body: AdvisorRequest,
+    response: Response,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
     _=Depends(rate_limit_advisor),
@@ -123,6 +196,13 @@ async def advisor_message(
     if not body.messages:
         raise HTTPException(400, detail="messages list is empty")
 
+    return await _enqueue_book_advisor_task(
+        book=book,
+        body=body,
+        current_user_id=current_user.id,
+        response=response,
+    )
+
     last_user_msg = next(
         (m.content for m in reversed(body.messages) if m.role == "user"), ""
     )
@@ -130,11 +210,6 @@ async def advisor_message(
         raise HTTPException(400, detail="no user message found")
 
     # ── Response cache: check before any LLM work ─────────────────────────────
-    cache_key = make_advisor_cache_key(book_id, last_user_msg)
-    cached = advisor_response_cache.get(cache_key)
-    if cached is not None:
-        return {**cached, "cached": True}
-
     # Cap history to last 10 turns (20 messages) to control cost
     history = body.messages[-20:]
 
@@ -158,7 +233,12 @@ async def advisor_message(
         chunk_limit = 10 if intent in ("consistency", "plothole") or world_mode else 5
         threshold = 0.25 if intent in ("consistency", "plothole") or world_mode else 0.30
 
-        query_emb = await embed_text(last_user_msg)
+        query_emb = await embed_text(
+            last_user_msg,
+            user_id=current_user.id,
+            book_id=book.id,
+            feature="advisor_message_query_embedding",
+        )
         rows = await db.execute(
             sql_text("""
                 SELECT bc.text, bc.chunk_index,
@@ -232,8 +312,13 @@ async def advisor_message(
         llm_messages.append(cast(ChatCompletionMessageParam, {"role": "user", "content": augmented_last}))
 
         # 6. Call GPT-4o-mini (main response)
-        response = await client.chat.completions.create(
+        response = await create_tracked_chat_completion(
+            client=client,
+            feature="advisor_message",
             model=settings.OPENAI_INTEL_MODEL,
+            db=db,
+            user_id=current_user.id,
+            book_id=book.id,
             temperature=0.55,
             max_tokens=800,
             messages=llm_messages,
@@ -300,9 +385,90 @@ async def advisor_greeting(
     }
 
 
+@router.post("/{book_id}/advisor/whats-the-word", response_model=WhatsTheWordResponse)
+async def whats_the_word(
+    book_id: uuid.UUID,
+    body: WhatsTheWordRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _=Depends(rate_limit_advisor),
+):
+    book = await db.get(Book, book_id)
+    if not book or book.user_id != current_user.id:
+        raise HTTPException(404)
+
+    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    try:
+        payload = await generate_whats_the_word_result(
+            client=client,
+            model=settings.OPENAI_INTEL_MODEL,
+            book_title=book.title,
+            description=body.description,
+            previous_word=body.previous_word,
+        )
+        return WhatsTheWordResponse(**payload)
+    finally:
+        await client.close()
+
+
+@router.post("/{book_id}/advisor/message-async")
+async def advisor_message_async(
+    book_id: uuid.UUID,
+    body: AdvisorRequest,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _=Depends(rate_limit_advisor),
+):
+    book = await db.get(Book, book_id)
+    if not book or book.user_id != current_user.id:
+        raise HTTPException(404)
+
+    if not body.messages:
+        raise HTTPException(400, detail="messages list is empty")
+
+    return await _enqueue_book_advisor_task(
+        book=book,
+        body=body,
+        current_user_id=current_user.id,
+        response=response,
+    )
+
+
+@router.get("/{book_id}/advisor/message-async/{task_id}", response_model=AdvisorTaskStatusResponse)
+async def advisor_message_async_status(
+    book_id: uuid.UUID,
+    task_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await db.get(Book, book_id)
+    if not book or book.user_id != current_user.id:
+        raise HTTPException(404)
+
+    task_meta = await cache_get(key_advisor_task(task_id))
+    if not isinstance(task_meta, dict):
+        raise HTTPException(404, detail="advisor task not found")
+    if task_meta.get("book_id") != str(book.id) or task_meta.get("user_id") != str(current_user.id):
+        raise HTTPException(403, detail="advisor task does not belong to this book")
+
+    result = generate_advisor_reply_task.AsyncResult(task_id)
+    if result.state in {PENDING, RETRY}:
+        return {"task_id": task_id, "status": "queued", "result": None, "error": None}
+    if result.state == STARTED:
+        return {"task_id": task_id, "status": "running", "result": None, "error": None}
+    if result.state == SUCCESS:
+        await cache_del(key_advisor_task(task_id))
+        return {"task_id": task_id, "status": "complete", "result": result.result, "error": None}
+    if result.state == FAILURE:
+        await cache_del(key_advisor_task(task_id))
+        return {"task_id": task_id, "status": "failed", "result": None, "error": "advisor_generation_failed"}
+    return {"task_id": task_id, "status": "running", "result": None, "error": None}
+
+
 # ─── Proactive suggestions scan ──────────────────────────────────────────────
 
-@router.get("/{book_id}/advisor/suggestions")
+@router.get("/{book_id}/advisor/suggestions", response_model=AdvisorSuggestionsResponse)
 async def advisor_suggestions(
     book_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
@@ -314,6 +480,60 @@ async def advisor_suggestions(
 
     total_ch = book.total_chapters or 1
     suggestions: list[dict] = []
+    scan_basis: list[str] = []
+    data_gaps: list[str] = []
+
+    all_chars = (
+        await db.execute(
+            select(Character)
+            .where(Character.book_id == book_id)
+            .order_by(Character.mention_count.desc(), Character.first_chapter, Character.name)
+        )
+    ).scalars().all()
+    character_count = len(all_chars)
+    character_names = {char.id: char.name for char in all_chars}
+    if character_count:
+        scan_basis.append("characters")
+    else:
+        data_gaps.append("characters")
+
+    all_threads = (
+        await db.execute(
+            select(PlotThread)
+            .where(PlotThread.book_id == book_id)
+            .order_by(PlotThread.importance.desc(), PlotThread.introduced_at, PlotThread.title)
+        )
+    ).scalars().all()
+    if all_threads:
+        scan_basis.append("plot threads")
+    else:
+        data_gaps.append("plot threads")
+
+    relationship_rows = (
+        await db.execute(
+            select(CharacterRelationship)
+            .where(CharacterRelationship.book_id == book_id)
+            .order_by(CharacterRelationship.from_chapter, CharacterRelationship.id)
+        )
+    ).scalars().all()
+    relationship_count = len(relationship_rows)
+    if relationship_count:
+        scan_basis.append("relationships")
+    else:
+        data_gaps.append("relationships")
+
+    world_rows = (
+        await db.execute(
+            select(WorldElement)
+            .where(WorldElement.book_id == book_id)
+            .order_by(WorldElement.usage_count.desc(), WorldElement.name.asc())
+        )
+    ).scalars().all()
+    world_element_count = len(world_rows)
+    if world_element_count:
+        scan_basis.append("world elements")
+    else:
+        data_gaps.append("world elements")
 
     # ── 0. Trait contradictions ───────────────────────────────────────────────
     PHYSICAL_TRAITS = ["eyes", "hair", "build", "age_descriptor", "distinguishing"]
@@ -334,6 +554,11 @@ async def advisor_suggestions(
             .order_by(CharacterState.character_id, CharacterState.at_chapter)
         )
     ).all()
+    state_count = len(all_states)
+    if state_count:
+        scan_basis.append("character states")
+    else:
+        data_gaps.append("character states")
 
     char_state_map: dict[str, list[Any]] = {}
     for row in all_states:
@@ -600,12 +825,18 @@ async def advisor_suggestions(
             .limit(10)
         )
     ).all()
+    clue_count = 0
+    if recent_summaries:
+        scan_basis.append("chapter summaries")
+    else:
+        data_gaps.append("chapter summaries")
 
     seen_clues: set[str] = set()
     for clues, chapter_num, chapter_title in recent_summaries:
         if not clues:
             continue
         clue_list = clues if isinstance(clues, list) else list(clues.values()) if isinstance(clues, dict) else []
+        clue_count += len(clue_list)
         for clue in clue_list[:2]:
             clue_str = str(clue)[:120]
             if clue_str not in seen_clues:
@@ -629,13 +860,295 @@ async def advisor_suggestions(
             break
 
     # Sort: warnings → direction → opportunities → info
+    thread_statuses = {
+        thread.id: derive_plot_thread_status(
+            thread.status,
+            introduced_at=thread.introduced_at,
+            last_mentioned_at=thread.last_mentioned_at or thread.introduced_at,
+            resolved_at=thread.resolved_at,
+            current_chapter=total_ch,
+        )
+        for thread in all_threads
+    }
+    open_threads = [thread for thread in all_threads if is_plot_thread_open(thread_statuses[thread.id])]
+    open_thread_count = len(open_threads)
+
+    for thread in [item for item in all_threads if item.status == "contradicted" or thread_statuses[item.id] == "contradicted"][:2]:
+        suggestions.append({
+            "id": f"contradicted-{thread.id}",
+            "type": "event_conflict",
+            "severity": "warning",
+            "title": f"Thread contradiction: \"{thread.title}\"",
+            "description": (
+                "This tracked thread is already marked as contradicted"
+                + (f" after chapter {thread.last_mentioned_at}" if thread.last_mentioned_at else "")
+                + ". Review the affected scenes before building more logic on top of it."
+                + (f" {thread.description}" if thread.description else "")
+            ),
+            "chapter_ref": thread.last_mentioned_at or thread.introduced_at,
+            "action_label": "Trace the contradiction",
+            "ask_prompt": f"Walk me through where the \"{thread.title}\" thread started contradicting itself and how to fix it.",
+            "source": "heuristic",
+        })
+
+    relationship_groups: dict[tuple[str, str], list[CharacterRelationship]] = {}
+    for rel in relationship_rows:
+        key = tuple(sorted([str(rel.character_a_id), str(rel.character_b_id)]))
+        relationship_groups.setdefault(key, []).append(rel)
+    for pair_key, rel_items in relationship_groups.items():
+        if len(rel_items) < 2:
+            continue
+        first = rel_items[0]
+        last = rel_items[-1]
+        rel_names = " / ".join(
+            name for name in [character_names.get(first.character_a_id), character_names.get(first.character_b_id)] if name
+        ) or "Character relationship"
+        type_changed = first.rel_type != last.rel_type
+        sentiment_changed = (
+            first.sentiment is not None
+            and last.sentiment is not None
+            and abs(first.sentiment - last.sentiment) >= 1.1
+        )
+        if not type_changed and not sentiment_changed:
+            continue
+        suggestions.append({
+            "id": f"relationship-{pair_key[0]}-{pair_key[1]}",
+            "type": "relationship_flip",
+            "severity": "warning" if type_changed else "info",
+            "title": f"Relationship drift: {rel_names}",
+            "description": (
+                f"This relationship shifts from {first.rel_type.replace('_', ' ')} in chapter {first.from_chapter} "
+                f"to {last.rel_type.replace('_', ' ')} in chapter {last.from_chapter}."
+                if type_changed
+                else f"The emotional tone around {rel_names} swings sharply between chapter {first.from_chapter} and chapter {last.from_chapter}."
+            ) + (f" {last.description}" if last.description else ""),
+            "chapter_ref": last.from_chapter,
+            "action_label": "Check the relationship arc",
+            "ask_prompt": f"Is the shift in the {rel_names} relationship earned on page, or am I skipping a transition?",
+            "source": "heuristic",
+        })
+
+    world_groups: dict[tuple[str, str], list[WorldElement]] = {}
+    for element in world_rows:
+        group_key = (" ".join(str(element.element_type or "").split()).strip().lower(), " ".join(str(element.name or "").split()).strip().lower())
+        world_groups.setdefault(group_key, []).append(element)
+    for (element_type, element_name), items in world_groups.items():
+        descriptions = [" ".join(str(item.description or "").split()).strip() for item in items if " ".join(str(item.description or "").split()).strip()]
+        normalized = list(dict.fromkeys(description.lower() for description in descriptions))
+        if len(items) < 2 or len(normalized) < 2:
+            continue
+        if all(a in b or b in a for index, a in enumerate(normalized) for b in normalized[index + 1:]):
+            continue
+        if element_type in {"place", "location"}:
+            issue_type = "location_conflict"
+            title = f"Location details drift: {items[0].name}"
+            prompt = f"Check the canon for {items[0].name}. Do these location details contradict each other?"
+        elif element_type in {"item", "artifact", "object"}:
+            issue_type = "object_continuity"
+            title = f"Object continuity drift: {items[0].name}"
+            prompt = f"Check the continuity of {items[0].name}. Am I describing or handling it inconsistently?"
+        elif element_type in {"concept", "rule", "magic", "system"}:
+            issue_type = "world_rule_conflict"
+            title = f"World-rule conflict: {items[0].name}"
+            prompt = f"Check the canon for {items[0].name}. Do my world rules now conflict?"
+        else:
+            continue
+        suggestions.append({
+            "id": f"world-{issue_type}-{element_name}",
+            "type": issue_type,
+            "severity": "warning",
+            "title": title,
+            "description": (
+                f"Multiple canon descriptions for {items[0].name} now diverge across extracted world elements. "
+                f"Example one: {descriptions[0][:120]} Example two: {descriptions[1][:120]}"
+            ),
+            "chapter_ref": None,
+            "action_label": "Reconcile the canon",
+            "ask_prompt": prompt,
+            "source": "heuristic",
+        })
+
+    heuristic_count = len(suggestions)
+    proactive_audit_applied = False
+    audit_summary: str | None = None
+    if heuristic_count < 3 and (recent_summaries or open_threads or world_rows):
+        detailed_summary_rows = (
+            await db.execute(
+                select(Ch.number, Ch.title, ChapterSummary.content, ChapterSummary.key_events)
+                .join(Ch, Ch.id == ChapterSummary.chapter_id)
+                .where(
+                    Ch.book_id == book_id,
+                    ChapterSummary.mode.in_(["short", "detailed"]),
+                )
+                .order_by(Ch.number.desc(), ChapterSummary.mode.asc())
+                .limit(10)
+            )
+        ).all()
+        recent_summary_blocks: list[str] = []
+        seen_summary_chapters: set[int] = set()
+        for chapter_num, chapter_title, content, key_events in detailed_summary_rows:
+            if chapter_num in seen_summary_chapters:
+                continue
+            seen_summary_chapters.add(chapter_num)
+            key_bits: list[str] = []
+            if isinstance(key_events, list):
+                for item in key_events[:3]:
+                    if isinstance(item, dict):
+                        key_bits.append(" ".join(str(item.get("event_title") or item.get("event") or "").split()).strip())
+            key_line = "; ".join(item for item in key_bits if item)
+            recent_summary_blocks.append(
+                f"Chapter {chapter_num} ({chapter_title or 'Untitled'}): "
+                f"{' '.join(str(content or '').split())[:240]}"
+                + (f" Key events: {key_line[:180]}" if key_line else "")
+            )
+            if len(recent_summary_blocks) >= 4:
+                break
+
+        open_thread_blocks = [
+            f"- {thread.title} [{thread_statuses[thread.id]}]"
+            + (f" introduced ch.{thread.introduced_at}" if thread.introduced_at else "")
+            + (f": {' '.join(str(thread.description or '').split())[:160]}" if thread.description else "")
+            for thread in open_threads[:5]
+        ]
+        relationship_blocks = [
+            f"- {character_names.get(rel.character_a_id, 'Unknown')} / {character_names.get(rel.character_b_id, 'Unknown')}: "
+            f"{rel.rel_type.replace('_', ' ')} at chapter {rel.from_chapter}"
+            + (f". {' '.join(str(rel.description or '').split())[:140]}" if rel.description else "")
+            for rel in relationship_rows[-5:]
+        ]
+        world_watch_blocks = [
+            f"- {element.name} [{element.element_type}] usage={element.usage_count}"
+            + (f" gap={round(float(element.gap_score), 2)}" if element.gap_score is not None else "")
+            + (f". {' '.join(str(element.description or '').split())[:160]}" if element.description else "")
+            for element in world_rows[:6]
+        ]
+        story_context = await build_story_context(db, book_id, total_ch)
+        proactive_cache_key = make_editorial_cache_key(
+            f"scan:{book_id}:{total_ch}",
+            "\n".join(recent_summary_blocks + open_thread_blocks + world_watch_blocks),
+            heuristic_count,
+        )
+        proactive_result = advisor_response_cache.get(proactive_cache_key)
+        if proactive_result is None:
+            if settings.OPENAI_API_KEY and settings.OPENAI_INTEL_MODEL:
+                client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+                try:
+                    response = await create_tracked_chat_completion(
+                        client=client,
+                        feature="advisor_proactive_scan",
+                        model=settings.OPENAI_INTEL_MODEL,
+                        db=db,
+                        user_id=current_user.id,
+                        book_id=book.id,
+                        temperature=0.2,
+                        max_tokens=900,
+                        response_format={"type": "json_object"},
+                        messages=[
+                            {
+                                "role": "system",
+                                "content": PROACTIVE_SCAN_SYSTEM.format(
+                                    title=_safe_prompt_str(book.title),
+                                    story_context=_safe_prompt_str(story_context),
+                                ),
+                            },
+                            {
+                                "role": "user",
+                                "content": PROACTIVE_SCAN_USER.format(
+                                    recent_summaries="\n".join(recent_summary_blocks) or "No recent summaries available.",
+                                    open_threads="\n".join(open_thread_blocks) or "No open threads available.",
+                                    relationships="\n".join(relationship_blocks) or "No relationship transitions available.",
+                                    world_watch="\n".join(world_watch_blocks) or "No world elements available.",
+                                ),
+                            },
+                        ],
+                    )
+                    proactive_result = normalize_proactive_scan_result(response.choices[0].message.content or "{}")
+                    advisor_response_cache.set(proactive_cache_key, proactive_result)
+                except Exception:
+                    proactive_result = {
+                        "findings": [],
+                        "overall_note": "Proactive audit was unavailable, so this scan is showing heuristic-only results.",
+                    }
+                finally:
+                    await client.close()
+            else:
+                proactive_result = {
+                    "findings": [],
+                    "overall_note": "Proactive audit is unavailable until AI scan settings are configured.",
+                }
+
+        proactive_findings = (proactive_result or {}).get("findings") or []
+        for index, finding in enumerate(proactive_findings):
+            suggestions.append({
+                "id": f"proactive-{index}-{finding['type']}",
+                **finding,
+                "source": "proactive_audit",
+            })
+        proactive_audit_applied = bool(proactive_findings)
+        audit_summary = (proactive_result or {}).get("overall_note") or None
+
+    for item in suggestions:
+        item.setdefault("source", "heuristic")
+
+    deduped_suggestions: list[dict[str, Any]] = []
+    seen_keys: set[tuple[str, str]] = set()
+    for item in suggestions:
+        dedupe_key = (
+            " ".join(str(item.get("title") or "").split()).strip().lower(),
+            " ".join(str(item.get("description") or "").split()).strip().lower(),
+        )
+        if dedupe_key in seen_keys:
+            continue
+        seen_keys.add(dedupe_key)
+        deduped_suggestions.append(item)
+    suggestions = deduped_suggestions
+
+    fallback_applied = False
+    if not suggestions:
+        focus_thread = None
+        if open_threads:
+            thread = open_threads[0]
+            focus_thread = {
+                "title": thread.title,
+                "introduced_at": thread.introduced_at,
+                "description": thread.description,
+            }
+        suggestions = [
+            {**item, "source": "fallback"}
+            for item in build_fallback_advisor_suggestions(
+                book_title=book.title,
+                total_chapters=total_ch,
+                character_count=character_count,
+                open_thread_count=open_thread_count,
+                focus_thread=focus_thread,
+            )
+        ]
+        fallback_applied = True
+
     severity_order = {"warning": 0, "direction": 1, "opportunity": 2, "info": 3}
     suggestions.sort(key=lambda s: severity_order.get(s["severity"], 4))
+
+    scan_basis = list(dict.fromkeys(scan_basis))
+    data_gaps = list(dict.fromkeys(data_gaps))
 
     return {
         "suggestions": suggestions,
         "total": len(suggestions),
         "book_title": book.title,
+        "meta": {
+            "character_count": character_count,
+            "state_count": state_count,
+            "open_thread_count": open_thread_count,
+            "clue_count": clue_count,
+            "relationship_count": relationship_count,
+            "world_element_count": world_element_count,
+            "heuristic_count": heuristic_count,
+            "fallback_applied": fallback_applied,
+            "proactive_audit_applied": proactive_audit_applied,
+            "scan_basis": scan_basis,
+            "data_gaps": data_gaps,
+            "audit_summary": audit_summary,
+        },
     }
 
 
@@ -672,7 +1185,15 @@ async def editorial_review(
 
     try:
         # 1. Semantic search
-        hits = await semantic_search(db, book_id, body.text[:600], total_ch, limit=6)
+        hits = await semantic_search(
+            db,
+            book_id,
+            body.text[:600],
+            total_ch,
+            limit=6,
+            usage_user_id=current_user.id,
+            usage_feature="advisor_editorial_search",
+        )
         passages_block = "\n\n".join(
             f"Ch. {h['chapter_num']} – {h.get('chapter_title') or 'Untitled'}:\n{h['text'][:320]}"
             for h in hits
@@ -697,8 +1218,13 @@ async def editorial_review(
             passages=passages_block,
         )
 
-        response = await client.chat.completions.create(
+        response = await create_tracked_chat_completion(
+            client=client,
+            feature="advisor_editorial_review",
             model=settings.OPENAI_INTEL_MODEL,
+            db=db,
+            user_id=current_user.id,
+            book_id=book.id,
             temperature=0.2,
             max_tokens=1400,
             response_format={"type": "json_object"},
@@ -753,8 +1279,13 @@ async def prose_tighten(
             if body.chapter_num else
             "Chapter number not specified."
         )
-        response = await client.chat.completions.create(
+        response = await create_tracked_chat_completion(
+            client=client,
+            feature="advisor_prose_tighten",
             model=settings.OPENAI_INTEL_MODEL,
+            db=db,
+            user_id=current_user.id,
+            book_id=book.id,
             temperature=0.2,
             max_tokens=700,
             response_format={"type": "json_object"},
@@ -876,8 +1407,13 @@ async def manuscript_synopsis(
     story_context = await build_story_context(db, book_id, book.total_chapters or len(chapter_rows))
     client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
     try:
-        response = await client.chat.completions.create(
+        response = await create_tracked_chat_completion(
+            client=client,
+            feature="advisor_synopsis",
             model=settings.OPENAI_INTEL_MODEL,
+            db=db,
+            user_id=current_user.id,
+            book_id=book.id,
             temperature=0.3,
             max_tokens=700,
             response_format={"type": "json_object"},
@@ -925,7 +1461,15 @@ async def voice_consistency_review(
     client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 
     try:
-        hits = await semantic_search(db, book_id, body.text[:600], total_ch, limit=6)
+        hits = await semantic_search(
+            db,
+            book_id,
+            body.text[:600],
+            total_ch,
+            limit=6,
+            usage_user_id=current_user.id,
+            usage_feature="advisor_voice_consistency_search",
+        )
         passages_block = "\n\n".join(
             f"Ch. {h['chapter_num']} - {h.get('chapter_title') or 'Untitled'}:\n{h['text'][:320]}"
             for h in hits
@@ -979,8 +1523,13 @@ async def voice_consistency_review(
             text=body.text[:4000],
         )
 
-        response = await client.chat.completions.create(
+        response = await create_tracked_chat_completion(
+            client=client,
+            feature="advisor_voice_consistency",
             model=settings.OPENAI_INTEL_MODEL,
+            db=db,
+            user_id=current_user.id,
+            book_id=book.id,
             temperature=0.2,
             max_tokens=1200,
             response_format={"type": "json_object"},
@@ -1113,7 +1662,7 @@ async def continuity_report(
         retrieved_passages=review_payload["retrieved_passages"],
         open_threads=open_threads,
     )
-    filename_base = "".join(ch for ch in (book.title or "lorevia") if ch.isalnum() or ch in {" ", "-", "_"}).strip().replace(" ", "-") or "lorevia"
+    filename_base = export_filename_base(book.title)
 
     if format == "md":
         return Response(
@@ -1136,6 +1685,7 @@ async def continuity_report(
 async def series_advisor_message(
     series_id: uuid.UUID,
     body: AdvisorRequest,
+    response: Response,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
     _=Depends(rate_limit_advisor),
@@ -1153,6 +1703,13 @@ async def series_advisor_message(
 
     if not body.messages:
         raise HTTPException(400, detail="messages list is empty")
+
+    return await _enqueue_series_advisor_task(
+        series=series,
+        body=body,
+        current_user_id=current_user.id,
+        response=response,
+    )
 
     last_user_msg = next(
         (m.content for m in reversed(body.messages) if m.role == "user"), ""
@@ -1213,8 +1770,12 @@ async def series_advisor_message(
     client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
     try:
         # Single call — gpt-4o-mini for cost efficiency
-        response = await client.chat.completions.create(
+        response = await create_tracked_chat_completion(
+            client=client,
+            feature="series_advisor_message",
             model=settings.OPENAI_INTEL_MODEL,
+            db=db,
+            user_id=current_user.id,
             temperature=0.55,
             max_tokens=900,
             messages=llm_messages,
@@ -1239,6 +1800,37 @@ async def series_advisor_message(
 
 
 # ─── Series continuity check endpoint ────────────────────────────────────────
+
+@router.get("/series/{series_id}/advisor/message/{task_id}", response_model=AdvisorTaskStatusResponse)
+async def series_advisor_message_status(
+    series_id: uuid.UUID,
+    task_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    series = await db.get(Series, series_id)
+    if not series or series.user_id != current_user.id:
+        raise HTTPException(404)
+
+    task_meta = await cache_get(key_advisor_task(task_id))
+    if not isinstance(task_meta, dict):
+        raise HTTPException(404, detail="advisor task not found")
+    if task_meta.get("scope") != "series" or task_meta.get("series_id") != str(series.id) or task_meta.get("user_id") != str(current_user.id):
+        raise HTTPException(403, detail="advisor task does not belong to this series")
+
+    result = generate_series_advisor_reply_task.AsyncResult(task_id)
+    if result.state in {PENDING, RETRY}:
+        return {"task_id": task_id, "status": "queued", "result": None, "error": None}
+    if result.state == STARTED:
+        return {"task_id": task_id, "status": "running", "result": None, "error": None}
+    if result.state == SUCCESS:
+        await cache_del(key_advisor_task(task_id))
+        return {"task_id": task_id, "status": "complete", "result": result.result, "error": None}
+    if result.state == FAILURE:
+        await cache_del(key_advisor_task(task_id))
+        return {"task_id": task_id, "status": "failed", "result": None, "error": "advisor_generation_failed"}
+    return {"task_id": task_id, "status": "running", "result": None, "error": None}
+
 
 class SeriesContinuityRequest(AdvisorRequest):
     """Reuse AdvisorRequest shape but add book_id and optional chapter_num."""
@@ -1334,7 +1926,12 @@ async def series_continuity_check(
 
     # RAG: retrieve relevant passages from prior books only (cross-series search)
     prior_book_id_strs = ", ".join(f"'{bid}'" for bid in prior_book_ids)
-    query_emb = await embed_text(body.text[:600])
+    query_emb = await embed_text(
+        body.text[:600],
+        user_id=current_user.id,
+        book_id=current_book.id,
+        feature="series_continuity_query_embedding",
+    )
     rows = await db.execute(
         sql_text(f"""
             SELECT bc.text, ch.number AS chapter_num, ch.title AS chapter_title,
@@ -1386,8 +1983,13 @@ async def series_continuity_check(
 
     client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
     try:
-        response = await client.chat.completions.create(
+        response = await create_tracked_chat_completion(
+            client=client,
+            feature="series_continuity_check",
             model=settings.OPENAI_INTEL_MODEL,
+            db=db,
+            user_id=current_user.id,
+            book_id=current_book.id,
             temperature=0.2,
             max_tokens=1200,
             response_format={"type": "json_object"},

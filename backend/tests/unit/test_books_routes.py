@@ -9,9 +9,11 @@ import pytest
 from fastapi import HTTPException, UploadFile
 
 from app.api.v1.routes import books
+from app.utils.llm_usage_utils import LlmUsageSummary
 from app.schemas.books import (
     BookModeBody,
     BookNoteBody,
+    CharacterCreateBody,
     CharacterMergeBody,
     CharacterPartitionBody,
     CharacterPartitionTargetBody,
@@ -21,6 +23,7 @@ from app.schemas.books import (
     MajorEventOut,
     ObsidianVaultNoteBody,
     ReadabilityRequestBody,
+    RelationshipCreateBody,
     RelationshipUpdateBody,
     SeriesBody,
     SeriesBookStatusBody,
@@ -245,6 +248,20 @@ async def test_upload_book_endpoint_validates_and_persists(monkeypatch):
         )
     assert exc.value.detail == "Invalid visibility"
 
+    monkeypatch.setattr("app.core.config.settings.PUBLIC_MODE_ENABLED", False, raising=False)
+    with pytest.raises(HTTPException) as exc:
+        await books.upload_book_endpoint(
+            file=_upload("atlas.txt", b"payload"),
+            title="Atlas",
+            visibility="public",
+            db=_FakeDB(),
+            current_user=user,
+            _=None,
+            __=None,
+        )
+    assert exc.value.status_code == 503
+    monkeypatch.setattr("app.core.config.settings.PUBLIC_MODE_ENABLED", True, raising=False)
+
     uploaded = {}
     notified = {}
     queued = {}
@@ -258,6 +275,7 @@ async def test_upload_book_endpoint_validates_and_persists(monkeypatch):
     monkeypatch.setattr(books, "require_author_access", _fake_require_author_access)
     monkeypatch.setattr(books, "resolve_upload_format_and_work_type", lambda *_args: ("txt", "novel"))
     monkeypatch.setattr(books, "resolve_owned_series_ids", _fake_resolve_series)
+    monkeypatch.setattr(books, "charge_public_share_points", _async_value(None))
     monkeypatch.setattr(books.storage, "upload_book_bytes", lambda raw, owner, filename: uploaded.setdefault("book", (raw, owner, filename)) or "books/mock.txt")
     monkeypatch.setattr(books.storage, "upload_binary", lambda key, raw, content_type: uploaded.setdefault("cover", (key, raw, content_type)) or key)
     monkeypatch.setattr(books, "build_upload_processing_notification", lambda book, mode, size: SimpleNamespace(book_id=book.id, mode=mode, size=size))
@@ -380,6 +398,7 @@ async def test_import_manuscript_content_text_flow_updates_progress_and_reports(
         continuity_flags=[],
     )
     added_words = {}
+    cache_invalidated = {"called": 0}
 
     async def _fake_process(*_args, **_kwargs):
         return None
@@ -412,6 +431,11 @@ async def test_import_manuscript_content_text_flow_updates_progress_and_reports(
     monkeypatch.setattr(books, "build_chapter_consistency_report", _async_value(report))
     monkeypatch.setattr(books, "build_chapter_report_notification", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(books, "build_continuity_risk_notifications", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        books,
+        "invalidate_advisor_caches",
+        lambda: cache_invalidated.__setitem__("called", cache_invalidated["called"] + 1),
+    )
 
     db = _FakeDB(
         execute_values=[_Result(scalar=None), _Result(scalar=chapter), _Result(scalar=None)],
@@ -434,10 +458,151 @@ async def test_import_manuscript_content_text_flow_updates_progress_and_reports(
     )
 
     assert payload.imported_chapters == [1]
+    assert payload.chapter_content_versions == {1: 1}
     assert payload.mode == "author"
     assert payload.chapter_reports[0].chapter_title == "Chapter 1"
     assert added_words["count"] == 3
+    assert cache_invalidated["called"] == 1
     assert any(item.__class__.__name__ == "ReadingProgress" for item in db.added)
+
+
+@pytest.mark.asyncio
+async def test_import_manuscript_content_rejects_stale_content_version(monkeypatch):
+    user = _user()
+    book = _book(user_id=user.id, mode="author", total_chapters=1)
+    existing = SimpleNamespace(
+        id=uuid.uuid4(),
+        book_id=book.id,
+        number=1,
+        title="Opening",
+        s3_key="chapters/1.json",
+        word_count=120,
+        content_version=4,
+    )
+
+    monkeypatch.setattr(books, "get_owned_book", _async_value(book))
+    monkeypatch.setattr(books, "require_author_access", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(books, "next_chapter_number", _async_value(2))
+    monkeypatch.setattr(books, "normalize_book_work_type", lambda *_args, **_kwargs: "novel")
+    monkeypatch.setattr(
+        books,
+        "normalize_imported_chapters",
+        lambda chapters, **_kwargs: [
+            {"number": 1, "title": chapters[0]["title"], "text": chapters[0]["text"], "html": chapters[0]["html"], "description": None}
+        ],
+    )
+
+    db = _FakeDB(execute_values=[_Result(scalar=existing)])
+
+    with pytest.raises(HTTPException) as exc_info:
+        await books.import_manuscript_content(
+            book.id,
+            text="Updated opening",
+            html="<p>Updated opening</p>",
+            title="Opening",
+            files=None,
+            work_type=None,
+            chapter_number=1,
+            replace_existing="true",
+            expected_content_version=3,
+            chunk_long_documents="false",
+            split_into_chapters="true",
+            db=db,
+            current_user=user,
+            _=None,
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["chapter_number"] == 1
+    assert exc_info.value.detail["current_content_version"] == 4
+
+
+@pytest.mark.asyncio
+async def test_import_manuscript_content_preserves_source_chapter_count_for_long_file_chapters(monkeypatch):
+    user = _user()
+    book = _book(user_id=user.id, mode="reader", total_chapters=0, preserve_source_chapters=True)
+    long_text = "\n\n".join([
+        " ".join(["opening"] * 1800),
+        " ".join(["middle"] * 1800),
+    ])
+    parsed_chapters = [
+        {"number": 1, "title": "I", "text": long_text},
+        {"number": 2, "title": "II", "text": "Second chapter text."},
+        {"number": 3, "title": "III", "text": "Third chapter text."},
+    ]
+    chapter_rows = [
+        SimpleNamespace(id=uuid.uuid4(), s3_key="chapters/1.json", title="I"),
+        SimpleNamespace(id=uuid.uuid4(), s3_key="chapters/2.json", title="II"),
+        SimpleNamespace(id=uuid.uuid4(), s3_key="chapters/3.json", title="III"),
+    ]
+    processed_numbers: list[int] = []
+
+    async def _fake_process(_db, _book, payload):
+        processed_numbers.append(int(payload["number"]))
+        return None
+
+    async def _fake_replace(*_args, **_kwargs):
+        return None
+
+    async def _fake_analyse(*_args, **_kwargs):
+        return None
+
+    async def _fake_report(_db, _book, chapter_number):
+        return ChapterConsistencyReport(
+            chapter_number=chapter_number,
+            chapter_title=f"Chapter {chapter_number}",
+            summary="Good",
+            new_characters=[],
+            relationship_changes=[],
+            plot_threads_opened=[],
+            plot_threads_resolved=[],
+            continuity_flags=[],
+        )
+
+    monkeypatch.setattr(books, "get_owned_book", _async_value(book))
+    monkeypatch.setattr(books, "require_author_access", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(books, "next_chapter_number", _async_value(1))
+    monkeypatch.setattr(books, "normalize_book_work_type", lambda *_args, **_kwargs: "novel")
+    monkeypatch.setattr(
+        books,
+        "parse_book_upload_for_ingestion",
+        _async_value({"chapters": parsed_chapters, "screenplay_payload": None, "parser_diagnostics": None}),
+    )
+    monkeypatch.setattr(books, "_process_chapter", _fake_process)
+    monkeypatch.setattr(books, "extract_novel_scene_candidates", lambda **_kwargs: [])
+    monkeypatch.setattr(books, "replace_chapter_novel_scenes", _fake_replace)
+    monkeypatch.setattr(books, "add_daily_word_progress", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(books.storage, "download_book", lambda _key: b"stored text")
+    monkeypatch.setattr(books, "deserialize_manuscript_content", lambda _raw: {"text": "stored chapter text"})
+    monkeypatch.setattr(books, "analyse_chapter", _fake_analyse)
+    monkeypatch.setattr(books, "build_chapter_consistency_report", _fake_report)
+    monkeypatch.setattr(books, "build_chapter_report_notification", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(books, "build_continuity_risk_notifications", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(books, "invalidate_advisor_caches", lambda: None)
+
+    db = _FakeDB(
+        execute_values=[*(_Result(scalar=chapter) for chapter in chapter_rows), _Result(scalar=None)],
+        scalar_values=[3],
+    )
+    payload = await books.import_manuscript_content(
+        book.id,
+        text=None,
+        html=None,
+        title=None,
+        files=[_upload("story.pdf", b"%PDF-1.4 mock")],
+        work_type=None,
+        chapter_number=None,
+        replace_existing="false",
+        chunk_long_documents="true",
+        split_into_chapters="true",
+        db=db,
+        current_user=user,
+        _=None,
+    )
+
+    assert processed_numbers == [1, 2, 3]
+    assert payload.imported_chapters == [1, 2, 3]
+    assert payload.total_chapters == 3
 
 
 @pytest.mark.asyncio
@@ -457,6 +622,38 @@ async def test_series_routes_and_user_stats(monkeypatch):
     monkeypatch.setattr(books, "get_owned_book", _async_value(book))
     monkeypatch.setattr(books, "build_series_bible_payload", _async_value({"series_id": str(series.id)}))
     monkeypatch.setattr(books, "compute_words_read_for_book", _async_value(1200))
+    monkeypatch.setattr(
+        books,
+        "build_writing_dashboard_stats",
+        _async_value(
+            {
+                "today": {"words": 1202, "target_words": 1000, "progress_pct": 100},
+                "this_week": {"words": 2565, "target_words": 7000, "progress_pct": 37},
+                "this_month": {"words": 12165, "target_words": None, "progress_pct": None},
+                "this_year": {"words": 59971, "target_words": None, "progress_pct": None},
+                "last_24_hours": {"words": 1202, "target_words": None, "progress_pct": None},
+                "last_7_days": {"words": 12165, "target_words": None, "progress_pct": None},
+                "last_30_days": {"words": 12165, "target_words": None, "progress_pct": None},
+                "last_year": {"words": 59971, "target_words": None, "progress_pct": None},
+                "heatmap": [{"date": "2026-05-14", "words": 1202}],
+                "entries_today": [{"book_id": str(book.id), "chapter_number": 36, "title": "Chapter XXXVI", "words": 763}],
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        books,
+        "calculate_upload_usage_summary",
+        _async_value(
+            SimpleNamespace(
+                manuscript_uploads=3,
+                worldbuilding_uploads=4,
+                total_uploads=7,
+                upload_limit=15,
+                uploads_remaining=8,
+                upload_limit_unlimited=False,
+            )
+        ),
+    )
 
     db = _FakeDB(get_values=[book], execute_values=[_Result(scalar=membership)])
     payload = await books.update_book_series(book.id, SeriesBody(series_name="", series_order=None), db=db, current_user=user)
@@ -504,12 +701,27 @@ async def test_series_routes_and_user_stats(monkeypatch):
     assert payload.marked_complete_in_series is True
     assert any(item.__class__.__name__ == "ReadingProgress" for item in db.added)
 
+    monkeypatch.setattr(books, "summarize_llm_usage_for_user", _async_value(LlmUsageSummary(
+        request_count=12,
+        prompt_tokens=3456,
+        completion_tokens=789,
+        total_tokens=4245,
+    )))
     db = _FakeDB(
         execute_values=[_Result(scalars=[book]), _Result(scalars=[SimpleNamespace(book_id=book.id, chapters_read=[1, 2, 3])]), _Result(scalar=2)]
     )
     stats = await books.get_user_stats(db=db, current_user=user)
     assert stats.public.total_words_read == 1200
+    assert stats.private.total_uploads == 7
+    assert stats.private.worldbuilding_uploads == 4
+    assert stats.private.uploads_remaining == 8
     assert stats.private.saved_quotes == 2
+    assert stats.private.llm_request_count == 12
+    assert stats.private.llm_prompt_tokens == 3456
+    assert stats.private.llm_completion_tokens == 789
+    assert stats.private.llm_total_tokens == 4245
+    assert stats.writing.today.words == 1202
+    assert stats.writing.entries_today[0].title == "Chapter XXXVI"
 
 
 @pytest.mark.asyncio
@@ -635,6 +847,8 @@ async def test_export_cover_archive_hide_and_delete_routes(monkeypatch):
             current_user=user,
         )
         assert response.media_type == media_type
+        expected_name = "Atlas-Draft-manuscript-vault.zip" if fmt == "obsidian" else f"Atlas-Draft-manuscript.{fmt}"
+        assert response.headers["Content-Disposition"] == f'attachment; filename="{expected_name}"'
 
     cover_book = _book(user_id=user.id, cover_s3_key="covers/atlas.png")
     monkeypatch.setattr(books, "ensure_book_cover", _async_value(None))
@@ -742,10 +956,12 @@ async def test_character_routes_cover_crud_and_exports(monkeypatch):
     monkeypatch.setattr(books, "require_author_access", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(books, "create_asset_token", lambda *_args, **_kwargs: "signed-token")
     monkeypatch.setattr(books, "build_character_card_payload", _async_value({"name": "Iris"}))
-    monkeypatch.setattr(books, "character_card_markdown", lambda payload: (f"# {payload['name']}", "iris"))
+    monkeypatch.setattr(books, "character_card_markdown", lambda payload: (f"# {payload['name']}", "atlas-draft-iris"))
     monkeypatch.setattr(books, "character_card_pdf", lambda _payload: b"pdf")
     monkeypatch.setattr(books, "character_card_docx", lambda _payload: b"docx")
     monkeypatch.setattr(books, "decode_token", lambda _token: {"type": "asset", "sub": str(user.id), "res": f"character-card:{book.id}:{character.id}"})
+    monkeypatch.setattr(books, "list_custom_tags_for_entity_ids", _async_value({}))
+    monkeypatch.setattr(books, "get_custom_tags_for_entity", _async_value([]))
 
     context = {
         "book": book,
@@ -781,6 +997,45 @@ async def test_character_routes_cover_crud_and_exports(monkeypatch):
     assert payload[0]["description"] == "hero:green|1"
     assert payload[0]["goal"] == "Protect the city"
     assert payload[0]["arc_tracker"]["goal"] == "Protect the city"
+
+    created_character = SimpleNamespace(
+        id=uuid.uuid4(),
+        book_id=book.id,
+        name="Aunt May",
+        aliases=["May"],
+        role="sc",
+        first_chapter=2,
+        last_seen_chapter=2,
+        mention_count=1,
+        trait_state={"eyes": "blue"},
+        personality_tags=["sharp"],
+        goal="Protect the family",
+        motivations=["Keep the household safe"],
+        fears=[],
+        lie_they_believe=None,
+        backstory_wound=None,
+        arc_type=None,
+        archetype="mentor",
+        arc_summary="Keeps careful watch over the family.",
+        growth_events=[],
+        character_type=None,
+        character_type_score=None,
+        subtype_scores={},
+        is_manual=True,
+    )
+    monkeypatch.setattr(books, "build_manual_character", lambda **_kwargs: created_character)
+    create_db = _FakeDB()
+    created = await books.create_book_character(
+        book.id,
+        CharacterCreateBody(name="Aunt May", first_chapter=2, role="sc"),
+        db=create_db,
+        current_user=user,
+    )
+    assert created["name"] == "Aunt May"
+    assert created["role"] == "sc"
+    assert created["is_manual"] is True
+    assert create_db.added == [created_character]
+    assert create_db.commits == 1
 
     db = _FakeDB(get_values=[character, character])
     merged = await books.merge_book_characters(
@@ -853,8 +1108,36 @@ async def test_character_routes_cover_crud_and_exports(monkeypatch):
     assert updated["aliases"] == ["Iris"]
     assert updated["goal"] == "Keep the archive safe"
 
+    updated_visibility = await books.update_book_character(
+        book.id,
+        character.id,
+        CharacterUpdateBody(graph_visibility="include"),
+        db=_FakeDB(
+            get_values=[character],
+            execute_values=[_Result(scalars=[]), _Result(scalars=[]), _Result(scalars=[]), _Result(scalar=None)],
+        ),
+        current_user=user,
+    )
+    assert updated_visibility["graph_visibility_override"] == "include"
+
     deleted = await books.delete_book_character(book.id, character.id, db=_FakeDB(get_values=[character]), current_user=user)
     assert deleted["deleted"] == str(character.id)
+
+    created_rel = await books.create_book_relationship(
+        book.id,
+        RelationshipCreateBody(
+            character_a_id=character.id,
+            character_b_id=secondary.id,
+            rel_type="ally",
+            sentiment=0.4,
+            description=" Trusts ",
+            from_chapter=2,
+        ),
+        db=_FakeDB(get_values=[character, secondary]),
+        current_user=user,
+    )
+    assert created_rel["rel_type"] == "ally"
+    assert created_rel["description"] == "Trusts"
 
     with pytest.raises(HTTPException) as exc:
         await books.update_book_relationship(
@@ -869,11 +1152,14 @@ async def test_character_routes_cover_crud_and_exports(monkeypatch):
     updated_rel = await books.update_book_relationship(
         book.id,
         relationship.id,
-        RelationshipUpdateBody(rel_type="Found Family", sentiment=0.8, description=" Strong ", from_chapter=2, to_chapter=3),
+        RelationshipUpdateBody(rel_type="family", sentiment=0.8, description=" Strong ", from_chapter=2, to_chapter=3),
         db=_FakeDB(get_values=[relationship]),
         current_user=user,
     )
-    assert updated_rel["rel_type"] == "found_family"
+    assert updated_rel["rel_type"] == "family"
+
+    deleted_rel = await books.delete_book_relationship(book.id, relationship.id, db=_FakeDB(get_values=[relationship]), current_user=user)
+    assert deleted_rel["deleted"] == str(relationship.id)
 
     shared = await books.share_book_character(book.id, character.id, db=_FakeDB(get_values=[character]), current_user=user)
     assert "signed-token" in shared.share_url
@@ -885,6 +1171,7 @@ async def test_character_routes_cover_crud_and_exports(monkeypatch):
     ):
         response = await books.export_character_card(book.id, character.id, format=fmt, db=_FakeDB(get_values=[character]), current_user=user)
         assert response.media_type == media_type
+        assert response.headers["Content-Disposition"] == f'attachment; filename="atlas-draft-iris-character-card.{fmt}"'
 
     for fmt, media_type in (
         ("md", "text/markdown; charset=utf-8"),
@@ -894,6 +1181,8 @@ async def test_character_routes_cover_crud_and_exports(monkeypatch):
     ):
         response = await books.export_character_bible(book.id, format=fmt, db=_FakeDB(), current_user=user)
         assert response.media_type == media_type
+        extension = "zip" if fmt == "obsidian_folder" else fmt
+        assert response.headers["Content-Disposition"] == f'attachment; filename="atlas-character-bible.{extension}"'
 
     preview = await books.preview_character_bible_obsidian(book.id, db=_FakeDB(), current_user=user)
     assert preview["root_folder"] == "Atlas"
@@ -914,3 +1203,23 @@ async def test_character_routes_cover_crud_and_exports(monkeypatch):
         db=_FakeDB(get_values=[book, character]),
     )
     assert public_payload["name"] == "Iris"
+
+
+@pytest.mark.asyncio
+async def test_public_asset_endpoints_respect_public_mode_kill_switch(monkeypatch):
+    monkeypatch.setattr("app.core.config.settings.PUBLIC_MODE_ENABLED", False, raising=False)
+    user = _user()
+    book = _book(user_id=user.id)
+    character = SimpleNamespace(id=uuid.uuid4(), book_id=book.id)
+
+    with pytest.raises(HTTPException) as exc:
+        await books.share_book_character(book.id, character.id, db=_FakeDB(), current_user=user)
+    assert exc.value.status_code == 503
+
+    with pytest.raises(HTTPException) as exc:
+        await books.get_book_cover_public(book.id, token="ok", db=_FakeDB())
+    assert exc.value.status_code == 503
+
+    with pytest.raises(HTTPException) as exc:
+        await books.get_book_character_card_public(book.id, character.id, token="ok", db=_FakeDB())
+    assert exc.value.status_code == 503

@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
 import Link from "next/link"
 
 import {
@@ -11,17 +12,17 @@ import {
   WorkspacePanel,
 } from "@/components/ui/Workspace"
 import { booksApi } from "@/lib/api/books"
+import { asQueryKey, booksNotesCacheKey } from "@/lib/query/cacheKeys"
 import { renderRichTextHtml } from "@/lib/utils/richText"
 import type { BookNote } from "@/types/book"
 
 export default function NotesPage() {
-  const [notes, setNotes] = useState<BookNote[]>([])
-  const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState("")
-
-  useEffect(() => {
-    booksApi.listNotes().then(setNotes).finally(() => setLoading(false))
-  }, [])
+  const { data: notes = [], isLoading: loading } = useQuery<BookNote[]>({
+    queryKey: asQueryKey(booksNotesCacheKey()),
+    queryFn: () => booksApi.listNotes(),
+    staleTime: 30_000,
+  })
 
   const filteredNotes = useMemo(() => {
     const trimmed = query.trim().toLowerCase()

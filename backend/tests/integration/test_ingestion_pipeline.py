@@ -92,7 +92,7 @@ async def test_upload_pipeline_stages_and_processes_multiple_chapters(client, db
             ],
         }
 
-    async def _fake_embed(texts: list[str]) -> list[list[float]]:
+    async def _fake_embed(texts: list[str], **_kwargs) -> list[list[float]]:
         return _embedding_for(len(texts))
 
     async def _fake_send_processing_complete_with_stats(email: str, **payload):
@@ -208,7 +208,7 @@ async def test_upload_pipeline_continues_when_cover_upload_fails(client, db, aut
     async def _fake_extract(_text: str) -> dict:
         return {"characters": [], "relationships": []}
 
-    async def _fake_embed(texts: list[str]) -> list[list[float]]:
+    async def _fake_embed(texts: list[str], **_kwargs) -> list[list[float]]:
         return _embedding_for(len(texts))
 
     def _raise_permission_error(*args, **kwargs):

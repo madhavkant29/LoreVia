@@ -15,7 +15,6 @@ from app.api.deps.auth import get_current_user
 from app.api.deps.rate_limit import rate_limit_search, rate_limit_summary
 from app.core.config import is_local_mode, settings
 from app.core.database import get_db
-from app.core.security import decode_token
 from app.core.redis import (
     cache_get,
     cache_set,
@@ -24,12 +23,12 @@ from app.core.redis import (
     key_relationship_graph,
     key_search_results,
 )
+from app.core.security import decode_token
 from app.core.storage import download_book, get_presigned_url
 from app.engine.analysis.recall import generate_recall
 from app.engine.character.consolidator import consolidate_characters
-from app.engine.character.profile_builder import build_description
 from app.engine.search.semantic import build_search_result, find_context_for_tap, semantic_search
-from app.models.book import Book, Chapter, ChapterMedia
+from app.models.book import Book, Chapter, ChapterMedia, NovelScene
 from app.models.character import Character, CharacterState
 from app.models.intelligence import (
     BookChunk,
@@ -39,23 +38,33 @@ from app.models.intelligence import (
     QuoteEntry,
 )
 from app.models.progress import ReadingProgress
+from app.schemas.books import BookEventsOut, CharacterEventOut, MajorEventOut
 from app.schemas.reader import (
     PlotThreadOut,
     SaveQuoteBody,
     TimelineResponseOut,
     UpdatePlotThreadBody,
 )
-from app.schemas.books import BookEventsOut, CharacterEventOut, MajorEventOut
 from app.services.summary_service import get_or_generate_summary
+from app.utils.beta_read_utils import sync_beta_assignments_for_reader_book
+from app.utils.billing_utils import summary_mode_allowed
 from app.utils.book_utils import (
+    build_workspace_chapter_text_from_scenes,
+    chapter_body_needs_scene_workspace_fallback,
     collaboration_allows_chapter,
+    collaboration_can_copy_manuscript,
     deserialize_manuscript_content,
     get_book_with_collaboration_access,
+    manuscript_text_to_html,
     normalize_collaboration_scope,
 )
-from app.utils.billing_utils import summary_mode_allowed
-from app.utils.queue_utils import queue_for_user
+from app.utils.character_utils import (
+    backfill_character_first_chapters_for_chapter_text,
+    compose_character_description,
+)
 from app.utils.plot_thread_utils import derive_plot_thread_status
+from app.utils.public_utils import ensure_public_mode_enabled
+from app.utils.queue_utils import queue_for_user
 
 # ── Utils imports ──────────────────────────────────────────────────────────────
 from app.utils.reader_utils import (
@@ -65,6 +74,7 @@ from app.utils.reader_utils import (
     collapse_graph_characters,
     dedupe_timeline_events,
     extract_media_markers,
+    graph_character_visibility_analysis,
     is_graph_character_visible,
     is_valid_timeline_character,
     list_plot_threads,
@@ -81,9 +91,14 @@ from app.utils.reader_utils import (
     summary_visible_chapter_set,
     timeline_character_detail,
     timeline_plot_thread_span,
-    timeline_visible_chapter_set,
     timeline_relationship_detail,
+    timeline_visible_chapter_set,
     update_plot_thread_note,
+)
+from app.utils.tag_utils import (
+    ENTITY_TYPE_CHAPTER,
+    get_custom_tags_for_entity,
+    list_custom_tags_for_entity_ids,
 )
 
 router = APIRouter()
@@ -133,6 +148,7 @@ async def get_chapter_media_public(
     token: str = Query(...),
     db: AsyncSession = Depends(get_db),
 ):
+    ensure_public_mode_enabled()
     media = await db.get(ChapterMedia, media_id)
     if not media:
         raise HTTPException(404, "Chapter media not found")
@@ -227,6 +243,34 @@ async def get_chapter(
                     if fallback_media:
                         stored_media = merge_media_items(stored_media, fallback_media)
 
+        if chapter_body_needs_scene_workspace_fallback(
+            stored_text_content,
+            chapter_number=chapter_num,
+            chapter_title=chapter.title,
+        ):
+            manual_scenes = (
+                await db.execute(
+                    select(NovelScene).where(
+                        NovelScene.book_id == book_id,
+                        NovelScene.chapter_number == chapter_num,
+                        NovelScene.status != "archived",
+                    ).order_by(NovelScene.sort_order.asc(), NovelScene.created_at.asc())
+                )
+            ).scalars().all()
+            compiled_text = build_workspace_chapter_text_from_scenes(list(manual_scenes))
+            if compiled_text:
+                stored_text_content = compiled_text
+                stored_html_content = manuscript_text_to_html(compiled_text)
+
+    chapter_text_content = stored_text_content if chapter else fallback_text
+    if await backfill_character_first_chapters_for_chapter_text(
+        db,
+        book_id=book_id,
+        chapter_number=chapter_num,
+        chapter_text=chapter_text_content,
+    ):
+        await db.commit()
+
     chars_result = await db.execute(
         select(Character)
         .where(Character.book_id == book_id, Character.first_chapter <= chapter_num)
@@ -257,19 +301,37 @@ async def get_chapter(
             "aliases": char.aliases or [],
             "role": char.role,
             "first_chapter": char.first_chapter,
-            "description": build_description(trait_snapshot, char.archetype),
+            "description": compose_character_description(
+                trait_state=trait_snapshot,
+                archetype=char.archetype,
+                arc_summary=char.arc_summary,
+                personality_tags=char.personality_tags or [],
+                motivations=char.motivations or [],
+            ),
             "personality_tags": char.personality_tags or [],
         })
 
     return {
         "chapter_number": chapter_num,
         "chapter_title": chapter.title if chapter else fallback_title,
+        "content_version": int(chapter.content_version or 1) if chapter else None,
         "total_chapters": book.total_chapters,
         "intelligence_available": await chapter_intelligence_available(db, book, current_user, chapter_num),
+        "can_copy_manuscript": collaboration_can_copy_manuscript(book, collaborator),
         "text_url": get_presigned_url(chapter.s3_key) if chapter and chapter.s3_key else None,
         "text_content": stored_text_content if chapter else fallback_text,
         "html_content": stored_html_content if chapter else None,
         "media": stored_media if chapter else fallback_media,
+        "tags": (
+            await get_custom_tags_for_entity(
+                db,
+                entity_type=ENTITY_TYPE_CHAPTER,
+                entity_id=chapter.id,
+                book_id=book.id,
+            )
+            if chapter is not None
+            else []
+        ),
         "characters": char_data,
     }
 
@@ -339,7 +401,13 @@ async def smart_tap(
                 "aliases": char.aliases or [],
                 "role": char.role,
                 "trait_state": trait_snapshot,
-                "description": build_description(trait_snapshot, char.archetype),
+                "description": compose_character_description(
+                    trait_state=trait_snapshot,
+                    archetype=char.archetype,
+                    arc_summary=char.arc_summary,
+                    personality_tags=char.personality_tags or [],
+                    motivations=char.motivations or [],
+                ),
                 "personality_tags": char.personality_tags or [],
                 "motivations": char.motivations or [],
                 "fears": char.fears or [],
@@ -389,7 +457,7 @@ async def get_summary(
     if mode not in ("short", "detailed", "key_points"):
         raise HTTPException(400, "Invalid mode")
     if not summary_mode_allowed(current_user, mode):
-        raise HTTPException(403, "Upgrade to Reader to unlock detailed and key-point summaries.")
+        raise HTTPException(403, "Upgrade to Author to unlock detailed and key-point summaries.")
     await require_summary_access(db, book, current_user, chapter_num)
 
     read_set = await read_chapter_set(db, current_user.id, book_id)
@@ -461,6 +529,7 @@ async def get_reader_events(
 async def get_relationships(
     book_id: uuid.UUID,
     chapter: int = Query(...),
+    include_inactive: bool = Query(False),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -469,7 +538,8 @@ async def get_relationships(
         raise HTTPException(404)
     await consolidate_characters(db, book_id, up_to_chapter=chapter)
 
-    cache_key = f"{key_relationship_graph(str(book_id), chapter)}:v3"
+    cache_scope = "all" if include_inactive else "active"
+    cache_key = f"{key_relationship_graph(str(book_id), chapter)}:v4:{cache_scope}"
     cached = await cache_get(cache_key)
     if cached:
         return cached
@@ -477,35 +547,62 @@ async def get_relationships(
     chars_result = await db.execute(
         select(Character).where(Character.book_id == book_id, Character.first_chapter <= chapter)
     )
-    chars = chars_result.scalars().all()
-    chars = [char for char in chars if is_graph_character_visible(char)]
-    visible_ids = {str(char.id) for char in chars}
-    chars, id_map = collapse_graph_characters(chars)
-    canonical_ids = {str(char.id) for char in chars}
-    char_names = {str(char.id): char.name for char in chars}
+    chars = list(chars_result.scalars().all())
 
     rels_result = await db.execute(
         select(CharacterRelationship).where(
             CharacterRelationship.book_id == book_id,
             CharacterRelationship.from_chapter <= chapter,
-            CharacterRelationship.to_chapter.is_(None) | (CharacterRelationship.to_chapter >= chapter),
         )
     )
-    rels = rels_result.scalars().all()
+    historical_rels = list(rels_result.scalars().all())
+    relationship_counts: dict[str, int] = {}
+    for rel in historical_rels:
+        relationship_counts[str(rel.character_a_id)] = relationship_counts.get(str(rel.character_a_id), 0) + 1
+        relationship_counts[str(rel.character_b_id)] = relationship_counts.get(str(rel.character_b_id), 0) + 1
+
+    for char in chars:
+        setattr(char, "_graph_relationship_count", relationship_counts.get(str(char.id), 0))
+
+    analyses = {
+        str(char.id): graph_character_visibility_analysis(char, relationship_counts.get(str(char.id), 0))
+        for char in chars
+    }
+
+    visible_chars = [char for char in chars if is_graph_character_visible(char)]
+    visible_ids = {str(char.id) for char in visible_chars}
+    hidden_chars = [char for char in chars if str(char.id) not in visible_ids]
+    chars, id_map = collapse_graph_characters(visible_chars)
+    canonical_ids = {str(char.id) for char in chars}
+    char_names = {str(char.id): char.name for char in chars}
+    rels = historical_rels if include_inactive else [
+        rel
+        for rel in historical_rels
+        if rel.to_chapter is None or rel.to_chapter >= chapter
+    ]
     rels = [
         rel for rel in rels
         if str(rel.character_a_id) in visible_ids and str(rel.character_b_id) in visible_ids
     ]
 
     rel_summaries: dict[str, list[str]] = {}
-    edge_map: dict[tuple[str, str, str], dict] = {}
+    edge_map: dict[tuple[str, ...], dict[str, Any]] = {}
     for rel in rels:
         source = id_map.get(str(rel.character_a_id), str(rel.character_a_id))
         target = id_map.get(str(rel.character_b_id), str(rel.character_b_id))
         if source == target or source not in canonical_ids or target not in canonical_ids:
             continue
         left_key, right_key = sorted((source, target))
-        key: tuple[str, str, str] = (left_key, right_key, rel.rel_type or "neutral")
+        if include_inactive:
+            key = (
+                left_key,
+                right_key,
+                rel.rel_type or "neutral",
+                str(rel.from_chapter or 0),
+                str(rel.to_chapter or "open"),
+            )
+        else:
+            key = (left_key, right_key, rel.rel_type or "neutral")
         bucket = edge_map.setdefault(key, {
             "relationship_ids": [], "source": key[0], "target": key[1],
             "type": rel.rel_type or "neutral", "sentiment_values": [],
@@ -549,6 +646,10 @@ async def get_relationships(
             "trait_state": trait_snapshot, "personality_tags": c.personality_tags or [],
             "aliases": c.aliases or [], "motivations": c.motivations or [],
             "fears": c.fears or [], "archetype": c.archetype, "arc_summary": c.arc_summary,
+            "mention_count": c.mention_count or 0, "is_manual": getattr(c, "is_manual", False),
+            "graph_visibility_override": analyses[str(c.id)]["override"],
+            "visibility_score": analyses[str(c.id)]["score"],
+            "visibility_reasons": analyses[str(c.id)]["reasons"],
         })
 
     graph = {
@@ -561,11 +662,27 @@ async def get_relationships(
                 "description": " ".join(dict.fromkeys(item["descriptions"])) or None,
                 "from_chapter": min(item["chapters"]) if item["chapters"] else None,
                 "to_chapter": max(item["end_chapters"]) if item["end_chapters"] else None,
+                "status": "ended" if item["end_chapters"] and max(item["end_chapters"]) < chapter else "ongoing",
             }
             for item in edge_map.values()
         ],
+        "hidden_nodes": [
+            {
+                "id": str(char.id),
+                "name": char.name,
+                "role": char.role,
+                "first_chapter": char.first_chapter,
+                "mention_count": char.mention_count or 0,
+                "is_manual": getattr(char, "is_manual", False),
+                "graph_visibility_override": analyses[str(char.id)]["override"],
+                "visibility_score": analyses[str(char.id)]["score"],
+                "visibility_reasons": analyses[str(char.id)]["reasons"],
+                "connected_relationship_count": relationship_counts.get(str(char.id), 0),
+            }
+            for char in sorted(hidden_chars, key=lambda item: (item.first_chapter, item.name))
+        ],
     }
-    if graph["nodes"] or graph["edges"]:
+    if graph["nodes"] or graph["edges"] or graph["hidden_nodes"]:
         await cache_set(cache_key, graph, settings.REDIS_TTL_GRAPH)
     return graph
 
@@ -588,7 +705,14 @@ async def search(
     if cached:
         return cached
 
-    results = await semantic_search(db, book_id, q, chapter)
+    results = await semantic_search(
+        db,
+        book_id,
+        q,
+        chapter,
+        usage_user_id=current_user.id,
+        usage_feature="reader_search",
+    )
     if not results:
         lowered = q.strip().lower()
         lexical_rows = (await db.execute(
@@ -662,6 +786,12 @@ async def get_chapter_list(
         author_visible = [chapter for chapter, available in intelligence_map.items() if available]
         if author_visible:
             read_upto = max(author_visible)
+    tags_by_chapter = await list_custom_tags_for_entity_ids(
+        db,
+        entity_type=ENTITY_TYPE_CHAPTER,
+        entity_ids=[chapter.id for chapter in chapters],
+        book_id=book.id,
+    )
 
     return {
         "read_upto": read_upto,
@@ -671,6 +801,7 @@ async def get_chapter_list(
                 "number": chapter.number, "title": chapter.title, "processed": chapter.processed,
                 "intelligence_available": intelligence_map.get(chapter.number, True),
                 "read": book.mode == "author" or chapter.number in read_set,
+                "tags": tags_by_chapter.get(chapter.id, []),
             }
             for chapter in chapters
         ],
@@ -1262,6 +1393,7 @@ async def update_progress(
     )).scalar()
     if current_row and await chapter_intelligence_available(db, book, current_user, current_chapter):
         await queue_analysis_if_missing(db, current_row, current_user)
+    await sync_beta_assignments_for_reader_book(db, book_id=book_id, current_user=current_user)
     return {"ok": True}
 
 
@@ -1295,6 +1427,7 @@ async def mark_book_read(
         progress.last_read = datetime.now(UTC)
 
     await db.commit()
+    await sync_beta_assignments_for_reader_book(db, book_id=book_id, current_user=current_user)
     return {"ok": True, "current_chapter": max(chapters_read), "chapters_read_count": len(chapters_read), "percent_complete": 100.0, "chapters_left": 0}
 
 
@@ -1336,4 +1469,5 @@ async def update_chapter_read_status(
         )).scalar()
         if chapter_row and await chapter_intelligence_available(db, book, current_user, chapter):
             await queue_analysis_if_missing(db, chapter_row, current_user)
+    await sync_beta_assignments_for_reader_book(db, book_id=book_id, current_user=current_user)
     return {"ok": True, "chapter": chapter, "read": read}

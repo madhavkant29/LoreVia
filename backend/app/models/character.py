@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import ARRAY, DateTime, ForeignKey, Index, Integer, String, func
+from sqlalchemy import ARRAY, Boolean, DateTime, ForeignKey, Index, Integer, String, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -63,6 +63,7 @@ class Character(Base):
     embedding: Mapped[list[float] | None] = mapped_column(Vector(1536))
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    is_manual: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
     book = relationship("Book", back_populates="characters")
     states = relationship("CharacterState", back_populates="character", cascade="all, delete-orphan")

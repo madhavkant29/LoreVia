@@ -4,7 +4,7 @@ import { LegalPageShell } from "@/components/legal/LegalPageShell"
 
 export const metadata: Metadata = {
   title: "Terms & Conditions",
-  description: "Read the LoreVia Terms & Conditions for account responsibilities, permitted uploads, AI outputs, billing, and acceptable use.",
+  description: "Read the LoreVia for authors Terms & Conditions for account responsibilities, permitted uploads, AI outputs, billing, and acceptable use.",
   alternates: {
     canonical: "/terms",
   },

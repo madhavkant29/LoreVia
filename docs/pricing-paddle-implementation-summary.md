@@ -16,15 +16,15 @@ What changed:
 
 - Tier normalization now treats these as the canonical live tiers:
   - `free`
-  - `reader`
+  - `reader` as an internal collaboration-only access tier
   - `author`
   - `architect`
   - `admin`
 - Legacy aliases still normalize in code only:
   - `pro` -> `author`
   - `power` -> `architect`
-  - `pro_monthly` -> `reader_monthly`
-  - `pro_annual` -> `reader_annual`
+  - `pro_monthly` -> internal collaboration access monthly code
+  - `pro_annual` -> internal collaboration access annual code
   - `power_monthly` -> `author_monthly`
   - `power_annual` -> `author_annual`
 - Trial access is computed from `users.created_at` and does not overwrite the purchased plan in `users.tier`.
@@ -48,7 +48,7 @@ What changed:
 - Config was aligned to the launch plan:
   - Free search: `5/day`
   - Free prediction: `3/day`
-  - Reader prediction: `10/day`
+  - Collaboration-only prediction: `10/day`
   - Trial protected authoring cap: `20/day`
   - Author protected authoring cap: `30/day`
   - Architect protected authoring cap: `60/day`
@@ -78,7 +78,7 @@ What changed:
     - uses the same shared protected-authoring daily bucket
 - This means trial users, Author users, and Architect users consume from the same protected surface family for advisor and continuity usage, which matches the launch fair-use intent.
 
-### 4. Reader and free entitlement enforcement
+### 4. Collaboration-only and free entitlement enforcement
 
 Implemented in:
 
@@ -89,7 +89,7 @@ What changed:
 - Free users can no longer access detailed or key-point summaries after trial expiry.
 - Summary mode enforcement is now:
   - Free: `short` only
-  - Reader and above: all summary modes
+  - collaboration-only access and above: all summary modes
 - Thematic search now also runs through the search limiter dependency.
 - Existing author-only protections stayed in place elsewhere for manuscript/editor/advisor surfaces.
 
@@ -143,7 +143,7 @@ What changed:
 
 - Pricing copy now reflects the launch plan more closely:
   - Free search/prediction numbers
-  - Reader isolation wording
+  - collaboration-only isolation wording
   - Author and Architect fair-use language
   - annual savings messaging
 - Settings now explain trial reversion more clearly and show the formatted trial end date when available.

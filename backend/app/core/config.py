@@ -119,6 +119,24 @@ class Settings(BaseSettings):
     REWARDED_AD_DAILY_CAP: int = 3
     REWARDED_AD_SESSION_TTL_SECONDS: int = 900
     REWARDED_AD_MIN_GRANT_SECONDS: int = 5
+    DAILY_LOGIN_REWARD_POINTS: int = 1
+    PUBLIC_SHARE_POINTS_COST: int = 10
+    REVIEW_FEEDBACK_REWARD_POINTS: int = 2
+    POSITIVE_BETA_REVIEW_REWARD_POINTS: int = 3
+
+    # Public demo / sharing
+    PUBLIC_MODE_ENABLED: bool = True
+
+    # Beta reads
+    BETA_READ_MIN_WINDOW_DAYS: int = 3
+    BETA_READ_MAX_WINDOW_DAYS: int = 7
+    BETA_READ_KEEP_READ_ONLY_AFTER_EXPIRY: bool = False
+    BETA_READ_ALLOW_LATE_FEEDBACK: bool = False
+    BETA_READ_MISSED_PENALTY_THRESHOLD: int = 3
+    BETA_READ_PENALTY_ENABLED: bool = True
+    BETA_READ_PENALTY_TYPE: str = "warning"
+    BETA_READ_PENALTY_AMOUNT: int = 0
+    BETA_READ_POINT_DEDUCTION: int = 0
 
     # Monitoring
     SENTRY_DSN: str | None = None
@@ -149,6 +167,7 @@ class Settings(BaseSettings):
     EMAIL_VERIFICATION_TOKEN_TTL_SECONDS: int = 86400
     # Tier limits
     FREE_MAX_BOOKS: int = 2
+    AUTHOR_MAX_UPLOADS: int = 15
     FREE_TOTAL_TOKEN_BUDGET: int = 250000
     FREE_SEARCH_PER_DAY: int = 5
     FREE_SUMMARY_PER_HOUR: int = 30

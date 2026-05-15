@@ -1,54 +1,38 @@
 import type { Metadata, Viewport } from "next"
 import Script from "next/script"
 import "./globals.css"
-import { Merriweather, Newsreader, Space_Grotesk } from "next/font/google"
+import { QueryProvider } from "@/components/app/QueryProvider"
 import { PostHogClientProvider } from "@/components/analytics/PostHogClient"
 import { SiteFooter } from "@/components/layout/SiteFooter"
 import {
   DEFAULT_OG_IMAGE,
   SITE_DESCRIPTION,
   SITE_NAME,
+  SITE_TAGLINE,
+  SITE_TITLE,
   SITE_URL,
   organizationJsonLd,
   websiteJsonLd,
 } from "@/lib/seo"
 
-const uiFont = Space_Grotesk({
-  subsets: ["latin"],
-  variable: "--font-ui",
-  display: "swap",
-})
-
-const merriweather = Merriweather({
-  subsets: ["latin"],
-  weight: ["400", "700"],
-  style: ["normal", "italic"],
-  variable: "--font-merriweather",
-  display: "swap",
-})
-
-const newsreader = Newsreader({
-  subsets: ["latin"],
-  weight: ["400", "600", "800"],
-  style: ["normal", "italic"],
-  variable: "--font-newsreader",
-  display: "swap",
-})
-
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   applicationName: SITE_NAME,
   title: {
-    default: "LoreVia: AI Reading Companion for Authors",
-    template: `%s | ${SITE_NAME}`,
+    default: SITE_TITLE,
+    template: `%s | ${SITE_TITLE}`,
   },
   description: SITE_DESCRIPTION,
   keywords: [
-    "AI writing assistant",
+    "LoreVia for authors",
+    "author software",
+    "novel writing assistant",
     "manuscript analysis",
+    "manuscript editor",
     "character tracker",
     "story bible",
     "plot continuity",
+    "revision workflow",
     "book writing tool",
     "author tools",
     "LoreVia",
@@ -77,34 +61,32 @@ export const metadata: Metadata = {
     locale: "en_US",
     url: SITE_URL,
     siteName: SITE_NAME,
-    title: "LoreVia: AI Reading Companion for Authors",
-    description:
-      "Track characters, plot threads, timelines and story consistency with AI. Your manuscript, deeply understood.",
+    title: SITE_TAGLINE,
+    description: SITE_DESCRIPTION,
     images: [
       {
         url: DEFAULT_OG_IMAGE,
         width: 1200,
         height: 630,
-        alt: "LoreVia: AI Reading Companion for Authors",
+        alt: SITE_TAGLINE,
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "LoreVia: AI Reading Companion for Authors",
-    description:
-      "Track characters, plot threads, timelines and story consistency with AI.",
+    title: SITE_TAGLINE,
+    description: SITE_DESCRIPTION,
     images: [DEFAULT_OG_IMAGE],
     creator: "@getlorevia",
   },
   manifest: "/manifest.webmanifest",
   icons: {
     icon: [
-      { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
-      { url: "/icon-512.png", sizes: "512x512", type: "image/png" },
+      { url: "/favicon.ico" },
+      { url: "/icon.png", sizes: "512x512", type: "image/png" },
     ],
-    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
-    shortcut: "/icon-192.png",
+    apple: [{ url: "/apple-icon.png", sizes: "180x180", type: "image/png" }],
+    shortcut: "/favicon.ico",
   },
   appleWebApp: {
     capable: true,
@@ -126,7 +108,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       lang="en"
       suppressHydrationWarning
       data-scroll-behavior="smooth"
-      className={`${uiFont.variable} ${merriweather.variable} ${newsreader.variable}`}
     >
       <head>
         <Script id="website-jsonld" type="application/ld+json" strategy="beforeInteractive">
@@ -137,10 +118,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         </Script>
       </head>
       <body className="antialiased">
-        <PostHogClientProvider>
-          {children}
-          <SiteFooter />
-        </PostHogClientProvider>
+        <QueryProvider>
+          <PostHogClientProvider>
+            {children}
+            <SiteFooter />
+          </PostHogClientProvider>
+        </QueryProvider>
       </body>
     </html>
   )

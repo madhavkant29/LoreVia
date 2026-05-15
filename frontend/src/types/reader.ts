@@ -1,16 +1,20 @@
 export type VisualMode = "off" | "minimal" | "full"
 export type SummaryMode = "short" | "detailed" | "key_points"
 export type ReaderDisplayStyle = "relaxed" | "published"
+export type BetaReadViewBucket = "active" | "scheduled" | "completed" | "missed"
 
 export interface ChapterData {
   chapter_number: number
   chapter_title: string | null
+  content_version?: number | null
   total_chapters?: number | null
   intelligence_available?: boolean
+  can_copy_manuscript?: boolean
   text_url: string | null
   text_content?: string | null
   html_content?: string | null
   media?: ChapterMedia[]
+  tags?: string[]
   characters: ChapterCharacter[]
 }
 
@@ -56,6 +60,7 @@ export interface ChapterListItem {
   processed: boolean
   intelligence_available?: boolean
   read: boolean
+  tags?: string[]
 }
 
 export interface ChapterListResponse {
@@ -70,6 +75,92 @@ export interface ReadingProgress {
   chapters_read_count: number
   percent_complete: number
   chapters_left: number
+}
+
+export interface RecallResponse {
+  recall: string | null
+  last_chapter?: number | null
+  cached?: boolean
+}
+
+export interface BetaReadAssignment {
+  id: string
+  book_id: string
+  author_user_id: string
+  reader_user_id: string | null
+  reader_email: string
+  collaborator_id: string | null
+  state: string
+  view_bucket: BetaReadViewBucket
+  task_label: string
+  scope_kind: string
+  section_label: string | null
+  chapter_start: number | null
+  chapter_end: number | null
+  window_days: number
+  reward_points: number
+  projected_reward_points: number
+  awarded_points: number
+  required_progress_pct: number
+  required_comment_count: number
+  required_feedback_item_count: number
+  require_final_feedback: boolean
+  starts_at: string
+  expires_at: string
+  access_granted_at: string
+  submitted_at: string | null
+  completed_at: string | null
+  awarded_at: string | null
+  first_opened_at: string | null
+  missed_reason: string | null
+  counted_toward_missed_streak: boolean
+  revoked_at: string | null
+  revoked_reason: string | null
+  disqualified_at: string | null
+  disqualified_reason: string | null
+  book_title: string
+  author_name: string
+  book_route_title: string
+  progress_pct: number
+  chapters_total: number
+  chapters_read_count: number
+  comment_count: number
+  feedback_item_count: number
+  question_count: number
+  answered_question_count: number
+  current_chapter: number
+  status_label: string
+  primary_action: string
+  submission_allowed: boolean
+  is_overdue: boolean
+  consecutive_missed_beta_reads: number
+  penalty_status: string
+  penalty_warning: string | null
+  final_rating: number | null
+  rating_sentiment: string | null
+  book_average_rating: number | null
+  book_rating_count: number
+}
+
+export interface BetaReadAssignmentListResponse {
+  items: BetaReadAssignment[]
+}
+
+export interface BetaReadAssignmentCreateInput {
+  readerEmail: string
+  taskLabel: string
+  scopeKind?: "full_book" | "chapter_range" | "section"
+  sectionLabel?: string | null
+  chapterStart?: number | null
+  chapterEnd?: number | null
+  windowDays: number
+  rewardPoints: number
+  requiredProgressPct?: number
+  requiredCommentCount?: number
+  requiredFeedbackItemCount?: number
+  requireFinalFeedback?: boolean
+  startsAt?: string | null
+  authorQuestions?: string[]
 }
 
 export interface SummaryCollectionItem {
@@ -103,6 +194,7 @@ export interface PlotThread {
   related_characters: string[]
   risk: string | null
   suggested_action: string | null
+  tags?: string[]
 }
 
 export interface ForeshadowingItem {

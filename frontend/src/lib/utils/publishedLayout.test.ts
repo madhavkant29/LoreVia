@@ -19,6 +19,13 @@ describe("published layout utilities", () => {
     expect(blocks[1]?.content).toBe("* * *")
   })
 
+  it("detects em-dash scene breaks used in novel formatting", () => {
+    const blocks = parsePublishedTextBlocks("The room went quiet.\n\n\u2014\u2014\u2014\n\nMorning came cold.")
+
+    expect(blocks.map((block) => block.type)).toEqual(["paragraph", "scene_break", "paragraph"])
+    expect(blocks[1]?.content).toBe("\u2014\u2014\u2014")
+  })
+
   it("detects quoted documents and removes markdown quote markers", () => {
     const blocks = parsePublishedTextBlocks("> CASE FILE 17\n> The witness refused to sign.")
 

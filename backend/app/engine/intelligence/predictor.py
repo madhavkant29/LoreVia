@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.engine.search.semantic import semantic_search
+from app.utils.llm_usage_utils import create_tracked_chat_completion
 
 
 def get_client() -> AsyncOpenAI:
@@ -40,6 +41,8 @@ async def predict(
     book_id: uuid.UUID,
     question: str,
     current_chapter: int,
+    *,
+    user_id: uuid.UUID | None = None,
 ) -> list[dict]:
     client = get_client()
     try:
@@ -49,11 +52,18 @@ async def predict(
             question,
             current_chapter,
             limit=settings.SEARCH_MAX_CONTEXT_CHUNKS,
+            usage_user_id=user_id,
+            usage_feature="prediction_search",
         )
         context = "\n\n".join(c["text"] for c in context_chunks)
 
-        r = await client.chat.completions.create(
+        r = await create_tracked_chat_completion(
+            client=client,
+            feature="prediction",
             model=settings.OPENAI_INTEL_MODEL,
+            db=db,
+            user_id=user_id,
+            book_id=book_id,
             messages=[
                 {"role": "system", "content": PREDICT_SYSTEM},
                 {

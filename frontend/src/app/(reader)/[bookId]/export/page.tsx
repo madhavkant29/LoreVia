@@ -1,5 +1,6 @@
 "use client"
 
+import axios from "axios"
 import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useParams } from "next/navigation"
@@ -27,6 +28,12 @@ function downloadBlob(blob: Blob, filename: string) {
 
 function safeFileBase(value: string | undefined, fallback: string) {
   return (value || fallback).replace(/[^\w\s-]/g, "").trim().replace(/\s+/g, "-") || fallback
+}
+
+function getApiErrorDetail(error: unknown) {
+  if (!axios.isAxiosError(error)) return null
+  const detail = error.response?.data?.detail
+  return typeof detail === "string" ? detail : null
 }
 
 export default function ExportStudioPage() {
@@ -185,8 +192,8 @@ export default function ExportStudioPage() {
       await worldBuildingApi.uploadDocuments(bookId, { files: worldFiles })
       setStatus(`Imported ${worldFiles.length} worldbuilding file${worldFiles.length === 1 ? "" : "s"}.`)
       setWorldFiles([])
-    } catch {
-      setStatus("Could not import the worldbuilding files.")
+    } catch (error) {
+      setStatus(getApiErrorDetail(error) ?? "Could not import the worldbuilding files.")
     } finally {
       setImporting(null)
     }

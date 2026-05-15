@@ -1,29 +1,29 @@
 # LoreVia
 
-LoreVia is an AI-powered reading workspace for long-form fiction. It helps readers move through dense novels and series without losing track of characters, relationships, events, themes, or prior chapters.
+LoreVia is an AI-powered author continuity platform for long-form fiction. It helps writers, developmental editors, and collaborators keep manuscripts, characters, relationships, plot threads, worldbuilding, and cross-book continuity aligned as a story evolves.
 
-Instead of acting like a generic document chatbot, LoreVia is designed around the reading journey itself: progress-aware summaries, evolving character profiles, relationship tracking, spoiler-sensitive recall, grounded Q&A, saved quotes, and book-level navigation tools.
+Instead of acting like a generic document chatbot, LoreVia is organized around the author workflow itself: continuity-aware summaries, evolving character profiles, relationship tracking, grounded Q&A, manuscript notes, export tools, and spoiler-safe reader surfaces when they are needed.
 
 ## What The Project Does
 
-LoreVia lets a reader upload a book, process it into chapters and chunks, and explore it through a set of AI-assisted reading tools. The product is structured around three levels of understanding:
+LoreVia lets an author upload a manuscript or book, process it into chapters and chunks, and work with it through a set of AI-assisted continuity tools. The product is structured around three levels of understanding:
 
 - `Character Engine` for the micro view of people, motivations, traits, aliases, and relationships
-- `Event / Plot Tracker` for the meso view of what has happened so far
+- `Plot / Continuity Tracker` for the meso view of what has happened, what is unresolved, and what may break
 - `Theme / Cross-Book Analysis` for the macro view of recurring motifs, arcs, and multi-book continuity
 
 The app is built as a full-stack system with asynchronous processing so that ingestion, extraction, and intelligence features can run independently from the main web app.
 
 ## Core Features
 
-- `Book Upload and Parsing`
-  Upload PDF or EPUB files and turn them into chapter-aware, searchable reading material.
+- `Manuscript Upload and Parsing`
+  Upload PDF, EPUB, DOCX, DOC, or text-based manuscript files and turn them into chapter-aware, searchable drafting material.
 
-- `Progress-Aware Reading`
-  Track current chapter, reading progress, and chapter completion state.
+- `Author Continuity Workspace`
+  Track book mode, chapter progress, draft state, and editing context in a workspace built for revision.
 
-- `Spoiler-Safe Summaries`
-  Show summaries only for chapters the reader has already finished.
+- `Continuity-Aware Summaries`
+  Show summaries, chapter notes, and recall only within the spoiler boundaries that the book and user context allow.
 
 - `Character Engine`
   Build evolving character profiles with merged aliases, roles, motivations, fears, traits, and descriptions.
@@ -31,20 +31,20 @@ The app is built as a full-stack system with asynchronous processing so that ing
 - `Relationship Graph and Evolution`
   Track how characters are connected and how those connections change through events over time.
 
-- `Recall / Previously On`
-  Generate quick recaps so a reader can resume a book without rereading old chapters.
+- `Continuity Recall / Previously On`
+  Generate quick recaps so an author or collaborator can resume a draft without rereading old chapters.
 
 - `Grounded Q&A`
-  Let readers ask questions about the book and receive answers grounded in the text instead of speculative outputs.
+  Ask questions about the book or manuscript and receive answers grounded in the text instead of speculative outputs.
 
 - `Foreshadowing and Timeline Views`
-  Surface earlier hints, major events, and arc progression from already-read material.
+  Surface earlier hints, major events, and arc progression from already-processed material.
 
 - `Thematic Search`
   Explore scenes and passages by idea or motif rather than just raw keyword matching.
 
-- `Saved Quotes and Notes`
-  Store quotes with metadata such as source book, chapter, and optional character context.
+- `Annotations, Notes, and Saved Quotes`
+  Store passages with metadata such as source book, chapter, and optional character context.
 
 - `Library and Shelf Management`
   Keep books in the library, archive them, or hide them from the UI while still preserving usage accounting.
@@ -62,7 +62,7 @@ LoreVia is split into a frontend, a FastAPI backend, background workers, and sup
 - `TypeScript`
 - `Tailwind CSS`
 
-The frontend handles authentication, library management, reading UI, pricing, settings, and all reader-side tools.
+The frontend handles authentication, library management, manuscript editing, pricing, settings, and all author-side continuity tools.
 
 ### Backend
 
@@ -78,7 +78,7 @@ The backend manages auth, uploads, parsing, progress tracking, book metadata, ch
 - `Celery`
 - Separate worker queues for extraction, analysis, embedding, and intelligence tasks
 
-Workers parse books, generate chunks, compute embeddings, extract characters and relationships, and produce derived reading features.
+Workers parse books, generate chunks, compute embeddings, extract characters and relationships, and produce derived continuity features.
 
 ### Infrastructure
 
@@ -89,12 +89,12 @@ Workers parse books, generate chunks, compute embeddings, extract characters and
 
 ## How LoreVia Works
 
-1. A user uploads a book.
+1. An author uploads a manuscript or book.
 2. The backend stores the file and records a book entry.
-3. Workers parse the book into chapters and chunks.
+3. Workers parse the source into chapters and chunks.
 4. AI-backed extraction builds summaries, character data, relationships, and retrieval context.
-5. The frontend exposes those features through a structured reading workspace.
-6. User progress determines what the app should reveal and what it should keep spoiler-safe.
+5. The frontend exposes those features through a structured author continuity workspace.
+6. Book state determines what the app should reveal and what it should keep spoiler-safe.
 
 ## Running Locally
 
@@ -138,8 +138,6 @@ JWT_SECRET=replace_with_a_long_random_secret
 
 PADDLE_API_KEY=pdl_live_or_sandbox_key_here
 PADDLE_WEBHOOK_SECRET=pdl_webhook_secret_here
-PADDLE_READER_MONTHLY_PRICE_ID=pri_reader_monthly
-PADDLE_READER_ANNUAL_PRICE_ID=pri_reader_annual
 PADDLE_AUTHOR_MONTHLY_PRICE_ID=pri_author_monthly
 PADDLE_AUTHOR_ANNUAL_PRICE_ID=pri_author_annual
 PADDLE_ARCHITECT_MONTHLY_PRICE_ID=pri_architect_monthly
@@ -210,7 +208,7 @@ docker compose -f docker-compose-local.yml down -v
 
 ## Testing
 
-LoreVia now has backend tests, frontend unit tests, and frontend E2E smoke tests.
+LoreVia has backend tests, frontend unit tests, and frontend E2E smoke tests.
 
 ### Backend tests
 
@@ -294,4 +292,4 @@ LoreVia/
 
 ## Why This Project Matters
 
-LoreVia was built to solve a real reading problem: long books are hard to hold in working memory. Readers often forget who a character is, when an event happened, or why a relationship matters. This project turns that pain point into a full product experience by combining retrieval, summarization, entity extraction, asynchronous processing, and a focused reading UI.
+LoreVia was built to solve a real writing problem: long manuscripts are hard to keep consistent over time. Authors and collaborators lose track of character state, unresolved promises, chapter history, and cross-book continuity. This project turns that pain point into a full product experience by combining retrieval, summarization, entity extraction, asynchronous processing, and a focused author continuity workspace.

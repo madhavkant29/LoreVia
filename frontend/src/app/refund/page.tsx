@@ -5,7 +5,7 @@ import { SUPPORT_EMAIL } from "@/lib/constants/contact"
 
 export const metadata: Metadata = {
   title: "Refund Policy",
-  description: "Understand LoreVia subscription cancellation, refund review criteria, renewal timing, and billing support.",
+  description: "Understand LoreVia for authors subscription cancellation, refund review criteria, renewal timing, and billing support.",
   alternates: {
     canonical: "/refund",
   },

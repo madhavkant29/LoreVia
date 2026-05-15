@@ -13,7 +13,7 @@ export interface PublishedTextBlock {
   content: string
 }
 
-const SCENE_BREAK_PATTERN = /^(?:(?:\*\s*){3,}|#{1,3}|[-–—]{3,}|[~]{3,})$/
+const SCENE_BREAK_PATTERN = /^(?:(?:\*\s*){3,}|#{1,3}|(?:-|\u2013|\u2014){3,}|[~]{3,})$/
 const QUOTE_PREFIX_PATTERN = /^(?:>\s*)+/
 const BROADCAST_PATTERN = /^(?:radio|tv|television|news|broadcast|announcer|reporter)\s*[:\-]/i
 const ARTIFACT_PATTERN = /^(?:system|terminal|log|record|transcript|artifact)\s*[:\-]/i

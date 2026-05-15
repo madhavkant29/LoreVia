@@ -5,8 +5,6 @@ import pytest
 async def test_billing_status_reports_missing_configuration(auth_headers, client, monkeypatch):
     monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_API_KEY", None, raising=False)
     monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_WEBHOOK_SECRET", None, raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_READER_MONTHLY_PRICE_ID", None, raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_READER_ANNUAL_PRICE_ID", None, raising=False)
     monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_AUTHOR_MONTHLY_PRICE_ID", None, raising=False)
     monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_AUTHOR_ANNUAL_PRICE_ID", None, raising=False)
     monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_ARCHITECT_MONTHLY_PRICE_ID", None, raising=False)
@@ -28,7 +26,7 @@ async def test_billing_status_reports_missing_configuration(auth_headers, client
     assert "PADDLE_WEBHOOK_SECRET" in payload["missing_configuration"]
     assert "RESEND_API_KEY" in payload["missing_configuration"]
     assert "INTERNAL_JOB_SECRET" in payload["missing_configuration"]
-    assert len(payload["plans"]) == 6
+    assert len(payload["plans"]) == 4
     assert payload["trial_email_automation_code_ready"] is True
     assert payload["priority_processing_code_ready"] is True
     assert payload["points_wallet_ready"] is True
@@ -51,8 +49,6 @@ async def test_billing_status_reports_missing_configuration(auth_headers, client
 async def test_billing_status_reports_fully_configured_catalog(auth_headers, client, monkeypatch):
     monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_API_KEY", "pdl_test_key", raising=False)
     monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_WEBHOOK_SECRET", "whsec_test", raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_READER_MONTHLY_PRICE_ID", "pri_reader_monthly", raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_READER_ANNUAL_PRICE_ID", "pri_reader_annual", raising=False)
     monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_AUTHOR_MONTHLY_PRICE_ID", "pri_author_monthly", raising=False)
     monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_AUTHOR_ANNUAL_PRICE_ID", "pri_author_annual", raising=False)
     monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_ARCHITECT_MONTHLY_PRICE_ID", "pri_architect_monthly", raising=False)
@@ -68,6 +64,6 @@ async def test_billing_status_reports_fully_configured_catalog(auth_headers, cli
     assert payload["payments_ready"] is True
     assert payload["resend_api_key_present"] is True
     assert payload["internal_job_secret_present"] is True
-    assert payload["fully_configured_plan_count"] == 6
+    assert payload["fully_configured_plan_count"] == 4
     assert payload["missing_configuration"] == []
     assert all(plan["configured"] for plan in payload["plans"])

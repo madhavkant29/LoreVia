@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class SaveQuoteBody(BaseModel):
@@ -25,6 +25,7 @@ class PlotThreadOut(BaseModel):
     related_characters: list[str] = []
     risk: str | None = None
     suggested_action: str | None = None
+    tags: list[str] = Field(default_factory=list)
 
 
 class UpdatePlotThreadBody(BaseModel):

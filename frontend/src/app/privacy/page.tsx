@@ -6,7 +6,7 @@ import { TRUST_EFFECTIVE_DATE } from "@/lib/constants/trust"
 
 export const metadata: Metadata = {
   title: "Privacy Policy",
-  description: "Learn how LoreVia handles account data, manuscript uploads, analytics preferences, and third-party processing.",
+  description: "Learn how LoreVia for authors handles account data, manuscript uploads, analytics preferences, and third-party processing.",
   alternates: {
     canonical: "/privacy",
   },

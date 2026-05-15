@@ -2,11 +2,14 @@
 
 import type { ReactNode } from "react"
 import { useEffect, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
 import type { Route } from "next"
 import { useRouter } from "next/navigation"
 
+import { UpcomingBetaReadsCard } from "@/components/library/UpcomingBetaReadsCard"
 import { UploadModal } from "@/components/modals/UploadModal"
 import { booksApi } from "@/lib/api/books"
+import { asQueryKey, booksListCacheKey } from "@/lib/query/cacheKeys"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { getBookHref } from "@/lib/utils/bookRoutes"
 import type { Book, BookStatus } from "@/types/book"
@@ -175,8 +178,6 @@ export default function LibraryPage() {
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
 
-  const [books, setBooks] = useState<Book[]>([])
-  const [loading, setLoading] = useState(true)
   const [showUpload, setShowUpload] = useState(false)
   const [uploadPreset, setUploadPreset] = useState<{ mode?: "reader" | "author"; existingBookId?: string }>({})
   const [busyBookId, setBusyBookId] = useState<string | null>(null)
@@ -191,11 +192,20 @@ export default function LibraryPage() {
   const [pinnedIds, setPinnedIds] = useState<Record<string, boolean>>({})
   const [pinsReady, setPinsReady] = useState(false)
 
-  const load = () => booksApi.list(true).then(setBooks).finally(() => setLoading(false))
-
-  useEffect(() => {
-    load()
-  }, [])
+  const {
+    data: books = [],
+    isLoading: loading,
+    refetch,
+  } = useQuery<Book[]>({
+    queryKey: asQueryKey(booksListCacheKey(true)),
+    queryFn: () => booksApi.list(true),
+    staleTime: 20_000,
+    refetchInterval: (query) => {
+      const items = (query.state.data as Book[] | undefined) ?? []
+      const hasProcessingBook = items.some((book) => book.status === "processing" || (!book.cover_url && book.format === "pdf"))
+      return hasProcessingBook ? 5_000 : false
+    },
+  })
 
   useEffect(() => {
     try {
@@ -215,18 +225,6 @@ export default function LibraryPage() {
     if (!pinsReady) return
     window.localStorage.setItem(PINNED_STORAGE_KEY, JSON.stringify(pinnedIds))
   }, [pinnedIds, pinsReady])
-
-  useEffect(() => {
-    if (loading) return
-    const hasProcessingBook = books.some((book) => book.status === "processing" || (!book.cover_url && book.format === "pdf"))
-    if (!hasProcessingBook) return
-
-    const interval = window.setInterval(() => {
-      load()
-    }, 5000)
-
-    return () => window.clearInterval(interval)
-  }, [books, loading])
 
   const normalizedSearch = search.trim().toLowerCase()
   const visibleBooks = books.filter((book) => !book.hidden_at)
@@ -255,7 +253,7 @@ export default function LibraryPage() {
     setBusyBookId(bookId)
     try {
       await booksApi.archive(bookId, archived)
-      await load()
+      await refetch()
       setMenuBookId(null)
     } finally {
       setBusyBookId(null)
@@ -269,7 +267,7 @@ export default function LibraryPage() {
     setBusyBookId(bookId)
     try {
       await booksApi.hide(bookId, true)
-      await load()
+      await refetch()
       setMenuBookId(null)
     } finally {
       setBusyBookId(null)
@@ -450,6 +448,8 @@ export default function LibraryPage() {
             </div>
           </div>
 
+          <UpcomingBetaReadsCard isDark={isDark} />
+
           <section className="space-y-5">
             <SectionHeading
               icon={<PinIcon className={isDark ? "text-violet-300" : "text-violet-600"} />}
@@ -600,7 +600,7 @@ export default function LibraryPage() {
           onClose={() => {
             setShowUpload(false)
             setUploadPreset({})
-            load()
+            void refetch()
           }}
         />
       ) : null}

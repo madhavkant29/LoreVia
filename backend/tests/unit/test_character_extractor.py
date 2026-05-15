@@ -1,4 +1,9 @@
-from app.engine.character.extractor import _allow_auto_augmentation, _apply_anti_merge_hints, _clean_character_entries
+from app.engine.character.extractor import (
+    _allow_auto_augmentation,
+    _apply_anti_merge_hints,
+    _clean_character_entries,
+    _mention_has_person_context,
+)
 
 
 def test_clean_character_entries_strips_fragment_prefixes_and_keeps_supported_name():
@@ -108,3 +113,8 @@ def test_clean_character_entries_keeps_titled_surname_only_names_distinct():
     cleaned = _clean_character_entries(characters, ["Mr. Samsa", "Mrs. Samsa"], source_text)
 
     assert [item["name"] for item in cleaned] == ["Mr. Samsa", "Mrs. Samsa"]
+
+
+def test_mention_has_person_context_treats_narrative_action_as_character_evidence():
+    assert _mention_has_person_context("When ", "Gregor awoke from uneasy dreams.") is True
+    assert _mention_has_person_context("", "Gregor watched the door in silence.") is True

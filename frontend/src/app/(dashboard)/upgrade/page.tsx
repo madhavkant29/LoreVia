@@ -13,7 +13,7 @@ export default function UpgradePage() {
         <p className="text-sm font-semibold uppercase tracking-[0.28em] text-muted-foreground">Pricing</p>
         <h1 className="mt-3 text-4xl font-semibold tracking-tight text-foreground">Choose the plan that matches your work</h1>
         <p className="mt-3 max-w-3xl text-base leading-7 text-muted-foreground">
-          Compare plans, switch billing cadence, and start checkout without leaving the app.
+          Free stays included with your account. Compare the paid plans, switch billing cadence, and start checkout without leaving the app.
         </p>
       </div>
 

@@ -111,7 +111,7 @@ function LoginInner() {
         <div className="mb-8 text-center">
           <h1 className={`text-3xl font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>Sign in</h1>
           <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-            Enter your email and password to continue.
+            Enter your email and password to return to your author workspace.
           </p>
         </div>
 

@@ -1,6 +1,7 @@
 export type BookStatus = "pending" | "processing" | "ready" | "failed"
 export type BookFormat = "pdf" | "epub" | "docx" | "doc" | "fountain" | "txt" | "md" | "manual"
 export type BookWorkType = "novel" | "screenplay" | "other"
+export type RevisionTagTarget = "chapter" | "scene" | "character" | "note" | "comment" | "plot_thread" | "world_note"
 
 export interface Book {
   id: string
@@ -35,15 +36,18 @@ export interface Book {
   processing?: BookProcessing | null
   collaboration_role?: CollaborationRole | null
   collaboration_scope?: CollaborationScope | null
+  collaboration_permissions?: CollaborationPermissions | null
 }
 
 export type CollaborationRole =
   | "viewer"
+  | "reader_only"
   | "commenter"
   | "editor"
   | "beta_reader"
   | "developmental_editor"
   | "coauthor"
+  | "co_writer"
 
 export interface CollaborationScope {
   chapter_start?: number | null
@@ -53,6 +57,15 @@ export interface CollaborationScope {
   reader_confusion_report: boolean
 }
 
+export interface CollaborationPermissions {
+  can_edit_manuscript: boolean
+  can_view_story_bible: boolean
+  can_run_ai_scans: boolean
+  can_export: boolean
+  can_comment: boolean
+  can_view_selected_chapters_only: boolean
+}
+
 export interface BookCollaborator {
   id: string
   book_id: string
@@ -60,6 +73,7 @@ export interface BookCollaborator {
   display_name?: string | null
   role: CollaborationRole
   scope: CollaborationScope
+  permissions: CollaborationPermissions
   invite_status: "active" | "revoked" | string
   invited_at: string
   updated_at: string
@@ -143,6 +157,7 @@ export interface PublicBook {
   id: string
   title: string
   author: string | null
+  author_username: string | null
   genre: string | null
   description: string | null
   format: BookFormat
@@ -190,6 +205,46 @@ export interface BookNote {
   chapter_title: string | null
   title: string | null
   body: string
+  tags?: string[]
+  created_at: string
+  updated_at: string
+}
+
+export interface RevisionTagSet {
+  entity_type: RevisionTagTarget
+  entity_id: string
+  chapter_number?: number | null
+  tags: string[]
+}
+
+export type ManuscriptAnnotationCategory =
+  | "general"
+  | "continuity"
+  | "character"
+  | "worldbuilding"
+  | "pacing"
+  | "line_edit"
+  | "theme"
+
+export interface ManuscriptAnnotation {
+  id: string
+  book_id: string
+  book_title: string
+  chapter_number: number
+  chapter_title: string | null
+  category: ManuscriptAnnotationCategory | string
+  status: "open" | "resolved" | string
+  visibility: "shared" | "private" | string
+  quote: string
+  comment: string
+  anchor_context_before?: string | null
+  anchor_context_after?: string | null
+  start_offset?: number | null
+  end_offset?: number | null
+  created_by_user_id: string
+  created_by_label: string
+  can_edit: boolean
+  resolved_at?: string | null
   created_at: string
   updated_at: string
 }
@@ -290,10 +345,51 @@ export interface UserStats {
   }
   private: {
     total_uploads: number
+    manuscript_uploads?: number
+    worldbuilding_uploads?: number
+    upload_limit?: number | null
+    uploads_remaining?: number | null
+    upload_limit_unlimited?: boolean
     total_token_consumption: number
+    llm_request_count?: number
+    llm_prompt_tokens?: number
+    llm_completion_tokens?: number
+    llm_total_tokens?: number
     total_chapters_tracked: number
     saved_quotes: number
   }
+  writing: WritingDashboardStats
+}
+
+export interface WritingPeriodStat {
+  words: number
+  target_words?: number | null
+  progress_pct?: number | null
+}
+
+export interface WritingHeatmapDay {
+  date: string
+  words: number
+}
+
+export interface WritingEntry {
+  book_id?: string | null
+  chapter_number?: number | null
+  title: string
+  words: number
+}
+
+export interface WritingDashboardStats {
+  today: WritingPeriodStat
+  this_week: WritingPeriodStat
+  this_month: WritingPeriodStat
+  this_year: WritingPeriodStat
+  last_24_hours: WritingPeriodStat
+  last_7_days: WritingPeriodStat
+  last_30_days: WritingPeriodStat
+  last_year: WritingPeriodStat
+  heatmap: WritingHeatmapDay[]
+  entries_today: WritingEntry[]
 }
 
 export interface ChapterReportCharacter {
@@ -378,6 +474,24 @@ export interface ChapterVersion {
 export interface ChapterVersionDetail extends ChapterVersion {
   text: string
   html: string | null
+}
+
+export interface SceneVersion {
+  id: string
+  scene_id?: string | null
+  chapter_number?: number | null
+  scene_title: string
+  scene_path?: string | null
+  word_count?: number | null
+  note?: string | null
+  snapshot_kind?: string
+  created_at: string
+}
+
+export interface SceneVersionDetail extends SceneVersion {
+  description?: string | null
+  body: string
+  html_body?: string | null
 }
 
 export interface WordCountGoals {
@@ -505,11 +619,30 @@ export interface CharacterKnowledgeFact {
   warning?: string | null
 }
 
+export interface CharacterKnowledgeTimelineCell {
+  chapter_number: number
+  state: string
+}
+
+export interface CharacterKnowledgeTimelineRow {
+  character_name: string
+  chapter_learned?: number | null
+  source: string
+  cells: CharacterKnowledgeTimelineCell[]
+}
+
+export interface CharacterKnowledgeTimelineFact {
+  fact: string
+  rows: CharacterKnowledgeTimelineRow[]
+  warning?: string | null
+}
+
 export interface RevisionIntelligenceSummary {
   hero_message: string
   active_item_count: number
   high_severity_count: number
   task_ready_count: number
+  recent_edit_label?: string | null
 }
 
 export interface RevisionIntelligence {
@@ -519,6 +652,7 @@ export interface RevisionIntelligence {
   genre_checks: RevisionGenreCheck[]
   revision_plan: RevisionPlanPass[]
   knowledge_matrix: CharacterKnowledgeFact[]
+  knowledge_timeline: CharacterKnowledgeTimelineFact[]
   scene_advice: RevisionActionItem[]
   confusion_map: RevisionActionItem[]
   voice_alerts: RevisionActionItem[]
@@ -539,6 +673,7 @@ export interface NovelScene {
   sort_order: number
   source: string
   origin_chapter_number?: number | null
+  tags?: string[]
   created_at: string
   updated_at: string
 }
@@ -547,12 +682,15 @@ export interface WorkspaceChapterNode {
   chapter_number: number
   title?: string | null
   scene_count: number
+  structure_version: number
+  tags?: string[]
 }
 
 export interface WorkspaceSceneGroup {
   id: string
   label: string
   chapter_number?: number | null
+  structure_version?: number | null
   collapsed_by_default: boolean
   scenes: NovelScene[]
 }
@@ -561,6 +699,16 @@ export interface ManuscriptWorkspaceTree {
   chapters: WorkspaceChapterNode[]
   scene_groups: WorkspaceSceneGroup[]
   note_paths: string[]
+}
+
+export interface ChapterSceneOrder {
+  chapter_number: number
+  structure_version: number
+  scenes: Array<{
+    id: string
+    title: string
+    sort_order: number
+  }>
 }
 
 export interface BookProcessing {

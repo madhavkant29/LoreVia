@@ -4,7 +4,7 @@ export default function manifest(): MetadataRoute.Manifest {
   return {
     name: "LoreVia",
     short_name: "LoreVia",
-    description: "AI-powered reading workspace for long-form books.",
+    description: "LoreVia for authors is a manuscript workspace for continuity, revision, character tracking, and story memory.",
     start_url: "/library",
     scope: "/",
     display: "standalone",
@@ -24,13 +24,13 @@ export default function manifest(): MetadataRoute.Manifest {
         purpose: "maskable",
       },
       {
-        src: "/icon-512.png",
+        src: "/icon.png",
         sizes: "512x512",
         type: "image/png",
         purpose: "any",
       },
       {
-        src: "/icon-512.png",
+        src: "/icon.png",
         sizes: "512x512",
         type: "image/png",
         purpose: "maskable",

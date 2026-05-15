@@ -60,6 +60,8 @@ async def build_grounded_qa_context(
         question,
         current_chapter,
         limit=4,
+        usage_user_id=user_id,
+        usage_feature="grounded_qa_search",
     )
 
     context_blocks: list[str] = []

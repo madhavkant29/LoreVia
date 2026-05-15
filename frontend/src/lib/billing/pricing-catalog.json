@@ -1,0 +1,128 @@
+{
+  "plans": [
+    {
+      "code": "reader_monthly",
+      "tier": "reader",
+      "display_name": "Collaboration access",
+      "billing_interval": "monthly",
+      "price_usd": 12,
+      "checkout_enabled": false,
+      "price_id_env_keys": ["PADDLE_READER_MONTHLY_PRICE_ID", "PADDLE_PRO_MONTHLY_PRICE_ID"]
+    },
+    {
+      "code": "reader_annual",
+      "tier": "reader",
+      "display_name": "Collaboration access",
+      "billing_interval": "annual",
+      "price_usd": 120,
+      "checkout_enabled": false,
+      "price_id_env_keys": ["PADDLE_READER_ANNUAL_PRICE_ID", "PADDLE_PRO_ANNUAL_PRICE_ID"]
+    },
+    {
+      "code": "author_monthly",
+      "tier": "author",
+      "display_name": "Author",
+      "billing_interval": "monthly",
+      "price_usd": 29,
+      "checkout_enabled": true,
+      "price_id_env_keys": ["PADDLE_AUTHOR_MONTHLY_PRICE_ID", "PADDLE_POWER_MONTHLY_PRICE_ID"]
+    },
+    {
+      "code": "author_annual",
+      "tier": "author",
+      "display_name": "Author",
+      "billing_interval": "annual",
+      "price_usd": 290,
+      "checkout_enabled": true,
+      "price_id_env_keys": ["PADDLE_AUTHOR_ANNUAL_PRICE_ID", "PADDLE_POWER_ANNUAL_PRICE_ID"]
+    },
+    {
+      "code": "architect_monthly",
+      "tier": "architect",
+      "display_name": "Lore Architect",
+      "billing_interval": "monthly",
+      "price_usd": 49,
+      "checkout_enabled": true,
+      "price_id_env_keys": ["PADDLE_ARCHITECT_MONTHLY_PRICE_ID"]
+    },
+    {
+      "code": "architect_annual",
+      "tier": "architect",
+      "display_name": "Lore Architect",
+      "billing_interval": "annual",
+      "price_usd": 490,
+      "checkout_enabled": true,
+      "price_id_env_keys": ["PADDLE_ARCHITECT_ANNUAL_PRICE_ID"]
+    }
+  ],
+  "tiers": [
+    {
+      "key": "free",
+      "name": "Free",
+      "badge": "Included",
+      "access": "free",
+      "subtitle": "Your fallback plan after the 10-day Author trial ends",
+      "highlight": false,
+      "cta": "Included with your account",
+      "monthly_code": null,
+      "annual_code": null,
+      "message": "Free is included with every account. No checkout is required.",
+      "price_monthly": 0,
+      "price_annual": 0,
+      "bullets": [
+        "2 uploads total, including worldbuilding manuscripts",
+        "Can read curated public demo books",
+        "Can join invited beta reads for free",
+        "Unlimited Smart Tap and memory recall",
+        "Full character profiles",
+        "Short summaries only",
+        "5 semantic searches/day and 3 prediction queries/day"
+      ]
+    },
+    {
+      "key": "author",
+      "name": "Author",
+      "badge": "Paid plan",
+      "access": "paid",
+      "subtitle": "For authors actively drafting and revising",
+      "highlight": true,
+      "cta": "Upgrade to Author",
+      "monthly_code": "author_monthly",
+      "annual_code": "author_annual",
+      "price_monthly": 29,
+      "price_annual": 290,
+      "bullets": [
+        "Everything in Free, plus:",
+        "15 uploads across manuscript and worldbuilding workspaces",
+        "Worldbuilding manuscripts count as uploads",
+        "Series-linked worldbuilding counts once per book in the series",
+        "Author collaboration workflows for beta readers and manuscript feedback",
+        "Catch continuity errors automatically",
+        "Chapter and full-book manuscript editing",
+        "Character bible export and edit mode",
+        "Visual character relationship maps"
+      ]
+    },
+    {
+      "key": "architect",
+      "name": "Lore Architect",
+      "badge": "Paid plan",
+      "access": "paid",
+      "subtitle": "For authors managing series-scale continuity and worldbuilding",
+      "highlight": false,
+      "cta": "Upgrade to Lore Architect",
+      "monthly_code": "architect_monthly",
+      "annual_code": "architect_annual",
+      "price_monthly": 49,
+      "price_annual": 490,
+      "bullets": [
+        "Everything in Author, plus:",
+        "Unlimited uploads, including series-linked worldbuilding",
+        "Priority processing planned for launch rollout",
+        "Deeper continuity analysis",
+        "Analyze multiple books together",
+        "Early access to new features"
+      ]
+    }
+  ]
+}

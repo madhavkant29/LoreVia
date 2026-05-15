@@ -19,16 +19,19 @@ from app.utils.billing_utils import (
     protected_authoring_limit_per_day,
 )
 from app.utils.monetization_utils import (
+    POINT_ENTRY_GRANT,
+    POINT_ENTRY_SPEND,
+    POINT_ENTRY_EXPIRE,
     FIRST_PROCESSED_BOOK_POINTS,
     POINT_ACTION_HIGH_COST,
     POINT_ACTION_PREDICTION,
     POINT_ACTION_SEARCH,
-    POINT_ENTRY_SPEND,
-    POINT_ENTRY_EXPIRE,
-    POINT_ENTRY_GRANT,
+    POINT_SOURCE_DAILY_LOGIN,
     POINT_SOURCE_FIRST_BOOK,
+    POINT_SOURCE_PUBLIC_SHARE,
     POINT_SOURCE_REFERRAL,
     POINT_SOURCE_REWARDED_AD,
+    POINT_SOURCE_REVIEW_FEEDBACK,
     POINT_SPEND_OFFERS,
     REFERRED_REWARD_POINTS,
     REWARDED_AD_PROVIDER_GPT,
@@ -49,6 +52,7 @@ from app.utils.monetization_utils import (
     utc_day_bounds,
     utc_now,
 )
+from app.utils.user_utils import utc_today
 
 
 async def ensure_referral_code(db: AsyncSession, user: User) -> str:
@@ -698,6 +702,101 @@ async def reward_first_processed_book(db: AsyncSession, user: User, book: Book) 
         source_id=str(book.id),
         metadata={"book_title": book.title},
     )
+
+
+async def grant_daily_login_points(
+    db: AsyncSession,
+    user: User,
+    *,
+    now: datetime | None = None,
+) -> PointLedgerEntry | None:
+    reward_points = max(int(settings.DAILY_LOGIN_REWARD_POINTS), 0)
+    if reward_points <= 0:
+        return None
+    today = utc_today(now)
+    return await grant_points(
+        db,
+        user.id,
+        reward_points,
+        POINT_SOURCE_DAILY_LOGIN,
+        source_id=today.isoformat(),
+        metadata={
+            "login_date": today.isoformat(),
+            "login_streak_days": max(int(user.login_streak_days or 0), 0),
+        },
+    )
+
+
+async def grant_review_feedback_points(
+    db: AsyncSession,
+    user: User,
+    *,
+    source_id: str,
+    book_id: uuid.UUID | None = None,
+    assignment_id: uuid.UUID | None = None,
+) -> PointLedgerEntry | None:
+    reward_points = max(int(settings.REVIEW_FEEDBACK_REWARD_POINTS), 0)
+    if reward_points <= 0:
+        return None
+    return await grant_points(
+        db,
+        user.id,
+        reward_points,
+        POINT_SOURCE_REVIEW_FEEDBACK,
+        source_id=source_id,
+        metadata={
+            "book_id": str(book_id) if book_id else None,
+            "assignment_id": str(assignment_id) if assignment_id else None,
+        },
+    )
+
+
+async def charge_public_share_points(
+    db: AsyncSession,
+    user: User,
+    *,
+    source_id: str,
+    metadata: dict[str, Any] | None = None,
+) -> PointLedgerEntry | None:
+    points_cost = max(int(settings.PUBLIC_SHARE_POINTS_COST), 0)
+    if points_cost <= 0:
+        return None
+
+    existing = (
+        await db.execute(
+            select(PointLedgerEntry).where(
+                PointLedgerEntry.user_id == user.id,
+                PointLedgerEntry.entry_type == POINT_ENTRY_SPEND,
+                PointLedgerEntry.source_type == POINT_SOURCE_PUBLIC_SHARE,
+                PointLedgerEntry.source_id == source_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        return existing
+
+    await db.execute(select(User.id).where(User.id == user.id).with_for_update())
+    await expire_due_points_for_user(db, user.id)
+    balance = await point_balance(db, user.id)
+    if balance < points_cost:
+        raise ValueError(
+            f"Public sharing costs {points_cost} points. You do not have enough points to share this book publicly."
+        )
+
+    entry = PointLedgerEntry(
+        user_id=user.id,
+        entry_type=POINT_ENTRY_SPEND,
+        source_type=POINT_SOURCE_PUBLIC_SHARE,
+        source_id=source_id,
+        points_delta=-points_cost,
+        metadata_json={
+            "points_cost": points_cost,
+            **(metadata or {}),
+        },
+    )
+    db.add(entry)
+    await db.flush()
+    return entry
 
 
 async def expire_due_points(db: AsyncSession, now: datetime | None = None, limit: int = 250) -> int:

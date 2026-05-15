@@ -244,6 +244,7 @@ def build_plot_thread_payload(
     thread: Any,
     *,
     current_chapter: int | None,
+    tags: list[str] | None = None,
 ) -> dict[str, Any]:
     title = normalize_plot_thread_title(getattr(thread, "title", ""))
     introduced_at = getattr(thread, "introduced_at", None)
@@ -285,4 +286,5 @@ def build_plot_thread_payload(
             current_chapter=current_chapter,
             last_mentioned_at=last_mentioned_at,
         ),
+        "tags": tags or [],
     }

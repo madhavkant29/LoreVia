@@ -84,7 +84,7 @@ async def test_free_users_only_get_short_summaries_after_trial(client, db):
 
     assert short_response.status_code == 200
     assert detailed_response.status_code == 403
-    assert detailed_response.json()["detail"] == "Upgrade to Reader to unlock detailed and key-point summaries."
+    assert detailed_response.json()["detail"] == "Upgrade to Author to unlock detailed and key-point summaries."
 
 
 @pytest.mark.asyncio

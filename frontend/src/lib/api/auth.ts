@@ -13,6 +13,8 @@ export interface RegisterResponse {
 
 export interface TierLimits {
   free_max_books: number
+  author_max_uploads: number
+  architect_uploads_unlimited: boolean
   free_total_token_budget: number
   free_search_per_day: number
   free_summary_per_hour: number

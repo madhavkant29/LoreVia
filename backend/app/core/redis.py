@@ -201,6 +201,10 @@ def key_grounded_answer(book_id: str, chapter: int, question: str) -> str:
     return f"grounded_answer:{book_id}:{chapter}:{q_hash}"
 
 
+def key_advisor_task(task_id: str) -> str:
+    return f"advisor:task:{task_id}"
+
+
 def key_public_books() -> str:
     return "public:books"
 

@@ -7,7 +7,7 @@ from celery import Celery, Task, signals
 from sentry_sdk.integrations.celery import CeleryIntegration
 
 from app.core.config import settings
-from app.utils.request_context import get_request_id, set_request_id
+from app.utils.request_context import get_request_id, set_request_id, set_request_user_id
 from app.workers.queues.queues import TASK_QUEUES
 
 
@@ -145,5 +145,6 @@ def _task_prerun_set_request_id(sender=None, headers=None, body=None, **kwargs):
 def _task_postrun_clear_request_id(sender=None, headers=None, body=None, **kwargs):
     try:
         set_request_id(None)
+        set_request_user_id(None)
     except Exception:
         return

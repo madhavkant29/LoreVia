@@ -2,6 +2,7 @@
 Plot thread extraction and status tracking.
 """
 import json
+import uuid
 
 from openai import AsyncOpenAI
 
@@ -37,6 +38,8 @@ async def extract_plot_threads(
     chapter_num: int,
     *,
     openai_client: AsyncOpenAI | None = None,
+    user_id: uuid.UUID | None = None,
+    book_id: uuid.UUID | None = None,
 ) -> list[dict]:
     try:
         content = await complete_with_fallback(
@@ -48,6 +51,10 @@ async def extract_plot_threads(
             max_tokens=1000,
             response_format={"type": "json_object"},
             openai_client=openai_client,
+            usage_feature="plot_thread_extraction",
+            usage_user_id=user_id,
+            usage_book_id=book_id,
+            usage_metadata={"chapter_number": chapter_num},
         )
         try:
             data = json.loads(_strip_json_fence(content))

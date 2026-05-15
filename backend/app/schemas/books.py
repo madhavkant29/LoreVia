@@ -15,6 +15,36 @@ class CollaborationScope(BaseModel):
     reader_confusion_report: bool = False
 
 
+class CollaborationPermissions(BaseModel):
+    can_edit_manuscript: bool = False
+    can_view_story_bible: bool = False
+    can_run_ai_scans: bool = False
+    can_export: bool = False
+    can_comment: bool = False
+    can_view_selected_chapters_only: bool = True
+
+
+CollaborationRoleLiteral = Literal[
+    "viewer",
+    "commenter",
+    "editor",
+    "beta_reader",
+    "developmental_editor",
+    "coauthor",
+    "reader_only",
+    "co_writer",
+]
+TagTargetLiteral = Literal[
+    "chapter",
+    "scene",
+    "character",
+    "note",
+    "comment",
+    "plot_thread",
+    "world_note",
+]
+
+
 class BookOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -50,6 +80,7 @@ class BookOut(BaseModel):
     processing: BookProcessingOut | None = None
     collaboration_role: str | None = None
     collaboration_scope: CollaborationScope | None = None
+    collaboration_permissions: CollaborationPermissions | None = None
 
 
 class SeriesOut(BaseModel):
@@ -142,6 +173,22 @@ class BookModeBody(BaseModel):
     mode: str
 
 
+class CharacterCreateBody(BaseModel):
+    name: str
+    first_chapter: int = Field(default=1, ge=1)
+    aliases: list[str] | None = None
+    role: str | None = None
+    description: str | None = None
+    goal: str | None = None
+    lie_they_believe: str | None = None
+    backstory_wound: str | None = None
+    arc_type: str | None = None
+    arc_summary: str | None = None
+    personality_tags: list[str] | None = None
+    motivations: list[str] | None = None
+    fears: list[str] | None = None
+
+
 class CharacterUpdateBody(BaseModel):
     name: str | None = None
     aliases: list[str] | None = None
@@ -155,6 +202,17 @@ class CharacterUpdateBody(BaseModel):
     personality_tags: list[str] | None = None
     motivations: list[str] | None = None
     fears: list[str] | None = None
+    graph_visibility: str | None = None
+
+
+class RelationshipCreateBody(BaseModel):
+    character_a_id: uuid.UUID
+    character_b_id: uuid.UUID
+    rel_type: str
+    sentiment: float | None = None
+    description: str | None = None
+    from_chapter: int = Field(default=1, ge=1)
+    to_chapter: int | None = Field(default=None, ge=1)
 
 
 class RelationshipUpdateBody(BaseModel):
@@ -173,14 +231,16 @@ class CharacterShareOut(BaseModel):
 class BookCollaboratorCreateBody(BaseModel):
     email: str = Field(..., min_length=3, max_length=320)
     display_name: str | None = Field(None, max_length=120)
-    role: Literal["viewer", "commenter", "editor", "beta_reader", "developmental_editor", "coauthor"]
+    role: CollaborationRoleLiteral
     scope: CollaborationScope = Field(default_factory=CollaborationScope)
+    permissions: CollaborationPermissions | None = None
 
 
 class BookCollaboratorUpdateBody(BaseModel):
     display_name: str | None = Field(None, max_length=120)
-    role: Literal["viewer", "commenter", "editor", "beta_reader", "developmental_editor", "coauthor"] | None = None
+    role: CollaborationRoleLiteral | None = None
     scope: CollaborationScope | None = None
+    permissions: CollaborationPermissions | None = None
     invite_status: Literal["active", "revoked"] | None = None
 
 
@@ -191,6 +251,7 @@ class BookCollaboratorOut(BaseModel):
     display_name: str | None = None
     role: str
     scope: CollaborationScope
+    permissions: CollaborationPermissions
     invite_status: str
     invited_at: datetime
     updated_at: datetime
@@ -245,6 +306,7 @@ class StoryHealthOut(BaseModel):
 class ManuscriptImportResult(BaseModel):
     book_id: str
     imported_chapters: list[int]
+    chapter_content_versions: dict[int, int] = Field(default_factory=dict)
     total_chapters: int
     mode: str
     source_kind: str
@@ -331,6 +393,29 @@ class ChapterVersionOut(BaseModel):
 class ChapterVersionDetailOut(ChapterVersionOut):
     text: str
     html: str | None = None
+
+
+class SceneVersionOut(BaseModel):
+    id: str
+    scene_id: str | None = None
+    chapter_number: int | None = None
+    scene_title: str
+    scene_path: str | None = None
+    word_count: int | None = None
+    note: str | None = None
+    snapshot_kind: str = "manual"
+    created_at: datetime
+
+
+class SceneVersionDetailOut(SceneVersionOut):
+    description: str | None = None
+    body: str
+    html_body: str | None = None
+
+
+class SceneVersionRestoreOut(BaseModel):
+    scene: NovelSceneOut
+    versions: list[SceneVersionOut] = Field(default_factory=list)
 
 
 class WordCountGoalsOut(BaseModel):
@@ -558,11 +643,30 @@ class CharacterKnowledgeFactOut(BaseModel):
     warning: str | None = None
 
 
+class CharacterKnowledgeTimelineCellOut(BaseModel):
+    chapter_number: int
+    state: str
+
+
+class CharacterKnowledgeTimelineRowOut(BaseModel):
+    character_name: str
+    chapter_learned: int | None = None
+    source: str
+    cells: list[CharacterKnowledgeTimelineCellOut] = Field(default_factory=list)
+
+
+class CharacterKnowledgeTimelineFactOut(BaseModel):
+    fact: str
+    rows: list[CharacterKnowledgeTimelineRowOut] = Field(default_factory=list)
+    warning: str | None = None
+
+
 class RevisionSummaryOut(BaseModel):
     hero_message: str
     active_item_count: int
     high_severity_count: int
     task_ready_count: int
+    recent_edit_label: str | None = None
 
 
 class RevisionIntelligenceOut(BaseModel):
@@ -572,6 +676,7 @@ class RevisionIntelligenceOut(BaseModel):
     genre_checks: list[RevisionGenreCheckOut] = Field(default_factory=list)
     revision_plan: list[RevisionPlanPassOut] = Field(default_factory=list)
     knowledge_matrix: list[CharacterKnowledgeFactOut] = Field(default_factory=list)
+    knowledge_timeline: list[CharacterKnowledgeTimelineFactOut] = Field(default_factory=list)
     scene_advice: list[RevisionActionItemOut] = Field(default_factory=list)
     confusion_map: list[RevisionActionItemOut] = Field(default_factory=list)
     voice_alerts: list[RevisionActionItemOut] = Field(default_factory=list)
@@ -629,6 +734,58 @@ class BookNoteOut(BaseModel):
     chapter_title: str | None = None
     title: str | None = None
     body: str
+    tags: list[str] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+
+
+class EntityTagUpdateBody(BaseModel):
+    entity_type: TagTargetLiteral
+    entity_id: str | None = None
+    chapter_number: int | None = Field(None, ge=1)
+    tags: list[str] = Field(default_factory=list)
+
+
+class EntityTagSetOut(BaseModel):
+    entity_type: TagTargetLiteral
+    entity_id: str
+    chapter_number: int | None = None
+    tags: list[str] = Field(default_factory=list)
+
+
+class ManuscriptAnnotationBody(BaseModel):
+    annotation_id: str | None = None
+    chapter_number: int | None = Field(None, ge=1)
+    category: str | None = None
+    status: Literal["open", "resolved"] | None = None
+    visibility: Literal["shared", "private"] | None = None
+    quote: str | None = None
+    comment: str | None = None
+    anchor_context_before: str | None = None
+    anchor_context_after: str | None = None
+    start_offset: int | None = Field(None, ge=0)
+    end_offset: int | None = Field(None, ge=0)
+
+
+class ManuscriptAnnotationOut(BaseModel):
+    id: str
+    book_id: str
+    book_title: str
+    chapter_number: int
+    chapter_title: str | None = None
+    category: str
+    status: str
+    visibility: str
+    quote: str
+    comment: str
+    anchor_context_before: str | None = None
+    anchor_context_after: str | None = None
+    start_offset: int | None = None
+    end_offset: int | None = None
+    created_by_user_id: str
+    created_by_label: str
+    can_edit: bool
+    resolved_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -742,6 +899,7 @@ class NovelSceneOut(BaseModel):
     sort_order: int
     source: str
     origin_chapter_number: int | None = None
+    tags: list[str] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 
@@ -751,16 +909,24 @@ class NovelSceneInsertBody(BaseModel):
     position: Literal["start", "end"] = "end"
 
 
+class ChapterSceneOrderUpdateBody(BaseModel):
+    scene_ids: list[str] = Field(default_factory=list)
+    expected_structure_version: int = Field(..., ge=0)
+
+
 class WorkspaceChapterNodeOut(BaseModel):
     chapter_number: int
     title: str | None = None
     scene_count: int = 0
+    structure_version: int = 0
+    tags: list[str] = Field(default_factory=list)
 
 
 class WorkspaceSceneGroupOut(BaseModel):
     id: str
     label: str
     chapter_number: int | None = None
+    structure_version: int | None = None
     collapsed_by_default: bool = False
     scenes: list[NovelSceneOut] = Field(default_factory=list)
 
@@ -769,6 +935,18 @@ class ManuscriptWorkspaceTreeOut(BaseModel):
     chapters: list[WorkspaceChapterNodeOut] = Field(default_factory=list)
     scene_groups: list[WorkspaceSceneGroupOut] = Field(default_factory=list)
     note_paths: list[str] = Field(default_factory=list)
+
+
+class ChapterSceneOrderItemOut(BaseModel):
+    id: str
+    title: str
+    sort_order: int
+
+
+class ChapterSceneOrderOut(BaseModel):
+    chapter_number: int
+    structure_version: int
+    scenes: list[ChapterSceneOrderItemOut] = Field(default_factory=list)
 
 
 class ObsidianGraphNodeOut(BaseModel):
@@ -790,6 +968,37 @@ class ObsidianGraphOut(BaseModel):
     edges: list[ObsidianGraphEdgeOut]
 
 
+class WritingPeriodStatOut(BaseModel):
+    words: int
+    target_words: int | None = None
+    progress_pct: int | None = None
+
+
+class WritingHeatmapDayOut(BaseModel):
+    date: str
+    words: int
+
+
+class WritingEntryOut(BaseModel):
+    book_id: str | None = None
+    chapter_number: int | None = None
+    title: str
+    words: int
+
+
+class WritingDashboardStatsOut(BaseModel):
+    today: WritingPeriodStatOut
+    this_week: WritingPeriodStatOut
+    this_month: WritingPeriodStatOut
+    this_year: WritingPeriodStatOut
+    last_24_hours: WritingPeriodStatOut
+    last_7_days: WritingPeriodStatOut
+    last_30_days: WritingPeriodStatOut
+    last_year: WritingPeriodStatOut
+    heatmap: list[WritingHeatmapDayOut] = Field(default_factory=list)
+    entries_today: list[WritingEntryOut] = Field(default_factory=list)
+
+
 class PublicUserStats(BaseModel):
     total_books_read: int
     total_words_read: int
@@ -797,7 +1006,16 @@ class PublicUserStats(BaseModel):
 
 class PrivateUserStats(BaseModel):
     total_uploads: int
+    manuscript_uploads: int = 0
+    worldbuilding_uploads: int = 0
+    upload_limit: int | None = None
+    uploads_remaining: int | None = None
+    upload_limit_unlimited: bool = False
     total_token_consumption: int
+    llm_request_count: int = 0
+    llm_prompt_tokens: int = 0
+    llm_completion_tokens: int = 0
+    llm_total_tokens: int = 0
     total_chapters_tracked: int
     saved_quotes: int
 
@@ -805,6 +1023,7 @@ class PrivateUserStats(BaseModel):
 class UserStatsOut(BaseModel):
     public: PublicUserStats
     private: PrivateUserStats
+    writing: WritingDashboardStatsOut
 
 
 # Screenplay-specific schemas

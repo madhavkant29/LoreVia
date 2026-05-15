@@ -18,12 +18,12 @@ const audienceTabs = {
     "Location and prop consistency",
     "Beat references for rewrites",
   ],
-  Readers: [
-    "Spoiler-safe recap up to your chapter",
-    "Ask what happened without future reveals",
-    "Character reminders after long breaks",
-    "Relationship maps for dense casts",
-    "Reader-safe public-domain story scans",
+  Collaboration: [
+    "Invite-only beta reading windows",
+    "Read-only manuscript access for feedback partners",
+    "Guided questions, comments, and reactions for draft review",
+    "Spoiler-bounded reading context for collaborators",
+    "Author-controlled collaboration without exposing drafting tools",
   ],
 } as const
 
@@ -68,8 +68,8 @@ export function AudienceSection() {
         <Reveal>
           <div>
             <SectionHeader
-              title="Built for the way different story people work."
-              body="Authors, screenwriters, and serious readers need different memory boundaries. The same story engine can serve each without making the interface feel generic."
+              title="Built for authors first, flexible for the rest of the story team."
+              body="LoreVia is positioned around author workflows: drafting, revision, continuity, and story memory. Collaboration features exist to support beta reading, review, and manuscript feedback without turning the product into a separate reader app."
             />
             <div className="mt-8 inline-flex rounded-md border border-white/10 bg-white/[0.04] p-1">
               {(Object.keys(audienceTabs) as Array<keyof typeof audienceTabs>).map((tab) => (
@@ -94,7 +94,7 @@ export function AudienceSection() {
             <div className="relative z-10 grid gap-10 lg:grid-cols-[1fr_0.85fr] lg:gap-8">
               <div>
                 <p className="text-sm font-semibold uppercase tracking-[0.2em] text-cyan-300">{activeAudience}</p>
-                <h3 className="mt-4 text-3xl font-semibold text-white">Concrete tools, not vague writing magic.</h3>
+                <h3 className="mt-4 text-3xl font-semibold text-white">Concrete manuscript tools, not vague writing magic.</h3>
                 <div className="mt-7 space-y-4">
                   {items.map((item) => (
                     <div key={item} className="flex gap-4 rounded-xl border border-white/10 bg-white/[0.03] p-4">

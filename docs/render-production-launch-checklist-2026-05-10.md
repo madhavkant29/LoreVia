@@ -10,7 +10,7 @@ Use [backend/app/api/v1/routes/billing.py](/C:/Users/madha/.vscode/prod/LoreVia2
 
 It now reports:
 
-- whether Paddle keys and all six price IDs are truly configured
+- whether Paddle keys and all four paid-plan price IDs are truly configured
 - whether `RESEND_API_KEY` and `INTERNAL_JOB_SECRET` are present
 - the supported Paddle webhook events
 - the expected trial-email job path
@@ -72,8 +72,6 @@ Required for payments:
 
 - `PADDLE_API_KEY`
 - `PADDLE_WEBHOOK_SECRET`
-- `PADDLE_READER_MONTHLY_PRICE_ID`
-- `PADDLE_READER_ANNUAL_PRICE_ID`
 - `PADDLE_AUTHOR_MONTHLY_PRICE_ID`
 - `PADDLE_AUTHOR_ANNUAL_PRICE_ID`
 - `PADDLE_ARCHITECT_MONTHLY_PRICE_ID`
@@ -119,9 +117,7 @@ References:
 
 In Paddle, do all of these:
 
-1. Create or confirm the six live price IDs for:
-   - Reader monthly
-   - Reader annual
+1. Create or confirm the four live price IDs for:
    - Author monthly
    - Author annual
    - Architect monthly
@@ -174,7 +170,7 @@ After setting env vars and redeploying:
    - `webhook_secret_present: true`
    - `resend_api_key_present: true`
    - `internal_job_secret_present: true`
-   - `fully_configured_plan_count: 6`
+   - `fully_configured_plan_count: 4`
 4. Confirm the response also shows:
    - `trial_email_automation_code_ready: true`
    - `priority_processing_code_ready: true`

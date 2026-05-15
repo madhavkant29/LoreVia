@@ -3,6 +3,7 @@
 import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type ReactNode } from "react"
 
 import { booksApi } from "@/lib/api/books"
+import { WhatsTheWordPanel } from "@/components/intelligence/WhatsTheWordPanel"
 import Link from "next/link"
 import {
   buildUniqueWorkspacePath,
@@ -1013,6 +1014,7 @@ export function ObsidianNotesEditor({
               </div>
 
               <div className="p-5">
+                <WhatsTheWordPanel bookId={bookId} isDark={isDark} className="mb-4" />
                 <div className={`overflow-hidden rounded-[1.4rem] border ${isDark ? "border-white/8 bg-[#0a1323]" : "border-stone-200 bg-stone-50"}`}>
                   {(mode === "edit" || mode === "split") ? (
                     <div className={`flex flex-wrap gap-2 border-b px-3 py-3 ${isDark ? "border-white/8 bg-white/[0.02]" : "border-stone-200 bg-white/80"}`}>

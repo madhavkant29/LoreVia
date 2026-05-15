@@ -1,6 +1,6 @@
 # LoreVia Pricing, Paddle, And Monetization Plan
 
-Last updated: 2026-05-07
+Last updated: 2026-05-14
 
 ## Purpose
 
@@ -16,7 +16,7 @@ This document is intentionally conservative. The launch goal is not maximum feat
 
 ## Core Philosophy
 
-- Zero exploitation: Reader is a reader-only paid tier. No author tools may leak into it through UI, API, points, ads, mode switching, or edge cases.
+- Zero exploitation: collaboration access exists only to support author workflows such as beta reading, review, and manuscript feedback. No author tools may leak into that access mode through UI, API, points, ads, mode switching, or edge cases.
 - Controlled unlimited: Author and Lore Architect may be marketed as unlimited, but backend fair-use caps must still exist.
 - Refresh economy: high-cost AI usage resets daily at `00:00 UTC`.
 - Infrastructure minded: pricing must cover the $30/month fixed base plus variable model cost.
@@ -28,7 +28,7 @@ This document is intentionally conservative. The launch goal is not maximum feat
 All new product, backend, and frontend code should use these canonical tier names:
 
 - `free`
-- `reader`
+- `reader` internally for collaboration-only access
 - `author`
 - `architect`
 - `admin`
@@ -37,7 +37,7 @@ Legacy compatibility mappings remain in code only:
 
 - `pro` maps to `author`
 - `power` maps to `architect`
-- `pro_monthly` and `pro_annual` map to Reader checkout codes
+- `pro_monthly` and `pro_annual` map to internal collaboration access codes
 - `power_monthly` and `power_annual` map to Author checkout codes
 
 Do not use legacy names in product copy.
@@ -61,7 +61,7 @@ Author (free trial)
 When the trial ends:
 
 - if the user never upgraded, effective access becomes `free`
-- if the user bought Reader, effective access becomes `reader`
+- if the user has collaboration-only access, effective access becomes `reader`
 - if the user bought Author, effective access becomes `author`
 - if the user bought Architect, effective access becomes `architect`
 
@@ -114,6 +114,8 @@ Feature policy:
 | Feature | Limit |
 | :------ | :---- |
 | Active books | 2 |
+| Public demo books | Yes |
+| Invited beta reads | Yes |
 | Smart Tap | Unlimited |
 | Character profiles | Full access |
 | Chapter summaries | Short mode only |
@@ -128,47 +130,45 @@ Feature policy:
 | Manuscript editor | Locked |
 | Points earning | Allowed later |
 
-### Reader
+### Collaboration Access
 
-Price: `$12/month` or `$120/year`
+Price: `Not sold as a standalone public plan`
 
 Who it is for:
 
-- committed readers
-- users who want the full reading experience only
+- invited beta readers
+- critique partners
+- editors and feedback collaborators supporting an author workflow
 
 Feature policy:
 
 | Feature | Limit |
 | :------ | :---- |
-| Active books | Unlimited |
+| Access path | Author invite only |
+| Book scope | Invite-scoped |
 | Smart Tap | Unlimited |
 | Character profiles | Full access |
-| Chapter summaries | All 3 modes |
+| Chapter summaries | Allowed only within the shared scope |
 | Memory recall | Unlimited |
 | Relationship graph | Yes |
 | Plot tracker | Yes |
-| Semantic search | Unlimited |
-| Continuity checker | Locked |
+| Semantic search | Allowed only within the shared scope |
 | Story Advisor | Locked |
-| Prediction engine | 10 queries/day |
-| Character bible export | Locked |
+| Continuity checker | Locked |
 | Manuscript editor | Locked |
-| Points earning | Allowed later |
+| Character bible export | Locked |
 
-Reader is the most important isolation boundary in the whole model.
+Collaboration access remains important internally, but it should be framed as an author collaboration feature rather than a standalone product tier.
 
-Non-negotiable rule:
+Important boundary:
 
-- Reader must never gain author features through points
-- Reader must never gain author features through ads
-- Reader must never gain author features through upload mode conversion
-- Reader must never gain author features through direct API calls
-- Reader must never gain author features through temporary unlocks
+- Free users can accept invited beta-read access and use curated public demos
+- Free users do not inherit the old Reader tier as a broad reading subscription
+- authoring upgrades should still be the path to deeper continuity and manuscript workflows
 
 ### Author
 
-Price: `$24/month` or `$240/year`
+Price: `$29/month` or `$290/year`
 
 Who it is for:
 
@@ -198,7 +198,7 @@ Feature policy:
 
 ### Lore Architect
 
-Price: `$36/month` or `$360/year`
+Price: `$49/month` or `$490/year`
 
 Who it is for:
 
@@ -237,7 +237,7 @@ Important launch boundary:
 
 ## Note On Unlimited
 
-“Unlimited” is a marketing label, not a literal removal of all safeguards.
+"Unlimited" is a marketing label, not a literal removal of all safeguards.
 
 Backend rule:
 
@@ -261,9 +261,8 @@ The pricing page should default to annual billing. Users can toggle to monthly.
 
 | Tier | Monthly | Annual | Savings |
 | :--- | :------ | :----- | :------ |
-| Reader | $12 | $120 | $16 |
-| Author | $24 | $240 | $48 |
-| Lore Architect | $36 | $360 | $72 |
+| Author | $29 | $290 | $58 |
+| Lore Architect | $49 | $490 | $98 |
 
 Reason:
 
@@ -277,7 +276,7 @@ For the first month after pricing launches:
 
 - all existing users receive a 15-day Author trial extension
 - first paid subscription gets 20% off the first 3 months
-- anyone upgrading to Lore Architect in month 1 locks `$36` pricing for life while continuously subscribed
+- anyone upgrading to Lore Architect in month 1 locks `$49` pricing for life while continuously subscribed
 
 Important implementation note:
 
@@ -289,8 +288,6 @@ Important implementation note:
 The app expects these recurring Paddle prices:
 
 ```env
-PADDLE_READER_MONTHLY_PRICE_ID=pri_...
-PADDLE_READER_ANNUAL_PRICE_ID=pri_...
 PADDLE_AUTHOR_MONTHLY_PRICE_ID=pri_...
 PADDLE_AUTHOR_ANNUAL_PRICE_ID=pri_...
 PADDLE_ARCHITECT_MONTHLY_PRICE_ID=pri_...
@@ -302,13 +299,12 @@ PADDLE_DEFAULT_CHECKOUT_URL=https://getlorevia.com/pricing
 
 Recommended catalog structure:
 
-- one Paddle product per tier, each with monthly and annual prices
-- or one product family with six recurring prices if reporting still stays clean
+- one Paddle product per sellable tier, each with monthly and annual prices
+- the live catalog currently sells Author and Lore Architect, with Free available without checkout
+- keep the legacy `pro` and `power` aliases in code only while rollout is in progress
 
 The code should continue to normalize legacy codes during rollout, but all new checkout UI should use:
 
-- `reader_monthly`
-- `reader_annual`
 - `author_monthly`
 - `author_annual`
 - `architect_monthly`
@@ -337,12 +333,12 @@ We should stay conservative here. If payment status is uncertain, do not leave h
 
 ## Settings And Plan Display
 
-The settings page should show the user’s effective access tier, not just their purchased tier.
+The settings page should show the user's effective access tier, not just their purchased tier.
 
 Examples:
 
 - new user in trial: `Author (free trial)`
-- paid Reader user: `Reader`
+- invited beta reader or collaborator: `Collaboration access`
 - expired non-paying user: `Free`
 
 The app should also preserve the purchased plan internally so trial state and paid state do not overwrite one another.
@@ -353,10 +349,10 @@ Points are intentionally small, not gamechanging.
 
 Points must never:
 
-- unlock Story Advisor for Free or Reader
-- unlock continuity checker for Free or Reader
-- unlock manuscript editor for Free or Reader
-- unlock character bible export for Free or Reader
+- unlock Story Advisor for Free or collaboration-only access
+- unlock continuity checker for Free or collaboration-only access
+- unlock manuscript editor for Free or collaboration-only access
+- unlock character bible export for Free or collaboration-only access
 - unlock any Architect-only benefit for Author
 - unlock queue priority
 - unlock bulk scan
@@ -366,7 +362,7 @@ Points must never:
 - be transferable between users
 - stack into a shadow subscription
 
-Points may only do minor overflow inside the user’s existing entitlement class.
+Points may only do minor overflow inside the user's existing entitlement class.
 
 Safe examples:
 
@@ -377,7 +373,7 @@ Safe examples:
 
 Unsafe examples:
 
-- Reader spending points to access Story Advisor
+- collaboration-only access spending points to access Story Advisor
 - Author spending points to access Architect queue priority
 - Free hoarding points to simulate Author
 - any bundle that effectively turns points into a second subscription economy
@@ -397,13 +393,13 @@ Ads must:
 - never appear automatically
 - never appear while reading
 - never appear while the manuscript editor is open
-- only appear in settings, points wallet, or post-limit “earn more” flows
+- only appear in settings, points wallet, or post-limit "earn more" flows
 - remain capped at 5/day server-side
 
 Ads must never:
 
 - directly unlock a higher tier
-- directly unlock an author feature for Reader
+- directly unlock an author feature for collaboration-only access
 - grant Architect-level capabilities to Author
 - let a user loop ads into practical unlimited access
 
@@ -421,7 +417,7 @@ Suggested earn rules:
 - watch one ad: 10 points
 - daily login bonus:
   - Free: 5
-  - Reader: 10
+  - collaboration-only access: 10
   - Author: 15
 - monthly Architect grant: 500
 - first processed book one-time reward: 25
@@ -436,9 +432,9 @@ Suggested spend rules:
 
 Explicit launch exclusions:
 
-- no Reader or Free unlock path into authoring
+- no collaboration-only or Free unlock path into authoring
 - no point-spend path into Architect-only value
-- no character bible export unlock for Free or Reader
+- no character bible export unlock for Free or collaboration-only access
 - no public feature unlocks
 - no complex referral economy at launch
 
@@ -450,15 +446,15 @@ Referral rule for the next pass:
 
 ## Launch Decision On Public Features
 
-Public-facing features are deferred until the product has more users and clearer demand.
+Public features should be enabled, but their roles need to stay separate.
 
 Launch rule:
 
-- do not implement public character pages yet
-- do not position public sharing as a priced tier differentiator yet
-- keep tokenized private sharing utilities internal or quiet if they already exist
+- keep a curated public demo library for public-domain books and safe showcase projects
+- keep public sharing available without turning it into a pricing-tier differentiator
+- do not bundle public access claims into paid-plan positioning unless the workflow is actually polished and trustworthy
 
-Pricing pages, docs, and in-app billing comparisons should not present deferred public features as live value.
+Pricing pages, docs, and in-app billing comparisons should treat public demos as trust-building product exposure, not as the core monetization story.
 
 ## Revenue And Cost Assumptions
 
@@ -471,13 +467,13 @@ Estimated monthly model cost:
 | Tier | Estimated monthly cost |
 | :--- | :--------------------- |
 | Free | ~$10 per 1,000 users |
-| Reader | ~$25 per user |
+| Collaboration-only access | ~$25 per user |
 | Author | ~$45 per user |
 | Lore Architect | ~$80 per user |
 
 Scenario model at 1,000 users:
 
-| Scenario | Free | Reader | Author | Lore Architect | MRR | Est. OpenAI | Net Profit |
+| Scenario | Free | Collaboration-only | Author | Lore Architect | MRR | Est. OpenAI | Net Profit |
 | :------- | :--- | :----- | :----- | :------------- | :-- | :---------- | :--------- |
 | Conservative | 970 | 15 | 10 | 5 | $390 | ~$150 | ~$210 |
 | Realistic | 930 | 35 | 25 | 10 | $1,110 | ~$280 | ~$800 |
@@ -492,12 +488,12 @@ These numbers exist to keep enforcement honest. If a monetization mechanic weake
 - canonical tiers exist in code: `free`, `reader`, `author`, `architect`
 - annual-first pricing is enabled
 - settings shows effective trial status
-- Reader author-feature lockdown exists in UI and backend author-mode guards
-- Paddle plan mapping exists for Reader, Author, and Architect
+- collaboration-only author-feature lockdown exists in UI and backend author-mode guards
+- Paddle plan mapping exists for internal collaboration access plus Author and Architect
 
 ### Required Guardrails
 
-1. Reader tier lockdown
+1. Collaboration access lockdown
    `AuthorFeatureComponent` must return `null` or locked state for `tier === 'reader'`.
 
 2. Daily high-cost counters
@@ -517,7 +513,7 @@ These numbers exist to keep enforcement honest. If a monetization mechanic weake
    Weekly cleanup for expired points once the ledger exists.
 
 7. No pricing bypass through mode switching
-   Reader users must not convert uploads into author workspaces.
+   Collaboration-only users must not convert uploads into author workspaces.
 
 8. No pricing bypass through export routes
    Author-only and Architect-only exports must stay server-enforced.
@@ -526,7 +522,7 @@ These numbers exist to keep enforcement honest. If a monetization mechanic weake
    Deferred public features must not be half-open through hidden URLs or stale API routes.
 
 10. Paddle remains the source of paid truth
-   Do not create alternative “paid” states outside subscription and verified launch promotions.
+   Do not create alternative "paid" states outside subscription and verified launch promotions.
 
 ## Current Implementation Status
 
@@ -535,10 +531,10 @@ Implemented in the current pricing pass:
 - new canonical tier model
 - trial-aware effective access
 - local Architect access in debug
-- Reader, Author, Architect Paddle plan codes
+- internal collaboration access plus Author and Architect Paddle plan codes
 - annual-first pricing page
 - settings display of effective tier plus purchased plan
-- Reader lockdown of author workflows in UI and backend
+- collaboration-only lockdown of author workflows in UI and backend
 - Paddle webhook tier mapping and conservative downgrade behavior
 - pricing strategy doc
 - points ledger schema, service, and read APIs
@@ -575,7 +571,6 @@ If there is ever a choice between generosity and tier integrity, choose tier int
 
 The pricing system only works if:
 
-- Reader feels clearly valuable
 - Author feels clearly necessary for writers
 - Architect feels clearly better for heavy professional use
 - points and ads feel like small relief, not a loophole
@@ -583,8 +578,9 @@ The pricing system only works if:
 
 The cleanest launch is:
 
-- strong reader-only isolation
+- strong collaboration-only isolation
 - strong authoring upsell
 - strict same-tier-only points relief later
 - no public rollout yet
 - conservative backend enforcement everywhere that costs real money
+

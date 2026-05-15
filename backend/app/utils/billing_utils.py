@@ -1,13 +1,20 @@
 from __future__ import annotations
 
+import json
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.models.book import Book, SeriesBook
+from app.models.intelligence import WorldBuildingDocument
 
 FREE_TIER = "free"
 READER_TIER = "reader"
@@ -17,17 +24,9 @@ ADMIN_TIER = "admin"
 
 TRIAL_DAYS = 10
 AUTHOR_ACCESS_TIERS = {AUTHOR_TIER, ARCHITECT_TIER, ADMIN_TIER}
-UNLIMITED_BOOK_TIERS = {READER_TIER, AUTHOR_TIER, ARCHITECT_TIER, ADMIN_TIER}
+UNLIMITED_BOOK_TIERS = {READER_TIER, ARCHITECT_TIER, ADMIN_TIER}
 VALID_USER_TIERS = {FREE_TIER, READER_TIER, AUTHOR_TIER, ARCHITECT_TIER, ADMIN_TIER}
 DAILY_LIMIT_MESSAGE = "Your daily limit refreshes tomorrow. Want higher limits now? Upgrade."
-VALID_PAID_PLAN_CODES = {
-    "reader_monthly",
-    "reader_annual",
-    "author_monthly",
-    "author_annual",
-    "architect_monthly",
-    "architect_annual",
-}
 SUPPORTED_PADDLE_WEBHOOK_EVENTS = (
     "transaction.completed",
     "subscription.created",
@@ -68,22 +67,46 @@ LEGACY_PLAN_ALIASES = {
     "power_annual": "author_annual",
 }
 
-PLAN_PRICES_USD = {
-    "reader_monthly": 12,
-    "reader_annual": 120,
-    "author_monthly": 29,
-    "author_annual": 290,
-    "architect_monthly": 49,
-    "architect_annual": 490,
-}
+REPO_ROOT = Path(__file__).resolve().parents[3]
+SHARED_PRICING_CATALOG_PATH = REPO_ROOT / "frontend" / "src" / "lib" / "billing" / "pricing-catalog.json"
 
+
+@lru_cache(maxsize=1)
+def load_shared_pricing_catalog() -> dict[str, list[dict[str, Any]]]:
+    return json.loads(SHARED_PRICING_CATALOG_PATH.read_text(encoding="utf-8"))
+
+
+def _catalog_plans() -> list[dict[str, Any]]:
+    plans = load_shared_pricing_catalog().get("plans", [])
+    if not isinstance(plans, list):
+        raise ValueError("Shared pricing catalog is missing a valid plans list.")
+    return plans
+
+
+PLAN_METADATA_BY_CODE = {
+    str(plan["code"]): plan
+    for plan in _catalog_plans()
+}
+PLAN_PRICES_USD = {
+    code: int(plan["price_usd"])
+    for code, plan in PLAN_METADATA_BY_CODE.items()
+}
 PLAN_DISPLAY_NAMES = {
-    "reader_monthly": "Reader",
-    "reader_annual": "Reader",
-    "author_monthly": "Author",
-    "author_annual": "Author",
-    "architect_monthly": "Lore Architect",
-    "architect_annual": "Lore Architect",
+    code: str(plan["display_name"])
+    for code, plan in PLAN_METADATA_BY_CODE.items()
+}
+PLAN_INTERVALS = {
+    code: str(plan["billing_interval"])
+    for code, plan in PLAN_METADATA_BY_CODE.items()
+}
+PLAN_PRICE_ID_ENV_KEYS = {
+    code: [str(env_key) for env_key in plan.get("price_id_env_keys", [])]
+    for code, plan in PLAN_METADATA_BY_CODE.items()
+}
+VALID_PAID_PLAN_CODES = {
+    code
+    for code, plan in PLAN_METADATA_BY_CODE.items()
+    if bool(plan.get("checkout_enabled"))
 }
 
 
@@ -94,6 +117,16 @@ class TierPresentation:
     tier_label: str
     trial_active: bool
     trial_ends_at: datetime | None
+
+
+@dataclass(frozen=True)
+class UploadUsageSummary:
+    manuscript_uploads: int
+    worldbuilding_uploads: int
+    total_uploads: int
+    upload_limit: int | None
+    uploads_remaining: int | None
+    upload_limit_unlimited: bool
 
 
 def normalize_tier(tier: str | None) -> str:
@@ -174,7 +207,7 @@ def build_tier_presentation(user: Any, now: datetime | None = None) -> TierPrese
 def tier_display_label(tier: str, trial_active: bool = False) -> str:
     labels = {
         FREE_TIER: "Free",
-        READER_TIER: "Reader",
+        READER_TIER: "Collaboration access",
         AUTHOR_TIER: "Author",
         ARCHITECT_TIER: "Lore Architect",
         ADMIN_TIER: "Admin",
@@ -192,24 +225,155 @@ def require_author_access(user: Any) -> None:
         raise HTTPException(403, "This authoring feature requires an Author or Lore Architect plan.")
 
 
+def upload_limit_for_user(user: Any) -> int | None:
+    tier = user_access_tier(user)
+    if tier in {READER_TIER, ARCHITECT_TIER, ADMIN_TIER}:
+        return None
+    if tier == AUTHOR_TIER:
+        return settings.AUTHOR_MAX_UPLOADS
+    return settings.FREE_MAX_BOOKS
+
+
+async def _worldbuilding_upload_cost_by_book(db: AsyncSession, user_id: uuid.UUID) -> dict[uuid.UUID, int]:
+    owned_book_rows = (
+        await db.execute(
+            select(Book.id, Book.primary_series_id)
+            .where(Book.user_id == user_id)
+        )
+    ).all()
+    if not owned_book_rows:
+        return {}
+
+    book_ids = [book_id for book_id, _primary_series_id in owned_book_rows]
+    membership_rows = (
+        await db.execute(
+            select(SeriesBook.series_id, SeriesBook.book_id)
+            .where(SeriesBook.book_id.in_(book_ids))
+        )
+    ).all()
+
+    book_to_series_ids: dict[uuid.UUID, set[uuid.UUID]] = {book_id: set() for book_id in book_ids}
+    series_to_book_ids: dict[uuid.UUID, set[uuid.UUID]] = {}
+
+    for series_id, book_id in membership_rows:
+        book_to_series_ids.setdefault(book_id, set()).add(series_id)
+        series_to_book_ids.setdefault(series_id, set()).add(book_id)
+
+    for book_id, primary_series_id in owned_book_rows:
+        if primary_series_id is None:
+            continue
+        book_to_series_ids.setdefault(book_id, set()).add(primary_series_id)
+        series_to_book_ids.setdefault(primary_series_id, set()).add(book_id)
+
+    return {
+        book_id: max(
+            1,
+            len(
+                {
+                    linked_book_id
+                    for series_id in linked_series_ids
+                    for linked_book_id in series_to_book_ids.get(series_id, {book_id})
+                }
+            ) if linked_series_ids else 1,
+        )
+        for book_id, linked_series_ids in book_to_series_ids.items()
+    }
+
+
+async def worldbuilding_upload_cost_for_book(db: AsyncSession, book: Any) -> int:
+    cost_map = await _worldbuilding_upload_cost_by_book(db, getattr(book, "user_id"))
+    return max(1, cost_map.get(getattr(book, "id"), 1))
+
+
+async def calculate_upload_usage_summary(db: AsyncSession, user: Any) -> UploadUsageSummary:
+    user_id = getattr(user, "id")
+    manuscript_uploads = int(
+        (await db.execute(select(func.count(Book.id)).where(Book.user_id == user_id))).scalar() or 0
+    )
+    upload_limit = upload_limit_for_user(user)
+
+    worldbuilding_rows = (
+        await db.execute(
+            select(WorldBuildingDocument.book_id, func.count(WorldBuildingDocument.id))
+            .join(Book, Book.id == WorldBuildingDocument.book_id)
+            .where(
+                Book.user_id == user_id,
+                WorldBuildingDocument.is_active.is_(True),
+            )
+            .group_by(WorldBuildingDocument.book_id)
+        )
+    ).all()
+    worldbuilding_costs = await _worldbuilding_upload_cost_by_book(db, user_id)
+    worldbuilding_uploads = sum(
+        int(document_count) * max(1, worldbuilding_costs.get(book_id, 1))
+        for book_id, document_count in worldbuilding_rows
+    )
+    total_uploads = manuscript_uploads + worldbuilding_uploads
+    upload_limit_unlimited = upload_limit is None
+    uploads_remaining = None if upload_limit is None else max(upload_limit - total_uploads, 0)
+    return UploadUsageSummary(
+        manuscript_uploads=manuscript_uploads,
+        worldbuilding_uploads=worldbuilding_uploads,
+        total_uploads=total_uploads,
+        upload_limit=upload_limit,
+        uploads_remaining=uploads_remaining,
+        upload_limit_unlimited=upload_limit_unlimited,
+    )
+
+
+async def ensure_upload_capacity(
+    db: AsyncSession,
+    user: Any,
+    *,
+    requested_uploads: int,
+    released_uploads: int = 0,
+    context: str | None = None,
+) -> UploadUsageSummary:
+    summary = await calculate_upload_usage_summary(db, user)
+    if summary.upload_limit is None:
+        return summary
+
+    projected_total = max(summary.total_uploads - max(released_uploads, 0), 0) + max(requested_uploads, 0)
+    if projected_total <= summary.upload_limit:
+        return summary
+
+    tier = user_access_tier(user)
+    if tier == AUTHOR_TIER:
+        base_message = (
+            f"Author tier includes {summary.upload_limit} uploads. "
+            f"You have {summary.uploads_remaining or 0} remaining. "
+            "Worldbuilding manuscripts count as uploads too, and series-linked worldbuilding manuscripts count once per book in the series. "
+            "Upgrade to Lore Architect for unlimited uploads."
+        )
+    else:
+        base_message = (
+            f"Free tier limited to {summary.upload_limit} uploads. "
+            "Worldbuilding manuscripts count as uploads too."
+        )
+    if context:
+        base_message = f"{base_message} {context}"
+    raise HTTPException(403, base_message)
+
+
 def price_id_for_plan(plan: str) -> str:
     normalized = normalize_plan_code(plan)
-    mapping = {
-        "reader_monthly": settings.PADDLE_READER_MONTHLY_PRICE_ID or settings.PADDLE_PRO_MONTHLY_PRICE_ID or "",
-        "reader_annual": settings.PADDLE_READER_ANNUAL_PRICE_ID or settings.PADDLE_PRO_ANNUAL_PRICE_ID or "",
-        "author_monthly": settings.PADDLE_AUTHOR_MONTHLY_PRICE_ID or settings.PADDLE_POWER_MONTHLY_PRICE_ID or "",
-        "author_annual": settings.PADDLE_AUTHOR_ANNUAL_PRICE_ID or settings.PADDLE_POWER_ANNUAL_PRICE_ID or "",
-        "architect_monthly": settings.PADDLE_ARCHITECT_MONTHLY_PRICE_ID or "",
-        "architect_annual": settings.PADDLE_ARCHITECT_ANNUAL_PRICE_ID or "",
-    }
-    price_id = mapping.get(normalized, "")
-    if not price_id:
+    env_keys = PLAN_PRICE_ID_ENV_KEYS.get(normalized, [])
+    if not env_keys:
         raise RuntimeError(f"Missing Paddle price mapping for plan: {normalized}")
-    return price_id
+
+    for env_key in env_keys:
+        price_id = getattr(settings, env_key, None)
+        if price_id:
+            return str(price_id)
+
+    raise RuntimeError(f"Missing Paddle price mapping for plan: {normalized}")
 
 
 def billing_interval_for_plan(plan: str) -> str:
     normalized = normalize_plan_code(plan)
+    interval = PLAN_INTERVALS.get(normalized)
+    if interval in {"monthly", "annual"}:
+        return interval
     return "annual" if normalized.endswith("_annual") else "monthly"
 
 
@@ -254,9 +418,8 @@ def billing_configuration_status() -> dict[str, Any]:
         except RuntimeError:
             price_id = ""
 
-        env_key = f"PADDLE_{normalized.upper()}_PRICE_ID"
         if not has_meaningful_setting_value(price_id):
-            missing_configuration.append(env_key)
+            missing_configuration.extend(PLAN_PRICE_ID_ENV_KEYS.get(normalized, []))
 
         plan_price_ids[normalized] = price_id
         plans.append(
@@ -324,7 +487,7 @@ def paddle_plan_from_event_data(data: dict[str, Any]) -> str:
             return f"author_{suffix}"
         if "reader" in candidate or "pro" in candidate:
             return f"reader_{suffix}"
-    return "reader_monthly"
+    return ""
 
 
 def paddle_price_id_from_event_data(data: dict[str, Any]) -> str:

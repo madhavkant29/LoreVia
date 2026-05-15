@@ -1,15 +1,15 @@
 # LoreVia Pricing, Cost, Profit, and Integration Analysis
 
-Last updated: 2026-05-10
+Last updated: 2026-05-14
 
 ## Executive summary
 
-LoreVia's current codebase is monetization-ready in the broad sense: pricing tiers exist in frontend and backend, Paddle checkout and portal endpoints are wired, webhook verification and idempotency exist, trial logic is enforced, and points/referrals/trial-email lifecycle tables are in place.
+LoreVia's current codebase is monetization-ready in the broad sense: the public pricing catalog and backend billing status now agree on the live sellable tiers, Paddle checkout and portal endpoints are wired, webhook verification and idempotency exist, trial logic is enforced, and points/referrals/trial-email lifecycle tables are in place.
 
 The most important conclusion is this:
 
 - No, entering only the webhook secret is not the final remaining step.
-- Billing needs more than the webhook secret: Paddle API key plus the six price IDs are also required.
+- Billing needs more than the webhook secret: Paddle API key plus the four live paid-plan price IDs are also required.
 - Trial email automation still needs an actual scheduler calling the protected internal job endpoint.
 - Points are now spendable for same-day overflow, have a frontend wallet, and include rewarded-ad earning.
 - Architect priority routing is code-complete in repo; the only remaining queue work is production worker command parity.
@@ -19,21 +19,45 @@ The most important conclusion is this:
 Canonical live pricing in code:
 
 - Free: `$0`
-- Reader: `$12/mo` or `$120/yr`
-- Author: `$24/mo` or `$240/yr`
-- Lore Architect: `$36/mo` or `$360/yr`
+- Author: `$29/mo` or `$290/yr`
+- Lore Architect: `$49/mo` or `$490/yr`
+
+Public pricing catalog shape:
+
+- 3 visible tiers
+- 2 paid subscriptions
+- Collaboration-only access remains a backend-supported entitlement, but it is not sold as a public pricing card
 
 Current tier behavior from code:
 
 - All new users get a 10-day Author trial.
-- Free users get short summaries only, `5` semantic searches/day, and `3` prediction queries/day.
-- Reader unlocks all summary modes and `10` prediction queries/day, but remains reader-only.
-- Author is marketed as unlimited but is fair-use capped at `30` protected high-cost turns/day.
-- Architect is marketed as unlimited but is fair-use capped at `60` protected high-cost turns/day.
+- Free users get `2` uploads total, including worldbuilding manuscripts.
+- Free users can read curated public demo books.
+- Free users can participate in invited beta reads.
+- Free users get unlimited Smart Tap and memory recall.
+- Free users get full character profiles.
+- Free users get short summaries only.
+- Free users get `5` semantic searches/day and `3` prediction queries/day.
+- Author includes `15` uploads across manuscript and worldbuilding workspaces.
+- Author counts worldbuilding manuscripts as uploads.
+- Author counts series-linked worldbuilding manuscripts once per book in the series.
+- Author includes the collaboration workflows that power beta reading and manuscript feedback.
+- Free does not receive the old Reader tier as a hidden giveaway; invited beta-read access is narrower than a general reader subscription.
+- Author catches continuity errors automatically.
+- Author supports chapter and full-book manuscript editing.
+- Author includes character bible export and edit mode.
+- Author includes visual character relationship maps.
+- Lore Architect includes everything in Author, plus unlimited uploads.
+- Lore Architect keeps series-linked worldbuilding unlimited too.
+- Lore Architect is positioned for planned priority processing at launch rollout.
+- Lore Architect adds deeper continuity analysis.
+- Lore Architect can analyze multiple books together.
+- Lore Architect gets early access to new features.
 
 Primary code references:
 
-- Pricing UI: [frontend/src/components/billing/PricingPlans.tsx](/C:/Users/madha/.vscode/prod/LoreVia2/frontend/src/components/billing/PricingPlans.tsx:30)
+- Pricing catalog: [frontend/src/lib/billing/catalog.ts](/C:/Users/madha/.vscode/prod/LoreVia2/frontend/src/lib/billing/catalog.ts)
+- Pricing UI: [frontend/src/components/billing/PricingPlans.tsx](/C:/Users/madha/.vscode/prod/LoreVia2/frontend/src/components/billing/PricingPlans.tsx)
 - Trial + tier rules: [backend/app/utils/billing_utils.py](/C:/Users/madha/.vscode/prod/LoreVia2/backend/app/utils/billing_utils.py:18)
 - Limits config: [backend/app/core/config.py](/C:/Users/madha/.vscode/prod/LoreVia2/backend/app/core/config.py:150)
 
@@ -87,18 +111,15 @@ Net revenue per successful subscription sale before infrastructure and model cos
 
 | Plan | List price | Est. Paddle fee | Net revenue |
 | --- | ---: | ---: | ---: |
-| Reader monthly | $12.00 | $1.10 | $10.90 |
-| Author monthly | $24.00 | $1.70 | $22.30 |
-| Architect monthly | $36.00 | $2.30 | $33.70 |
-| Reader annual | $120.00 | $6.50 | $113.50 |
-| Author annual | $240.00 | $12.50 | $227.50 |
-| Architect annual | $360.00 | $18.50 | $341.50 |
+| Author monthly | $29.00 | $1.95 | $27.05 |
+| Architect monthly | $49.00 | $2.95 | $46.05 |
+| Author annual | $290.00 | $15.00 | $275.00 |
+| Architect annual | $490.00 | $25.00 | $465.00 |
 
 Effective net revenue per month for annual plans:
 
-- Reader annual: about `$9.46/mo`
-- Author annual: about `$18.96/mo`
-- Architect annual: about `$28.46/mo`
+- Author annual: about `$22.92/mo`
+- Architect annual: about `$38.75/mo`
 
 ## Model cost assumptions
 
@@ -154,11 +175,7 @@ Reasonable working estimate:
 
 - prediction query: about `$0.0010` to `$0.0020`
 
-If a Reader uses all `10/day` prediction turns for 30 days:
-
-- estimated monthly prediction cost: about `$0.30` to `$0.60`
-
-That still leaves wide margin against Reader net revenue.
+If a collaboration-heavy account drives frequent beta-reading prediction requests, the prediction cost is still modest relative to Author and Architect plan revenue.
 
 ### Ingestion and embeddings cost
 
@@ -189,15 +206,13 @@ Using the fee and model assumptions above:
 
 | Plan | Net revenue | Likely recurring model cost | Gross contribution before infra/support |
 | --- | ---: | ---: | ---: |
-| Reader monthly | $10.90 | low, often well under `$1/mo` | strong positive |
-| Author monthly | $22.30 | low-to-moderate, often low single digits | strong positive |
-| Architect monthly | $33.70 | moderate, still likely low single digits to a few dollars | strong positive |
+| Author monthly | $27.05 | low-to-moderate, often low single digits | strong positive |
+| Architect monthly | $46.05 | moderate, still likely low single digits to a few dollars | strong positive |
 
 ### Break-even intuition
 
 Ignoring support labor and using only software cost:
 
-- one Reader monthly subscriber nearly covers the repo's old `$30/mo` planning assumption by about three subscriptions
 - one Author monthly subscriber contributes materially more headroom
 - annual plans improve cash flow but lower net monthly equivalent due to the discount
 
@@ -239,8 +254,6 @@ You need all of these, not just the webhook secret:
 
 - `PADDLE_API_KEY`
 - `PADDLE_WEBHOOK_SECRET`
-- `PADDLE_READER_MONTHLY_PRICE_ID`
-- `PADDLE_READER_ANNUAL_PRICE_ID`
 - `PADDLE_AUTHOR_MONTHLY_PRICE_ID`
 - `PADDLE_AUTHOR_ANNUAL_PRICE_ID`
 - `PADDLE_ARCHITECT_MONTHLY_PRICE_ID`
@@ -321,7 +334,7 @@ If by "final touch" you mean "can users complete paid checkout and have tiers up
 Minimum remaining production setup checklist:
 
 1. Set Paddle API key.
-2. Set all six Paddle price IDs.
+2. Set all four paid-plan Paddle price IDs.
 3. Set Paddle webhook secret.
 4. Confirm webhook endpoint is registered in Paddle for the supported events.
 5. Set `PADDLE_DEFAULT_CHECKOUT_URL` if you want approved-domain checkout URLs.

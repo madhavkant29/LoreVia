@@ -6,7 +6,7 @@ import { TRUST_EFFECTIVE_DATE } from "@/lib/constants/trust"
 
 export const metadata: Metadata = {
   title: "Contact",
-  description: "Find the right LoreVia contact path for support, billing, legal notices, copyright issues, and security concerns.",
+  description: "Find the right LoreVia for authors contact path for support, billing, legal notices, copyright issues, and security concerns.",
   alternates: {
     canonical: "/contact",
   },

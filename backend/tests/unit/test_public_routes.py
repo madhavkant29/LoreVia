@@ -71,13 +71,13 @@ class _FakeDB:
 
 @pytest.fixture(autouse=True)
 def _enable_public_mode(monkeypatch):
-    monkeypatch.setattr(public, "PUBLIC_MODE_ENABLED", True)
+    monkeypatch.setattr("app.core.config.settings.PUBLIC_MODE_ENABLED", True, raising=False)
 
 
 def test_public_mode_guard_blocks_when_disabled(monkeypatch):
-    monkeypatch.setattr(public, "PUBLIC_MODE_ENABLED", False)
+    monkeypatch.setattr("app.core.config.settings.PUBLIC_MODE_ENABLED", False, raising=False)
     with pytest.raises(HTTPException) as exc:
-        public._ensure_public_mode_enabled()
+        public.ensure_public_mode_enabled()
     assert exc.value.status_code == 503
 
 
@@ -115,12 +115,14 @@ async def test_list_public_books_builds_and_caches_rows(monkeypatch):
         total_chapters=3,
         copyright_warning=False,
         created_at="now",
+        archived_at=None,
     )
-    db = _FakeDB(execute_values=[_Result(scalars=[book])])
+    db = _FakeDB(execute_values=[_Result(all_rows=[(book, "public_author")])])
 
     payload = await public.list_public_books(db=db)
 
     assert payload[0]["title"] == "Public Novel"
+    assert payload[0]["author_username"] == "public_author"
     assert captured["args"][1] == payload
     assert captured["args"][2] == 300
 
@@ -164,6 +166,7 @@ async def test_get_public_book_builds_payload(monkeypatch):
         id=book_id,
         is_public=True,
         hidden_at=None,
+        archived_at=None,
         title="Public Novel",
         author="M. Author",
         genre="Fantasy",
@@ -173,15 +176,18 @@ async def test_get_public_book_builds_payload(monkeypatch):
         status="ready",
         total_chapters=2,
         copyright_warning=False,
+        user_id=uuid.uuid4(),
     )
+    author_user = SimpleNamespace(username="public_author")
     db = _FakeDB(
-        get_values=[book],
+        get_values=[book, author_user],
         execute_values=[_Result(all_rows=[(1, "One", "First"), (2, "Two", "Second")])],
     )
 
     payload = await public.get_public_book(book_id, db=db)
 
     assert payload["chapters"][0]["title"] == "One"
+    assert payload["author_username"] == "public_author"
     assert cached["args"][1]["id"] == str(book_id)
 
 
@@ -206,7 +212,7 @@ async def test_get_public_chapter_raises_for_missing_book_or_chapter(monkeypatch
         await public.get_public_chapter(uuid.uuid4(), 1, db=db)
     assert exc.value.status_code == 404
 
-    book = SimpleNamespace(id=uuid.uuid4(), is_public=True, hidden_at=None)
+    book = SimpleNamespace(id=uuid.uuid4(), is_public=True, hidden_at=None, archived_at=None)
     db = _FakeDB(get_values=[book], execute_values=[_Result(scalar=None)])
     with pytest.raises(HTTPException) as exc:
         await public.get_public_chapter(book.id, 4, db=db)
@@ -230,7 +236,7 @@ async def test_get_public_chapter_builds_payload(monkeypatch):
     monkeypatch.setattr(public, "get_presigned_url", lambda key: f"https://signed/{key}")
 
     book_id = uuid.uuid4()
-    book = SimpleNamespace(id=book_id, is_public=True, hidden_at=None, title="Book", total_chapters=5)
+    book = SimpleNamespace(id=book_id, is_public=True, hidden_at=None, archived_at=None, title="Book", total_chapters=5)
     chapter = SimpleNamespace(number=2, title="Two", description="Desc", s3_key="chapters/2.txt")
     db = _FakeDB(get_values=[book], execute_values=[_Result(scalar=chapter)])
 
@@ -253,13 +259,18 @@ async def test_create_public_book_manual_requires_chapters():
 async def test_create_public_book_manual_persists_book_and_chapters(monkeypatch):
     uploaded = []
     invalidated = []
+    charged = {}
     monkeypatch.setattr(public, "upload_text", lambda key, text: uploaded.append((key, text)))
     monkeypatch.setattr(public, "count_tokens", lambda text: len(text.split()))
+    async def _fake_charge(_db, _user, *, source_id, metadata):
+        charged["source_id"] = source_id
+        charged["metadata"] = metadata
 
     async def _fake_cache_del(key):
         invalidated.append(key)
 
     monkeypatch.setattr(public, "cache_del", _fake_cache_del)
+    monkeypatch.setattr(public, "charge_public_share_points", _fake_charge)
     user = SimpleNamespace(id=uuid.uuid4())
     body = PublicBookManualIn(
         title="Title",
@@ -280,7 +291,29 @@ async def test_create_public_book_manual_persists_book_and_chapters(monkeypatch)
     assert book.total_chapters == 2
     assert book.total_tokens == 3
     assert len(uploaded) == 2
+    assert charged["metadata"]["entrypoint"] == "manual_public_book"
     assert invalidated == [public.key_public_books()]
+
+
+@pytest.mark.asyncio
+async def test_create_public_book_manual_surfaces_insufficient_points(monkeypatch):
+    async def _fake_charge(*_args, **_kwargs):
+        raise ValueError("Public sharing costs 10 points.")
+
+    monkeypatch.setattr(public, "charge_public_share_points", _fake_charge)
+
+    with pytest.raises(HTTPException) as exc:
+        await public.create_public_book_manual(
+            body=PublicBookManualIn(
+                title="Title",
+                chapters=[PublicChapterIn(title="One", text="alpha")],
+            ),
+            db=_FakeDB(),
+            current_user=SimpleNamespace(id=uuid.uuid4()),
+        )
+
+    assert exc.value.status_code == 400
+    assert "Public sharing costs 10 points." in exc.value.detail
 
 
 @pytest.mark.asyncio

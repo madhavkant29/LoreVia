@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import ARRAY, Date, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import ARRAY, Boolean, Date, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -29,6 +29,12 @@ class User(Base):
     legal_version: Mapped[str | None] = mapped_column(String)
     email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     referral_code: Mapped[str | None] = mapped_column(String, unique=True, nullable=True, index=True)
+    consecutive_missed_beta_reads: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    beta_read_penalty_status: Mapped[str] = mapped_column(String, default="none", server_default="none")
+    beta_read_penalty_required_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reputation_score: Mapped[int] = mapped_column(Integer, default=0, server_default="0", index=True)
+    reputation_likes_received: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    reputation_dislikes_received: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     books = relationship("Book", back_populates="user", cascade="all, delete-orphan")
@@ -54,6 +60,10 @@ class User(Base):
     )
     trial_email_events = relationship("TrialEmailEvent", back_populates="user", cascade="all, delete-orphan")
     rewarded_ad_sessions = relationship("RewardedAdSession", back_populates="user", cascade="all, delete-orphan")
+    writing_activities = relationship("UserWritingActivity", back_populates="user", cascade="all, delete-orphan")
+    llm_usage_events = relationship("LlmUsageEvent", cascade="all, delete-orphan")
+    forum_comments = relationship("BookForumComment", back_populates="author", cascade="all, delete-orphan")
+    forum_comment_reactions = relationship("BookForumCommentReaction", back_populates="user", cascade="all, delete-orphan")
 
 
 class Subscription(Base):
@@ -175,3 +185,40 @@ class RewardedAdSession(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     user = relationship("User", back_populates="rewarded_ad_sessions")
+
+
+class UserWritingActivity(Base):
+    __tablename__ = "user_writing_activities"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    book_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="SET NULL"), index=True)
+    chapter_number: Mapped[int | None] = mapped_column(Integer, index=True)
+    entry_title: Mapped[str] = mapped_column(String, nullable=False)
+    words_added: Mapped[int] = mapped_column(Integer, nullable=False)
+    activity_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    user = relationship("User", back_populates="writing_activities")
+    book = relationship("Book", back_populates="writing_activities")
+
+
+class LlmUsageEvent(Base):
+    __tablename__ = "llm_usage_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    book_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="SET NULL"), index=True)
+    provider: Mapped[str] = mapped_column(String, nullable=False, default="openai", server_default="openai", index=True)
+    model: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    operation: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    feature: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    request_id: Mapped[str | None] = mapped_column(String, index=True)
+    prompt_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    completion_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    total_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    cached: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    metadata_json: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    user = relationship("User")

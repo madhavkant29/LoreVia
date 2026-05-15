@@ -70,7 +70,7 @@ export function LegalTopBar() {
               Login
             </Link>
             <Link href="/" className="transition hover:text-[#F2F4F7]">
-              Landing-page
+              Home
             </Link>
           </div>
         )}

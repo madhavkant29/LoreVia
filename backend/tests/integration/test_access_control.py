@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import select
 
-from app.models.book import Book, Chapter, Series, SeriesBook
+from app.models.book import Book, Chapter, ChapterVersion, Series, SeriesBook
 from app.models.character import Character
 from app.models.user import User
 
@@ -320,3 +320,229 @@ async def test_story_scoped_collaboration_limits_shared_book_access(client, db):
     continuity = await client.get(f"/api/v1/books/{book.id}/chapter-reports", headers=collaborator_headers)
     assert characters.status_code == 200
     assert continuity.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_collaboration_permissions_gate_comments_and_manuscript_tools(client, db):
+    owner_headers, owner_id = await _register_user(client, "owner-permissions@lorevia.app")
+    collaborator_headers, _ = await _register_user(client, "commenter-permissions@lorevia.app")
+    owner = await db.get(User, owner_id)
+    assert owner is not None
+    owner.tier = "author"
+
+    book = Book(
+        user_id=owner_id,
+        title="Permissions Draft",
+        format="docx",
+        s3_key="shared/permissions.docx",
+        status="ready",
+        total_chapters=3,
+        mode="author",
+    )
+    db.add(book)
+    await db.flush()
+    for number in range(1, 4):
+        db.add(Chapter(book_id=book.id, number=number, title=f"Chapter {number}", s3_key=f"chapter-{number}.txt"))
+    await db.commit()
+
+    create = await client.post(
+        f"/api/v1/books/{book.id}/collaborators",
+        headers=owner_headers,
+        json={
+            "email": "commenter-permissions@lorevia.app",
+            "display_name": "Commenter",
+            "role": "commenter",
+            "scope": {
+                "chapter_start": 1,
+                "chapter_end": 2,
+                "character_bible": False,
+                "continuity_report": False,
+                "reader_confusion_report": False,
+            },
+            "permissions": {
+                "can_edit_manuscript": False,
+                "can_view_story_bible": False,
+                "can_run_ai_scans": False,
+                "can_export": False,
+                "can_comment": True,
+                "can_view_selected_chapters_only": True,
+            },
+        },
+    )
+
+    assert create.status_code == 201
+    assert create.json()["permissions"]["can_comment"] is True
+    assert create.json()["permissions"]["can_edit_manuscript"] is False
+
+    note = await client.post(
+        f"/api/v1/books/{book.id}/notes",
+        headers=collaborator_headers,
+        json={
+            "chapter_number": 1,
+            "title": "Reader note",
+            "body": "The opening lands well.",
+        },
+    )
+    blocked_note = await client.post(
+        f"/api/v1/books/{book.id}/notes",
+        headers=collaborator_headers,
+        json={
+            "chapter_number": 3,
+            "title": "Blocked note",
+            "body": "This should be out of scope.",
+        },
+    )
+    writer_workspace = await client.get(f"/api/v1/books/{book.id}/writer-workspace", headers=collaborator_headers)
+    manuscript_tree = await client.get(f"/api/v1/books/{book.id}/workspace/tree", headers=collaborator_headers)
+
+    assert note.status_code == 200
+    assert blocked_note.status_code == 403
+    assert writer_workspace.status_code == 403
+    assert manuscript_tree.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_collaboration_manuscript_export_respects_selected_chapter_scope(client, db, monkeypatch):
+    owner_headers, owner_id = await _register_user(client, "owner-export-scope@lorevia.app")
+    collaborator_headers, _ = await _register_user(client, "export-scope@lorevia.app")
+    owner = await db.get(User, owner_id)
+    assert owner is not None
+    owner.tier = "author"
+
+    book = Book(
+        user_id=owner_id,
+        title="Scoped Export",
+        format="docx",
+        s3_key="shared/scoped-export.docx",
+        status="ready",
+        total_chapters=3,
+        mode="author",
+    )
+    db.add(book)
+    await db.flush()
+    for number in range(1, 4):
+        db.add(Chapter(book_id=book.id, number=number, title=f"Chapter {number}", s3_key=f"chapter-{number}.txt"))
+    await db.commit()
+
+    captured: dict[str, object] = {}
+
+    def _fake_manuscript_docx(*, title, chapters, scenes, preset, front_matter):
+        captured["title"] = title
+        captured["chapters"] = chapters
+        return b"docx-bytes"
+
+    monkeypatch.setattr("app.api.v1.routes.books.manuscript_docx", _fake_manuscript_docx)
+    monkeypatch.setattr(
+        "app.api.v1.routes.books.storage.download_book",
+        lambda _key: b'{"text":"Body text","html":"<p>Body text</p>"}',
+    )
+
+    create = await client.post(
+        f"/api/v1/books/{book.id}/collaborators",
+        headers=owner_headers,
+        json={
+            "email": "export-scope@lorevia.app",
+            "display_name": "Scoped Exporter",
+            "role": "developmental_editor",
+            "scope": {
+                "chapter_start": 1,
+                "chapter_end": 2,
+                "character_bible": False,
+                "continuity_report": False,
+                "reader_confusion_report": False,
+            },
+            "permissions": {
+                "can_edit_manuscript": True,
+                "can_view_story_bible": False,
+                "can_run_ai_scans": False,
+                "can_export": True,
+                "can_comment": True,
+                "can_view_selected_chapters_only": True,
+            },
+        },
+    )
+    assert create.status_code == 201
+
+    export = await client.get(
+        f"/api/v1/books/{book.id}/manuscript/export",
+        headers=collaborator_headers,
+        params={"format": "docx"},
+    )
+
+    assert export.status_code == 200
+    assert export.content == b"docx-bytes"
+    assert [chapter["number"] for chapter in captured["chapters"]] == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_collaboration_restore_rejects_out_of_scope_version_before_mutation(client, db, monkeypatch):
+    owner_headers, owner_id = await _register_user(client, "owner-restore-scope@lorevia.app")
+    collaborator_headers, _ = await _register_user(client, "restore-scope@lorevia.app")
+    owner = await db.get(User, owner_id)
+    assert owner is not None
+    owner.tier = "author"
+
+    book = Book(
+        user_id=owner_id,
+        title="Restore Scope",
+        format="docx",
+        s3_key="shared/restore-scope.docx",
+        status="ready",
+        total_chapters=3,
+        mode="author",
+    )
+    db.add(book)
+    await db.flush()
+    db.add(Chapter(book_id=book.id, number=3, title="Chapter 3", s3_key="chapter-3.txt"))
+    await db.flush()
+    version = ChapterVersion(
+        book_id=book.id,
+        chapter_number=3,
+        title="Chapter 3",
+        s3_key="versions/chapter-3.txt",
+        snapshot_kind="manual",
+    )
+    db.add(version)
+    await db.commit()
+
+    create = await client.post(
+        f"/api/v1/books/{book.id}/collaborators",
+        headers=owner_headers,
+        json={
+            "email": "restore-scope@lorevia.app",
+            "display_name": "Scoped Editor",
+            "role": "editor",
+            "scope": {
+                "chapter_start": 1,
+                "chapter_end": 2,
+                "character_bible": False,
+                "continuity_report": False,
+                "reader_confusion_report": False,
+            },
+            "permissions": {
+                "can_edit_manuscript": True,
+                "can_view_story_bible": False,
+                "can_run_ai_scans": False,
+                "can_export": False,
+                "can_comment": True,
+                "can_view_selected_chapters_only": True,
+            },
+        },
+    )
+    assert create.status_code == 201
+
+    called = {"restore": False}
+
+    async def _fake_restore(*args, **kwargs):
+        called["restore"] = True
+        return {"chapter_number": 3, "title": "Chapter 3", "text": "body", "html": None}
+
+    monkeypatch.setattr("app.api.v1.routes.manuscript.restore_chapter_version", _fake_restore)
+
+    response = await client.post(
+        f"/api/v1/books/{book.id}/chapter-versions/{version.id}/restore",
+        headers=collaborator_headers,
+    )
+
+    assert response.status_code == 403
+    assert called["restore"] is False

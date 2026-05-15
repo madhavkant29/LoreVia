@@ -5,8 +5,8 @@ and text-sanitization helpers used on character data.
 """
 from __future__ import annotations
 
-import re
 import math
+import re
 import uuid
 from collections import Counter, defaultdict
 from difflib import SequenceMatcher
@@ -17,16 +17,17 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.engine.character.extractor import extract_characters_and_relationships
 from app.engine.character.entity_filters import (
+    VISIBILITY_THRESHOLD,
+    character_visibility_score,
     complex_character_score,
     compute_all_subtype_scores,
     gag_character_score,
-    character_visibility_score,
-    VISIBILITY_THRESHOLD,
     is_displayable_character_entity,
 )
+from app.engine.character.extractor import extract_characters_and_relationships
 from app.engine.character.profile_builder import (
+    build_description,
     choose_richer_text,
     flat,
     merge_growth_events,
@@ -36,7 +37,14 @@ from app.engine.character.profile_builder import (
 )
 from app.models.book import Chapter
 from app.models.character import Character, CharacterState, CharacterVoiceProfile
-from app.models.intelligence import BookChunk, ChapterSummary, CharacterRelationship, PlotThread, QuoteEntry, WikiEntry
+from app.models.intelligence import (
+    BookChunk,
+    ChapterSummary,
+    CharacterRelationship,
+    PlotThread,
+    QuoteEntry,
+    WikiEntry,
+)
 
 BLEACH_EMPTY_TAGS: Any = frozenset()
 
@@ -46,6 +54,8 @@ def is_displayable_character(char: Character) -> bool:
     name = " ".join((char.name or "").split())
     if not name:
         return False
+    if getattr(char, "is_manual", False):
+        return True
     score = character_visibility_score(
         name,
         role=char.role,
@@ -143,13 +153,59 @@ def dedupe_preserve_order(items: list[str]) -> list[str]:
 
 
 def merge_description_with_relationships(
-    description: str,
+    description: str | None,
     relationship_summaries: list[str],
 ) -> str:
-    preview = relationship_summaries[:2]
+    preview = clean_string_list(relationship_summaries)[:2]
+    base = clean_optional_text(description)
     if not preview:
-        return description
-    return f"{description}. {' '.join(preview)}"
+        return base or ""
+    if not base:
+        return " ".join(preview)
+    return f"{base}. {' '.join(preview)}"
+
+
+def _ensure_sentence(text: str) -> str:
+    cleaned = clean_optional_text(text)
+    if not cleaned:
+        return ""
+    if cleaned.endswith((".", "!", "?")):
+        return cleaned
+    return f"{cleaned}."
+
+
+def compose_character_description(
+    *,
+    trait_state: dict[str, Any] | None,
+    archetype: str | None,
+    arc_summary: str | None = None,
+    personality_tags: list[str] | None = None,
+    motivations: list[str] | None = None,
+    relationship_summaries: list[str] | None = None,
+) -> str | None:
+    segments: list[str] = []
+    base = clean_optional_text(build_description(trait_state or {}, archetype))
+    if base and base.casefold() != "appearance not yet described":
+        segments.append(_ensure_sentence(base))
+
+    arc = clean_optional_text(arc_summary)
+    if arc and (not base or arc.casefold() != base.casefold()):
+        segments.append(_ensure_sentence(arc))
+
+    if not segments:
+        cleaned_tags = clean_string_list(personality_tags)
+        if cleaned_tags:
+            segments.append(f"Disposition: {', '.join(cleaned_tags[:3])}.")
+        cleaned_motivations = clean_string_list(motivations)
+        if cleaned_motivations:
+            segments.append(f"Wants: {', '.join(cleaned_motivations[:2])}.")
+
+    relationship_preview = clean_string_list(relationship_summaries)[:2]
+    if relationship_preview:
+        segments.append(" ".join(_ensure_sentence(summary) for summary in relationship_preview if summary))
+
+    composed = " ".join(segment for segment in segments if segment).strip()
+    return composed or None
 
 
 # ─── Text-cleaning helpers ────────────────────────────────────────────────────
@@ -347,6 +403,129 @@ def apply_manual_character_description(character: Character, description: str | 
     character.trait_state = trait_state
 
 
+GRAPH_VISIBILITY_OVERRIDE_KEY = "graph_visibility_override"
+GRAPH_VISIBILITY_OVERRIDE_VALUES = {"include", "exclude"}
+
+
+def graph_visibility_override_value(trait_state: dict[str, Any] | None) -> str | None:
+    if not isinstance(trait_state, dict):
+        return None
+    raw = trait_state.get(GRAPH_VISIBILITY_OVERRIDE_KEY)
+    if isinstance(raw, dict):
+        value = clean_optional_text(raw.get("value"))
+    else:
+        value = clean_optional_text(raw)
+    if not value:
+        return None
+    normalized = value.casefold()
+    return normalized if normalized in GRAPH_VISIBILITY_OVERRIDE_VALUES else None
+
+
+def get_graph_visibility_override(character: Character) -> str | None:
+    trait_state = getattr(character, "trait_state", None)
+    return graph_visibility_override_value(trait_state if isinstance(trait_state, dict) else None)
+
+
+def apply_graph_visibility_override(character: Character, override: str | None) -> None:
+    normalized = clean_optional_text(override)
+    trait_state = dict(character.trait_state or {})
+    if not normalized:
+        trait_state.pop(GRAPH_VISIBILITY_OVERRIDE_KEY, None)
+        character.trait_state = trait_state
+        return
+    normalized = normalized.casefold()
+    if normalized not in GRAPH_VISIBILITY_OVERRIDE_VALUES:
+        raise ValueError("Graph visibility override must be include or exclude")
+    trait_state[GRAPH_VISIBILITY_OVERRIDE_KEY] = {
+        "value": normalized,
+        "confidence": 1.0,
+        "type": "abstract",
+    }
+    character.trait_state = trait_state
+
+
+def build_manual_character(
+    *,
+    book_id: uuid.UUID,
+    name: str,
+    first_chapter: int,
+    aliases: list[str] | None = None,
+    role: str | None = None,
+    description: str | None = None,
+    goal: str | None = None,
+    lie_they_believe: str | None = None,
+    backstory_wound: str | None = None,
+    arc_type: str | None = None,
+    arc_summary: str | None = None,
+    personality_tags: list[str] | None = None,
+    motivations: list[str] | None = None,
+    fears: list[str] | None = None,
+) -> Character:
+    cleaned_name = clean_optional_text(name)
+    if not cleaned_name:
+        raise ValueError("Character name cannot be empty")
+
+    normalized_name = normalize_character_name(cleaned_name)
+    cleaned_aliases = [
+        alias
+        for alias in clean_string_list(aliases)
+        if normalize_character_name(alias) != normalized_name
+    ]
+    chapter_number = max(1, first_chapter)
+
+    character = Character(
+        book_id=book_id,
+        name=cleaned_name,
+        aliases=cleaned_aliases,
+        role=role,
+        first_chapter=chapter_number,
+        last_seen_chapter=chapter_number,
+        mention_count=1,
+        trait_state={"manual_entry": {"value": "manual", "confidence": 0.0, "type": "abstract"}},
+        personality_tags=clean_string_list(personality_tags),
+        motivations=clean_string_list(motivations),
+        fears=clean_string_list(fears),
+        goal=clean_optional_text(goal),
+        lie_they_believe=clean_optional_text(lie_they_believe),
+        backstory_wound=clean_optional_text(backstory_wound),
+        arc_type=clean_optional_text(arc_type),
+        arc_summary=clean_optional_text(arc_summary),
+        is_manual=True,
+    )
+    apply_manual_character_description(character, description)
+    return character
+
+
+def _manual_character_description_value(trait_state: dict[str, Any] | None) -> str | None:
+    if not isinstance(trait_state, dict):
+        return None
+    manual = trait_state.get("manual_description")
+    if not isinstance(manual, dict):
+        return None
+    return clean_optional_text(manual.get("value"))
+
+
+def _merge_character_descriptions(primary_description: str | None, secondary_description: str | None) -> str | None:
+    primary_clean = clean_optional_text(primary_description)
+    secondary_clean = clean_optional_text(secondary_description)
+    if not primary_clean:
+        return secondary_clean
+    if not secondary_clean:
+        return primary_clean
+
+    primary_key = primary_clean.casefold()
+    secondary_key = secondary_clean.casefold()
+    if primary_key == secondary_key:
+        return primary_clean
+    if primary_key in secondary_key:
+        return secondary_clean
+    if secondary_key in primary_key:
+        return primary_clean
+
+    separator = "" if primary_clean.endswith((".", "!", "?", ";", ":")) else "."
+    return f"{primary_clean}{separator} {secondary_clean}"
+
+
 def _normalize_character_reference(value: object | None) -> str:
     return " ".join(str(value or "").split()).strip().lower()
 
@@ -396,6 +575,81 @@ def _find_name_occurrences(text: str, candidate: str) -> int:
         return 0
     pattern = re.compile(rf"(?<![A-Za-z]){re.escape(cleaned)}(?![A-Za-z])")
     return len(pattern.findall(text or ""))
+
+
+async def find_earliest_character_mention_chapter(
+    db: AsyncSession,
+    *,
+    book_id: uuid.UUID,
+    name: str,
+    aliases: list[str] | None = None,
+    upto_chapter: int | None = None,
+) -> int | None:
+    candidates = merge_list_values([name], aliases)
+    if not candidates:
+        return None
+
+    filters = [BookChunk.text.ilike(f"%{candidate}%") for candidate in candidates if candidate]
+    if not filters:
+        return None
+
+    query = (
+        select(Chapter.number, BookChunk.text)
+        .join(BookChunk, BookChunk.chapter_id == Chapter.id)
+        .where(Chapter.book_id == book_id, or_(*filters))
+        .order_by(Chapter.number.asc(), BookChunk.chunk_index.asc())
+    )
+    if upto_chapter is not None:
+        query = query.where(Chapter.number <= upto_chapter)
+
+    rows = (await db.execute(query)).all()
+    for chapter_number, text in rows:
+        if any(_find_name_occurrences(text or "", candidate) > 0 for candidate in candidates):
+            return int(chapter_number)
+    return None
+
+
+async def backfill_character_first_chapters_for_chapter_text(
+    db: AsyncSession,
+    *,
+    book_id: uuid.UUID,
+    chapter_number: int,
+    chapter_text: str | None,
+) -> bool:
+    if not chapter_text or not chapter_text.strip():
+        return False
+
+    characters = (
+        await db.execute(
+            select(Character)
+            .where(Character.book_id == book_id, Character.first_chapter > chapter_number)
+            .order_by(Character.first_chapter.asc(), Character.name.asc())
+        )
+    ).scalars().all()
+
+    changed = False
+    for character in characters:
+        candidates = merge_list_values([character.name], character.aliases or [])
+        if not any(_find_name_occurrences(chapter_text, candidate) > 0 for candidate in candidates):
+            continue
+
+        earliest_chapter = await find_earliest_character_mention_chapter(
+            db,
+            book_id=book_id,
+            name=character.name,
+            aliases=character.aliases or [],
+            upto_chapter=chapter_number,
+        )
+        resolved_first_chapter = earliest_chapter or chapter_number
+        if resolved_first_chapter >= character.first_chapter:
+            continue
+
+        character.first_chapter = resolved_first_chapter
+        if character.last_seen_chapter is None or character.last_seen_chapter < resolved_first_chapter:
+            character.last_seen_chapter = resolved_first_chapter
+        changed = True
+
+    return changed
 
 
 def _collect_partition_evidence(
@@ -869,12 +1123,18 @@ async def merge_characters(
         return primary
 
     merged = merge_profile_fields(primary, secondary)
+    merged_manual_description = _merge_character_descriptions(
+        _manual_character_description_value(primary.trait_state),
+        _manual_character_description_value(secondary.trait_state),
+    )
     primary.aliases = merged["aliases"]
     primary.role = merged["role"]
     primary.first_chapter = merged["first_chapter"]
     primary.last_seen_chapter = merged["last_seen_chapter"]
     primary.mention_count = (primary.mention_count or 0) + (secondary.mention_count or 0)
     primary.trait_state = merged["trait_state"]
+    if merged_manual_description:
+        apply_manual_character_description(primary, merged_manual_description)
     primary.hair = merged["hair"]
     primary.eyes = merged["eyes"]
     primary.build = merged["build"]

@@ -107,3 +107,5 @@ async def test_story_health_endpoint_returns_dynamic_book_metrics(client, db, au
     assert all(0 <= item["score"] <= 100 for item in payload["metrics"])
     assert payload["score"] < 100
     assert all(item["score"] < 100 for item in payload["metrics"])
+    world_metric = next(item for item in payload["metrics"] if item["label"] == "Worldbuilding consistency")
+    assert "0 cached world-analysis issues" not in world_metric["detail"]

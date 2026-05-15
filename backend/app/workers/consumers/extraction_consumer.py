@@ -32,16 +32,13 @@ from app.models.character import Character, CharacterState, CharacterVoiceProfil
 from app.models.intelligence import BookChunk, CharacterRelationship, Notification
 from app.models.user import User
 from app.parsers.chunker import ChunkingConfig, chunk_text, count_tokens
-from app.services.monetization_service import qualify_referral_if_ready, reward_first_processed_book
 from app.services.email_service import send_processing_complete_with_stats
+from app.services.monetization_service import qualify_referral_if_ready, reward_first_processed_book
+from app.utils.billing_utils import user_access_tier
+from app.utils.book_utils import parse_book_upload_for_ingestion, refresh_screenplay_scene_rows
+from app.utils.character_utils import find_earliest_character_mention_chapter
 from app.utils.compliance.copyright_check import check_isbn
 from app.utils.external.isbn_lookup import extract_isbn_from_pdf
-from app.utils.book_utils import parse_book_upload_for_ingestion, refresh_screenplay_scene_rows
-from app.utils.intelligence_utils import (
-    compute_voice_metrics,
-    extract_dialogue_samples_by_character,
-    merge_voice_profile_metrics,
-)
 from app.utils.ingestion_utils import (
     apply_chapter_number_strategy,
     build_chapter_dispatch_plan,
@@ -53,7 +50,11 @@ from app.utils.ingestion_utils import (
     persist_chapter_payloads,
     update_book_processing_state,
 )
-from app.utils.billing_utils import user_access_tier
+from app.utils.intelligence_utils import (
+    compute_voice_metrics,
+    extract_dialogue_samples_by_character,
+    merge_voice_profile_metrics,
+)
 from app.utils.notification_utils import build_book_ready_notification, collect_book_ready_stats
 from app.utils.queue_utils import queue_for_user
 
@@ -355,6 +356,7 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
         chapter = Chapter(
             book_id=book.id,
             number=chapter_number,
+            content_version=int(ch_data.get("content_version") or 1),
             title=ch_data.get("title"),
             description=ch_data.get("description"),
             s3_key=s3_key,
@@ -378,6 +380,10 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
         next_word_count = _count_words(ch_data.get("text", ""))
         if next_word_count and chapter.word_count != next_word_count:
             chapter.word_count = next_word_count
+            chapter_changed = True
+        next_content_version = ch_data.get("content_version")
+        if next_content_version is not None and int(chapter.content_version or 1) != int(next_content_version):
+            chapter.content_version = int(next_content_version)
             chapter_changed = True
         if chapter_changed:
             await db.flush()
@@ -413,7 +419,12 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
 
     async def _embed_with_limit(batch: list[str]) -> list[list[float]]:
         async with embed_semaphore:
-            return await embed_batch(batch)
+            return await embed_batch(
+                batch,
+                user_id=book.user_id,
+                book_id=book.id,
+                feature="chapter_chunk_embedding",
+            )
 
     embedded_batches = await asyncio.gather(*(_embed_with_limit(batch) for batch in chunk_batches))
     chunk_embeddings = [embedding for batch in embedded_batches for embedding in batch]
@@ -446,7 +457,14 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
     llm_started = time.perf_counter()
     extraction_batches = _group_chunks_for_extraction(chunks)
     extraction_results = await asyncio.gather(
-        *(extract_characters_and_relationships("\n\n".join(chunk_batch)) for chunk_batch in extraction_batches),
+        *(
+            extract_characters_and_relationships(
+                "\n\n".join(chunk_batch),
+                user_id=book.user_id,
+                book_id=book.id,
+            )
+            for chunk_batch in extraction_batches
+        ),
         return_exceptions=True,
     )
 
@@ -475,6 +493,15 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                 char = await db.get(Character, existing_id)
                 if char:
                     updated = update_profile(char, {**entity, "first_chapter": chapter_number})
+                    earliest_chapter = await find_earliest_character_mention_chapter(
+                        db,
+                        book_id=book.id,
+                        name=char.name,
+                        aliases=updated.get("aliases") or char.aliases or [],
+                        upto_chapter=chapter_number,
+                    )
+                    if earliest_chapter is not None:
+                        updated["first_chapter"] = min(updated["first_chapter"], earliest_chapter)
                     changed = _changed(char.trait_state or {}, updated["trait_state"])
                     await db.execute(sa_update(Character).where(Character.id == existing_id).values(**updated))
                     if changed:
@@ -517,6 +544,15 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                     char = await db.get(Character, existing_id)
                     if char and _should_update_existing_character(entity):
                         updated = update_profile(char, {**entity, "first_chapter": chapter_number})
+                        earliest_chapter = await find_earliest_character_mention_chapter(
+                            db,
+                            book_id=book.id,
+                            name=char.name,
+                            aliases=updated.get("aliases") or char.aliases or [],
+                            upto_chapter=chapter_number,
+                        )
+                        if earliest_chapter is not None:
+                            updated["first_chapter"] = min(updated["first_chapter"], earliest_chapter)
                         changed = _changed(char.trait_state or {}, updated["trait_state"])
                         await db.execute(sa_update(Character).where(Character.id == existing_id).values(**updated))
                         if changed:
@@ -538,6 +574,15 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                     await merge_alias(db, existing_id, entity["name"])
                     continue
                 profile = build_character_profile(entity, book.id, chapter_number)
+                earliest_chapter = await find_earliest_character_mention_chapter(
+                    db,
+                    book_id=book.id,
+                    name=profile["name"],
+                    aliases=profile["aliases"],
+                    upto_chapter=chapter_number,
+                )
+                if earliest_chapter is not None:
+                    profile["first_chapter"] = min(profile["first_chapter"], earliest_chapter)
                 char = Character(**profile, embedding=emb)
                 db.add(char)
                 await db.flush()
@@ -871,7 +916,23 @@ def _should_update_existing_character(entity: dict) -> bool:
         evidence.get("has_dialogue_or_action")
         or evidence.get("has_physical_description")
         or evidence.get("appears_multiple_times")
+        or _has_character_profile_signal(entity)
     ))
+
+
+def _has_character_profile_signal(entity: dict) -> bool:
+    traits = entity.get("traits")
+    if isinstance(traits, dict) and any(
+        isinstance(value, dict) and str(value.get("value") or "").strip()
+        for value in traits.values()
+    ):
+        return True
+    if any(str(entity.get(field) or "").strip() for field in ("goal", "lie_they_believe", "backstory_wound", "arc_type", "arc_summary", "archetype")):
+        return True
+    if any(entity.get(field) for field in ("personality_tags", "motivations", "fears")):
+        return True
+    growth_event = entity.get("growth_event")
+    return isinstance(growth_event, dict) and bool(str(growth_event.get("event") or "").strip())
 
 
 def _can_auto_save_character(entity: dict) -> bool:
@@ -888,12 +949,14 @@ def _can_auto_save_character(entity: dict) -> bool:
     has_dialogue_or_action = bool(evidence.get("has_dialogue_or_action"))
     has_physical_description = bool(evidence.get("has_physical_description"))
     appears_multiple_times = bool(evidence.get("appears_multiple_times")) or mention_count >= 2
+    has_profile_signal = _has_character_profile_signal(entity)
 
-    if not (has_dialogue_or_action or has_physical_description or appears_multiple_times):
+    if not (has_dialogue_or_action or has_physical_description or appears_multiple_times or has_profile_signal):
         return False
 
     if mention_count < 2 and not (
-        confidence >= SINGLE_MENTION_SAVE_CONFIDENCE and (has_dialogue_or_action or has_physical_description)
+        confidence >= SINGLE_MENTION_SAVE_CONFIDENCE
+        and (has_dialogue_or_action or has_physical_description or has_profile_signal)
     ):
         return False
 

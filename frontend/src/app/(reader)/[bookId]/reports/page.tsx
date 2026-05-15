@@ -1,10 +1,12 @@
 "use client"
 
 import Link from "next/link"
-import { useEffect, useState } from "react"
+import { useEffect } from "react"
+import { useQuery } from "@tanstack/react-query"
 import { useParams } from "next/navigation"
 
 import { booksApi } from "@/lib/api/books"
+import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { capture } from "@/lib/analytics/posthog"
 import type { ChapterConsistencyReport } from "@/types/book"
@@ -14,13 +16,14 @@ export default function ChapterReportsPage() {
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
 
-  const [reports, setReports] = useState<ChapterConsistencyReport[]>([])
-  const [loading, setLoading] = useState(true)
-
   useEffect(() => {
     capture("author_reports_opened", { book_id: bookId })
-    booksApi.getChapterReports(bookId).then(setReports).finally(() => setLoading(false))
   }, [bookId])
+  const { data: reports = [], isLoading: loading } = useQuery<ChapterConsistencyReport[]>({
+    queryKey: asQueryKey(bookCacheKey(bookId, "chapter-reports:12")),
+    queryFn: () => booksApi.getChapterReports(bookId),
+    staleTime: 30_000,
+  })
 
   return (
     <div className={`min-h-screen ${isDark ? "bg-[linear-gradient(180deg,#000000_0%,#060606_44%,#0d0d0d_100%)] text-slate-100" : "bg-[linear-gradient(180deg,#fcf7ef_0%,#f8f3ec_46%,#f5f0ea_100%)] text-stone-950"}`}>

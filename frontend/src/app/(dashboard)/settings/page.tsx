@@ -188,7 +188,7 @@ export default function SettingsPage() {
           <WorkspaceMetric
             label="Theme"
             value={theme.toUpperCase()}
-            note="Synced with the reader"
+            note="Synced with the reading workspace"
             accent="success"
           />
         </section>
@@ -243,7 +243,7 @@ export default function SettingsPage() {
               Choose the workspace tone
             </h2>
             <p className="mt-2 text-sm leading-7 text-[rgb(var(--muted-foreground))]">
-              Theme selection is synced automatically across the dashboard and the reader.
+              Theme selection is synced automatically across the dashboard and the reading workspace.
             </p>
             <div className="mt-5 grid gap-3">
               {[
@@ -378,7 +378,7 @@ export default function SettingsPage() {
                 {pointsLoading ? "Loading..." : referralSummary?.referral_code ?? "Not available yet"}
               </p>
               <p className="mt-2 text-sm leading-7 text-[rgb(var(--muted-foreground))]">
-                Invite a verified reader who actually processes a first book, and rewards are added automatically.
+                Invite a verified collaborator who actually processes a first book, and rewards are added automatically.
               </p>
               <div className="mt-4 flex flex-wrap gap-3">
                 <button onClick={copyReferralLink} className="app-button-primary disabled:opacity-60" disabled={pointsLoading || !referralSummary?.referral_url}>

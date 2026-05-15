@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from typing import Any, cast
+import uuid
 
 from openai import AsyncOpenAI
 
 from app.core.config import settings
+from app.utils.llm_usage_utils import create_tracked_chat_completion
 
 
 async def complete_with_fallback(
@@ -19,6 +21,10 @@ async def complete_with_fallback(
     max_tokens: int = 1200,
     response_format: dict[str, Any] | None = None,
     openai_client: AsyncOpenAI | None = None,
+    usage_feature: str = "llm_completion",
+    usage_user_id: uuid.UUID | None = None,
+    usage_book_id: uuid.UUID | None = None,
+    usage_metadata: dict[str, Any] | None = None,
 ) -> str:
     openai_error: Exception | None = None
 
@@ -39,7 +45,15 @@ async def complete_with_fallback(
             )
             if response_format is not None:
                 request_kwargs["response_format"] = response_format
-            response = await client.chat.completions.create(**request_kwargs)
+            response = await create_tracked_chat_completion(
+                client=client,
+                feature=usage_feature,
+                model=openai_model,
+                user_id=usage_user_id,
+                book_id=usage_book_id,
+                metadata=usage_metadata,
+                **request_kwargs,
+            )
             content = response.choices[0].message.content or ""
             if content.strip():
                 return content.strip()

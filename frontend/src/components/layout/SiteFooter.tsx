@@ -29,10 +29,10 @@ export function SiteFooter() {
         <div className="max-w-xl">
           <div>
             <BrandLockup size="md" iconClassName="h-11 w-11 rounded-2xl" />
-            <p className="mt-2 text-sm text-white/60">Manuscript intelligence for readers and authors</p>
+            <p className="mt-2 text-sm text-white/60">LoreVia for authors</p>
           </div>
           <p className="mt-5 max-w-lg text-base leading-7 text-white/70">
-            Built for long books, real continuity work, and people who want a calmer way to work through a story.
+            Built for manuscript drafting, revision, continuity control, and the authors who need a dependable memory for every story detail.
           </p>
         </div>
 
@@ -52,6 +52,15 @@ export function SiteFooter() {
                 Pricing
               </a>
             )}
+            <Link href="/blog" className={footerLinkClass}>
+              Blog
+            </Link>
+            <Link href="/answers" className={footerLinkClass}>
+              Answers
+            </Link>
+            <Link href="/demo" className={footerLinkClass}>
+              Demo
+            </Link>
             <Link href="/status" className={footerLinkClass}>
               Status
             </Link>

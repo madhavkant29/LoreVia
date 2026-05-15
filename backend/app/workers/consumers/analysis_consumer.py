@@ -81,6 +81,8 @@ async def analyse_chapter(
                         "detailed",
                         chapter_title,
                         openai_client=client,
+                        user_id=book.user_id,
+                        book_id=book.id,
                     )
                 except Exception:
                     summary_payload = None
@@ -115,6 +117,8 @@ async def analyse_chapter(
                 chapter_text,
                 chapter.number,
                 openai_client=client,
+                user_id=book.user_id,
+                book_id=book.id,
             )
         finally:
             if client is not None:

@@ -1,13 +1,18 @@
 export const SITE_URL = "https://getlorevia.com"
 export const SITE_NAME = "LoreVia"
+export const SITE_TITLE = "lorevia"
+export const SITE_TAGLINE = "LoreVia for authors"
 export const SITE_DESCRIPTION =
-  "LoreVia helps authors deeply understand their manuscripts, track characters, plot threads, timelines, and story consistency with AI."
+  "LoreVia for authors turns a manuscript into a searchable story workspace with grounded AI for characters, plot threads, timelines, revisions, and continuity."
 export const DEFAULT_OG_IMAGE = "/og-image.png"
 
 export const STATIC_PUBLIC_ROUTES = [
   "/",
+  "/blog",
+  "/answers",
   "/compliance",
   "/contact",
+  "/demo",
   "/eula",
   "/privacy",
   "/pricing",
@@ -41,7 +46,7 @@ export const websiteJsonLd = {
     "@type": "Organization",
     name: SITE_NAME,
     url: SITE_URL,
-    logo: toAbsoluteUrl("/image.png"),
+    logo: toAbsoluteUrl("/logoandtext.png"),
   },
 }
 
@@ -50,5 +55,5 @@ export const organizationJsonLd = {
   "@type": "Organization",
   name: SITE_NAME,
   url: SITE_URL,
-  logo: toAbsoluteUrl("/image.png"),
+  logo: toAbsoluteUrl("/logoandtext.png"),
 }

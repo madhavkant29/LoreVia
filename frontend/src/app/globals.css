@@ -27,6 +27,9 @@
   --panel-subtle-gradient: linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.6));
   --panel-shadow: 0 30px 80px -48px rgba(15, 23, 42, 0.28);
   --hairline: rgba(255, 255, 255, 0.66);
+  --font-ui: "Avenir Next";
+  --font-merriweather: Georgia;
+  --font-newsreader: "Times New Roman";
   
   --reader-font: var(--font-merriweather), Georgia, serif;
   --reader-line-height: 1.5;
@@ -428,7 +431,7 @@ body::before {
   max-width: 680px;
   margin-inline: auto;
   color: var(--book-ink);
-  font-family: Georgia, "Times New Roman", Times, serif;
+  font-family: inherit;
   line-height: 1.68;
   text-align: justify;
   text-wrap: pretty;
@@ -668,6 +671,98 @@ body::before {
   color: #0f766e;
   text-decoration: underline;
   text-underline-offset: 0.18em;
+}
+
+.manuscript-paged-preview-shell {
+  height: var(--manuscript-page-height);
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: var(--manuscript-page-padding-top) 0 var(--manuscript-page-padding-bottom);
+  box-sizing: border-box;
+  background-image:
+    repeating-linear-gradient(
+      to right,
+      rgba(253, 252, 249, 0.98) 0,
+      rgba(253, 252, 249, 0.98) var(--manuscript-page-width),
+      transparent var(--manuscript-page-width),
+      transparent calc(var(--manuscript-page-width) + var(--manuscript-page-gap))
+    );
+}
+
+.dark .manuscript-paged-preview-shell {
+  background-image:
+    repeating-linear-gradient(
+      to right,
+      rgba(15, 17, 23, 0.96) 0,
+      rgba(15, 17, 23, 0.96) var(--manuscript-page-width),
+      transparent var(--manuscript-page-width),
+      transparent calc(var(--manuscript-page-width) + var(--manuscript-page-gap))
+    );
+}
+
+.manuscript-paged-preview {
+  height: 100%;
+  min-width: calc(var(--manuscript-page-content-width) + var(--manuscript-page-padding-left) + var(--manuscript-page-padding-right));
+  padding-left: var(--manuscript-page-padding-left);
+  padding-right: var(--manuscript-page-padding-right);
+  column-width: var(--manuscript-page-content-width);
+  column-gap: calc(var(--manuscript-page-gap) + var(--manuscript-page-padding-left) + var(--manuscript-page-padding-right));
+  column-fill: auto;
+  overflow: visible;
+}
+
+.manuscript-paged-preview__section {
+  break-inside: avoid;
+}
+
+.manuscript-paged-preview__section--chapter-break {
+  break-before: column;
+}
+
+.manuscript-paged-preview__eyebrow {
+  margin: 0;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: rgba(100, 116, 139, 0.9);
+}
+
+.manuscript-paged-preview__title {
+  margin: 0.9rem 0 0;
+  font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, serif;
+  font-size: 1.8rem;
+  line-height: 1.15;
+  color: rgb(28, 25, 23);
+}
+
+.dark .manuscript-paged-preview__title {
+  color: rgb(241, 245, 249);
+}
+
+.manuscript-paged-preview__body {
+  margin-top: 1.2rem;
+  color: rgb(41, 37, 36);
+}
+
+.dark .manuscript-paged-preview__body {
+  color: rgb(226, 232, 240);
+}
+
+.manuscript-paged-preview__body p {
+  margin: 0;
+}
+
+.manuscript-paged-preview__body p + p {
+  margin-top: 1em;
+}
+
+.manuscript-paged-preview[data-first-line-indent="true"] .manuscript-paged-preview__body p + p {
+  text-indent: 1.5em;
+}
+
+.manuscript-paged-preview__body img {
+  break-inside: avoid;
 }
 
 .dark .manuscript-editor a,

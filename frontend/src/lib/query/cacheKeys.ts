@@ -1,0 +1,45 @@
+import { normalizeBookRouteId } from "@/lib/utils/bookRoutes"
+
+export function bookCacheKey(bookId: string, scope: string) {
+  return `book:${normalizeBookRouteId(bookId)}:${scope}`
+}
+
+export function readerCacheKey(bookId: string, scope: string) {
+  return `reader:${normalizeBookRouteId(bookId)}:${scope}`
+}
+
+export function booksListCacheKey(includeHidden = false) {
+  return `books:list:${includeHidden ? "all" : "active"}`
+}
+
+export function booksStatsCacheKey() {
+  return "books:stats"
+}
+
+export function booksQuotesCacheKey() {
+  return "books:quotes"
+}
+
+export function booksNotesCacheKey() {
+  return "books:notes"
+}
+
+export function booksSeriesCacheKey() {
+  return "books:series"
+}
+
+export function booksSeriesBibleCacheKey(seriesId: string) {
+  return `books:series-bible:${seriesId}`
+}
+
+export function readerUpcomingBetaReadsCacheKey() {
+  return "reader:beta-reads:upcoming"
+}
+
+export function notificationsCacheKey(limit: number) {
+  return `notifications:list:${limit}`
+}
+
+export function asQueryKey(key: string) {
+  return [key] as const
+}

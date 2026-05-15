@@ -4,15 +4,17 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 
 import { billingApi } from "@/lib/api/billing"
-import { pricingTiers, type BillingCycle, type PricingTier } from "@/lib/billing/catalog"
+import {
+  pricingTierAccessLabel,
+  pricingTierGuestCtaLabel,
+  pricingTiers,
+  type BillingCycle,
+  type PricingTier,
+} from "@/lib/billing/catalog"
 import { useAuthStore } from "@/lib/stores/authStore"
 
 type PricingPlansProps = {
   surface?: "public" | "app"
-}
-
-function getGuestCtaLabel(tier: PricingTier) {
-  return tier.name === "Free" ? "Start free" : "Start free trial"
 }
 
 export function PricingPlans({ surface = "public" }: PricingPlansProps) {
@@ -23,6 +25,16 @@ export function PricingPlans({ surface = "public" }: PricingPlansProps) {
   const [message, setMessage] = useState<string | null>(null)
 
   async function handlePlanClick(tier: PricingTier) {
+    if (tier.access === "free") {
+      if (!user) {
+        router.push("/register")
+        return
+      }
+
+      setMessage("Free is included with every account. Paid checkout only applies to Author and Lore Architect.")
+      return
+    }
+
     if (!user) {
       router.push("/register")
       return
@@ -51,16 +63,16 @@ export function PricingPlans({ surface = "public" }: PricingPlansProps) {
   }
 
   const helperCopy = user
-    ? "Your account is ready for upgrades from this screen."
+    ? "Free is already included in your account. Only Author and Lore Architect start paid checkout from this screen."
     : surface === "public"
-      ? "Create an account to start the 10-day Author trial, then choose the plan that fits."
-      : "Create an account or sign in before starting checkout."
+      ? "Every signup starts with 10 days of Author access at no charge. After the trial, the account falls back to Free unless you upgrade to a paid plan."
+      : "Free is included with every account. Sign in to upgrade to a paid plan."
 
   return (
     <section className={surface === "public" ? "border-t border-white/[0.08] py-8" : undefined}>
       <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-2xl font-semibold tracking-[-0.02em] text-[#F2F4F7]">Plans</h2>
+          <h2 className="text-2xl font-semibold tracking-[-0.02em] text-[#F2F4F7]">Plans for authors and larger story worlds</h2>
           <p className="mt-2 text-sm text-[#7F8994]">{helperCopy}</p>
         </div>
 
@@ -80,6 +92,11 @@ export function PricingPlans({ surface = "public" }: PricingPlansProps) {
         </div>
       </div>
 
+      <div className="mt-6 rounded-2xl border border-white/[0.08] bg-[#0B0F14] px-4 py-4 text-sm leading-6 text-[#C8D0D9]">
+        <p>Every new account starts with 10 days of Author access and no credit card.</p>
+        <p className="mt-2 text-[#A8B0BA]">After that, you keep the Free plan unless you choose a paid subscription.</p>
+      </div>
+
       {message ? (
         <div className="mt-6 rounded-xl border border-[#C9A86A]/30 bg-[#0B0F14] px-4 py-3 text-sm leading-6 text-[#E5CA91]">
           {message}
@@ -92,7 +109,7 @@ export function PricingPlans({ surface = "public" }: PricingPlansProps) {
           const unit = tier.name === "Free" ? "" : billingCycle === "annual" ? "/yr" : "/mo"
           const selectedPlanCode = billingCycle === "annual" ? tier.annualCode : tier.monthlyCode
           const isBusy = selectedPlanCode ? busyPlan === selectedPlanCode : false
-          const buttonLabel = user ? tier.cta : getGuestCtaLabel(tier)
+          const buttonLabel = user ? tier.cta : pricingTierGuestCtaLabel(tier)
 
           return (
             <article
@@ -108,6 +125,10 @@ export function PricingPlans({ surface = "public" }: PricingPlansProps) {
                 </div>
                 {tier.highlight ? <span className="text-[11px] font-semibold uppercase tracking-[0.24em] text-[#C9A86A]">Core</span> : null}
               </div>
+
+              <p className="mt-5 text-xs font-semibold uppercase tracking-[0.2em] text-[#C9A86A]">
+                {pricingTierAccessLabel(tier)}
+              </p>
 
               <div className="mt-7 flex items-end gap-1">
                 <span className="text-5xl font-semibold tracking-[-0.05em] text-[#F2F4F7]">
@@ -147,6 +168,13 @@ export function PricingPlans({ surface = "public" }: PricingPlansProps) {
           )
         })}
       </div>
+
+      <p className="mt-5 text-sm leading-6 text-[#7F8994]">
+        Only Author and Lore Architect are paid subscriptions. Free stays available without checkout.
+      </p>
+      <p className="mt-3 text-sm leading-6 text-[#7F8994]">
+        Worldbuilding manuscripts count as uploads on every tier. On Author, a series-linked worldbuilding manuscript counts once per book in that series. Lore Architect remains unlimited.
+      </p>
     </section>
   )
 }

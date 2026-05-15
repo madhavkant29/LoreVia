@@ -9,6 +9,7 @@ import { booksApi } from "@/lib/api/books"
 import { intelligenceApi } from "@/lib/api/intelligence"
 import { readerApi } from "@/lib/api/reader"
 import { saveContextualVaultNote } from "@/lib/utils/notes"
+import { getApiErrorDetail } from "@/lib/utils/apiErrors"
 import {
   buildVoiceIssueNote,
   buildVoiceReviewNote,
@@ -36,6 +37,7 @@ export default function VoiceConsistencyPage() {
   const [loading, setLoading] = useState(true)
   const [reviewLoading, setReviewLoading] = useState(false)
   const [saveStatus, setSaveStatus] = useState<string | null>(null)
+  const [reviewError, setReviewError] = useState<string | null>(null)
   const [review, setReview] = useState<VoiceConsistencyReview | null>(null)
   const [voiceCharacters, setVoiceCharacters] = useState<string[]>([])
   const [voiceMatches, setVoiceMatches] = useState<VoiceConsistencyMatch[]>([])
@@ -44,6 +46,10 @@ export default function VoiceConsistencyPage() {
   const existingScenePaths = useMemo(
     () => (workspaceTree?.scene_groups ?? []).flatMap((group) => group.scenes.map((scene) => scene.path)),
     [workspaceTree]
+  )
+  const savedVoiceSceneCount = useMemo(
+    () => existingScenePaths.filter((path) => path.startsWith("scenes/voice/")).length,
+    [existingScenePaths]
   )
   const existingVoiceNotes = useMemo(
     () => (workspaceTree?.note_paths ?? []).filter((path) => path.toLowerCase().includes("/voice/") || path.toLowerCase().startsWith("story advisor/voice")),
@@ -78,6 +84,7 @@ export default function VoiceConsistencyPage() {
       setChapterTitle("")
       setText("")
       setReview(null)
+      setReviewError(null)
       setVoiceCharacters([])
       setVoiceMatches([])
       return
@@ -97,6 +104,7 @@ export default function VoiceConsistencyPage() {
       })
 
     setReview(null)
+    setReviewError(null)
     setVoiceCharacters([])
     setVoiceMatches([])
     setSaveStatus(null)
@@ -111,11 +119,17 @@ export default function VoiceConsistencyPage() {
     if (!trimmed) return
     setReviewLoading(true)
     setSaveStatus(null)
+    setReviewError(null)
     try {
       const result = await intelligenceApi.voiceConsistencyReview(bookId, trimmed, selectedChapter ?? undefined)
       setReview(result.review)
       setVoiceCharacters(result.characters_reviewed)
       setVoiceMatches(result.character_matches ?? [])
+    } catch (error) {
+      setReview(null)
+      setVoiceCharacters([])
+      setVoiceMatches([])
+      setReviewError(getApiErrorDetail(error) ?? "Could not run the voice review right now. Please try again.")
     } finally {
       setReviewLoading(false)
     }
@@ -231,7 +245,19 @@ export default function VoiceConsistencyPage() {
                     <div className={`rounded-[1rem] border px-4 py-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white"}`}>
                       <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Shared outputs</p>
                       <p className="mt-2 text-sm">{existingVoiceNotes.length} saved voice note{existingVoiceNotes.length === 1 ? "" : "s"}</p>
-                      <p className="mt-1 text-sm">{existingScenePaths.filter((path) => path.startsWith("scenes/voice/")).length} voice scene snapshot{existingScenePaths.filter((path) => path.startsWith("scenes/voice/")).length === 1 ? "" : "s"}</p>
+                      <p className="mt-1 text-sm">{savedVoiceSceneCount} voice scene snapshot{savedVoiceSceneCount === 1 ? "" : "s"}</p>
+                      <p className={`mt-2 text-xs leading-5 ${isDark ? "text-slate-500" : "text-stone-500"}`}>These counts update when you save a review note or scene snapshot.</p>
+                    </div>
+                    <div className={`rounded-[1rem] border px-4 py-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white"}`}>
+                      <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Latest review</p>
+                      {review ? (
+                        <>
+                          <p className="mt-2 text-sm">{review.issues.length} flagged issue{review.issues.length === 1 ? "" : "s"}</p>
+                          <p className="mt-1 text-sm">{voiceCharacters.length} character baseline{voiceCharacters.length === 1 ? "" : "s"} reviewed</p>
+                        </>
+                      ) : (
+                        <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>Run a voice review to compare this passage against your manuscript baselines.</p>
+                      )}
                     </div>
                     <div className={`rounded-[1rem] border px-4 py-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white"}`}>
                       <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Scene folder</p>
@@ -262,6 +288,11 @@ export default function VoiceConsistencyPage() {
                     placeholder="Paste dialogue or load a chapter to review its voice consistency."
                     className={`mt-4 min-h-[18rem] w-full rounded-[1rem] border px-4 py-3 text-sm leading-7 outline-none ${isDark ? "border-white/10 bg-[#0b1220] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
                   />
+                  {reviewError ? (
+                    <p className={`mt-3 rounded-[0.95rem] border px-3 py-2 text-sm ${isDark ? "border-rose-500/30 bg-rose-500/10 text-rose-200" : "border-rose-200 bg-rose-50 text-rose-700"}`}>
+                      {reviewError}
+                    </p>
+                  ) : null}
                   {saveStatus ? <p className={`mt-3 text-sm ${isDark ? "text-emerald-300" : "text-emerald-700"}`}>{saveStatus}</p> : null}
                 </div>
               </div>

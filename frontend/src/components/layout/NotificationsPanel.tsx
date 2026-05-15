@@ -47,6 +47,12 @@ export function NotificationsPanel({ mode = "sidebar" }: { mode?: "sidebar" | "p
               const relationshipCount = typeof item.data?.relationship_count === "number" ? item.data.relationship_count : null
               const plotThreadCount = typeof item.data?.plot_thread_count === "number" ? item.data.plot_thread_count : null
               const continuityIssueCount = typeof item.data?.continuity_issue_count === "number" ? item.data.continuity_issue_count : null
+              const activeRevisionItems = typeof item.data?.active_item_count === "number" ? item.data.active_item_count : null
+              const highRevisionItems = typeof item.data?.high_severity_count === "number" ? item.data.high_severity_count : null
+              const revisionTagline = typeof item.data?.tagline === "string" ? item.data.tagline : null
+              const revisionHero = typeof item.data?.hero_message === "string" ? item.data.hero_message : null
+              const recentEditLabel = typeof item.data?.recent_edit_label === "string" ? item.data.recent_edit_label : null
+              const topRevisionTitle = typeof item.data?.top_item_title === "string" ? item.data.top_item_title : null
               return (
                 <article
                   key={item.id}
@@ -62,6 +68,18 @@ export function NotificationsPanel({ mode = "sidebar" }: { mode?: "sidebar" | "p
                           {relationshipCount !== null ? <span className={`rounded-full px-3 py-1 text-[11px] font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-white text-stone-700 border border-stone-200"}`}>{relationshipCount} relationships</span> : null}
                           {plotThreadCount !== null ? <span className={`rounded-full px-3 py-1 text-[11px] font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-white text-stone-700 border border-stone-200"}`}>{plotThreadCount} plot threads</span> : null}
                           {continuityIssueCount !== null ? <span className={`rounded-full px-3 py-1 text-[11px] font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-white text-stone-700 border border-stone-200"}`}>{continuityIssueCount} continuity issues</span> : null}
+                        </div>
+                      ) : null}
+                      {item.kind === "revision_digest" ? (
+                        <div className="mt-3">
+                          {revisionTagline ? <p className={`text-xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-violet-300" : "text-violet-700"}`}>{revisionTagline}</p> : null}
+                          {recentEditLabel ? <p className={`mt-2 text-sm leading-6 ${isDark ? "text-violet-200" : "text-violet-800"}`}>{recentEditLabel}</p> : null}
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {activeRevisionItems !== null ? <span className={`rounded-full px-3 py-1 text-[11px] font-semibold ${isDark ? "bg-white/10 text-slate-200" : "border border-stone-200 bg-white text-stone-700"}`}>{activeRevisionItems} active items</span> : null}
+                            {highRevisionItems !== null ? <span className={`rounded-full px-3 py-1 text-[11px] font-semibold ${isDark ? "bg-rose-500/15 text-rose-200" : "bg-rose-50 text-rose-700"}`}>{highRevisionItems} high severity</span> : null}
+                          </div>
+                          {revisionHero ? <p className={`mt-3 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{revisionHero}</p> : null}
+                          {topRevisionTitle ? <p className={`mt-2 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Top issue: {topRevisionTitle}</p> : null}
                         </div>
                       ) : null}
                       <div className={`mt-3 flex flex-wrap items-center gap-3 text-xs ${isDark ? "text-slate-500" : "text-stone-400"}`}>
@@ -82,10 +100,10 @@ export function NotificationsPanel({ mode = "sidebar" }: { mode?: "sidebar" | "p
                   {item.book_id ? (
                     <div className="mt-4">
                       <Link
-                        href={chapterNumber ? `/${item.book_id}/chapter/${chapterNumber}` : `/${item.book_id}`}
+                        href={item.kind === "revision_digest" ? `/${item.book_id}` : chapterNumber ? `/${item.book_id}/chapter/${chapterNumber}` : `/${item.book_id}`}
                         className={`text-sm font-medium transition ${isDark ? "text-indigo-300 hover:text-indigo-200" : "text-violet-700 hover:text-violet-800"}`}
                       >
-                        Open in LoreVia →
+                        {item.kind === "revision_digest" ? "Open revision command center →" : "Open in LoreVia →"}
                       </Link>
                     </div>
                   ) : null}

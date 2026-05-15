@@ -11,8 +11,12 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.models.book import Book
-from app.core.storage import upload_text
-from app.utils.book_utils import normalize_writer_workspace, serialize_manuscript_content
+from app.core.storage import download_book, upload_text
+from app.utils.book_utils import (
+    deserialize_manuscript_content,
+    normalize_writer_workspace,
+    serialize_manuscript_content,
+)
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -78,6 +82,59 @@ async def persist_chapter_payloads(
 
     stored_pairs = await asyncio.gather(*(_store(chapter) for chapter in chapters))
     return dict(stored_pairs)
+
+
+async def load_staged_chapter_payload(
+    book_id: uuid.UUID,
+    chapter_number: int,
+    *,
+    chapter_s3_key: str | None = None,
+) -> dict[str, str | None] | None:
+    candidate_keys: list[str] = []
+    normalized_key = " ".join(str(chapter_s3_key or "").split()).strip()
+    if normalized_key:
+        candidate_keys.append(normalized_key)
+
+    fallback_key = build_chapter_storage_key(book_id, chapter_number)
+    if fallback_key not in candidate_keys:
+        candidate_keys.append(fallback_key)
+
+    for storage_key in candidate_keys:
+        try:
+            raw = await asyncio.to_thread(download_book, storage_key)
+        except Exception:
+            continue
+        return deserialize_manuscript_content(raw)
+
+    return None
+
+
+async def load_processing_chapter_payload(
+    book_id: uuid.UUID,
+    chapter_number: int,
+    *,
+    chapter_s3_key: str | None = None,
+    chapter_title: str | None = None,
+) -> dict[str, Any] | None:
+    """Load chapter processing input from chapter storage only."""
+    stored_payload = await load_staged_chapter_payload(
+        book_id,
+        chapter_number,
+        chapter_s3_key=chapter_s3_key,
+    )
+    if not stored_payload:
+        return None
+
+    chapter_text = str(stored_payload.get("text") or "").strip()
+    if not chapter_text:
+        return None
+
+    return {
+        "number": chapter_number,
+        "title": " ".join(str(chapter_title or "").split()).strip() or None,
+        "text": chapter_text,
+        "html": stored_payload.get("html"),
+    }
 
 
 def build_ingestion_progress_state(

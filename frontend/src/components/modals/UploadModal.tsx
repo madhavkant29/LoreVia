@@ -1,4 +1,6 @@
 "use client"
+import axios from "axios"
+import { useQuery } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"
 import { booksApi } from "@/lib/api/books"
 import { authApi } from "@/lib/api/auth"
@@ -9,13 +11,20 @@ import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { useBookModeStore, type BookMode } from "@/lib/stores/bookModeStore"
 import { GENRE_TAGS } from "@/lib/constants/genreTags"
+import { asQueryKey, bookCacheKey, booksListCacheKey, booksSeriesCacheKey, booksStatsCacheKey } from "@/lib/query/cacheKeys"
 import { capture } from "@/lib/analytics/posthog"
-import type { Book, BookSeries, BookWorkType, ChapterConsistencyReport } from "@/types/book"
+import type { Book, BookSeries, BookWorkType, ChapterConsistencyReport, UserStats } from "@/types/book"
 import type { AdvisorSuggestion, EditorialReview, EditorialReviewPassage, ManuscriptSynopsis } from "@/types/intelligence"
 import type { PlotThread } from "@/types/reader"
 
 const MAX_TAGS = 8
 const TAG_SUGGESTION_LIMIT = 18
+
+function getApiErrorDetail(error: unknown) {
+  if (!axios.isAxiosError(error)) return null
+  const detail = error.response?.data?.detail
+  return typeof detail === "string" ? detail : null
+}
 
 export function UploadModal({
   onClose,
@@ -33,8 +42,6 @@ export function UploadModal({
   const [mode, setMode] = useState<BookMode>(initialMode)
   const [selectedTags, setSelectedTags] = useState<string[]>([])
   const [customTag, setCustomTag] = useState("")
-  const [series, setSeries] = useState<BookSeries[]>([])
-  const [books, setBooks] = useState<Book[]>([])
   const [selectedSeriesIds, setSelectedSeriesIds] = useState<string[]>([])
   const [existingBookId, setExistingBookId] = useState(initialExistingBookId)
   const [chapterSource, setChapterSource] = useState<"paste" | "upload">("paste")
@@ -59,7 +66,6 @@ export function UploadModal({
   const [uploadProgress, setUploadProgress] = useState(0)
   const [uploadStage, setUploadStage] = useState<"idle" | "uploading" | "processing">("idle")
   const [processingBookId, setProcessingBookId] = useState<string | null>(null)
-  const [processingBook, setProcessingBook] = useState<Book | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [postImportReview, setPostImportReview] = useState<EditorialReview | null>(null)
   const [postImportPassages, setPostImportPassages] = useState<EditorialReviewPassage[]>([])
@@ -75,6 +81,31 @@ export function UploadModal({
   const canUploadAuthorMode = canUseAuthorFeatures(user?.tier)
   const setBookMode = useBookModeStore((state) => state.setMode)
   const isDark = theme === "dark"
+  const { data: series = [] } = useQuery<BookSeries[]>({
+    queryKey: asQueryKey(booksSeriesCacheKey()),
+    queryFn: () => booksApi.listSeries(),
+  })
+
+  const {
+    data: books = [],
+    refetch: refetchBooks,
+  } = useQuery<Book[]>({
+    queryKey: asQueryKey(booksListCacheKey(true)),
+    queryFn: () => booksApi.list(true),
+  })
+
+  const { data: uploadStats = null } = useQuery<UserStats | null>({
+    queryKey: asQueryKey(booksStatsCacheKey()),
+    queryFn: () => booksApi.getStats(),
+  })
+
+  const { data: processingBook = null } = useQuery<Book | null>({
+    queryKey: processingBookId ? asQueryKey(bookCacheKey(processingBookId, "detail")) : ["upload:processing:none"],
+    queryFn: () => booksApi.get(processingBookId as string),
+    enabled: Boolean(processingBookId),
+    refetchInterval: 4000,
+  })
+
   const infoButtonClass = `inline-flex h-4 w-4 items-center justify-center rounded-full border text-[10px] font-semibold leading-none transition ${
     isDark
       ? "border-white/20 text-slate-300 hover:border-white/40 hover:bg-white/10 hover:text-white"
@@ -89,11 +120,6 @@ export function UploadModal({
     .filter((tag) => (shouldShowTagSuggestions ? tagSimilarity(tag, trimmedCustomTag) >= 0.34 : false))
     .sort((a, b) => tagSimilarity(b, trimmedCustomTag) - tagSimilarity(a, trimmedCustomTag))
     .slice(0, TAG_SUGGESTION_LIMIT)
-
-  useEffect(() => {
-    booksApi.listSeries().then(setSeries).catch(() => {})
-    booksApi.list(true).then(setBooks).catch(() => {})
-  }, [])
 
   useEffect(() => {
     setMode(initialMode)
@@ -133,42 +159,15 @@ export function UploadModal({
 
   useEffect(() => {
     if (!processingBookId) return
-
-    let active = true
-    let interval: number | null = null
-
-    const loadProcessingBook = async () => {
-      try {
-        const updated = await booksApi.get(processingBookId)
-        if (!active) return
-        setProcessingBook(updated)
-        if (updated.status === "ready" || updated.status === "failed") {
-          setUploadStage("idle")
-          setUploading(false)
-          setProcessingBookId(null)
-          if (updated.status === "ready") {
-            setTimeout(() => onClose(), 600)
-          }
-        }
-      } catch {
-        if (active) {
-          setProcessingBook(null)
-        }
-      }
+    if (!processingBook) return
+    if (processingBook.status !== "ready" && processingBook.status !== "failed") return
+    setUploadStage("idle")
+    setUploading(false)
+    setProcessingBookId(null)
+    if (processingBook.status === "ready") {
+      setTimeout(() => onClose(), 600)
     }
-
-    void loadProcessingBook()
-    interval = window.setInterval(() => {
-      void loadProcessingBook()
-    }, 4000)
-
-    return () => {
-      active = false
-      if (interval !== null) {
-        window.clearInterval(interval)
-      }
-    }
-  }, [onClose, processingBookId])
+  }, [onClose, processingBook, processingBookId])
 
   // Auto-set author to email when in author mode
   useEffect(() => {
@@ -306,7 +305,7 @@ export function UploadModal({
         }
         setUploadStage("processing")
         setUploadProgress(100)
-        await booksApi.list(true).then(setBooks).catch(() => {})
+        await refetchBooks()
         setProcessingBookId(response.book_id)
         return
       } else {
@@ -348,10 +347,9 @@ export function UploadModal({
       } else {
         onClose()
       }
-    } catch {
-      setError("Upload failed. Please try again.")
+    } catch (error) {
+      setError(getApiErrorDetail(error) ?? "Upload failed. Please try again.")
       setProcessingBookId(null)
-      setProcessingBook(null)
     } finally {
       setUploading(false)
       if (!startedProcessing) {
@@ -404,6 +402,13 @@ export function UploadModal({
       ]
         .filter(Boolean)
         .join(" · ")
+    : null
+  const uploadLimitCopy = uploadStats
+    ? uploadStats.private.upload_limit_unlimited
+      ? "Uploads are still tracked here, and worldbuilding manuscripts count as uploads on every tier. Lore Architect stays unlimited, even when worldbuilding is linked across a series."
+      : typeof uploadStats.private.upload_limit === "number"
+        ? `${uploadStats.private.total_uploads}/${uploadStats.private.upload_limit} uploads used. ${uploadStats.private.uploads_remaining ?? 0} remaining. Worldbuilding manuscripts count as uploads on every tier.`
+        : null
     : null
   const shellClassName = `flex ${isInline ? "min-h-0" : "max-h-[90vh]"} w-full ${postImportReview || isManagingExisting ? "max-w-5xl" : "max-w-md"} flex-col overflow-hidden rounded-2xl border p-6 shadow-2xl transition-colors ${
     isDark
@@ -578,7 +583,12 @@ export function UploadModal({
             </div>
             {!canUploadAuthorMode ? (
               <p className={`mt-3 text-xs leading-5 ${isDark ? "text-amber-200" : "text-amber-700"}`}>
-                Author uploads require Author or Lore Architect access. Reader plans stay reader-only.
+                Author uploads require Author or Lore Architect access. Collaboration-only access stays read-only.
+              </p>
+            ) : null}
+            {uploadLimitCopy ? (
+              <p className={`mt-3 text-xs leading-5 ${isDark ? "text-slate-400" : "text-slate-600"}`}>
+                {uploadLimitCopy}
               </p>
             ) : null}
             {mode === "author" && !user?.username ? (

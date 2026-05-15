@@ -150,6 +150,42 @@ When adding a new table or changing schema:
 
 - **Make migrations idempotent** — they should be safe to run multiple times without errors.
 
+### Supabase Data API Exposure
+
+- **Treat Supabase Data API access as explicit opt-in for new `public` tables.**
+- **Backend-only tables:** create the table, indexes, and constraints, but do **not** grant `anon` or `authenticated` access.
+- **Frontend/Data API tables:** add explicit grants, then enable RLS, then add policies in the same migration.
+- Use the shared helpers in `backend/app/utils/migration_utils.py` when a migration needs Supabase Data API exposure:
+  - `grant_supabase_data_api_table_access(...)`
+  - `grant_supabase_data_api_sequence_access(...)`
+  - `enable_row_level_security(...)`
+  - `create_policy_if_missing(...)`
+- Do not grant `anon` unless the table is intentionally public.
+- If a table uses UUID defaults only, sequence grants may be unnecessary. If it uses sequences or identity columns and the client writes through the Data API, grant sequence access explicitly.
+
+Example pattern for a frontend-accessed table:
+
+```python
+from app.utils.migration_utils import (
+    create_policy_if_missing,
+    enable_row_level_security,
+    grant_supabase_data_api_table_access,
+)
+
+if "beta_reader_assignments" not in tables:
+    op.create_table("beta_reader_assignments", ...)
+
+grant_supabase_data_api_table_access("beta_reader_assignments")
+enable_row_level_security("beta_reader_assignments")
+create_policy_if_missing(
+    "beta_reader_assignments",
+    "authors can manage assignments",
+    command="ALL",
+    using="auth.uid() = author_user_id",
+    with_check="auth.uid() = author_user_id",
+)
+```
+
 **Other production migration practices:**
 
 - **Always write both `upgrade()` and `downgrade()`** — migrations must be reversible.

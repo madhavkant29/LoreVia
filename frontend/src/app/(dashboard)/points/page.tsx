@@ -98,7 +98,7 @@ export default function PointsPage() {
           <WorkspaceHeader
             eyebrow="Points"
             title="Points wallet"
-            description="Track your current balance, recent point activity, referral rewards, and the daily rewarded-ad allowance from one place."
+            description="Track public-share costs, daily login rewards, upload rewards, beta read rewards, review rewards, and the daily rewarded-ad allowance from one place."
             meta={
               <div className="flex flex-wrap justify-end gap-3">
                 <div className="app-chip">{loading ? "Syncing" : `${pointsBalance.toLocaleString()} points`}</div>
@@ -145,7 +145,7 @@ export default function PointsPage() {
                 </h2>
               </div>
               <p className="max-w-xl text-sm leading-7 text-[rgb(var(--muted-foreground))]">
-                Grants, referral rewards, rewarded ads, expirations, and overflow spends appear here as the wallet changes.
+                Daily logins, first upload rewards, beta read rewards, review rewards, public sharing costs, referrals, expirations, and overflow spends appear here as the wallet changes.
               </p>
             </div>
 
@@ -172,7 +172,7 @@ export default function PointsPage() {
               ))}
               {!loading && pointsLedger.length === 0 ? (
                 <p className="text-sm text-[rgb(var(--muted-foreground))]">
-                  No point activity yet. Qualified referrals, first-book rewards, and rewarded ads will start the ledger.
+                  No point activity yet. Daily logins, your first upload, beta read reviews, referrals, and rewarded ads will start the ledger.
                 </p>
               ) : null}
             </div>

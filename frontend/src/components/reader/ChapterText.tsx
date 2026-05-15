@@ -1,10 +1,13 @@
 "use client"
-import { useCallback, useEffect, useState } from "react"
+import React, { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { parsePublishedTextBlocks } from "@/lib/utils/publishedLayout"
+import { resolveReaderFontStack } from "@/lib/utils/readerTypography"
 import { renderRichTextHtml } from "@/lib/utils/richText"
+import { PRIVATE_SHARE_COPY_NOTICE, preventProtectedManuscriptCopy } from "@/lib/utils/manuscriptCopyProtection"
 import type { ChapterCharacter, ChapterMedia, ReaderDisplayStyle } from "@/types/reader"
 import type { PublishedBlockType } from "@/lib/utils/publishedLayout"
+import type { ReaderFontFamily } from "@/lib/utils/readerTypography"
 
 interface Props {
   bookId: string
@@ -20,10 +23,11 @@ interface Props {
   onQuoteSelect: (text: string) => void
   theme: "light" | "dark"
   fontSize: number
-  fontFamily: "serif" | "sans" | "mono"
+  fontFamily: ReaderFontFamily
   displayStyle: ReaderDisplayStyle
   quoteModeEnabled: boolean
   canUseQuoteMode: boolean
+  canCopyManuscript: boolean
 }
 
 export function ChapterText({
@@ -44,9 +48,23 @@ export function ChapterText({
   displayStyle,
   quoteModeEnabled,
   canUseQuoteMode,
+  canCopyManuscript,
 }: Props) {
   const [text, setText] = useState("")
   const [selected, setSelected] = useState("")
+  const [copyNotice, setCopyNotice] = useState<string | null>(null)
+
+  const handleMentionClick = useCallback((event: React.MouseEvent<HTMLElement>) => {
+    const target = event.target
+    if (!(target instanceof Element)) return
+
+    const mentionElement = target.closest<HTMLElement>("[data-mention]")
+    const mention = mentionElement?.dataset.mention?.trim()
+    if (!mention) return
+
+    event.preventDefault()
+    onTap(mention)
+  }, [onTap])
 
   useEffect(() => {
     if (textContent) {
@@ -66,6 +84,18 @@ export function ChapterText({
       onQuoteSelect(rawSelection)
     }
   }, [canUseQuoteMode, onQuoteSelect, quoteModeEnabled])
+
+  useEffect(() => {
+    if (canCopyManuscript) {
+      setCopyNotice(null)
+    }
+  }, [canCopyManuscript])
+
+  const handleProtectedCopy = useCallback((event: { preventDefault: () => void }) => {
+    if (preventProtectedManuscriptCopy(event, canCopyManuscript)) {
+      setCopyNotice(PRIVATE_SHARE_COPY_NOTICE)
+    }
+  }, [canCopyManuscript])
 
   if (!text && !htmlContent) {
     return (
@@ -109,19 +139,14 @@ export function ChapterText({
         divider: "bg-violet-400",
       }
 
-  const fontStack =
-    isPublishedLayout
-      ? 'Georgia, "Times New Roman", Times, serif'
-      : fontFamily === "serif"
-      ? '"Newsreader", "Merriweather", Georgia, serif'
-      : fontFamily === "mono"
-        ? '"SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace'
-        : '"Space Grotesk", "Avenir Next", "Segoe UI Variable Text", sans-serif'
+  const fontStack = resolveReaderFontStack(fontFamily, displayStyle)
 
   return (
     <div
       className={`mx-auto w-full px-4 pb-28 pt-8 sm:px-8 lg:px-10 ${isPublishedLayout ? "reader-display-published" : "reader-display-relaxed"}`}
       onMouseUp={handleMouseUp}
+      onCopyCapture={handleProtectedCopy}
+      onCutCapture={handleProtectedCopy}
       style={{ maxWidth: isPublishedLayout ? "920px" : "1000px" }}
     >
       <div className="grid gap-8 xl:grid-cols-[minmax(0,1fr)] xl:items-start">
@@ -130,6 +155,16 @@ export function ChapterText({
             <p className={`reader-nonprint text-center text-[12px] italic tracking-[0.02em] ${cardTone.helper}`} style={{ fontFamily: "var(--reader-label)" }}>
               Tap any word or select text for instant context
             </p>
+            {!canCopyManuscript ? (
+              <p className={`reader-nonprint mt-3 text-center text-[11px] font-semibold uppercase tracking-[0.18em] ${theme === "dark" ? "text-amber-300" : "text-amber-700"}`} style={{ fontFamily: "var(--reader-label)" }}>
+                Private share: copying disabled
+              </p>
+            ) : null}
+            {copyNotice ? (
+              <p className={`reader-nonprint mt-2 text-center text-sm ${theme === "dark" ? "text-amber-200" : "text-amber-800"}`}>
+                {copyNotice}
+              </p>
+            ) : null}
 
             <header className={isPublishedLayout ? "book-layout__chapter-heading chapter-title" : "mb-14 mt-8"}>
               <p className="text-[11px] uppercase tracking-[0.36em] text-stone-400" style={{ fontFamily: "var(--reader-label)" }}>
@@ -144,6 +179,7 @@ export function ChapterText({
             {shouldRenderHtml ? (
               <div
                 className={`reader-text note-rich-content ${isPublishedLayout ? "book-layout__body" : ""} ${cardTone.prose}`}
+                onClick={handleMentionClick}
                 style={{
                   fontFamily: fontStack,
                   fontSize: `${fontSize}px`,

@@ -668,7 +668,7 @@ async def test_daily_word_goal_can_be_updated(client, auth_headers):
 
 @pytest.mark.asyncio
 async def test_manuscript_import_updates_today_word_count(client, db, auth_headers, monkeypatch):
-    async def _fake_embed_batch(texts: list[str]) -> list[list[float]]:
+    async def _fake_embed_batch(texts: list[str], **_kwargs) -> list[list[float]]:
         return [[0.0] * 1536 for _ in texts]
 
     monkeypatch.setattr("app.workers.consumers.extraction_consumer.embed_batch", _fake_embed_batch)

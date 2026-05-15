@@ -132,7 +132,7 @@ export default function RegisterPage() {
       <div className="mb-8 text-center">
         <h1 className={`text-3xl font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>Create account</h1>
         <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-          Set up your account, then verify your email before signing in.
+          Set up your LoreVia for authors account, then verify your email before opening your manuscript workspace.
         </p>
       </div>
 

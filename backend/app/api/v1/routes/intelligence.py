@@ -20,6 +20,7 @@ from app.models.book import Book, Series, SeriesBook
 from app.models.character import Character
 from app.models.intelligence import WikiEntry
 from app.schemas.intelligence import ChatRequest, GroundedAnswerOut, GroundedCitationOut, QARequest
+from app.utils.llm_usage_utils import create_tracked_chat_completion
 from app.utils.intelligence_utils import build_grounded_qa_context
 
 router = APIRouter()
@@ -94,8 +95,13 @@ async def qa_endpoint(
 
     client = get_client()
     try:
-        response = await client.chat.completions.create(
+        response = await create_tracked_chat_completion(
+            client=client,
+            feature="grounded_qa",
             model=settings.OPENAI_INTEL_MODEL,
+            db=db,
+            user_id=current_user.id,
+            book_id=book.id,
             temperature=0.2,
             max_tokens=220,
             messages=[
@@ -151,6 +157,8 @@ async def character_chat(
         last_user_message or char.name,
         body.current_chapter,
         limit=2,
+        usage_user_id=current_user.id,
+        usage_feature="character_chat_search",
     )
     search_context = "\n\n".join(hit["text"][:280] for hit in semantic_hits)
 
@@ -161,6 +169,7 @@ async def character_chat(
         context_summary=body.context_summary,
         search_context=search_context,
         messages=serialized_messages,
+        user_id=current_user.id,
     )
     grounded_hint = None
     if semantic_hits:

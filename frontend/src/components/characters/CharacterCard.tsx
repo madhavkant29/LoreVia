@@ -485,7 +485,7 @@ export function CharacterCard({ character, bookId, compact = false, editable = f
                   <div>
                     <p className={isDark ? "text-xs font-semibold uppercase tracking-[0.22em] text-slate-500" : "text-xs font-semibold uppercase tracking-[0.22em] text-slate-400"}>Advanced details</p>
                     <p className={isDark ? "mt-1 text-xs text-slate-400" : "mt-1 text-xs text-slate-500"}>
-                      {isPaid ? "Expanded unique traits and profile detail." : "Upgrade to Reader to unlock deeper character detail."}
+                      {isPaid ? "Expanded unique traits and profile detail." : "Upgrade to Author to unlock deeper character detail."}
                     </p>
                   </div>
                   <span className={isDark ? "text-sm text-slate-300 font-medium" : "text-sm text-slate-600 font-medium"}>{advancedOpen ? "Hide" : isPaid ? "Open" : "Preview"}</span>

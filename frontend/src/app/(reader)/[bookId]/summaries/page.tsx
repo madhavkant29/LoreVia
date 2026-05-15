@@ -1,25 +1,33 @@
 "use client"
 import { useEffect, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
 import { useParams, useRouter } from "next/navigation"
 
 import { booksApi } from "@/lib/api/books"
 import { readerApi } from "@/lib/api/reader"
+import { asQueryKey, bookCacheKey, readerCacheKey } from "@/lib/query/cacheKeys"
 import type { Book } from "@/types/book"
 import type { SummaryCollectionResponse } from "@/types/reader"
 
 export default function SummariesPage() {
   const { bookId } = useParams<{ bookId: string }>()
   const router = useRouter()
-  const [book, setBook] = useState<Book | null>(null)
-  const [data, setData] = useState<SummaryCollectionResponse | null>(null)
   const [theme, setTheme] = useState<"light" | "dark">("light")
 
   useEffect(() => {
-    booksApi.get(bookId).then(setBook).catch(() => {})
-    readerApi.getSummaryCollection(bookId).then(setData)
     const stored = window.localStorage.getItem("reader-theme")
     if (stored === "dark" || stored === "light") setTheme(stored)
-  }, [bookId])
+  }, [])
+  const { data: book = null, isLoading: bookLoading } = useQuery<Book>({
+    queryKey: asQueryKey(bookCacheKey(bookId, "detail")),
+    queryFn: () => booksApi.get(bookId),
+    staleTime: 20_000,
+  })
+  const { data = null, isLoading: dataLoading } = useQuery<SummaryCollectionResponse>({
+    queryKey: asQueryKey(readerCacheKey(bookId, "summary-collection")),
+    queryFn: () => readerApi.getSummaryCollection(bookId),
+    staleTime: 45_000,
+  })
 
   return (
     <div className={`min-h-screen px-4 py-8 transition-colors ${theme === "dark" ? "bg-black text-white" : "bg-white text-black"}`}>
@@ -36,6 +44,11 @@ export default function SummariesPage() {
           </div>
         </div>
 
+        {bookLoading || dataLoading ? (
+          <div className={theme === "dark" ? "rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-gray-400" : "rounded-xl border border-gray-200 bg-white p-4 text-sm text-gray-500"}>
+            Loading summaries...
+          </div>
+        ) : (
         <div className="flex flex-col gap-4">
           {(data?.summaries ?? []).map((summary) => (
             <article
@@ -63,6 +76,7 @@ export default function SummariesPage() {
             </article>
           ))}
         </div>
+        )}
       </div>
     </div>
   )

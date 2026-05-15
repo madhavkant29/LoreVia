@@ -74,6 +74,24 @@ describe("foundation utilities", () => {
     expect(shouldSkipAuthBootstrap("/pricing")).toBe(true)
   })
 
+  it("skips auth bootstrap for the public blog page", () => {
+    expect(shouldSkipAuthBootstrap("/blog")).toBe(true)
+  })
+
+  it("skips auth bootstrap for public blog articles", () => {
+    expect(shouldSkipAuthBootstrap("/blog/how-to-track-characters-in-a-novel")).toBe(true)
+  })
+
+  it("skips auth bootstrap for the answers hub and nested answer pages", () => {
+    expect(shouldSkipAuthBootstrap("/answers")).toBe(true)
+    expect(shouldSkipAuthBootstrap("/answers/how-do-i-track-character-arcs")).toBe(true)
+  })
+
+  it("skips auth bootstrap for the demo hub and nested demo pages", () => {
+    expect(shouldSkipAuthBootstrap("/demo")).toBe(true)
+    expect(shouldSkipAuthBootstrap("/demo/gregor-samsa-character-tracker")).toBe(true)
+  })
+
   it("skips auth bootstrap for exact auth-excluded routes", () => {
     expect(shouldSkipAuthBootstrap("/login")).toBe(true)
   })
@@ -115,11 +133,14 @@ describe("foundation utilities", () => {
   })
 
   it("includes a stable site description", () => {
-    expect(SITE_DESCRIPTION).toContain("track characters")
+    expect(SITE_DESCRIPTION).toContain("story workspace")
   })
 
   it("includes public marketing routes in static public routes", () => {
     expect(STATIC_PUBLIC_ROUTES).toContain("/")
+    expect(STATIC_PUBLIC_ROUTES).toContain("/blog")
+    expect(STATIC_PUBLIC_ROUTES).toContain("/answers")
+    expect(STATIC_PUBLIC_ROUTES).toContain("/demo")
     expect(STATIC_PUBLIC_ROUTES).toContain("/pricing")
   })
 
@@ -128,7 +149,7 @@ describe("foundation utilities", () => {
   })
 
   it("builds website json-ld with the publisher logo", () => {
-    expect(websiteJsonLd.publisher.logo).toBe("https://getlorevia.com/image.png")
+    expect(websiteJsonLd.publisher.logo).toBe("https://getlorevia.com/logoandtext.png")
   })
 
   it("builds website json-ld with the site name", () => {
@@ -136,7 +157,7 @@ describe("foundation utilities", () => {
   })
 
   it("builds organization json-ld with the canonical logo", () => {
-    expect(organizationJsonLd.logo).toBe("https://getlorevia.com/image.png")
+    expect(organizationJsonLd.logo).toBe("https://getlorevia.com/logoandtext.png")
   })
 
   it("marks author tiers as able to use author features", () => {
@@ -151,7 +172,7 @@ describe("foundation utilities", () => {
     expect(canUseAuthorFeatures("reader")).toBe(false)
   })
 
-  it("treats reader as a paid tier", () => {
+  it("treats collaboration access as a paid-capable tier", () => {
     expect(isPaidTier("reader")).toBe(true)
   })
 
@@ -159,8 +180,8 @@ describe("foundation utilities", () => {
     expect(isPaidTier("free")).toBe(false)
   })
 
-  it("returns a Reader label", () => {
-    expect(tierLabel("reader")).toBe("Reader")
+  it("returns a collaboration access label", () => {
+    expect(tierLabel("reader")).toBe("Collaboration access")
   })
 
   it("returns an Author label", () => {

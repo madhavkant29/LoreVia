@@ -34,6 +34,9 @@ export interface Character {
   character_type?: "complex" | "normal" | "gag" | "meme" | null
   character_type_score?: number | null
   subtype_scores?: Record<string, number>
+  is_manual?: boolean
+  tags?: string[]
+  graph_visibility_override?: "include" | "exclude" | null
   growth_events?: Array<{
     chapter?: number | null
     chapter_number?: number | null
@@ -111,6 +114,11 @@ export interface RelationshipGraph {
     name: string; 
     role: string | null; 
     first_chapter: number;
+    mention_count?: number;
+    is_manual?: boolean;
+    graph_visibility_override?: "include" | "exclude" | null;
+    visibility_score?: number;
+    visibility_reasons?: string[];
     description?: string | null;
     personality_tags?: string[];
     aliases?: string[];
@@ -128,5 +136,18 @@ export interface RelationshipGraph {
     description: string | null
     from_chapter?: number | null
     to_chapter?: number | null
+    status?: "ongoing" | "ended"
+  }>
+  hidden_nodes?: Array<{
+    id: string
+    name: string
+    role: string | null
+    first_chapter: number
+    mention_count: number
+    is_manual?: boolean
+    graph_visibility_override?: "include" | "exclude" | null
+    visibility_score: number
+    visibility_reasons: string[]
+    connected_relationship_count: number
   }>
 }

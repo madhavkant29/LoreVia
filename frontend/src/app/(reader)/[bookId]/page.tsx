@@ -1,22 +1,25 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import type { Route } from "next"
 import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
 
 import { AuthorToolsNav } from "@/components/layout/AuthorToolsNav"
+import { ReaderOverview } from "@/components/reader/ReaderOverview"
 import { RevisionIntelligencePanel } from "@/components/revision/RevisionIntelligencePanel"
 import { booksApi } from "@/lib/api/books"
 import { readerApi } from "@/lib/api/reader"
 import { canUseAuthorFeatures } from "@/lib/billing/plans"
+import { asQueryKey, bookCacheKey, booksQuotesCacheKey, readerCacheKey } from "@/lib/query/cacheKeys"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { useBookModeStore } from "@/lib/stores/bookModeStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { buildIssueDisplay } from "@/lib/utils/storyFeedback"
-import type { Book, ChapterConsistencyReport, GoalCalendarItem, PreWritingCheck, RevisionIntelligence, StoryHealth, WriterWorkspace } from "@/types/book"
+import type { Book, BookNote, ChapterConsistencyReport, GoalCalendarItem, PreWritingCheck, RevisionIntelligence, SavedQuote, StoryHealth, WriterWorkspace } from "@/types/book"
 import type { Character } from "@/types/character"
-import type { ChapterListResponse, ReadingProgress } from "@/types/reader"
+import type { ChapterListResponse, ReadingProgress, SummaryCollectionResponse } from "@/types/reader"
 
 type IconName =
   | "analysis"
@@ -42,6 +45,13 @@ type IconName =
   | "voice"
 
 type WorkspaceSaveState = "idle" | "saving" | "saved" | "error"
+
+type ReaderBookmarkSnapshot = {
+  chapter: number
+  chapterTitle: string | null
+  scrollPct: number
+  savedAt: string
+}
 
 function storyUnitName(workType?: Book["work_type"], plural = false) {
   if (workType === "screenplay") return plural ? "scenes" : "scene"
@@ -225,19 +235,12 @@ function formatQuotaLabel(value: number | null | undefined, unit: string | null 
 
 export default function BookOverviewPage() {
   const { bookId } = useParams<{ bookId: string }>()
-  const [book, setBook] = useState<Book | null>(null)
-  const [progress, setProgress] = useState<ReadingProgress | null>(null)
-  const [chapterList, setChapterList] = useState<ChapterListResponse | null>(null)
-  const [characters, setCharacters] = useState<Character[]>([])
-  const [chapterReports, setChapterReports] = useState<ChapterConsistencyReport[]>([])
-  const [preWritingCheck, setPreWritingCheck] = useState<PreWritingCheck | null>(null)
-  const [storyHealth, setStoryHealth] = useState<StoryHealth | null>(null)
-  const [writerWorkspace, setWriterWorkspace] = useState<WriterWorkspace | null>(null)
-  const [revisionIntelligence, setRevisionIntelligence] = useState<RevisionIntelligence | null>(null)
+  const [bookmark, setBookmark] = useState<ReaderBookmarkSnapshot | null>(null)
   const [workspaceSaveState, setWorkspaceSaveState] = useState<WorkspaceSaveState>("idle")
   const [workspaceSaveMessage, setWorkspaceSaveMessage] = useState<string | null>(null)
   const [modeSaving, setModeSaving] = useState(false)
   const router = useRouter()
+  const queryClient = useQueryClient()
   const { theme, toggleTheme } = usePreferencesStore()
   const bookMode = useBookModeStore((state) => state.getMode(bookId))
   const setBookMode = useBookModeStore((state) => state.setMode)
@@ -246,17 +249,108 @@ export default function BookOverviewPage() {
   const userTier = useAuthStore((state) => state.user?.tier)
   const isDark = theme === "dark"
   const overviewScrollKey = `reader-overview-scroll:${bookId}`
+  const bookQueryKey = asQueryKey(bookCacheKey(bookId, "detail"))
+  const writerWorkspaceQueryKey = asQueryKey(bookCacheKey(bookId, "writer-workspace"))
+
+  const bookQuery = useQuery({
+    queryKey: bookQueryKey,
+    queryFn: () => booksApi.get(bookId),
+    staleTime: 20_000,
+    refetchInterval: (query) => {
+      const currentBook = query.state.data as Book | undefined
+      return currentBook && currentBook.status !== "ready" ? 3_000 : false
+    },
+  })
+  const progressQuery = useQuery({
+    queryKey: asQueryKey(readerCacheKey(bookId, "progress")),
+    queryFn: () => readerApi.getProgress(bookId),
+    staleTime: 12_000,
+  })
+  const chapterListQuery = useQuery({
+    queryKey: asQueryKey(readerCacheKey(bookId, "chapters")),
+    queryFn: () => readerApi.getChapterList(bookId),
+    staleTime: 30_000,
+  })
+  const summaryCollectionQuery = useQuery({
+    queryKey: asQueryKey(readerCacheKey(bookId, "summary-collection")),
+    queryFn: () => readerApi.getSummaryCollection(bookId),
+    staleTime: 45_000,
+  })
+  const bookNotesQuery = useQuery({
+    queryKey: asQueryKey(bookCacheKey(bookId, "notes")),
+    queryFn: () => booksApi.getBookNotes(bookId),
+    staleTime: 20_000,
+  })
+  const savedQuotesQuery = useQuery({
+    queryKey: asQueryKey(booksQuotesCacheKey()),
+    queryFn: () => booksApi.listQuotes(),
+    staleTime: 45_000,
+  })
+  const charactersQuery = useQuery({
+    queryKey: asQueryKey(bookCacheKey(bookId, "characters")),
+    queryFn: () => booksApi.getCharacters(bookId),
+    staleTime: 45_000,
+  })
+  const chapterReportsQuery = useQuery({
+    queryKey: asQueryKey(bookCacheKey(bookId, "chapter-reports:6")),
+    queryFn: () => booksApi.getChapterReports(bookId, 6),
+    staleTime: 30_000,
+  })
+  const preWritingCheckQuery = useQuery({
+    queryKey: asQueryKey(bookCacheKey(bookId, "pre-writing:auto")),
+    queryFn: () => booksApi.getPreWritingCheck(bookId),
+    staleTime: 30_000,
+  })
+  const storyHealthQuery = useQuery({
+    queryKey: asQueryKey(bookCacheKey(bookId, "story-health")),
+    queryFn: () => booksApi.getStoryHealth(bookId),
+    staleTime: 30_000,
+  })
+  const writerWorkspaceQuery = useQuery({
+    queryKey: writerWorkspaceQueryKey,
+    queryFn: () => booksApi.getWriterWorkspace(bookId),
+    staleTime: 10_000,
+  })
+  const revisionIntelligenceQuery = useQuery({
+    queryKey: asQueryKey(bookCacheKey(bookId, "revision-intelligence")),
+    queryFn: () => booksApi.getRevisionIntelligence(bookId),
+    staleTime: 20_000,
+  })
+
+  const book = bookQuery.data ?? null
+  const progress = progressQuery.data ?? null
+  const chapterList = chapterListQuery.data ?? null
+  const summaryCollection = summaryCollectionQuery.data ?? null
+  const bookNotes = bookNotesQuery.data ?? []
+  const savedQuotes = (savedQuotesQuery.data ?? []).filter((quote) => quote.book_id === bookId)
+  const characters = charactersQuery.data ?? []
+  const chapterReports = chapterReportsQuery.data ?? []
+  const preWritingCheck = preWritingCheckQuery.data ?? null
+  const storyHealth = storyHealthQuery.data ?? null
+  const writerWorkspace = writerWorkspaceQuery.data ?? null
+  const revisionIntelligence = revisionIntelligenceQuery.data ?? null
 
   useEffect(() => {
-    booksApi.get(bookId).then(setBook)
-    readerApi.getProgress(bookId).then(setProgress).catch(() => {})
-    readerApi.getChapterList(bookId).then(setChapterList).catch(() => {})
-    booksApi.getCharacters(bookId).then(setCharacters).catch(() => setCharacters([]))
-    booksApi.getChapterReports(bookId, 6).then(setChapterReports).catch(() => setChapterReports([]))
-    booksApi.getPreWritingCheck(bookId).then(setPreWritingCheck).catch(() => setPreWritingCheck(null))
-    booksApi.getStoryHealth(bookId).then(setStoryHealth).catch(() => setStoryHealth(null))
-    booksApi.getWriterWorkspace(bookId).then(setWriterWorkspace).catch(() => setWriterWorkspace(null))
-    booksApi.getRevisionIntelligence(bookId).then(setRevisionIntelligence).catch(() => setRevisionIntelligence(null))
+    if (typeof window === "undefined") return
+
+    const bookmarkKey = `reader-bookmark:${bookId}`
+    const raw = window.localStorage.getItem(bookmarkKey)
+    if (!raw) {
+      setBookmark(null)
+      return
+    }
+
+    try {
+      const parsed = JSON.parse(raw) as ReaderBookmarkSnapshot
+      if (typeof parsed.chapter === "number" && typeof parsed.scrollPct === "number" && typeof parsed.savedAt === "string") {
+        setBookmark(parsed)
+        return
+      }
+    } catch {
+      // ignore malformed bookmark payloads
+    }
+
+    setBookmark(null)
   }, [bookId])
 
   useEffect(() => {
@@ -273,18 +367,6 @@ export default function BookOverviewPage() {
     }, 2400)
     return () => window.clearTimeout(timeout)
   }, [workspaceSaveState])
-
-  useEffect(() => {
-    if (!book || book.status === "ready") return
-
-    const interval = window.setInterval(async () => {
-      const updated = await booksApi.get(bookId)
-      setBook(updated)
-      if (updated.status === "ready") window.clearInterval(interval)
-    }, 3000)
-
-    return () => window.clearInterval(interval)
-  }, [book, bookId])
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -310,6 +392,10 @@ export default function BookOverviewPage() {
   const percentComplete = Math.round(progress?.percent_complete ?? book?.progress_pct ?? 0)
   const chaptersLeft = progress?.chapters_left ?? book?.chapters_left ?? 0
   const activeBookMode = book?.mode ?? bookMode
+  const collaborationPermissions = book?.collaboration_permissions ?? null
+  const hasCollaboratorAuthorAccess = Boolean(collaborationPermissions?.can_edit_manuscript)
+  const canUseAuthorWorkspace = canUseAuthorFeatures(userTier) || hasCollaboratorAuthorAccess
+  const canEditSharedManuscript = canUseAuthorWorkspace
   const processingSummary = getProcessingSummary(book)
   const unitTitle = storyUnitTitle(book?.work_type)
   const unitPrefix = storyUnitPrefix(book?.work_type)
@@ -340,18 +426,18 @@ export default function BookOverviewPage() {
     if (!writerWorkspace) return false
 
     const previous = writerWorkspace
-    setWriterWorkspace({ ...writerWorkspace, ...patch })
+    queryClient.setQueryData(writerWorkspaceQueryKey, { ...writerWorkspace, ...patch })
     setWorkspaceSaveState("saving")
     setWorkspaceSaveMessage(messages.saving)
 
     try {
       const updated = await booksApi.updateWriterWorkspace(bookId, patch)
-      setWriterWorkspace(updated)
+      queryClient.setQueryData(writerWorkspaceQueryKey, updated)
       setWorkspaceSaveState("saved")
       setWorkspaceSaveMessage(messages.success)
       return true
     } catch {
-      setWriterWorkspace(previous)
+      queryClient.setQueryData(writerWorkspaceQueryKey, previous)
       setWorkspaceSaveState("error")
       setWorkspaceSaveMessage(messages.error)
       return false
@@ -411,14 +497,21 @@ export default function BookOverviewPage() {
   }
 
   const updateMode = async (nextMode: "reader" | "author") => {
-    if (nextMode === "author" && !canUseAuthorFeatures(userTier)) return
+    if (nextMode === "author" && !canUseAuthorWorkspace) return
+    const previousBook = book
     setBookMode(bookId, nextMode)
     setModeSaving(true)
+    if (previousBook) {
+      queryClient.setQueryData(bookQueryKey, { ...previousBook, mode: nextMode })
+    }
     try {
       const updated = await booksApi.setMode(bookId, nextMode)
-      setBook(updated)
+      queryClient.setQueryData(bookQueryKey, updated)
     } catch {
-      setBookMode(bookId, book?.mode ?? "reader")
+      setBookMode(bookId, previousBook?.mode ?? "reader")
+      if (previousBook) {
+        queryClient.setQueryData(bookQueryKey, previousBook)
+      }
     } finally {
       setModeSaving(false)
     }
@@ -449,89 +542,117 @@ export default function BookOverviewPage() {
         </div>
 
         <main className="min-w-0 space-y-5">
-          <OverviewHeader
-            isDark={isDark}
-            activeBookMode={activeBookMode}
-            canUseAuthorMode={canUseAuthorFeatures(userTier)}
-            modeSaving={modeSaving}
-            greetingName={greetingName}
-            onModeChange={updateMode}
-            onToggleTheme={toggleTheme}
-          />
-
-          <div className="grid gap-5 xl:grid-cols-[minmax(0,1.62fr)_minmax(20rem,0.72fr)]">
-            <CurrentProjectCard
-              book={book}
-              isDark={isDark}
-              currentWords={currentWords}
-              targetWords={targetWords}
-              percentComplete={percentComplete}
-              chapters={chapters}
-              unitTitle={unitTitle}
-              unitPrefix={unitPrefix}
-              onOpenManuscript={() => navigateWithMemory(`/${bookId}/manuscript`)}
-            />
-            <StoryHealthCard
+          {activeBookMode === "reader" ? (
+            <ReaderOverview
               bookId={bookId}
+              book={book}
+              activeBookMode={activeBookMode}
+              progress={progress}
+              chapterList={chapterList}
+              summaryCollection={summaryCollection}
+              bookNotes={bookNotes}
+              savedQuotes={savedQuotes}
+              bookmark={bookmark}
               isDark={isDark}
-              storyHealth={storyHealth}
-            />
-          </div>
-
-          <div className="grid gap-5 xl:grid-cols-[minmax(16rem,0.9fr)_minmax(0,1.05fr)_minmax(18rem,0.95fr)]">
-            <ActiveIssuesCard
-              isDark={isDark}
-              continuityIssueCount={continuityIssueCount}
-              worldGapCount={worldGapCount}
-              timelineIssueCount={timelineIssueCount}
+              modeSaving={modeSaving}
+              canUseAuthorMode={canUseAuthorWorkspace}
+              onModeChange={updateMode}
+              onToggleTheme={toggleTheme}
               onNavigate={navigateWithMemory}
-              bookId={bookId}
+              onContinueReading={continueReading}
             />
-            <QuickToolsCard isDark={isDark} bookId={bookId} onNavigate={navigateWithMemory} />
-            <RecentActivityCard
-              isDark={isDark}
-              book={book}
-              unitTitle={unitTitle}
-              continueChapter={continueChapter}
-              processingSummary={processingSummary}
-            />
-          </div>
+          ) : (
+            <>
+              <OverviewHeader
+                isDark={isDark}
+                activeBookMode={activeBookMode}
+                canUseAuthorMode={canUseAuthorWorkspace}
+                modeSaving={modeSaving}
+                greetingName={greetingName}
+                onModeChange={updateMode}
+                onToggleTheme={toggleTheme}
+              />
 
-          <div className="grid gap-5 xl:grid-cols-[minmax(0,1.44fr)_minmax(15rem,0.56fr)_minmax(15rem,0.58fr)]">
-            <ProjectOverviewCard
-              isDark={isDark}
-              currentWords={currentWords}
-              chapterCount={chapterCount}
-              characterCount={characters.length}
-              worldArticleCount={(writerWorkspace?.templates.length ?? 0) + (writerWorkspace?.corkboard_cards.length ?? 0)}
-            />
-            <WritingStreakCard isDark={isDark} streakDays={loginStreakDays} weekActivity={weeklyLoginActivity} />
-            <DailyGoalCard isDark={isDark} dailyWords={dailyWords} dailyTarget={dailyTarget} />
-          </div>
+              <div className="grid gap-5 xl:grid-cols-[minmax(0,1.62fr)_minmax(20rem,0.72fr)]">
+                <CurrentProjectCard
+                  book={book}
+                  isDark={isDark}
+                  canOpenManuscript={canEditSharedManuscript}
+                  currentWords={currentWords}
+                  targetWords={targetWords}
+                  percentComplete={percentComplete}
+                  chapters={chapters}
+                  unitTitle={unitTitle}
+                  unitPrefix={unitPrefix}
+                  onOpenManuscript={() => navigateWithMemory(`/${bookId}/manuscript`)}
+                />
+                <StoryHealthCard
+                  bookId={bookId}
+                  isDark={isDark}
+                  storyHealth={storyHealth}
+                />
+              </div>
 
-          {activeBookMode === "author" && revisionIntelligence ? (
-            <RevisionIntelligencePanel
-              bookId={bookId}
-              revision={revisionIntelligence}
-              writerWorkspace={writerWorkspace}
-              isDark={isDark}
-              onRevisionChange={setRevisionIntelligence}
-              onWriterWorkspaceChange={setWriterWorkspace}
-            />
-          ) : null}
+              <div className="grid gap-5 xl:grid-cols-[minmax(16rem,0.9fr)_minmax(0,1.05fr)_minmax(18rem,0.95fr)]">
+                <ActiveIssuesCard
+                  isDark={isDark}
+                  continuityIssueCount={continuityIssueCount}
+                  worldGapCount={worldGapCount}
+                  timelineIssueCount={timelineIssueCount}
+                  onNavigate={navigateWithMemory}
+                  bookId={bookId}
+                />
+                <QuickToolsCard isDark={isDark} bookId={bookId} onNavigate={navigateWithMemory} />
+                <RecentActivityCard
+                  isDark={isDark}
+                  book={book}
+                  unitTitle={unitTitle}
+                  continueChapter={continueChapter}
+                  processingSummary={processingSummary}
+                />
+              </div>
 
-          <GoalCalendarCard
-            isDark={isDark}
-            writerWorkspace={writerWorkspace}
-            saveState={workspaceSaveState}
-            saveMessage={workspaceSaveMessage}
-            onSaveGoalCalendar={saveGoalCalendar}
-            onOpenManuscript={() => navigateWithMemory(`/${bookId}/manuscript`)}
-          />
+              <div className="grid gap-5 xl:grid-cols-[minmax(0,1.44fr)_minmax(15rem,0.56fr)_minmax(15rem,0.58fr)]">
+                <ProjectOverviewCard
+                  isDark={isDark}
+                  currentWords={currentWords}
+                  chapterCount={chapterCount}
+                  characterCount={characters.length}
+                  worldArticleCount={(writerWorkspace?.templates.length ?? 0) + (writerWorkspace?.corkboard_cards.length ?? 0)}
+                />
+                <WritingStreakCard isDark={isDark} streakDays={loginStreakDays} weekActivity={weeklyLoginActivity} />
+                <DailyGoalCard isDark={isDark} dailyWords={dailyWords} dailyTarget={dailyTarget} />
+              </div>
+
+              {revisionIntelligence ? (
+                <RevisionIntelligencePanel
+                  bookId={bookId}
+                  revision={revisionIntelligence}
+                  writerWorkspace={writerWorkspace}
+                  isDark={isDark}
+                  onRevisionChange={(nextRevision) => {
+                    queryClient.setQueryData(asQueryKey(bookCacheKey(bookId, "revision-intelligence")), nextRevision)
+                  }}
+                  onWriterWorkspaceChange={(nextWorkspace) => {
+                    queryClient.setQueryData(writerWorkspaceQueryKey, nextWorkspace)
+                  }}
+                />
+              ) : null}
+
+              <GoalCalendarCard
+                isDark={isDark}
+                writerWorkspace={writerWorkspace}
+                saveState={workspaceSaveState}
+                saveMessage={workspaceSaveMessage}
+                onSaveGoalCalendar={saveGoalCalendar}
+                onOpenManuscript={() => navigateWithMemory(`/${bookId}/manuscript`)}
+              />
+            </>
+          )}
         </main>
       </div>
 
-      {activeBookMode === "author" ? (
+      {activeBookMode === "author" && canEditSharedManuscript ? (
         <CreateFab bookId={bookId} isDark={isDark} onAddScene={openAddSceneFlow} onNavigate={navigateWithMemory} />
       ) : null}
 
@@ -617,6 +738,7 @@ function OverviewHeader({
 function CurrentProjectCard({
   book,
   isDark,
+  canOpenManuscript,
   currentWords,
   targetWords,
   percentComplete,
@@ -627,6 +749,7 @@ function CurrentProjectCard({
 }: {
   book: Book
   isDark: boolean
+  canOpenManuscript: boolean
   currentWords: number | null
   targetWords: number
   percentComplete: number
@@ -685,13 +808,15 @@ function CurrentProjectCard({
             )}
           </div>
 
-          <button
-            onClick={onOpenManuscript}
-            className={`mt-auto inline-flex h-10 items-center justify-center gap-2 rounded-md px-4 text-xs font-semibold transition ${isDark ? "bg-violet-500/12 text-violet-300 hover:bg-violet-500/18" : "bg-violet-50 text-violet-700 hover:bg-violet-100"}`}
-          >
-            Open Manuscript Editor
-            <Icon name="chevron" className="h-3.5 w-3.5" />
-          </button>
+          {canOpenManuscript ? (
+            <button
+              onClick={onOpenManuscript}
+              className={`mt-auto inline-flex h-10 items-center justify-center gap-2 rounded-md px-4 text-xs font-semibold transition ${isDark ? "bg-violet-500/12 text-violet-300 hover:bg-violet-500/18" : "bg-violet-50 text-violet-700 hover:bg-violet-100"}`}
+            >
+              Open Manuscript Editor
+              <Icon name="chevron" className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
         </div>
       </div>
     </section>

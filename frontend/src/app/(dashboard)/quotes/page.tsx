@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
 import Link from "next/link"
 
 import {
@@ -11,6 +12,7 @@ import {
   WorkspacePanel,
 } from "@/components/ui/Workspace"
 import { booksApi } from "@/lib/api/books"
+import { asQueryKey, booksQuotesCacheKey } from "@/lib/query/cacheKeys"
 import type { SavedQuote } from "@/types/book"
 
 function formatQuoteChapter(quote: SavedQuote) {
@@ -21,13 +23,12 @@ function formatQuoteChapter(quote: SavedQuote) {
 }
 
 export default function QuotesPage() {
-  const [quotes, setQuotes] = useState<SavedQuote[]>([])
-  const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState("")
-
-  useEffect(() => {
-    booksApi.listQuotes().then(setQuotes).finally(() => setLoading(false))
-  }, [])
+  const { data: quotes = [], isLoading: loading } = useQuery<SavedQuote[]>({
+    queryKey: asQueryKey(booksQuotesCacheKey()),
+    queryFn: () => booksApi.listQuotes(),
+    staleTime: 45_000,
+  })
 
   const filteredQuotes = useMemo(() => {
     const trimmed = query.trim().toLowerCase()

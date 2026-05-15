@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
 import Link from "next/link"
 import { useParams } from "next/navigation"
 
@@ -8,6 +9,7 @@ import { AuthorToolsNav } from "@/components/layout/AuthorToolsNav"
 import { booksApi } from "@/lib/api/books"
 import { intelligenceApi } from "@/lib/api/intelligence"
 import { canUseAuthorFeatures } from "@/lib/billing/plans"
+import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { saveContextualVaultNote } from "@/lib/utils/notes"
@@ -21,7 +23,10 @@ export default function EditorialReviewPage() {
   const canUseAuthorMode = canUseAuthorFeatures(userTier)
   const isDark = theme === "dark"
 
-  const [book, setBook] = useState<Book | null>(null)
+  const { data: book = null } = useQuery<Book | null>({
+    queryKey: asQueryKey(bookCacheKey(bookId, "detail")),
+    queryFn: () => booksApi.get(bookId),
+  })
   const [bookMode, setBookMode] = useState<"reader" | "author">("author")
   const [editText, setEditText] = useState("")
   const [editChapter, setEditChapter] = useState("")
@@ -38,11 +43,9 @@ export default function EditorialReviewPage() {
   const [saveStatus, setSaveStatus] = useState<string | null>(null)
 
   useEffect(() => {
-    booksApi.get(bookId).then((bookData) => {
-      setBook(bookData)
-      setBookMode(bookData.mode ?? "author")
-    }).catch(() => {})
-  }, [bookId])
+    if (!book) return
+    setBookMode(book.mode ?? "author")
+  }, [book])
 
   const saveNote = useCallback(async (title: string, body: string, chapterNumber: number | null) => {
     try {

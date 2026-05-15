@@ -1,6 +1,9 @@
 "use client"
-import { useState, useEffect } from "react"
+import { useEffect, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
+
 import { readerApi } from "@/lib/api/reader"
+import { asQueryKey, readerCacheKey } from "@/lib/query/cacheKeys"
 import type { ChapterSummary, SummaryMode } from "@/types/reader"
 import { SUMMARY_MODE_LABELS } from "@/lib/constants"
 import { capture } from "@/lib/analytics/posthog"
@@ -14,24 +17,21 @@ interface Props {
 
 export function SummaryPanel({ bookId, chapterNum, onClose, theme }: Props) {
   const [mode, setMode] = useState<SummaryMode>("short")
-  const [summary, setSummary] = useState<ChapterSummary | null>(null)
-  const [loading, setLoading] = useState(false)
+  const summaryQuery = useQuery({
+    queryKey: asQueryKey(readerCacheKey(bookId, `summary:${chapterNum}:${mode}`)),
+    queryFn: () => readerApi.getSummary(bookId, chapterNum, mode),
+    staleTime: 2 * 60 * 1000,
+  })
 
   useEffect(() => {
-    setLoading(true)
-    readerApi.getSummary(bookId, chapterNum, mode)
-      .then((data) => {
-        setSummary(data)
-        capture("summary_viewed", { book_id: bookId, chapter: chapterNum, mode })
-        return data
-      })
-      .finally(() => setLoading(false))
-  }, [bookId, chapterNum, mode])
+    if (!summaryQuery.data) return
+    capture("summary_viewed", { book_id: bookId, chapter: chapterNum, mode })
+  }, [bookId, chapterNum, mode, summaryQuery.dataUpdatedAt])
 
   const shellClass = theme === "dark" ? "bg-black text-white border border-white/10" : "bg-white text-black"
   const tabActiveClass = theme === "dark" ? "bg-white text-black font-medium" : "bg-black text-white font-medium"
   const tabIdleClass = theme === "dark" ? "text-gray-300 hover:bg-white/10" : "text-gray-500 hover:bg-gray-100"
-  const normalized = summary ? normalizeSummary(summary) : null
+  const normalized = summaryQuery.data ? normalizeSummary(summaryQuery.data) : null
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4">
@@ -54,7 +54,7 @@ export function SummaryPanel({ bookId, chapterNum, onClose, theme }: Props) {
           ))}
         </div>
         <div className="app-scroll flex-1 overflow-y-auto px-5 py-4">
-          {loading ? (
+          {summaryQuery.isLoading || summaryQuery.isFetching ? (
             <div className="flex justify-center py-8"><div className="h-5 w-5 animate-spin rounded-full border-2 border-indigo-400 border-t-transparent" /></div>
           ) : normalized ? (
             <div>

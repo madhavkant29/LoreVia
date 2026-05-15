@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
 import Link from "next/link"
 import { useParams } from "next/navigation"
 
@@ -8,6 +9,7 @@ import { booksApi } from "@/lib/api/books"
 import { intelligenceApi } from "@/lib/api/intelligence"
 import { buildDailyCapEventDetail } from "@/lib/monetization/limitRecovery"
 import { readerApi } from "@/lib/api/reader"
+import { asQueryKey, bookCacheKey, readerCacheKey } from "@/lib/query/cacheKeys"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { capture } from "@/lib/analytics/posthog"
 import type { Book } from "@/types/book"
@@ -32,10 +34,6 @@ export default function AskPage() {
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
 
-  const [book, setBook] = useState<Book | null>(null)
-  const [progress, setProgress] = useState<ReadingProgress | null>(null)
-  const [chapterList, setChapterList] = useState<ChapterListResponse | null>(null)
-  const [bookTitle, setBookTitle] = useState<string | null>(null)
   const [input, setInput] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -44,16 +42,21 @@ export default function AskPage() {
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    booksApi.get(bookId)
-      .then((nextBook) => {
-        setBook(nextBook)
-        setBookTitle(nextBook.title)
-      })
-      .catch(() => {})
-    readerApi.getProgress(bookId).then(setProgress).catch(() => {})
-    readerApi.getChapterList(bookId).then(setChapterList).catch(() => {})
-  }, [bookId])
+  const { data: book = null } = useQuery<Book>({
+    queryKey: asQueryKey(bookCacheKey(bookId, "detail")),
+    queryFn: () => booksApi.get(bookId),
+    staleTime: 20_000,
+  })
+  const { data: progress = null } = useQuery<ReadingProgress>({
+    queryKey: asQueryKey(readerCacheKey(bookId, "progress")),
+    queryFn: () => readerApi.getProgress(bookId),
+    staleTime: 12_000,
+  })
+  const { data: chapterList = null } = useQuery<ChapterListResponse>({
+    queryKey: asQueryKey(readerCacheKey(bookId, "chapters")),
+    queryFn: () => readerApi.getChapterList(bookId),
+    staleTime: 30_000,
+  })
 
   const currentChapter = (() => {
     if (book?.mode === "author") {
@@ -128,7 +131,7 @@ export default function AskPage() {
       >
         <div className="mx-auto flex max-w-3xl items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <Link
+              <Link
               href={`/${bookId}`}
               className={`text-sm font-medium transition ${
                 isDark ? "text-indigo-300 hover:text-indigo-200" : "text-violet-700 hover:text-violet-800"
@@ -136,11 +139,11 @@ export default function AskPage() {
             >
               {"<- Overview"}
             </Link>
-            {bookTitle ? (
+            {book?.title ? (
               <>
                 <span className={`text-sm ${isDark ? "text-slate-600" : "text-stone-300"}`}>/</span>
                 <span className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>
-                  {bookTitle}
+                  {book.title}
                 </span>
               </>
             ) : null}

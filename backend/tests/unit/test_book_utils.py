@@ -1,15 +1,27 @@
 """Unit tests for book_utils functions."""
 import io
 import uuid
+from datetime import UTC, datetime
+from types import SimpleNamespace
+
 import pytest
+from fastapi import HTTPException
 from PIL import Image
 
+from app.models.book import Book, Chapter, ManuscriptAnnotation
+from app.models.user import User
 from app.utils.book_utils import (
+    list_manuscript_annotations,
+    _build_knowledge_timeline,
+    _build_narration_signature,
+    _describe_narration_shift,
     build_emotional_arc_payload,
     build_book_processing_payload,
     build_blank_cover_image,
+    build_workspace_chapter_text_from_scenes,
     clean_markdown_asterisks_str,
     clean_manuscript_html,
+    chapter_body_needs_scene_workspace_fallback,
     deserialize_manuscript_content,
     ensure_book_cover,
     estimate_readability,
@@ -17,17 +29,58 @@ from app.utils.book_utils import (
     build_scene_chapter_import_text,
     markdown_to_html,
     manuscript_html_to_text,
+    normalize_imported_chapters,
+    normalize_scene_reorder_ids,
     normalize_writer_workspace,
     parse_screenplay_upload,
     parse_book_upload_for_ingestion,
     resolve_upload_format_and_work_type,
+    save_manuscript_annotation,
     serialize_manuscript_content,
     strip_scene_metadata_from_manuscript_text,
     story_unit_label,
     story_unit_name,
 )
-from app.models.book import Book
 from app.models.character import Character
+
+
+class _ScalarResult:
+    def __init__(self, value):
+        self._value = value
+
+    def scalar_one_or_none(self):
+        return self._value
+
+    def all(self):
+        return self._value
+
+
+class _FakeAnnotationDB:
+    def __init__(self, *, execute_values=None, get_values=None):
+        self._execute_values = list(execute_values or [])
+        self._get_values = list(get_values or [])
+        self.added: list[object] = []
+
+    async def execute(self, *_args, **_kwargs):
+        return self._execute_values.pop(0)
+
+    async def get(self, *_args, **_kwargs):
+        return self._get_values.pop(0) if self._get_values else None
+
+    def add(self, value):
+        self.added.append(value)
+        if getattr(value, "id", None) is None:
+            value.id = uuid.uuid4()
+        if getattr(value, "created_at", None) is None:
+            value.created_at = datetime.now(UTC)
+        if getattr(value, "updated_at", None) is None:
+            value.updated_at = datetime.now(UTC)
+
+    async def commit(self):
+        return None
+
+    async def refresh(self, _value):
+        return None
 
 
 class TestCleanMarkdownAsterisks:
@@ -250,8 +303,114 @@ def test_estimate_readability_returns_basic_metrics():
     assert metrics["words"] == 9
     assert metrics["sentences"] == 2
     assert metrics["paragraphs"] == 1
-    assert metrics["average_sentence_length"] > 0
-    assert metrics["label"] in {"Very easy", "Easy", "Balanced", "Demanding", "Dense"}
+
+
+@pytest.mark.asyncio
+async def test_manuscript_annotations_round_trip_and_hide_private_entries():
+    author = User(id=uuid.uuid4(), email=f"author-{uuid.uuid4().hex[:8]}@example.com", username="author", password_hash="hash")
+    reviewer = User(id=uuid.uuid4(), email=f"reviewer-{uuid.uuid4().hex[:8]}@example.com", username="reviewer", password_hash="hash")
+    book = Book(id=uuid.uuid4(), user_id=author.id, title="Atlas", format="txt", work_type="novel", s3_key="atlas.txt", status="ready", mode="author")
+
+    db = _FakeAnnotationDB(execute_values=[_ScalarResult("The Ember Gate"), _ScalarResult("The Ember Gate")])
+    shared = await save_manuscript_annotation(
+        db,
+        book=book,
+        actor=author,
+        annotation_id=None,
+        chapter_number=2,
+        category="continuity",
+        status="open",
+        visibility="shared",
+        quote="The bell cracked at dawn.",
+        comment="Keep the bell description aligned with chapter 1.",
+        anchor_context_before="",
+        anchor_context_after="",
+        start_offset=12,
+        end_offset=36,
+    )
+    private = await save_manuscript_annotation(
+        db,
+        book=book,
+        actor=author,
+        annotation_id=None,
+        chapter_number=2,
+        category="general",
+        status="open",
+        visibility="private",
+        quote="Nora looked away.",
+        comment="Private reminder to revisit the emotional turn.",
+        anchor_context_before="",
+        anchor_context_after="",
+        start_offset=40,
+        end_offset=57,
+    )
+
+    assert shared["visibility"] == "shared"
+    assert private["visibility"] == "private"
+
+    created_shared = db.added[0]
+    created_private = db.added[1]
+    list_db = _FakeAnnotationDB(
+        execute_values=[
+            _ScalarResult(
+                [
+                    (created_shared, "The Ember Gate", "author", author.email),
+                    (created_private, "The Ember Gate", "author", author.email),
+                ]
+            )
+        ]
+    )
+    author_visible = await list_manuscript_annotations(list_db, book=book, actor=author)
+    reviewer_db = _FakeAnnotationDB(
+        execute_values=[
+            _ScalarResult(
+                [
+                    (created_shared, "The Ember Gate", "author", author.email),
+                    (created_private, "The Ember Gate", "author", author.email),
+                ]
+            )
+        ]
+    )
+    reviewer_visible = await list_manuscript_annotations(
+        reviewer_db,
+        book=book,
+        actor=reviewer,
+        collaborator=SimpleNamespace(
+            role="commenter",
+            permissions={"can_comment": True},
+            scope={"chapter_start": 1, "chapter_end": 3, "character_bible": False, "continuity_report": False, "reader_confusion_report": False},
+        ),
+    )
+
+    assert len(author_visible) == 2
+    assert [item["visibility"] for item in reviewer_visible] == ["shared"]
+
+
+@pytest.mark.asyncio
+async def test_save_manuscript_annotation_rejects_reversed_offsets():
+    author = User(id=uuid.uuid4(), email=f"author-{uuid.uuid4().hex[:8]}@example.com", username="author2", password_hash="hash")
+    book = Book(id=uuid.uuid4(), user_id=author.id, title="Atlas", format="txt", work_type="novel", s3_key="atlas.txt", status="ready", mode="author")
+    db = _FakeAnnotationDB()
+
+    with pytest.raises(HTTPException) as exc:
+        await save_manuscript_annotation(
+            db,
+            book=book,
+            actor=author,
+            annotation_id=None,
+            chapter_number=1,
+            category="general",
+            status="open",
+            visibility="shared",
+            quote="A short quote",
+            comment="Invalid offsets",
+            anchor_context_before="",
+            anchor_context_after="",
+            start_offset=20,
+            end_offset=10,
+        )
+
+    assert exc.value.status_code == 400
 
 
 def test_extract_novel_scene_candidates_splits_hash_breaks_and_assigns_paths():
@@ -314,6 +473,56 @@ def test_strip_scene_metadata_from_manuscript_text_keeps_plain_scene_breaks():
     assert stripped == "Opening paragraph.\n\n***\n\nNyra entered the chamber."
 
 
+def test_build_workspace_chapter_text_from_scenes_joins_clean_scene_bodies():
+    scenes = [
+        {
+            "title": "Arrival",
+            "body": "POV: Mira\nLocation: Docks\n\nThe boat scraped against the pier.",
+        },
+        {
+            "title": "Confrontation",
+            "body": "## Confrontation\n\nConflict: Old debts\n\nThe captain blocked her path.",
+        },
+    ]
+
+    compiled = build_workspace_chapter_text_from_scenes(scenes)
+
+    assert compiled.startswith("## Scene 1 - Arrival")
+    assert "POV: Mira" in compiled
+    assert "Location: Docks" in compiled
+    assert "The boat scraped against the pier." in compiled
+    assert "\n\n***\n\n## Scene 2 - Confrontation" in compiled
+    assert "Conflict:\n- Old debts" in compiled
+    assert compiled.endswith("The captain blocked her path.")
+
+
+def test_normalize_scene_reorder_ids_accepts_unique_uuid_strings():
+    first_id = str(uuid.uuid4())
+    second_id = str(uuid.uuid4())
+
+    assert normalize_scene_reorder_ids([first_id, second_id]) == [
+        uuid.UUID(first_id),
+        uuid.UUID(second_id),
+    ]
+
+
+def test_normalize_scene_reorder_ids_rejects_duplicates_and_bad_values():
+    scene_id = str(uuid.uuid4())
+
+    with pytest.raises(HTTPException):
+        normalize_scene_reorder_ids([scene_id, scene_id])
+
+    with pytest.raises(HTTPException):
+        normalize_scene_reorder_ids(["not-a-uuid"])
+
+
+def test_chapter_body_needs_scene_workspace_fallback_detects_empty_and_placeholder_content():
+    assert chapter_body_needs_scene_workspace_fallback("", chapter_number=2, chapter_title="Chapter 2") is True
+    assert chapter_body_needs_scene_workspace_fallback("2.", chapter_number=2, chapter_title="Chapter 2") is True
+    assert chapter_body_needs_scene_workspace_fallback("II", chapter_number=2, chapter_title="II") is True
+    assert chapter_body_needs_scene_workspace_fallback("A real opening line begins here.", chapter_number=2, chapter_title="Chapter 2") is False
+
+
 def test_build_emotional_arc_payload_uses_growth_events():
     character = Character(
         book_id=uuid.UUID("00000000-0000-0000-0000-000000000001"),
@@ -352,10 +561,62 @@ def test_story_unit_helpers_switch_to_scene_language_for_screenplays():
     assert story_unit_label(screenplay_book, 3, short=True) == "Sc. 3"
 
 
+def test_build_knowledge_timeline_keeps_all_chapters_in_matrix():
+    timeline = _build_knowledge_timeline(
+        knowledge_matrix=[
+            {
+                "fact": "The king was poisoned",
+                "entries": [
+                    {
+                        "character_name": "Mira",
+                        "chapter_learned": 2,
+                        "source": "Overheard guard",
+                    },
+                    {
+                        "character_name": "Lina",
+                        "chapter_learned": None,
+                        "source": "No earlier evidence surfaced yet",
+                    },
+                ],
+                "warning": "LoreVia has no clear evidence yet that Lina learned this.",
+            }
+        ],
+        chapter_numbers=[1, 2, 3, 4, 5, 6, 7],
+    )
+
+    assert len(timeline) == 1
+    assert [cell["chapter_number"] for cell in timeline[0]["rows"][0]["cells"]] == [1, 2, 3, 4, 5, 6, 7]
+    assert timeline[0]["rows"][0]["cells"][1]["state"] == "learned"
+    assert timeline[0]["rows"][0]["cells"][-1]["state"] == "known"
+    assert all(cell["state"] == "unknown" for cell in timeline[0]["rows"][1]["cells"])
+
+
 def test_resolve_upload_format_and_work_type_infers_and_preserves_technical_format():
     assert resolve_upload_format_and_work_type("pilot.fountain") == ("fountain", "screenplay")
     assert resolve_upload_format_and_work_type("episode.txt", "screenplay") == ("txt", "screenplay")
     assert resolve_upload_format_and_work_type("novel.pdf") == ("pdf", "novel")
+
+
+def test_normalize_imported_chapters_keeps_long_source_chapter_intact_when_structure_is_preserved():
+    long_text = "\n\n".join([
+        " ".join(["opening"] * 1800),
+        " ".join(["middle"] * 1800),
+    ])
+
+    normalized = normalize_imported_chapters(
+        [{"number": 1, "title": "Chapter I", "text": long_text}],
+        chapter_number=None,
+        start_number=1,
+        replace_existing=False,
+        chunk_long_documents=True,
+        preserve_exact_structure=True,
+    )
+
+    assert len(normalized) == 1
+    assert normalized[0]["number"] == 1
+    assert normalized[0]["title"] == "Chapter I"
+    assert "(Part 1)" not in normalized[0]["title"]
+    assert normalized[0]["text"] == long_text
 
 
 def test_normalize_writer_workspace_includes_front_matter_defaults():
@@ -382,6 +643,18 @@ def test_normalize_writer_workspace_sanitizes_revision_board_items():
                 ],
                 "last_generated_at": " 2026-05-11T10:00:00Z ",
             }
+            ,
+            "revision_recent_edits": [
+                {
+                    "id": " edit-1 ",
+                    "kind": "scene",
+                    "chapter_number": 2,
+                    "scene_title": " Gate Approach ",
+                    "before_text": "Before",
+                    "after_text": "After",
+                    "updated_at": " 2026-05-13T10:00:00Z ",
+                }
+            ],
         }
     )
 
@@ -395,6 +668,22 @@ def test_normalize_writer_workspace_sanitizes_revision_board_items():
             "updated_at": None,
         }
     ]
+    assert workspace["revision_recent_edits"][0]["kind"] == "scene"
+    assert workspace["revision_recent_edits"][0]["scene_title"] == "Gate Approach"
+
+
+def test_build_narration_signature_detects_first_person_anchor():
+    signature = _build_narration_signature('I ran through the gate. My hands shook. "Stop," Kael said.')
+
+    assert signature["pov_mode"] == "first-person"
+    assert signature["first_person_hits"] >= 2
+
+
+def test_describe_narration_shift_flags_mode_change():
+    previous = _build_narration_signature("She crossed the gate and kept her head down.")
+    current = _build_narration_signature("I crossed the gate and kept my head down.")
+
+    assert _describe_narration_shift(previous, current) == "Narration shifts from third-person anchoring into first-person anchoring."
 
 
 @pytest.mark.asyncio

@@ -92,8 +92,9 @@ class SecurityHeadersMiddleware:
         if not request_id:
             request_id = str(uuid.uuid4())
         
-        from app.utils.request_context import set_request_id
+        from app.utils.request_context import set_request_id, set_request_user_id
         set_request_id(request_id)
+        set_request_user_id(None)
         started_at = time.perf_counter()
         response_started = False
 
@@ -149,6 +150,8 @@ class SecurityHeadersMiddleware:
                     "duration_ms": duration_ms,
                 },
             )
+        set_request_id(None)
+        set_request_user_id(None)
 
 app.add_middleware(SecurityHeadersMiddleware)
 app.include_router(api_router, prefix=settings.API_V1_PREFIX)

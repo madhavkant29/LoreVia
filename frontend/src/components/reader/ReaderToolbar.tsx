@@ -1,6 +1,7 @@
 "use client"
 import { useState } from "react"
 import Link from "next/link"
+import type { ReaderFontFamily } from "@/lib/utils/readerTypography"
 import type { ReaderDisplayStyle } from "@/types/reader"
 
 interface Props {
@@ -15,8 +16,8 @@ interface Props {
   onToggleTheme: () => void
   fontSize: number
   onSetFontSize: (s: number) => void
-  fontFamily: "serif" | "sans" | "mono"
-  onSetFontFamily: (f: "serif" | "sans" | "mono") => void
+  fontFamily: ReaderFontFamily
+  onSetFontFamily: (f: ReaderFontFamily) => void
   displayStyle: ReaderDisplayStyle
   onSetDisplayStyle: (style: ReaderDisplayStyle) => void
   quoteModeEnabled: boolean

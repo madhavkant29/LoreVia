@@ -28,7 +28,9 @@ from app.utils.plot_thread_utils import (
     build_plot_thread_payload,
     normalize_plot_thread_status,
 )
+from app.utils.tag_utils import ENTITY_TYPE_PLOT_THREAD, get_custom_tags_for_entity, list_custom_tags_for_entity_ids
 from app.utils.billing_utils import user_access_tier
+from app.utils.character_utils import get_graph_visibility_override
 from app.utils.queue_utils import queue_for_user
 from app.engine.character.profile_builder import build_description
 from app.models.book import Book, Chapter, ChapterMedia
@@ -223,6 +225,107 @@ def relationship_node_description(
     return " ".join(segment.strip() for segment in segments if segment).strip() or "No narrative details discovered yet."
 
 
+def graph_character_visibility_analysis(char: Character, relationship_count: int = 0) -> dict[str, Any]:
+    name = " ".join((getattr(char, "name", "") or "").split())
+    override = get_graph_visibility_override(char)
+    reasons: list[str] = []
+
+    if not name:
+        return {
+            "visible": False,
+            "score": -99,
+            "override": override,
+            "reasons": ["missing_name"],
+        }
+
+    if getattr(char, "is_manual", False):
+        reasons.append("manual_character")
+    if relationship_count > 0:
+        reasons.append("relationship_evidence")
+    if (getattr(char, "mention_count", 0) or 0) > 1:
+        reasons.append("repeat_mentions")
+    if getattr(char, "aliases", None):
+        reasons.append("has_aliases")
+    if getattr(char, "arc_summary", None):
+        reasons.append("has_arc_summary")
+    if getattr(char, "personality_tags", None) or getattr(char, "motivations", None) or getattr(char, "fears", None):
+        reasons.append("profile_details")
+
+    # Possessive forms ("Author's note", "Narrator's voice") -> strip
+    if name.endswith("'s"):
+        reasons.append("possessive_name_shape")
+        return {
+            "visible": False if override != "include" else True,
+            "score": -8,
+            "override": override,
+            "reasons": (["author_override_include"] if override == "include" else ["author_override_exclude"] if override == "exclude" else []) + reasons,
+        }
+
+    words = re.findall(r"[A-Za-z][A-Za-z'-]*", name)
+    if not words:
+        reasons.append("no_name_tokens")
+        return {
+            "visible": False,
+            "score": -10,
+            "override": override,
+            "reasons": reasons,
+        }
+
+    if len(words) == 1 and words[0][0].islower():
+        reasons.append("lowercase_single_word")
+        return {
+            "visible": False if override != "include" else True,
+            "score": -7,
+            "override": override,
+            "reasons": (["author_override_include"] if override == "include" else ["author_override_exclude"] if override == "exclude" else []) + reasons,
+        }
+
+    score = character_visibility_score(
+        name,
+        role=getattr(char, "role", None),
+        aliases=getattr(char, "aliases", None) or [],
+        arc_summary=getattr(char, "arc_summary", None),
+        personality_tags=getattr(char, "personality_tags", None) or [],
+        motivations=getattr(char, "motivations", None) or [],
+        fears=getattr(char, "fears", None) or [],
+        archetype=getattr(char, "archetype", None),
+        trait_state=getattr(char, "trait_state", None),
+        relationship_count=relationship_count,
+        stopwords=frozenset(GRAPH_CHARACTER_STOPWORDS),
+        exact_blocklist=frozenset(TIMELINE_CHARACTER_EXACT_BLOCKLIST),
+        concept_suffixes=tuple(TIMELINE_CHARACTER_SUFFIXES),
+        use_ner=True,
+    )
+
+    if score >= VISIBILITY_THRESHOLD:
+        reasons.append("score_meets_threshold")
+    else:
+        reasons.append("score_below_threshold")
+
+    if override == "include":
+        reasons.insert(0, "author_override_include")
+        return {
+            "visible": True,
+            "score": score,
+            "override": override,
+            "reasons": reasons,
+        }
+    if override == "exclude":
+        reasons.insert(0, "author_override_exclude")
+        return {
+            "visible": False,
+            "score": score,
+            "override": override,
+            "reasons": reasons,
+        }
+    return {
+        "visible": score >= VISIBILITY_THRESHOLD or getattr(char, "is_manual", False),
+        "score": score,
+        "override": override,
+        "reasons": reasons,
+    }
+
+
 def is_graph_character_visible(char: Character) -> bool:
     """Determine whether a Character should appear in the relationship graph.
 
@@ -235,35 +338,7 @@ def is_graph_character_visible(char: Character) -> bool:
       - Possessive suffix ("'s")   → not a character label
       - Single all-lowercase word  → not a proper name
     """
-    name = " ".join((char.name or "").split())
-    if not name:
-        return False
-    # Possessive forms ("Author's note", "Narrator's voice") → strip
-    if name.endswith("'s"):
-        return False
-    words = re.findall(r"[A-Za-z][A-Za-z'-]*", name)
-    if not words:
-        return False
-    if len(words) == 1 and words[0][0].islower():
-        return False
-
-    score = character_visibility_score(
-        name,
-        role=char.role,
-        aliases=char.aliases or [],
-        arc_summary=char.arc_summary,
-        personality_tags=char.personality_tags or [],
-        motivations=char.motivations or [],
-        fears=char.fears or [],
-        archetype=char.archetype,
-        trait_state=char.trait_state,
-        relationship_count=0,
-        stopwords=frozenset(GRAPH_CHARACTER_STOPWORDS),
-        exact_blocklist=frozenset(TIMELINE_CHARACTER_EXACT_BLOCKLIST),
-        concept_suffixes=tuple(TIMELINE_CHARACTER_SUFFIXES),
-        use_ner=True,
-    )
-    return score >= VISIBILITY_THRESHOLD
+    return bool(graph_character_visibility_analysis(char, getattr(char, "_graph_relationship_count", 0)).get("visible"))
 
 
 def character_evidence_score(char: Character) -> tuple[int, int]:
@@ -634,8 +709,13 @@ def build_timeline_track_payload(
     }
 
 
-def serialize_plot_thread(thread: PlotThread, *, current_chapter: int | None) -> dict:
-    return build_plot_thread_payload(thread, current_chapter=current_chapter)
+def serialize_plot_thread(
+    thread: PlotThread,
+    *,
+    current_chapter: int | None,
+    tags: list[str] | None = None,
+) -> dict:
+    return build_plot_thread_payload(thread, current_chapter=current_chapter, tags=tags)
 
 
 async def list_plot_threads(
@@ -653,7 +733,16 @@ async def list_plot_threads(
     current_chapter = chapter
     if current_chapter is None:
         current_chapter = await db.scalar(select(Book.total_chapters).where(Book.id == book_id))
-    return [serialize_plot_thread(thread, current_chapter=current_chapter) for thread in threads]
+    tags_by_thread = await list_custom_tags_for_entity_ids(
+        db,
+        entity_type=ENTITY_TYPE_PLOT_THREAD,
+        entity_ids=[thread.id for thread in threads],
+        book_id=book_id,
+    )
+    return [
+        serialize_plot_thread(thread, current_chapter=current_chapter, tags=tags_by_thread.get(thread.id, []))
+        for thread in threads
+    ]
 
 
 async def update_plot_thread_note(
@@ -683,4 +772,13 @@ async def update_plot_thread_note(
     await db.commit()
     await db.refresh(thread)
     current_chapter = await db.scalar(select(Book.total_chapters).where(Book.id == book_id))
-    return serialize_plot_thread(thread, current_chapter=current_chapter)
+    return serialize_plot_thread(
+        thread,
+        current_chapter=current_chapter,
+        tags=await get_custom_tags_for_entity(
+            db,
+            entity_type=ENTITY_TYPE_PLOT_THREAD,
+            entity_id=thread.id,
+            book_id=book_id,
+        ),
+    )

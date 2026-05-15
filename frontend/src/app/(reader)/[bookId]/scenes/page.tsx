@@ -5,10 +5,16 @@ import type { Route } from "next"
 import Link from "next/link"
 import { useParams } from "next/navigation"
 
+import { WhatsTheWordPanel } from "@/components/intelligence/WhatsTheWordPanel"
 import { AuthorToolsNav } from "@/components/layout/AuthorToolsNav"
 import { booksApi } from "@/lib/api/books"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
-import { buildSceneChapterOptions, extractChapterNumberFromSceneFolder } from "@/lib/utils/sceneWorkspace"
+import {
+  buildSceneChapterOptions,
+  extractChapterNumberFromSceneFolder,
+  parseStoredSceneFolders,
+  SCENE_FOLDER_STORAGE_KEY_PREFIX,
+} from "@/lib/utils/sceneWorkspace"
 import {
   buildUniqueWorkspacePathFromCandidate,
   buildWorkspaceFolderTree,
@@ -18,8 +24,6 @@ import {
   type WorkspaceFolderNode,
 } from "@/lib/utils/workspacePaths"
 import type { Book, ManuscriptWorkspaceTree, NovelScene } from "@/types/book"
-
-const SCENE_FOLDER_STORAGE_KEY_PREFIX = "scene-workspace-folders:v1:"
 
 type FolderNode = WorkspaceFolderNode
 type SceneDragItem = { kind: "scene"; id: string }
@@ -47,13 +51,7 @@ function defaultSceneFolder(chapterNumber: number | null) {
 
 function loadSceneFolders(bookId: string) {
   if (typeof window === "undefined") return [] as string[]
-  try {
-    const raw = window.localStorage.getItem(`${SCENE_FOLDER_STORAGE_KEY_PREFIX}${bookId}`)
-    const parsed = raw ? JSON.parse(raw) : []
-    return Array.isArray(parsed) ? parsed.map((value) => normalizeWorkspaceFolderPath(String(value))).filter(Boolean) : []
-  } catch {
-    return []
-  }
+  return parseStoredSceneFolders(window.localStorage.getItem(`${SCENE_FOLDER_STORAGE_KEY_PREFIX}${bookId}`))
 }
 
 function parseSceneDragItem(event: Pick<DragEvent, "dataTransfer"> | Pick<ReactDragEvent, "dataTransfer">) {
@@ -75,7 +73,7 @@ export default function ScenesPage() {
   const [tree, setTree] = useState<ManuscriptWorkspaceTree | null>(null)
   const [selectedSceneId, setSelectedSceneId] = useState<string | null>(null)
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null)
-  const [customFolders, setCustomFolders] = useState<string[]>(() => loadSceneFolders(bookId))
+  const [customFolders, setCustomFolders] = useState<string[]>([])
   const [dropTargetFolder, setDropTargetFolder] = useState<string | null>(null)
   const [search, setSearch] = useState("")
   const [title, setTitle] = useState("")
@@ -447,6 +445,7 @@ export default function ScenesPage() {
                     <span className={labelClass(isDark)}>Description</span>
                     <input value={description} onChange={(event) => setDescription(event.target.value)} className={inputClass(isDark)} placeholder="Optional scene summary" />
                   </label>
+                  <WhatsTheWordPanel bookId={bookId} isDark={isDark} className="mt-4" />
                   <label className="mt-4 block text-sm">
                     <span className={labelClass(isDark)}>Scene text</span>
                     <textarea

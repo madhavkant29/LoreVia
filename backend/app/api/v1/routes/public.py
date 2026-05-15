@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps.auth import get_current_user
+from app.api.deps.auth import get_current_user, get_optional_current_user
 from app.core.database import get_db
 from app.core.redis import (
     cache_del,
@@ -16,36 +16,190 @@ from app.core.redis import (
 )
 from app.core.storage import download_book, get_presigned_url, upload_text
 from app.models.book import Book, Chapter
+from app.models.user import User
 from app.parsers.chunker import count_tokens
-from app.schemas.public import PublicBookManualIn, PublicChapterIn
+from app.schemas.public import (
+    PublicBookCreateOut,
+    PublicBookDetailOut,
+    PublicBookManualIn,
+    PublicBookOut,
+    PublicChapterAppendOut,
+    PublicChapterOut,
+    PublicChapterIn,
+    PublicForumInterestCreateBody,
+    PublicForumInterestListOut,
+    PublicForumInterestOut,
+    PublicForumCommentCreateBody,
+    PublicForumCommentListOut,
+    PublicForumCommentOut,
+    PublicForumCommentReactionBody,
+    PublicForumPostCreateBody,
+    PublicForumPostListOut,
+    PublicForumPostOut,
+    PublicForumPostUpdateBody,
+    PublicUserProfileOut,
+)
 from app.utils.book_utils import deserialize_manuscript_content
+from app.utils.public_utils import (
+    create_public_forum_interest,
+    create_public_forum_comment,
+    create_public_forum_post,
+    ensure_public_mode_enabled,
+    get_public_forum_post_detail,
+    get_public_user_profile,
+    list_public_forum_interests_for_author,
+    list_public_forum_comments,
+    list_public_forum_posts,
+    react_to_public_forum_comment,
+    update_public_forum_post,
+)
+from app.services.monetization_service import charge_public_share_points
 
 router = APIRouter()
-PUBLIC_MODE_ENABLED = False
 
 
-def _ensure_public_mode_enabled() -> None:
-    if not PUBLIC_MODE_ENABLED:
-        raise HTTPException(503, "Public mode is temporarily disabled")
+@router.get("/forum/posts", response_model=PublicForumPostListOut)
+async def list_public_beta_forum_posts(
+    q: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    ensure_public_mode_enabled()
+    return PublicForumPostListOut(items=await list_public_forum_posts(db, q=q))
 
 
-@router.get("/books")
+@router.get("/forum/posts/{post_id}", response_model=PublicForumPostOut)
+async def get_public_beta_forum_post(
+    post_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    ensure_public_mode_enabled()
+    return await get_public_forum_post_detail(db, post_id=post_id)
+
+
+@router.post("/forum/posts", response_model=PublicForumPostOut, status_code=201)
+async def create_public_beta_forum_post_endpoint(
+    body: PublicForumPostCreateBody,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    ensure_public_mode_enabled()
+    return await create_public_forum_post(db, current_user=current_user, body=body)
+
+
+@router.put("/forum/posts/{post_id}", response_model=PublicForumPostOut)
+async def edit_public_beta_forum_post_endpoint(
+    post_id: uuid.UUID,
+    body: PublicForumPostUpdateBody,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    ensure_public_mode_enabled()
+    return await update_public_forum_post(db, post_id=post_id, current_user=current_user, body=body)
+
+
+@router.post("/forum/posts/{post_id}/interests", response_model=PublicForumInterestOut, status_code=201)
+async def create_public_beta_forum_interest_endpoint(
+    post_id: uuid.UUID,
+    body: PublicForumInterestCreateBody,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    ensure_public_mode_enabled()
+    return await create_public_forum_interest(db, post_id=post_id, current_user=current_user, body=body)
+
+
+@router.get("/forum/posts/{post_id}/interests", response_model=PublicForumInterestListOut)
+async def list_public_beta_forum_interests(
+    post_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    ensure_public_mode_enabled()
+    return PublicForumInterestListOut(
+        items=await list_public_forum_interests_for_author(
+            db,
+            post_id=post_id,
+            author_user_id=current_user.id,
+        )
+    )
+
+
+@router.get("/forum/posts/{post_id}/comments", response_model=PublicForumCommentListOut)
+async def list_public_beta_forum_comments(
+    post_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_optional_current_user),
+):
+    ensure_public_mode_enabled()
+    return PublicForumCommentListOut(
+        items=await list_public_forum_comments(
+            db,
+            post_id=post_id,
+            current_user=current_user,
+        )
+    )
+
+
+@router.post("/forum/posts/{post_id}/comments", response_model=PublicForumCommentOut, status_code=201)
+async def create_public_beta_forum_comment(
+    post_id: uuid.UUID,
+    body: PublicForumCommentCreateBody,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    ensure_public_mode_enabled()
+    return await create_public_forum_comment(db, post_id=post_id, current_user=current_user, body=body)
+
+
+@router.put("/forum/comments/{comment_id}/reaction", response_model=PublicForumCommentOut)
+async def react_to_public_beta_forum_comment(
+    comment_id: uuid.UUID,
+    body: PublicForumCommentReactionBody,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    ensure_public_mode_enabled()
+    return await react_to_public_forum_comment(
+        db,
+        comment_id=comment_id,
+        current_user=current_user,
+        reaction=body.reaction,
+    )
+
+
+@router.get("/users/{username}", response_model=PublicUserProfileOut)
+async def get_public_user_profile_endpoint(
+    username: str,
+    db: AsyncSession = Depends(get_db),
+):
+    ensure_public_mode_enabled()
+    return await get_public_user_profile(db, username=username)
+
+
+@router.get("/books", response_model=list[PublicBookOut])
 async def list_public_books(db: AsyncSession = Depends(get_db)):
-    _ensure_public_mode_enabled()
+    ensure_public_mode_enabled()
     cached = await cache_get(key_public_books())
     if cached:
         return cached
 
     rows = (await db.execute(
-        select(Book)
-        .where(Book.is_public.is_(True), Book.hidden_at.is_(None), Book.status.in_(["ready", "processing", "pending"]))
+        select(Book, User.username)
+        .join(User, User.id == Book.user_id)
+        .where(
+            Book.is_public.is_(True),
+            Book.hidden_at.is_(None),
+            Book.archived_at.is_(None),
+            Book.status.in_(["ready", "processing", "pending"]),
+        )
         .order_by(Book.created_at.desc())
-    )).scalars().all()
+    )).all()
     payload = [
         {
             "id": str(book.id),
             "title": book.title,
             "author": book.author,
+            "author_username": username,
             "genre": book.genre,
             "description": book.public_description,
             "format": book.format,
@@ -55,22 +209,23 @@ async def list_public_books(db: AsyncSession = Depends(get_db)):
             "copyright_warning": book.copyright_warning,
             "created_at": book.created_at,
         }
-        for book in rows
+        for book, username in rows
     ]
     await cache_set(key_public_books(), payload, 300)
     return payload
 
 
-@router.get("/books/{book_id}")
+@router.get("/books/{book_id}", response_model=PublicBookDetailOut)
 async def get_public_book(book_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
-    _ensure_public_mode_enabled()
+    ensure_public_mode_enabled()
     cached = await cache_get(key_public_book_detail(str(book_id)))
     if cached:
         return cached
 
     book = await db.get(Book, book_id)
-    if not book or not book.is_public or book.hidden_at is not None:
+    if not book or not book.is_public or book.hidden_at is not None or book.archived_at is not None:
         raise HTTPException(404, "Public book not found")
+    author_user = await db.get(User, book.user_id)
 
     chapters = (await db.execute(
         select(Chapter.number, Chapter.title, Chapter.description)
@@ -82,6 +237,7 @@ async def get_public_book(book_id: uuid.UUID, db: AsyncSession = Depends(get_db)
         "id": str(book.id),
         "title": book.title,
         "author": book.author,
+        "author_username": author_user.username if author_user else None,
         "genre": book.genre,
         "description": book.public_description,
         "format": book.format,
@@ -98,15 +254,15 @@ async def get_public_book(book_id: uuid.UUID, db: AsyncSession = Depends(get_db)
     return payload
 
 
-@router.get("/books/{book_id}/chapter/{chapter_num}")
+@router.get("/books/{book_id}/chapter/{chapter_num}", response_model=PublicChapterOut)
 async def get_public_chapter(book_id: uuid.UUID, chapter_num: int, db: AsyncSession = Depends(get_db)):
-    _ensure_public_mode_enabled()
+    ensure_public_mode_enabled()
     cached = await cache_get(key_public_chapter(str(book_id), chapter_num))
     if cached:
         return cached
 
     book = await db.get(Book, book_id)
-    if not book or not book.is_public or book.hidden_at is not None:
+    if not book or not book.is_public or book.hidden_at is not None or book.archived_at is not None:
         raise HTTPException(404, "Public book not found")
 
     chapter = (await db.execute(
@@ -131,17 +287,32 @@ async def get_public_chapter(book_id: uuid.UUID, chapter_num: int, db: AsyncSess
     return payload
 
 
-@router.post("/books/manual")
+@router.post("/books/manual", response_model=PublicBookCreateOut)
 async def create_public_book_manual(
     body: PublicBookManualIn,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    _ensure_public_mode_enabled()
+    ensure_public_mode_enabled()
     if not body.chapters:
         raise HTTPException(400, "At least one chapter is required")
+    book_id = uuid.uuid4()
+    try:
+        await charge_public_share_points(
+            db,
+            current_user,
+            source_id=str(book_id),
+            metadata={
+                "book_title": body.title,
+                "visibility": "public",
+                "entrypoint": "manual_public_book",
+            },
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
     book = Book(
+        id=book_id,
         user_id=current_user.id,
         title=body.title,
         author=body.author,
@@ -180,14 +351,14 @@ async def create_public_book_manual(
     return {"book_id": str(book.id), "status": "ready", "visibility": "public"}
 
 
-@router.post("/books/{book_id}/chapters")
+@router.post("/books/{book_id}/chapters", response_model=PublicChapterAppendOut)
 async def append_public_chapter(
     book_id: uuid.UUID,
     body: PublicChapterIn,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    _ensure_public_mode_enabled()
+    ensure_public_mode_enabled()
     book = await db.get(Book, book_id)
     if not book or book.user_id != current_user.id or not book.is_public:
         raise HTTPException(404, "Public book not found")

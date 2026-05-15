@@ -85,6 +85,8 @@ class RefreshBody(BaseModel):
 
 class TierLimitsOut(BaseModel):
     free_max_books: int
+    author_max_uploads: int
+    architect_uploads_unlimited: bool = True
     free_total_token_budget: int
     free_search_per_day: int
     free_summary_per_hour: int

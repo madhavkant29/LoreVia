@@ -12,7 +12,9 @@ from app.utils.auth_cookies import ACCESS_TOKEN_COOKIE_NAME
 from app.utils.monetization_utils import (
     POINT_ACTION_SEARCH,
     POINT_ENTRY_GRANT,
+    POINT_SOURCE_DAILY_LOGIN,
     POINT_SOURCE_FIRST_BOOK,
+    POINT_SOURCE_PUBLIC_SHARE,
     POINT_SOURCE_REWARDED_AD,
 )
 
@@ -140,6 +142,78 @@ async def test_rewarded_ad_session_grants_points_once(client, auth_headers, db, 
             select(PointLedgerEntry).where(
                 PointLedgerEntry.user_id == user.id,
                 PointLedgerEntry.source_type == POINT_SOURCE_REWARDED_AD,
+            )
+        )
+    ).scalars().all()
+    assert len(ledger_entries) == 1
+
+
+@pytest.mark.asyncio
+async def test_daily_login_reward_is_only_granted_once_per_day(client, auth_headers, db):
+    first_me = await client.get("/api/v1/auth/me", headers=auth_headers)
+    assert first_me.status_code == 200
+
+    second_me = await client.get("/api/v1/auth/me", headers=auth_headers)
+    assert second_me.status_code == 200
+
+    balance = await client.get("/api/v1/monetization/points", headers=auth_headers)
+    assert balance.status_code == 200
+    assert balance.json()["balance"] == 1
+
+    user = await _current_user_from_auth_headers(db, auth_headers)
+    ledger_entries = (
+        await db.execute(
+            select(PointLedgerEntry).where(
+                PointLedgerEntry.user_id == user.id,
+                PointLedgerEntry.source_type == POINT_SOURCE_DAILY_LOGIN,
+            )
+        )
+    ).scalars().all()
+    assert len(ledger_entries) == 1
+
+
+@pytest.mark.asyncio
+async def test_public_upload_requires_points_and_spends_them_once(client, auth_headers, db):
+    blocked = await client.post(
+        "/api/v1/books/upload",
+        headers=auth_headers,
+        files={"file": ("atlas.txt", b"chapter text", "text/plain")},
+        data={"title": "Atlas", "visibility": "public"},
+    )
+
+    assert blocked.status_code == 400
+    assert "Public sharing costs" in blocked.json()["detail"]
+
+    user = await _current_user_from_auth_headers(db, auth_headers)
+    db.add(
+        PointLedgerEntry(
+            user_id=user.id,
+            entry_type=POINT_ENTRY_GRANT,
+            source_type=POINT_SOURCE_FIRST_BOOK,
+            source_id="public-share-seed",
+            points_delta=12,
+        )
+    )
+    await db.commit()
+
+    allowed = await client.post(
+        "/api/v1/books/upload",
+        headers=auth_headers,
+        files={"file": ("atlas.txt", b"chapter text", "text/plain")},
+        data={"title": "Atlas", "visibility": "public"},
+    )
+
+    assert allowed.status_code == 202
+
+    balance = await client.get("/api/v1/monetization/points", headers=auth_headers)
+    assert balance.status_code == 200
+    assert balance.json()["balance"] == 2
+
+    ledger_entries = (
+        await db.execute(
+            select(PointLedgerEntry).where(
+                PointLedgerEntry.user_id == user.id,
+                PointLedgerEntry.source_type == POINT_SOURCE_PUBLIC_SHARE,
             )
         )
     ).scalars().all()

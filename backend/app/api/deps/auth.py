@@ -15,6 +15,7 @@ from app.utils.auth_cookies import (
     get_auth_token,
     set_access_cookie,
 )
+from app.utils.request_context import set_request_user_id
 
 bearer = HTTPBearer(auto_error=False)
 log = logging.getLogger("lorevia.auth")
@@ -74,6 +75,7 @@ async def _load_user_from_claims(user_id: str, claimed_version: int, db: AsyncSe
     user = await db.get(User, uuid.UUID(user_id))
     if not user:
         raise HTTPException(401, "User not found")
+    set_request_user_id(user.id)
     return user
 
 
@@ -121,6 +123,20 @@ async def get_current_user(
 
     set_access_cookie(response, create_access_token(user_id, claimed_version))
     return user
+
+
+async def get_optional_current_user(
+    request: Request,
+    response: Response,
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer),
+    db: AsyncSession = Depends(get_db),
+) -> User | None:
+    try:
+        return await get_current_user(request=request, response=response, credentials=credentials, db=db)
+    except HTTPException as exc:
+        if exc.status_code in {401, 503}:
+            return None
+        raise
 
 
 async def get_admin(current_user: User = Depends(get_current_user)) -> User:
