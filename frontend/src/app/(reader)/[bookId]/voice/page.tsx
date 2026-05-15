@@ -1,5 +1,6 @@
 "use client"
 
+import { useQuery } from "@tanstack/react-query"
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useParams } from "next/navigation"
@@ -7,6 +8,7 @@ import { useParams } from "next/navigation"
 import { AuthorToolsNav } from "@/components/layout/AuthorToolsNav"
 import { booksApi } from "@/lib/api/books"
 import { intelligenceApi } from "@/lib/api/intelligence"
+import { asQueryKey, bookCacheKey, readerCacheKey } from "@/lib/query/cacheKeys"
 import { readerApi } from "@/lib/api/reader"
 import { saveContextualVaultNote } from "@/lib/utils/notes"
 import { getApiErrorDetail } from "@/lib/utils/apiErrors"
@@ -28,19 +30,38 @@ export default function VoiceConsistencyPage() {
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
 
-  const [book, setBook] = useState<Book | null>(null)
-  const [chapterList, setChapterList] = useState<ChapterListResponse | null>(null)
-  const [workspaceTree, setWorkspaceTree] = useState<ManuscriptWorkspaceTree | null>(null)
   const [selectedChapter, setSelectedChapter] = useState<number | null>(null)
   const [chapterTitle, setChapterTitle] = useState("")
   const [text, setText] = useState("")
-  const [loading, setLoading] = useState(true)
   const [reviewLoading, setReviewLoading] = useState(false)
   const [saveStatus, setSaveStatus] = useState<string | null>(null)
   const [reviewError, setReviewError] = useState<string | null>(null)
   const [review, setReview] = useState<VoiceConsistencyReview | null>(null)
   const [voiceCharacters, setVoiceCharacters] = useState<string[]>([])
   const [voiceMatches, setVoiceMatches] = useState<VoiceConsistencyMatch[]>([])
+
+  const { data: book = null, isLoading: bookLoading } = useQuery<Book | null>({
+    queryKey: asQueryKey(bookCacheKey(bookId, "detail")),
+    queryFn: () => booksApi.get(bookId),
+  })
+  const { data: chapterList = null, isLoading: chapterListLoading } = useQuery<ChapterListResponse | null>({
+    queryKey: asQueryKey(readerCacheKey(bookId, "chapters")),
+    queryFn: () => readerApi.getChapterList(bookId),
+  })
+  const {
+    data: workspaceTree = null,
+    isLoading: workspaceTreeLoading,
+    refetch: refetchWorkspaceTree,
+  } = useQuery<ManuscriptWorkspaceTree | null>({
+    queryKey: asQueryKey(bookCacheKey(bookId, "workspace-tree")),
+    queryFn: () => booksApi.getWorkspaceTree(bookId),
+  })
+  const { data: chapterData = null, isLoading: chapterLoading } = useQuery({
+    queryKey: selectedChapter !== null ? asQueryKey(readerCacheKey(bookId, `chapter:${selectedChapter}`)) : ["voice:chapter:none"],
+    queryFn: () => readerApi.getChapter(bookId, selectedChapter as number),
+    enabled: selectedChapter !== null,
+  })
+  const loading = bookLoading || chapterListLoading || workspaceTreeLoading
 
   const chapterOptions = useMemo(() => chapterList?.chapters ?? EMPTY_CHAPTERS, [chapterList?.chapters])
   const existingScenePaths = useMemo(
@@ -56,30 +77,21 @@ export default function VoiceConsistencyPage() {
     [workspaceTree]
   )
 
-  const loadWorkspace = async () => {
-    const [bookData, chaptersData, treeData] = await Promise.all([
-      booksApi.get(bookId).catch(() => null),
-      readerApi.getChapterList(bookId).catch(() => null),
-      booksApi.getWorkspaceTree(bookId).catch(() => ({ chapters: [], scene_groups: [], note_paths: [] })),
-    ])
-    setBook(bookData)
-    setChapterList(chaptersData)
-    setWorkspaceTree(treeData)
-
-    const preferredChapter = chaptersData?.current_chapter
-      ?? chaptersData?.chapters[chaptersData.chapters.length - 1]?.number
+  useEffect(() => {
+    const preferredChapter = chapterList?.current_chapter
+      ?? chapterList?.chapters[chapterList.chapters.length - 1]?.number
       ?? null
-    setSelectedChapter(preferredChapter)
-    setLoading(false)
-  }
+    if (preferredChapter === null) {
+      setSelectedChapter(null)
+      return
+    }
+    setSelectedChapter((current) => {
+      if (current && chapterOptions.some((chapter) => chapter.number === current)) return current
+      return preferredChapter
+    })
+  }, [chapterList, chapterOptions])
 
   useEffect(() => {
-    void loadWorkspace()
-  }, [bookId])
-
-  useEffect(() => {
-    let active = true
-
     if (selectedChapter === null) {
       setChapterTitle("")
       setText("")
@@ -91,28 +103,20 @@ export default function VoiceConsistencyPage() {
     }
 
     const chapterMeta = chapterOptions.find((item) => item.number === selectedChapter)
-    readerApi.getChapter(bookId, selectedChapter)
-      .then((chapter) => {
-        if (!active) return
-        setChapterTitle(chapter.chapter_title || chapterMeta?.title || `Chapter ${selectedChapter}`)
-        setText(chapter.text_content || "")
-      })
-      .catch(() => {
-        if (!active) return
-        setChapterTitle(chapterMeta?.title || `Chapter ${selectedChapter}`)
-        setText("")
-      })
+    if (chapterData) {
+      setChapterTitle(chapterData.chapter_title || chapterMeta?.title || `Chapter ${selectedChapter}`)
+      setText(chapterData.text_content || "")
+    } else if (!chapterLoading) {
+      setChapterTitle(chapterMeta?.title || `Chapter ${selectedChapter}`)
+      setText("")
+    }
 
     setReview(null)
     setReviewError(null)
     setVoiceCharacters([])
     setVoiceMatches([])
     setSaveStatus(null)
-
-    return () => {
-      active = false
-    }
-  }, [bookId, chapterOptions, selectedChapter])
+  }, [chapterData, chapterLoading, chapterOptions, selectedChapter])
 
   const runReview = async () => {
     const trimmed = text.trim()
@@ -145,7 +149,7 @@ export default function VoiceConsistencyPage() {
       folderSegments: selectedChapter ? ["Voice", `Chapter ${selectedChapter}`] : ["Voice"],
     })
     setSaveStatus(`Saved voice note to ${saved.path}`)
-    setWorkspaceTree(await booksApi.getWorkspaceTree(bookId))
+    await refetchWorkspaceTree()
   }
 
   const saveReviewNote = async () => {
@@ -166,7 +170,7 @@ export default function VoiceConsistencyPage() {
       folderSegments: selectedChapter ? ["Voice", `Chapter ${selectedChapter}`] : ["Voice"],
     })
     setSaveStatus(`Saved full review to ${saved.path}`)
-    setWorkspaceTree(await booksApi.getWorkspaceTree(bookId))
+    await refetchWorkspaceTree()
   }
 
   const saveReviewScene = async () => {
@@ -181,7 +185,7 @@ export default function VoiceConsistencyPage() {
     })
     const saved = await booksApi.saveScene(bookId, sceneDraft)
     setSaveStatus(`Saved review scene to ${saved.path}`)
-    setWorkspaceTree(await booksApi.getWorkspaceTree(bookId))
+    await refetchWorkspaceTree()
   }
 
   if (loading) {

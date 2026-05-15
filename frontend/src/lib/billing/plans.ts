@@ -17,7 +17,7 @@ export function isPaidTier(tier?: UserTier | null) {
 export function tierLabel(tier?: UserTier | null) {
   switch (tier) {
     case "reader":
-      return "Collaboration access"
+      return "Beta reader access"
     case "author":
       return "Author"
     case "architect":

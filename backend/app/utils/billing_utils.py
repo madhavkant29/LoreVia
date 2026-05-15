@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.models.book import Book, SeriesBook
 from app.models.intelligence import WorldBuildingDocument
+from app.models.user import SubscriptionEvent, User
 
 FREE_TIER = "free"
 READER_TIER = "reader"
@@ -129,6 +130,22 @@ class UploadUsageSummary:
     upload_limit_unlimited: bool
 
 
+@dataclass(frozen=True)
+class SubscriptionMetricsSummary:
+    cohort_start: date
+    cohort_end: date
+    trial_starts: int
+    trial_to_paid_conversions: int
+    trial_to_paid_rate: float | None
+    cancellation_events: int
+    resolved_cancellation_events: int
+    unresolved_cancellation_events: int
+    reactivated_after_cancellation: int
+    churned_after_cancellation: int
+    post_cancel_churn_rate: float | None
+    reactivation_window_days: int
+
+
 def normalize_tier(tier: str | None) -> str:
     cleaned = (tier or FREE_TIER).strip().lower()
     return LEGACY_TIER_ALIASES.get(cleaned, cleaned if cleaned in VALID_USER_TIERS else FREE_TIER)
@@ -207,7 +224,7 @@ def build_tier_presentation(user: Any, now: datetime | None = None) -> TierPrese
 def tier_display_label(tier: str, trial_active: bool = False) -> str:
     labels = {
         FREE_TIER: "Free",
-        READER_TIER: "Collaboration access",
+        READER_TIER: "Beta reader access",
         AUTHOR_TIER: "Author",
         ARCHITECT_TIER: "Lore Architect",
         ADMIN_TIER: "Admin",
@@ -469,6 +486,179 @@ def event_id_from_paddle_payload(payload: dict[str, Any]) -> str:
     return str(payload.get("event_id") or payload.get("notification_id") or payload.get("id") or "")
 
 
+def subscription_service_is_active(event_type: str, status: str | None) -> bool:
+    normalized_status = (status or "").strip().lower()
+    if event_type == "transaction.completed":
+        return True
+    return normalized_status in {"active", "trialing"}
+
+
+def subscription_event_type_for_metrics(event_type: str, status: str | None) -> str | None:
+    if event_type in {"transaction.completed", "subscription.created", "subscription.updated"}:
+        return "subscription_activated" if subscription_service_is_active(event_type, status) else None
+    if event_type == "subscription.canceled":
+        return "subscription_canceled"
+    if event_type == "subscription.paused":
+        return "subscription_paused"
+    if event_type == "subscription.past_due":
+        return "subscription_past_due"
+    return None
+
+
+def _cohort_bounds(
+    cohort_start: date | datetime,
+    cohort_end: date | datetime,
+) -> tuple[date, date, datetime, datetime]:
+    start_date = cohort_start.date() if isinstance(cohort_start, datetime) else cohort_start
+    end_date = cohort_end.date() if isinstance(cohort_end, datetime) else cohort_end
+    if end_date < start_date:
+        raise ValueError("cohort_end must be on or after cohort_start")
+    start_at = datetime.combine(start_date, time.min, tzinfo=UTC)
+    end_at = datetime.combine(end_date + timedelta(days=1), time.min, tzinfo=UTC)
+    return start_date, end_date, start_at, end_at
+
+
+def _rate(numerator: int, denominator: int) -> float | None:
+    if denominator <= 0:
+        return None
+    return round((numerator / denominator) * 100, 2)
+
+
+async def record_subscription_event(
+    db: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    event_type: str,
+    source_event_id: str | None,
+    plan: str | None = None,
+    status: str | None = None,
+    paddle_customer_id: str | None = None,
+    paddle_sub_id: str | None = None,
+    occurred_at: datetime | None = None,
+    metadata: dict[str, Any] | None = None,
+    source: str = "paddle",
+) -> SubscriptionEvent:
+    event = SubscriptionEvent(
+        user_id=user_id,
+        event_type=event_type,
+        source=source,
+        source_event_id=(source_event_id or None),
+        plan=plan,
+        status=status,
+        paddle_customer_id=paddle_customer_id,
+        paddle_sub_id=paddle_sub_id,
+        metadata_json=metadata or {},
+        occurred_at=(occurred_at or datetime.now(UTC)),
+    )
+    db.add(event)
+    return event
+
+
+async def build_subscription_metrics_summary(
+    db: AsyncSession,
+    *,
+    cohort_start: date | datetime,
+    cohort_end: date | datetime,
+    reactivation_window_days: int = 30,
+    now: datetime | None = None,
+) -> SubscriptionMetricsSummary:
+    start_date, end_date, start_at, end_at = _cohort_bounds(cohort_start, cohort_end)
+    current = (now or datetime.now(UTC)).astimezone(UTC)
+    window = timedelta(days=max(int(reactivation_window_days or 0), 1))
+
+    cohort_users = (
+        await db.execute(
+            select(User.id)
+            .where(User.created_at >= start_at, User.created_at < end_at)
+        )
+    ).scalars().all()
+    cohort_user_ids = {user_id for user_id in cohort_users}
+
+    trial_to_paid_conversions = 0
+    if cohort_user_ids:
+        trial_to_paid_conversions = len(
+            {
+                user_id
+                for user_id in (
+                    await db.execute(
+                        select(SubscriptionEvent.user_id)
+                        .where(
+                            SubscriptionEvent.user_id.in_(cohort_user_ids),
+                            SubscriptionEvent.event_type == "subscription_activated",
+                        )
+                    )
+                ).scalars().all()
+            }
+        )
+
+    cancellation_events = (
+        await db.execute(
+            select(SubscriptionEvent)
+            .where(
+                SubscriptionEvent.event_type == "subscription_canceled",
+                SubscriptionEvent.occurred_at >= start_at,
+                SubscriptionEvent.occurred_at < end_at,
+            )
+            .order_by(SubscriptionEvent.occurred_at.asc())
+        )
+    ).scalars().all()
+
+    if cancellation_events:
+        cancellation_user_ids = {event.user_id for event in cancellation_events}
+        reactivation_events = (
+            await db.execute(
+                select(SubscriptionEvent)
+                .where(
+                    SubscriptionEvent.user_id.in_(cancellation_user_ids),
+                    SubscriptionEvent.event_type == "subscription_activated",
+                )
+                .order_by(SubscriptionEvent.occurred_at.asc())
+            )
+        ).scalars().all()
+    else:
+        reactivation_events = []
+
+    reactivations_by_user: dict[uuid.UUID, list[SubscriptionEvent]] = {}
+    for event in reactivation_events:
+        reactivations_by_user.setdefault(event.user_id, []).append(event)
+
+    resolved_cancellation_events = 0
+    unresolved_cancellation_events = 0
+    reactivated_after_cancellation = 0
+    churned_after_cancellation = 0
+
+    for cancellation in cancellation_events:
+        resolution_deadline = cancellation.occurred_at + window
+        if resolution_deadline > current:
+            unresolved_cancellation_events += 1
+            continue
+
+        resolved_cancellation_events += 1
+        reactivated = any(
+            candidate.occurred_at > cancellation.occurred_at and candidate.occurred_at <= resolution_deadline
+            for candidate in reactivations_by_user.get(cancellation.user_id, [])
+        )
+        if reactivated:
+            reactivated_after_cancellation += 1
+        else:
+            churned_after_cancellation += 1
+
+    return SubscriptionMetricsSummary(
+        cohort_start=start_date,
+        cohort_end=end_date,
+        trial_starts=len(cohort_user_ids),
+        trial_to_paid_conversions=trial_to_paid_conversions,
+        trial_to_paid_rate=_rate(trial_to_paid_conversions, len(cohort_user_ids)),
+        cancellation_events=len(cancellation_events),
+        resolved_cancellation_events=resolved_cancellation_events,
+        unresolved_cancellation_events=unresolved_cancellation_events,
+        reactivated_after_cancellation=reactivated_after_cancellation,
+        churned_after_cancellation=churned_after_cancellation,
+        post_cancel_churn_rate=_rate(churned_after_cancellation, resolved_cancellation_events),
+        reactivation_window_days=window.days,
+    )
+
+
 def paddle_plan_from_event_data(data: dict[str, Any]) -> str:
     custom_data = data.get("custom_data") or {}
     if isinstance(custom_data, dict) and custom_data.get("plan"):
@@ -529,12 +719,30 @@ def protected_authoring_limit_per_day(user: Any) -> int:
     if presentation.trial_active:
         return settings.TRIAL_HIGH_COST_TURNS_PER_DAY
     return {
-        FREE_TIER: 0,
+        FREE_TIER: settings.FREE_ADVISOR_PER_DAY,
         READER_TIER: 0,
         AUTHOR_TIER: settings.AUTHOR_HIGH_COST_TURNS_PER_DAY,
         ARCHITECT_TIER: settings.ARCHITECT_HIGH_COST_TURNS_PER_DAY,
         ADMIN_TIER: 999999,
     }.get(tier, 0)
+
+
+def recall_limit_per_day(user: Any) -> int | None:
+    return settings.FREE_RECALL_PER_DAY if user_access_tier(user) == FREE_TIER else None
+
+
+def continuity_limit_per_day(user: Any) -> int:
+    presentation = build_tier_presentation(user)
+    if presentation.trial_active:
+        return settings.TRIAL_HIGH_COST_TURNS_PER_DAY
+
+    return {
+        FREE_TIER: settings.FREE_CONTINUITY_PER_DAY,
+        READER_TIER: 0,
+        AUTHOR_TIER: settings.AUTHOR_HIGH_COST_TURNS_PER_DAY,
+        ARCHITECT_TIER: settings.ARCHITECT_HIGH_COST_TURNS_PER_DAY,
+        ADMIN_TIER: 999999,
+    }.get(presentation.access_tier, 0)
 
 
 def summary_mode_allowed(user: Any, mode: str) -> bool:

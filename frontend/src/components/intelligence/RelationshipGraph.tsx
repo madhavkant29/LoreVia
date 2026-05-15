@@ -1,9 +1,11 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
 import cytoscape from "cytoscape"
 import { booksApi } from "@/lib/api/books"
 import { RELATIONSHIP_COLORS } from "@/lib/constants"
+import { asQueryKey, readerCacheKey } from "@/lib/query/cacheKeys"
 import type { RelationshipGraph as GraphData } from "@/types/character"
 import { readerApi } from "@/lib/api/reader"
 
@@ -66,7 +68,6 @@ export function RelationshipGraph({
   const cyRef = useRef<cytoscape.Core | null>(null)
   const selectCharacterRef = useRef(onSelectCharacterId)
   const [graphData, setGraphData] = useState<GraphData | null>(null)
-  const [loading, setLoading] = useState(true)
   const [selection, setSelection] = useState<Selection>(null)
   const [filterType, setFilterType] = useState<string | null>(null)
   const [showIsolated, setShowIsolated] = useState(authorMode)
@@ -76,6 +77,11 @@ export function RelationshipGraph({
   const [edgeDraft, setEdgeDraft] = useState({ relType: "", description: "", sentiment: "0", fromChapter: "", toChapter: "" })
   const [savingEdge, setSavingEdge] = useState(false)
   const [edgeMessage, setEdgeMessage] = useState<string | null>(null)
+
+  const { data: graphQueryData = null, isLoading: loading } = useQuery<GraphData | null>({
+    queryKey: asQueryKey(readerCacheKey(bookId, `relationships:${upToChapter}:${includeInactive ? "all" : "active"}`)),
+    queryFn: () => readerApi.getRelationships(bookId, upToChapter, { includeInactive }),
+  })
 
   useEffect(() => {
     selectCharacterRef.current = onSelectCharacterId
@@ -92,14 +98,11 @@ export function RelationshipGraph({
   }, [bookId])
 
   useEffect(() => {
-    setLoading(true)
-    readerApi.getRelationships(bookId, upToChapter, { includeInactive })
-      .then((data) => {
-        setGraphData(data)
-        onGraphDataChange?.(data)
-      })
-      .finally(() => setLoading(false))
-  }, [bookId, includeInactive, onGraphDataChange, upToChapter])
+    setGraphData(graphQueryData)
+    if (graphQueryData) {
+      onGraphDataChange?.(graphQueryData)
+    }
+  }, [graphQueryData, onGraphDataChange])
 
   useEffect(() => {
     setShowIsolated(authorMode)

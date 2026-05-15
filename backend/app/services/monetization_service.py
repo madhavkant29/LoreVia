@@ -12,11 +12,11 @@ from app.models.book import Book
 from app.models.user import PointLedgerEntry, Referral, RewardedAdSession, TrialEmailEvent, User
 from app.services.email_service import send_trial_email
 from app.utils.billing_utils import (
+    user_can_author,
     FREE_TIER,
     free_search_limit_per_day,
     normalize_tier,
     prediction_limit_per_day,
-    protected_authoring_limit_per_day,
 )
 from app.utils.monetization_utils import (
     POINT_ENTRY_GRANT,
@@ -458,8 +458,7 @@ def _offer_is_useful_for_user(user: User, action: str) -> bool:
         limit = prediction_limit_per_day(user)
         return 0 < limit < 999999
     if action == POINT_ACTION_HIGH_COST:
-        limit = protected_authoring_limit_per_day(user)
-        return 0 < limit < 999999
+        return user_can_author(user)
     return False
 
 

@@ -1,10 +1,12 @@
 "use client"
 
 import Link from "next/link"
+import { useQuery } from "@tanstack/react-query"
 import { useEffect, useMemo, useState } from "react"
 
 import { booksApi } from "@/lib/api/books"
 import { readerApi } from "@/lib/api/reader"
+import { asQueryKey, readerCacheKey } from "@/lib/query/cacheKeys"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { saveContextualVaultNote } from "@/lib/utils/notes"
 import type { PlotThread } from "@/types/reader"
@@ -48,8 +50,6 @@ function statusClasses(status: string, isDark: boolean) {
 }
 
 export function PlotTracker({ bookId, chapter, mode = "compact" }: Props) {
-  const [threads, setThreads] = useState<PlotThread[]>([])
-  const [loading, setLoading] = useState(true)
   const [savingId, setSavingId] = useState<string | null>(null)
   const [vaultSavingId, setVaultSavingId] = useState<string | null>(null)
   const [draftNotes, setDraftNotes] = useState<Record<string, string>>({})
@@ -57,16 +57,19 @@ export function PlotTracker({ bookId, chapter, mode = "compact" }: Props) {
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
 
+  const {
+    data: threads = [],
+    isLoading: loading,
+    refetch: refetchThreads,
+  } = useQuery<PlotThread[]>({
+    queryKey: asQueryKey(readerCacheKey(bookId, `plot-threads:${chapter ?? "all"}`)),
+    queryFn: () => readerApi.getPlotThreads(bookId, chapter),
+  })
+
   useEffect(() => {
-    setLoading(true)
-    readerApi.getPlotThreads(bookId, chapter)
-      .then((items) => {
-        setThreads(items)
-        setDraftNotes(Object.fromEntries(items.map((item) => [item.id, item.note ?? ""])))
-        setDraftStatuses(Object.fromEntries(items.map((item) => [item.id, item.status ?? "unknown"])))
-      })
-      .finally(() => setLoading(false))
-  }, [bookId, chapter])
+    setDraftNotes(Object.fromEntries(threads.map((item) => [item.id, item.note ?? ""])))
+    setDraftStatuses(Object.fromEntries(threads.map((item) => [item.id, item.status ?? "unknown"])))
+  }, [threads])
 
   const grouped = useMemo(() => {
     const initial = Object.fromEntries(STATUS_ORDER.map((status) => [status, [] as PlotThread[]])) as Record<string, PlotThread[]>
@@ -80,13 +83,11 @@ export function PlotTracker({ bookId, chapter, mode = "compact" }: Props) {
   const saveNote = async (threadId: string) => {
     setSavingId(threadId)
     try {
-      const updated = await readerApi.updatePlotThread(bookId, threadId, {
+      await readerApi.updatePlotThread(bookId, threadId, {
         note: draftNotes[threadId]?.trim() ? draftNotes[threadId].trim() : null,
         status: draftStatuses[threadId] ?? null,
       })
-      setThreads((current) => current.map((item) => item.id === threadId ? updated : item))
-      setDraftNotes((current) => ({ ...current, [threadId]: updated.note ?? "" }))
-      setDraftStatuses((current) => ({ ...current, [threadId]: updated.status ?? "unknown" }))
+      await refetchThreads()
     } finally {
       setSavingId(null)
     }

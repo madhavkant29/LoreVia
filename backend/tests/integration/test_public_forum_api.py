@@ -305,6 +305,9 @@ async def test_public_profile_requires_public_presence_and_skips_private_only_pr
     public_profile = await client.get(f"/api/v1/public/users/{private_only_user.username}")
     assert public_profile.status_code == 200
     assert public_profile.json()["current_project"]["title"] == "Hidden Lantern"
+    assert public_profile.json()["current_project"]["description"] == (
+        "I want honest feedback on pacing, chapter endings, and whether the emotional beats feel earned."
+    )
     assert public_profile.json()["current_project"]["source"] == "forum"
 
     public_book_user = await _create_user(db, email="public-book@lorevia.test", tier="author")

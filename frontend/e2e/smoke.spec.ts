@@ -231,24 +231,16 @@ test("manuscript workspace reorders chapter scenes within the sidebar", async ({
   await expect(page.getByText("Order saved")).toBeVisible()
 })
 
-test("manuscript workspace resolves and jumps to inline annotations", async ({ page }) => {
+test("manuscript workspace surfaces chapter annotations in the notes rail", async ({ page }) => {
   await installMockApi(page)
   await page.goto("/book-1/manuscript")
   await page.getByRole("button", { name: /Chapter 2 The Ember Gate/i }).click()
   await expect(page.locator('[data-editor-key="chapter-2"]')).toBeVisible()
 
-  await page.locator("aside").getByRole("button", { name: /^Notes$/ }).click()
-  const annotationCard = page.locator("div").filter({ hasText: "Gate imagery" }).first()
-  await expect(annotationCard).toBeVisible()
-
-  await annotationCard.getByRole("button", { name: /^Resolve$/ }).click()
-  await expect(annotationCard.getByRole("button", { name: /^Reopen$/ })).toBeVisible()
-
-  await annotationCard.getByRole("button", { name: /^Jump$/ }).click()
-  await expect.poll(async () => page.evaluate(() => {
-    const registry = (globalThis.CSS as typeof CSS & { highlights?: { get: (name: string) => unknown } }).highlights
-    return Boolean(registry?.get("lorevia-annotation-active"))
-  })).toBe(true)
+  const notesPane = page.locator("aside")
+  await notesPane.getByRole("button", { name: /^Notes$/ }).click()
+  await expect(notesPane.getByText("1 annotation anchored to this chapter.")).toBeVisible()
+  await expect(notesPane.getByText("Gate imagery")).toBeVisible()
 })
 
 test("collaboration workspace creates a story-scoped share", async ({ page }) => {

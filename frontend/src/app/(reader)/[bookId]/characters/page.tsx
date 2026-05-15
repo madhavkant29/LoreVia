@@ -1,5 +1,6 @@
 "use client"
 
+import { useQuery } from "@tanstack/react-query"
 import { useDeferredValue, useEffect, useMemo, useState, type ReactNode } from "react"
 import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
@@ -8,6 +9,7 @@ import RelationshipGraph from "@/components/intelligence/RelationshipGraph"
 import { booksApi } from "@/lib/api/books"
 import { CONFIDENCE_THRESHOLDS } from "@/lib/constants"
 import { intelligenceApi } from "@/lib/api/intelligence"
+import { asQueryKey, bookCacheKey, readerCacheKey } from "@/lib/query/cacheKeys"
 import { readerApi } from "@/lib/api/reader"
 import { saveContextualVaultNote } from "@/lib/utils/notes"
 import type { Book } from "@/types/book"
@@ -649,12 +651,28 @@ export default function CharactersPage() {
   const { bookId } = useParams<{ bookId: string }>()
   const router = useRouter()
 
+  const { data: bookData = null, isLoading: bookLoading } = useQuery<Book | null>({
+    queryKey: asQueryKey(bookCacheKey(bookId, "detail")),
+    queryFn: () => booksApi.get(bookId),
+  })
+  const { data: progressData = null } = useQuery<ReadingProgress | null>({
+    queryKey: asQueryKey(readerCacheKey(bookId, "progress")),
+    queryFn: () => readerApi.getProgress(bookId).catch(() => null),
+  })
+  const {
+    data: charactersData = [],
+    refetch: refetchCharacters,
+    isLoading: charactersLoading,
+  } = useQuery<Character[]>({
+    queryKey: asQueryKey(bookCacheKey(bookId, "characters")),
+    queryFn: () => booksApi.getCharacters(bookId),
+  })
   const [book, setBook] = useState<Book | null>(null)
   const [progress, setProgress] = useState<ReadingProgress | null>(null)
   const [chars, setChars] = useState<Character[]>([])
   const [graphData, setGraphData] = useState<RelationshipGraphData | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const loading = bookLoading || charactersLoading
+  const error: string | null = null
   const [theme, setTheme] = useState<"light" | "dark">("light")
   const [search, setSearch] = useState("")
   const [selectedId, setSelectedId] = useState("")
@@ -696,34 +714,17 @@ export default function CharactersPage() {
   const [characterMenuOpen, setCharacterMenuOpen] = useState(false)
 
   useEffect(() => {
-    let active = true
-    setLoading(true)
-    setError(null)
+    setBook(bookData)
+  }, [bookData])
 
-    Promise.all([
-      booksApi.get(bookId),
-      booksApi.getCharacters(bookId),
-      readerApi.getProgress(bookId).catch(() => null),
-    ])
-      .then(([bookData, characterData, progressData]) => {
-        if (!active) return
-        setBook(bookData)
-        setChars(characterData)
-        setProgress(progressData)
-        setSelectedId((current) => current || characterData[0]?.id || "")
-      })
-      .catch(() => {
-        if (!active) return
-        setError("Could not load the Character Bible yet.")
-      })
-      .finally(() => {
-        if (active) setLoading(false)
-      })
+  useEffect(() => {
+    setChars(charactersData)
+    setSelectedId((current) => current || charactersData[0]?.id || "")
+  }, [charactersData])
 
-    return () => {
-      active = false
-    }
-  }, [bookId])
+  useEffect(() => {
+    setProgress(progressData)
+  }, [progressData])
 
   useEffect(() => {
     const stored = window.localStorage.getItem("reader-theme")
@@ -1002,7 +1003,7 @@ export default function CharactersPage() {
   }, [selectedMergePrimary, selectedMergeSecondary, workspaceMode])
 
   async function refreshCharacters() {
-    const refreshed = await booksApi.getCharacters(bookId)
+    const { data: refreshed = [] } = await refetchCharacters()
     setChars(refreshed)
     return refreshed
   }

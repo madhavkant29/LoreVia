@@ -1,10 +1,13 @@
+from datetime import UTC, datetime, timedelta
+
 import pytest
 from fastapi import HTTPException
 
 from app.models.book import Book, Series, SeriesBook
 from app.models.intelligence import WorldBuildingDocument
-from app.models.user import User
+from app.models.user import SubscriptionEvent, User
 from app.utils.billing_utils import (
+    build_subscription_metrics_summary,
     calculate_upload_usage_summary,
     ensure_upload_capacity,
     paddle_plan_from_event_data,
@@ -96,5 +99,123 @@ async def test_ensure_upload_capacity_blocks_author_when_series_weight_pushes_pa
     assert "counts as 2 uploads" in exc.value.detail
 
 
+@pytest.mark.asyncio
+async def test_ensure_upload_capacity_blocks_free_users_after_single_upload(db):
+    user = User(email="billing-free-cap@lorevia.app", username="billingfreecap", password_hash="hash", tier="free")
+    db.add(user)
+    await db.flush()
+
+    db.add(Book(user_id=user.id, title="Only Project", format="txt", s3_key="books/free.txt", status="ready"))
+    await db.commit()
+
+    with pytest.raises(HTTPException) as exc:
+        await ensure_upload_capacity(db, user, requested_uploads=1)
+
+    assert exc.value.status_code == 403
+    assert "Free tier limited to 1 uploads" in exc.value.detail
+
+
 def test_paddle_plan_from_event_data_does_not_default_unknown_events_to_reader():
     assert paddle_plan_from_event_data({"items": []}) == ""
+
+
+@pytest.mark.asyncio
+async def test_build_subscription_metrics_summary_reports_trial_conversion_and_post_cancel_churn(db):
+    now = datetime(2026, 5, 16, 12, 0, tzinfo=UTC)
+    cohort_start = datetime(2026, 5, 1, 8, 0, tzinfo=UTC)
+
+    converted_user = User(
+        email="metrics-converted@lorevia.app",
+        username="metricsconverted",
+        password_hash="hash",
+        created_at=cohort_start,
+    )
+    churned_user = User(
+        email="metrics-churned@lorevia.app",
+        username="metricschurned",
+        password_hash="hash",
+        created_at=cohort_start + timedelta(days=1),
+    )
+    reactivated_user = User(
+        email="metrics-reactivated@lorevia.app",
+        username="metricsreactivated",
+        password_hash="hash",
+        created_at=cohort_start + timedelta(days=2),
+    )
+    unresolved_user = User(
+        email="metrics-unresolved@lorevia.app",
+        username="metricsunresolved",
+        password_hash="hash",
+        created_at=cohort_start + timedelta(days=3),
+    )
+    db.add_all([converted_user, churned_user, reactivated_user, unresolved_user])
+    await db.flush()
+
+    db.add_all(
+        [
+            SubscriptionEvent(
+                user_id=converted_user.id,
+                event_type="subscription_activated",
+                source="paddle",
+                source_event_id="evt_converted_activate",
+                plan="author_monthly",
+                status="active",
+                occurred_at=cohort_start + timedelta(days=4),
+            ),
+            SubscriptionEvent(
+                user_id=churned_user.id,
+                event_type="subscription_canceled",
+                source="paddle",
+                source_event_id="evt_churned_cancel",
+                plan="author_monthly",
+                status="canceled",
+                occurred_at=cohort_start + timedelta(days=5),
+            ),
+            SubscriptionEvent(
+                user_id=reactivated_user.id,
+                event_type="subscription_canceled",
+                source="paddle",
+                source_event_id="evt_reactivated_cancel",
+                plan="author_monthly",
+                status="canceled",
+                occurred_at=cohort_start + timedelta(days=5),
+            ),
+            SubscriptionEvent(
+                user_id=reactivated_user.id,
+                event_type="subscription_activated",
+                source="paddle",
+                source_event_id="evt_reactivated_activate",
+                plan="author_monthly",
+                status="active",
+                occurred_at=cohort_start + timedelta(days=12),
+            ),
+            SubscriptionEvent(
+                user_id=unresolved_user.id,
+                event_type="subscription_canceled",
+                source="paddle",
+                source_event_id="evt_unresolved_cancel",
+                plan="author_monthly",
+                status="canceled",
+                occurred_at=now - timedelta(days=5),
+            ),
+        ]
+    )
+    await db.commit()
+
+    summary = await build_subscription_metrics_summary(
+        db,
+        cohort_start=cohort_start.date(),
+        cohort_end=(cohort_start + timedelta(days=15)).date(),
+        reactivation_window_days=30,
+        now=now,
+    )
+
+    assert summary.trial_starts == 4
+    assert summary.trial_to_paid_conversions == 2
+    assert summary.trial_to_paid_rate == 50.0
+    assert summary.cancellation_events == 3
+    assert summary.resolved_cancellation_events == 2
+    assert summary.unresolved_cancellation_events == 1
+    assert summary.reactivated_after_cancellation == 1
+    assert summary.churned_after_cancellation == 1
+    assert summary.post_cancel_churn_rate == 50.0

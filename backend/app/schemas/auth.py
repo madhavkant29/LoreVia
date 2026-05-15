@@ -91,6 +91,7 @@ class TierLimitsOut(BaseModel):
     free_search_per_day: int
     free_summary_per_hour: int
     free_prediction_per_day: int
+    free_recall_per_day: int
     reader_prediction_per_day: int
     author_prediction_per_day: int
     architect_prediction_per_day: int
@@ -100,6 +101,7 @@ class TierLimitsOut(BaseModel):
     free_advisor_per_day: int
     free_advisor_per_week: int
     free_advisor_per_month: int
+    free_continuity_per_day: int
     reader_advisor_per_day: int
     reader_advisor_per_week: int
     reader_advisor_per_month: int

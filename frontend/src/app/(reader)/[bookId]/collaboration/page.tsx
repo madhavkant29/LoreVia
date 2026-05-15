@@ -1,11 +1,13 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
 import { useParams } from "next/navigation"
 
 import { AuthorToolsNav } from "@/components/layout/AuthorToolsNav"
 import { betaReadsApi } from "@/lib/api/betaReads"
 import { booksApi } from "@/lib/api/books"
+import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { parseQuestionLines } from "@/lib/utils/betaRead"
 import type { BetaReadAssignment } from "@/types/betaRead"
@@ -150,9 +152,24 @@ export default function CollaborationPage() {
   const { bookId } = useParams<{ bookId: string }>()
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
-  const [book, setBook] = useState<Book | null>(null)
-  const [collaborators, setCollaborators] = useState<BookCollaborator[]>([])
-  const [betaAssignments, setBetaAssignments] = useState<BetaReadAssignment[]>([])
+  const { data: book = null } = useQuery<Book | null>({
+    queryKey: asQueryKey(bookCacheKey(bookId, "detail")),
+    queryFn: () => booksApi.get(bookId),
+  })
+  const {
+    data: collaborators = [],
+    refetch: refetchCollaborators,
+  } = useQuery<BookCollaborator[]>({
+    queryKey: asQueryKey(`collaboration:${bookId}:collaborators`),
+    queryFn: () => booksApi.listCollaborators(bookId).catch(() => []),
+  })
+  const {
+    data: betaAssignments = [],
+    refetch: refetchBetaAssignments,
+  } = useQuery<BetaReadAssignment[]>({
+    queryKey: asQueryKey(`collaboration:${bookId}:beta-assignments`),
+    queryFn: () => betaReadsApi.listBookAssignments(bookId).catch(() => []),
+  })
   const [email, setEmail] = useState("")
   const [displayName, setDisplayName] = useState("")
   const [role, setRole] = useState<CollaborationRole>("beta_reader")
@@ -176,23 +193,6 @@ export default function CollaborationPage() {
   const [authorQuestionsText, setAuthorQuestionsText] = useState("What confused you most?\nWhich moment landed best?")
   const [status, setStatus] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-
-  useEffect(() => {
-    let active = true
-    Promise.all([
-      booksApi.get(bookId),
-      booksApi.listCollaborators(bookId).catch(() => []),
-      betaReadsApi.listBookAssignments(bookId).catch(() => []),
-    ]).then(([bookValue, collaboratorValue, betaAssignmentValue]) => {
-      if (!active) return
-      setBook(bookValue)
-      setCollaborators(collaboratorValue)
-      setBetaAssignments(betaAssignmentValue)
-    })
-    return () => {
-      active = false
-    }
-  }, [bookId])
 
   const sortedCollaborators = useMemo(
     () => [...collaborators].sort((left, right) => left.email.localeCompare(right.email)),
@@ -219,14 +219,14 @@ export default function CollaborationPage() {
     setSaving(true)
     setStatus(null)
     try {
-      const created = await booksApi.createCollaborator(bookId, {
+      await booksApi.createCollaborator(bookId, {
         email,
         displayName: displayName || null,
         role,
         scope,
         permissions,
       })
-      setCollaborators((current) => [created, ...current.filter((item) => item.id !== created.id)])
+      await refetchCollaborators()
       setEmail("")
       setDisplayName("")
       setStatus("Share saved.")
@@ -242,8 +242,8 @@ export default function CollaborationPage() {
     setSaving(true)
     setStatus(null)
     try {
-      const created = await betaReadsApi.createAssignment(bookId, betaForm)
-      setBetaAssignments((current) => [created, ...current.filter((item) => item.id !== created.id)])
+      await betaReadsApi.createAssignment(bookId, betaForm)
+      await refetchBetaAssignments()
       const defaultQuestions = ["What confused you most?", "Which moment landed best?"]
       setBetaForm((current) => ({
         ...current,
@@ -262,8 +262,8 @@ export default function CollaborationPage() {
   const revoke = async (collaborator: BookCollaborator) => {
     setStatus(null)
     try {
-      const updated = await booksApi.updateCollaborator(bookId, collaborator.id, { inviteStatus: "revoked" })
-      setCollaborators((current) => current.map((item) => (item.id === updated.id ? updated : item)))
+      await booksApi.updateCollaborator(bookId, collaborator.id, { inviteStatus: "revoked" })
+      await refetchCollaborators()
       setStatus("Share revoked.")
     } catch {
       setStatus("Could not revoke this share.")
@@ -273,8 +273,8 @@ export default function CollaborationPage() {
   const revokeBetaAssignment = async (assignment: BetaReadAssignment) => {
     setStatus(null)
     try {
-      const updated = await betaReadsApi.revokeAssignment(bookId, assignment.id)
-      setBetaAssignments((current) => current.map((item) => (item.id === updated.id ? updated : item)))
+      await betaReadsApi.revokeAssignment(bookId, assignment.id)
+      await refetchBetaAssignments()
       setStatus("Beta read revoked.")
     } catch {
       setStatus("Could not revoke this beta read.")

@@ -10,7 +10,7 @@ from sqlalchemy import select
 
 from app.core.config import allowed_hosts
 from app.main import app
-from app.models.user import Subscription, User
+from app.models.user import Subscription, SubscriptionEvent, User
 
 
 def _sign_payload(payload: dict, timestamp: int, secret: str) -> tuple[bytes, str]:
@@ -200,3 +200,14 @@ async def test_paddle_webhook_upserts_subscription_and_downgrades_on_pause(clien
     assert pause_response.status_code == 200
     await db.refresh(user)
     assert user.tier == "free"
+    subscription_events = (
+        await db.execute(
+            select(SubscriptionEvent)
+            .where(SubscriptionEvent.user_id == user.id)
+            .order_by(SubscriptionEvent.occurred_at.asc())
+        )
+    ).scalars().all()
+    assert [event.event_type for event in subscription_events] == [
+        "subscription_activated",
+        "subscription_paused",
+    ]

@@ -198,7 +198,8 @@ async def _build_public_user_project_out(db: AsyncSession, *, user_id: uuid.UUID
             book_id=str(book.id),
             title=book.title,
             genre=book.genre,
-            description=book.public_description or post.body,
+            # Forum-backed profiles should only surface the text explicitly shared in the forum.
+            description=post.body,
             progress_words=await _project_progress_words(db, book_id=book.id),
             source="forum",
             forum_post_id=str(post.id),

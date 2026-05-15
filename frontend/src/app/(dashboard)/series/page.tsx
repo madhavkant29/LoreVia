@@ -153,7 +153,7 @@ export default function SeriesPage() {
       <div className={`rounded-[2rem] border p-8 ${isDark ? "border-white/10 bg-white/5" : "border-amber-300 bg-amber-50"}`}>
         <h1 className={`text-3xl font-serif ${isDark ? "text-white" : "text-stone-900"}`}>Series workspace</h1>
         <p className={`mt-3 text-sm leading-7 ${isDark ? "text-gray-300" : "text-stone-700"}`}>
-          Series mode is reserved for paid plans. It is built for readers carrying continuity across multiple books without losing where each story stands.
+          Series mode is reserved for paid plans. It is built for authors carrying continuity across multiple books without losing where each story stands.
         </p>
       </div>
     )

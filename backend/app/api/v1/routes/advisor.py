@@ -128,7 +128,12 @@ async def _enqueue_book_advisor_task(
     current_user_id: uuid.UUID,
     response: Response,
 ) -> dict[str, Any]:
-
+    last_user_msg = next(
+        (message.content for message in reversed(body.messages) if message.role == "user"),
+        "",
+    )
+    if not last_user_msg:
+        raise HTTPException(400, detail="no user message found")
     cache_key = make_advisor_cache_key(book.id, last_user_msg)
     cached = advisor_response_cache.get(cache_key)
     if cached is not None:
@@ -158,6 +163,12 @@ async def _enqueue_series_advisor_task(
     current_user_id: uuid.UUID,
     response: Response,
 ) -> dict[str, Any]:
+    last_user_msg = next(
+        (message.content for message in reversed(body.messages) if message.role == "user"),
+        "",
+    )
+    if not last_user_msg:
+        raise HTTPException(400, detail="no user message found")
     cache_key = make_advisor_cache_key(f"series:{series.id}", last_user_msg)
     cached = advisor_response_cache.get(cache_key)
     if cached is not None:
@@ -203,155 +214,6 @@ async def advisor_message(
         response=response,
     )
 
-    last_user_msg = next(
-        (m.content for m in reversed(body.messages) if m.role == "user"), ""
-    )
-    if not last_user_msg:
-        raise HTTPException(400, detail="no user message found")
-
-    # ── Response cache: check before any LLM work ─────────────────────────────
-    # Cap history to last 10 turns (20 messages) to control cost
-    history = body.messages[-20:]
-
-    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
-    try:
-        # 1. Classify intent + build story context (parallel, both cheap)
-        intent, story_context = await asyncio.gather(
-            classify_intent(client, last_user_msg),
-            build_story_context(db, book_id, book.total_chapters or 0),
-        )
-        world_mode = detect_advisor_world_mode(last_user_msg, intent)
-        world_analysis = (
-            await build_advisor_world_analysis(db, book, last_user_msg, world_mode)
-            if world_mode
-            else None
-        )
-        world_context = build_advisor_world_context(world_analysis)
-
-        # 2. Retrieve relevant chunks
-        max_ch = body.total_chapters
-        chunk_limit = 10 if intent in ("consistency", "plothole") or world_mode else 5
-        threshold = 0.25 if intent in ("consistency", "plothole") or world_mode else 0.30
-
-        query_emb = await embed_text(
-            last_user_msg,
-            user_id=current_user.id,
-            book_id=book.id,
-            feature="advisor_message_query_embedding",
-        )
-        rows = await db.execute(
-            sql_text("""
-                SELECT bc.text, bc.chunk_index,
-                       ch.number AS chapter_num, ch.title AS chapter_title,
-                       1 - (bc.embedding <=> CAST(:emb AS vector)) AS relevance
-                FROM book_chunks bc
-                JOIN chapters ch ON ch.id = bc.chapter_id
-                WHERE bc.book_id = :bid
-                  AND ch.number <= :max_ch
-                  AND bc.embedding IS NOT NULL
-                  AND 1 - (bc.embedding <=> CAST(:emb AS vector)) > :threshold
-                ORDER BY relevance DESC
-                LIMIT :lim
-            """),
-            {"emb": str(query_emb), "bid": str(book_id), "max_ch": max_ch,
-             "threshold": threshold, "lim": chunk_limit},
-        )
-        hits = [
-            {
-                "text": r.text,
-                "chapter_num": r.chapter_num,
-                "chapter_title": r.chapter_title,
-                "relevance": round(float(r.relevance), 3),
-            }
-            for r in rows.fetchall()
-        ]
-
-        # 3. Build retrieved passages block
-        passage_blocks: list[str] = []
-        for h in hits:
-            chapter_ref = f"Chapter {h['chapter_num']}"
-            if h.get("chapter_title"):
-                chapter_ref += f" — {h['chapter_title']}"
-            passage_blocks.append(f"[{chapter_ref}]\n{h['text'][:380]}")
-
-        retrieved_context = (
-            "\n\n".join(passage_blocks)
-            if passage_blocks
-            else "No passage excerpts matched this query — reason from the STORY KNOWLEDGE above."
-        )
-
-        # 4. Augment last user message with context + intent hint
-        intent_hint = {
-            "consistency": "[AUTHOR INTENT DETECTED: check for contradictions and continuity violations]",
-            "plothole": "[AUTHOR INTENT DETECTED: look for logical gaps and unresolved inconsistencies]",
-            "direction": "[AUTHOR INTENT DETECTED: debate options and walk through narrative tradeoffs]",
-            "opportunity": "[AUTHOR INTENT DETECTED: surface foreshadowing and arc opportunities]",
-        }.get(intent, "")
-        if world_mode == "gap_detection":
-            intent_hint = "[AUTHOR INTENT DETECTED: check world-building, canon, lore coverage, and world-gap issues]"
-        elif world_mode == "story_integration":
-            intent_hint = "[AUTHOR INTENT DETECTED: use world-building lore to find story integration options]"
-
-        augmented_last = (
-            f"{last_user_msg}\n\n"
-            + (f"{intent_hint}\n\n" if intent_hint else "")
-            + f"--- Retrieved passages ---\n{retrieved_context}"
-            + (f"\n\n{world_context}" if world_context else "")
-        )
-
-        # 5. Build message list for LLM
-        system_prompt = ADVISOR_SYSTEM.format(
-            title=_safe_prompt_str(book.title),
-            story_context=_safe_prompt_str(story_context),
-        )
-        llm_messages: list[ChatCompletionMessageParam] = [
-            cast(ChatCompletionMessageParam, {"role": "system", "content": system_prompt})
-        ]
-        for msg in history[:-1]:
-            llm_messages.append(cast(ChatCompletionMessageParam, {"role": msg.role, "content": msg.content}))
-        llm_messages.append(cast(ChatCompletionMessageParam, {"role": "user", "content": augmented_last}))
-
-        # 6. Call GPT-4o-mini (main response)
-        response = await create_tracked_chat_completion(
-            client=client,
-            feature="advisor_message",
-            model=settings.OPENAI_INTEL_MODEL,
-            db=db,
-            user_id=current_user.id,
-            book_id=book.id,
-            temperature=0.55,
-            max_tokens=800,
-            messages=llm_messages,
-        )
-        reply = (response.choices[0].message.content or "").strip()
-
-        # 7. Classify response type
-        response_type = await classify_response_type(client, reply)
-
-        result = {
-            "reply": reply,
-            "intent": intent,
-            "response_type": response_type,
-            "retrieved_passages": [
-                {
-                    "chapter_num": h["chapter_num"],
-                    "chapter_title": h.get("chapter_title"),
-                    "excerpt": h["text"][:240],
-                    "relevance": h["relevance"],
-                }
-                for h in hits[:5]
-            ],
-            "world_analysis": world_analysis,
-            "cached": False,
-        }
-        # Store in cache for subsequent identical queries
-        advisor_response_cache.set(cache_key, result)
-        return result
-    finally:
-        await client.close()
-
-
-# ─── Opening greeting endpoint ────────────────────────────────────────────────
 
 @router.get("/{book_id}/advisor/greeting")
 async def advisor_greeting(
@@ -1711,95 +1573,6 @@ async def series_advisor_message(
         response=response,
     )
 
-    last_user_msg = next(
-        (m.content for m in reversed(body.messages) if m.role == "user"), ""
-    )
-    if not last_user_msg:
-        raise HTTPException(400, detail="no user message found")
-
-    # Cache check
-    cache_key = make_advisor_cache_key(f"series:{series_id}", last_user_msg)
-    cached = advisor_response_cache.get(cache_key)
-    if cached is not None:
-        return {**cached, "cached": True}
-
-    # Load all books in this series
-    memberships = (
-        await db.execute(
-            select(SeriesBook.book_id, SeriesBook.position)
-            .where(SeriesBook.series_id == series_id)
-            .order_by(SeriesBook.position.asc().nulls_last())
-        )
-    ).all()
-
-    if not memberships:
-        raise HTTPException(400, detail="No books found in this series.")
-
-    book_ids = [row.book_id for row in memberships]
-
-    # Load book titles for labelling
-    book_rows = (
-        await db.execute(
-            select(Book.id, Book.title).where(Book.id.in_(book_ids))
-        )
-    ).all()
-    book_titles = {row.id: row.title for row in book_rows}
-
-    # Build merged series context (capped per-book to keep token count low)
-    story_context = await build_series_story_context(
-        db, book_ids, book_titles,
-        max_chars_per_book=6, max_threads_per_book=4,
-    )
-
-    history = body.messages[-16:]  # cap history tighter for series context
-
-    system_prompt = SERIES_ADVISOR_SYSTEM.format(
-        series_name=_safe_prompt_str(series.name),
-        story_context=_safe_prompt_str(story_context),
-    )
-
-    llm_messages: list[ChatCompletionMessageParam] = [
-        cast(ChatCompletionMessageParam, {"role": "system", "content": system_prompt})
-    ]
-    for msg in history[:-1]:
-        llm_messages.append(
-            cast(ChatCompletionMessageParam, {"role": msg.role, "content": msg.content})
-        )
-    llm_messages.append(cast(ChatCompletionMessageParam, {"role": "user", "content": last_user_msg}))
-
-    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
-    try:
-        # Single call — gpt-4o-mini for cost efficiency
-        response = await create_tracked_chat_completion(
-            client=client,
-            feature="series_advisor_message",
-            model=settings.OPENAI_INTEL_MODEL,
-            db=db,
-            user_id=current_user.id,
-            temperature=0.55,
-            max_tokens=900,
-            messages=llm_messages,
-        )
-        reply = (response.choices[0].message.content or "").strip()
-        response_type = await classify_response_type(client, reply)
-        intent = await classify_intent(client, last_user_msg)
-
-        result = {
-            "reply": reply,
-            "intent": intent,
-            "response_type": response_type,
-            "series_id": str(series_id),
-            "book_count": len(book_ids),
-            "retrieved_passages": [],
-            "cached": False,
-        }
-        advisor_response_cache.set(cache_key, result)
-        return result
-    finally:
-        await client.close()
-
-
-# ─── Series continuity check endpoint ────────────────────────────────────────
 
 @router.get("/series/{series_id}/advisor/message/{task_id}", response_model=AdvisorTaskStatusResponse)
 async def series_advisor_message_status(

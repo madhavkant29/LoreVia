@@ -1,4 +1,5 @@
 import uuid
+from datetime import UTC, date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
@@ -11,8 +12,12 @@ from app.models.book import Book
 from app.models.character import Character
 from app.models.intelligence import BookChunk, ChapterSummary
 from app.models.user import User, UserRateLimitOverride
-from app.schemas.admin import RateLimitOverrideBody, UpdateUserTierBody
-from app.utils.billing_utils import VALID_USER_TIERS, normalize_tier
+from app.schemas.admin import RateLimitOverrideBody, SubscriptionMetricsOut, UpdateUserTierBody
+from app.utils.billing_utils import (
+    VALID_USER_TIERS,
+    build_subscription_metrics_summary,
+    normalize_tier,
+)
 from app.utils.redis_utils import maybe_await
 
 router = APIRouter()
@@ -32,6 +37,26 @@ async def metrics(db: AsyncSession = Depends(get_db), _=Depends(get_admin)):
         "chunks_indexed": chunks, "summaries_cached": summaries,
         "redis_memory_mb": round(mem.get("used_memory", 0) / 1024 / 1024, 2),
     }
+
+
+@router.get("/subscription-metrics", response_model=SubscriptionMetricsOut)
+async def subscription_metrics(
+    start_date: date | None = None,
+    end_date: date | None = None,
+    reactivation_window_days: int = 30,
+    db: AsyncSession = Depends(get_db),
+    _=Depends(get_admin),
+):
+    today = datetime.now(UTC).date()
+    resolved_end_date = end_date or today
+    resolved_start_date = start_date or (resolved_end_date - timedelta(days=29))
+    summary = await build_subscription_metrics_summary(
+        db,
+        cohort_start=resolved_start_date,
+        cohort_end=resolved_end_date,
+        reactivation_window_days=reactivation_window_days,
+    )
+    return SubscriptionMetricsOut(**summary.__dict__)
 
 
 @router.get("/queue-depth")

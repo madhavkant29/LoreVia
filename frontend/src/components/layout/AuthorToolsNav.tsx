@@ -1,5 +1,6 @@
 "use client"
 
+import { useQuery } from "@tanstack/react-query"
 import { useEffect, useMemo, useState } from "react"
 import type { Route } from "next"
 import Link from "next/link"
@@ -8,6 +9,7 @@ import { useRouter } from "next/navigation"
 import { AuthorFeatureComponent } from "@/components/billing/AuthorFeatureComponent"
 import { booksApi } from "@/lib/api/books"
 import { canUseAuthorFeatures } from "@/lib/billing/plans"
+import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
 import { useAuthStore } from "@/lib/stores/authStore"
 import type { CollaborationPermissions } from "@/types/book"
 
@@ -155,41 +157,38 @@ export function AuthorToolsNav({
 }: AuthorToolsNavProps) {
   const router = useRouter()
   const tier = useAuthStore((state) => state.user?.tier)
-  const [collaborationRole, setCollaborationRole] = useState<string | null>(null)
-  const [collaborationPermissions, setCollaborationPermissions] = useState<CollaborationPermissions | null>(null)
+  const { data: book = null } = useQuery({
+    queryKey: asQueryKey(bookCacheKey(bookId, "detail")),
+    queryFn: () => booksApi.get(bookId),
+  })
+  const collaborationRole = book?.collaboration_role ?? null
+  const collaborationPermissions = book?.collaboration_permissions ?? null
   const hasOwnAuthorAccess = canUseAuthorFeatures(tier)
+  const hasFreeSampleIntelligenceAccess = tier === "free"
   const hasCollaboratorAccess = Boolean(collaborationRole && collaborationPermissions)
   const showAuthorSections = mode === "author" && (hasOwnAuthorAccess || hasCollaboratorAccess)
-
-  useEffect(() => {
-    let active = true
-    booksApi.get(bookId).then((book) => {
-      if (!active) return
-      setCollaborationRole(book.collaboration_role ?? null)
-      setCollaborationPermissions(book.collaboration_permissions ?? null)
-    }).catch(() => {
-      if (!active) return
-      setCollaborationRole(null)
-      setCollaborationPermissions(null)
-    })
-    return () => {
-      active = false
-    }
-  }, [bookId])
 
   const sections = useMemo(
     () =>
       NAV_SECTIONS(bookId, currentChapter)
-        .filter((section) => showAuthorSections || !section.authorOnly)
+        .filter((section) => {
+          if (showAuthorSections || !section.authorOnly) {
+            return true
+          }
+          return hasFreeSampleIntelligenceAccess && section.title === "Intelligence"
+        })
         .map((section) => ({
           ...section,
           items: section.items.filter((item) => {
+            if (!showAuthorSections && hasFreeSampleIntelligenceAccess) {
+              return item.id === "advisor" || item.id === "editorial-review"
+            }
             if (hasOwnAuthorAccess || !collaborationRole) return true
             return canSeeCollaboratorItem(item.id, collaborationPermissions)
           }),
         }))
         .filter((section) => section.items.length > 0),
-    [bookId, collaborationPermissions, collaborationRole, currentChapter, hasOwnAuthorAccess, showAuthorSections]
+    [bookId, collaborationPermissions, collaborationRole, currentChapter, hasFreeSampleIntelligenceAccess, hasOwnAuthorAccess, showAuthorSections]
   )
   const items = sections.flatMap((section) => section.items)
 

@@ -1,5 +1,7 @@
+import asyncio
 import time
 import uuid
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from typing import cast
 
@@ -15,11 +17,8 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from app.api.v1.router import api_router
 from app.core.config import allowed_hosts, cors_middleware_options, settings
-from app.core.database import engine
 from app.core.events import on_shutdown, on_startup
-from app.core.redis import get_redis
 from app.utils.security_utils import apply_security_headers
 from app.utils.tunnel.cloudflare import CloudflareTunnelMiddleware
 
@@ -41,6 +40,78 @@ configure_logging()
 log = get_logger("lorevia.http")
 
 
+def _install_exception_handlers(target_app: FastAPI) -> None:
+    @target_app.exception_handler(StarletteHTTPException)
+    async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+        log.warning(
+            "http_exception",
+            extra=request_log_context(
+                request,
+                status_code=exc.status_code,
+                detail=exc.detail,
+            ),
+        )
+        detail = public_error_message(exc.status_code)
+        if exc.status_code != 404 and isinstance(exc.detail, str) and exc.detail:
+            detail = exc.detail
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": detail},
+        )
+
+    @target_app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(request: Request, exc: RequestValidationError):
+        log.warning(
+            "request_validation_failed",
+            extra=request_log_context(
+                request,
+                status_code=422,
+                errors=sanitize_validation_errors(cast(list[dict[str, object]], list(exc.errors()))),
+            ),
+        )
+        return JSONResponse(status_code=422, content={"detail": public_error_message(422)})
+
+    @target_app.exception_handler(Exception)
+    async def unhandled_exception_handler(request: Request, exc: Exception):
+        log.exception(
+            "unhandled_exception",
+            extra=request_log_context(request, status_code=500),
+        )
+        return JSONResponse(status_code=500, content={"detail": public_error_message(500)})
+
+
+def _build_api_app() -> FastAPI:
+    from app.api.v1.router import api_router
+
+    api_app = FastAPI(
+        title="LoreVia API",
+        version="2.0.0",
+        docs_url="/docs" if settings.DEBUG else None,
+        redoc_url=None,
+    )
+    _install_exception_handlers(api_app)
+    api_app.include_router(api_router)
+    return api_app
+
+
+class _LazyMountedApp:
+    def __init__(self, factory: Callable[[], FastAPI]):
+        self._factory = factory
+        self._app: FastAPI | None = None
+        self._lock = asyncio.Lock()
+
+    async def ensure_app(self) -> FastAPI:
+        if self._app is None:
+            async with self._lock:
+                if self._app is None:
+                    self._app = self._factory()
+        return self._app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send):
+        app = await self.ensure_app()
+        await app(scope, receive, send)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await on_startup()
@@ -49,12 +120,13 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="LoreVia API",
+    title="LoreVia",
     version="2.0.0",
     lifespan=lifespan,
     docs_url="/docs" if settings.DEBUG else None,
     redoc_url=None,
 )
+_install_exception_handlers(app)
 
 app.add_middleware(
     CORSMiddleware,
@@ -154,48 +226,17 @@ class SecurityHeadersMiddleware:
         set_request_user_id(None)
 
 app.add_middleware(SecurityHeadersMiddleware)
-app.include_router(api_router, prefix=settings.API_V1_PREFIX)
+_lazy_api_app = _LazyMountedApp(_build_api_app)
+app.mount(settings.API_V1_PREFIX, _lazy_api_app)
 
 
-@app.exception_handler(StarletteHTTPException)
-async def http_exception_handler(request: Request, exc: StarletteHTTPException):
-    log.warning(
-        "http_exception",
-        extra=request_log_context(
-            request,
-            status_code=exc.status_code,
-            detail=exc.detail,
-        ),
-    )
-    detail = public_error_message(exc.status_code)
-    if exc.status_code != 404 and isinstance(exc.detail, str) and exc.detail:
-        detail = exc.detail
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={"detail": detail},
-    )
+def _openapi_schema() -> dict:
+    if _lazy_api_app._app is None:
+        _lazy_api_app._app = _lazy_api_app._factory()
+    return _lazy_api_app._app.openapi()
 
 
-@app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    log.warning(
-        "request_validation_failed",
-        extra=request_log_context(
-            request,
-            status_code=422,
-            errors=sanitize_validation_errors(cast(list[dict[str, object]], list(exc.errors()))),
-        ),
-    )
-    return JSONResponse(status_code=422, content={"detail": public_error_message(422)})
-
-
-@app.exception_handler(Exception)
-async def unhandled_exception_handler(request: Request, exc: Exception):
-    log.exception(
-        "unhandled_exception",
-        extra=request_log_context(request, status_code=500),
-    )
-    return JSONResponse(status_code=500, content={"detail": public_error_message(500)})
+app.openapi = _openapi_schema  # type: ignore[method-assign]
 
 
 @app.get("/health")
@@ -205,6 +246,9 @@ async def health():
 
 @app.get("/ready")
 async def ready():
+    from app.core.database import engine
+    from app.core.redis import get_redis
+
     try:
         async with engine.connect() as conn:
             await conn.execute(text("SELECT 1"))

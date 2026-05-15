@@ -10,18 +10,13 @@ from app.utils.billing_utils import (
     event_id_from_paddle_payload,
     paddle_plan_from_event_data,
     paddle_price_id_from_event_data,
+    record_subscription_event,
+    subscription_event_type_for_metrics,
+    subscription_service_is_active,
     tier_from_plan_code,
 )
 
 router = APIRouter()
-
-
-def _service_is_active(event_type: str, status: str | None) -> bool:
-    normalized_status = (status or "").strip().lower()
-    if event_type == "transaction.completed":
-        return True
-    return normalized_status in {"active", "trialing"}
-
 
 @router.post("/paddle")
 async def paddle_webhook(request: Request, paddle_signature: str | None = Header(default=None, alias="Paddle-Signature")):
@@ -99,7 +94,7 @@ async def paddle_webhook(request: Request, paddle_signature: str | None = Header
                 effective_plan = plan or existing.plan
                 next_tier = (
                     tier_from_plan_code(effective_plan, paddle_price_id_from_event_data(data))
-                    if _service_is_active(event_type, status)
+                    if subscription_service_is_active(event_type, status)
                     else "free"
                 )
                 await db.execute(
@@ -107,6 +102,19 @@ async def paddle_webhook(request: Request, paddle_signature: str | None = Header
                     .where(User.id == existing.user_id)
                     .values(tier=next_tier)
                 )
+                metrics_event_type = subscription_event_type_for_metrics(event_type, status)
+                if metrics_event_type:
+                    await record_subscription_event(
+                        db,
+                        user_id=existing.user_id,
+                        event_type=metrics_event_type,
+                        source_event_id=event_id,
+                        plan=effective_plan,
+                        status=status,
+                        paddle_customer_id=existing.paddle_customer_id,
+                        paddle_sub_id=existing.paddle_sub_id,
+                        metadata={"webhook_event_type": event_type},
+                    )
                 await db.commit()
 
         elif event_type in {"subscription.canceled", "subscription.past_due", "subscription.paused"}:
@@ -129,6 +137,19 @@ async def paddle_webhook(request: Request, paddle_signature: str | None = Header
             if existing:
                 existing.status = data.get("status", "cancelled" if event_type == "subscription.canceled" else "past_due")
                 await db.execute(update(User).where(User.id == existing.user_id).values(tier="free"))
+                metrics_event_type = subscription_event_type_for_metrics(event_type, existing.status)
+                if metrics_event_type:
+                    await record_subscription_event(
+                        db,
+                        user_id=existing.user_id,
+                        event_type=metrics_event_type,
+                        source_event_id=event_id,
+                        plan=existing.plan,
+                        status=existing.status,
+                        paddle_customer_id=existing.paddle_customer_id,
+                        paddle_sub_id=existing.paddle_sub_id,
+                        metadata={"webhook_event_type": event_type},
+                    )
                 await db.commit()
 
     return {"received": True}

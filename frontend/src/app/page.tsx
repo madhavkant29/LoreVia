@@ -118,12 +118,12 @@ const pricingTiers = billingPricingTiers.map((tier) => ({
   bullets:
     tier.name === "Free"
       ? [
-          "2 active books",
+          "1 upload total",
           "Read public demo books",
           "Join invited beta reads for free",
-          "Character tracking and story recall",
-          "Basic chapter summaries",
-          "Standard usage limits",
+          "Basic story recall with strict limits",
+          "Short chapter summaries only",
+          "3 searches/day, 1 prediction/day, 1 advisor turn/day, 1 continuity check/day",
         ]
       : tier.name === "Author"
         ? [

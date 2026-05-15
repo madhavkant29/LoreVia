@@ -12,7 +12,7 @@ from sqlalchemy import and_, delete, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps.auth import get_current_user
-from app.api.deps.rate_limit import rate_limit_search, rate_limit_summary
+from app.api.deps.rate_limit import rate_limit_recall, rate_limit_search, rate_limit_summary
 from app.core.config import is_local_mode, settings
 from app.core.database import get_db
 from app.core.redis import (
@@ -1251,6 +1251,7 @@ async def memory_recall(
     book_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
+    _=Depends(rate_limit_recall),
 ):
     book = await db.get(Book, book_id)
     if not book or book.user_id != current_user.id:

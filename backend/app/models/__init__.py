@@ -44,6 +44,7 @@ from app.models.user import (
     PointLedgerEntry,
     Referral,
     Subscription,
+    SubscriptionEvent,
     TrialEmailEvent,
     User,
     UserWritingActivity,

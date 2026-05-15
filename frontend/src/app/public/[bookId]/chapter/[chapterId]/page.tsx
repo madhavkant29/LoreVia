@@ -2,34 +2,33 @@
 
 import Link from "next/link"
 import type { Route } from "next"
-import { useEffect, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
 import { useParams } from "next/navigation"
 
 import { publicApi } from "@/lib/api/public"
+import { asQueryKey } from "@/lib/query/cacheKeys"
 import { renderRichTextHtml } from "@/lib/utils/richText"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import type { PublicChapter } from "@/types/book"
 
 export default function PublicChapterPage() {
   const { bookId, chapterId } = useParams<{ bookId: string; chapterId: string }>()
-  const [chapter, setChapter] = useState<PublicChapter | null>(null)
-  const [text, setText] = useState("")
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
   const chapterNum = parseInt(chapterId)
-
-  useEffect(() => {
-    publicApi.getChapter(bookId, chapterNum).then((payload) => {
-      setChapter(payload)
-      if (payload.text_content) {
-        setText(payload.text_content)
-      } else if (payload.text_url) {
-        fetch(payload.text_url).then((r) => r.text()).then(setText).catch(() => setText(""))
-      } else {
-        setText("")
-      }
-    })
-  }, [bookId, chapterNum])
+  const { data: chapter = null } = useQuery<PublicChapter | null>({
+    queryKey: asQueryKey(`public:chapter:${bookId}:${chapterNum}`),
+    queryFn: () => publicApi.getChapter(bookId, chapterNum),
+  })
+  const { data: text = "" } = useQuery<string>({
+    queryKey: asQueryKey(`public:chapter-text:${bookId}:${chapterNum}`),
+    queryFn: async () => {
+      if (!chapter?.text_url || chapter.text_content) return chapter?.text_content || ""
+      const response = await fetch(chapter.text_url)
+      return response.text()
+    },
+    enabled: Boolean(chapter && (chapter.text_content || chapter.text_url)),
+  })
 
   if (!chapter) {
     return <div className={`mx-auto max-w-4xl px-4 py-20 text-center ${isDark ? "text-slate-500" : "text-slate-400"}`}>Loading chapter...</div>

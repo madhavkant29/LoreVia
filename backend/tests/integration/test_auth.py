@@ -655,6 +655,21 @@ async def test_me_includes_goal_and_login_streak_fields(client, auth_headers):
 
 
 @pytest.mark.asyncio
+async def test_tier_limits_reflect_strict_free_plan(client, auth_headers):
+    response = await client.get("/api/v1/auth/tier-limits", headers=auth_headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["free_max_books"] == 1
+    assert payload["free_total_token_budget"] == 150000
+    assert payload["free_search_per_day"] == 3
+    assert payload["free_prediction_per_day"] == 1
+    assert payload["free_recall_per_day"] == 2
+    assert payload["free_advisor_per_day"] == 1
+    assert payload["free_continuity_per_day"] == 1
+
+
+@pytest.mark.asyncio
 async def test_daily_word_goal_can_be_updated(client, auth_headers):
     response = await client.patch(
         "/api/v1/auth/me/daily-word-goal",

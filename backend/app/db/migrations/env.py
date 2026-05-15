@@ -6,7 +6,7 @@ from pathlib import Path
 from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
-from sqlalchemy.ext.asyncio import async_engine_from_config
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.core.config import settings
 from app.db.base import Base  # noqa
@@ -76,8 +76,11 @@ def do_run(connection: Connection) -> None:
 
 
 async def run_async() -> None:
-    cfg = config.get_section(config.config_ini_section, {})
-    connectable = async_engine_from_config(cfg, prefix="sqlalchemy.", poolclass=pool.NullPool)
+    connectable = create_async_engine(
+        config.get_main_option("sqlalchemy.url"),
+        poolclass=pool.NullPool,
+        connect_args={"prepare_threshold": None},
+    )
     async with connectable.connect() as connection:
         await connection.run_sync(do_run)
     await connectable.dispose()

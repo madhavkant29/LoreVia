@@ -1,9 +1,11 @@
 "use client"
 import { useEffect, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
 import { useParams, useRouter } from "next/navigation"
 
 import RelationshipGraph from "@/components/intelligence/RelationshipGraph"
 import { booksApi } from "@/lib/api/books"
+import { asQueryKey, bookCacheKey, readerCacheKey } from "@/lib/query/cacheKeys"
 import { readerApi } from "@/lib/api/reader"
 import { capture } from "@/lib/analytics/posthog"
 
@@ -12,19 +14,27 @@ export default function GraphPage() {
   const router = useRouter()
   const [chapter, setChapter] = useState(1)
   const [maxChapter, setMaxChapter] = useState(1)
-  const [authorMode, setAuthorMode] = useState(false)
   const [theme, setTheme] = useState<"light" | "dark">("light")
+  const { data: book = null } = useQuery({
+    queryKey: asQueryKey(bookCacheKey(bookId, "detail")),
+    queryFn: () => booksApi.get(bookId),
+  })
+  const { data: progress = null } = useQuery({
+    queryKey: asQueryKey(readerCacheKey(bookId, "progress")),
+    queryFn: () => readerApi.getProgress(bookId),
+  })
+  const authorMode = book?.mode === "author"
 
   useEffect(() => {
     const stored = window.localStorage.getItem("reader-theme")
     if (stored === "dark" || stored === "light") setTheme(stored)
-    booksApi.get(bookId).then((book) => setAuthorMode(book.mode === "author")).catch(() => {})
-    readerApi.getProgress(bookId).then((progress) => {
-      const readChapter = Math.max(1, progress?.current_chapter ?? 1)
-      setChapter(readChapter)
-      setMaxChapter(readChapter)
-    }).catch(() => {})
-  }, [bookId])
+  }, [])
+
+  useEffect(() => {
+    const readChapter = Math.max(1, progress?.current_chapter ?? 1)
+    setChapter(readChapter)
+    setMaxChapter(readChapter)
+  }, [progress])
 
   useEffect(() => {
     capture("graph_opened", { book_id: bookId })

@@ -1,9 +1,10 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
 import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
 
+import { asQueryKey } from "@/lib/query/cacheKeys"
 import { readerApi } from "@/lib/api/reader"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import type { ForeshadowingItem } from "@/types/reader"
@@ -14,19 +15,12 @@ export default function ForeshadowingPage() {
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
 
-  const [items, setItems] = useState<ForeshadowingItem[]>([])
-  const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    setLoading(true)
-    readerApi.getForeshadowing(bookId).then((res) => {
-      setItems(res.items)
-      setError(null)
-    }).catch((e) => {
-      setError("Foreshadowing unavailable")
-    }).finally(() => setLoading(false))
-  }, [bookId])
+  const { data, isLoading: loading } = useQuery({
+    queryKey: asQueryKey(`reader:${bookId}:foreshadowing`),
+    queryFn: () => readerApi.getForeshadowing(bookId),
+  })
+  const items: ForeshadowingItem[] = data?.items ?? []
+  const error = !loading && !data ? "Foreshadowing unavailable" : null
 
   return (
     <div className={`min-h-screen px-4 py-8 transition-colors ${isDark ? "bg-[radial-gradient(circle_at_top,#182033,#090b12_60%)] text-stone-100" : "bg-[linear-gradient(180deg,#fbfbfd,#f3f5f8)] text-slate-950"}`}>

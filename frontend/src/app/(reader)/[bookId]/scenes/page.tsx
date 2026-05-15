@@ -1,5 +1,6 @@
 "use client"
 
+import { useQuery } from "@tanstack/react-query"
 import { useEffect, useMemo, useState, type DragEvent as ReactDragEvent } from "react"
 import type { Route } from "next"
 import Link from "next/link"
@@ -8,6 +9,7 @@ import { useParams } from "next/navigation"
 import { WhatsTheWordPanel } from "@/components/intelligence/WhatsTheWordPanel"
 import { AuthorToolsNav } from "@/components/layout/AuthorToolsNav"
 import { booksApi } from "@/lib/api/books"
+import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import {
   buildSceneChapterOptions,
@@ -69,8 +71,6 @@ export default function ScenesPage() {
   const { bookId } = useParams<{ bookId: string }>()
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
-  const [book, setBook] = useState<Book | null>(null)
-  const [tree, setTree] = useState<ManuscriptWorkspaceTree | null>(null)
   const [selectedSceneId, setSelectedSceneId] = useState<string | null>(null)
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null)
   const [customFolders, setCustomFolders] = useState<string[]>([])
@@ -84,6 +84,18 @@ export default function ScenesPage() {
   const [saving, setSaving] = useState(false)
   const [status, setStatus] = useState<string | null>(null)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
+
+  const { data: book = null } = useQuery<Book | null>({
+    queryKey: asQueryKey(bookCacheKey(bookId, "detail")),
+    queryFn: () => booksApi.get(bookId),
+  })
+  const {
+    data: tree = null,
+    refetch: refetchTree,
+  } = useQuery<ManuscriptWorkspaceTree | null>({
+    queryKey: asQueryKey(bookCacheKey(bookId, "workspace-tree")),
+    queryFn: () => booksApi.getWorkspaceTree(bookId),
+  })
 
   const scenes = useMemo(
     () => (tree?.scene_groups ?? []).flatMap((group) => group.scenes).sort((a, b) => a.path.localeCompare(b.path)),
@@ -129,14 +141,8 @@ export default function ScenesPage() {
     setCustomFolders((current) => [...new Set([...current, normalized])].sort())
   }
 
-  const loadWorkspace = async (preferredSceneId?: string | null) => {
-    const [bookData, treeData] = await Promise.all([
-      booksApi.get(bookId).catch(() => null),
-      booksApi.getWorkspaceTree(bookId),
-    ])
-    setBook(bookData)
-    setTree(treeData)
-    const availableScenes = treeData.scene_groups.flatMap((group) => group.scenes)
+  const syncWorkspaceSelection = (treeData: ManuscriptWorkspaceTree | null, preferredSceneId?: string | null) => {
+    const availableScenes = treeData?.scene_groups.flatMap((group) => group.scenes) ?? []
     const nextSceneId = preferredSceneId ?? selectedSceneId
     const matchedScene = nextSceneId ? availableScenes.find((scene) => scene.id === nextSceneId) ?? null : null
     const fallbackScene = matchedScene ?? availableScenes[0] ?? null
@@ -160,10 +166,8 @@ export default function ScenesPage() {
   }, [bookId, customFolders])
 
   useEffect(() => {
-    void loadWorkspace().catch(() => {
-      setTree({ chapters: [], scene_groups: [], note_paths: [] })
-    })
-  }, [bookId])
+    syncWorkspaceSelection(tree)
+  }, [tree])
 
   function selectScene(scene: NovelScene) {
     const inferredChapterNumber = scene.chapter_number ?? extractChapterNumberFromSceneFolder(scene.path)
@@ -226,7 +230,8 @@ export default function ScenesPage() {
         sort_order: selectedScene?.sort_order ?? 1,
       })
       setStatus("Scene saved. Metadata refreshed from the scene text.")
-      await loadWorkspace(saved.id)
+      const { data: nextTree } = await refetchTree()
+      syncWorkspaceSelection(nextTree ?? null, saved.id)
     } finally {
       setSaving(false)
     }
@@ -260,7 +265,8 @@ export default function ScenesPage() {
         sort_order: scene.sort_order,
       })
       setStatus(`Moved scene to ${nextPath}`)
-      await loadWorkspace(scene.id)
+      const { data: nextTree } = await refetchTree()
+      syncWorkspaceSelection(nextTree ?? null, scene.id)
     } catch {
       setStatus("Could not move this scene")
     } finally {
@@ -274,7 +280,8 @@ export default function ScenesPage() {
     await booksApi.deleteScene(bookId, selectedScene.id)
     newScene(selectedFolder)
     setStatus("Scene deleted.")
-    await loadWorkspace()
+    const { data: nextTree } = await refetchTree()
+    syncWorkspaceSelection(nextTree ?? null)
   }
 
   return (

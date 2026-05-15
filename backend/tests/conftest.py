@@ -18,6 +18,7 @@ from app.api.deps.rate_limit import (
     rate_limit_manuscript_import,
     rate_limit_public,
     rate_limit_public_asset,
+    rate_limit_recall,
     rate_limit_search,
     rate_limit_summary,
     rate_limit_upload,
@@ -254,6 +255,7 @@ async def client(db):
     app.dependency_overrides[rate_limit_auth_password] = lambda: None
     app.dependency_overrides[rate_limit_auth_refresh] = lambda: None
     app.dependency_overrides[rate_limit_search] = lambda: None
+    app.dependency_overrides[rate_limit_recall] = lambda: None
     app.dependency_overrides[rate_limit_summary] = lambda: None
     app.dependency_overrides[rate_limit_chat] = lambda: None
     app.dependency_overrides[rate_limit_public] = lambda: None

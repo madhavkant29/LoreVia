@@ -3,7 +3,7 @@
     {
       "code": "reader_monthly",
       "tier": "reader",
-      "display_name": "Collaboration access",
+      "display_name": "Beta reader access",
       "billing_interval": "monthly",
       "price_usd": 12,
       "checkout_enabled": false,
@@ -12,7 +12,7 @@
     {
       "code": "reader_annual",
       "tier": "reader",
-      "display_name": "Collaboration access",
+      "display_name": "Beta reader access",
       "billing_interval": "annual",
       "price_usd": 120,
       "checkout_enabled": false,
@@ -70,13 +70,14 @@
       "price_monthly": 0,
       "price_annual": 0,
       "bullets": [
-        "2 uploads total, including worldbuilding manuscripts",
+        "1 upload total, including worldbuilding manuscripts",
         "Can read curated public demo books",
         "Can join invited beta reads for free",
-        "Unlimited Smart Tap and memory recall",
-        "Full character profiles",
+        "Basic story recall with strict daily limits",
+        "Reader-safe export options",
         "Short summaries only",
-        "5 semantic searches/day and 3 prediction queries/day"
+        "3 semantic searches/day and 1 prediction query/day",
+        "1 advisor turn/day and 1 continuity tool use/day"
       ]
     },
     {

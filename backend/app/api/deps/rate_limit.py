@@ -13,10 +13,12 @@ from app.core.redis import get_redis, key_ratelimit
 from app.models.user import User, UserRateLimitOverride
 from app.services.monetization_service import purchased_overflow_units_for_action
 from app.utils.billing_utils import (
+    continuity_limit_per_day,
     DAILY_LIMIT_MESSAGE,
     free_search_limit_per_day,
     prediction_limit_per_day,
     protected_authoring_limit_per_day,
+    recall_limit_per_day,
 )
 
 
@@ -105,15 +107,24 @@ async def rate_limit_advisor(
     await _bump_daily_bucket(db, current_user.id, "high_cost_authoring", daily_limit)
 
 
+async def rate_limit_recall(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    daily_limit = recall_limit_per_day(current_user)
+    if daily_limit is None:
+        return
+    await _bump_daily_bucket(db, current_user.id, "recall", daily_limit)
+
+
 async def rate_limit_continuity_checker(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    daily_limit = protected_authoring_limit_per_day(current_user)
+    daily_limit = continuity_limit_per_day(current_user)
     if daily_limit <= 0:
         raise HTTPException(403, "Continuity checks are authoring features. Upgrade to Author for access.")
-    daily_limit = await _limit_for_user(db, current_user.id, "advisor_per_day", daily_limit)
-    await _bump_daily_bucket(db, current_user.id, "high_cost_authoring", daily_limit)
+    await _bump_daily_bucket(db, current_user.id, "continuity", daily_limit)
 
 
 async def rate_limit_api(

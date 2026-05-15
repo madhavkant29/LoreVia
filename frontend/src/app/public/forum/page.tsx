@@ -2,40 +2,25 @@
 
 import Link from "next/link"
 import type { Route } from "next"
-import { useDeferredValue, useEffect, useState } from "react"
+import { useDeferredValue, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
 
 import { publicApi } from "@/lib/api/public"
+import { asQueryKey } from "@/lib/query/cacheKeys"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { formatReputationScore } from "@/lib/utils/publicForum"
 import type { PublicForumPost } from "@/types/public"
 
 export default function PublicForumPage() {
-  const [posts, setPosts] = useState<PublicForumPost[]>([])
   const [query, setQuery] = useState("")
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
   const deferredQuery = useDeferredValue(query)
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
-
-  useEffect(() => {
-    let active = true
-    setLoading(true)
-    setError(null)
-    publicApi.listForumPosts(deferredQuery).then((items) => {
-      if (!active) return
-      setPosts(items)
-    }).catch(() => {
-      if (!active) return
-      setError("Could not load the public forum right now.")
-    }).finally(() => {
-      if (!active) return
-      setLoading(false)
-    })
-    return () => {
-      active = false
-    }
-  }, [deferredQuery])
+  const { data: posts = [], isLoading: loading, isError } = useQuery<PublicForumPost[]>({
+    queryKey: asQueryKey(`public:forum:${deferredQuery.trim() || "all"}`),
+    queryFn: () => publicApi.listForumPosts(deferredQuery),
+  })
+  const error = isError ? "Could not load the public forum right now." : null
 
   return (
     <div className={`min-h-screen ${isDark ? "bg-[#071019] text-slate-100" : "bg-[#f4efe7] text-slate-950"}`}>

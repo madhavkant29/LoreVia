@@ -19,6 +19,7 @@ export interface TierLimits {
   free_search_per_day: number
   free_summary_per_hour: number
   free_prediction_per_day: number
+  free_recall_per_day: number
   reader_prediction_per_day: number
   author_prediction_per_day: number
   architect_prediction_per_day: number
@@ -28,6 +29,7 @@ export interface TierLimits {
   free_advisor_per_day: number
   free_advisor_per_week: number
   free_advisor_per_month: number
+  free_continuity_per_day: number
   reader_advisor_per_day: number
   reader_advisor_per_week: number
   reader_advisor_per_month: number

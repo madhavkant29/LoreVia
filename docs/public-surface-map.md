@@ -35,4 +35,5 @@ This map keeps the word "public" tied to explicit exposure models instead of usi
 ## Not Product-wired Yet
 
 - Manual public book creation and public chapter append remain backend endpoints only.
+- Forum creation/editing, reader-interest creation, and author-side interest listing also remain backend-only product surfaces for now.
 - Do not add frontend client methods or UI for these write flows until the product path is ready.

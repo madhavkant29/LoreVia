@@ -1,11 +1,13 @@
 "use client"
 
+import { useQuery } from "@tanstack/react-query"
 import { useEffect, useMemo, useState } from "react"
 import { useParams } from "next/navigation"
 
 import { AuthorToolsNav } from "@/components/layout/AuthorToolsNav"
 import { betaReadsApi } from "@/lib/api/betaReads"
 import { booksApi } from "@/lib/api/books"
+import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { formatFeedbackKindLabel, parseQuestionLines, selectPrimaryAssignment } from "@/lib/utils/betaRead"
 import type { BetaReadAssignment, BetaReadAssignmentDetail } from "@/types/betaRead"
@@ -34,13 +36,47 @@ export default function BetaFeedbackPage() {
   const { bookId } = useParams<{ bookId: string }>()
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
-  const [book, setBook] = useState<Book | null>(null)
   const [status, setStatus] = useState<string | null>(null)
-  const [authorAssignments, setAuthorAssignments] = useState<BetaReadAssignment[]>([])
-  const [authorDetail, setAuthorDetail] = useState<BetaReadAssignmentDetail | null>(null)
-  const [readerDetail, setReaderDetail] = useState<BetaReadAssignmentDetail | null>(null)
-  const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [selectedAuthorAssignmentId, setSelectedAuthorAssignmentId] = useState<string | null>(null)
+
+  const { data: book = null, isLoading: bookLoading } = useQuery<Book | null>({
+    queryKey: asQueryKey(bookCacheKey(bookId, "detail")),
+    queryFn: () => booksApi.get(bookId),
+  })
+  const {
+    data: authorAssignments = [],
+    isLoading: authorAssignmentsLoading,
+    refetch: refetchAuthorAssignments,
+  } = useQuery<BetaReadAssignment[]>({
+    queryKey: asQueryKey(`beta-feedback:${bookId}:author-assignments`),
+    queryFn: () => betaReadsApi.listBookAssignments(bookId).catch(() => []),
+  })
+  const {
+    data: myAssignments = [],
+    isLoading: myAssignmentsLoading,
+  } = useQuery<BetaReadAssignment[]>({
+    queryKey: asQueryKey(`beta-feedback:${bookId}:my-assignments`),
+    queryFn: () => betaReadsApi.listMine().catch(() => []),
+  })
+  const {
+    data: authorDetail = null,
+    refetch: refetchAuthorDetail,
+  } = useQuery<BetaReadAssignmentDetail | null>({
+    queryKey: selectedAuthorAssignmentId ? asQueryKey(`beta-feedback:${bookId}:author-detail:${selectedAuthorAssignmentId}`) : ["beta-feedback:author-detail:none"],
+    queryFn: () => betaReadsApi.getBookAssignmentDetail(bookId, selectedAuthorAssignmentId as string).catch(() => null),
+    enabled: Boolean(selectedAuthorAssignmentId),
+  })
+  const primaryReaderAssignment = useMemo(() => selectPrimaryAssignment(myAssignments, bookId), [bookId, myAssignments])
+  const {
+    data: readerDetail = null,
+    refetch: refetchReaderDetail,
+  } = useQuery<BetaReadAssignmentDetail | null>({
+    queryKey: primaryReaderAssignment ? asQueryKey(`beta-feedback:${bookId}:reader-detail:${primaryReaderAssignment.id}`) : ["beta-feedback:reader-detail:none"],
+    queryFn: () => betaReadsApi.getMineDetail(primaryReaderAssignment?.id as string).catch(() => null),
+    enabled: Boolean(primaryReaderAssignment?.id),
+  })
+  const loading = bookLoading || authorAssignmentsLoading || myAssignmentsLoading
 
   const [readerEmail, setReaderEmail] = useState("")
   const [taskLabel, setTaskLabel] = useState("First-pass reader response")
@@ -65,47 +101,13 @@ export default function BetaFeedbackPage() {
   const [finalRating, setFinalRating] = useState("4")
 
   useEffect(() => {
-    let active = true
-
-    async function load() {
-      setLoading(true)
-      try {
-        const bookValue = await booksApi.get(bookId)
-        if (!active) return
-        setBook(bookValue)
-
-        const [bookAssignments, myAssignments] = await Promise.all([
-          betaReadsApi.listBookAssignments(bookId).catch(() => []),
-          betaReadsApi.listMine().catch(() => []),
-        ])
-        if (!active) return
-
-        setAuthorAssignments(bookAssignments)
-
-        if (bookAssignments.length > 0) {
-          const detail = await betaReadsApi.getBookAssignmentDetail(bookId, bookAssignments[0].id).catch(() => null)
-          if (active) setAuthorDetail(detail)
-        } else {
-          setAuthorDetail(null)
-        }
-
-        const primaryReaderAssignment = selectPrimaryAssignment(myAssignments, bookId)
-        if (primaryReaderAssignment) {
-          const detail = await betaReadsApi.getMineDetail(primaryReaderAssignment.id).catch(() => null)
-          if (active) setReaderDetail(detail)
-        } else {
-          setReaderDetail(null)
-        }
-      } finally {
-        if (active) setLoading(false)
-      }
+    if (authorAssignments.length === 0) {
+      setSelectedAuthorAssignmentId(null)
+      return
     }
-
-    void load()
-    return () => {
-      active = false
-    }
-  }, [bookId])
+    if (selectedAuthorAssignmentId && authorAssignments.some((assignment) => assignment.id === selectedAuthorAssignmentId)) return
+    setSelectedAuthorAssignmentId(authorAssignments[0].id)
+  }, [authorAssignments, selectedAuthorAssignmentId])
 
   const isAuthorView = useMemo(
     () => Boolean(book && (!book.collaboration_role || book.mode === "author")),
@@ -114,17 +116,14 @@ export default function BetaFeedbackPage() {
   const canLeaveFeedback = Boolean(book?.collaboration_permissions?.can_comment || book?.collaboration_permissions?.can_edit_manuscript)
 
   const refreshAuthorDetail = async (assignmentId: string) => {
-    const [assignments, detail] = await Promise.all([
-      betaReadsApi.listBookAssignments(bookId).catch(() => []),
-      betaReadsApi.getBookAssignmentDetail(bookId, assignmentId).catch(() => null),
-    ])
-    setAuthorAssignments(assignments)
-    setAuthorDetail(detail)
+    await refetchAuthorAssignments()
+    setSelectedAuthorAssignmentId(assignmentId)
+    await refetchAuthorDetail()
   }
 
   const refreshReaderDetail = async (assignmentId: string) => {
-    const detail = await betaReadsApi.getMineDetail(assignmentId).catch(() => null)
-    setReaderDetail(detail)
+    if (primaryReaderAssignment?.id !== assignmentId) return
+    await refetchReaderDetail()
   }
 
   const createAssignment = async () => {
@@ -145,7 +144,9 @@ export default function BetaFeedbackPage() {
         requireFinalFeedback: true,
         authorQuestions: parseQuestionLines(authorQuestionsText),
       })
-      await refreshAuthorDetail(created.id)
+      await refetchAuthorAssignments()
+      setSelectedAuthorAssignmentId(created.id)
+      await refetchAuthorDetail()
       setReaderEmail("")
       setStatus("Beta read assignment created.")
     } catch {
@@ -178,11 +179,9 @@ export default function BetaFeedbackPage() {
     setStatus(null)
     try {
       await betaReadsApi.revokeAssignment(bookId, assignmentId)
-      const assignments = await betaReadsApi.listBookAssignments(bookId).catch(() => [])
-      setAuthorAssignments(assignments)
-      if (authorDetail?.assignment.id === assignmentId) {
-        const nextId = assignments[0]?.id
-        setAuthorDetail(nextId ? await betaReadsApi.getBookAssignmentDetail(bookId, nextId).catch(() => null) : null)
+      const { data: assignments = [] } = await refetchAuthorAssignments()
+      if (selectedAuthorAssignmentId === assignmentId) {
+        setSelectedAuthorAssignmentId(assignments[0]?.id ?? null)
       }
       setStatus("Assignment revoked.")
     } catch {
@@ -212,7 +211,7 @@ export default function BetaFeedbackPage() {
     setSaving(true)
     setStatus(null)
     try {
-      const detail = await betaReadsApi.createFeedbackItem(readerDetail.assignment.id, {
+      await betaReadsApi.createFeedbackItem(readerDetail.assignment.id, {
         kind: feedbackKind,
         chapterNumber: feedbackChapter ? Number(feedbackChapter) : null,
         questionId: selectedQuestionId || null,
@@ -220,7 +219,7 @@ export default function BetaFeedbackPage() {
         anchorText: feedbackAnchor || null,
         body: feedbackBody || null,
       })
-      setReaderDetail(detail)
+      await refreshReaderDetail(readerDetail.assignment.id)
       setFeedbackReaction("")
       setFeedbackAnchor("")
       setFeedbackBody("")
@@ -238,8 +237,8 @@ export default function BetaFeedbackPage() {
     setSaving(true)
     setStatus(null)
     try {
-      const detail = await betaReadsApi.deleteFeedbackItem(readerDetail.assignment.id, feedbackItemId)
-      setReaderDetail(detail)
+      await betaReadsApi.deleteFeedbackItem(readerDetail.assignment.id, feedbackItemId)
+      await refreshReaderDetail(readerDetail.assignment.id)
       setStatus("Feedback removed.")
     } catch {
       setStatus("Could not remove that feedback item.")

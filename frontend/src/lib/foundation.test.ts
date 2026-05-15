@@ -180,8 +180,8 @@ describe("foundation utilities", () => {
     expect(isPaidTier("free")).toBe(false)
   })
 
-  it("returns a collaboration access label", () => {
-    expect(tierLabel("reader")).toBe("Collaboration access")
+  it("returns a beta reader access label", () => {
+    expect(tierLabel("reader")).toBe("Beta reader access")
   })
 
   it("returns an Author label", () => {

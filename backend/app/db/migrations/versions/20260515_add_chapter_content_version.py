@@ -1,7 +1,7 @@
 """Add chapter content versioning for optimistic manuscript saves.
 
 Revision ID: 20260515_add_chapter_content_version
-Revises: 20260515_normalize_collaboration_and_beta_read_state
+Revises: 20260515_normalize_collab_beta_state
 Create Date: 2026-05-15
 """
 
@@ -14,7 +14,7 @@ from alembic import op
 
 
 revision: str = "20260515_add_chapter_content_version"
-down_revision: str | None = "20260515_normalize_collaboration_and_beta_read_state"
+down_revision: str | None = "20260515_normalize_collab_beta_state"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

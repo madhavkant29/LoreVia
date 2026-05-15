@@ -2,40 +2,24 @@
 
 import Link from "next/link"
 import type { Route } from "next"
-import { useEffect, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
 import { useParams } from "next/navigation"
 
 import { publicApi } from "@/lib/api/public"
+import { asQueryKey } from "@/lib/query/cacheKeys"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { formatReputationScore, formatWordProgress } from "@/lib/utils/publicForum"
 import type { PublicUserProfile } from "@/types/public"
 
 export default function PublicWriterProfilePage() {
   const { username } = useParams<{ username: string }>()
-  const [profile, setProfile] = useState<PublicUserProfile | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
-
-  useEffect(() => {
-    let active = true
-    setLoading(true)
-    setError(null)
-    publicApi.getUserProfile(username).then((payload) => {
-      if (!active) return
-      setProfile(payload)
-    }).catch(() => {
-      if (!active) return
-      setError("Could not load this writer profile.")
-    }).finally(() => {
-      if (!active) return
-      setLoading(false)
-    })
-    return () => {
-      active = false
-    }
-  }, [username])
+  const { data: profile = null, isLoading: loading, isError } = useQuery<PublicUserProfile | null>({
+    queryKey: asQueryKey(`public:writer:${username}`),
+    queryFn: () => publicApi.getUserProfile(username),
+  })
+  const error = isError ? "Could not load this writer profile." : null
 
   if (loading) {
     return <div className={`mx-auto max-w-4xl px-4 py-20 text-center ${isDark ? "text-slate-500" : "text-slate-400"}`}>Loading writer profile...</div>

@@ -85,7 +85,7 @@ async def test_build_public_user_project_prefers_visible_forum_project():
         id=uuid.uuid4(),
         title="Forum Draft",
         genre="Fantasy",
-        public_description=None,
+        public_description="Private manuscript blurb",
     )
     post = SimpleNamespace(id=uuid.uuid4(), body="A public beta forum pitch.")
     db = _FakeDB([_Result(first_row=(post, book))])
@@ -93,6 +93,7 @@ async def test_build_public_user_project_prefers_visible_forum_project():
     project = await _build_public_user_project_out(db, user_id=uuid.uuid4())
 
     assert project is not None
+    assert project.description == "A public beta forum pitch."
     assert project.source == "forum"
     assert project.forum_post_id == str(post.id)
     assert project.public_book_id is None

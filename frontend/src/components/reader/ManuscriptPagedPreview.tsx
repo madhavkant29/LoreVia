@@ -50,20 +50,24 @@ export function ManuscriptPagedPreview({
     if (!shell) return
 
     const pageExtent = getManuscriptPreviewPageExtentPx(layout)
-    const syncPageMetrics = () => {
+    const countPages = () => {
       const scrollWidth = shell.scrollWidth
       const clientWidth = shell.clientWidth
-      const totalPages = scrollWidth <= clientWidth + 1
+      return scrollWidth <= clientWidth + 1
         ? 1
-        : Math.max(2, Math.round((scrollWidth + layout.pageGapPx) / pageExtent))
+        : Math.max(2, Math.ceil((scrollWidth + layout.pageGapPx) / pageExtent))
+    }
 
-      setPageCount(totalPages)
+    const syncPageMetrics = () => {
+      const totalPages = countPages()
+
+      setPageCount((current) => current === totalPages ? current : totalPages)
       setCurrentPage((current) => Math.min(totalPages, Math.max(1, current)))
       onPageCountChange?.(totalPages)
     }
 
     const syncCurrentPage = () => {
-      const totalPages = Math.max(1, pageCount)
+      const totalPages = countPages()
       const nextPage = Math.min(totalPages, Math.max(1, Math.round(shell.scrollLeft / pageExtent) + 1))
       setCurrentPage(nextPage)
     }
@@ -89,7 +93,7 @@ export function ManuscriptPagedPreview({
       observer.disconnect()
       window.cancelAnimationFrame(animation)
     }
-  }, [layout, onPageCountChange, pageCount, sectionMarkup.length])
+  }, [layout, onPageCountChange, sectionMarkup.length])
 
   const previewStyle = {
     "--manuscript-page-width": `${layout.pageWidthMm}mm`,

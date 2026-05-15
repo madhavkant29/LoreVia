@@ -677,6 +677,7 @@ body::before {
   height: var(--manuscript-page-height);
   overflow-x: auto;
   overflow-y: hidden;
+  scroll-snap-type: x proximity;
   padding: var(--manuscript-page-padding-top) 0 var(--manuscript-page-padding-bottom);
   box-sizing: border-box;
   background-image:
