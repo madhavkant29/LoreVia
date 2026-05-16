@@ -22,10 +22,10 @@ export default function PublicLibraryPage() {
     <main className={`min-h-screen ${isDark ? "bg-black text-white" : "bg-stone-50 text-stone-950"}`}>
       <div className="mx-auto max-w-6xl px-4 py-10">
         <div className="max-w-3xl">
-          <p className={`text-xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-cyan-300" : "text-cyan-700"}`}>Public demo library</p>
-          <h1 className="mt-4 text-4xl font-semibold tracking-tight">Explore public LoreVia demos before you upload private work.</h1>
+          <p className={`text-xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-cyan-300" : "text-cyan-700"}`}>Optional public showcase</p>
+          <h1 className="mt-4 text-4xl font-semibold tracking-tight">Explore author-shared samples and curated LoreVia demos.</h1>
           <p className={`mt-4 text-base leading-8 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
-            Browse public-domain books and shared demo projects to see chapter reading, public chapter pages, and LoreVia's public-facing experience.
+            This library is a secondary showcase surface for public-domain examples and author-shared samples. LoreVia's core workflow still lives in the private author workspace.
           </p>
         </div>
 
@@ -35,7 +35,7 @@ export default function PublicLibraryPage() {
           </div>
         ) : books.length === 0 ? (
           <div className={`mt-12 rounded-2xl border px-6 py-12 text-center ${isDark ? "border-white/10 bg-white/5 text-slate-400" : "border-stone-200 bg-white text-stone-500"}`}>
-            No public demo books are available yet.
+            No public showcase books are available yet.
           </div>
         ) : (
           <div className="mt-12 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
@@ -69,7 +69,7 @@ export default function PublicLibraryPage() {
                     href={`/public/${book.id}` as Route}
                     className={`inline-flex rounded-full px-4 py-2 text-sm font-semibold ${isDark ? "bg-white text-stone-950 hover:bg-slate-200" : "bg-stone-950 text-white hover:bg-stone-800"}`}
                   >
-                    Open public book
+                    Open sample
                   </Link>
                 </div>
               </article>

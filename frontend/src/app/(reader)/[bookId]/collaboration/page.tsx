@@ -183,7 +183,6 @@ export default function CollaborationPage() {
     chapterStart: null,
     chapterEnd: null,
     windowDays: 3,
-    rewardPoints: 120,
     requiredProgressPct: 100,
     requiredCommentCount: 3,
     requiredFeedbackItemCount: 1,
@@ -464,7 +463,7 @@ export default function CollaborationPage() {
               <div>
                 <h2 className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>Beta read assignments</h2>
                 <p className={`mt-2 max-w-3xl text-sm leading-6 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                  Grant a reader a strict 3 to 7 day beta-reading window with points, feedback requirements, and revocation controls.
+                  Grant a reader a strict 3 to 7 day beta-reading window with feedback requirements and revocation controls.
                 </p>
               </div>
               <span className={`text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>{betaAssignments.length} assignments</span>
@@ -540,14 +539,6 @@ export default function CollaborationPage() {
                     <input
                       type="number"
                       min="1"
-                      value={betaForm.rewardPoints}
-                      onChange={(event) => setBetaForm((current) => ({ ...current, rewardPoints: Number(event.target.value || 0) }))}
-                      placeholder="Points"
-                      className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#0d141c] text-slate-100 placeholder:text-slate-600 focus:border-violet-400" : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-violet-400"}`}
-                    />
-                    <input
-                      type="number"
-                      min="1"
                       max="100"
                       value={betaForm.requiredProgressPct ?? 100}
                       onChange={(event) => setBetaForm((current) => ({ ...current, requiredProgressPct: Number(event.target.value || 100) }))}
@@ -586,7 +577,7 @@ export default function CollaborationPage() {
                   />
 
                   <label className={`flex items-center justify-between rounded-md border p-3 text-sm ${isDark ? "border-white/[0.06] bg-[#0d141c] text-slate-200" : "border-slate-200 bg-white text-slate-700"}`}>
-                    <span>Require final feedback before points</span>
+                    <span>Require final feedback before completion</span>
                     <input
                       type="checkbox"
                       checked={betaForm.requireFinalFeedback ?? true}
@@ -619,7 +610,7 @@ export default function CollaborationPage() {
                     </div>
                     <div className="mt-4 grid gap-2 text-sm">
                       <p className={isDark ? "text-slate-300" : "text-slate-700"}>{betaScopeSummary(assignment)}</p>
-                      <p className={isDark ? "text-slate-400" : "text-slate-600"}>{assignment.reward_points} points - {assignment.required_comment_count} required comments - {assignment.required_feedback_item_count} feedback item minimum - {assignment.required_progress_pct}% progress</p>
+                      <p className={isDark ? "text-slate-400" : "text-slate-600"}>{assignment.required_comment_count} required comments - {assignment.required_feedback_item_count} feedback item minimum - {assignment.required_progress_pct}% progress</p>
                       <p className={isDark ? "text-slate-500" : "text-slate-500"}>Window: {assignment.window_days} days - Due {new Date(assignment.expires_at).toLocaleString()}</p>
                       <p className={isDark ? "text-slate-500" : "text-slate-500"}>Progress: {Math.round(assignment.progress_pct)}% - Submission: {assignment.submitted_at ? "Submitted" : "Pending"} - Questions: {assignment.question_count}</p>
                     </div>

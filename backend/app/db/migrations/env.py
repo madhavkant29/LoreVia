@@ -35,14 +35,15 @@ if not is_local_database_url(db_url) and os.getenv("ALEMBIC_CONFIRM_REMOTE") != 
         "Set ALEMBIC_CONFIRM_REMOTE=YES_I_AM_SURE to continue."
     )
 
-offending_revisions = destructive_upgrade_revisions(Path(__file__).resolve().parent / "versions")
-if offending_revisions and os.getenv("ALEMBIC_ALLOW_DESTRUCTIVE_UPGRADES") != "1":
-    offending_paths = ", ".join(str(path.name) for path in offending_revisions)
-    raise RuntimeError(
-        "Refusing to run migrations because destructive operations were found in upgrade() blocks: "
-        f"{offending_paths}. Remove them or set ALEMBIC_ALLOW_DESTRUCTIVE_UPGRADES=1 only if you "
-        "explicitly intend to drop data."
-    )
+if any(arg == "upgrade" for arg in sys.argv[1:]):
+    offending_revisions = destructive_upgrade_revisions(Path(__file__).resolve().parent / "versions")
+    if offending_revisions and os.getenv("ALEMBIC_ALLOW_DESTRUCTIVE_UPGRADES") != "1":
+        offending_paths = ", ".join(str(path.name) for path in offending_revisions)
+        raise RuntimeError(
+            "Refusing to run migrations because destructive operations were found in upgrade() blocks: "
+            f"{offending_paths}. Remove them or set ALEMBIC_ALLOW_DESTRUCTIVE_UPGRADES=1 only if you "
+            "explicitly intend to drop data."
+        )
 
 if any(arg == "downgrade" for arg in sys.argv[1:]):
     destructive_downgrades = destructive_downgrade_revisions(Path(__file__).resolve().parent / "versions")

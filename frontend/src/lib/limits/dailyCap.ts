@@ -1,17 +1,18 @@
 import axios from "axios"
-import type { PointAction } from "@/types/monetization"
+
+export type DailyCapAction = "search" | "prediction" | "high_cost_authoring"
 
 export const DAILY_LIMIT_MESSAGE = "Your daily limit refreshes tomorrow. Want higher limits now? Upgrade."
 export const DAILY_CAP_EVENT = "lorevia:daily-cap-hit"
 
 export interface DailyCapEventDetail {
-  action: PointAction | null
+  action: DailyCapAction | null
   status: number
   requestPath: string
   detail: string
 }
 
-export function inferPointActionFromRequestPath(requestPath: string): PointAction | null {
+export function inferDailyCapActionFromRequestPath(requestPath: string): DailyCapAction | null {
   if (requestPath.includes("/reader/") && (requestPath.endsWith("/search") || requestPath.endsWith("/thematic-search"))) {
     return "search"
   }
@@ -46,7 +47,7 @@ export function buildDailyCapEventDetail(error: unknown): DailyCapEventDetail | 
   }
 
   return {
-    action: inferPointActionFromRequestPath(requestPath),
+    action: inferDailyCapActionFromRequestPath(requestPath),
     status,
     requestPath,
     detail,

@@ -42,15 +42,21 @@ test("public forum surfaces reputation and writer profile details", async ({ pag
   await installMockApi(page)
   await page.goto("/public/forum")
 
-  await expect(page.getByRole("heading", { name: /find writers, gauge trust/i })).toBeVisible()
+  await expect(page.getByRole("heading", { name: /see which authors choose to open a public conversation/i })).toBeVisible()
   await expect(page.getByText("reputation +18")).toBeVisible()
+  await expect(page.getByText(/current status: public/i)).toBeVisible()
   await page.getByRole("link", { name: "Open discussion" }).click()
 
   await expect(page.getByRole("heading", { name: /looking for sharp beta readers/i })).toBeVisible()
-  await expect(page.getByText("Like 4")).toBeVisible()
+  await page.getByRole("button", { name: "Like 4" }).click()
+  await expect(page.getByText("Like 5")).toBeVisible()
+  await page.getByPlaceholder(/add a thoughtful public comment/i).fill("Happy to review pacing and clarity.")
+  await page.getByRole("button", { name: "Post comment" }).click()
+  await expect(page.getByText("Happy to review pacing and clarity.")).toBeVisible()
   await page.getByRole("link", { name: "@author" }).first().click()
 
   await expect(page.getByRole("heading", { name: "@author" })).toBeVisible()
+  await expect(page.getByText(/public forum status: public/i)).toBeVisible()
   await expect(page.getByText("20k words")).toBeVisible()
   await expect(page.getByText("Trusted")).toBeVisible()
 })
@@ -89,7 +95,7 @@ test("library renders a mocked project and opens the upload modal", async ({ pag
 
   await expect(page.getByRole("heading", { name: "Library" })).toBeVisible()
   await expect(page.getByText("Upcoming Beta Reads")).toBeVisible()
-  await expect(page.getByText("Complete before the deadline to earn points.")).toBeVisible()
+  await expect(page.getByText("Complete reviews before the deadline.")).toBeVisible()
   await expect(page.getByText("Chapter 12 feedback - Seraphina Vale")).toBeVisible()
   await expect(page.getByRole("heading", { name: "Sky of Ash" }).first()).toBeVisible()
   await page.getByRole("button", { name: /^new project$/i }).click()
@@ -101,7 +107,7 @@ test("beta reads page shows active and missed assignments without reader analysi
   await page.goto("/beta-reads")
 
   await expect(page.getByRole("heading", { name: "Upcoming Beta Reads" })).toBeVisible()
-  await expect(page.getByText("Only your assigned beta reads appear here.")).toBeVisible()
+  await expect(page.getByText("Track assigned beta reads, deadlines, and review requirements from one place.")).toBeVisible()
   await expect(page.getByText("Chapter 12 feedback")).toBeVisible()
   await expect(page.getByText("The Lost Heir")).toBeVisible()
   await expect(page.getByRole("button", { name: /^submit feedback$/i }).first()).toBeVisible()
@@ -110,18 +116,6 @@ test("beta reads page shows active and missed assignments without reader analysi
   await page.getByRole("button", { name: "Missed" }).click()
   await expect(page.getByText("Act two beta read")).toBeVisible()
   await expect(page.getByText("Counted toward your consecutive missed beta reads")).toBeVisible()
-})
-
-test("points page shows the daily rewarded-ad counter", async ({ page }) => {
-  await installMockApi(page)
-  await page.goto("/points")
-
-  await expect(page.getByRole("heading", { name: "Points wallet" })).toBeVisible()
-  await expect(page.getByText("2 / 3")).toBeVisible()
-  await expect(page.getByRole("heading", { name: "2 ads left today" })).toBeVisible()
-  await expect(page.getByText("Ad 1")).toBeVisible()
-  await expect(page.getByText("Watched")).toBeVisible()
-  await expect(page.getByText("Rewarded ad", { exact: true })).toBeVisible()
 })
 
 test("stats page shows the writing dashboard and todays entries", async ({ page }) => {

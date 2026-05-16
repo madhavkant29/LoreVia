@@ -148,7 +148,20 @@ def test_normalize_beta_read_rating_requires_half_steps():
         beta_read_utils.normalize_beta_read_rating(4.3)
 
 
-def test_compute_beta_read_reward_points_applies_rating_bonus():
-    assert beta_read_utils.compute_beta_read_reward_points(20, None) == 20
-    assert beta_read_utils.compute_beta_read_reward_points(20, 3.9) == 23
-    assert beta_read_utils.compute_beta_read_reward_points(20, 4.5) == 30
+
+
+def test_beta_feedback_item_author_metadata_defaults_to_open():
+    item = SimpleNamespace(metadata_json={})
+
+    metadata = beta_read_utils.beta_feedback_item_author_metadata(item)
+
+    assert metadata["author_status"] == "open"
+    assert metadata["author_task_id"] is None
+    assert metadata["author_updated_at"] is None
+
+
+def test_normalize_author_feedback_item_status_rejects_unknown_values():
+    assert beta_read_utils.normalize_author_feedback_item_status("resolved") == "resolved"
+
+    with pytest.raises(beta_read_utils.HTTPException):
+        beta_read_utils.normalize_author_feedback_item_status("done")

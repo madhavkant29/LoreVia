@@ -1,4 +1,4 @@
-from app.core.config import LOCALHOST_CORS_ORIGIN_REGEX, cors_middleware_options, cors_origins
+from app.core.config import LOCALHOST_CORS_ORIGIN_REGEX, cors_middleware_options, cors_origins, settings
 
 
 def test_cors_origins_include_localhost_and_loopback(monkeypatch):
@@ -58,3 +58,7 @@ def test_cors_middleware_options_exclude_localhost_regex_in_production(monkeypat
 
     assert options["allow_origins"] == ["https://getlorevia.com"]
     assert "allow_origin_regex" not in options
+
+
+def test_public_forum_status_defaults_to_public():
+    assert settings.PUBLIC_FORUM_STATUS == "public"

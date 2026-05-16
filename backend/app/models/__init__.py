@@ -41,8 +41,6 @@ from app.models.tag import CustomTag
 from app.models.user import (
     DeviceTrial,
     LlmUsageEvent,
-    PointLedgerEntry,
-    Referral,
     Subscription,
     SubscriptionEvent,
     TrialEmailEvent,

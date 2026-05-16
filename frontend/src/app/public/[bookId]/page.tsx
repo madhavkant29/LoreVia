@@ -21,11 +21,11 @@ export default function PublicBookPage() {
   })
 
   if (loading) {
-    return <div className={`mx-auto max-w-5xl px-4 py-20 text-center ${isDark ? "text-slate-400" : "text-stone-500"}`}>Loading public book...</div>
+    return <div className={`mx-auto max-w-5xl px-4 py-20 text-center ${isDark ? "text-slate-400" : "text-stone-500"}`}>Loading public sample...</div>
   }
 
   if (!book) {
-    return <div className={`mx-auto max-w-5xl px-4 py-20 text-center ${isDark ? "text-slate-400" : "text-stone-500"}`}>Public book not found.</div>
+    return <div className={`mx-auto max-w-5xl px-4 py-20 text-center ${isDark ? "text-slate-400" : "text-stone-500"}`}>Public sample not found.</div>
   }
 
   return (
@@ -33,12 +33,12 @@ export default function PublicBookPage() {
       <div className="mx-auto max-w-5xl px-4 py-10">
         <div className="flex flex-wrap items-center gap-3">
           <Link href="/public" className={`text-sm ${isDark ? "text-slate-400 hover:text-white" : "text-stone-500 hover:text-stone-900"}`}>
-            {"<- Back to public library"}
+            {"<- Back to showcase library"}
           </Link>
         </div>
 
         <div className="mt-8 max-w-3xl">
-          <p className={`text-xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-cyan-300" : "text-cyan-700"}`}>Public book</p>
+          <p className={`text-xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-cyan-300" : "text-cyan-700"}`}>Public sample</p>
           <h1 className="mt-4 text-4xl font-semibold tracking-tight">{book.title}</h1>
           {book.author_username ? (
             <Link href={`/public/writers/${book.author_username}` as Route} className={`mt-3 inline-flex text-lg font-semibold ${isDark ? "text-cyan-200 hover:text-white" : "text-cyan-700 hover:text-cyan-900"}`}>
@@ -52,7 +52,7 @@ export default function PublicBookPage() {
           ) : null}
           {book.author_username ? (
             <p className={`mt-5 text-sm leading-7 ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-              Want the trust context before reading? Visit this writer&apos;s public profile for forum reputation and visible participation.
+              Want more context before reading? Visit this author&apos;s public profile to see what they have chosen to surface here.
             </p>
           ) : null}
         </div>

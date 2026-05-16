@@ -48,6 +48,12 @@ export type DemoPage = {
   sections: ContentSection[]
 }
 
+export type PublicContentEntry = {
+  path: string
+  publishedAt: string
+  type: "hub" | "blog" | "answer" | "demo"
+}
+
 export const CONTENT_HUB_ROUTES = ["/blog", "/answers", "/demo"] as const
 
 export const blogArticles: BlogArticle[] = [
@@ -699,4 +705,37 @@ export function getAllPublicContentPaths(): string[] {
     ...answerPages.map((answer) => `/answers/${answer.slug}`),
     ...demoPages.map((demo) => `/demo/${demo.slug}`),
   ]
+}
+
+export function getAllPublicContentEntries(): PublicContentEntry[] {
+  const latestPublishedAt = getLatestContentPublishedAt()
+
+  return [
+    ...CONTENT_HUB_ROUTES.map((path) => ({
+      path,
+      publishedAt: latestPublishedAt,
+      type: "hub" as const,
+    })),
+    ...blogArticles.map((article) => ({
+      path: `/blog/${article.slug}`,
+      publishedAt: article.publishedAt,
+      type: "blog" as const,
+    })),
+    ...answerPages.map((answer) => ({
+      path: `/answers/${answer.slug}`,
+      publishedAt: answer.publishedAt,
+      type: "answer" as const,
+    })),
+    ...demoPages.map((demo) => ({
+      path: `/demo/${demo.slug}`,
+      publishedAt: demo.publishedAt,
+      type: "demo" as const,
+    })),
+  ]
+}
+
+export function getLatestContentPublishedAt(): string {
+  return [...blogArticles, ...answerPages, ...demoPages]
+    .map((entry) => entry.publishedAt)
+    .sort((left, right) => right.localeCompare(left))[0]
 }

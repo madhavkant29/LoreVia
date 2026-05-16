@@ -40,7 +40,7 @@ async def test_billing_status_reports_missing_configuration(auth_headers, client
     assert author_monthly["display_name"] == "Author"
     assert author_monthly["billing_interval"] == "monthly"
     assert author_monthly["price_usd"] == 29
-    assert architect_monthly["display_name"] == "Lore Architect"
+    assert architect_monthly["display_name"] == "Architect"
     assert architect_monthly["billing_interval"] == "monthly"
     assert architect_monthly["price_usd"] == 49
 

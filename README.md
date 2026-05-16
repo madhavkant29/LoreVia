@@ -1,8 +1,8 @@
 # LoreVia
 
-LoreVia is an AI-powered author continuity platform for long-form fiction. It helps writers, developmental editors, and collaborators keep manuscripts, characters, relationships, plot threads, worldbuilding, and cross-book continuity aligned as a story evolves.
+LoreVia is an AI-powered manuscript intelligence platform for fiction authors. It helps authors understand, revise, and maintain continuity in complex manuscripts across characters, relationships, plot threads, worldbuilding, and cross-book arcs.
 
-Instead of acting like a generic document chatbot, LoreVia is organized around the author workflow itself: continuity-aware summaries, evolving character profiles, relationship tracking, grounded Q&A, manuscript notes, export tools, and spoiler-safe reader surfaces when they are needed.
+Instead of acting like a generic document chatbot, LoreVia is organized around the author workflow itself: continuity-aware summaries, evolving character profiles, relationship tracking, grounded Q&A, manuscript notes, export tools, and invite-only collaborator surfaces when they are needed.
 
 ## What The Project Does
 

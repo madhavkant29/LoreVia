@@ -8,9 +8,9 @@ from sqlalchemy import select
 
 from app.core.security import create_access_token
 from app.models.beta_read import BetaReadAssignment
-from app.models.book import Book
+from app.models.book import Book, BookCollaborator
 from app.models.progress import ReadingProgress
-from app.models.user import PointLedgerEntry, User
+from app.models.user import User
 from app.utils.beta_read_utils import run_beta_read_jobs
 
 
@@ -51,7 +51,7 @@ async def _create_book(db, *, author_id: uuid.UUID) -> Book:
 
 
 @pytest.mark.asyncio
-async def test_beta_read_flow_requires_review_and_awards_points(client, db):
+async def test_beta_read_flow_requires_review_and_tracks_feedback_completion(client, db):
     author = await _create_user(db, email="author@lorevia.test", tier="author")
     reader = await _create_user(db, email="reader@lorevia.test", tier="reader")
     book = await _create_book(db, author_id=author.id)
@@ -74,7 +74,6 @@ async def test_beta_read_flow_requires_review_and_awards_points(client, db):
             "reader_email": reader.email,
             "task_label": "Reader response pass",
             "window_days": 7,
-            "reward_points": 25,
             "required_progress_pct": 100,
             "required_comment_count": 1,
             "required_feedback_item_count": 2,
@@ -144,18 +143,10 @@ async def test_beta_read_flow_requires_review_and_awards_points(client, db):
     assert submit_response.status_code == 200
     submitted_assignment = submit_response.json()
     assert submitted_assignment["state"] == "completed"
-    assert submitted_assignment["awarded_points"] == 38
     assert submitted_assignment["final_rating"] == 4.5
     assert submitted_assignment["rating_sentiment"] == "positive"
-    assert submitted_assignment["projected_reward_points"] == 38
-
-    ledger_entries = (
-        await db.execute(
-            select(PointLedgerEntry).where(PointLedgerEntry.user_id == reader.id)
-        )
-    ).scalars().all()
-    assert len(ledger_entries) == 2
-    assert sorted(entry.points_delta for entry in ledger_entries) == [2, 38]
+    assert submitted_assignment["book_average_rating"] == 4.5
+    assert submitted_assignment["book_rating_count"] == 1
 
     author_detail = await client.get(
         f"/api/v1/books/{book.id}/beta-reads/{assignment_id}",
@@ -167,13 +158,8 @@ async def test_beta_read_flow_requires_review_and_awards_points(client, db):
     assert summary["answer_count"] == 1
     assert summary["chapter_comment_count"] == 1
 
-    author_ledger_entries = (
-        await db.execute(
-            select(PointLedgerEntry).where(PointLedgerEntry.user_id == author.id)
-        )
-    ).scalars().all()
-    assert len(author_ledger_entries) == 1
-    assert author_ledger_entries[0].points_delta == 3
+    assert author_detail.json()["assignment"]["book_average_rating"] == 4.5
+    assert author_detail.json()["assignment"]["book_rating_count"] == 1
 
 
 @pytest.mark.asyncio
@@ -200,7 +186,6 @@ async def test_deleting_feedback_item_moves_assignment_out_of_ready_state(client
             "reader_email": reader.email,
             "task_label": "Tighten pacing feedback",
             "window_days": 7,
-            "reward_points": 10,
             "required_progress_pct": 100,
             "required_comment_count": 0,
             "required_feedback_item_count": 1,
@@ -234,6 +219,76 @@ async def test_deleting_feedback_item_moves_assignment_out_of_ready_state(client
 
 
 @pytest.mark.asyncio
+async def test_author_can_triage_beta_feedback_items(client, db):
+    author = await _create_user(db, email="author-triage@lorevia.test", tier="author")
+    reader = await _create_user(db, email="reader-triage@lorevia.test", tier="reader")
+    book = await _create_book(db, author_id=author.id)
+
+    db.add(
+        ReadingProgress(
+            user_id=reader.id,
+            book_id=book.id,
+            current_chapter=1,
+            chapters_read=[1],
+            scroll_pct=1.0,
+        )
+    )
+    await db.commit()
+
+    create_response = await client.post(
+        f"/api/v1/books/{book.id}/beta-reads",
+        headers=_auth_headers(author.id),
+        json={
+            "reader_email": reader.email,
+            "task_label": "Collect confusion feedback",
+            "window_days": 7,
+            "required_feedback_item_count": 1,
+        },
+    )
+    assignment_id = create_response.json()["id"]
+
+    feedback_response = await client.post(
+        f"/api/v1/beta-reads/{assignment_id}/feedback-items",
+        headers=_auth_headers(reader.id),
+        json={
+            "kind": "confusing",
+            "chapter_number": 1,
+            "anchor_text": "The lantern answers in a different voice here.",
+            "body": "I lost track of whether this was the same presence from the opener.",
+        },
+    )
+    assert feedback_response.status_code == 201
+    feedback_item_id = feedback_response.json()["feedback_items"][0]["id"]
+
+    task_created = await client.put(
+        f"/api/v1/books/{book.id}/beta-reads/{assignment_id}/feedback-items/{feedback_item_id}",
+        headers=_auth_headers(author.id),
+        json={
+            "author_status": "task_created",
+            "author_task_id": "revision-task:lantern-voice",
+        },
+    )
+    assert task_created.status_code == 200
+    item = task_created.json()["feedback_items"][0]
+    assert item["author_status"] == "task_created"
+    assert item["author_task_id"] == "revision-task:lantern-voice"
+    assert item["author_updated_at"] is not None
+
+    resolved = await client.put(
+        f"/api/v1/books/{book.id}/beta-reads/{assignment_id}/feedback-items/{feedback_item_id}",
+        headers=_auth_headers(author.id),
+        json={
+            "author_status": "resolved",
+            "author_task_id": None,
+        },
+    )
+    assert resolved.status_code == 200
+    resolved_item = resolved.json()["feedback_items"][0]
+    assert resolved_item["author_status"] == "resolved"
+    assert resolved_item["author_task_id"] is None
+
+
+@pytest.mark.asyncio
 async def test_beta_read_assignment_rejects_windows_outside_three_to_seven_days(client, db):
     author = await _create_user(db, email="author-window@lorevia.test", tier="author")
     reader = await _create_user(db, email="reader-window@lorevia.test", tier="reader")
@@ -246,7 +301,6 @@ async def test_beta_read_assignment_rejects_windows_outside_three_to_seven_days(
             "reader_email": reader.email,
             "task_label": "Short window",
             "window_days": 2,
-            "reward_points": 20,
         },
     )
     assert too_short.status_code == 422
@@ -259,7 +313,6 @@ async def test_beta_read_assignment_rejects_windows_outside_three_to_seven_days(
             "reader_email": reader.email,
             "task_label": "Long window",
             "window_days": 8,
-            "reward_points": 20,
         },
     )
     assert too_long.status_code == 422
@@ -280,7 +333,6 @@ async def test_unassigned_reader_cannot_access_beta_book(client, db):
             "reader_email": assigned_reader.email,
             "task_label": "Assigned access",
             "window_days": 3,
-            "reward_points": 15,
         },
     )
     assert create_response.status_code == 201
@@ -293,7 +345,7 @@ async def test_unassigned_reader_cannot_access_beta_book(client, db):
 
 
 @pytest.mark.asyncio
-async def test_award_job_is_idempotent_and_resets_missed_streak(client, db):
+async def test_completion_job_is_idempotent_and_resets_missed_streak(client, db):
     author = await _create_user(db, email="author-idem@lorevia.test", tier="author")
     reader = await _create_user(db, email="reader-idem@lorevia.test", tier="reader")
     reader.consecutive_missed_beta_reads = 2
@@ -319,7 +371,6 @@ async def test_award_job_is_idempotent_and_resets_missed_streak(client, db):
             "reader_email": reader.email,
             "task_label": "Idempotent award",
             "window_days": 7,
-            "reward_points": 40,
             "required_progress_pct": 100,
             "required_comment_count": 0,
             "required_feedback_item_count": 1,
@@ -352,14 +403,6 @@ async def test_award_job_is_idempotent_and_resets_missed_streak(client, db):
     await run_beta_read_jobs(db, limit=20)
     await db.commit()
 
-    ledger_entries = (
-        await db.execute(
-            select(PointLedgerEntry).where(PointLedgerEntry.user_id == reader.id)
-        )
-    ).scalars().all()
-    assert len(ledger_entries) == 2
-    assert sorted(entry.points_delta for entry in ledger_entries) == [2, 52]
-
     await db.refresh(reader)
     assert reader.consecutive_missed_beta_reads == 0
     assert reader.beta_read_penalty_status == "none"
@@ -378,7 +421,6 @@ async def test_expired_assignments_move_to_missed_and_increment_consecutive_coun
             "reader_email": reader.email,
             "task_label": "Expire me",
             "window_days": 3,
-            "reward_points": 18,
         },
     )
     assignment_id = create_response.json()["id"]
@@ -401,6 +443,52 @@ async def test_expired_assignments_move_to_missed_and_increment_consecutive_coun
 
     await db.refresh(reader)
     assert reader.consecutive_missed_beta_reads == 1
+
+
+@pytest.mark.asyncio
+async def test_expired_beta_read_revokes_book_invite_access(client, db):
+    author = await _create_user(db, email="author-invite-expire@lorevia.test", tier="author")
+    reader = await _create_user(db, email="reader-invite-expire@lorevia.test", tier="reader")
+    book = await _create_book(db, author_id=author.id)
+
+    create_response = await client.post(
+        f"/api/v1/books/{book.id}/beta-reads",
+        headers=_auth_headers(author.id),
+        json={
+            "reader_email": reader.email,
+            "task_label": "Temporary access",
+            "window_days": 3,
+        },
+    )
+    assert create_response.status_code == 201
+
+    before_expiry = await client.get("/api/v1/books", headers=_auth_headers(reader.id))
+    assert before_expiry.status_code == 200
+    assert any(item["id"] == str(book.id) for item in before_expiry.json())
+
+    assignment = (
+        await db.execute(select(BetaReadAssignment).where(BetaReadAssignment.book_id == book.id))
+    ).scalar_one()
+    collaborator = (
+        await db.execute(
+            select(BookCollaborator).where(
+                BookCollaborator.book_id == book.id,
+                BookCollaborator.email == reader.email,
+            )
+        )
+    ).scalar_one()
+    assignment.expires_at = assignment.expires_at - timedelta(days=10)
+    await db.commit()
+
+    await run_beta_read_jobs(db, limit=20)
+    await db.commit()
+
+    await db.refresh(collaborator)
+    assert collaborator.invite_status == "revoked"
+
+    after_expiry = await client.get("/api/v1/books", headers=_auth_headers(reader.id))
+    assert after_expiry.status_code == 200
+    assert all(item["id"] != str(book.id) for item in after_expiry.json())
 
 
 @pytest.mark.asyncio
@@ -427,7 +515,6 @@ async def test_revoked_assignments_cannot_be_completed(client, db):
             "reader_email": reader.email,
             "task_label": "Revoke me",
             "window_days": 3,
-            "reward_points": 18,
             "required_feedback_item_count": 1,
         },
     )
@@ -462,7 +549,6 @@ async def test_author_cannot_assign_beta_readers_to_another_authors_book(client,
             "reader_email": reader.email,
             "task_label": "Unauthorized assign",
             "window_days": 3,
-            "reward_points": 10,
         },
     )
     assert response.status_code == 404

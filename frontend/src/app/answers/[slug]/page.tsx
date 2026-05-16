@@ -11,7 +11,7 @@ import {
   getBlogArticleBySlug,
   getDemoPageBySlug,
 } from "@/lib/content"
-import { DEFAULT_OG_IMAGE, SITE_NAME, toAbsoluteUrl } from "@/lib/seo"
+import { DEFAULT_OG_IMAGE, SITE_NAME, buildBreadcrumbJsonLd, toAbsoluteUrl } from "@/lib/seo"
 
 export function generateStaticParams() {
   return answerPages.map((answer) => ({ slug: answer.slug }))
@@ -27,6 +27,7 @@ export function generateMetadata({ params }: { params: { slug: string } }): Meta
   return {
     title: answer.question,
     description: answer.description,
+    authors: [{ name: SITE_NAME, url: toAbsoluteUrl("/") }],
     alternates: {
       canonical: `/answers/${answer.slug}`,
     },
@@ -77,6 +78,11 @@ export default function AnswerPage({ params }: { params: { slug: string } }) {
       },
     ],
   }
+  const breadcrumbJsonLd = buildBreadcrumbJsonLd([
+    { name: "Home", path: "/" },
+    { name: "Answers", path: "/answers" },
+    { name: answer.question, path: `/answers/${answer.slug}` },
+  ])
 
   return (
     <main className="app-shell overflow-hidden">
@@ -84,6 +90,9 @@ export default function AnswerPage({ params }: { params: { slug: string } }) {
       <div className="absolute inset-x-0 top-0 -z-10 h-[28rem] bg-[radial-gradient(circle_at_top,rgba(15,118,110,0.14),transparent_36%),radial-gradient(circle_at_85%_10%,rgba(180,83,9,0.12),transparent_24%)]" />
       <Script id={`answers-jsonld-${answer.slug}`} type="application/ld+json" strategy="beforeInteractive">
         {JSON.stringify(jsonLd).replace(/</g, "\\u003c")}
+      </Script>
+      <Script id={`answers-breadcrumbs-jsonld-${answer.slug}`} type="application/ld+json" strategy="beforeInteractive">
+        {JSON.stringify(breadcrumbJsonLd).replace(/</g, "\\u003c")}
       </Script>
 
       <PublicContentHeader activeSection="answers" />

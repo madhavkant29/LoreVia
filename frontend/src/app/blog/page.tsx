@@ -1,10 +1,11 @@
 import type { Metadata } from "next"
 import Link from "next/link"
+import Script from "next/script"
 
 import { PublicContentHeader, ContentArrowIcon } from "@/components/marketing/PublicContentHeader"
 import { Reveal } from "@/components/marketing/Reveal"
 import { blogArticles, demoPages, getAnswersByArticleSlug } from "@/lib/content"
-import { DEFAULT_OG_IMAGE, SITE_NAME, SITE_URL } from "@/lib/seo"
+import { BLOG_RSS_PATH, DEFAULT_OG_IMAGE, SITE_NAME, SITE_URL, buildCollectionPageJsonLd } from "@/lib/seo"
 
 const featuredArticle = blogArticles[0]
 
@@ -21,6 +22,9 @@ export const metadata: Metadata = {
   ],
   alternates: {
     canonical: "/blog",
+    types: {
+      "application/rss+xml": BLOG_RSS_PATH,
+    },
   },
   openGraph: {
     title: `LoreVia Blog | ${SITE_NAME}`,
@@ -46,10 +50,20 @@ export const metadata: Metadata = {
 }
 
 export default function BlogPage() {
+  const jsonLd = buildCollectionPageJsonLd({
+    name: "LoreVia Blog",
+    description:
+      "Long-form LoreVia guides for fiction authors on character tracking, continuity, story bibles, writing software, and revision workflows.",
+    path: "/blog",
+  })
+
   return (
     <main className="app-shell overflow-hidden">
       <div className="app-shell__mesh" />
       <div className="absolute inset-x-0 top-0 -z-10 h-[34rem] bg-[radial-gradient(circle_at_top,rgba(15,118,110,0.16),transparent_40%),radial-gradient(circle_at_82%_10%,rgba(180,83,9,0.16),transparent_24%)]" />
+      <Script id="blog-collection-jsonld" type="application/ld+json" strategy="beforeInteractive">
+        {JSON.stringify(jsonLd).replace(/</g, "\\u003c")}
+      </Script>
 
       <PublicContentHeader activeSection="blog" />
 

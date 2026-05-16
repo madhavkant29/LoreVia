@@ -38,8 +38,6 @@ from app.utils.book_utils import (
     normalize_collaboration_permissions,
     normalize_collaboration_scope,
 )
-from app.services.monetization_service import grant_points, grant_review_feedback_points
-from app.utils.monetization_utils import POINT_SOURCE_BETA_READ_AUTHOR_REWARD
 
 ACTIVE_READER_STATES = {
     BetaReadAssignmentState.ACTIVE.value,
@@ -88,7 +86,6 @@ PENALTY_STATUS_NONE = "none"
 PENALTY_STATUS_WARNING = "warning"
 PENALTY_STATUS_STRONG_WARNING = "strong_warning"
 PENALTY_STATUS_PENALTY_REQUIRED = "penalty_required"
-POINT_SOURCE_BETA_READ = "beta_read_completed"
 FEEDBACK_KINDS = {
     BetaReadFeedbackKind.CHAPTER_COMMENT.value,
     BetaReadFeedbackKind.SCENE_REACTION.value,
@@ -96,6 +93,12 @@ FEEDBACK_KINDS = {
     BetaReadFeedbackKind.CONFUSING.value,
     BetaReadFeedbackKind.BORING.value,
     BetaReadFeedbackKind.FAVORITE.value,
+}
+AUTHOR_FEEDBACK_ITEM_STATUSES = {
+    "open",
+    "resolved",
+    "archived",
+    "task_created",
 }
 RATED_ASSIGNMENT_STATES = {
     BetaReadAssignmentState.SUBMITTED.value,
@@ -200,6 +203,31 @@ def normalize_feedback_kind(kind: str) -> str:
     return normalized
 
 
+def normalize_author_feedback_item_status(status: str) -> str:
+    normalized = str(status or "").strip().lower().replace(" ", "_")
+    if normalized not in AUTHOR_FEEDBACK_ITEM_STATUSES:
+        raise HTTPException(400, "Invalid beta-read feedback status.")
+    return normalized
+
+
+def beta_feedback_item_author_metadata(item: BetaReadFeedbackItem) -> dict[str, Any]:
+    metadata = dict(item.metadata_json or {})
+    status = normalize_author_feedback_item_status(metadata.get("author_status") or "open")
+    task_id = str(metadata.get("author_task_id")).strip() or None if metadata.get("author_task_id") is not None else None
+    updated_at_raw = metadata.get("author_updated_at")
+    updated_at = None
+    if isinstance(updated_at_raw, str):
+        try:
+            updated_at = datetime.fromisoformat(updated_at_raw.replace("Z", "+00:00"))
+        except ValueError:
+            updated_at = None
+    return {
+        "author_status": status,
+        "author_task_id": task_id,
+        "author_updated_at": updated_at,
+    }
+
+
 def normalize_beta_read_rating(value: float | int | None) -> float:
     try:
         rating = float(value)
@@ -297,26 +325,6 @@ async def book_beta_rating_summary(
         "neutral_rating_count": neutral,
         "negative_rating_count": negative,
     }
-
-
-def beta_read_reward_multiplier(average_rating: float | None) -> float:
-    if average_rating is None:
-        return 1.0
-    if average_rating >= 4.5:
-        return 1.5
-    if average_rating >= 4.0:
-        return 1.3
-    if average_rating >= 3.5:
-        return 1.15
-    return 1.0
-
-
-def compute_beta_read_reward_points(base_points: int, average_rating: float | None) -> int:
-    base = max(int(base_points or 0), 0)
-    if base <= 0:
-        return 0
-    boosted = int(round(base * beta_read_reward_multiplier(average_rating)))
-    return max(base, boosted)
 
 
 def submission_is_late(assignment: BetaReadAssignment, now: datetime | None = None) -> bool:
@@ -601,23 +609,29 @@ async def _serialize_beta_read_feedback_items(
         ).scalars().all()
         scenes = {scene.id: scene for scene in scene_rows}
 
-    return [
-        BetaReadFeedbackItemOut(
-            id=str(item.id),
-            kind=item.kind,
-            chapter_number=item.chapter_number,
-            scene_id=str(item.scene_id) if item.scene_id else None,
-            scene_title=scenes.get(item.scene_id).title if item.scene_id in scenes else None,
-            question_id=str(item.question_id) if item.question_id else None,
-            question_prompt=questions.get(item.question_id).prompt if item.question_id in questions else None,
-            reaction=item.reaction,
-            anchor_text=item.anchor_text,
-            body=item.body,
-            created_at=item.created_at,
-            updated_at=item.updated_at,
+    serialized_items: list[BetaReadFeedbackItemOut] = []
+    for item in items:
+        author_metadata = beta_feedback_item_author_metadata(item)
+        serialized_items.append(
+            BetaReadFeedbackItemOut(
+                id=str(item.id),
+                kind=item.kind,
+                chapter_number=item.chapter_number,
+                scene_id=str(item.scene_id) if item.scene_id else None,
+                scene_title=scenes.get(item.scene_id).title if item.scene_id in scenes else None,
+                question_id=str(item.question_id) if item.question_id else None,
+                question_prompt=questions.get(item.question_id).prompt if item.question_id in questions else None,
+                reaction=item.reaction,
+                anchor_text=item.anchor_text,
+                body=item.body,
+                author_status=author_metadata["author_status"],
+                author_task_id=author_metadata["author_task_id"],
+                author_updated_at=author_metadata["author_updated_at"],
+                created_at=item.created_at,
+                updated_at=item.updated_at,
+            )
         )
-        for item in items
-    ]
+    return serialized_items
 
 
 async def _upsert_beta_read_collaborator(
@@ -832,7 +846,6 @@ async def create_beta_read_assignment(
         chapter_start=chapter_start,
         chapter_end=chapter_end,
         window_days=window_days,
-        reward_points=int(body.reward_points),
         required_progress_pct=int(body.required_progress_pct),
         required_comment_count=int(body.required_comment_count),
         required_feedback_item_count=int(body.required_feedback_item_count),
@@ -860,13 +873,12 @@ async def create_beta_read_assignment(
                 book_id=book.id,
                 kind="beta_read_assigned",
                 title=f"You were assigned a beta read for {book.title}",
-                body="Complete before the deadline to earn points.",
+                body="Complete before the deadline to finish this beta read cleanly.",
                 data={
                     "assignment_id": str(assignment.id),
                     "book_id": str(book.id),
                     "book_title": book.title,
                     "task_label": assignment.task_label,
-                    "reward_points": assignment.reward_points,
                     "question_count": len(author_questions),
                     "starts_at": assignment.starts_at.isoformat(),
                     "expires_at": assignment.expires_at.isoformat(),
@@ -1237,6 +1249,42 @@ async def delete_beta_read_feedback_item(
     await db.commit()
 
 
+async def update_beta_read_feedback_item_author_state(
+    db: AsyncSession,
+    *,
+    assignment: BetaReadAssignment,
+    feedback_item_id: uuid.UUID,
+    author_status: str,
+    author_task_id: str | None,
+) -> BetaReadFeedbackItem:
+    item = (
+        await db.execute(
+            select(BetaReadFeedbackItem).where(
+                BetaReadFeedbackItem.id == feedback_item_id,
+                BetaReadFeedbackItem.assignment_id == assignment.id,
+            )
+        )
+    ).scalar_one_or_none()
+    if item is None:
+        raise HTTPException(404, "Beta-read feedback item not found.")
+
+    metadata = dict(item.metadata_json or {})
+    normalized_status = normalize_author_feedback_item_status(author_status)
+    cleaned_task_id = str(author_task_id).strip() if author_task_id is not None else ""
+    metadata["author_status"] = normalized_status
+    metadata["author_updated_at"] = utc_now().isoformat()
+    if normalized_status == "task_created":
+        if not cleaned_task_id:
+            raise HTTPException(400, "author_task_id is required when marking feedback as task_created.")
+        metadata["author_task_id"] = cleaned_task_id
+    else:
+        metadata["author_task_id"] = cleaned_task_id or None
+    item.metadata_json = metadata
+    await db.commit()
+    await db.refresh(item)
+    return item
+
+
 async def build_beta_read_assignment_out(
     db: AsyncSession,
     *,
@@ -1248,6 +1296,7 @@ async def build_beta_read_assignment_out(
     book = await db.get(Book, assignment.book_id)
     if book is None:
         raise HTTPException(404, "Book not found")
+    rating_summary = await book_beta_rating_summary(db, book_id=assignment.book_id)
     resolved_reader = reader_user
     if resolved_reader is None and assignment.reader_user_id is not None:
         resolved_reader = await db.get(User, assignment.reader_user_id)
@@ -1262,7 +1311,6 @@ async def build_beta_read_assignment_out(
             )
         ).scalar_one_or_none()
     snapshot = await _assignment_progress_snapshot(db, assignment=assignment, progress=progress)
-    rating_summary = await book_beta_rating_summary(db, book_id=assignment.book_id)
     requirements_met = _requirements_met(assignment, snapshot)
     effective_user = resolved_reader or current_user
     consecutive_missed = int(effective_user.consecutive_missed_beta_reads or 0) if effective_user is not None else 0
@@ -1286,12 +1334,6 @@ async def build_beta_read_assignment_out(
         chapter_start=assignment.chapter_start,
         chapter_end=assignment.chapter_end,
         window_days=assignment.window_days,
-        reward_points=assignment.reward_points,
-        projected_reward_points=compute_beta_read_reward_points(
-            assignment.reward_points,
-            rating_summary["average_rating"],
-        ),
-        awarded_points=assignment.awarded_points,
         required_progress_pct=assignment.required_progress_pct,
         required_comment_count=assignment.required_comment_count,
         required_feedback_item_count=assignment.required_feedback_item_count,
@@ -1301,7 +1343,6 @@ async def build_beta_read_assignment_out(
         access_granted_at=assignment.access_granted_at,
         submitted_at=assignment.submitted_at,
         completed_at=assignment.completed_at,
-        awarded_at=assignment.awarded_at,
         first_opened_at=assignment.first_opened_at,
         missed_reason=assignment.missed_reason,
         counted_toward_missed_streak=assignment.counted_toward_missed_streak,
@@ -1334,7 +1375,7 @@ async def build_beta_read_assignment_out(
         final_rating=float(assignment.final_rating) if assignment.final_rating is not None else None,
         rating_sentiment=beta_read_rating_sentiment(float(assignment.final_rating)) if assignment.final_rating is not None else None,
         book_average_rating=rating_summary["average_rating"],
-        book_rating_count=int(rating_summary["rating_count"]),
+        book_rating_count=rating_summary["rating_count"],
     )
 
 
@@ -1487,7 +1528,7 @@ async def submit_beta_read_feedback(
     expired_now = await expire_beta_assignment_if_due(db, assignment=assignment, now=now)
     if expired_now and not settings.BETA_READ_ALLOW_LATE_FEEDBACK:
         await db.commit()
-        raise HTTPException(409, "This beta read has already expired. Late feedback does not award points.")
+        raise HTTPException(409, "This beta read has already expired. Late feedback is no longer accepted for completion.")
     await sync_beta_assignment_progress(db, assignment=assignment, now=now)
     if expired_now:
         assignment.final_feedback = final_feedback.strip()
@@ -1569,7 +1610,7 @@ async def revoke_beta_read_assignment(
                 book_id=assignment.book_id,
                 kind="beta_read_revoked",
                 title="A beta read was revoked",
-                body="This beta read is no longer available for points.",
+                body="This beta read is no longer available.",
                 data={"assignment_id": str(assignment.id), "book_id": str(assignment.book_id)},
             )
         )
@@ -1620,50 +1661,17 @@ async def award_submitted_beta_reads(
             sync_beta_read_access(assignment, collaborator)
             continue
 
-        rating_summary = await book_beta_rating_summary(db, book_id=assignment.book_id)
-        awarded_points = compute_beta_read_reward_points(
-            assignment.reward_points,
-            rating_summary["average_rating"],
-        )
-        await grant_points(
-            db,
-            reader.id,
-            awarded_points,
-            POINT_SOURCE_BETA_READ,
-            source_id=str(assignment.id),
-            metadata={
-                "book_id": str(assignment.book_id),
-                "task_label": assignment.task_label,
-                "submitted_at": assignment.submitted_at.isoformat() if assignment.submitted_at else None,
-                "average_rating": rating_summary["average_rating"],
-                "final_rating": assignment.final_rating,
-            },
-        )
-        assignment.awarded_points = awarded_points
-        assignment.awarded_at = utc_now()
-        set_beta_assignment_state(assignment, BetaReadAssignmentState.COMPLETED.value, now=assignment.awarded_at)
+        completed_at = utc_now()
+        set_beta_assignment_state(assignment, BetaReadAssignmentState.COMPLETED.value, now=completed_at)
         reset_missed_beta_read_penalty(reader)
-        if assignment.final_rating is not None and beta_read_rating_sentiment(float(assignment.final_rating)) == "positive":
-            await grant_points(
-                db,
-                assignment.author_user_id,
-                max(int(settings.POSITIVE_BETA_REVIEW_REWARD_POINTS), 0),
-                POINT_SOURCE_BETA_READ_AUTHOR_REWARD,
-                source_id=str(assignment.id),
-                metadata={
-                    "book_id": str(assignment.book_id),
-                    "reader_user_id": str(reader.id),
-                    "final_rating": assignment.final_rating,
-                },
-            )
         db.add(
             Notification(
                 user_id=reader.id,
                 book_id=assignment.book_id,
-                kind="beta_read_points_awarded",
-                title="Beta read points awarded",
-                body=f"You earned {awarded_points} points for completing this beta read on time.",
-                data={"assignment_id": str(assignment.id), "points": awarded_points},
+                kind="beta_read_completed",
+                title="Beta read completed",
+                body="Thanks for submitting your beta read on time.",
+                data={"assignment_id": str(assignment.id)},
             )
         )
         completed += 1
@@ -1719,11 +1727,11 @@ async def send_beta_read_reminders(
         if 23 <= hours_left <= 24 and assignment.reminder_24h_sent_at is None:
             assignment.reminder_24h_sent_at = now
             sent += 1
-            body = "24 hours left. Complete before the deadline to earn points."
+            body = "24 hours left. Complete before the deadline."
         elif 5 <= hours_left <= 6 and assignment.reminder_6h_sent_at is None:
             assignment.reminder_6h_sent_at = now
             sent += 1
-            body = "6 hours left. Finish the reading and feedback to keep the points."
+            body = "6 hours left. Finish the reading and feedback before the assignment closes."
         else:
             continue
         db.add(

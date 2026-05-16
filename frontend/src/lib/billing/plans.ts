@@ -11,17 +11,18 @@ export function canUseAuthorFeatures(tier?: UserTier | null) {
 }
 
 export function isPaidTier(tier?: UserTier | null) {
-  return tier === "reader" || canUseAuthorFeatures(tier)
+  return canUseAuthorFeatures(tier)
 }
 
 export function tierLabel(tier?: UserTier | null) {
   switch (tier) {
+    case "collaborator":
     case "reader":
-      return "Beta reader access"
+      return "Invited beta reader"
     case "author":
       return "Author"
     case "architect":
-      return "Lore Architect"
+      return "Architect"
     case "admin":
       return "Admin"
     case "free":

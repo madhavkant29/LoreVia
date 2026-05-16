@@ -11,19 +11,19 @@ const audienceTabs = {
     "Voice and detail inconsistency detection",
     "Worldbuilding gaps before beta readers find them",
   ],
-  Screenwriters: [
-    "Scene continuity across drafts",
-    "Motivation tracking by character and beat",
-    "Dialogue voice checks",
-    "Location and prop consistency",
-    "Beat references for rewrites",
+  "Series Authors": [
+    "Cross-book continuity checks for recurring casts and lore",
+    "Timeline recall that follows reveals across volumes",
+    "Relationship tracking that survives major revisions",
+    "Story-bible support grounded in the manuscript, not memory",
+    "Multi-book scans before contradictions spread downstream",
   ],
-  Collaboration: [
+  Collaborators: [
     "Invite-only beta reading windows",
-    "Read-only manuscript access for feedback partners",
+    "Author-scoped access for beta readers and editors",
     "Guided questions, comments, and reactions for draft review",
     "Spoiler-bounded reading context for collaborators",
-    "Author-controlled collaboration without exposing drafting tools",
+    "Author-controlled collaboration without turning LoreVia into a public reader app",
   ],
 } as const
 

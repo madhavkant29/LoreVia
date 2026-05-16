@@ -168,28 +168,28 @@ describe("foundation utilities", () => {
     expect(canUseAuthorFeatures("admin")).toBe(true)
   })
 
-  it("does not mark reader tiers as able to use author features", () => {
-    expect(canUseAuthorFeatures("reader")).toBe(false)
+  it("does not mark invited beta-reader tiers as able to use author features", () => {
+    expect(canUseAuthorFeatures("collaborator")).toBe(false)
   })
 
-  it("treats collaboration access as a paid-capable tier", () => {
-    expect(isPaidTier("reader")).toBe(true)
+  it("does not treat invited beta-reader access as a paid tier", () => {
+    expect(isPaidTier("collaborator")).toBe(false)
   })
 
   it("does not treat free as a paid tier", () => {
     expect(isPaidTier("free")).toBe(false)
   })
 
-  it("returns a beta reader access label", () => {
-    expect(tierLabel("reader")).toBe("Beta reader access")
+  it("returns an invited beta reader label", () => {
+    expect(tierLabel("collaborator")).toBe("Invited beta reader")
   })
 
   it("returns an Author label", () => {
     expect(tierLabel("author")).toBe("Author")
   })
 
-  it("returns a Lore Architect label", () => {
-    expect(tierLabel("architect")).toBe("Lore Architect")
+  it("returns an Architect label", () => {
+    expect(tierLabel("architect")).toBe("Architect")
   })
 
   it("returns an Admin label", () => {

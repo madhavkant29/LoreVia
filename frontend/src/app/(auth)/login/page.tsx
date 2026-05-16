@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
 import axios from "axios"
 import { authApi } from "@/lib/api/auth"
-import { isGoogleSignupRedirectError, normalizeOAuthLoginError } from "@/lib/auth/oauthMessages"
+import { normalizeLoginError, shouldShowCreateAccountCta } from "@/lib/auth/loginMessages"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { supabase } from "@/lib/supabase"
@@ -48,7 +48,7 @@ function LoginInner() {
 
   useEffect(() => {
     const oauthError = searchParams.get("error")
-    if (oauthError) setError(normalizeOAuthLoginError(oauthError))
+    if (oauthError) setError(normalizeLoginError(oauthError))
   }, [searchParams])
 
   const submit = async (e: React.FormEvent) => {
@@ -67,11 +67,11 @@ function LoginInner() {
       if (axios.isAxiosError(error)) {
         const detail = error.response?.data?.detail
         if (error.response?.status === 401) {
-          setError("Invalid email or password.")
+          setError(normalizeLoginError(typeof detail === "string" ? detail : null, 401))
           return
         }
         if (typeof detail === "string" && detail.trim()) {
-          setError(detail)
+          setError(normalizeLoginError(detail))
           return
         }
       }
@@ -189,7 +189,7 @@ function LoginInner() {
                   Resend verification email
                 </Link>
               ) : null}
-              {isGoogleSignupRedirectError(error) ? (
+              {shouldShowCreateAccountCta(error) ? (
                 <Link
                   href="/register"
                   className={`mt-2 inline-flex font-medium underline-offset-2 hover:underline ${

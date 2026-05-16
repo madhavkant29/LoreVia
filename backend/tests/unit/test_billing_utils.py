@@ -10,7 +10,9 @@ from app.utils.billing_utils import (
     build_subscription_metrics_summary,
     calculate_upload_usage_summary,
     ensure_upload_capacity,
+    normalize_tier,
     paddle_plan_from_event_data,
+    summary_mode_allowed,
     worldbuilding_upload_cost_for_book,
 )
 
@@ -112,11 +114,55 @@ async def test_ensure_upload_capacity_blocks_free_users_after_single_upload(db):
         await ensure_upload_capacity(db, user, requested_uploads=1)
 
     assert exc.value.status_code == 403
-    assert "Free tier limited to 1 uploads" in exc.value.detail
+    assert "This account is limited to 1 owned upload" in exc.value.detail
+
+
+@pytest.mark.asyncio
+async def test_ensure_upload_capacity_treats_legacy_reader_alias_like_non_author_owner_for_uploads(db):
+    user = User(email="billing-reader-cap@lorevia.app", username="billingreadercap", password_hash="hash", tier="reader")
+    db.add(user)
+    await db.flush()
+
+    db.add(Book(user_id=user.id, title="Reader Project", format="txt", s3_key="books/reader.txt", status="ready"))
+    await db.commit()
+
+    with pytest.raises(HTTPException) as exc:
+        await ensure_upload_capacity(db, user, requested_uploads=1)
+
+    assert exc.value.status_code == 403
+    assert "Upgrade to Author for higher owner upload limits." in exc.value.detail
 
 
 def test_paddle_plan_from_event_data_does_not_default_unknown_events_to_reader():
     assert paddle_plan_from_event_data({"items": []}) == ""
+
+
+def test_paddle_plan_from_event_data_maps_legacy_pro_labels_to_author_plan():
+    payload = {
+        "items": [
+            {
+                "price": {
+                    "name": "LoreVia Pro",
+                    "billing_cycle": {"interval": "month"},
+                }
+            }
+        ]
+    }
+
+    assert paddle_plan_from_event_data(payload) == "author_monthly"
+
+
+def test_normalize_tier_maps_legacy_reader_aliases_back_to_free():
+    assert normalize_tier("collaborator") == "free"
+    assert normalize_tier("reader") == "free"
+
+
+def test_summary_modes_are_available_across_free_author_and_architect_tiers():
+    for tier in ("free", "author", "architect"):
+        user = User(email=f"{tier}@lorevia.app", username=f"{tier}user", password_hash="hash", tier=tier)
+        assert summary_mode_allowed(user, "short") is True
+        assert summary_mode_allowed(user, "detailed") is True
+        assert summary_mode_allowed(user, "key_points") is True
 
 
 @pytest.mark.asyncio

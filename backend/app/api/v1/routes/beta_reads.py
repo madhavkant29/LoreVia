@@ -10,6 +10,7 @@ from app.schemas.beta_reads import (
     BetaReadAssignmentDetailOut,
     BetaReadAssignmentListOut,
     BetaReadAssignmentOut,
+    BetaReadFeedbackItemAuthorUpdateBody,
     BetaReadFeedbackItemCreateBody,
     BetaReadFeedbackSubmitBody,
     BetaReadQuestionAppendBody,
@@ -32,6 +33,7 @@ from app.utils.beta_read_utils import (
     start_beta_read,
     submit_beta_read_feedback,
     sync_beta_assignment_progress,
+    update_beta_read_feedback_item_author_state,
 )
 from app.utils.book_utils import get_owned_book
 from app.utils.billing_utils import require_author_access
@@ -192,6 +194,31 @@ async def remove_beta_read_feedback_item(
     )
     await db.refresh(assignment)
     return await build_beta_read_assignment_detail_out(db, assignment=assignment, current_user=current_user)
+
+
+@router.put("/books/{book_id}/beta-reads/{assignment_id}/feedback-items/{feedback_item_id}", response_model=BetaReadAssignmentDetailOut)
+async def update_book_beta_read_feedback_item(
+    book_id: uuid.UUID,
+    assignment_id: uuid.UUID,
+    feedback_item_id: uuid.UUID,
+    body: BetaReadFeedbackItemAuthorUpdateBody,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
+    assignment = await get_beta_assignment_for_author(db, assignment_id=assignment_id, author_user_id=current_user.id)
+    if assignment.book_id != book.id:
+        raise HTTPException(404, "Beta read assignment not found.")
+    await update_beta_read_feedback_item_author_state(
+        db,
+        assignment=assignment,
+        feedback_item_id=feedback_item_id,
+        author_status=body.author_status,
+        author_task_id=body.author_task_id,
+    )
+    await db.refresh(assignment)
+    return await build_beta_read_assignment_detail_out(db, assignment=assignment)
 
 
 @router.post("/beta-reads/{assignment_id}/submit-feedback", response_model=BetaReadAssignmentOut)

@@ -3,10 +3,12 @@ from __future__ import annotations
 import uuid
 
 from fastapi import HTTPException
-from sqlalchemy import func, or_, select
+from sqlalchemy import case, func, literal, literal_column, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.redis import cache_incr, key_public_forum_cache_version
+from app.models.beta_read import BetaReadAssignment
 from app.models.book import Book, BookForumComment, BookForumCommentReaction, BookForumInterest, BookForumPost, Chapter
 from app.models.intelligence import Notification
 from app.models.user import User
@@ -15,6 +17,7 @@ from app.schemas.public import (
     PublicForumCommentOut,
     PublicForumInterestCreateBody,
     PublicForumInterestOut,
+    PublicForumPostListOut,
     PublicForumPostCreateBody,
     PublicForumPostOut,
     PublicForumPostUpdateBody,
@@ -22,7 +25,8 @@ from app.schemas.public import (
     PublicUserProfileOut,
     PublicUserProjectOut,
 )
-from app.utils.beta_read_utils import book_beta_rating_summary
+from app.utils.billing_utils import ADMIN_TIER, ARCHITECT_TIER, AUTHOR_TIER, user_access_tier
+from app.utils.beta_read_utils import NEUTRAL_RATING_MIN, POSITIVE_RATING_MIN, RATED_ASSIGNMENT_STATES
 
 FORUM_POST_OPEN = "open"
 FORUM_POST_CLOSED = "closed"
@@ -35,11 +39,114 @@ VALID_FORUM_COMMENT_REACTIONS = {
     FORUM_COMMENT_REACTION_DISLIKE,
     FORUM_COMMENT_REACTION_CLEAR,
 }
+PUBLIC_DEMO_SOURCE_KIND = "public_demo"
+USER_PUBLIC_SHARE_SOURCE_KIND = "user_public_share"
+PUBLIC_FORUM_STATUS_DISABLED = "disabled"
+PUBLIC_FORUM_STATUS_INTERNAL = "internal"
+PUBLIC_FORUM_STATUS_BETA = "beta"
+PUBLIC_FORUM_STATUS_PUBLIC = "public"
+PUBLIC_SHARE_STATUS_NOT_REQUESTED = "not_requested"
+PUBLIC_SHARE_STATUS_PENDING = "pending"
+PUBLIC_SHARE_STATUS_APPROVED = "approved"
+VALID_PUBLIC_FORUM_STATUSES = {
+    PUBLIC_FORUM_STATUS_DISABLED,
+    PUBLIC_FORUM_STATUS_INTERNAL,
+    PUBLIC_FORUM_STATUS_BETA,
+    PUBLIC_FORUM_STATUS_PUBLIC,
+}
+VALID_PUBLIC_SHARE_STATUSES = {
+    PUBLIC_SHARE_STATUS_NOT_REQUESTED,
+    PUBLIC_SHARE_STATUS_PENDING,
+    PUBLIC_SHARE_STATUS_APPROVED,
+}
+DEFAULT_PUBLIC_FORUM_PAGE_SIZE = 20
+MAX_PUBLIC_FORUM_PAGE_SIZE = 100
+
+
+def has_public_authoring_access(user: User | None) -> bool:
+    if user is None:
+        return False
+    return user_access_tier(user) in {AUTHOR_TIER, ARCHITECT_TIER, ADMIN_TIER}
+
+
+def ensure_public_authoring_access(user: User | None, *, action_label: str) -> None:
+    if has_public_authoring_access(user):
+        return
+    raise HTTPException(
+        403,
+        f"{action_label} requires an Author or Architect plan.",
+    )
 
 
 def ensure_public_mode_enabled() -> None:
     if not settings.PUBLIC_MODE_ENABLED:
         raise HTTPException(503, "Public mode is temporarily disabled")
+
+
+def public_catalog_kind(book: Book | None) -> str | None:
+    if book is None or not bool(book.is_public):
+        return None
+
+    source_kind = str(getattr(book, "source_kind", "") or "").strip().lower()
+    if source_kind == PUBLIC_DEMO_SOURCE_KIND:
+        return PUBLIC_DEMO_SOURCE_KIND
+    if source_kind == USER_PUBLIC_SHARE_SOURCE_KIND:
+        return USER_PUBLIC_SHARE_SOURCE_KIND
+    if str(getattr(book, "format", "") or "").strip().lower() == "manual":
+        return PUBLIC_DEMO_SOURCE_KIND
+    return USER_PUBLIC_SHARE_SOURCE_KIND
+
+
+def is_public_demo_book(book: Book | None) -> bool:
+    return public_catalog_kind(book) == PUBLIC_DEMO_SOURCE_KIND
+
+
+def is_user_public_share_book(book: Book | None) -> bool:
+    return public_catalog_kind(book) == USER_PUBLIC_SHARE_SOURCE_KIND
+
+
+def get_public_share_status(book: Book | None) -> str:
+    value = str(getattr(book, "public_share_status", "") or "").strip().lower()
+    if value in VALID_PUBLIC_SHARE_STATUSES:
+        return value
+    if bool(getattr(book, "is_public", False)) and str(getattr(book, "source_kind", "") or "").strip().lower() == USER_PUBLIC_SHARE_SOURCE_KIND:
+        return PUBLIC_SHARE_STATUS_APPROVED
+    return PUBLIC_SHARE_STATUS_NOT_REQUESTED
+
+
+def is_approved_user_public_share_book(book: Book | None) -> bool:
+    return (
+        bool(getattr(book, "is_public", False))
+        and str(getattr(book, "source_kind", "") or "").strip().lower() == USER_PUBLIC_SHARE_SOURCE_KIND
+        and get_public_share_status(book) == PUBLIC_SHARE_STATUS_APPROVED
+    )
+
+
+def get_public_forum_status() -> str:
+    status = str(settings.PUBLIC_FORUM_STATUS or PUBLIC_FORUM_STATUS_DISABLED).strip().lower()
+    if status not in VALID_PUBLIC_FORUM_STATUSES:
+        raise HTTPException(
+            500,
+            "PUBLIC_FORUM_STATUS must be one of: disabled, internal, beta, public.",
+        )
+    return status
+
+
+def ensure_public_forum_read_enabled() -> None:
+    ensure_public_mode_enabled()
+    status = get_public_forum_status()
+    if status in {PUBLIC_FORUM_STATUS_DISABLED, PUBLIC_FORUM_STATUS_INTERNAL}:
+        raise HTTPException(404, "Public forum is not available.")
+
+
+def ensure_public_forum_write_enabled() -> None:
+    ensure_public_mode_enabled()
+    status = get_public_forum_status()
+    if status == PUBLIC_FORUM_STATUS_PUBLIC:
+        return
+    if status == PUBLIC_FORUM_STATUS_BETA:
+        raise HTTPException(403, "Public forum is currently read-only.")
+    raise HTTPException(404, "Public forum is not available.")
 
 
 def public_forum_discoverability_score(
@@ -135,18 +242,293 @@ async def _get_visible_forum_post(db: AsyncSession, *, post_id: uuid.UUID) -> tu
     return post, book
 
 
-async def _count_forum_interests(db: AsyncSession, *, post_id: uuid.UUID) -> int:
-    count = (
-        await db.execute(select(func.count(BookForumInterest.id)).where(BookForumInterest.post_id == post_id))
-    ).scalar_one()
-    return int(count or 0)
+async def _get_author_accessible_forum_post(
+    db: AsyncSession,
+    *,
+    post_id: uuid.UUID,
+    author_user_id: uuid.UUID,
+) -> tuple[BookForumPost, Book]:
+    post = await _get_forum_post(db, post_id=post_id)
+    if post.author_user_id != author_user_id:
+        raise HTTPException(404, "Forum post not found.")
+    book = await db.get(Book, post.book_id)
+    if book is None or book.hidden_at is not None or book.archived_at is not None or bool(book.is_public):
+        raise HTTPException(404, "Forum post not found.")
+    return post, book
 
 
-async def _count_forum_comments(db: AsyncSession, *, post_id: uuid.UUID) -> int:
-    count = (
-        await db.execute(select(func.count(BookForumComment.id)).where(BookForumComment.post_id == post_id))
-    ).scalar_one()
-    return int(count or 0)
+async def _invalidate_public_forum_cache() -> None:
+    await cache_incr(key_public_forum_cache_version(), default=1)
+
+
+def _normalize_public_forum_pagination(page: int, page_size: int) -> tuple[int, int]:
+    normalized_page = max(int(page or 1), 1)
+    normalized_page_size = max(1, min(int(page_size or DEFAULT_PUBLIC_FORUM_PAGE_SIZE), MAX_PUBLIC_FORUM_PAGE_SIZE))
+    return normalized_page, normalized_page_size
+
+
+def _public_forum_visibility_filters() -> tuple:
+    return (
+        BookForumPost.status == FORUM_POST_OPEN,
+        Book.hidden_at.is_(None),
+        Book.archived_at.is_(None),
+        Book.is_public.is_(False),
+    )
+
+
+def _public_forum_search_clause(query: str | None):
+    normalized_query = " ".join((query or "").split()).strip()
+    if not normalized_query:
+        return None
+    like = f"%{normalized_query}%"
+    return or_(
+        Book.title.ilike(like),
+        Book.author.ilike(like),
+        Book.genre.ilike(like),
+        BookForumPost.headline.ilike(like),
+        BookForumPost.body.ilike(like),
+        User.username.ilike(like),
+    )
+
+
+def _public_forum_rating_summary_subquery():
+    average_rating = func.round(func.avg(BetaReadAssignment.final_rating), 2).label("average_rating")
+    rating_count = func.count(BetaReadAssignment.id).label("rating_count")
+    positive_rating_count = func.sum(
+        case(
+            (
+                BetaReadAssignment.final_rating >= POSITIVE_RATING_MIN,
+                1,
+            ),
+            else_=0,
+        )
+    ).label("positive_rating_count")
+    neutral_rating_count = func.sum(
+        case(
+            (
+                (BetaReadAssignment.final_rating >= NEUTRAL_RATING_MIN)
+                & (BetaReadAssignment.final_rating < POSITIVE_RATING_MIN),
+                1,
+            ),
+            else_=0,
+        )
+    ).label("neutral_rating_count")
+    negative_rating_count = func.sum(
+        case(
+            (
+                BetaReadAssignment.final_rating < NEUTRAL_RATING_MIN,
+                1,
+            ),
+            else_=0,
+        )
+    ).label("negative_rating_count")
+    return (
+        select(
+            BetaReadAssignment.book_id.label("book_id"),
+            average_rating,
+            rating_count,
+            positive_rating_count,
+            neutral_rating_count,
+            negative_rating_count,
+        )
+        .where(
+            BetaReadAssignment.state.in_(list(RATED_ASSIGNMENT_STATES)),
+            BetaReadAssignment.final_rating.is_not(None),
+        )
+        .group_by(BetaReadAssignment.book_id)
+        .subquery()
+    )
+
+
+def _public_forum_comment_count_subquery():
+    return (
+        select(
+            BookForumComment.post_id.label("post_id"),
+            func.count(BookForumComment.id).label("comment_count"),
+        )
+        .group_by(BookForumComment.post_id)
+        .subquery()
+    )
+
+
+def _public_forum_interest_count_subquery():
+    return (
+        select(
+            BookForumInterest.post_id.label("post_id"),
+            func.count(BookForumInterest.id).label("interest_count"),
+        )
+        .group_by(BookForumInterest.post_id)
+        .subquery()
+    )
+
+
+def _public_forum_interest_state_subquery(user_id: uuid.UUID | None):
+    if user_id is None:
+        return None
+    return (
+        select(
+            BookForumInterest.post_id.label("post_id"),
+            BookForumInterest.status.label("viewer_interest_status"),
+        )
+        .where(BookForumInterest.interested_user_id == user_id)
+        .subquery()
+    )
+
+
+def _public_forum_discoverability_expression(rating_subquery, interest_subquery):
+    average_rating = func.coalesce(rating_subquery.c.average_rating, 0.0)
+    rating_count = func.coalesce(rating_subquery.c.rating_count, 0)
+    positive_rating_count = func.coalesce(rating_subquery.c.positive_rating_count, 0)
+    negative_rating_count = func.coalesce(rating_subquery.c.negative_rating_count, 0)
+    interest_count = func.coalesce(interest_subquery.c.interest_count, 0)
+    return func.round(
+        (average_rating * 100)
+        + (func.least(rating_count, 12) * 4)
+        + (positive_rating_count * 12)
+        - (negative_rating_count * 9)
+        + (func.least(interest_count, 20) * 2),
+        2,
+    )
+
+
+def _public_forum_post_select_statement(
+    *,
+    q: str | None = None,
+    viewer_user_id: uuid.UUID | None = None,
+    post_id: uuid.UUID | None = None,
+):
+    rating_subquery = _public_forum_rating_summary_subquery()
+    comment_subquery = _public_forum_comment_count_subquery()
+    interest_subquery = _public_forum_interest_count_subquery()
+    viewer_interest_subquery = _public_forum_interest_state_subquery(viewer_user_id)
+    discoverability_score = _public_forum_discoverability_expression(rating_subquery, interest_subquery).label(
+        "discoverability_score"
+    )
+    statement = (
+        select(
+            BookForumPost,
+            Book,
+            User,
+            func.coalesce(comment_subquery.c.comment_count, 0).label("comment_count"),
+            func.coalesce(interest_subquery.c.interest_count, 0).label("interest_count"),
+            rating_subquery.c.average_rating.label("average_rating"),
+            func.coalesce(rating_subquery.c.rating_count, 0).label("rating_count"),
+            func.coalesce(rating_subquery.c.positive_rating_count, 0).label("positive_rating_count"),
+            func.coalesce(rating_subquery.c.neutral_rating_count, 0).label("neutral_rating_count"),
+            func.coalesce(rating_subquery.c.negative_rating_count, 0).label("negative_rating_count"),
+            (
+                viewer_interest_subquery.c.viewer_interest_status
+                if viewer_interest_subquery is not None
+                else literal(None)
+            ).label("viewer_interest_status"),
+            discoverability_score,
+        )
+        .join(Book, Book.id == BookForumPost.book_id)
+        .join(User, User.id == BookForumPost.author_user_id)
+        .outerjoin(comment_subquery, comment_subquery.c.post_id == BookForumPost.id)
+        .outerjoin(interest_subquery, interest_subquery.c.post_id == BookForumPost.id)
+        .outerjoin(rating_subquery, rating_subquery.c.book_id == BookForumPost.book_id)
+    )
+    if viewer_interest_subquery is not None:
+        statement = statement.outerjoin(viewer_interest_subquery, viewer_interest_subquery.c.post_id == BookForumPost.id)
+
+    statement = statement.where(*_public_forum_visibility_filters())
+    search_clause = _public_forum_search_clause(q)
+    if search_clause is not None:
+        statement = statement.where(search_clause)
+    if post_id is not None:
+        statement = statement.where(BookForumPost.id == post_id)
+    return statement
+
+
+def _author_forum_post_select_statement(
+    *,
+    author_user_id: uuid.UUID,
+    post_id: uuid.UUID | None = None,
+):
+    rating_subquery = _public_forum_rating_summary_subquery()
+    comment_subquery = _public_forum_comment_count_subquery()
+    interest_subquery = _public_forum_interest_count_subquery()
+    discoverability_score = _public_forum_discoverability_expression(rating_subquery, interest_subquery).label(
+        "discoverability_score"
+    )
+    statement = (
+        select(
+            BookForumPost,
+            Book,
+            User,
+            func.coalesce(comment_subquery.c.comment_count, 0).label("comment_count"),
+            func.coalesce(interest_subquery.c.interest_count, 0).label("interest_count"),
+            rating_subquery.c.average_rating.label("average_rating"),
+            func.coalesce(rating_subquery.c.rating_count, 0).label("rating_count"),
+            func.coalesce(rating_subquery.c.positive_rating_count, 0).label("positive_rating_count"),
+            func.coalesce(rating_subquery.c.neutral_rating_count, 0).label("neutral_rating_count"),
+            func.coalesce(rating_subquery.c.negative_rating_count, 0).label("negative_rating_count"),
+            literal(None).label("viewer_interest_status"),
+            discoverability_score,
+        )
+        .join(Book, Book.id == BookForumPost.book_id)
+        .join(User, User.id == BookForumPost.author_user_id)
+        .outerjoin(comment_subquery, comment_subquery.c.post_id == BookForumPost.id)
+        .outerjoin(interest_subquery, interest_subquery.c.post_id == BookForumPost.id)
+        .outerjoin(rating_subquery, rating_subquery.c.book_id == BookForumPost.book_id)
+        .where(
+            BookForumPost.author_user_id == author_user_id,
+            Book.hidden_at.is_(None),
+            Book.archived_at.is_(None),
+            Book.is_public.is_(False),
+        )
+    )
+    if post_id is not None:
+        statement = statement.where(BookForumPost.id == post_id)
+    return statement
+
+
+async def list_author_public_forum_posts(
+    db: AsyncSession,
+    *,
+    author_user_id: uuid.UUID,
+) -> list[PublicForumPostOut]:
+    rows = (
+        await db.execute(
+            _author_forum_post_select_statement(author_user_id=author_user_id).order_by(
+                BookForumPost.updated_at.desc(),
+                BookForumPost.created_at.desc(),
+            )
+        )
+    ).all()
+    return [
+        build_public_forum_post_out(
+            post=post,
+            book=book,
+            author_user=author_user,
+            rating_summary=PublicForumRatingSummaryOut(
+                average_rating=float(average_rating) if average_rating is not None else None,
+                rating_count=int(rating_count or 0),
+                positive_rating_count=int(positive_rating_count or 0),
+                neutral_rating_count=int(neutral_rating_count or 0),
+                negative_rating_count=int(negative_rating_count or 0),
+            ),
+            interest_count=int(interest_count or 0),
+            comment_count=int(comment_count or 0),
+            viewer_interest_status=viewer_interest_status,
+            discoverability_score=float(discoverability_score or 0.0),
+        )
+        for (
+            post,
+            book,
+            author_user,
+            comment_count,
+            interest_count,
+            average_rating,
+            rating_count,
+            positive_rating_count,
+            neutral_rating_count,
+            negative_rating_count,
+            viewer_interest_status,
+            discoverability_score,
+        ) in rows
+    ]
 
 
 async def _comment_reaction_map(
@@ -205,7 +587,7 @@ async def _build_public_user_project_out(db: AsyncSession, *, user_id: uuid.UUID
             forum_post_id=str(post.id),
         )
 
-    latest_book = (
+    latest_public_books = (
         await db.execute(
             select(Book)
             .where(
@@ -215,9 +597,10 @@ async def _build_public_user_project_out(db: AsyncSession, *, user_id: uuid.UUID
                 Book.archived_at.is_(None),
             )
             .order_by(Book.created_at.desc())
-            .limit(1)
+            .limit(10)
         )
-    ).scalar_one_or_none()
+    ).scalars().all()
+    latest_book = next((book for book in latest_public_books if is_approved_user_public_share_book(book)), None)
     if latest_book is None:
         return None
 
@@ -260,20 +643,20 @@ async def public_profile_activity_counts(db: AsyncSession, *, user_id: uuid.UUID
             )
         )
     ).scalar_one()
-    public_book_count = (
+    public_books = (
         await db.execute(
-            select(func.count(Book.id)).where(
+            select(Book).where(
                 Book.user_id == user_id,
                 Book.is_public.is_(True),
                 Book.hidden_at.is_(None),
                 Book.archived_at.is_(None),
             )
         )
-    ).scalar_one()
+    ).scalars().all()
     return (
         int(public_forum_post_count or 0),
         int(public_forum_comment_count or 0),
-        int(public_book_count or 0),
+        sum(1 for book in public_books if is_approved_user_public_share_book(book)),
     )
 
 
@@ -301,52 +684,48 @@ async def build_public_user_profile_out(
     )
 
 
-async def build_public_forum_post_out(
-    db: AsyncSession,
+def build_public_forum_post_out(
     *,
     post: BookForumPost,
-    book: Book | None = None,
-    author_user: User | None = None,
-    interest_count: int | None = None,
-    comment_count: int | None = None,
+    book: Book,
+    author_user: User,
+    rating_summary: PublicForumRatingSummaryOut | None = None,
+    interest_count: int = 0,
+    comment_count: int = 0,
+    viewer_interest_status: str | None = None,
+    discoverability_score: float | None = None,
 ) -> PublicForumPostOut:
-    resolved_book = book or await db.get(Book, post.book_id)
-    if resolved_book is None:
-        raise HTTPException(404, "Book not found.")
-    resolved_author = author_user or await db.get(User, post.author_user_id)
-    if resolved_author is None:
-        raise HTTPException(404, "Author not found.")
-    rating_summary = await book_beta_rating_summary(db, book_id=post.book_id)
-    resolved_interest_count = interest_count if interest_count is not None else await _count_forum_interests(db, post_id=post.id)
-    resolved_comment_count = comment_count if comment_count is not None else await _count_forum_comments(db, post_id=post.id)
-    rating_payload = PublicForumRatingSummaryOut(**rating_summary)
-    discoverability_score = public_forum_discoverability_score(
-        average_rating=rating_payload.average_rating,
-        rating_count=rating_payload.rating_count,
-        positive_rating_count=rating_payload.positive_rating_count,
-        negative_rating_count=rating_payload.negative_rating_count,
-        interest_count=resolved_interest_count,
-    )
+    rating_payload = rating_summary or PublicForumRatingSummaryOut()
+    resolved_discoverability_score = discoverability_score
+    if resolved_discoverability_score is None:
+        resolved_discoverability_score = public_forum_discoverability_score(
+            average_rating=rating_payload.average_rating,
+            rating_count=rating_payload.rating_count,
+            positive_rating_count=rating_payload.positive_rating_count,
+            negative_rating_count=rating_payload.negative_rating_count,
+            interest_count=interest_count,
+        )
     return PublicForumPostOut(
         id=str(post.id),
         book_id=str(post.book_id),
         author_user_id=str(post.author_user_id),
-        author_username=resolved_author.username,
-        author_reputation_score=int(resolved_author.reputation_score or 0),
-        author_trust_level=reputation_trust_level(resolved_author.reputation_score),
-        title=resolved_book.title,
-        author=resolved_book.author,
-        genre=resolved_book.genre,
-        work_type=resolved_book.work_type,
+        author_username=author_user.username,
+        author_reputation_score=int(author_user.reputation_score or 0),
+        author_trust_level=reputation_trust_level(author_user.reputation_score),
+        title=book.title,
+        author=book.author,
+        genre=book.genre,
+        work_type=book.work_type,
         headline=post.headline,
         body=post.body,
         desired_beta_reader_count=post.desired_beta_reader_count,
         allow_contact_requests=bool(post.allow_contact_requests),
         status=post.status,
-        interest_count=resolved_interest_count,
-        comment_count=resolved_comment_count,
+        viewer_interest_status=viewer_interest_status,
+        interest_count=interest_count,
+        comment_count=comment_count,
         rating_summary=rating_payload,
-        discoverability_score=discoverability_score,
+        discoverability_score=float(resolved_discoverability_score),
         created_at=post.created_at,
         updated_at=post.updated_at,
     )
@@ -358,15 +737,21 @@ async def create_public_forum_post(
     current_user: User,
     body: PublicForumPostCreateBody,
 ) -> PublicForumPostOut:
+    ensure_public_authoring_access(current_user, action_label="Opening a public discussion")
     book = await _get_private_owned_book(db, book_id=body.book_id, author_user_id=current_user.id)
     headline = " ".join(body.headline.split()).strip()
     description = body.body.strip()
     if not headline or not description:
         raise HTTPException(400, "Forum headline and body are required.")
-    existing = (
-        await db.execute(select(BookForumPost).where(BookForumPost.book_id == book.id))
+    existing_open_post = (
+        await db.execute(
+            select(BookForumPost).where(
+                BookForumPost.book_id == book.id,
+                BookForumPost.status == FORUM_POST_OPEN,
+            )
+        )
     ).scalar_one_or_none()
-    if existing is not None:
+    if existing_open_post is not None:
         raise HTTPException(409, "This manuscript already has a beta forum post. Update it instead.")
 
     post = BookForumPost(
@@ -381,7 +766,8 @@ async def create_public_forum_post(
     db.add(post)
     await db.commit()
     await db.refresh(post)
-    return await build_public_forum_post_out(db, post=post, book=book, author_user=current_user, interest_count=0, comment_count=0)
+    await _invalidate_public_forum_cache()
+    return await get_public_forum_post_detail(db, post_id=post.id, current_user=current_user)
 
 
 async def update_public_forum_post(
@@ -399,58 +785,114 @@ async def update_public_forum_post(
     description = body.body.strip()
     if not headline or not description:
         raise HTTPException(400, "Forum headline and body are required.")
+    next_status = _normalize_forum_status(body.status)
+    if not has_public_authoring_access(current_user):
+        attempted_non_closing_change = (
+            headline != post.headline
+            or description != post.body
+            or body.desired_beta_reader_count != post.desired_beta_reader_count
+            or bool(body.allow_contact_requests) != bool(post.allow_contact_requests)
+            or next_status != FORUM_POST_CLOSED
+        )
+        if attempted_non_closing_change:
+            raise HTTPException(403, "Opening or editing a public discussion requires an Author or Architect plan.")
+    if next_status == FORUM_POST_OPEN:
+        existing_open_post = (
+            await db.execute(
+                select(BookForumPost).where(
+                    BookForumPost.book_id == book.id,
+                    BookForumPost.status == FORUM_POST_OPEN,
+                    BookForumPost.id != post.id,
+                )
+            )
+        ).scalar_one_or_none()
+        if existing_open_post is not None:
+            raise HTTPException(409, "This manuscript already has another open beta forum post.")
     post.headline = headline
     post.body = description
     post.desired_beta_reader_count = body.desired_beta_reader_count
     post.allow_contact_requests = bool(body.allow_contact_requests)
-    post.status = _normalize_forum_status(body.status)
+    post.status = next_status
     await db.commit()
     await db.refresh(post)
-    return await build_public_forum_post_out(db, post=post, book=book, author_user=current_user)
+    await _invalidate_public_forum_cache()
+    return await get_public_forum_post_detail(db, post_id=post.id, current_user=current_user)
 
 
 async def list_public_forum_posts(
     db: AsyncSession,
     *,
     q: str | None = None,
-) -> list[PublicForumPostOut]:
-    statement = (
-        select(BookForumPost, Book, User)
+    page: int = 1,
+    page_size: int = DEFAULT_PUBLIC_FORUM_PAGE_SIZE,
+    current_user: User | None = None,
+) -> PublicForumPostListOut:
+    normalized_page, normalized_page_size = _normalize_public_forum_pagination(page, page_size)
+    total_statement = (
+        select(func.count(BookForumPost.id))
         .join(Book, Book.id == BookForumPost.book_id)
         .join(User, User.id == BookForumPost.author_user_id)
-        .where(
-            BookForumPost.status == FORUM_POST_OPEN,
-            Book.hidden_at.is_(None),
-            Book.archived_at.is_(None),
-            Book.is_public.is_(False),
-        )
+        .where(*_public_forum_visibility_filters())
     )
-    query = " ".join((q or "").split()).strip()
-    if query:
-        like = f"%{query}%"
-        statement = statement.where(
-            or_(
-                Book.title.ilike(like),
-                Book.author.ilike(like),
-                Book.genre.ilike(like),
-                BookForumPost.headline.ilike(like),
-                BookForumPost.body.ilike(like),
-                User.username.ilike(like),
-            )
+    search_clause = _public_forum_search_clause(q)
+    if search_clause is not None:
+        total_statement = total_statement.where(search_clause)
+    total = int((await db.execute(total_statement)).scalar_one() or 0)
+
+    statement = _public_forum_post_select_statement(
+        q=q,
+        viewer_user_id=current_user.id if current_user is not None else None,
+    ).order_by(
+        literal_column("discoverability_score").desc(),
+        User.reputation_score.desc(),
+        literal_column("average_rating").desc(),
+        literal_column("rating_count").desc(),
+        literal_column("comment_count").desc(),
+        BookForumPost.created_at.desc(),
+    )
+    rows = (
+        await db.execute(
+            statement.offset((normalized_page - 1) * normalized_page_size).limit(normalized_page_size)
         )
-    rows = (await db.execute(statement)).all()
-    items = [await build_public_forum_post_out(db, post=post, book=book, author_user=author_user) for post, book, author_user in rows]
-    return sorted(
-        items,
-        key=lambda item: (
-            item.discoverability_score,
-            item.author_reputation_score,
-            item.rating_summary.average_rating or 0.0,
-            item.rating_summary.rating_count,
-            item.comment_count,
-            item.created_at,
-        ),
-        reverse=True,
+    ).all()
+    items = [
+        build_public_forum_post_out(
+            post=post,
+            book=book,
+            author_user=author_user,
+            rating_summary=PublicForumRatingSummaryOut(
+                average_rating=float(average_rating) if average_rating is not None else None,
+                rating_count=int(rating_count or 0),
+                positive_rating_count=int(positive_rating_count or 0),
+                neutral_rating_count=int(neutral_rating_count or 0),
+                negative_rating_count=int(negative_rating_count or 0),
+            ),
+            interest_count=int(interest_count or 0),
+            comment_count=int(comment_count or 0),
+            viewer_interest_status=viewer_interest_status,
+            discoverability_score=float(discoverability_score or 0.0),
+        )
+        for (
+            post,
+            book,
+            author_user,
+            comment_count,
+            interest_count,
+            average_rating,
+            rating_count,
+            positive_rating_count,
+            neutral_rating_count,
+            negative_rating_count,
+            viewer_interest_status,
+            discoverability_score,
+        ) in rows
+    ]
+    return PublicForumPostListOut(
+        items=items,
+        total=total,
+        page=normalized_page,
+        page_size=normalized_page_size,
+        has_more=(normalized_page * normalized_page_size) < total,
     )
 
 
@@ -458,10 +900,59 @@ async def get_public_forum_post_detail(
     db: AsyncSession,
     *,
     post_id: uuid.UUID,
+    current_user: User | None = None,
 ) -> PublicForumPostOut:
-    post, book = await _get_visible_forum_post(db, post_id=post_id)
-    author_user = await db.get(User, post.author_user_id)
-    return await build_public_forum_post_out(db, post=post, book=book, author_user=author_user)
+    row = (
+        await db.execute(
+            _public_forum_post_select_statement(
+                viewer_user_id=current_user.id if current_user is not None else None,
+                post_id=post_id,
+            )
+        )
+    ).first()
+    if row is None:
+        if current_user is None:
+            raise HTTPException(404, "Forum post not found.")
+        row = (
+            await db.execute(
+                _author_forum_post_select_statement(
+                    author_user_id=current_user.id,
+                    post_id=post_id,
+                )
+            )
+        ).first()
+        if row is None:
+            raise HTTPException(404, "Forum post not found.")
+    (
+        post,
+        book,
+        author_user,
+        comment_count,
+        interest_count,
+        average_rating,
+        rating_count,
+        positive_rating_count,
+        neutral_rating_count,
+        negative_rating_count,
+        viewer_interest_status,
+        discoverability_score,
+    ) = row
+    return build_public_forum_post_out(
+        post=post,
+        book=book,
+        author_user=author_user,
+        rating_summary=PublicForumRatingSummaryOut(
+            average_rating=float(average_rating) if average_rating is not None else None,
+            rating_count=int(rating_count or 0),
+            positive_rating_count=int(positive_rating_count or 0),
+            neutral_rating_count=int(neutral_rating_count or 0),
+            negative_rating_count=int(negative_rating_count or 0),
+        ),
+        interest_count=int(interest_count or 0),
+        comment_count=int(comment_count or 0),
+        viewer_interest_status=viewer_interest_status,
+        discoverability_score=float(discoverability_score or 0.0),
+    )
 
 
 async def build_public_forum_interest_out(
@@ -538,6 +1029,7 @@ async def create_public_forum_interest(
     )
     await db.commit()
     await db.refresh(interest)
+    await _invalidate_public_forum_cache()
     return await build_public_forum_interest_out(db, interest=interest)
 
 
@@ -596,7 +1088,17 @@ async def list_public_forum_comments(
     post_id: uuid.UUID,
     current_user: User | None = None,
 ) -> list[PublicForumCommentOut]:
-    post, _book = await _get_visible_forum_post(db, post_id=post_id)
+    if current_user is not None:
+        try:
+            post, _book = await _get_author_accessible_forum_post(
+                db,
+                post_id=post_id,
+                author_user_id=current_user.id,
+            )
+        except HTTPException:
+            post, _book = await _get_visible_forum_post(db, post_id=post_id)
+    else:
+        post, _book = await _get_visible_forum_post(db, post_id=post_id)
     rows = (
         await db.execute(
             select(BookForumComment, User)
@@ -658,7 +1160,12 @@ async def create_public_forum_comment(
         )
     await db.commit()
     await db.refresh(comment)
+    await _invalidate_public_forum_cache()
     return await build_public_forum_comment_out(db, comment=comment, author_user=current_user, current_user=current_user)
+
+
+def forum_post_is_publicly_interactive(post: BookForumPost | PublicForumPostOut | None) -> bool:
+    return str(getattr(post, "status", "") or "").strip().lower() == FORUM_POST_OPEN
 
 
 async def react_to_public_forum_comment(
@@ -723,6 +1230,7 @@ async def react_to_public_forum_comment(
     await db.commit()
     await db.refresh(comment)
     await db.refresh(author_user)
+    await _invalidate_public_forum_cache()
     reaction_map = {comment.id: next_reaction} if next_reaction else {}
     return await build_public_forum_comment_out(
         db,

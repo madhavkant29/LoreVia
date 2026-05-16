@@ -17,16 +17,19 @@ from app.models.book import Book, SeriesBook
 from app.models.intelligence import WorldBuildingDocument
 from app.models.user import SubscriptionEvent, User
 
+# Subscription tiers describe product entitlements on the user account.
+# They must not be used as collaboration roles or per-book permissions.
+# Book access is derived separately from ownership or BookCollaborator.role.
 FREE_TIER = "free"
-READER_TIER = "reader"
 AUTHOR_TIER = "author"
 ARCHITECT_TIER = "architect"
 ADMIN_TIER = "admin"
 
 TRIAL_DAYS = 10
-AUTHOR_ACCESS_TIERS = {AUTHOR_TIER, ARCHITECT_TIER, ADMIN_TIER}
-UNLIMITED_BOOK_TIERS = {READER_TIER, ARCHITECT_TIER, ADMIN_TIER}
-VALID_USER_TIERS = {FREE_TIER, READER_TIER, AUTHOR_TIER, ARCHITECT_TIER, ADMIN_TIER}
+VALID_USER_TIERS = {FREE_TIER, AUTHOR_TIER, ARCHITECT_TIER, ADMIN_TIER}
+PAID_READING_TIERS = {AUTHOR_TIER, ARCHITECT_TIER, ADMIN_TIER}
+AUTHORING_SUBSCRIPTION_TIERS = {AUTHOR_TIER, ARCHITECT_TIER, ADMIN_TIER}
+UNLIMITED_OWNER_UPLOAD_TIERS = {ARCHITECT_TIER, ADMIN_TIER}
 DAILY_LIMIT_MESSAGE = "Your daily limit refreshes tomorrow. Want higher limits now? Upgrade."
 SUPPORTED_PADDLE_WEBHOOK_EVENTS = (
     "transaction.completed",
@@ -46,8 +49,6 @@ PRIORITY_QUEUE_NAMES = (
 PLACEHOLDER_ENV_VALUES = {
     "pdl_live_or_sandbox_key_here",
     "pdl_webhook_secret_here",
-    "price_reader_monthly_here",
-    "price_reader_annual_here",
     "price_author_monthly_here",
     "price_author_annual_here",
     "price_architect_monthly_here",
@@ -57,15 +58,17 @@ PLACEHOLDER_ENV_VALUES = {
 }
 
 LEGACY_TIER_ALIASES = {
+    "collaborator": FREE_TIER,
+    "reader": FREE_TIER,
     "pro": AUTHOR_TIER,
     "power": ARCHITECT_TIER,
 }
 
 LEGACY_PLAN_ALIASES = {
-    "pro_monthly": "reader_monthly",
-    "pro_annual": "reader_annual",
-    "power_monthly": "author_monthly",
-    "power_annual": "author_annual",
+    "pro_monthly": "author_monthly",
+    "pro_annual": "author_annual",
+    "power_monthly": "architect_monthly",
+    "power_annual": "architect_annual",
 }
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -168,15 +171,15 @@ def tier_from_plan_code(plan: str | None, price_id: str = "", plan_name: str = "
     if normalized_plan.startswith("author_"):
         return AUTHOR_TIER
     if normalized_plan.startswith("reader_"):
-        return READER_TIER
+        return FREE_TIER
 
     fallback = f"{plan_name} {price_id}".lower()
-    if "architect" in fallback or "lore architect" in fallback:
+    if "architect" in fallback or "lore architect" in fallback or "power" in fallback:
         return ARCHITECT_TIER
-    if "author" in fallback or "power" in fallback:
+    if "author" in fallback or "pro" in fallback:
         return AUTHOR_TIER
-    if "reader" in fallback or "pro" in fallback:
-        return READER_TIER
+    if "reader" in fallback:
+        return FREE_TIER
     return FREE_TIER
 
 
@@ -196,20 +199,36 @@ def trial_is_active(created_at: datetime | None, now: datetime | None = None) ->
     return current < ends_at
 
 
-def user_access_tier(user: Any, now: datetime | None = None) -> str:
-    plan_tier = normalize_tier(getattr(user, "tier", FREE_TIER))
+def subscription_tier_for_user(user: Any) -> str:
+    return normalize_tier(getattr(user, "tier", FREE_TIER))
+
+
+def billing_access_tier(user: Any, now: datetime | None = None) -> str:
+    plan_tier = subscription_tier_for_user(user)
     if settings.DEBUG:
         return ARCHITECT_TIER
-    if plan_tier in {READER_TIER, AUTHOR_TIER, ARCHITECT_TIER, ADMIN_TIER}:
+    if plan_tier in PAID_READING_TIERS:
         return plan_tier
     if trial_is_active(getattr(user, "created_at", None), now):
         return AUTHOR_TIER
     return FREE_TIER
 
 
+def user_access_tier(user: Any, now: datetime | None = None) -> str:
+    return billing_access_tier(user, now)
+
+
+def has_paid_reading_access(user: Any, now: datetime | None = None) -> bool:
+    return billing_access_tier(user, now) in PAID_READING_TIERS
+
+
+def has_authoring_access(user: Any, now: datetime | None = None) -> bool:
+    return billing_access_tier(user, now) in AUTHORING_SUBSCRIPTION_TIERS
+
+
 def build_tier_presentation(user: Any, now: datetime | None = None) -> TierPresentation:
-    plan_tier = normalize_tier(getattr(user, "tier", FREE_TIER))
-    access_tier = user_access_tier(user, now)
+    plan_tier = subscription_tier_for_user(user)
+    access_tier = billing_access_tier(user, now)
     ends_at = trial_ends_at(getattr(user, "created_at", None))
     is_trial = not settings.DEBUG and plan_tier == FREE_TIER and access_tier == AUTHOR_TIER
     return TierPresentation(
@@ -224,9 +243,8 @@ def build_tier_presentation(user: Any, now: datetime | None = None) -> TierPrese
 def tier_display_label(tier: str, trial_active: bool = False) -> str:
     labels = {
         FREE_TIER: "Free",
-        READER_TIER: "Beta reader access",
         AUTHOR_TIER: "Author",
-        ARCHITECT_TIER: "Lore Architect",
+        ARCHITECT_TIER: "Architect",
         ADMIN_TIER: "Admin",
     }
     label = labels.get(normalize_tier(tier), "Free")
@@ -234,17 +252,17 @@ def tier_display_label(tier: str, trial_active: bool = False) -> str:
 
 
 def user_can_author(user: Any) -> bool:
-    return user_access_tier(user) in AUTHOR_ACCESS_TIERS
+    return has_authoring_access(user)
 
 
 def require_author_access(user: Any) -> None:
     if not user_can_author(user):
-        raise HTTPException(403, "This authoring feature requires an Author or Lore Architect plan.")
+        raise HTTPException(403, "This authoring feature requires an Author or Architect plan.")
 
 
 def upload_limit_for_user(user: Any) -> int | None:
-    tier = user_access_tier(user)
-    if tier in {READER_TIER, ARCHITECT_TIER, ADMIN_TIER}:
+    tier = billing_access_tier(user)
+    if tier in UNLIMITED_OWNER_UPLOAD_TIERS:
         return None
     if tier == AUTHOR_TIER:
         return settings.AUTHOR_MAX_UPLOADS
@@ -354,18 +372,19 @@ async def ensure_upload_capacity(
     if projected_total <= summary.upload_limit:
         return summary
 
-    tier = user_access_tier(user)
+    tier = billing_access_tier(user)
     if tier == AUTHOR_TIER:
         base_message = (
             f"Author tier includes {summary.upload_limit} uploads. "
             f"You have {summary.uploads_remaining or 0} remaining. "
             "Worldbuilding manuscripts count as uploads too, and series-linked worldbuilding manuscripts count once per book in the series. "
-            "Upgrade to Lore Architect for unlimited uploads."
+            "Upgrade to Architect for unlimited uploads."
         )
     else:
         base_message = (
-            f"Free tier limited to {summary.upload_limit} uploads. "
-            "Worldbuilding manuscripts count as uploads too."
+            f"This account is limited to {summary.upload_limit} owned upload"
+            f"{'' if summary.upload_limit == 1 else 's'}. "
+            "Worldbuilding manuscripts count as uploads too. Upgrade to Author for higher owner upload limits."
         )
     if context:
         base_message = f"{base_message} {context}"
@@ -671,11 +690,11 @@ def paddle_plan_from_event_data(data: dict[str, Any]) -> str:
         candidate = f"{price.get('name', '')} {price.get('description', '')} {product.get('name', '')}".lower()
         interval = ((price.get("billing_cycle") or {}).get("interval") or "").lower()
         suffix = "annual" if interval == "year" else "monthly"
-        if "architect" in candidate or "lore architect" in candidate:
+        if "architect" in candidate or "lore architect" in candidate or "power" in candidate:
             return f"architect_{suffix}"
-        if "author" in candidate or "power" in candidate:
+        if "author" in candidate or "pro" in candidate:
             return f"author_{suffix}"
-        if "reader" in candidate or "pro" in candidate:
+        if "reader" in candidate:
             return f"reader_{suffix}"
     return ""
 
@@ -706,7 +725,6 @@ def prediction_limit_per_day(user: Any) -> int:
     tier = user_access_tier(user)
     return {
         FREE_TIER: settings.FREE_PREDICTION_PER_DAY,
-        READER_TIER: settings.READER_PREDICTION_PER_DAY,
         AUTHOR_TIER: settings.AUTHOR_PREDICTION_PER_DAY,
         ARCHITECT_TIER: settings.ARCHITECT_PREDICTION_PER_DAY,
         ADMIN_TIER: 999999,
@@ -720,7 +738,6 @@ def protected_authoring_limit_per_day(user: Any) -> int:
         return settings.TRIAL_HIGH_COST_TURNS_PER_DAY
     return {
         FREE_TIER: settings.FREE_ADVISOR_PER_DAY,
-        READER_TIER: 0,
         AUTHOR_TIER: settings.AUTHOR_HIGH_COST_TURNS_PER_DAY,
         ARCHITECT_TIER: settings.ARCHITECT_HIGH_COST_TURNS_PER_DAY,
         ADMIN_TIER: 999999,
@@ -738,7 +755,6 @@ def continuity_limit_per_day(user: Any) -> int:
 
     return {
         FREE_TIER: settings.FREE_CONTINUITY_PER_DAY,
-        READER_TIER: 0,
         AUTHOR_TIER: settings.AUTHOR_HIGH_COST_TURNS_PER_DAY,
         ARCHITECT_TIER: settings.ARCHITECT_HIGH_COST_TURNS_PER_DAY,
         ADMIN_TIER: 999999,
@@ -746,7 +762,4 @@ def continuity_limit_per_day(user: Any) -> int:
 
 
 def summary_mode_allowed(user: Any, mode: str) -> bool:
-    tier = user_access_tier(user)
-    if tier in {READER_TIER, AUTHOR_TIER, ARCHITECT_TIER, ADMIN_TIER}:
-        return True
-    return mode == "short"
+    return mode in {"short", "detailed", "key_points"}

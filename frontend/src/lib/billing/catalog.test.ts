@@ -14,7 +14,7 @@ describe("pricing catalog", () => {
   it("marks checkout tiers as paid subscriptions", () => {
     const paidTiers = pricingTiers.filter((tier) => tier.access === "paid")
 
-    expect(paidTiers.map((tier) => tier.name)).toEqual(["Author", "Lore Architect"])
+    expect(paidTiers.map((tier) => tier.name)).toEqual(["Author", "Architect"])
     expect(paidTiers.every((tier) => pricingTierAccessLabel(tier) === "Paid subscription")).toBe(true)
     expect(paidTiers.every((tier) => pricingTierGuestCtaLabel(tier) === "Create account for free trial")).toBe(true)
   })

@@ -139,7 +139,6 @@ from app.schemas.books import (
     WriterWorkspaceBody,
     WriterWorkspaceOut,
 )
-from app.services.monetization_service import charge_public_share_points
 from app.utils.advisor_utils import invalidate_advisor_caches
 from app.utils.billing_utils import calculate_upload_usage_summary, require_author_access
 from app.utils.book_utils import (
@@ -421,7 +420,10 @@ async def upload_book_endpoint(
     if visibility not in {"private", "public"}:
         raise HTTPException(400, "Invalid visibility")
     if visibility == "public":
-        ensure_public_mode_enabled()
+        raise HTTPException(
+            400,
+            "Main upload flow only supports private manuscripts. Use the explicit public-sharing route after upload.",
+        )
     if mode not in {"reader", "author"}:
         raise HTTPException(400, "Invalid mode")
     if mode == "author":
@@ -435,7 +437,7 @@ async def upload_book_endpoint(
     selected_series = await resolve_owned_series_ids(db, current_user.id, series_ids)
     await check_upload_limit(db, current_user, requested_uploads=1)
 
-    is_public = visibility == "public"
+    is_public = False
     # Stream-read with a hard size cap to prevent OOM DoS.
     raw = await _read_upload_bounded(file, MAX_BOOK_UPLOAD_BYTES, "Book file")
     if not raw:
@@ -447,20 +449,6 @@ async def upload_book_endpoint(
         if cover_raw:
             # Validate magic bytes — never trust client-supplied MIME or extension.
             _validate_cover_magic(cover_raw)
-    if is_public:
-        try:
-            await charge_public_share_points(
-                db,
-                current_user,
-                source_id=str(book_id),
-                metadata={
-                    "book_title": title,
-                    "visibility": visibility,
-                    "entrypoint": "upload",
-                },
-            )
-        except ValueError as exc:
-            raise HTTPException(400, str(exc)) from exc
     s3_key = storage.upload_book_bytes(raw, str(current_user.id), file.filename)
     cover_s3_key = None
     if cover_raw:

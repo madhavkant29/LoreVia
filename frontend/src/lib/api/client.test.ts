@@ -25,7 +25,7 @@ vi.mock("axios", () => ({
   isAxiosError: isAxiosErrorMock,
 }))
 
-vi.mock("@/lib/monetization/limitRecovery", () => ({
+vi.mock("@/lib/limits/dailyCap", () => ({
   buildDailyCapEventDetail: buildDailyCapEventDetailMock,
   dispatchDailyCapEvent: dispatchDailyCapEventMock,
 }))

@@ -141,7 +141,6 @@ describe("books api", () => {
       chapterStart: 12,
       chapterEnd: 12,
       windowDays: 5,
-      rewardPoints: 120,
       requiredProgressPct: 100,
       requiredCommentCount: 3,
       requiredFeedbackItemCount: 2,
@@ -158,7 +157,6 @@ describe("books api", () => {
       chapter_start: 12,
       chapter_end: 12,
       window_days: 5,
-      reward_points: 120,
       required_progress_pct: 100,
       required_comment_count: 3,
       required_feedback_item_count: 2,
@@ -513,7 +511,7 @@ describe("books api", () => {
     })
 
     await booksApi.upload(file, "Story", "Fantasy", "Author", {
-      visibility: "public",
+      visibility: "private",
       description: "Epic",
       seriesIds: ["series-1"],
       autoExtractCover: false,
@@ -529,7 +527,7 @@ describe("books api", () => {
     expect(form.get("title")).toBe("Story")
     expect(form.get("genre")).toBe("Fantasy")
     expect(form.get("author")).toBe("Author")
-    expect(form.get("visibility")).toBe("public")
+    expect(form.get("visibility")).toBe("private")
     expect(form.get("description")).toBe("Epic")
     expect(form.get("series_ids")).toBe("series-1")
     expect(form.get("auto_extract_cover")).toBe("false")

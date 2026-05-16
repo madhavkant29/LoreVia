@@ -13,9 +13,6 @@ export interface BetaReadAssignment {
   chapter_start?: number | null
   chapter_end?: number | null
   window_days: number
-  reward_points: number
-  projected_reward_points: number
-  awarded_points: number
   required_progress_pct: number
   required_comment_count: number
   required_feedback_item_count: number
@@ -25,7 +22,6 @@ export interface BetaReadAssignment {
   access_granted_at: string
   submitted_at?: string | null
   completed_at?: string | null
-  awarded_at?: string | null
   first_opened_at?: string | null
   missed_reason?: string | null
   counted_toward_missed_streak: boolean
@@ -75,6 +71,9 @@ export interface BetaReadFeedbackItem {
   reaction?: string | null
   anchor_text?: string | null
   body?: string | null
+  author_status: "open" | "resolved" | "archived" | "task_created" | string
+  author_task_id?: string | null
+  author_updated_at?: string | null
   created_at: string
   updated_at: string
 }

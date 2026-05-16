@@ -98,9 +98,6 @@ export interface BetaReadAssignment {
   chapter_start: number | null
   chapter_end: number | null
   window_days: number
-  reward_points: number
-  projected_reward_points: number
-  awarded_points: number
   required_progress_pct: number
   required_comment_count: number
   required_feedback_item_count: number
@@ -110,7 +107,6 @@ export interface BetaReadAssignment {
   access_granted_at: string
   submitted_at: string | null
   completed_at: string | null
-  awarded_at: string | null
   first_opened_at: string | null
   missed_reason: string | null
   counted_toward_missed_streak: boolean
@@ -154,7 +150,6 @@ export interface BetaReadAssignmentCreateInput {
   chapterStart?: number | null
   chapterEnd?: number | null
   windowDays: number
-  rewardPoints: number
   requiredProgressPct?: number
   requiredCommentCount?: number
   requiredFeedbackItemCount?: number

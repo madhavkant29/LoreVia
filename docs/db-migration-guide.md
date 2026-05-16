@@ -17,6 +17,25 @@ It also covers prod backup and restore workflow, recovery from a broken `public`
 - For any remote database, set `ALEMBIC_CONFIRM_REMOTE=YES_I_AM_SURE`.
 - Do not use destructive upgrade or downgrade overrides unless you have reviewed the migration and explicitly intend to drop data.
 
+## Current schema head
+
+- The current repo head after the migration hygiene cleanup is `20260516_normalize_unique_constraints`.
+- Use [backend/scripts/schema_drift_audit.sql](C:/Users/madha/.vscode/prod/LoreVia2/backend/scripts/schema_drift_audit.sql) to verify either dev or prod matches that head.
+- The frozen schema inventory for this cutover lives at [backend/scripts/frozen_schema_manifest_20260516.json](C:/Users/madha/.vscode/prod/LoreVia2/backend/scripts/frozen_schema_manifest_20260516.json).
+
+## Uniqueness standard
+
+- Prefer named `UniqueConstraint` definitions over `unique=True` column flags when the uniqueness rule is part of the public schema contract.
+- Do not combine `unique=True` and `index=True` on the same mapped column just to preserve lookup performance.
+- If a unique field is also queried frequently, rely on the backing unique index created by PostgreSQL unless a separate non-unique index is explicitly justified by query plans.
+- When reviewing autogeneration output, treat index/constraint churn on the same column as a schema smell and fix the model declaration before accepting the migration.
+
+## Legacy bootstrap revisions
+
+- `20260425_baseline_schema` and `20260429_rebuild_public_schema` are legacy-only compatibility revisions.
+- They are kept in history for deployed databases and old replay paths, but they should not be treated as the long-term model for fresh bootstraps because they depend on runtime ORM metadata.
+- The preferred fresh-environment reference is the frozen schema manifest plus the repo head migration state for the current release cutover.
+
 ## Environment variables
 
 These variables control Alembic behavior in this repo:
@@ -110,6 +129,14 @@ cd C:\Users\madha\.vscode\prod\LoreVia2\backend
 & psql "$env:ALEMBIC_DATABASE_URL" -c "select * from public.alembic_version;"
 ```
 
+### Run the drift audit
+
+Run the same SQL script against dev or prod after migrations:
+
+```powershell
+Get-Content .\scripts\schema_drift_audit.sql | psql "$env:ALEMBIC_DATABASE_URL"
+```
+
 
 ### remove old db url
 ```powershell
@@ -166,6 +193,12 @@ cd C:\Users\madha\.vscode\prod\LoreVia2\backend
 
 ```powershell
 & psql "$env:ALEMBIC_DATABASE_URL" -c "select * from public.alembic_version;"
+```
+
+### Run the drift audit
+
+```powershell
+Get-Content .\scripts\schema_drift_audit.sql | psql "$env:ALEMBIC_DATABASE_URL"
 ```
 
 ### Backup before prod

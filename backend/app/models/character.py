@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import ARRAY, Boolean, DateTime, ForeignKey, Index, Integer, String, func
+from sqlalchemy import ARRAY, Boolean, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -91,10 +91,13 @@ class CharacterState(Base):
 
 class CharacterVoiceProfile(Base):
     __tablename__ = "character_voice_profiles"
+    __table_args__ = (
+        UniqueConstraint("character_id", name="uq_character_voice_profiles_character_id"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     book_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
-    character_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("characters.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    character_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("characters.id", ondelete="CASCADE"), nullable=False)
     sample_dialogue_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     sample_word_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     avg_sentence_length: Mapped[int | None] = mapped_column(Integer)

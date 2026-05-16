@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -43,6 +43,14 @@ class Book(Base):
     series_order: Mapped[int | None] = mapped_column(Integer)
     is_public: Mapped[bool] = mapped_column(Boolean, default=False)
     public_description: Mapped[str | None] = mapped_column(String)
+    public_share_status: Mapped[str] = mapped_column(String, default="not_requested", server_default="not_requested", index=True)
+    public_share_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    public_share_approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    public_share_approved_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        index=True,
+    )
     copyright_warning: Mapped[bool] = mapped_column(Boolean, default=False)
     writer_workspace: Mapped[dict | None] = mapped_column(JSONB, default=dict)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -124,7 +132,8 @@ class BookCollaborator(Base):
 class BookForumPost(Base):
     __tablename__ = "book_forum_posts"
     __table_args__ = (
-        UniqueConstraint("book_id", name="uq_book_forum_posts_book"),
+        Index("ix_book_forum_posts_book_status", "book_id", "status"),
+        Index("ix_book_forum_posts_status_created_at", "status", "created_at"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -148,6 +157,7 @@ class BookForumInterest(Base):
     __tablename__ = "book_forum_interests"
     __table_args__ = (
         UniqueConstraint("post_id", "interested_user_id", name="uq_book_forum_interests_post_user"),
+        Index("ix_book_forum_interests_post_status_created_at", "post_id", "status", "created_at"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -168,6 +178,9 @@ class BookForumInterest(Base):
 
 class BookForumComment(Base):
     __tablename__ = "book_forum_comments"
+    __table_args__ = (
+        Index("ix_book_forum_comments_post_created_at", "post_id", "created_at"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     post_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("book_forum_posts.id", ondelete="CASCADE"), nullable=False, index=True)

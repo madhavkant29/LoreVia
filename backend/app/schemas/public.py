@@ -20,6 +20,7 @@ class PublicBookManualIn(BaseModel):
 
 class PublicBookOut(BaseModel):
     id: str
+    public_kind: str | None = None
     title: str
     author: str | None = None
     author_username: str | None = None
@@ -59,6 +60,14 @@ class PublicBookCreateOut(BaseModel):
     book_id: str
     status: str
     visibility: str
+    public_kind: str
+    approval_status: str
+    message: str | None = None
+
+
+class PublicBookShareBody(BaseModel):
+    confirm_public_share: bool = False
+    description: str | None = Field(default=None, max_length=2000)
 
 
 class PublicChapterAppendOut(BaseModel):
@@ -107,6 +116,7 @@ class PublicForumPostOut(BaseModel):
     desired_beta_reader_count: int | None = None
     allow_contact_requests: bool
     status: str
+    viewer_interest_status: str | None = None
     interest_count: int = 0
     comment_count: int = 0
     rating_summary: PublicForumRatingSummaryOut
@@ -117,6 +127,10 @@ class PublicForumPostOut(BaseModel):
 
 class PublicForumPostListOut(BaseModel):
     items: list[PublicForumPostOut]
+    total: int = 0
+    page: int = 1
+    page_size: int = 20
+    has_more: bool = False
 
 
 class PublicForumInterestCreateBody(BaseModel):

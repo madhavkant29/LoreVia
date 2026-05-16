@@ -69,15 +69,7 @@ async def test_daily_bucket_blocks_after_limit(monkeypatch):
     async def _fake_get_redis():
         return fake_redis
 
-    async def _fake_overflow_units(_db, user_id, action, now=None):
-        assert _db is None
-        return 0
-
     monkeypatch.setattr("app.api.deps.rate_limit.get_redis", _fake_get_redis)
-    monkeypatch.setattr(
-        "app.api.deps.rate_limit.purchased_overflow_units_for_action",
-        _fake_overflow_units,
-    )
     monkeypatch.setattr(
         "app.api.deps.rate_limit._current_utc",
         lambda now=None: datetime(2026, 5, 7, 10, 0, tzinfo=UTC),
@@ -93,39 +85,6 @@ async def test_daily_bucket_blocks_after_limit(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_daily_bucket_allows_purchased_overflow_units(monkeypatch):
-    fake_redis = _FakeRedis()
-
-    async def _fake_get_redis():
-        return fake_redis
-
-    async def _fake_overflow_units(_db, user_id, action, now=None):
-        assert _db is None
-        assert user_id == "user-overflow"
-        assert action == "prediction"
-        return 1
-
-    monkeypatch.setattr("app.api.deps.rate_limit.get_redis", _fake_get_redis)
-    monkeypatch.setattr(
-        "app.api.deps.rate_limit.purchased_overflow_units_for_action",
-        _fake_overflow_units,
-    )
-    monkeypatch.setattr(
-        "app.api.deps.rate_limit._current_utc",
-        lambda now=None: datetime(2026, 5, 7, 10, 0, tzinfo=UTC),
-    )
-
-    await _bump_daily_bucket(None, "user-overflow", "prediction", 2)
-    await _bump_daily_bucket(None, "user-overflow", "prediction", 2)
-    await _bump_daily_bucket(None, "user-overflow", "prediction", 2)
-
-    with pytest.raises(Exception) as exc_info:
-        await _bump_daily_bucket(None, "user-overflow", "prediction", 2)
-
-    assert getattr(exc_info.value, "status_code", None) == 429
-
-
-@pytest.mark.asyncio
 async def test_trial_authoring_surfaces_share_one_daily_bucket(monkeypatch):
     fake_redis = _FakeRedis()
 
@@ -136,15 +95,8 @@ async def test_trial_authoring_surfaces_share_one_daily_bucket(monkeypatch):
         assert _db is None
         return default
 
-    async def _fake_overflow_units(_db, user_id, action, now=None):
-        return 0
-
     monkeypatch.setattr("app.api.deps.rate_limit.get_redis", _fake_get_redis)
     monkeypatch.setattr("app.api.deps.rate_limit._limit_for_user", _fake_limit_for_user)
-    monkeypatch.setattr(
-        "app.api.deps.rate_limit.purchased_overflow_units_for_action",
-        _fake_overflow_units,
-    )
     monkeypatch.setattr("app.api.deps.rate_limit.settings.TRIAL_HIGH_COST_TURNS_PER_DAY", 2, raising=False)
     monkeypatch.setattr("app.api.deps.rate_limit.settings.DEBUG", False, raising=False)
     user = SimpleNamespace(
@@ -169,14 +121,7 @@ async def test_free_recall_limit_blocks_after_two_uses(monkeypatch):
     async def _fake_get_redis():
         return fake_redis
 
-    async def _fake_overflow_units(_db, _user_id, _action, now=None):
-        return 0
-
     monkeypatch.setattr("app.api.deps.rate_limit.get_redis", _fake_get_redis)
-    monkeypatch.setattr(
-        "app.api.deps.rate_limit.purchased_overflow_units_for_action",
-        _fake_overflow_units,
-    )
 
     user = SimpleNamespace(
         id="user-recall",
@@ -200,14 +145,7 @@ async def test_free_continuity_limit_blocks_after_one_use(monkeypatch):
     async def _fake_get_redis():
         return fake_redis
 
-    async def _fake_overflow_units(_db, _user_id, _action, now=None):
-        return 0
-
     monkeypatch.setattr("app.api.deps.rate_limit.get_redis", _fake_get_redis)
-    monkeypatch.setattr(
-        "app.api.deps.rate_limit.purchased_overflow_units_for_action",
-        _fake_overflow_units,
-    )
 
     user = SimpleNamespace(
         id="user-continuity",

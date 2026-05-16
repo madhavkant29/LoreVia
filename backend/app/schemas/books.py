@@ -69,6 +69,9 @@ class BookOut(BaseModel):
     series_order: int | None
     is_public: bool
     public_description: str | None
+    public_share_status: str | None = None
+    public_share_requested_at: datetime | None = None
+    public_share_approved_at: datetime | None = None
     copyright_warning: bool
     archived_at: datetime | None
     hidden_at: datetime | None

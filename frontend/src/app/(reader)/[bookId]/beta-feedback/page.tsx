@@ -84,7 +84,6 @@ export default function BetaFeedbackPage() {
   const [chapterStart, setChapterStart] = useState("1")
   const [chapterEnd, setChapterEnd] = useState("3")
   const [windowDays, setWindowDays] = useState("7")
-  const [rewardPoints, setRewardPoints] = useState("30")
   const [requiredProgressPct, setRequiredProgressPct] = useState("100")
   const [requiredCommentCount, setRequiredCommentCount] = useState("1")
   const [requiredFeedbackItemCount, setRequiredFeedbackItemCount] = useState("2")
@@ -137,7 +136,6 @@ export default function BetaFeedbackPage() {
         chapterStart: scopeKind === "full_book" ? null : Number(chapterStart || "1"),
         chapterEnd: scopeKind === "full_book" ? null : Number(chapterEnd || chapterStart || "1"),
         windowDays: Number(windowDays || "7"),
-        rewardPoints: Number(rewardPoints || "0"),
         requiredProgressPct: Number(requiredProgressPct || "100"),
         requiredCommentCount: Number(requiredCommentCount || "0"),
         requiredFeedbackItemCount: Number(requiredFeedbackItemCount || "1"),
@@ -254,7 +252,7 @@ export default function BetaFeedbackPage() {
     try {
       await betaReadsApi.submitReview(readerDetail.assignment.id, finalReview.trim(), Number(finalRating))
       await refreshReaderDetail(readerDetail.assignment.id)
-      setStatus("Review submitted and points eligibility checked.")
+      setStatus("Review submitted.")
     } catch {
       setStatus("Could not submit this review yet.")
     } finally {
@@ -288,7 +286,7 @@ export default function BetaFeedbackPage() {
                   {book?.title ?? "Story"} beta feedback
                 </h1>
                 <p className={`mt-2 max-w-3xl text-sm leading-6 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                  Share a read-only draft, ask direct plain-text questions, capture structured reader signals, and only release points once the reader actually submits a review.
+                  Share a read-only draft, ask direct plain-text questions, and capture structured reader signals before the final review is submitted.
                 </p>
               </div>
               {status ? <p className={`text-sm font-semibold ${status.includes("Could") ? "text-rose-400" : "text-emerald-400"}`}>{status}</p> : null}
@@ -347,7 +345,7 @@ export default function BetaFeedbackPage() {
                       />
                     </div>
                   ) : null}
-                  <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="grid gap-3 sm:grid-cols-1">
                     <input
                       type="number"
                       min="3"
@@ -355,14 +353,6 @@ export default function BetaFeedbackPage() {
                       value={windowDays}
                       onChange={(event) => setWindowDays(event.target.value)}
                       placeholder="Window days"
-                      className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 focus:border-amber-400"}`}
-                    />
-                    <input
-                      type="number"
-                      min="1"
-                      value={rewardPoints}
-                      onChange={(event) => setRewardPoints(event.target.value)}
-                      placeholder="Reward points"
                       className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 focus:border-amber-400"}`}
                     />
                   </div>
@@ -403,7 +393,7 @@ export default function BetaFeedbackPage() {
                 </div>
 
                 <div className="mt-5 grid gap-3 sm:grid-cols-4">
-                  <StatPill label="Points gated by" value="Submitted review" isDark={isDark} />
+                  <StatPill label="Completion gate" value="Submitted review" isDark={isDark} />
                   <StatPill label="Reader must add" value={`${requiredFeedbackItemCount || "1"} feedback items`} isDark={isDark} />
                   <StatPill label="Question format" value="Plain text prompts" isDark={isDark} />
                   <StatPill label="Draft access" value="Read-only share" isDark={isDark} />
@@ -442,7 +432,7 @@ export default function BetaFeedbackPage() {
                         </span>
                       </div>
                       <div className="mt-3 grid gap-2 sm:grid-cols-3">
-                        <StatPill label="Points" value={`${assignment.reward_points}`} isDark={isDark} />
+                        <StatPill label="Window" value={`${assignment.window_days} days`} isDark={isDark} />
                         <StatPill label="Comments" value={`${assignment.comment_count}/${assignment.required_comment_count}`} isDark={isDark} />
                         <StatPill label="Review items" value={`${assignment.feedback_item_count}/${assignment.required_feedback_item_count}`} isDark={isDark} />
                       </div>
@@ -525,8 +515,7 @@ export default function BetaFeedbackPage() {
                 </div>
 
                 <div className="mt-5 grid gap-3 sm:grid-cols-4">
-                  <StatPill label="Base points" value={`${readerDetail.assignment.reward_points}`} isDark={isDark} />
-                  <StatPill label="Projected payout" value={`${readerDetail.assignment.projected_reward_points}`} isDark={isDark} />
+                  <StatPill label="Window" value={`${readerDetail.assignment.window_days} days`} isDark={isDark} />
                   <StatPill label="Progress" value={`${readerDetail.assignment.progress_pct}%`} isDark={isDark} />
                   <StatPill label="Comments" value={`${readerDetail.assignment.comment_count}/${readerDetail.assignment.required_comment_count}`} isDark={isDark} />
                   <StatPill label="Review items" value={`${readerDetail.assignment.feedback_item_count}/${readerDetail.assignment.required_feedback_item_count}`} isDark={isDark} />
@@ -657,7 +646,7 @@ export default function BetaFeedbackPage() {
                 <div className={`mt-5 rounded-md border p-4 ${isDark ? "border-white/[0.06] bg-[#101720]" : "border-slate-200 bg-slate-50"}`}>
                   <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>Final review</p>
                   <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                    Points release only after you submit a written review and a 1 to 5 rating in 0.5 steps. Stronger-rated books rise in discovery and can boost later beta-read payouts.
+                    Submit a written review and a 1 to 5 rating in 0.5 steps to finish this assignment cleanly. Stronger-rated books rise in discovery for future readers.
                   </p>
                   <select
                     value={finalRating}
@@ -681,7 +670,7 @@ export default function BetaFeedbackPage() {
                     disabled={saving || !finalReview.trim()}
                     className={`mt-4 inline-flex h-11 w-full items-center justify-center rounded-md px-4 text-sm font-semibold transition ${isDark ? "bg-emerald-400 text-slate-950 hover:bg-emerald-300 disabled:bg-emerald-400/40 disabled:text-slate-900/70" : "bg-emerald-600 text-white hover:bg-emerald-500 disabled:bg-emerald-200 disabled:text-slate-500"}`}
                   >
-                    Submit review for points
+                    Submit review
                   </button>
                 </div>
               </div>

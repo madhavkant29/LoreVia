@@ -11,7 +11,7 @@ import {
   getBlogArticleBySlug,
   getDemoPageBySlug,
 } from "@/lib/content"
-import { DEFAULT_OG_IMAGE, SITE_NAME, toAbsoluteUrl } from "@/lib/seo"
+import { DEFAULT_OG_IMAGE, SITE_NAME, buildBreadcrumbJsonLd, toAbsoluteUrl } from "@/lib/seo"
 
 export function generateStaticParams() {
   return blogArticles.map((article) => ({ slug: article.slug }))
@@ -28,6 +28,8 @@ export function generateMetadata({ params }: { params: { slug: string } }): Meta
     title: article.title,
     description: article.description,
     keywords: article.keywords,
+    authors: [{ name: SITE_NAME, url: toAbsoluteUrl("/") }],
+    category: article.category,
     alternates: {
       canonical: `/blog/${article.slug}`,
     },
@@ -36,6 +38,7 @@ export function generateMetadata({ params }: { params: { slug: string } }): Meta
       title: `${article.title} | ${SITE_NAME}`,
       description: article.description,
       url: toAbsoluteUrl(`/blog/${article.slug}`),
+      publishedTime: article.publishedAt,
       images: [
         {
           url: DEFAULT_OG_IMAGE,
@@ -81,6 +84,11 @@ export default function BlogArticlePage({ params }: { params: { slug: string } }
     },
     mainEntityOfPage: toAbsoluteUrl(`/blog/${article.slug}`),
   }
+  const breadcrumbJsonLd = buildBreadcrumbJsonLd([
+    { name: "Home", path: "/" },
+    { name: "Blog", path: "/blog" },
+    { name: article.title, path: `/blog/${article.slug}` },
+  ])
 
   return (
     <main className="app-shell overflow-hidden">
@@ -88,6 +96,9 @@ export default function BlogArticlePage({ params }: { params: { slug: string } }
       <div className="absolute inset-x-0 top-0 -z-10 h-[30rem] bg-[radial-gradient(circle_at_top,rgba(15,118,110,0.15),transparent_38%),radial-gradient(circle_at_80%_12%,rgba(180,83,9,0.14),transparent_24%)]" />
       <Script id={`blog-jsonld-${article.slug}`} type="application/ld+json" strategy="beforeInteractive">
         {JSON.stringify(jsonLd).replace(/</g, "\\u003c")}
+      </Script>
+      <Script id={`blog-breadcrumbs-jsonld-${article.slug}`} type="application/ld+json" strategy="beforeInteractive">
+        {JSON.stringify(breadcrumbJsonLd).replace(/</g, "\\u003c")}
       </Script>
 
       <PublicContentHeader activeSection="blog" />

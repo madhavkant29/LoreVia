@@ -169,7 +169,7 @@ async def test_paddle_webhook_upserts_subscription_and_downgrades_on_pause(clien
 
     assert activate_response.status_code == 200
     await db.refresh(user)
-    assert user.tier == "reader"
+    assert user.tier == "free"
     subscription = (
         await db.execute(
             select(Subscription).where(Subscription.user_id == user.id)

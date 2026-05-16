@@ -1,5 +1,6 @@
 import io
 import uuid
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -258,6 +259,66 @@ async def test_upload_rejects_foreign_series_ids(client, db):
 
 
 @pytest.mark.asyncio
+async def test_author_can_upload_author_mode_book(client, db):
+    headers, user_id = await _register_user(client, "author-upload-mode@lorevia.app")
+    author = await db.get(User, user_id)
+    assert author is not None
+    author.tier = "author"
+    author.created_at = datetime.now(UTC) - timedelta(days=30)
+    await db.commit()
+
+    response = await client.post(
+        "/api/v1/books/upload",
+        headers=headers,
+        files={"file": ("draft.docx", b"fake-docx-payload", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+        data={
+            "title": "Author Draft",
+            "mode": "author",
+        },
+    )
+
+    assert response.status_code == 202
+    created = await db.get(Book, uuid.UUID(response.json()["book_id"]))
+    assert created is not None
+    assert created.user_id == user_id
+    assert created.mode == "author"
+
+
+@pytest.mark.asyncio
+async def test_legacy_reader_alias_uploads_are_limited_like_non_author_owned_uploads(client, db):
+    from app.core.security import create_access_token
+
+    reader = User(
+        email="reader-upload-limit@lorevia.app",
+        username="readeruploadlimit",
+        password_hash="hash",
+        tier="reader",
+        created_at=datetime.now(UTC) - timedelta(days=30),
+    )
+    db.add(reader)
+    await db.commit()
+    await db.refresh(reader)
+
+    headers = {"Cookie": f"lorevia_access_token={create_access_token(str(reader.id))}"}
+    first = await client.post(
+        "/api/v1/books/upload",
+        headers=headers,
+        files={"file": ("first.pdf", b"%PDF-1.4 first payload", "application/pdf")},
+        data={"title": "First Reader Upload"},
+    )
+    second = await client.post(
+        "/api/v1/books/upload",
+        headers=headers,
+        files={"file": ("second.pdf", b"%PDF-1.4 second payload", "application/pdf")},
+        data={"title": "Second Reader Upload"},
+    )
+
+    assert first.status_code == 202
+    assert second.status_code == 403
+    assert "Upgrade to Author for higher owner upload limits." in second.json()["detail"]
+
+
+@pytest.mark.asyncio
 async def test_story_scoped_collaboration_limits_shared_book_access(client, db):
     owner_headers, owner_id = await _register_user(client, "owner-collab@lorevia.app")
     collaborator_headers, _ = await _register_user(client, "beta-collab@lorevia.app")
@@ -399,6 +460,62 @@ async def test_collaboration_permissions_gate_comments_and_manuscript_tools(clie
     assert blocked_note.status_code == 403
     assert writer_workspace.status_code == 403
     assert manuscript_tree.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_beta_reader_collaboration_can_read_and_leave_feedback_notes(client, db):
+    owner_headers, owner_id = await _register_user(client, "owner-beta-feedback@lorevia.app")
+    beta_reader_headers, _ = await _register_user(client, "beta-feedback@lorevia.app")
+    owner = await db.get(User, owner_id)
+    assert owner is not None
+    owner.tier = "author"
+
+    book = Book(
+        user_id=owner_id,
+        title="Feedback Draft",
+        format="docx",
+        s3_key="shared/feedback-draft.docx",
+        status="ready",
+        total_chapters=2,
+        mode="author",
+    )
+    db.add(book)
+    await db.flush()
+    for number in range(1, 3):
+        db.add(Chapter(book_id=book.id, number=number, title=f"Chapter {number}", s3_key=f"chapter-{number}.txt"))
+    await db.commit()
+
+    create = await client.post(
+        f"/api/v1/books/{book.id}/collaborators",
+        headers=owner_headers,
+        json={
+            "email": "beta-feedback@lorevia.app",
+            "display_name": "Beta Reader",
+            "role": "beta_reader",
+            "scope": {
+                "chapter_start": 1,
+                "chapter_end": 2,
+                "character_bible": False,
+                "continuity_report": False,
+                "reader_confusion_report": False,
+            },
+        },
+    )
+    assert create.status_code == 201
+
+    chapter = await client.get(f"/api/v1/reader/{book.id}/chapter/1", headers=beta_reader_headers)
+    note = await client.post(
+        f"/api/v1/books/{book.id}/notes",
+        headers=beta_reader_headers,
+        json={
+            "chapter_number": 1,
+            "title": "Beta feedback",
+            "body": "The chapter hook lands, but the reveal wants a stronger bridge.",
+        },
+    )
+
+    assert chapter.status_code == 200
+    assert note.status_code == 200
 
 
 @pytest.mark.asyncio

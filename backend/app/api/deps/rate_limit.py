@@ -11,7 +11,6 @@ from app.api.deps.auth import get_current_user
 from app.core.database import get_db
 from app.core.redis import get_redis, key_ratelimit
 from app.models.user import User, UserRateLimitOverride
-from app.services.monetization_service import purchased_overflow_units_for_action
 from app.utils.billing_utils import (
     continuity_limit_per_day,
     DAILY_LIMIT_MESSAGE,
@@ -63,12 +62,11 @@ async def _bump_daily_bucket(
         raise HTTPException(403, DAILY_LIMIT_MESSAGE)
 
     bucket, ttl_seconds = _utc_day_bucket(action)
-    overflow_units = await purchased_overflow_units_for_action(db, user_id, action)
     key = key_ratelimit(str(user_id), bucket)
     r = await get_redis()
     await r.set(key, "0", ex=ttl_seconds, nx=True)
     count = int(await r.incr(key))
-    if count > (limit + overflow_units):
+    if count > limit:
         raise HTTPException(429, DAILY_LIMIT_MESSAGE)
 
 

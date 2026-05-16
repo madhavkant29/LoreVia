@@ -24,7 +24,6 @@ export const betaReadsApi = {
       chapterStart?: number | null
       chapterEnd?: number | null
       windowDays: number
-      rewardPoints: number
       requiredProgressPct?: number
       requiredCommentCount?: number
       requiredFeedbackItemCount?: number
@@ -40,7 +39,6 @@ export const betaReadsApi = {
       chapter_start: payload.chapterStart,
       chapter_end: payload.chapterEnd,
       window_days: payload.windowDays,
-      reward_points: payload.rewardPoints,
       required_progress_pct: payload.requiredProgressPct ?? 100,
       required_comment_count: payload.requiredCommentCount ?? 0,
       required_feedback_item_count: payload.requiredFeedbackItemCount ?? 1,
@@ -103,6 +101,22 @@ export const betaReadsApi = {
     }),
   deleteFeedbackItem: (assignmentId: string, feedbackItemId: string) =>
     apiClient.delete<BetaReadAssignmentDetail>(`/beta-reads/${assignmentId}/feedback-items/${feedbackItemId}`).then((response) => {
+      invalidateBetaReadCache()
+      return response.data
+    }),
+  updateBookFeedbackItem: (
+    bookId: string,
+    assignmentId: string,
+    feedbackItemId: string,
+    payload: {
+      authorStatus: string
+      authorTaskId?: string | null
+    }
+  ) =>
+    apiClient.put<BetaReadAssignmentDetail>(`/books/${bookId}/beta-reads/${assignmentId}/feedback-items/${feedbackItemId}`, {
+      author_status: payload.authorStatus,
+      author_task_id: payload.authorTaskId ?? null,
+    }).then((response) => {
       invalidateBetaReadCache()
       return response.data
     }),

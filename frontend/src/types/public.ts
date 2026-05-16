@@ -22,6 +22,7 @@ export interface PublicForumPost {
   desired_beta_reader_count: number | null
   allow_contact_requests: boolean
   status: string
+  viewer_interest_status: string | null
   interest_count: number
   comment_count: number
   rating_summary: PublicForumRatingSummary
@@ -51,8 +52,30 @@ export interface PublicForumCommentListResponse {
   items: PublicForumComment[]
 }
 
+export interface PublicForumInterest {
+  id: string
+  post_id: string
+  book_id: string
+  author_user_id: string
+  interested_user_id: string
+  interested_username: string | null
+  interested_email: string
+  message: string
+  status: string
+  created_at: string
+  updated_at: string
+}
+
+export interface PublicForumInterestListResponse {
+  items: PublicForumInterest[]
+}
+
 export interface PublicForumPostListResponse {
   items: PublicForumPost[]
+  total: number
+  page: number
+  page_size: number
+  has_more: boolean
 }
 
 export interface PublicUserProject {

@@ -40,13 +40,16 @@ export default function PublicWriterProfilePage() {
   return (
     <div className={`min-h-screen ${isDark ? "bg-[#071019] text-slate-100" : "bg-[#f4efe7] text-slate-950"}`}>
       <div className="mx-auto max-w-5xl px-4 py-10 sm:px-6 lg:px-8">
-        <Link href="/public/forum" className={`text-sm ${isDark ? "text-slate-400 hover:text-white" : "text-slate-500 hover:text-slate-900"}`}>{"<- Back to forum"}</Link>
+        <Link href="/public" className={`text-sm ${isDark ? "text-slate-400 hover:text-white" : "text-slate-500 hover:text-slate-900"}`}>{"<- Back to public library"}</Link>
 
         <section className={`mt-6 rounded-[2rem] border p-6 sm:p-8 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-[#dfd3c2] bg-white/92"}`}>
-          <p className={`text-xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-amber-300" : "text-amber-700"}`}>Public Writer Profile</p>
+          <p className={`text-xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-amber-300" : "text-amber-700"}`}>Public Author Profile</p>
           <h1 className="mt-3 font-serif text-4xl tracking-tight">@{profile.username}</h1>
           <p className={`mt-3 max-w-2xl text-sm leading-7 ${isDark ? "text-slate-300" : "text-slate-600"}`}>
-            Reputation here is earned from public forum comment votes. More positive reactions generally mean this writer or reader has been helpful, thoughtful, and worth trusting in a beta-read exchange.
+            This page is an optional public layer around a private author workflow. Reputation and visible activity help show whether this author or collaborator has been thoughtful, reliable, and worth engaging with.
+          </p>
+          <p className={`mt-3 text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+            Public forum status: public
           </p>
 
           <div className="mt-6 grid gap-4 sm:grid-cols-3">
@@ -56,7 +59,7 @@ export default function PublicWriterProfilePage() {
               <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-slate-600"}`}>{profile.trust_level}</p>
             </div>
             <div className={`rounded-3xl border px-5 py-5 ${isDark ? "border-white/10 bg-black/20" : "border-[#eadfce] bg-[#fbf7f0]"}`}>
-              <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>Forum activity</p>
+              <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>Public activity</p>
               <p className="mt-3 text-2xl font-semibold">{profile.forum_post_count} posts</p>
               <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-slate-600"}`}>{profile.forum_comment_count} comments</p>
             </div>
@@ -70,8 +73,8 @@ export default function PublicWriterProfilePage() {
 
         <section className={`mt-8 rounded-[2rem] border p-6 sm:p-8 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-[#dfd3c2] bg-white/92"}`}>
           <div className="flex flex-col gap-2">
-            <p className={`text-xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>Current Project</p>
-            <h2 className="font-serif text-3xl tracking-tight">{project?.title || "No public project surfaced yet"}</h2>
+              <p className={`text-xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>Surfaced Project</p>
+              <h2 className="font-serif text-3xl tracking-tight">{project?.title || "No public sample surfaced yet"}</h2>
           </div>
 
           {project ? (
@@ -95,13 +98,13 @@ export default function PublicWriterProfilePage() {
                 <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>Trust snapshot</p>
                 <p className="mt-3 text-2xl font-semibold">{profile.trust_level}</p>
                 <p className={`mt-3 text-sm leading-7 ${isDark ? "text-slate-400" : "text-slate-600"}`}>
-                  Readers can use the reputation score, vote history, and forum activity together to judge whether this person feels dependable before swapping manuscript time.
+                  Use this as lightweight context, not the main product story. LoreVia is still built first for private manuscript work, with public trust signals as an optional add-on.
                 </p>
               </div>
             </div>
           ) : (
             <div className={`mt-6 rounded-3xl border border-dashed px-5 py-6 text-sm ${isDark ? "border-white/10 text-slate-500" : "border-[#d8c6ab] text-slate-500"}`}>
-              This member has not surfaced a manuscript in the public forum yet.
+              This member has not surfaced a sample or manuscript in the public layer yet.
             </div>
           )}
         </section>

@@ -7,7 +7,7 @@ import { useParams } from "next/navigation"
 
 import { booksApi } from "@/lib/api/books"
 import { intelligenceApi } from "@/lib/api/intelligence"
-import { buildDailyCapEventDetail } from "@/lib/monetization/limitRecovery"
+import { buildDailyCapEventDetail } from "@/lib/limits/dailyCap"
 import { readerApi } from "@/lib/api/reader"
 import { asQueryKey, bookCacheKey, readerCacheKey } from "@/lib/query/cacheKeys"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
@@ -97,7 +97,7 @@ export default function AskPage() {
       const dailyCap = buildDailyCapEventDetail(err)
       const message = err instanceof Error ? err.message : ""
       if (dailyCap) {
-        setError("You reached today's question limit. Use the upgrade or points options to keep going.")
+        setError("You reached today's question limit. Upgrade for more daily capacity or continue tomorrow.")
       } else if (message.includes("429")) {
         setError("Too many questions right now. Please try again in a bit.")
       } else {

@@ -1,6 +1,14 @@
 import { apiClient } from "./client"
 import type { PublicBook, PublicBookDetail, PublicChapter } from "@/types/book"
-import type { PublicForumComment, PublicForumCommentListResponse, PublicForumPost, PublicForumPostListResponse, PublicUserProfile } from "@/types/public"
+import type {
+  PublicForumComment,
+  PublicForumCommentListResponse,
+  PublicForumInterest,
+  PublicForumInterestListResponse,
+  PublicForumPost,
+  PublicForumPostListResponse,
+  PublicUserProfile,
+} from "@/types/public"
 
 export const publicApi = {
   listBooks: () => apiClient.get<PublicBook[]>("/public/books").then((response) => response.data),
@@ -8,14 +16,52 @@ export const publicApi = {
     apiClient.get<PublicBookDetail>(`/public/books/${bookId}`).then((response) => response.data),
   getChapter: (bookId: string, chapter: number) =>
     apiClient.get<PublicChapter>(`/public/books/${bookId}/chapter/${chapter}`).then((response) => response.data),
-  listForumPosts: (query?: string) =>
+  listForumPosts: (query?: string, page = 1, pageSize = 20) =>
     apiClient.get<PublicForumPostListResponse>("/public/forum/posts", {
-      params: query?.trim() ? { q: query.trim() } : undefined,
-    }).then((response) => response.data.items),
+      params: {
+        ...(query?.trim() ? { q: query.trim() } : {}),
+        page,
+        page_size: pageSize,
+      },
+    }).then((response) => response.data),
   getForumPost: (postId: string) =>
     apiClient.get<PublicForumPost>(`/public/forum/posts/${postId}`).then((response) => response.data),
+  listMyForumPosts: () =>
+    apiClient.get<PublicForumPost[]>("/public/forum/my-posts").then((response) => response.data),
+  createForumPost: (payload: {
+    bookId: string
+    headline: string
+    body: string
+    desiredBetaReaderCount?: number | null
+    allowContactRequests?: boolean
+  }) =>
+    apiClient.post<PublicForumPost>("/public/forum/posts", {
+      book_id: payload.bookId,
+      headline: payload.headline,
+      body: payload.body,
+      desired_beta_reader_count: payload.desiredBetaReaderCount ?? null,
+      allow_contact_requests: payload.allowContactRequests ?? true,
+    }).then((response) => response.data),
+  updateForumPost: (postId: string, payload: {
+    headline: string
+    body: string
+    desiredBetaReaderCount?: number | null
+    allowContactRequests?: boolean
+    status?: string
+  }) =>
+    apiClient.put<PublicForumPost>(`/public/forum/posts/${postId}`, {
+      headline: payload.headline,
+      body: payload.body,
+      desired_beta_reader_count: payload.desiredBetaReaderCount ?? null,
+      allow_contact_requests: payload.allowContactRequests ?? true,
+      ...(payload.status ? { status: payload.status } : {}),
+    }).then((response) => response.data),
   listForumComments: (postId: string) =>
     apiClient.get<PublicForumCommentListResponse>(`/public/forum/posts/${postId}/comments`).then((response) => response.data.items),
+  listForumInterests: (postId: string) =>
+    apiClient.get<PublicForumInterestListResponse>(`/public/forum/posts/${postId}/interests`).then((response) => response.data.items),
+  createForumInterest: (postId: string, message: string) =>
+    apiClient.post<PublicForumInterest>(`/public/forum/posts/${postId}/interests`, { message }).then((response) => response.data),
   createForumComment: (postId: string, body: string) =>
     apiClient.post<PublicForumComment>(`/public/forum/posts/${postId}/comments`, { body }).then((response) => response.data),
   reactToForumComment: (commentId: string, reaction: "like" | "dislike" | "clear") =>

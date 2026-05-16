@@ -5,6 +5,7 @@ export const SITE_TAGLINE = "LoreVia for authors"
 export const SITE_DESCRIPTION =
   "LoreVia for authors turns a manuscript into a searchable story workspace with grounded AI for characters, plot threads, timelines, revisions, and continuity."
 export const DEFAULT_OG_IMAGE = "/og-image.png"
+export const BLOG_RSS_PATH = "/blog/rss.xml"
 
 export const STATIC_PUBLIC_ROUTES = [
   "/",
@@ -25,6 +26,11 @@ export const INDEXNOW_KEY_PATH = "/indexnow-key.txt"
 
 export function toAbsoluteUrl(path: string): string {
   return new URL(path, SITE_URL).toString()
+}
+
+export type BreadcrumbItem = {
+  name: string
+  path: string
 }
 
 export function getIndexNowKey(): string | null {
@@ -56,4 +62,40 @@ export const organizationJsonLd = {
   name: SITE_NAME,
   url: SITE_URL,
   logo: toAbsoluteUrl("/logoandtext.png"),
+}
+
+export function buildBreadcrumbJsonLd(items: BreadcrumbItem[]) {
+  return {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: items.map((item, index) => ({
+      "@type": "ListItem",
+      position: index + 1,
+      name: item.name,
+      item: toAbsoluteUrl(item.path),
+    })),
+  }
+}
+
+export function buildCollectionPageJsonLd({
+  name,
+  description,
+  path,
+}: {
+  name: string
+  description: string
+  path: string
+}) {
+  return {
+    "@context": "https://schema.org",
+    "@type": "CollectionPage",
+    name,
+    description,
+    url: toAbsoluteUrl(path),
+    isPartOf: {
+      "@type": "WebSite",
+      name: SITE_NAME,
+      url: SITE_URL,
+    },
+  }
 }

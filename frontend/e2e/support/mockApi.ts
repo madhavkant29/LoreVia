@@ -97,6 +97,7 @@ const publicForumPosts = [
     desired_beta_reader_count: 5,
     allow_contact_requests: true,
     status: "open",
+    viewer_interest_status: null,
     interest_count: 3,
     comment_count: 2,
     rating_summary: {
@@ -246,8 +247,6 @@ const initialBetaReads = [
     chapter_start: 12,
     chapter_end: 12,
     window_days: 3,
-    reward_points: 120,
-    awarded_points: 0,
     required_progress_pct: 100,
     required_comment_count: 3,
     required_feedback_item_count: 3,
@@ -257,7 +256,6 @@ const initialBetaReads = [
     access_granted_at: "2026-05-13T12:00:00Z",
     submitted_at: null,
     completed_at: null,
-    awarded_at: null,
     first_opened_at: "2026-05-13T14:00:00Z",
     missed_reason: null,
     counted_toward_missed_streak: false,
@@ -299,8 +297,6 @@ const initialBetaReads = [
     chapter_start: null,
     chapter_end: null,
     window_days: 5,
-    reward_points: 250,
-    awarded_points: 0,
     required_progress_pct: 100,
     required_comment_count: 3,
     required_feedback_item_count: 4,
@@ -310,7 +306,6 @@ const initialBetaReads = [
     access_granted_at: "2026-05-14T10:00:00Z",
     submitted_at: null,
     completed_at: null,
-    awarded_at: null,
     first_opened_at: null,
     missed_reason: null,
     counted_toward_missed_streak: false,
@@ -352,8 +347,6 @@ const initialBetaReads = [
     chapter_start: null,
     chapter_end: null,
     window_days: 4,
-    reward_points: 150,
-    awarded_points: 0,
     required_progress_pct: 100,
     required_comment_count: 3,
     required_feedback_item_count: 3,
@@ -363,7 +356,6 @@ const initialBetaReads = [
     access_granted_at: "2026-05-12T12:00:00Z",
     submitted_at: null,
     completed_at: null,
-    awarded_at: null,
     first_opened_at: "2026-05-12T13:00:00Z",
     missed_reason: null,
     counted_toward_missed_streak: false,
@@ -405,8 +397,6 @@ const initialBetaReads = [
     chapter_start: 3,
     chapter_end: 3,
     window_days: 4,
-    reward_points: 110,
-    awarded_points: 0,
     required_progress_pct: 100,
     required_comment_count: 2,
     required_feedback_item_count: 2,
@@ -416,7 +406,6 @@ const initialBetaReads = [
     access_granted_at: "2026-05-14T10:00:00Z",
     submitted_at: null,
     completed_at: null,
-    awarded_at: null,
     first_opened_at: null,
     missed_reason: null,
     counted_toward_missed_streak: false,
@@ -458,8 +447,6 @@ const initialBetaReads = [
     chapter_start: null,
     chapter_end: null,
     window_days: 3,
-    reward_points: 180,
-    awarded_points: 180,
     required_progress_pct: 100,
     required_comment_count: 3,
     required_feedback_item_count: 3,
@@ -469,7 +456,6 @@ const initialBetaReads = [
     access_granted_at: "2026-05-05T12:00:00Z",
     submitted_at: "2026-05-08T18:00:00Z",
     completed_at: "2026-05-08T18:05:00Z",
-    awarded_at: "2026-05-08T18:05:00Z",
     first_opened_at: "2026-05-05T14:00:00Z",
     missed_reason: null,
     counted_toward_missed_streak: false,
@@ -511,8 +497,6 @@ const initialBetaReads = [
     chapter_start: null,
     chapter_end: null,
     window_days: 3,
-    reward_points: 140,
-    awarded_points: 0,
     required_progress_pct: 100,
     required_comment_count: 3,
     required_feedback_item_count: 3,
@@ -522,7 +506,6 @@ const initialBetaReads = [
     access_granted_at: "2026-05-01T12:00:00Z",
     submitted_at: null,
     completed_at: null,
-    awarded_at: null,
     first_opened_at: "2026-05-01T13:00:00Z",
     missed_reason: "deadline_expired",
     counted_toward_missed_streak: true,
@@ -1328,67 +1311,6 @@ const notifications = {
   unread_count: 1,
 }
 
-const pointsBalance = {
-  balance: 18,
-}
-
-const pointsLedger = [
-  {
-    id: "ledger-1",
-    entry_type: "grant",
-    source_type: "rewarded_ad",
-    source_id: "ad-session-1",
-    points_delta: 3,
-    expires_at: null,
-    metadata_json: {},
-    created_at: "2026-05-08T13:00:00Z",
-  },
-  {
-    id: "ledger-2",
-    entry_type: "spend",
-    source_type: "overflow_search",
-    source_id: "spend-1",
-    points_delta: -3,
-    expires_at: null,
-    metadata_json: {},
-    created_at: "2026-05-08T14:00:00Z",
-  },
-]
-
-const referralSummary = {
-  referral_code: "LOREAUTHOR",
-  referral_url: "https://getlorevia.com/register?ref=LOREAUTHOR",
-  points_balance: 18,
-  rewards: [],
-}
-
-const pointOffers = {
-  offers: [
-    {
-      code: "search_pack_5",
-      action: "search",
-      title: "Search pack",
-      description: "Add five same-day semantic searches.",
-      points_cost: 3,
-      units: 5,
-      eligible: true,
-      reason: null,
-    },
-  ],
-}
-
-const rewardedAdStatus = {
-  enabled: true,
-  provider: "google_publisher_tag",
-  reward_points: 3,
-  daily_cap: 3,
-  claims_used_today: 1,
-  claims_remaining_today: 2,
-  session_ttl_seconds: 900,
-  min_grant_seconds: 0,
-  reason: null,
-}
-
 const notes = [
   {
     id: "note-1",
@@ -1768,26 +1690,6 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
       return updated ? json(route, updated) : notFound(route)
     }
 
-    if (path === "/api/v1/monetization/points" && method === "GET") {
-      return json(route, pointsBalance)
-    }
-
-    if (path === "/api/v1/monetization/points/ledger" && method === "GET") {
-      return json(route, pointsLedger)
-    }
-
-    if (path === "/api/v1/monetization/referrals" && method === "GET") {
-      return json(route, referralSummary)
-    }
-
-    if (path === "/api/v1/monetization/offers" && method === "GET") {
-      return json(route, pointOffers)
-    }
-
-    if (path === "/api/v1/monetization/rewarded-ads/status" && method === "GET") {
-      return json(route, rewardedAdStatus)
-    }
-
     if (path === "/api/v1/books" && method === "GET") {
       return json(route, [book])
     }
@@ -1841,8 +1743,6 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
         chapter_start: payload.chapter_start ?? null,
         chapter_end: payload.chapter_end ?? null,
         window_days: Number(payload.window_days || 3),
-        reward_points: Number(payload.reward_points || 120),
-        awarded_points: 0,
         required_progress_pct: Number(payload.required_progress_pct || 100),
         required_comment_count: Number(payload.required_comment_count || 0),
         required_feedback_item_count: Number(payload.required_feedback_item_count || 1),
@@ -1852,7 +1752,6 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
         access_granted_at: "2026-05-14T12:00:00Z",
         submitted_at: null,
         completed_at: null,
-        awarded_at: null,
         first_opened_at: null,
         missed_reason: null,
         counted_toward_missed_streak: false,
@@ -2227,10 +2126,8 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
               view_bucket: "completed",
               status_label: "Completed",
               primary_action: "View",
-              awarded_points: item.reward_points,
               submitted_at: "2026-05-14T18:30:00Z",
               completed_at: "2026-05-14T18:31:00Z",
-              awarded_at: "2026-05-14T18:31:00Z",
               final_rating: payload?.final_rating ?? 4,
               submission_allowed: false,
             }
@@ -2350,7 +2247,7 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
     }
 
     if (path === "/api/v1/public/forum/posts" && method === "GET") {
-      return json(route, { items: publicForumPosts })
+      return json(route, { items: publicForumPosts, total: publicForumPosts.length, page: 1, page_size: 20, has_more: false })
     }
 
     if (path === "/api/v1/public/books" && method === "GET") {

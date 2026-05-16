@@ -7,20 +7,115 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps.auth import get_admin
 from app.core.database import get_db
+from app.core.redis import cache_del, key_public_book_detail, key_public_books
 import app.core.redis
 from app.models.book import Book
 from app.models.character import Character
 from app.models.intelligence import BookChunk, ChapterSummary
 from app.models.user import User, UserRateLimitOverride
-from app.schemas.admin import RateLimitOverrideBody, SubscriptionMetricsOut, UpdateUserTierBody
+from app.schemas.admin import (
+    PendingPublicShareOut,
+    PublicShareApprovalBody,
+    RateLimitOverrideBody,
+    SubscriptionMetricsOut,
+    UpdateUserTierBody,
+)
 from app.utils.billing_utils import (
     VALID_USER_TIERS,
     build_subscription_metrics_summary,
     normalize_tier,
 )
+from app.utils.public_utils import (
+    PUBLIC_SHARE_STATUS_APPROVED,
+    PUBLIC_SHARE_STATUS_NOT_REQUESTED,
+    PUBLIC_SHARE_STATUS_PENDING,
+    USER_PUBLIC_SHARE_SOURCE_KIND,
+    get_public_share_status,
+)
 from app.utils.redis_utils import maybe_await
 
 router = APIRouter()
+
+
+@router.get("/public-shares/pending", response_model=list[PendingPublicShareOut])
+async def list_pending_public_shares(
+    db: AsyncSession = Depends(get_db),
+    _=Depends(get_admin),
+):
+    rows = (
+        await db.execute(
+            select(Book, User.username)
+            .join(User, User.id == Book.user_id)
+            .where(
+                Book.source_kind == USER_PUBLIC_SHARE_SOURCE_KIND,
+                Book.public_share_status == PUBLIC_SHARE_STATUS_PENDING,
+                Book.hidden_at.is_(None),
+                Book.archived_at.is_(None),
+            )
+            .order_by(Book.public_share_requested_at.asc(), Book.created_at.asc())
+        )
+    ).all()
+    return [
+        PendingPublicShareOut(
+            book_id=str(book.id),
+            user_id=str(book.user_id),
+            author_username=username,
+            title=book.title,
+            author=book.author,
+            genre=book.genre,
+            public_description=book.public_description,
+            requested_at=book.public_share_requested_at,
+            created_at=book.created_at,
+        )
+        for book, username in rows
+    ]
+
+
+@router.put("/public-shares/{book_id}")
+async def review_public_share(
+    book_id: uuid.UUID,
+    body: PublicShareApprovalBody,
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(get_admin),
+):
+    book = await db.get(Book, book_id)
+    if not book:
+        raise HTTPException(404, "Book not found")
+    if book.hidden_at is not None or book.archived_at is not None:
+        raise HTTPException(409, "This manuscript is not available for public sharing.")
+
+    current_status = get_public_share_status(book)
+    if str(book.source_kind or "").strip().lower() != USER_PUBLIC_SHARE_SOURCE_KIND and current_status == PUBLIC_SHARE_STATUS_NOT_REQUESTED:
+        raise HTTPException(409, "This manuscript is not in the author public-share workflow.")
+    if body.approved:
+        if current_status == PUBLIC_SHARE_STATUS_NOT_REQUESTED:
+            raise HTTPException(409, "This manuscript does not have a pending public-share request.")
+        book.public_share_status = PUBLIC_SHARE_STATUS_APPROVED
+        book.public_share_approved_at = datetime.now(UTC)
+        book.public_share_approved_by_user_id = admin_user.id
+        book.is_public = True
+        visibility = "public"
+    else:
+        book.is_public = False
+        if current_status == PUBLIC_SHARE_STATUS_PENDING:
+            book.public_share_status = PUBLIC_SHARE_STATUS_NOT_REQUESTED
+            book.public_share_requested_at = None
+        else:
+            book.public_share_status = PUBLIC_SHARE_STATUS_NOT_REQUESTED
+        book.public_share_approved_at = None
+        book.public_share_approved_by_user_id = None
+        book.source_kind = USER_PUBLIC_SHARE_SOURCE_KIND
+        visibility = "private"
+
+    await db.commit()
+    await cache_del(key_public_books())
+    await cache_del(key_public_book_detail(str(book.id)))
+    return {
+        "book_id": str(book.id),
+        "approval_status": get_public_share_status(book),
+        "visibility": visibility,
+        "approved": bool(body.approved),
+    }
 
 
 @router.get("/metrics")

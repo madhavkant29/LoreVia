@@ -3,13 +3,12 @@ from __future__ import annotations
 import uuid
 
 import pytest
-from sqlalchemy import select
 
 from app.api.v1.routes import public
 from app.core.security import create_access_token
 from app.models.book import Book, Chapter
 from app.models.progress import ReadingProgress
-from app.models.user import PointLedgerEntry, User
+from app.models.user import User
 
 
 def _auth_headers(user_id: uuid.UUID) -> dict[str, str]:
@@ -63,6 +62,7 @@ async def _create_book(db, *, author_id: uuid.UUID, title: str) -> Book:
 @pytest.fixture(autouse=True)
 def _enable_public_forum(monkeypatch):
     monkeypatch.setattr("app.core.config.settings.PUBLIC_MODE_ENABLED", True, raising=False)
+    monkeypatch.setattr("app.core.config.settings.PUBLIC_FORUM_STATUS", "public", raising=False)
 
 
 @pytest.mark.asyncio
@@ -185,7 +185,6 @@ async def test_private_book_forum_supports_interest_and_rating_rankings(client, 
             "reader_email": first_reader.email,
             "task_label": "High-rated proof pass",
             "window_days": 7,
-            "reward_points": 20,
             "required_feedback_item_count": 1,
         },
     )
@@ -199,7 +198,6 @@ async def test_private_book_forum_supports_interest_and_rating_rankings(client, 
             "reader_email": second_reader.email,
             "task_label": "Low-rated proof pass",
             "window_days": 7,
-            "reward_points": 20,
             "required_feedback_item_count": 1,
         },
     )
@@ -226,7 +224,9 @@ async def test_private_book_forum_supports_interest_and_rating_rankings(client, 
         },
     )
     assert high_submit.status_code == 200
-    assert high_submit.json()["awarded_points"] == 30
+    assert high_submit.json()["final_rating"] == 4.5
+    assert high_submit.json()["book_average_rating"] == 4.5
+    assert high_submit.json()["book_rating_count"] == 1
 
     low_submit = await client.post(
         f"/api/v1/beta-reads/{low_assignment_id}/submit-feedback",
@@ -237,7 +237,9 @@ async def test_private_book_forum_supports_interest_and_rating_rankings(client, 
         },
     )
     assert low_submit.status_code == 200
-    assert low_submit.json()["awarded_points"] == 20
+    assert low_submit.json()["final_rating"] == 1.5
+    assert low_submit.json()["book_average_rating"] == 1.5
+    assert low_submit.json()["book_rating_count"] == 1
 
     forum_list = await client.get("/api/v1/public/forum/posts")
     assert forum_list.status_code == 200
@@ -272,13 +274,6 @@ async def test_private_book_forum_supports_interest_and_rating_rankings(client, 
     assert seeker_profile_payload["reputation_dislikes_received"] == 0
     assert seeker_profile_payload["forum_comment_count"] == 1
 
-    author_ledger_entries = (
-        await db.execute(
-            select(PointLedgerEntry).where(PointLedgerEntry.user_id == author.id)
-        )
-    ).scalars().all()
-    assert len(author_ledger_entries) == 1
-    assert author_ledger_entries[0].points_delta == 3
 
 
 @pytest.mark.asyncio
@@ -349,3 +344,135 @@ async def test_public_profile_requires_public_presence_and_skips_private_only_pr
     assert payload["current_project"]["progress_words"] == 12000
     assert payload["current_project"]["source"] == "public_book"
     assert payload["current_project"]["public_book_id"] == str(public_book.id)
+
+
+@pytest.mark.asyncio
+async def test_public_share_requires_admin_approval_before_author_book_surfaces(client, db):
+    author = await _create_user(db, email="share-author@lorevia.test", tier="author")
+    admin = await _create_user(db, email="share-admin@lorevia.test", tier="admin")
+    book = await _create_book(db, author_id=author.id, title="Approval Gate")
+
+    request_response = await client.post(
+        f"/api/v1/public/shared-books/{book.id}/publish",
+        headers=_auth_headers(author.id),
+        json={"confirm_public_share": True, "description": "A curated public sample request."},
+    )
+    assert request_response.status_code == 200
+    request_payload = request_response.json()
+    assert request_payload["visibility"] == "private"
+    assert request_payload["approval_status"] == "pending"
+
+    pending_response = await client.get(
+        "/api/v1/admin/public-shares/pending",
+        headers=_auth_headers(admin.id),
+    )
+    assert pending_response.status_code == 200
+    assert pending_response.json()[0]["book_id"] == str(book.id)
+
+    public_list_before = await client.get("/api/v1/public/books")
+    assert public_list_before.status_code == 200
+    assert all(item["id"] != str(book.id) for item in public_list_before.json())
+
+    direct_before = await client.get(f"/api/v1/public/books/{book.id}")
+    assert direct_before.status_code == 404
+
+    approval_response = await client.put(
+        f"/api/v1/admin/public-shares/{book.id}",
+        headers=_auth_headers(admin.id),
+        json={"approved": True},
+    )
+    assert approval_response.status_code == 200
+    assert approval_response.json()["approval_status"] == "approved"
+    assert approval_response.json()["visibility"] == "public"
+
+    public_list_after = await client.get("/api/v1/public/books")
+    assert public_list_after.status_code == 200
+    assert any(item["id"] == str(book.id) for item in public_list_after.json())
+
+    direct_after = await client.get(f"/api/v1/public/books/{book.id}")
+    assert direct_after.status_code == 200
+    assert direct_after.json()["id"] == str(book.id)
+
+
+@pytest.mark.asyncio
+async def test_free_users_cannot_open_public_discussions_or_submit_public_samples(client, db):
+    paid_author = await _create_user(db, email="paid-forum-author@lorevia.test", tier="author")
+    free_author = await _create_user(db, email="free-forum-author@lorevia.test", tier="free")
+    free_reader = await _create_user(db, email="free-forum-reader@lorevia.test", tier="free")
+
+    paid_book = await _create_book(db, author_id=paid_author.id, title="Paid Harbor")
+    free_book = await _create_book(db, author_id=free_author.id, title="Free Harbor")
+
+    paid_post = await client.post(
+        "/api/v1/public/forum/posts",
+        headers=_auth_headers(paid_author.id),
+        json={
+            "book_id": str(paid_book.id),
+            "headline": "Paid author seeking outside eyes.",
+            "body": "Looking for honest reactions on pacing and hook strength.",
+            "desired_beta_reader_count": 2,
+            "allow_contact_requests": True,
+        },
+    )
+    assert paid_post.status_code == 201
+
+    blocked_post = await client.post(
+        "/api/v1/public/forum/posts",
+        headers=_auth_headers(free_author.id),
+        json={
+            "book_id": str(free_book.id),
+            "headline": "Free author seeking outside eyes.",
+            "body": "Trying to open a public discussion from the free plan.",
+            "desired_beta_reader_count": 2,
+            "allow_contact_requests": True,
+        },
+    )
+    assert blocked_post.status_code == 403
+    assert blocked_post.json()["detail"] == "Opening a public discussion requires an Author or Architect plan."
+
+    blocked_share = await client.post(
+        f"/api/v1/public/shared-books/{free_book.id}/publish",
+        headers=_auth_headers(free_author.id),
+        json={"confirm_public_share": True, "description": "Trying to request a public sample on free."},
+    )
+    assert blocked_share.status_code == 403
+    assert blocked_share.json()["detail"] == "Submitting a public sample requires an Author or Architect plan."
+
+    comment_response = await client.post(
+        f"/api/v1/public/forum/posts/{paid_post.json()['id']}/comments",
+        headers=_auth_headers(free_reader.id),
+        json={"body": "Free readers can still comment and engage."},
+    )
+    assert comment_response.status_code == 201
+
+    interest_response = await client.post(
+        f"/api/v1/public/forum/posts/{paid_post.json()['id']}/interests",
+        headers=_auth_headers(free_reader.id),
+        json={"message": "Free readers can still offer to beta read."},
+    )
+    assert interest_response.status_code == 201
+
+
+@pytest.mark.asyncio
+async def test_public_forum_beta_mode_is_read_only(client, db, monkeypatch):
+    monkeypatch.setattr("app.core.config.settings.PUBLIC_FORUM_STATUS", "beta", raising=False)
+
+    author = await _create_user(db, email="beta-mode-author@lorevia.test", tier="author")
+    book = await _create_book(db, author_id=author.id, title="Read Only Harbor")
+
+    create_response = await client.post(
+        "/api/v1/public/forum/posts",
+        headers=_auth_headers(author.id),
+        json={
+            "book_id": str(book.id),
+            "headline": "Looking for readers on a harbor fantasy.",
+            "body": "Seeking feedback on whether the opening tension lands early and clearly enough for first-time readers.",
+            "desired_beta_reader_count": 3,
+            "allow_contact_requests": True,
+        },
+    )
+    assert create_response.status_code == 403
+
+    forum_list = await client.get("/api/v1/public/forum/posts")
+    assert forum_list.status_code == 200
+    assert forum_list.json()["items"] == []

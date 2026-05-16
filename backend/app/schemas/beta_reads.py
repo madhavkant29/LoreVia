@@ -13,7 +13,6 @@ class BetaReadAssignmentCreateBody(BaseModel):
     chapter_start: int | None = Field(default=None, ge=1)
     chapter_end: int | None = Field(default=None, ge=1)
     window_days: int = Field(..., ge=3, le=7)
-    reward_points: int = Field(..., ge=1, le=100000)
     required_progress_pct: int = Field(default=100, ge=1, le=100)
     required_comment_count: int = Field(default=0, ge=0, le=1000)
     required_feedback_item_count: int = Field(default=1, ge=1, le=1000)
@@ -37,9 +36,6 @@ class BetaReadAssignmentOut(BaseModel):
     chapter_start: int | None = None
     chapter_end: int | None = None
     window_days: int
-    reward_points: int
-    projected_reward_points: int
-    awarded_points: int
     required_progress_pct: int
     required_comment_count: int
     required_feedback_item_count: int
@@ -49,7 +45,6 @@ class BetaReadAssignmentOut(BaseModel):
     access_granted_at: datetime
     submitted_at: datetime | None = None
     completed_at: datetime | None = None
-    awarded_at: datetime | None = None
     first_opened_at: datetime | None = None
     missed_reason: str | None = None
     counted_toward_missed_streak: bool = False
@@ -111,6 +106,11 @@ class BetaReadFeedbackItemCreateBody(BaseModel):
     body: str | None = Field(default=None, max_length=10000)
 
 
+class BetaReadFeedbackItemAuthorUpdateBody(BaseModel):
+    author_status: str = Field(..., min_length=4, max_length=32)
+    author_task_id: str | None = Field(default=None, max_length=120)
+
+
 class BetaReadFeedbackItemOut(BaseModel):
     id: str
     kind: str
@@ -122,6 +122,9 @@ class BetaReadFeedbackItemOut(BaseModel):
     reaction: str | None = None
     anchor_text: str | None = None
     body: str | None = None
+    author_status: str = "open"
+    author_task_id: str | None = None
+    author_updated_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 

@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -38,6 +38,9 @@ class BetaReadFeedbackKind(str, enum.Enum):
 
 class BetaReadAssignment(Base):
     __tablename__ = "beta_read_assignments"
+    __table_args__ = (
+        Index("ix_beta_read_assignments_book_state_rating", "book_id", "state", "final_rating"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     book_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -52,7 +55,6 @@ class BetaReadAssignment(Base):
     chapter_start: Mapped[int | None] = mapped_column(Integer)
     chapter_end: Mapped[int | None] = mapped_column(Integer)
     window_days: Mapped[int] = mapped_column(Integer, nullable=False)
-    reward_points: Mapped[int] = mapped_column(Integer, nullable=False)
     required_progress_pct: Mapped[int] = mapped_column(Integer, nullable=False, default=100, server_default="100")
     required_comment_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     required_feedback_item_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
@@ -64,8 +66,6 @@ class BetaReadAssignment(Base):
     first_opened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
-    awarded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
-    awarded_points: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     final_feedback: Mapped[str | None] = mapped_column(Text)
     final_rating: Mapped[float | None] = mapped_column(Float, index=True)
     feedback_payload: Mapped[dict | None] = mapped_column(JSONB, default=dict, server_default="{}")

@@ -5,7 +5,7 @@ from urllib.parse import urlparse
 import resend
 
 from app.core.config import settings
-from app.utils.monetization_utils import (
+from app.utils.trial_email_utils import (
     TRIAL_EMAIL_ENDED,
     TRIAL_EMAIL_ENDING,
     TRIAL_EMAIL_NUDGE,

@@ -31,7 +31,7 @@ export function PricingPlans({ surface = "public" }: PricingPlansProps) {
         return
       }
 
-      setMessage("Free is included with every account. Paid checkout only applies to Author and Lore Architect.")
+      setMessage("Free is included with every account. Paid checkout only applies to Author and Architect.")
       return
     }
 
@@ -63,16 +63,16 @@ export function PricingPlans({ surface = "public" }: PricingPlansProps) {
   }
 
   const helperCopy = user
-    ? "Free is already included in your account. Only Author and Lore Architect start paid checkout from this screen."
+    ? "Free is already included in your account. Only Author and Architect start paid checkout from this screen."
     : surface === "public"
-      ? "Every signup starts with 10 days of Author access at no charge. After the trial, the account falls back to Free unless you upgrade to a paid plan."
+      ? "Every signup starts with 10 days of Author access at no charge. After the trial, the account falls back to Free unless you upgrade to a paid plan for deeper manuscript intelligence."
       : "Free is included with every account. Sign in to upgrade to a paid plan."
 
   return (
     <section className={surface === "public" ? "border-t border-white/[0.08] py-8" : undefined}>
       <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-2xl font-semibold tracking-[-0.02em] text-[#F2F4F7]">Plans for authors and larger story worlds</h2>
+          <h2 className="text-2xl font-semibold tracking-[-0.02em] text-[#F2F4F7]">Plans for fiction authors and complex story worlds</h2>
           <p className="mt-2 text-sm text-[#7F8994]">{helperCopy}</p>
         </div>
 
@@ -94,7 +94,7 @@ export function PricingPlans({ surface = "public" }: PricingPlansProps) {
 
       <div className="mt-6 rounded-2xl border border-white/[0.08] bg-[#0B0F14] px-4 py-4 text-sm leading-6 text-[#C8D0D9]">
         <p>Every new account starts with 10 days of Author access and no credit card.</p>
-        <p className="mt-2 text-[#A8B0BA]">After that, you keep the Free plan unless you choose a paid subscription.</p>
+        <p className="mt-2 text-[#A8B0BA]">After that, you keep the Free plan unless you choose a paid subscription for ongoing continuity and manuscript work.</p>
       </div>
 
       {message ? (
@@ -170,10 +170,10 @@ export function PricingPlans({ surface = "public" }: PricingPlansProps) {
       </div>
 
       <p className="mt-5 text-sm leading-6 text-[#7F8994]">
-        Only Author and Lore Architect are paid subscriptions. Free stays available without checkout.
+        Only Author and Architect are paid subscriptions. Free stays available without checkout.
       </p>
       <p className="mt-3 text-sm leading-6 text-[#7F8994]">
-        Worldbuilding manuscripts count as uploads on every tier. On Author, a series-linked worldbuilding manuscript counts once per book in that series. Lore Architect remains unlimited.
+        Worldbuilding manuscripts count as uploads on every tier. On Author, a series-linked worldbuilding manuscript counts once per book in that series. Architect remains unlimited.
       </p>
     </section>
   )

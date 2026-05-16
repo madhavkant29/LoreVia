@@ -89,7 +89,6 @@ export const booksApi = {
       chapter_start: payload.chapterStart,
       chapter_end: payload.chapterEnd,
       window_days: payload.windowDays,
-      reward_points: payload.rewardPoints,
       required_progress_pct: payload.requiredProgressPct ?? 100,
       required_comment_count: payload.requiredCommentCount ?? 0,
       required_feedback_item_count: payload.requiredFeedbackItemCount ?? 1,
@@ -567,7 +566,7 @@ export const booksApi = {
     genre?: string,
     author?: string,
     options?: {
-      visibility?: "private" | "public"
+      visibility?: "private"
       description?: string
       seriesIds?: string[]
       autoExtractCover?: boolean

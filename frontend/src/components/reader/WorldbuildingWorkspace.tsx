@@ -433,7 +433,7 @@ export function WorldbuildingWorkspace({
 
   const uploadLimitNote = uploadStats
     ? uploadStats.private.upload_limit_unlimited
-      ? "Worldbuilding manuscripts count as uploads on every tier. Lore Architect remains unlimited, including for series-linked worldbuilding."
+      ? "Worldbuilding manuscripts count as uploads on every tier. Architect remains unlimited, including for series-linked worldbuilding."
       : typeof uploadStats.private.upload_limit === "number"
         ? `${uploadStats.private.total_uploads}/${uploadStats.private.upload_limit} uploads used. ${uploadStats.private.uploads_remaining ?? 0} remaining. Worldbuilding manuscripts count as uploads on every tier, and series-linked worldbuilding counts once per book in the series.`
         : null

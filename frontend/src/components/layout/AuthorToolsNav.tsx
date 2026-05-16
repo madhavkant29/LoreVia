@@ -81,6 +81,7 @@ function canSeeCollaboratorItem(itemId: string, permissions: CollaborationPermis
       return permissions.can_view_story_bible
     case "notes":
     case "beta-feedback":
+    case "author-loop":
       return permissions.can_comment || permissions.can_edit_manuscript
     case "export":
       return permissions.can_export
@@ -93,10 +94,10 @@ function canSeeCollaboratorItem(itemId: string, permissions: CollaborationPermis
 
 const NAV_SECTIONS = (bookId: string, currentChapter = 1): NavSection[] => [
   {
-    title: "Book",
+    title: "Manuscript",
     items: [
       { id: "overview", label: "Overview", href: `/${bookId}` as Route, tone: "Home", icon: "book" },
-      { id: "read", label: "Read", href: `/${bookId}/chapter/${currentChapter}` as Route, tone: "Continue", icon: "read" },
+      { id: "read", label: "Preview Draft", href: `/${bookId}/chapter/${currentChapter}` as Route, tone: "Continue", icon: "read" },
       { id: "chapters", label: "Chapters", href: `/${bookId}/chapters` as Route, tone: "Switch", icon: "chapters" },
     ],
   },
@@ -124,11 +125,11 @@ const NAV_SECTIONS = (bookId: string, currentChapter = 1): NavSection[] => [
     ],
   },
   {
-    title: "Tools",
+    title: "Story Tools",
     items: [
       { id: "search", label: "Search Passages", href: `/${bookId}/search` as Route, tone: "Find", icon: "search" },
       { id: "timeline", label: "Major Events", href: `/${bookId}/timeline` as Route, tone: "Plot", icon: "events" },
-      { id: "summaries", label: "Summary", href: `/${bookId}/summaries` as Route, tone: "Recap", icon: "summary" },
+      { id: "summaries", label: "Recaps", href: `/${bookId}/summaries` as Route, tone: "Recap", icon: "summary" },
       { id: "quotes", label: "Saved Quotes", href: "/quotes" as Route, tone: "Highlights", icon: "quote" },
       { id: "analysis", label: "Analysis", href: `/${bookId}/analysis` as Route, tone: "Advanced", icon: "analysis" },
     ],
@@ -138,8 +139,9 @@ const NAV_SECTIONS = (bookId: string, currentChapter = 1): NavSection[] => [
     authorOnly: true,
     items: [
       { id: "notes", label: "Notes", href: `/${bookId}/notes` as Route, tone: "Vault", icon: "notes" },
-      { id: "beta-feedback", label: "Beta Feedback", href: `/${bookId}/beta-feedback` as Route, tone: "Reader loop", icon: "users" },
-      { id: "collaboration", label: "Collaboration", href: `/${bookId}/collaboration` as Route, tone: "Share", icon: "users" },
+      { id: "author-loop", label: "Author Loop", href: `/${bookId}/author-loop` as Route, tone: "Launch flow", icon: "spark" },
+      { id: "beta-feedback", label: "Beta Feedback", href: `/${bookId}/beta-feedback` as Route, tone: "Collaborator loop", icon: "users" },
+      { id: "collaboration", label: "Collaborators", href: `/${bookId}/collaboration` as Route, tone: "Invite", icon: "users" },
       { id: "export", label: "Import & Export", href: `/${bookId}/export` as Route, tone: "Files", icon: "files" },
     ],
   },
@@ -149,8 +151,8 @@ export function AuthorToolsNav({
   bookId,
   active,
   isDark,
-  title = "Book workspace",
-  description = "Navigation stays quiet until you need the deeper tools.",
+  title = "Author workspace",
+  description = "Navigate drafting, continuity, and collaborator review without losing the manuscript thread.",
   currentChapter = 1,
   mode = "author",
   variant = "panel",

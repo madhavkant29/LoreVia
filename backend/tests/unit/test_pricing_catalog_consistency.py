@@ -27,7 +27,7 @@ def test_shared_pricing_catalog_matches_backend_constants():
     assert free_tier["monthly_code"] is None
     assert free_tier["annual_code"] is None
 
-    assert [tier["name"] for tier in paid_tiers] == ["Author", "Lore Architect"]
+    assert [tier["name"] for tier in paid_tiers] == ["Author", "Architect"]
     assert (
         {tier["monthly_code"] for tier in paid_tiers}
         | {tier["annual_code"] for tier in paid_tiers}
@@ -51,6 +51,7 @@ def test_shared_pricing_catalog_tracks_price_id_env_keys():
     catalog = _load_shared_pricing_catalog()
     plans = {str(plan["code"]): plan for plan in catalog["plans"]}
 
-    assert PLAN_PRICE_ID_ENV_KEYS["reader_monthly"] == plans["reader_monthly"]["price_id_env_keys"]
+    assert "reader_monthly" not in plans
+    assert "reader_annual" not in plans
     assert PLAN_PRICE_ID_ENV_KEYS["author_monthly"] == plans["author_monthly"]["price_id_env_keys"]
     assert PLAN_PRICE_ID_ENV_KEYS["architect_annual"] == plans["architect_annual"]["price_id_env_keys"]

@@ -31,9 +31,9 @@ async def check_upload_limit(
 
 async def require_pro(current_user: User = Depends(get_current_user)):
     if user_access_tier(current_user) not in (AUTHOR_TIER, ARCHITECT_TIER, ADMIN_TIER):
-        raise HTTPException(403, "This feature requires an Author or Lore Architect subscription.")
+        raise HTTPException(403, "This feature requires an Author or Architect subscription.")
 
 
 async def require_power(current_user: User = Depends(get_current_user)):
     if user_access_tier(current_user) not in (ARCHITECT_TIER, ADMIN_TIER):
-        raise HTTPException(403, "This feature requires a Lore Architect subscription.")
+        raise HTTPException(403, "This feature requires an Architect subscription.")

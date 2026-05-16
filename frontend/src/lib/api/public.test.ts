@@ -31,7 +31,15 @@ describe("public api", () => {
     await publicApi.listForumPosts("  sky harbor  ")
 
     expect(getMock).toHaveBeenCalledWith("/public/forum/posts", {
-      params: { q: "sky harbor" },
+      params: { q: "sky harbor", page: 1, page_size: 20 },
+    })
+  })
+
+  it("passes pagination params for forum post listing", async () => {
+    await publicApi.listForumPosts(undefined, 3, 50)
+
+    expect(getMock).toHaveBeenCalledWith("/public/forum/posts", {
+      params: { page: 3, page_size: 50 },
     })
   })
 
@@ -55,10 +63,82 @@ describe("public api", () => {
     expect(getMock).toHaveBeenCalledWith("/public/forum/posts/post-1")
   })
 
+  it("loads the signed-in author's forum posts", async () => {
+    await publicApi.listMyForumPosts()
+
+    expect(getMock).toHaveBeenCalledWith("/public/forum/my-posts")
+  })
+
+  it("creates a public forum post", async () => {
+    await publicApi.createForumPost({
+      bookId: "book-1",
+      headline: "Need mystery beta readers",
+      body: "Looking for readers who can flag continuity gaps and pacing issues.",
+      desiredBetaReaderCount: 4,
+      allowContactRequests: true,
+    })
+
+    expect(postMock).toHaveBeenCalledWith("/public/forum/posts", {
+      book_id: "book-1",
+      headline: "Need mystery beta readers",
+      body: "Looking for readers who can flag continuity gaps and pacing issues.",
+      desired_beta_reader_count: 4,
+      allow_contact_requests: true,
+    })
+  })
+
+  it("updates a public forum post", async () => {
+    await publicApi.updateForumPost("post-9", {
+      headline: "Updated headline",
+      body: "Updated forum body with more detail for collaborators.",
+      desiredBetaReaderCount: 6,
+      allowContactRequests: false,
+      status: "closed",
+    })
+
+    expect(putMock).toHaveBeenCalledWith("/public/forum/posts/post-9", {
+      headline: "Updated headline",
+      body: "Updated forum body with more detail for collaborators.",
+      desired_beta_reader_count: 6,
+      allow_contact_requests: false,
+      status: "closed",
+    })
+  })
+
+  it("preserves backend default status when no explicit status is supplied", async () => {
+    await publicApi.updateForumPost("post-10", {
+      headline: "Keep this open",
+      body: "Still looking for continuity and pacing feedback from collaborators.",
+      desiredBetaReaderCount: 2,
+      allowContactRequests: true,
+    })
+
+    expect(putMock).toHaveBeenCalledWith("/public/forum/posts/post-10", {
+      headline: "Keep this open",
+      body: "Still looking for continuity and pacing feedback from collaborators.",
+      desired_beta_reader_count: 2,
+      allow_contact_requests: true,
+    })
+  })
+
   it("loads forum comments for a post", async () => {
     await publicApi.listForumComments("post-1")
 
     expect(getMock).toHaveBeenCalledWith("/public/forum/posts/post-1/comments")
+  })
+
+  it("loads forum interests for a post", async () => {
+    await publicApi.listForumInterests("post-1")
+
+    expect(getMock).toHaveBeenCalledWith("/public/forum/posts/post-1/interests")
+  })
+
+  it("creates a forum interest message", async () => {
+    await publicApi.createForumInterest("post-3", "I would love to beta read this.")
+
+    expect(postMock).toHaveBeenCalledWith("/public/forum/posts/post-3/interests", {
+      message: "I would love to beta read this.",
+    })
   })
 
   it("creates a forum comment", async () => {

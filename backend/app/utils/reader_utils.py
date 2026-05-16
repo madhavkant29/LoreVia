@@ -29,7 +29,7 @@ from app.utils.plot_thread_utils import (
     normalize_plot_thread_status,
 )
 from app.utils.tag_utils import ENTITY_TYPE_PLOT_THREAD, get_custom_tags_for_entity, list_custom_tags_for_entity_ids
-from app.utils.billing_utils import user_access_tier
+from app.utils.billing_utils import has_paid_reading_access
 from app.utils.character_utils import get_graph_visibility_override
 from app.utils.queue_utils import queue_for_user
 from app.engine.character.profile_builder import build_description
@@ -460,7 +460,7 @@ def strip_json_fence(content: str) -> str:
 # ─── Chapter intelligence / access ───────────────────────────────────────────
 
 async def require_summary_access(db: AsyncSession, book: Book, current_user, chapter_num: int | None = None) -> None:
-    if user_access_tier(current_user) in ("reader", "author", "architect", "admin"):
+    if has_paid_reading_access(current_user):
         return
     if not book.is_truncated:
         return
@@ -566,7 +566,7 @@ async def chapter_intelligence_available(db: AsyncSession, book: Book, current_u
 
 async def chapter_intelligence_map(db: AsyncSession, book: Book, current_user) -> dict[int, bool]:
     from app.models.book import Chapter as Ch
-    if user_access_tier(current_user) in ("reader", "author", "architect", "admin"):
+    if has_paid_reading_access(current_user):
         rows = (await db.execute(
             select(Ch.number).where(Ch.book_id == book.id).order_by(Ch.number)
         )).all()

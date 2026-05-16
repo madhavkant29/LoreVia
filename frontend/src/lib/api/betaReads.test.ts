@@ -3,11 +3,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 const {
   getMock,
   postMock,
+  putMock,
   deleteMock,
   invalidateQueryKeysMock,
 } = vi.hoisted(() => ({
   getMock: vi.fn(),
   postMock: vi.fn(),
+  putMock: vi.fn(),
   deleteMock: vi.fn(),
   invalidateQueryKeysMock: vi.fn(),
 }))
@@ -16,6 +18,7 @@ vi.mock("./client", () => ({
   apiClient: {
     get: getMock,
     post: postMock,
+    put: putMock,
     delete: deleteMock,
   },
 }))
@@ -30,11 +33,13 @@ describe("betaReads api", () => {
   beforeEach(() => {
     getMock.mockReset()
     postMock.mockReset()
+    putMock.mockReset()
     deleteMock.mockReset()
     invalidateQueryKeysMock.mockReset()
 
     getMock.mockResolvedValue({ data: { items: [], author_questions: [], feedback_items: [], feedback_summary: {} } })
     postMock.mockResolvedValue({ data: { ok: true } })
+    putMock.mockResolvedValue({ data: { ok: true } })
     deleteMock.mockResolvedValue({ data: { ok: true } })
   })
 
@@ -46,7 +51,6 @@ describe("betaReads api", () => {
       chapterStart: 3,
       chapterEnd: 5,
       windowDays: 4,
-      rewardPoints: 180,
       requiredProgressPct: 100,
       requiredCommentCount: 3,
       requiredFeedbackItemCount: 4,
@@ -62,7 +66,6 @@ describe("betaReads api", () => {
       chapter_start: 3,
       chapter_end: 5,
       window_days: 4,
-      reward_points: 180,
       required_progress_pct: 100,
       required_comment_count: 3,
       required_feedback_item_count: 4,
@@ -106,6 +109,20 @@ describe("betaReads api", () => {
     expect(postMock).toHaveBeenCalledWith("/beta-reads/assignment-3/submit-feedback", {
       final_feedback: "The midpoint landed better than I expected.",
       final_rating: 4.5,
+    })
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("reader:beta-reads:")
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("books:list:")
+  })
+
+  it("updates author triage state for a feedback item", async () => {
+    await betaReadsApi.updateBookFeedbackItem("book-1", "assignment-2", "feedback-9", {
+      authorStatus: "task_created",
+      authorTaskId: "revision-task:feedback-9",
+    })
+
+    expect(putMock).toHaveBeenCalledWith("/books/book-1/beta-reads/assignment-2/feedback-items/feedback-9", {
+      author_status: "task_created",
+      author_task_id: "revision-task:feedback-9",
     })
     expect(invalidateQueryKeysMock).toHaveBeenCalledWith("reader:beta-reads:")
     expect(invalidateQueryKeysMock).toHaveBeenCalledWith("books:list:")

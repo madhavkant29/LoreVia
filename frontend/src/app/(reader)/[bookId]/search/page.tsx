@@ -6,7 +6,7 @@ import { useEffect, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 
 import { booksApi } from "@/lib/api/books"
-import { buildDailyCapEventDetail } from "@/lib/monetization/limitRecovery"
+import { buildDailyCapEventDetail } from "@/lib/limits/dailyCap"
 import { readerApi } from "@/lib/api/reader"
 import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
@@ -70,7 +70,7 @@ export default function SearchPage() {
       setResults([])
       setThematicResults([])
       const dailyCap = buildDailyCapEventDetail(err)
-      setError(dailyCap ? "You reached today's search limit. Use the upgrade or points options to keep going." : "Search failed. Please try again.")
+      setError(dailyCap ? "You reached today's search limit. Upgrade for more daily capacity or continue tomorrow." : "Search failed. Please try again.")
     } finally {
       setLoading(false)
     }

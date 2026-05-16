@@ -33,8 +33,7 @@ from app.models.intelligence import BookChunk, CharacterRelationship, Notificati
 from app.models.user import User
 from app.parsers.chunker import ChunkingConfig, chunk_text, count_tokens
 from app.services.email_service import send_processing_complete_with_stats
-from app.services.monetization_service import qualify_referral_if_ready, reward_first_processed_book
-from app.utils.billing_utils import user_access_tier
+from app.utils.billing_utils import has_paid_reading_access
 from app.utils.book_utils import parse_book_upload_for_ingestion, refresh_screenplay_scene_rows
 from app.utils.character_utils import find_earliest_character_mention_chapter
 from app.utils.compliance.copyright_check import check_isbn
@@ -162,7 +161,7 @@ async def process_book(book_id: str, queue_wait_ms: int | None = None) -> dict:
         was_truncated = False
         ai_chapters = all_chapters
 
-        if user and user_access_tier(user) not in ("reader", "author", "architect", "admin"):
+        if user and not has_paid_reading_access(user):
             result = await db.execute(
                 select(func.sum(Book.total_tokens))
                 .where(Book.user_id == user.id, Book.id != book.id, Book.status != "error")
@@ -784,11 +783,6 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
         await db.commit()
 
         user = await db.get(User, book.user_id)
-        if user and existing_ready_notification is None:
-            await reward_first_processed_book(db, user, book)
-            await qualify_referral_if_ready(db, user, source_book_id=book.id)
-            await db.commit()
-
         if user and user.email and existing_ready_notification is None:
             await send_processing_complete_with_stats(
                 user.email,

@@ -9,20 +9,11 @@ import {
   WorkspacePage,
   WorkspacePanel,
 } from "@/components/ui/Workspace"
-import { RewardedAdEarnCard } from "@/components/monetization/RewardedAdEarnCard"
 import { authApi } from "@/lib/api/auth"
 import { billingApi } from "@/lib/api/billing"
-import { monetizationApi } from "@/lib/api/monetization"
 import { tierLabel } from "@/lib/billing/plans"
-import { formatPointEntryLabel, formatPointsDelta } from "@/lib/monetization/formatters"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
-import type {
-  PointLedgerEntry,
-  PointSpendOffer,
-  ReferralSummary,
-  ResolveRewardedAdSessionResponse,
-} from "@/types/monetization"
 
 const MODES = [
   { value: "casual", label: "Casual", desc: "Quick summaries and light-touch guidance." },
@@ -38,13 +29,6 @@ export default function SettingsPage() {
   const [goalDraft, setGoalDraft] = useState("1000")
   const [goalSaving, setGoalSaving] = useState(false)
   const [goalMessage, setGoalMessage] = useState<string | null>(null)
-  const [pointsBalance, setPointsBalance] = useState<number>(0)
-  const [pointsLedger, setPointsLedger] = useState<PointLedgerEntry[]>([])
-  const [referralSummary, setReferralSummary] = useState<ReferralSummary | null>(null)
-  const [pointOffers, setPointOffers] = useState<PointSpendOffer[]>([])
-  const [pointsLoading, setPointsLoading] = useState(false)
-  const [pointsMessage, setPointsMessage] = useState<string | null>(null)
-  const [referralMessage, setReferralMessage] = useState<string | null>(null)
   const router = useRouter()
   const displayTier = user?.tier_label ?? tierLabel(user?.tier)
   const purchasedTier = tierLabel(user?.plan_tier)
@@ -52,35 +36,9 @@ export default function SettingsPage() {
     ? new Intl.DateTimeFormat("en-US", { dateStyle: "medium" }).format(new Date(user.trial_ends_at))
     : null
 
-  const loadPointsWallet = () => {
-    setPointsLoading(true)
-    setPointsMessage(null)
-    Promise.all([
-      monetizationApi.getPointsBalance(),
-      monetizationApi.getPointsLedger(),
-      monetizationApi.getReferralSummary(),
-      monetizationApi.getPointOffers(),
-    ])
-      .then(([balance, ledger, referral, offers]) => {
-        setPointsBalance(balance.balance)
-        setPointsLedger(ledger)
-        setReferralSummary(referral)
-        setPointOffers(offers.offers)
-      })
-      .catch(() => {
-        setPointsMessage("We could not load your points wallet right now.")
-      })
-      .finally(() => setPointsLoading(false))
-  }
-
   useEffect(() => {
     setGoalDraft(String(user?.daily_word_goal ?? 1000))
   }, [user?.daily_word_goal])
-
-  useEffect(() => {
-    if (!user) return
-    loadPointsWallet()
-  }, [user])
 
   const changeMode = async (mode: string) => {
     await authApi.setReadingMode(mode)
@@ -134,26 +92,6 @@ export default function SettingsPage() {
     } finally {
       setGoalSaving(false)
     }
-  }
-
-  const copyReferralLink = async () => {
-    const referralUrl = referralSummary?.referral_url
-    if (!referralUrl) {
-      setReferralMessage("Referral link is not ready yet.")
-      return
-    }
-    try {
-      await navigator.clipboard.writeText(referralUrl)
-      setReferralMessage("Referral link copied.")
-    } catch {
-      setReferralMessage("We could not copy the referral link right now.")
-    }
-  }
-
-  const handleRewardEarned = (result: ResolveRewardedAdSessionResponse) => {
-    setPointsBalance(result.balance)
-    setPointsMessage(result.confirmation_message)
-    loadPointsWallet()
   }
 
   return (
@@ -347,119 +285,6 @@ export default function SettingsPage() {
             </div>
           </div>
         </WorkspacePanel>
-
-        <div id="points-wallet">
-          <WorkspacePanel className="p-6">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <p className="app-eyebrow">Points wallet</p>
-              <h2 className="mt-3 text-2xl font-semibold text-[rgb(var(--foreground))]">
-                Track balance, referrals, and overflow relief
-              </h2>
-            </div>
-            <p className="max-w-2xl text-sm leading-7 text-[rgb(var(--muted-foreground))]">
-              Points are supplemental only. They can soften a capped day, but they do not replace plan upgrades or unlock higher-tier author tools.
-            </p>
-          </div>
-
-          <div className="mt-5 grid gap-4 lg:grid-cols-3">
-            <div className="app-stat">
-              <p className="app-stat__label">Current balance</p>
-              <p className="mt-3 text-3xl font-semibold text-[rgb(var(--foreground))]">
-                {pointsLoading ? "..." : pointsBalance.toLocaleString()}
-              </p>
-              <p className="mt-2 text-sm leading-7 text-[rgb(var(--muted-foreground))]">
-                Earned from referrals and milestone rewards, then spent on same-day overflow when your plan already supports that action.
-              </p>
-            </div>
-            <div className="app-stat">
-              <p className="app-stat__label">Referral code</p>
-              <p className="mt-3 break-all text-base font-semibold text-[rgb(var(--foreground))]">
-                {pointsLoading ? "Loading..." : referralSummary?.referral_code ?? "Not available yet"}
-              </p>
-              <p className="mt-2 text-sm leading-7 text-[rgb(var(--muted-foreground))]">
-                Invite a verified collaborator who actually processes a first book, and rewards are added automatically.
-              </p>
-              <div className="mt-4 flex flex-wrap gap-3">
-                <button onClick={copyReferralLink} className="app-button-primary disabled:opacity-60" disabled={pointsLoading || !referralSummary?.referral_url}>
-                  Copy referral link
-                </button>
-                {referralMessage ? <span className="text-sm text-[rgb(var(--muted-foreground))]">{referralMessage}</span> : null}
-              </div>
-            </div>
-            <div className="app-stat">
-              <p className="app-stat__label">Referral rewards</p>
-              <p className="mt-3 text-base font-semibold text-[rgb(var(--foreground))]">
-                {(referralSummary?.rewards.length ?? 0).toLocaleString()} total
-              </p>
-              <p className="mt-2 text-sm leading-7 text-[rgb(var(--muted-foreground))]">
-                Your wallet updates lazily on reads, so expirations and new grants stay accurate without a separate balance counter.
-              </p>
-            </div>
-          </div>
-
-          {pointsMessage ? (
-            <div className="mt-4 rounded-[1.1rem] border border-amber-300/40 bg-amber-100/70 px-4 py-3 text-sm text-amber-900 dark:bg-amber-300/10 dark:text-amber-100">
-              {pointsMessage}
-            </div>
-          ) : null}
-
-          <div className="mt-6 grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
-            <div className="space-y-4">
-              <div className="app-stat">
-                <p className="app-stat__label">Recent ledger activity</p>
-                <div className="mt-4 space-y-3">
-                  {pointsLedger.slice(0, 6).map((entry) => (
-                    <div key={entry.id} className="rounded-[1rem] border border-[rgba(var(--border),0.75)] bg-[rgba(255,255,255,0.55)] px-4 py-3 dark:bg-[rgba(255,255,255,0.03)]">
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-semibold text-[rgb(var(--foreground))]">{formatPointEntryLabel(entry)}</p>
-                          <p className="mt-1 text-xs text-[rgb(var(--muted-foreground))]">
-                            {new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" }).format(new Date(entry.created_at))}
-                          </p>
-                        </div>
-                        <p className={`text-sm font-semibold ${entry.points_delta >= 0 ? "text-emerald-600 dark:text-emerald-300" : "text-rose-600 dark:text-rose-300"}`}>
-                          {formatPointsDelta(entry.points_delta)} pts
-                        </p>
-                      </div>
-                    </div>
-                  ))}
-                  {!pointsLoading && pointsLedger.length === 0 ? (
-                    <p className="text-sm text-[rgb(var(--muted-foreground))]">
-                      No point activity yet. Your first processed book and qualified referrals will start the ledger.
-                    </p>
-                  ) : null}
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <RewardedAdEarnCard placement="points_wallet" onRewardEarned={handleRewardEarned} />
-              <div className="app-stat">
-                <p className="app-stat__label">Overflow options</p>
-                <div className="mt-4 space-y-3">
-                  {pointOffers.map((offer) => (
-                    <div key={offer.code} className="rounded-[1rem] border border-[rgba(var(--border),0.75)] bg-[rgba(255,255,255,0.55)] px-4 py-4 dark:bg-[rgba(255,255,255,0.03)]">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-semibold text-[rgb(var(--foreground))]">{offer.title}</p>
-                          <p className="mt-2 text-sm leading-6 text-[rgb(var(--muted-foreground))]">{offer.description}</p>
-                        </div>
-                        <span className="rounded-full bg-[rgba(var(--accent),0.12)] px-3 py-1 text-xs font-semibold text-[rgb(var(--accent))]">
-                          {offer.points_cost} pts
-                        </span>
-                      </div>
-                      <p className="mt-3 text-xs uppercase tracking-[0.22em] text-[rgb(var(--muted-foreground))]">
-                        {offer.eligible ? "Available on your plan" : offer.reason ?? "Upgrade required"}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-          </WorkspacePanel>
-        </div>
 
         <div className="flex justify-start">
           <button

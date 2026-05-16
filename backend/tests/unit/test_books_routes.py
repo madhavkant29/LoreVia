@@ -248,7 +248,6 @@ async def test_upload_book_endpoint_validates_and_persists(monkeypatch):
         )
     assert exc.value.detail == "Invalid visibility"
 
-    monkeypatch.setattr("app.core.config.settings.PUBLIC_MODE_ENABLED", False, raising=False)
     with pytest.raises(HTTPException) as exc:
         await books.upload_book_endpoint(
             file=_upload("atlas.txt", b"payload"),
@@ -259,8 +258,8 @@ async def test_upload_book_endpoint_validates_and_persists(monkeypatch):
             _=None,
             __=None,
         )
-    assert exc.value.status_code == 503
-    monkeypatch.setattr("app.core.config.settings.PUBLIC_MODE_ENABLED", True, raising=False)
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "Main upload flow only supports private manuscripts. Use the explicit public-sharing route after upload."
 
     uploaded = {}
     notified = {}
@@ -275,7 +274,6 @@ async def test_upload_book_endpoint_validates_and_persists(monkeypatch):
     monkeypatch.setattr(books, "require_author_access", _fake_require_author_access)
     monkeypatch.setattr(books, "resolve_upload_format_and_work_type", lambda *_args: ("txt", "novel"))
     monkeypatch.setattr(books, "resolve_owned_series_ids", _fake_resolve_series)
-    monkeypatch.setattr(books, "charge_public_share_points", _async_value(None))
     monkeypatch.setattr(books.storage, "upload_book_bytes", lambda raw, owner, filename: uploaded.setdefault("book", (raw, owner, filename)) or "books/mock.txt")
     monkeypatch.setattr(books.storage, "upload_binary", lambda key, raw, content_type: uploaded.setdefault("cover", (key, raw, content_type)) or key)
     monkeypatch.setattr(books, "build_upload_processing_notification", lambda book, mode, size: SimpleNamespace(book_id=book.id, mode=mode, size=size))
@@ -290,7 +288,7 @@ async def test_upload_book_endpoint_validates_and_persists(monkeypatch):
         genre=" Fantasy ",
         author=" M. Author ",
         series_ids=["1"],
-        visibility="public",
+        visibility="private",
         description=" Desc ",
         mode="author",
         auto_extract_cover="false",
@@ -304,7 +302,8 @@ async def test_upload_book_endpoint_validates_and_persists(monkeypatch):
 
     book = next(item for item in db.added if item.__class__.__name__ == "Book")
     assert payload["status"] == "processing"
-    assert book.is_public is True
+    assert payload["visibility"] == "private"
+    assert book.is_public is False
     assert book.mode == "author"
     assert book.preserve_chapter_numbers is True
     assert book.preserve_source_chapters is True

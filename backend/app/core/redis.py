@@ -48,6 +48,20 @@ async def cache_del(key: str) -> None:
     await r.delete(key)
 
 
+async def cache_get_int(key: str, default: int = 0) -> int:
+    r = await get_redis()
+    value = await r.get(key)
+    return int(value) if value is not None else default
+
+
+async def cache_incr(key: str, default: int = 1) -> int:
+    r = await get_redis()
+    if await r.exists(key):
+        return int(await r.incr(key))
+    await r.set(key, str(default))
+    return default
+
+
 async def get_token_version(user_id: str) -> int:
     r = await get_redis()
     key = key_token_version(user_id)
@@ -215,3 +229,16 @@ def key_public_book_detail(book_id: str) -> str:
 
 def key_public_chapter(book_id: str, chapter_num: int) -> str:
     return f"public:chapter:{book_id}:{chapter_num}"
+
+
+def key_public_forum_cache_version() -> str:
+    return "public:forum:version"
+
+
+def key_public_forum_posts(version: int, q: str, page: int, page_size: int) -> str:
+    query_hash = hashlib.md5(q.strip().lower().encode("utf-8")).hexdigest()[:10]
+    return f"public:forum:posts:v{version}:{query_hash}:{page}:{page_size}"
+
+
+def key_public_forum_post_detail(version: int, post_id: str) -> str:
+    return f"public:forum:post:v{version}:{post_id}"

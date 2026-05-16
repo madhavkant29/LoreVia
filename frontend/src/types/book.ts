@@ -25,6 +25,9 @@ export interface Book {
   series_order?: number | null
   is_public?: boolean
   public_description?: string | null
+  public_share_status?: "not_requested" | "pending" | "approved" | string | null
+  public_share_requested_at?: string | null
+  public_share_approved_at?: string | null
   copyright_warning?: boolean
   archived_at?: string | null
   hidden_at?: string | null
@@ -155,6 +158,7 @@ export interface PublicChapterMeta {
 
 export interface PublicBook {
   id: string
+  public_kind?: "public_demo" | "user_public_share"
   title: string
   author: string | null
   author_username: string | null

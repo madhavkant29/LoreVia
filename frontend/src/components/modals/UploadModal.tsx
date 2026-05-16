@@ -382,7 +382,7 @@ export function UploadModal({
   const storyUnitLabel = isScreenplayWorkspace ? "scene" : "chapter"
   const storyUnitLabelTitle = isScreenplayWorkspace ? "Scene" : "Chapter"
   const storyUnitCollectionLabel = isScreenplayWorkspace ? "scenes" : "chapters"
-  const newUploadAccept = isScreenplayWorkspace ? ".pdf,.fountain,.txt,.md" : ".pdf,.epub,.docx,.txt,.md,.fountain"
+  const newUploadAccept = isScreenplayWorkspace ? ".pdf,.txt,.md" : ".pdf,.epub,.docx,.txt,.md"
   const newUploadPrompt = "Upload"
   const primaryFile = files[0] ?? null
   const primaryFileIsPdf = Boolean(primaryFile?.name?.toLowerCase().endsWith(".pdf"))
@@ -405,7 +405,7 @@ export function UploadModal({
     : null
   const uploadLimitCopy = uploadStats
     ? uploadStats.private.upload_limit_unlimited
-      ? "Uploads are still tracked here, and worldbuilding manuscripts count as uploads on every tier. Lore Architect stays unlimited, even when worldbuilding is linked across a series."
+      ? "Uploads are still tracked here, and worldbuilding manuscripts count as uploads on every tier. Architect stays unlimited, even when worldbuilding is linked across a series."
       : typeof uploadStats.private.upload_limit === "number"
         ? `${uploadStats.private.total_uploads}/${uploadStats.private.upload_limit} uploads used. ${uploadStats.private.uploads_remaining ?? 0} remaining. Worldbuilding manuscripts count as uploads on every tier.`
         : null
@@ -426,7 +426,7 @@ export function UploadModal({
             <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
               {isManagingExisting
                 ? "Paste or upload one scene, chapter, or script segment, process it incrementally, and review what changed before moving on."
-                : "Add a new book or script to your workspace."}
+                : "Add a new manuscript to your private workspace with processing status you can trust."}
             </p>
           </div>
           <button
@@ -583,7 +583,7 @@ export function UploadModal({
             </div>
             {!canUploadAuthorMode ? (
               <p className={`mt-3 text-xs leading-5 ${isDark ? "text-amber-200" : "text-amber-700"}`}>
-                Author uploads require Author or Lore Architect access. Collaboration-only access stays read-only.
+                Author uploads require Author or Architect access. Collaboration-only access stays read-only.
               </p>
             ) : null}
             {uploadLimitCopy ? (
@@ -695,7 +695,9 @@ export function UploadModal({
           </div>
 
           <div className={`rounded-xl border px-4 py-3 text-sm ${isDark ? "border-white/10 bg-white/[0.03] text-slate-300" : "border-gray-200 bg-gray-50 text-slate-600"}`}>
-            Upload visibility: private
+            <p className="font-semibold">Private by default</p>
+            <p className="mt-1">LoreVia keeps this upload private in your workspace. Public sharing is not part of this step.</p>
+            <p className="mt-2 text-xs">Supported manuscript formats: DOCX, PDF, EPUB, TXT, and Markdown.</p>
           </div>
 
           {series.length > 0 ? (

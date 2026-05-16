@@ -1,7 +1,7 @@
 import pytest
 
 from app.services import email_service
-from app.utils.monetization_utils import TRIAL_EMAIL_ENDING
+from app.utils.trial_email_utils import TRIAL_EMAIL_ENDING
 
 
 def test_canonical_app_url_falls_back_to_public_domain_for_production_localhost(monkeypatch):

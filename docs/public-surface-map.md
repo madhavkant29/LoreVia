@@ -14,7 +14,8 @@ This map keeps the word "public" tied to explicit exposure models instead of usi
 - Routes: `/public`, `/public/{bookId}`, `/public/{bookId}/chapter/{chapterId}`.
 - API: `/api/v1/public/books`, `/api/v1/public/books/{bookId}`, `/api/v1/public/books/{bookId}/chapter/{chapterNum}`.
 - Backend rule: only `books.is_public = true` with no `hidden_at` or `archived_at`.
-- Writer bridge: responses include `author_username` when available so readers can open `/public/writers/{username}`.
+- Product role: optional author-facing showcase surface, not the core LoreVia workflow.
+- Writer bridge: responses include `author_username` when available so visitors can open `/public/writers/{username}`.
 - Kill switch: controlled by `PUBLIC_MODE_ENABLED`.
 
 ## Forum-public
@@ -22,8 +23,22 @@ This map keeps the word "public" tied to explicit exposure models instead of usi
 - Routes: `/public/forum`, `/public/forum/{postId}`, `/public/writers/{username}`.
 - API: `/api/v1/public/forum/*`, `/api/v1/public/users/{username}`.
 - Backend rule: forum posts and profile counts only use open posts whose manuscripts are not public, hidden, or archived.
+- Product role: optional trust and discovery layer around author collaboration, not a separate reader product.
 - Profile bridge: `current_project.source` is either `forum` with `forum_post_id`, or `public_book` with `public_book_id`.
-- Kill switch: controlled by `PUBLIC_MODE_ENABLED`.
+- Launch gate: controlled by `PUBLIC_FORUM_STATUS`.
+
+### Public forum status values
+
+- `disabled`: forum reads and writes are off.
+- `internal`: reserved for internal-only work; public forum reads and writes stay off.
+- `beta`: public reads stay on, but public posting/commenting/reactions stay off.
+- `public`: public forum reads and writes are both on.
+
+### Current launch decision
+
+- Public forum posting, commenting, reactions, and interest requests are enabled when the forum is intentionally launched.
+- Authenticated users can participate in those write flows when `PUBLIC_FORUM_STATUS=public`.
+- Current intended production status is `public`.
 
 ## Token-shared Assets
 
@@ -35,5 +50,4 @@ This map keeps the word "public" tied to explicit exposure models instead of usi
 ## Not Product-wired Yet
 
 - Manual public book creation and public chapter append remain backend endpoints only.
-- Forum creation/editing, reader-interest creation, and author-side interest listing also remain backend-only product surfaces for now.
-- Do not add frontend client methods or UI for these write flows until the product path is ready.
+- `PUBLIC_FORUM_STATUS` remains the explicit launch gate for forum reads/writes, but the product path is now intentionally launched in `public` mode.

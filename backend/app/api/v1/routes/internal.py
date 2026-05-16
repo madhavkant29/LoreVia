@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Header, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.services.monetization_service import send_due_trial_emails
+from app.services.trial_email_service import send_due_trial_emails
 from app.utils.beta_read_utils import run_beta_read_jobs
 from app.utils.internal_job_utils import verify_internal_job_secret
 

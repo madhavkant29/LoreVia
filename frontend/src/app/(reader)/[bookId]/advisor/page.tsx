@@ -7,7 +7,7 @@ import { useParams } from "next/navigation"
 import { booksApi } from "@/lib/api/books"
 import { intelligenceApi } from "@/lib/api/intelligence"
 import { canUseAuthorFeatures } from "@/lib/billing/plans"
-import { buildDailyCapEventDetail } from "@/lib/monetization/limitRecovery"
+import { buildDailyCapEventDetail } from "@/lib/limits/dailyCap"
 import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
@@ -488,7 +488,7 @@ export default function AdvisorPage() {
       const dailyCap = buildDailyCapEventDetail(err)
       const msg = err instanceof Error ? err.message : ""
       if (dailyCap) {
-        setError("You reached today's Story Advisor limit. Use the upgrade or points options to keep going.")
+        setError("You reached today's Story Advisor limit. Upgrade for more daily capacity or continue tomorrow.")
       } else if (msg.includes("429")) {
         setError("Too many Story Advisor requests right now. Please try again in a bit.")
       } else {

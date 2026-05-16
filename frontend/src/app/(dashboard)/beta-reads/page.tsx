@@ -41,14 +41,12 @@ function formatWindow(assignment: BetaReadAssignment) {
   return `${DATE_TIME_FORMATTER.format(new Date(assignment.starts_at))} to ${DATE_TIME_FORMATTER.format(new Date(assignment.expires_at))}`
 }
 
-function completedPointsLabel(assignment: BetaReadAssignment) {
-  if (assignment.awarded_points > 0) {
-    return `${assignment.awarded_points} points earned`
-  }
+function completedResultLabel(assignment: BetaReadAssignment) {
+  if (assignment.completed_at) return "Review completed"
   if (assignment.state === "disqualified") {
-    return "No points awarded"
+    return "Requirements not met before the deadline"
   }
-  return `${assignment.reward_points} points available`
+  return "Awaiting completion processing"
 }
 
 function submissionStatusLabel(assignment: BetaReadAssignment) {
@@ -77,7 +75,7 @@ export default function BetaReadsPage() {
     () => (
       <div className="flex flex-wrap justify-end gap-3">
         <div className="app-chip">{items.length.toLocaleString()} assignments</div>
-        <div className="app-chip">Complete before the deadline to earn points</div>
+        <div className="app-chip">Deadline-based review workflow</div>
       </div>
     ),
     [items.length]
@@ -122,7 +120,7 @@ export default function BetaReadsPage() {
             </div>
             <p className="text-sm font-medium text-[rgb(var(--foreground))]">{assignment.task_label}</p>
             <p className={`text-sm ${urgent ? "text-rose-600 dark:text-rose-300" : "text-[rgb(var(--muted-foreground))]"}`}>
-              {betaReadDeadlineLabel(assignment.expires_at)} - {assignment.reward_points} pts available
+              {betaReadDeadlineLabel(assignment.expires_at)}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -168,7 +166,7 @@ export default function BetaReadsPage() {
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[rgb(var(--muted-foreground))]">
                     Result
                   </p>
-                  <p className="mt-1 text-sm text-[rgb(var(--foreground))]">{completedPointsLabel(assignment)}</p>
+                  <p className="mt-1 text-sm text-[rgb(var(--foreground))]">{completedResultLabel(assignment)}</p>
                 </div>
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[rgb(var(--muted-foreground))]">
@@ -197,9 +195,9 @@ export default function BetaReadsPage() {
                 </div>
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[rgb(var(--muted-foreground))]">
-                    Points lost
+                    Outcome
                   </p>
-                  <p className="mt-1 text-sm text-[rgb(var(--foreground))]">{assignment.reward_points} points were not awarded</p>
+                  <p className="mt-1 text-sm text-[rgb(var(--foreground))]">This assignment expired before completion.</p>
                 </div>
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[rgb(var(--muted-foreground))]">
@@ -285,7 +283,7 @@ export default function BetaReadsPage() {
           <WorkspaceHeader
             eyebrow="Beta Reads"
             title="Upcoming Beta Reads"
-            description="Complete before the deadline to earn points. Only your assigned beta reads appear here."
+            description="Track assigned beta reads, deadlines, and review requirements from one place."
             meta={headerMeta}
           />
         </WorkspacePanel>
@@ -313,12 +311,12 @@ export default function BetaReadsPage() {
             {loading ? (
               <WorkspaceEmptyState
                 title="Loading beta reads"
-                body="We are syncing your assigned reads, deadlines, and points."
+                body="We are syncing your assigned reads, deadlines, and review requirements."
               />
             ) : items.length === 0 ? (
               <WorkspaceEmptyState
                 title={`No ${bucket} beta reads`}
-                body="When an author assigns you a beta read, it will appear here with its deadline, progress, and points."
+                body="When an author assigns you a beta read, it will appear here with its deadline, progress, and review requirements."
               />
             ) : (
               items.map(renderCard)

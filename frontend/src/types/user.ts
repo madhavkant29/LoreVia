@@ -1,4 +1,4 @@
-export type UserTier = "free" | "reader" | "author" | "architect" | "admin"
+export type UserTier = "free" | "collaborator" | "reader" | "author" | "architect" | "admin"
 
 export interface User {
   id: string

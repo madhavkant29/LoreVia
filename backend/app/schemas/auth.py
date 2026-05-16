@@ -12,7 +12,6 @@ class RegisterBody(BaseModel):
     password: str = Field(..., min_length=12, max_length=128)
     accepted_terms: bool
     device_id: str = Field(..., min_length=16, max_length=128)
-    referral_code: str | None = Field(None, max_length=64)
 
 
 class LoginBody(BaseModel):
@@ -67,7 +66,6 @@ class SupabaseOAuthBody(BaseModel):
     token: str
     accepted_terms: bool = False
     device_id: str = Field(..., min_length=16, max_length=128)
-    referral_code: str | None = Field(None, max_length=64)
 
 
 class ForgotPasswordBody(BaseModel):
@@ -92,7 +90,6 @@ class TierLimitsOut(BaseModel):
     free_summary_per_hour: int
     free_prediction_per_day: int
     free_recall_per_day: int
-    reader_prediction_per_day: int
     author_prediction_per_day: int
     architect_prediction_per_day: int
     trial_high_cost_turns_per_day: int
@@ -102,9 +99,6 @@ class TierLimitsOut(BaseModel):
     free_advisor_per_week: int
     free_advisor_per_month: int
     free_continuity_per_day: int
-    reader_advisor_per_day: int
-    reader_advisor_per_week: int
-    reader_advisor_per_month: int
     author_advisor_per_day: int
     author_advisor_per_week: int
     author_advisor_per_month: int
@@ -112,6 +106,5 @@ class TierLimitsOut(BaseModel):
     architect_advisor_per_week: int
     architect_advisor_per_month: int
     free_continuity_per_minute: int
-    reader_continuity_per_minute: int
     author_continuity_per_minute: int
     architect_continuity_per_minute: int

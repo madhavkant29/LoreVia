@@ -1,10 +1,12 @@
 import Link from "next/link"
+import Script from "next/script"
 import type { Route } from "next"
 import type { ReactNode } from "react"
 import { AudienceSection } from "@/components/marketing/AudienceSection"
 import { Reveal } from "@/components/marketing/Reveal"
 import { BrandLockup } from "@/components/layout/BrandLockup"
 import { pricingTierAccessLabel, pricingTiers as billingPricingTiers } from "@/lib/billing/catalog"
+import { SITE_NAME, toAbsoluteUrl } from "@/lib/seo"
 
 const navItems = [
   { label: "Product", href: "#product" },
@@ -49,7 +51,7 @@ const workspaceModules = [
   },
   {
     title: "Story Advisor",
-    body: "Ask grounded questions with chapter-aware citations and spoiler limits.",
+    body: "Ask grounded questions with chapter-aware citations and collaborator-safe sharing limits.",
   },
 ]
 
@@ -86,7 +88,7 @@ const processSteps = [
   {
     number: "03",
     title: "Ask, revise, detect",
-    body: "Get spoiler-safe answers, continuity flags, and chapter references you can verify fast.",
+    body: "Get grounded answers, continuity flags, and chapter references you can verify fast.",
   },
 ]
 
@@ -113,14 +115,14 @@ const pricingTiers = billingPricingTiers.map((tier) => ({
     tier.name === "Free"
       ? "Explore LoreVia with a single project."
       : tier.name === "Author"
-        ? "For active manuscript drafting, revision, beta feedback, and continuity work."
+        ? "For active manuscript drafting, revision, collaborator feedback, and continuity work."
         : "For multi-book projects and expansive story worlds.",
   bullets:
     tier.name === "Free"
       ? [
           "1 upload total",
-          "Read public demo books",
-          "Join invited beta reads for free",
+          "Explore sample LoreVia workflows",
+          "Join author-invited beta reads for free",
           "Basic story recall with strict limits",
           "Short chapter summaries only",
           "3 searches/day, 1 prediction/day, 1 advisor turn/day, 1 continuity check/day",
@@ -154,7 +156,7 @@ const pricingTiers = billingPricingTiers.map((tier) => ({
 const faqItems = [
   {
     q: "Will LoreVia spoil future chapters?",
-    a: "Reader mode can stay bounded to a chapter, so answers avoid events past the point you choose.",
+    a: "Collaborator access can stay bounded to a chapter, so shared answers avoid events past the point you choose.",
   },
   {
     q: "Can I use it before my book is published?",
@@ -664,7 +666,7 @@ function PricingSection({ ctaHref }: { ctaHref: Route }) {
     <Section id="pricing">
       <SectionHeader
         title="Choose the workspace that fits your writing."
-        body="Every signup starts with a 10-day Author trial at no charge. After that, Free remains available and only Author or Lore Architect are paid."
+        body="Every signup starts with a 10-day Author trial at no charge. After that, Free remains available and only Author or Architect are paid."
         align="center"
       />
       <div className="mt-12 grid gap-5 md:grid-cols-2 lg:grid-cols-4">
@@ -741,9 +743,46 @@ function FAQSection() {
 
 export default function HomePage() {
   const ctaHref: Route = "/register"
+  const faqJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    mainEntity: faqItems.map((item) => ({
+      "@type": "Question",
+      name: item.q,
+      acceptedAnswer: {
+        "@type": "Answer",
+        text: item.a,
+      },
+    })),
+  }
+  const softwareJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    name: SITE_NAME,
+    applicationCategory: "BusinessApplication",
+    operatingSystem: "Web",
+    url: toAbsoluteUrl("/"),
+    description:
+      "LoreVia helps fiction authors analyze manuscripts, track characters, manage continuity, and build a searchable story workspace.",
+    offers: pricingTiers
+      .filter((tier) => tier.price >= 0)
+      .map((tier) => ({
+        "@type": "Offer",
+        price: tier.price.toString(),
+        priceCurrency: "USD",
+        name: tier.name,
+        url: toAbsoluteUrl("/pricing"),
+      })),
+  }
 
   return (
     <main className="min-h-screen overflow-hidden bg-[#050814] text-white">
+      <Script id="home-faq-jsonld" type="application/ld+json" strategy="beforeInteractive">
+        {JSON.stringify(faqJsonLd).replace(/</g, "\\u003c")}
+      </Script>
+      <Script id="home-software-jsonld" type="application/ld+json" strategy="beforeInteractive">
+        {JSON.stringify(softwareJsonLd).replace(/</g, "\\u003c")}
+      </Script>
       <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(circle_at_20%_0%,rgba(125,211,252,0.09),transparent_28%),radial-gradient(circle_at_80%_12%,rgba(196,181,253,0.08),transparent_24%),linear-gradient(180deg,#050814_0%,#070b14_42%,#0b1020_100%)]" />
 
       <header className="sticky top-0 z-50 border-b border-white/10 bg-[#050814]/88 backdrop-blur-xl">
@@ -789,16 +828,16 @@ export default function HomePage() {
         <Reveal>
           <div>
             <p className="inline-flex rounded-full border border-white/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-300">
-              LoreVia for authors
+              Fiction authors only
             </p>
             <h1
               className="mt-7 text-5xl font-[650] leading-[0.98] tracking-[-0.04em] text-white md:text-7xl xl:text-[5.15rem]"
               style={{ fontFamily: '"Inter", "Geist", "Satoshi", var(--font-ui), sans-serif' }}
             >
-              LoreVia for authors who never want to lose the thread.
+              LoreVia helps authors understand, revise, and maintain continuity in complex manuscripts.
             </h1>
             <p className="mt-6 max-w-2xl text-lg leading-9 text-slate-300 md:text-xl">
-              LoreVia turns your manuscript into an author workspace with character tracking, relationship memory, timeline recall, grounded story questions, and continuity scans that stay tied to the draft.
+              LoreVia turns your manuscript into an author workspace with character tracking, manuscript intelligence, relationship memory, grounded story questions, and continuity scans that stay tied to the draft.
             </p>
             <div className="mt-8 flex flex-col gap-4 xl:flex-row">
               <Link

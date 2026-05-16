@@ -169,6 +169,13 @@ function countWarnings(book: Book) {
   return warnings
 }
 
+function getPublicSampleStatus(book: Book) {
+  if (book.source_kind !== "user_public_share") return null
+  if (book.public_share_status === "pending") return "Public sample pending approval"
+  if (book.is_public || book.public_share_status === "approved") return "Public sample approved"
+  return null
+}
+
 function formatNumber(value: number) {
   return NUMBER_FORMAT.format(value)
 }
@@ -307,7 +314,7 @@ export default function LibraryPage() {
           <div className="flex flex-col gap-8 xl:flex-row xl:items-end xl:justify-between">
             <div className="space-y-3 pt-1">
               <h1 className={`font-serif text-[3.25rem] leading-[0.94] tracking-[-0.04em] sm:text-[3.5rem] ${headingText}`}>Library</h1>
-              <p className={`max-w-xl text-lg leading-8 ${mutedText}`}>All your projects. All your worlds.</p>
+              <p className={`max-w-xl text-lg leading-8 ${mutedText}`}>Understand, revise, and maintain continuity across every manuscript.</p>
             </div>
 
             <div className="flex w-full flex-col gap-3 xl:w-auto xl:flex-row xl:items-center xl:justify-end">
@@ -339,8 +346,8 @@ export default function LibraryPage() {
                         <div className="mt-3 flex flex-wrap gap-2">
                           {[
                             ["all", "All"],
-                            ["author", "Author"],
-                            ["reader", "Reader"],
+                            ["author", "Author Workspace"],
+                            ["reader", "Collaborator Preview"],
                           ].map(([value, label]) => (
                             <button
                               key={value}
@@ -692,6 +699,7 @@ function ProjectCard({
   const targetWords = estimateTargetWordCount(book, currentWords)
   const warningCount = countWarnings(book)
   const isArchived = !!book.archived_at
+  const publicSampleStatus = getPublicSampleStatus(book)
 
   return (
     <article
@@ -723,6 +731,11 @@ function ProjectCard({
                 <span className={`h-2.5 w-2.5 rounded-full ${DOT_CLASSES[book.status]}`} />
               </div>
               <p className={`truncate text-[0.95rem] ${isDark ? "text-[#b7b4bd]" : "text-stone-600"}`}>{getGenreLabel(book)}</p>
+              {publicSampleStatus ? (
+                <p className={`mt-2 inline-flex rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${isDark ? "bg-cyan-400/12 text-cyan-200" : "bg-cyan-100 text-cyan-800"}`}>
+                  {publicSampleStatus}
+                </p>
+              ) : null}
             </div>
           </div>
 
@@ -814,6 +827,7 @@ function ProjectRow({
   const currentWords = estimateWordCount(book)
   const targetWords = estimateTargetWordCount(book, currentWords)
   const isArchived = !!book.archived_at
+  const publicSampleStatus = getPublicSampleStatus(book)
 
   return (
     <article
@@ -840,6 +854,11 @@ function ProjectRow({
               <span className={`h-2.5 w-2.5 rounded-full ${DOT_CLASSES[book.status]}`} />
             </div>
             <p className={`mt-1 truncate text-[0.95rem] ${isDark ? "text-[#b7b4bd]" : "text-stone-600"}`}>{getGenreLabel(book)}</p>
+            {publicSampleStatus ? (
+              <p className={`mt-2 inline-flex rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${isDark ? "bg-cyan-400/12 text-cyan-200" : "bg-cyan-100 text-cyan-800"}`}>
+                {publicSampleStatus}
+              </p>
+            ) : null}
             <p className={`mt-1.5 text-[0.95rem] ${isDark ? "text-[#8c8994]" : "text-stone-500"}`}>{getProgressLine(book)}</p>
           </div>
         </div>

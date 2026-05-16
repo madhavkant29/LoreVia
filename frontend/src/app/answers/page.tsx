@@ -1,10 +1,11 @@
 import type { Metadata } from "next"
 import Link from "next/link"
+import Script from "next/script"
 
 import { PublicContentHeader, ContentArrowIcon } from "@/components/marketing/PublicContentHeader"
 import { Reveal } from "@/components/marketing/Reveal"
 import { answerPages, blogArticles, getBlogArticleBySlug } from "@/lib/content"
-import { DEFAULT_OG_IMAGE, SITE_NAME, SITE_URL } from "@/lib/seo"
+import { DEFAULT_OG_IMAGE, SITE_NAME, SITE_URL, buildCollectionPageJsonLd } from "@/lib/seo"
 
 export const metadata: Metadata = {
   title: "Answers",
@@ -43,10 +44,20 @@ export const metadata: Metadata = {
 }
 
 export default function AnswersPage() {
+  const jsonLd = buildCollectionPageJsonLd({
+    name: "LoreVia Answers",
+    description:
+      "Short, useful question pages for fiction authors on character tracking, continuity, manuscript analysis, story bibles, timelines, and beta-reader prep.",
+    path: "/answers",
+  })
+
   return (
     <main className="app-shell overflow-hidden">
       <div className="app-shell__mesh" />
       <div className="absolute inset-x-0 top-0 -z-10 h-[30rem] bg-[radial-gradient(circle_at_top,rgba(15,118,110,0.14),transparent_36%),radial-gradient(circle_at_82%_8%,rgba(180,83,9,0.14),transparent_24%)]" />
+      <Script id="answers-collection-jsonld" type="application/ld+json" strategy="beforeInteractive">
+        {JSON.stringify(jsonLd).replace(/</g, "\\u003c")}
+      </Script>
 
       <PublicContentHeader activeSection="answers" />
 

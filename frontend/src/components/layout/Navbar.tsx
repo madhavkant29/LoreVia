@@ -35,7 +35,6 @@ export function Navbar() {
     { href: "/quotes", label: "Quotes" },
     { href: "/stats", label: "Stats" },
     { href: "/series", label: "Series" },
-    { href: "/points" as Route, label: "Points" },
     { href: "/upgrade", label: "Pricing" },
     { href: "/settings", label: "Settings" },
   ]

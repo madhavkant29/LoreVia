@@ -4,11 +4,13 @@ import {
   answerPages,
   blogArticles,
   demoPages,
+  getAllPublicContentEntries,
   getAllPublicContentPaths,
   getAnswerPageBySlug,
   getAnswersByArticleSlug,
   getBlogArticleBySlug,
   getDemoPageBySlug,
+  getLatestContentPublishedAt,
 } from "./content"
 
 describe("content helpers", () => {
@@ -53,5 +55,35 @@ describe("content helpers", () => {
     const expectedCount = 3 + blogArticles.length + answerPages.length + demoPages.length
 
     expect(getAllPublicContentPaths()).toHaveLength(expectedCount)
+  })
+
+  it("exposes public content entries with stable publish dates for sitemap generation", () => {
+    const entries = getAllPublicContentEntries()
+
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        path: "/blog/how-to-track-characters-in-a-novel",
+        publishedAt: "2026-05-14",
+        type: "blog",
+      }),
+    )
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        path: "/answers/how-do-i-track-character-arcs",
+        publishedAt: "2026-05-14",
+        type: "answer",
+      }),
+    )
+  })
+
+  it("uses the newest public content date for hub pages", () => {
+    expect(getLatestContentPublishedAt()).toBe("2026-05-14")
+    expect(getAllPublicContentEntries()).toContainEqual(
+      expect.objectContaining({
+        path: "/blog",
+        publishedAt: "2026-05-14",
+        type: "hub",
+      }),
+    )
   })
 })

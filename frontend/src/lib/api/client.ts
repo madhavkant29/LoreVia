@@ -1,6 +1,6 @@
 import axios from "axios"
 import { API_BASE } from "@/lib/constants"
-import { buildDailyCapEventDetail, dispatchDailyCapEvent } from "@/lib/monetization/limitRecovery"
+import { buildDailyCapEventDetail, dispatchDailyCapEvent } from "@/lib/limits/dailyCap"
 
 export const apiClient = axios.create({
   baseURL: API_BASE,

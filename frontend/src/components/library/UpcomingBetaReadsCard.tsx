@@ -47,7 +47,7 @@ export function UpcomingBetaReadsCard({ isDark }: { isDark: boolean }) {
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className={`text-[0.7rem] font-semibold uppercase tracking-[0.28em] ${isDark ? "text-amber-300" : "text-amber-700"}`}>Upcoming Beta Reads</p>
-          <h2 className={`mt-2 font-serif text-[2rem] tracking-[-0.03em] ${copyClass}`}>Complete before the deadline to earn points.</h2>
+          <h2 className={`mt-2 font-serif text-[2rem] tracking-[-0.03em] ${copyClass}`}>Complete reviews before the deadline.</h2>
         </div>
         <button
           type="button"
@@ -89,7 +89,7 @@ export function UpcomingBetaReadsCard({ isDark }: { isDark: boolean }) {
 
                 <div className={`mt-5 flex items-center justify-between text-sm ${subtleClass}`}>
                   <span className={urgent ? "text-rose-300" : undefined}>{betaReadDeadlineLabel(assignment.expires_at)}</span>
-                  <span>{assignment.reward_points} pts available</span>
+                  <span>{Math.round(assignment.progress_pct)}% complete</span>
                 </div>
 
                 <div className="mt-4">
