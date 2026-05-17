@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 from starlette.requests import Request
 
+from app.api.deps import rate_limit as rate_limit_module
 from app.api.deps.rate_limit import (
     _bump_daily_bucket,
     _client_identifier,
@@ -97,12 +98,12 @@ async def test_trial_authoring_surfaces_share_one_daily_bucket(monkeypatch):
 
     monkeypatch.setattr("app.api.deps.rate_limit.get_redis", _fake_get_redis)
     monkeypatch.setattr("app.api.deps.rate_limit._limit_for_user", _fake_limit_for_user)
-    monkeypatch.setattr("app.api.deps.rate_limit.settings.TRIAL_HIGH_COST_TURNS_PER_DAY", 2, raising=False)
-    monkeypatch.setattr("app.api.deps.rate_limit.settings.DEBUG", False, raising=False)
+    monkeypatch.setattr("app.core.config.settings.TRIAL_HIGH_COST_TURNS_PER_DAY", 2, raising=False)
+    monkeypatch.setattr("app.core.config.settings.DEBUG", False, raising=False)
     user = SimpleNamespace(
         id="user-2",
         tier="free",
-        created_at=datetime(2026, 5, 6, 10, 0, tzinfo=UTC),
+        created_at=datetime(2026, 5, 16, 10, 0, tzinfo=UTC),
     )
 
     await rate_limit_advisor(user, db=None)

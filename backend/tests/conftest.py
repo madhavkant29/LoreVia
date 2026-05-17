@@ -1,11 +1,33 @@
 import asyncio
 import sys
+import warnings
 
 import pytest
 import pytest_asyncio
 import sqlalchemy as sa
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+warnings.filterwarnings(
+    "ignore",
+    message=r".*'crypt' is deprecated and slated for removal in Python 3\.13.*",
+    category=DeprecationWarning,
+)
+warnings.filterwarnings(
+    "ignore",
+    message=r"builtin type SwigPyPacked has no __module__ attribute",
+    category=DeprecationWarning,
+)
+warnings.filterwarnings(
+    "ignore",
+    message=r"builtin type SwigPyObject has no __module__ attribute",
+    category=DeprecationWarning,
+)
+warnings.filterwarnings(
+    "ignore",
+    message=r"builtin type swigvarlink has no __module__ attribute",
+    category=DeprecationWarning,
+)
 
 from app.api.deps.rate_limit import (
     rate_limit_api,
@@ -35,7 +57,17 @@ from app.utils.migration_utils import is_local_database_url
 @pytest.fixture(autouse=True)
 def test_runtime_defaults(monkeypatch):
     """Run tests with production-like auth and billing behavior by default."""
-    monkeypatch.setattr("app.core.config.settings.DEBUG", False, raising=False)
+    monkeypatch.setattr(settings, "DEBUG", False, raising=False)
+    monkeypatch.setattr(settings, "FREE_MAX_BOOKS", 1, raising=False)
+    monkeypatch.setattr(settings, "FREE_TOTAL_TOKEN_BUDGET", 150000, raising=False)
+    monkeypatch.setattr(settings, "FREE_SEARCH_PER_DAY", 3, raising=False)
+    monkeypatch.setattr(settings, "FREE_SUMMARY_PER_HOUR", 30, raising=False)
+    monkeypatch.setattr(settings, "FREE_PREDICTION_PER_DAY", 1, raising=False)
+    monkeypatch.setattr(settings, "FREE_RECALL_PER_DAY", 2, raising=False)
+    monkeypatch.setattr(settings, "FREE_ADVISOR_PER_DAY", 1, raising=False)
+    monkeypatch.setattr(settings, "FREE_ADVISOR_PER_WEEK", 7, raising=False)
+    monkeypatch.setattr(settings, "FREE_ADVISOR_PER_MONTH", 30, raising=False)
+    monkeypatch.setattr(settings, "FREE_CONTINUITY_PER_DAY", 1, raising=False)
 
 
 @pytest.fixture(autouse=True)
@@ -123,6 +155,7 @@ def mock_redis(monkeypatch):
     class FakeRedis:
         def __init__(self):
             self.store: dict[str, str] = {}
+            self.sorted_sets: dict[str, dict[str, float]] = {}
 
         async def ping(self):
             return True
@@ -160,6 +193,9 @@ def mock_redis(monkeypatch):
             outer = self
 
             class FakePipeline:
+                def __init__(self):
+                    self.ops: list[tuple[str, tuple[object, ...]]] = []
+
                 async def __aenter__(self):
                     return self
 
@@ -167,16 +203,70 @@ def mock_redis(monkeypatch):
                     return False
 
                 def delete(self, *keys):
-                    for key in keys:
-                        outer.store.pop(key, None)
+                    self.ops.append(("delete", keys))
                     return self
 
                 def setex(self, key, ttl, value):
-                    outer.store[key] = str(value)
+                    self.ops.append(("setex", (key, ttl, value)))
+                    return self
+
+                def zremrangebyscore(self, key, minimum, maximum):
+                    self.ops.append(("zremrangebyscore", (key, minimum, maximum)))
+                    return self
+
+                def zadd(self, key, mapping):
+                    self.ops.append(("zadd", (key, mapping)))
+                    return self
+
+                def zcard(self, key):
+                    self.ops.append(("zcard", (key,)))
+                    return self
+
+                def expire(self, key, ttl):
+                    self.ops.append(("expire", (key, ttl)))
                     return self
 
                 async def execute(self):
-                    return []
+                    results: list[object] = []
+                    for op_name, args in self.ops:
+                        if op_name == "delete":
+                            deleted = 0
+                            for key in args:
+                                if key in outer.store:
+                                    deleted += 1
+                                    del outer.store[key]
+                                if key in outer.sorted_sets:
+                                    deleted += 1
+                                    del outer.sorted_sets[key]
+                            results.append(deleted)
+                        elif op_name == "setex":
+                            key, _ttl, value = args
+                            outer.store[str(key)] = str(value)
+                            results.append(True)
+                        elif op_name == "zremrangebyscore":
+                            key, minimum, maximum = args
+                            entries = outer.sorted_sets.setdefault(str(key), {})
+                            removable = [
+                                member
+                                for member, score in entries.items()
+                                if float(minimum) <= score <= float(maximum)
+                            ]
+                            for member in removable:
+                                del entries[member]
+                            results.append(len(removable))
+                        elif op_name == "zadd":
+                            key, mapping = args
+                            entries = outer.sorted_sets.setdefault(str(key), {})
+                            for member, score in dict(mapping).items():
+                                entries[str(member)] = float(score)
+                            results.append(len(mapping))
+                        elif op_name == "zcard":
+                            key = str(args[0])
+                            results.append(len(outer.sorted_sets.get(key, {})))
+                        elif op_name == "expire":
+                            results.append(True)
+                    self.ops.clear()
+                    return results
 
             return FakePipeline()
 

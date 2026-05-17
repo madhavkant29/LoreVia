@@ -29,6 +29,20 @@ export function pricingTierGuestCtaLabel(tier: PricingTier) {
   return tier.access === "free" ? "Create free account" : "Create account for free trial"
 }
 
+export function pricingTierPrice(tier: PricingTier, billingCycle: BillingCycle) {
+  return billingCycle === "annual" ? tier.priceAnnual : tier.priceMonthly
+}
+
+export function pricingTierPriceSuffix(tier: PricingTier, billingCycle: BillingCycle) {
+  if (tier.access === "free") return ""
+  return billingCycle === "annual" ? "/yr" : "/mo"
+}
+
+export function pricingTierAnnualSavings(tier: PricingTier) {
+  if (tier.access === "free") return 0
+  return Math.max(tier.priceMonthly * 12 - tier.priceAnnual, 0)
+}
+
 export const pricingTiers: PricingTier[] = pricingCatalog.tiers.map((tier) => ({
   key: tier.key,
   name: tier.name,

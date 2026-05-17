@@ -354,7 +354,7 @@ def infer_element_type(name: str, description: str = "") -> str:
         return "magic_system"
     haystack = f"{name} {description}".lower()
     for element_type, words in ELEMENT_PATTERNS.items():
-        if any(word in haystack for word in words):
+        if any(re.search(rf"\b{re.escape(word)}\b", haystack) for word in words):
             return element_type
     if looks_like_person_entity_name(name):
         return "character"

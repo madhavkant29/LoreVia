@@ -4,7 +4,8 @@ import sys
 from pathlib import Path
 
 from alembic import context
-from sqlalchemy import pool
+import sqlalchemy as sa
+from sqlalchemy import create_engine, pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -24,6 +25,7 @@ if sys.platform == "win32":
 
 config = context.config
 log = get_logger("alembic")
+versions_dir = Path(__file__).resolve().parent / "versions"
 db_url, _explicit_url = resolve_alembic_database_url(
     os.getenv("ALEMBIC_DATABASE_URL"),
     settings.DATABASE_URL,
@@ -35,8 +37,64 @@ if not is_local_database_url(db_url) and os.getenv("ALEMBIC_CONFIRM_REMOTE") != 
         "Set ALEMBIC_CONFIRM_REMOTE=YES_I_AM_SURE to continue."
     )
 
+
+def _table_names(inspector: sa.Inspector) -> set[str]:
+    return set(inspector.get_table_names())
+
+
+def _column_names(inspector: sa.Inspector, table_name: str) -> set[str]:
+    return {column["name"] for column in inspector.get_columns(table_name)}
+
+
+def _index_names(inspector: sa.Inspector, table_name: str) -> set[str]:
+    return {
+        name
+        for index in inspector.get_indexes(table_name)
+        if isinstance(name := index.get("name"), str)
+    }
+
+
+def _destructive_upgrade_still_has_runtime_impact(path: Path) -> bool:
+    if path.name != "20260517_finalize_subscription_events_and_remove_monetization.py":
+        return True
+
+    engine = create_engine(
+        db_url.replace("postgresql://", "postgresql+psycopg://"),
+        poolclass=pool.NullPool,
+        connect_args={"prepare_threshold": None},
+    )
+    try:
+        with engine.connect() as connection:
+            inspector = sa.inspect(connection)
+            tables = _table_names(inspector)
+
+            if any(table_name in tables for table_name in ("rewarded_ad_sessions", "referrals", "point_ledger_entries")):
+                return True
+
+            if "users" in tables and "referral_code" in _column_names(inspector, "users"):
+                return True
+
+            if "beta_read_assignments" in tables:
+                columns = _column_names(inspector, "beta_read_assignments")
+                indexes = _index_names(inspector, "beta_read_assignments")
+                if (
+                    "ix_beta_read_assignments_awarded_at" in indexes
+                    or "awarded_at" in columns
+                    or "awarded_points" in columns
+                    or "reward_points" in columns
+                ):
+                    return True
+
+            return False
+    finally:
+        engine.dispose()
+
 if any(arg == "upgrade" for arg in sys.argv[1:]):
-    offending_revisions = destructive_upgrade_revisions(Path(__file__).resolve().parent / "versions")
+    offending_revisions = [
+        path
+        for path in destructive_upgrade_revisions(versions_dir)
+        if _destructive_upgrade_still_has_runtime_impact(path)
+    ]
     if offending_revisions and os.getenv("ALEMBIC_ALLOW_DESTRUCTIVE_UPGRADES") != "1":
         offending_paths = ", ".join(str(path.name) for path in offending_revisions)
         raise RuntimeError(
@@ -46,7 +104,7 @@ if any(arg == "upgrade" for arg in sys.argv[1:]):
         )
 
 if any(arg == "downgrade" for arg in sys.argv[1:]):
-    destructive_downgrades = destructive_downgrade_revisions(Path(__file__).resolve().parent / "versions")
+    destructive_downgrades = destructive_downgrade_revisions(versions_dir)
     if destructive_downgrades and os.getenv("ALEMBIC_ALLOW_DESTRUCTIVE_DOWNGRADES") != "1":
         offending_paths = ", ".join(str(path.name) for path in destructive_downgrades)
         raise RuntimeError(

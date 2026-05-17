@@ -4,6 +4,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import sentry_sdk
 from celery import Celery, Task, signals
+from celery.schedules import crontab
 from sentry_sdk.integrations.celery import CeleryIntegration
 
 from app.core.config import settings
@@ -73,6 +74,7 @@ celery_app = Celery(
         "app.workers.tasks.analysis_tasks",
         "app.workers.tasks.embedding_tasks",
         "app.workers.tasks.intelligence_tasks",
+        "app.workers.tasks.maintenance_tasks",
     ],
 )
 
@@ -92,6 +94,7 @@ celery_app.conf.update(
         "analysis_tasks.*":   {"queue": "analysis"},
         "embedding_tasks.*":  {"queue": "embedding"},
         "intelligence_tasks.*": {"queue": "intelligence"},
+        "maintenance_tasks.*": {"queue": "intelligence"},
     },
     task_annotations={
         # Queue-specific guardrails:
@@ -118,6 +121,22 @@ celery_app.conf.update(
             "rate_limit": "60/m",
             "soft_time_limit": 60,
             "time_limit": 120,
+        },
+        "maintenance_tasks.*": {
+            "soft_time_limit": 5 * 60,
+            "time_limit": 10 * 60,
+        },
+    },
+    beat_schedule={
+        "maintenance-send-due-trial-emails-hourly": {
+            "task": "maintenance_tasks.send_due_trial_emails",
+            "schedule": crontab(minute=0),
+            "kwargs": {"limit": 100},
+        },
+        "maintenance-process-beta-reads-every-15-minutes": {
+            "task": "maintenance_tasks.process_beta_reads",
+            "schedule": crontab(minute="*/15"),
+            "kwargs": {"limit": 100},
         },
     },
     task_default_retry_delay=30,

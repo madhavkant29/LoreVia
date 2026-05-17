@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import HTTPException
-from sqlalchemy import case, func, literal, literal_column, or_, select
+from sqlalchemy import Numeric, and_, case, cast, func, literal, literal_column, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -25,7 +25,7 @@ from app.schemas.public import (
     PublicUserProfileOut,
     PublicUserProjectOut,
 )
-from app.utils.billing_utils import ADMIN_TIER, ARCHITECT_TIER, AUTHOR_TIER, user_access_tier
+from app.utils.billing_utils import has_authoring_access
 from app.utils.beta_read_utils import NEUTRAL_RATING_MIN, POSITIVE_RATING_MIN, RATED_ASSIGNMENT_STATES
 
 FORUM_POST_OPEN = "open"
@@ -66,7 +66,7 @@ MAX_PUBLIC_FORUM_PAGE_SIZE = 100
 def has_public_authoring_access(user: User | None) -> bool:
     if user is None:
         return False
-    return user_access_tier(user) in {AUTHOR_TIER, ARCHITECT_TIER, ADMIN_TIER}
+    return has_authoring_access(user)
 
 
 def ensure_public_authoring_access(user: User | None, *, action_label: str) -> None:
@@ -74,7 +74,7 @@ def ensure_public_authoring_access(user: User | None, *, action_label: str) -> N
         return
     raise HTTPException(
         403,
-        f"{action_label} requires an Author or Architect plan.",
+        f"{action_label} requires Trial, Author, or Architect access.",
     )
 
 
@@ -209,7 +209,33 @@ def _reaction_delta(old_reaction: str | None, new_reaction: str | None) -> tuple
     )
 
 
-async def _get_private_owned_book(
+def _book_is_forum_eligible(book: Book | None) -> bool:
+    if book is None:
+        return False
+    if str(getattr(book, "mode", "") or "").strip().lower() != "author":
+        return False
+    if getattr(book, "hidden_at", None) is not None or getattr(book, "archived_at", None) is not None:
+        return False
+    if not bool(getattr(book, "is_public", False)):
+        return True
+    return is_approved_user_public_share_book(book)
+
+
+def _book_is_forum_eligible_expression():
+    return or_(
+        Book.is_public.is_(False),
+        and_(
+            Book.is_public.is_(True),
+            Book.source_kind == USER_PUBLIC_SHARE_SOURCE_KIND,
+            or_(
+                Book.public_share_status == PUBLIC_SHARE_STATUS_APPROVED,
+                Book.public_share_status.is_(None),
+            ),
+        ),
+    )
+
+
+async def _get_forum_eligible_owned_book(
     db: AsyncSession,
     *,
     book_id: uuid.UUID,
@@ -218,9 +244,7 @@ async def _get_private_owned_book(
     book = await db.get(Book, book_id)
     if book is None or book.user_id != author_user_id:
         raise HTTPException(404, "Book not found.")
-    if bool(book.is_public):
-        raise HTTPException(409, "Only private manuscripts can be posted in the public beta forum.")
-    if book.hidden_at is not None or book.archived_at is not None:
+    if not _book_is_forum_eligible(book):
         raise HTTPException(409, "This manuscript is not available for public beta discovery.")
     return book
 
@@ -237,7 +261,7 @@ async def _get_visible_forum_post(db: AsyncSession, *, post_id: uuid.UUID) -> tu
     if post.status != FORUM_POST_OPEN:
         raise HTTPException(404, "Forum post not found.")
     book = await db.get(Book, post.book_id)
-    if book is None or book.hidden_at is not None or book.archived_at is not None or bool(book.is_public):
+    if not _book_is_forum_eligible(book):
         raise HTTPException(404, "Forum post not found.")
     return post, book
 
@@ -252,7 +276,7 @@ async def _get_author_accessible_forum_post(
     if post.author_user_id != author_user_id:
         raise HTTPException(404, "Forum post not found.")
     book = await db.get(Book, post.book_id)
-    if book is None or book.hidden_at is not None or book.archived_at is not None or bool(book.is_public):
+    if not _book_is_forum_eligible(book):
         raise HTTPException(404, "Forum post not found.")
     return post, book
 
@@ -272,7 +296,8 @@ def _public_forum_visibility_filters() -> tuple:
         BookForumPost.status == FORUM_POST_OPEN,
         Book.hidden_at.is_(None),
         Book.archived_at.is_(None),
-        Book.is_public.is_(False),
+        Book.mode == "author",
+        _book_is_forum_eligible_expression(),
     )
 
 
@@ -292,7 +317,7 @@ def _public_forum_search_clause(query: str | None):
 
 
 def _public_forum_rating_summary_subquery():
-    average_rating = func.round(func.avg(BetaReadAssignment.final_rating), 2).label("average_rating")
+    average_rating = func.round(cast(func.avg(BetaReadAssignment.final_rating), Numeric), 2).label("average_rating")
     rating_count = func.count(BetaReadAssignment.id).label("rating_count")
     positive_rating_count = func.sum(
         case(
@@ -381,14 +406,14 @@ def _public_forum_discoverability_expression(rating_subquery, interest_subquery)
     positive_rating_count = func.coalesce(rating_subquery.c.positive_rating_count, 0)
     negative_rating_count = func.coalesce(rating_subquery.c.negative_rating_count, 0)
     interest_count = func.coalesce(interest_subquery.c.interest_count, 0)
-    return func.round(
+    score = (
         (average_rating * 100)
         + (func.least(rating_count, 12) * 4)
         + (positive_rating_count * 12)
         - (negative_rating_count * 9)
-        + (func.least(interest_count, 20) * 2),
-        2,
+        + (func.least(interest_count, 20) * 2)
     )
+    return func.round(cast(score, Numeric), 2)
 
 
 def _public_forum_post_select_statement(
@@ -476,7 +501,8 @@ def _author_forum_post_select_statement(
             BookForumPost.author_user_id == author_user_id,
             Book.hidden_at.is_(None),
             Book.archived_at.is_(None),
-            Book.is_public.is_(False),
+            Book.mode == "author",
+            _book_is_forum_eligible_expression(),
         )
     )
     if post_id is not None:
@@ -568,7 +594,8 @@ async def _build_public_user_project_out(db: AsyncSession, *, user_id: uuid.UUID
                 BookForumPost.status == FORUM_POST_OPEN,
                 Book.hidden_at.is_(None),
                 Book.archived_at.is_(None),
-                Book.is_public.is_(False),
+                Book.mode == "author",
+                _book_is_forum_eligible_expression(),
             )
             .order_by(BookForumPost.last_activity_at.desc(), BookForumPost.updated_at.desc())
             .limit(1)
@@ -625,7 +652,8 @@ async def public_profile_activity_counts(db: AsyncSession, *, user_id: uuid.UUID
                 BookForumPost.status == FORUM_POST_OPEN,
                 Book.hidden_at.is_(None),
                 Book.archived_at.is_(None),
-                Book.is_public.is_(False),
+                Book.mode == "author",
+                _book_is_forum_eligible_expression(),
             )
         )
     ).scalar_one()
@@ -639,7 +667,8 @@ async def public_profile_activity_counts(db: AsyncSession, *, user_id: uuid.UUID
                 BookForumPost.status == FORUM_POST_OPEN,
                 Book.hidden_at.is_(None),
                 Book.archived_at.is_(None),
-                Book.is_public.is_(False),
+                Book.mode == "author",
+                _book_is_forum_eligible_expression(),
             )
         )
     ).scalar_one()
@@ -738,7 +767,7 @@ async def create_public_forum_post(
     body: PublicForumPostCreateBody,
 ) -> PublicForumPostOut:
     ensure_public_authoring_access(current_user, action_label="Opening a public discussion")
-    book = await _get_private_owned_book(db, book_id=body.book_id, author_user_id=current_user.id)
+    book = await _get_forum_eligible_owned_book(db, book_id=body.book_id, author_user_id=current_user.id)
     headline = " ".join(body.headline.split()).strip()
     description = body.body.strip()
     if not headline or not description:
@@ -780,7 +809,7 @@ async def update_public_forum_post(
     post = await _get_forum_post(db, post_id=post_id)
     if post.author_user_id != current_user.id:
         raise HTTPException(404, "Forum post not found.")
-    book = await _get_private_owned_book(db, book_id=post.book_id, author_user_id=current_user.id)
+    book = await _get_forum_eligible_owned_book(db, book_id=post.book_id, author_user_id=current_user.id)
     headline = " ".join(body.headline.split()).strip()
     description = body.body.strip()
     if not headline or not description:
@@ -795,7 +824,7 @@ async def update_public_forum_post(
             or next_status != FORUM_POST_CLOSED
         )
         if attempted_non_closing_change:
-            raise HTTPException(403, "Opening or editing a public discussion requires an Author or Architect plan.")
+            raise HTTPException(403, "Opening or editing a public discussion requires Trial, Author, or Architect access.")
     if next_status == FORUM_POST_OPEN:
         existing_open_post = (
             await db.execute(

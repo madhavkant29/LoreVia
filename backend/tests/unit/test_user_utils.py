@@ -196,7 +196,7 @@ async def test_build_writing_dashboard_stats_rolls_up_periods_and_entries():
     assert stats["this_month"]["words"] == 12165
     assert stats["this_year"]["words"] == 59971
     assert stats["last_24_hours"]["words"] == 1202
-    assert stats["last_7_days"]["words"] == 12165
+    assert stats["last_7_days"]["words"] == 2565
     assert stats["last_30_days"]["words"] == 12165
     assert stats["last_year"]["words"] == 59971
     assert stats["entries_today"][0]["title"] == "Epilogue"

@@ -139,6 +139,7 @@ class Notification(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     book_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), index=True)
     kind: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String, unique=True, index=True)
     title: Mapped[str] = mapped_column(String, nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
     data: Mapped[dict | None] = mapped_column(JSONB)

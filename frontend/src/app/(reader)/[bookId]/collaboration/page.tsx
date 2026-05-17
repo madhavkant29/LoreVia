@@ -101,6 +101,12 @@ const PERMISSION_OPTIONS: Array<{ key: keyof CollaborationPermissions; label: st
   { key: "can_view_selected_chapters_only", label: "Can view selected chapters only", detail: "Restrict access to a chapter range instead of the whole draft." },
 ]
 
+const BETA_SCOPE_OPTIONS: Array<{ value: "full_book" | "chapter_range" | "section"; label: string }> = [
+  { value: "full_book", label: "Full manuscript" },
+  { value: "chapter_range", label: "Chapter range" },
+  { value: "section", label: "Section" },
+]
+
 const DEFAULT_SCOPE: CollaborationScope = {
   chapter_start: 1,
   chapter_end: 10,
@@ -476,7 +482,7 @@ export default function CollaborationPage() {
                   <input
                     value={betaForm.readerEmail}
                     onChange={(event) => setBetaForm((current) => ({ ...current, readerEmail: event.target.value }))}
-                    placeholder="reader@example.com"
+                    placeholder="beta.invitee@example.net"
                     className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#0d141c] text-slate-100 placeholder:text-slate-600 focus:border-violet-400" : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-violet-400"}`}
                   />
                   <input
@@ -486,15 +492,34 @@ export default function CollaborationPage() {
                     className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#0d141c] text-slate-100 placeholder:text-slate-600 focus:border-violet-400" : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-violet-400"}`}
                   />
                   <div className="grid gap-3 sm:grid-cols-2">
-                    <select
-                      value={betaForm.scopeKind ?? "full_book"}
-                      onChange={(event) => setBetaForm((current) => ({ ...current, scopeKind: event.target.value as "full_book" | "chapter_range" | "section" }))}
-                      className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#0d141c] text-slate-100 focus:border-violet-400" : "border-slate-200 bg-white text-slate-900 focus:border-violet-400"}`}
+                    <div
+                      className={`grid h-11 grid-cols-3 rounded-md border p-1 text-sm ${isDark ? "border-white/[0.08] bg-[#0d141c]" : "border-slate-200 bg-white"}`}
+                      role="group"
+                      aria-label="Beta read scope"
                     >
-                      <option value="full_book">Full manuscript</option>
-                      <option value="chapter_range">Chapter range</option>
-                      <option value="section">Section</option>
-                    </select>
+                      {BETA_SCOPE_OPTIONS.map((option) => {
+                        const isActive = (betaForm.scopeKind ?? "full_book") === option.value
+                        return (
+                          <button
+                            key={option.value}
+                            type="button"
+                            onClick={() => setBetaForm((current) => ({ ...current, scopeKind: option.value }))}
+                            className={`rounded-md px-3 text-sm font-medium transition ${
+                              isActive
+                                ? isDark
+                                  ? "bg-violet-500 text-white"
+                                  : "bg-violet-600 text-white"
+                                : isDark
+                                  ? "text-slate-300 hover:bg-white/[0.04]"
+                                  : "text-slate-700 hover:bg-slate-50"
+                            }`}
+                            aria-pressed={isActive}
+                          >
+                            {option.label}
+                          </button>
+                        )
+                      })}
+                    </div>
                     <input
                       type="number"
                       min="3"

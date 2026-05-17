@@ -649,12 +649,12 @@ async def test_publish_user_shared_book_requires_explicit_confirmation():
     )
 
     with pytest.raises(HTTPException) as exc:
-        await public.publish_user_shared_book(
-            book_id,
-            PublicBookShareBody(confirm_public_share=False, description="Share me"),
-            db=_FakeDB(get_values=[book]),
-            current_user=SimpleNamespace(id=user_id),
-        )
+            await public.publish_user_shared_book(
+                book_id,
+                PublicBookShareBody(confirm_public_share=False, description="Share me"),
+                db=_FakeDB(get_values=[book]),
+                current_user=SimpleNamespace(id=user_id, tier="author"),
+            )
     assert exc.value.status_code == 400
 
 
@@ -678,7 +678,7 @@ async def test_publish_user_shared_book_creates_pending_approval_request(monkeyp
         book_id,
         PublicBookShareBody(confirm_public_share=True, description="Public draft"),
         db=db,
-        current_user=SimpleNamespace(id=user_id),
+        current_user=SimpleNamespace(id=user_id, tier="author"),
     )
 
     assert payload == {
@@ -716,7 +716,7 @@ async def test_publish_user_shared_book_resubmits_approved_book_for_fresh_review
         book_id,
         PublicBookShareBody(confirm_public_share=True, description="Approved draft"),
         db=db,
-        current_user=SimpleNamespace(id=user_id),
+        current_user=SimpleNamespace(id=user_id, tier="author"),
     )
 
     assert payload == {

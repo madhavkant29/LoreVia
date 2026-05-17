@@ -142,7 +142,7 @@ PADDLE_AUTHOR_MONTHLY_PRICE_ID=pri_author_monthly
 PADDLE_AUTHOR_ANNUAL_PRICE_ID=pri_author_annual
 PADDLE_ARCHITECT_MONTHLY_PRICE_ID=pri_architect_monthly
 PADDLE_ARCHITECT_ANNUAL_PRICE_ID=pri_architect_annual
-PADDLE_DEFAULT_CHECKOUT_URL=http://localhost:3000/pricing
+PADDLE_DEFAULT_CHECKOUT_URL=http://localhost:3000/checkout
 
 RESEND_API_KEY=dummy
 INTERNAL_JOB_SECRET=replace_with_an_internal_job_secret
@@ -158,6 +158,7 @@ Notes:
 - Keep `backend/.env.local` out of version control.
 - For local development, file storage is mounted to a Docker volume instead of cloud storage.
 - Paddle checkout requires the API key, webhook secret, and plan price IDs to be set together.
+- In Paddle Checkout settings, set the default payment link to your public checkout page, such as `https://getlorevia.com/checkout` in production or `http://localhost:3000/checkout` in local sandbox testing.
 - Trial lifecycle emails can be run from a scheduler with `python backend/scripts/run_due_trial_emails.py --limit 100` or through the protected internal job endpoint.
 
 ### 2. Create frontend environment file
@@ -167,6 +168,7 @@ Create `frontend/.env.local`:
 ```env
 NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
 NEXT_PUBLIC_APP_URL=http://localhost:3000
+NEXT_PUBLIC_PADDLE_CLIENT_TOKEN=test_your_paddle_client_side_token_here
 ```
 
 ### 3. Start the full stack

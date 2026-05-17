@@ -74,6 +74,14 @@ describe("foundation utilities", () => {
     expect(shouldSkipAuthBootstrap("/pricing")).toBe(true)
   })
 
+  it("skips auth bootstrap for the Paddle checkout landing page", () => {
+    expect(shouldSkipAuthBootstrap("/checkout")).toBe(true)
+  })
+
+  it("skips auth bootstrap for nested Paddle checkout routes", () => {
+    expect(shouldSkipAuthBootstrap("/checkout/success")).toBe(true)
+  })
+
   it("skips auth bootstrap for the public blog page", () => {
     expect(shouldSkipAuthBootstrap("/blog")).toBe(true)
   })

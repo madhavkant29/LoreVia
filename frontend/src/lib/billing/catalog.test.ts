@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest"
 
-import { pricingTierAccessLabel, pricingTierGuestCtaLabel, pricingTiers } from "./catalog"
+import {
+  pricingTierAccessLabel,
+  pricingTierAnnualSavings,
+  pricingTierGuestCtaLabel,
+  pricingTierPrice,
+  pricingTierPriceSuffix,
+  pricingTiers,
+} from "./catalog"
 
 describe("pricing catalog", () => {
   it("marks the free tier as included instead of paid", () => {
@@ -17,5 +24,26 @@ describe("pricing catalog", () => {
     expect(paidTiers.map((tier) => tier.name)).toEqual(["Author", "Architect"])
     expect(paidTiers.every((tier) => pricingTierAccessLabel(tier) === "Paid subscription")).toBe(true)
     expect(paidTiers.every((tier) => pricingTierGuestCtaLabel(tier) === "Create account for free trial")).toBe(true)
+  })
+
+  it("returns cadence-aware prices and suffixes", () => {
+    const authorTier = pricingTiers.find((tier) => tier.name === "Author")
+    const freeTier = pricingTiers.find((tier) => tier.name === "Free")
+
+    expect(pricingTierPrice(authorTier!, "monthly")).toBe(29)
+    expect(pricingTierPrice(authorTier!, "annual")).toBe(290)
+    expect(pricingTierPriceSuffix(authorTier!, "monthly")).toBe("/mo")
+    expect(pricingTierPriceSuffix(authorTier!, "annual")).toBe("/yr")
+    expect(pricingTierPriceSuffix(freeTier!, "annual")).toBe("")
+  })
+
+  it("calculates annual savings for paid tiers only", () => {
+    const authorTier = pricingTiers.find((tier) => tier.name === "Author")
+    const architectTier = pricingTiers.find((tier) => tier.name === "Architect")
+    const freeTier = pricingTiers.find((tier) => tier.name === "Free")
+
+    expect(pricingTierAnnualSavings(authorTier!)).toBe(58)
+    expect(pricingTierAnnualSavings(architectTier!)).toBe(98)
+    expect(pricingTierAnnualSavings(freeTier!)).toBe(0)
   })
 })

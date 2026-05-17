@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -42,6 +42,18 @@ async def send_due_trial_emails(
 ) -> dict[str, int]:
     current = now or datetime.now(UTC)
     current = current if current.tzinfo else current.replace(tzinfo=UTC)
+    stale_sending_rows = (
+        await db.execute(
+            select(TrialEmailEvent).where(
+                TrialEmailEvent.status == "sending",
+                TrialEmailEvent.updated_at < current - timedelta(minutes=30),
+            )
+        )
+    ).scalars().all()
+    for event in stale_sending_rows:
+        event.status = "failed"
+        event.last_error = "Previous send attempt did not finalize. Review delivery logs before retrying."
+
     due_rows = (
         await db.execute(
             select(TrialEmailEvent, User)
@@ -67,11 +79,35 @@ async def send_due_trial_emails(
             older[0].last_error = "Superseded by a later due trial email."
         latest_due_by_user[user_key] = (event, user)
 
+    claimed_event_ids = []
     for event, user in latest_due_by_user.values():
         if normalize_tier(user.tier) != FREE_TIER:
             event.status = "skipped"
             event.last_error = "User upgraded before trial email was due."
             continue
+        # Claim the event durably before calling the external email provider so
+        # overlapping scheduler runs do not deliver the same logical email twice.
+        event.status = "sending"
+        event.last_error = None
+        claimed_event_ids.append(event.id)
+
+    await db.commit()
+
+    if not claimed_event_ids:
+        return {"sent": sent_count, "checked": len(due_rows)}
+
+    claimed_events = (
+        await db.execute(
+            select(TrialEmailEvent, User)
+            .join(User, User.id == TrialEmailEvent.user_id)
+            .where(
+                TrialEmailEvent.id.in_(claimed_event_ids),
+            )
+            .order_by(TrialEmailEvent.scheduled_for.asc())
+        )
+    ).all()
+
+    for event, user in claimed_events:
         delivered = await send_trial_email(user.email, event.email_type)
         if delivered:
             event.status = "sent"
@@ -81,5 +117,6 @@ async def send_due_trial_emails(
         else:
             event.status = "failed"
             event.last_error = "Resend delivery failed."
+        await db.commit()
 
     return {"sent": sent_count, "checked": len(due_rows)}

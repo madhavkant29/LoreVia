@@ -16,7 +16,7 @@ describe("manuscript annotation utilities", () => {
       anchor_context_before: "Nora",
       anchor_context_after: "before dawn",
       start_offset: 5,
-      end_offset: 28,
+      end_offset: 27,
     })
 
     expect(range?.toString()).toBe("crossed the ember gate")

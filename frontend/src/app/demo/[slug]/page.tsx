@@ -17,8 +17,9 @@ export function generateStaticParams() {
   return demoPages.map((demo) => ({ slug: demo.slug }))
 }
 
-export function generateMetadata({ params }: { params: { slug: string } }): Metadata {
-  const demo = getDemoPageBySlug(params.slug)
+export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
+  const { slug } = await params
+  const demo = getDemoPageBySlug(slug)
 
   if (!demo) {
     return {}
@@ -54,8 +55,9 @@ export function generateMetadata({ params }: { params: { slug: string } }): Meta
   }
 }
 
-export default function DemoPage({ params }: { params: { slug: string } }) {
-  const demo = getDemoPageBySlug(params.slug)
+export default async function DemoPage({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params
+  const demo = getDemoPageBySlug(slug)
 
   if (!demo) {
     notFound()

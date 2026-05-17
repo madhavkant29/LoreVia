@@ -6,6 +6,7 @@ import uuid
 from types import SimpleNamespace
 
 import pytest
+import sqlalchemy as sa
 
 from app.workers.tasks import extraction_tasks
 
@@ -36,6 +37,21 @@ class _FakeSession:
         return _Result(self._chapter)
 
 
+class _FakeSelect:
+    def where(self, *_args, **_kwargs):
+        return self
+
+
+class _FakeColumn:
+    def __eq__(self, _other):
+        return self
+
+
+class _FakeChapterModel:
+    book_id = _FakeColumn()
+    number = _FakeColumn()
+
+
 def test_process_chapter_task_fails_cleanly_when_payload_missing(monkeypatch):
     book_id = uuid.uuid4()
     book = SimpleNamespace(id=book_id, hidden_at=None)
@@ -50,6 +66,8 @@ def test_process_chapter_task_fails_cleanly_when_payload_missing(monkeypatch):
 
     monkeypatch.setattr(extraction_tasks, "is_book_hidden", _visible)
     monkeypatch.setattr(extraction_tasks, "load_processing_chapter_payload", _missing_payload)
+    monkeypatch.setattr(extraction_tasks, "extract_queue_wait_ms", lambda _headers: 0)
+    monkeypatch.setattr(sa, "select", lambda *_args, **_kwargs: _FakeSelect())
 
     async def _unexpected_process(*_args, **_kwargs):
         raise AssertionError("_process_chapter should not run when payload is missing")
@@ -57,12 +75,9 @@ def test_process_chapter_task_fails_cleanly_when_payload_missing(monkeypatch):
     monkeypatch.setattr(extraction_tasks, "_process_chapter", _unexpected_process)
 
     fake_database_module = SimpleNamespace(AsyncSessionLocal=lambda: _FakeSession(book, chapter))
-    fake_models_module = SimpleNamespace(Book=object, Chapter=object)
+    fake_models_module = SimpleNamespace(Book=object, Chapter=_FakeChapterModel)
     monkeypatch.setitem(sys.modules, "app.core.database", fake_database_module)
     monkeypatch.setitem(sys.modules, "app.models.book", fake_models_module)
 
-    request = SimpleNamespace(headers={})
-    task_self = SimpleNamespace(request=request, retry=lambda exc=None: (_ for _ in ()).throw(exc))
-
     with pytest.raises(ValueError, match="missing_chapter_payload"):
-        extraction_tasks.process_chapter_task(task_self, str(book_id), 4)
+        extraction_tasks.process_chapter_task.run(str(book_id), 4)

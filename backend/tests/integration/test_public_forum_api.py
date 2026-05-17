@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 import uuid
 
 import pytest
@@ -15,12 +16,13 @@ def _auth_headers(user_id: uuid.UUID) -> dict[str, str]:
     return {"Cookie": f"lorevia_access_token={create_access_token(str(user_id))}"}
 
 
-async def _create_user(db, *, email: str, tier: str) -> User:
+async def _create_user(db, *, email: str, tier: str, created_at: datetime | None = None) -> User:
     user = User(
         email=email,
         username=email.split("@", 1)[0],
         password_hash="hashed",
         tier=tier,
+        created_at=created_at,
     )
     db.add(user)
     await db.commit()
@@ -318,6 +320,8 @@ async def test_public_profile_requires_public_presence_and_skips_private_only_pr
         status="ready",
         total_chapters=1,
         is_public=True,
+        source_kind="user_public_share",
+        public_share_status="approved",
         public_description="A public-facing serial project.",
     )
     db.add(public_book)
@@ -397,7 +401,8 @@ async def test_public_share_requires_admin_approval_before_author_book_surfaces(
 @pytest.mark.asyncio
 async def test_free_users_cannot_open_public_discussions_or_submit_public_samples(client, db):
     paid_author = await _create_user(db, email="paid-forum-author@lorevia.test", tier="author")
-    free_author = await _create_user(db, email="free-forum-author@lorevia.test", tier="free")
+    expired_trial_at = datetime.now(UTC) - timedelta(days=14)
+    free_author = await _create_user(db, email="free-forum-author@lorevia.test", tier="free", created_at=expired_trial_at)
     free_reader = await _create_user(db, email="free-forum-reader@lorevia.test", tier="free")
 
     paid_book = await _create_book(db, author_id=paid_author.id, title="Paid Harbor")
@@ -428,7 +433,7 @@ async def test_free_users_cannot_open_public_discussions_or_submit_public_sample
         },
     )
     assert blocked_post.status_code == 403
-    assert blocked_post.json()["detail"] == "Opening a public discussion requires an Author or Architect plan."
+    assert blocked_post.json()["detail"] == "Opening a public discussion requires Trial, Author, or Architect access."
 
     blocked_share = await client.post(
         f"/api/v1/public/shared-books/{free_book.id}/publish",
@@ -436,7 +441,7 @@ async def test_free_users_cannot_open_public_discussions_or_submit_public_sample
         json={"confirm_public_share": True, "description": "Trying to request a public sample on free."},
     )
     assert blocked_share.status_code == 403
-    assert blocked_share.json()["detail"] == "Submitting a public sample requires an Author or Architect plan."
+    assert blocked_share.json()["detail"] == "Submitting a public sample requires Trial, Author, or Architect access."
 
     comment_response = await client.post(
         f"/api/v1/public/forum/posts/{paid_post.json()['id']}/comments",
@@ -451,6 +456,33 @@ async def test_free_users_cannot_open_public_discussions_or_submit_public_sample
         json={"message": "Free readers can still offer to beta read."},
     )
     assert interest_response.status_code == 201
+
+
+@pytest.mark.asyncio
+async def test_trial_users_can_open_discussions_and_submit_public_samples(client, db):
+    trial_author = await _create_user(db, email="trial-forum-author@lorevia.test", tier="free")
+    private_book = await _create_book(db, author_id=trial_author.id, title="Trial Harbor")
+
+    discussion_response = await client.post(
+        "/api/v1/public/forum/posts",
+        headers=_auth_headers(trial_author.id),
+        json={
+            "book_id": str(private_book.id),
+            "headline": "Trial author opening a discussion.",
+            "body": "Looking for early reactions while the manuscript is still in active revision.",
+            "desired_beta_reader_count": 3,
+            "allow_contact_requests": True,
+        },
+    )
+    assert discussion_response.status_code == 201
+
+    public_share_book = await _create_book(db, author_id=trial_author.id, title="Trial Public Sample")
+    publish_response = await client.post(
+        f"/api/v1/public/shared-books/{public_share_book.id}/publish",
+        headers=_auth_headers(trial_author.id),
+        json={"confirm_public_share": True, "description": "Trial user requesting a public sample."},
+    )
+    assert publish_response.status_code == 200
 
 
 @pytest.mark.asyncio
@@ -475,4 +507,4 @@ async def test_public_forum_beta_mode_is_read_only(client, db, monkeypatch):
 
     forum_list = await client.get("/api/v1/public/forum/posts")
     assert forum_list.status_code == 200
-    assert forum_list.json()["items"] == []
+    assert all(item["title"] != "Read Only Harbor" for item in forum_list.json()["items"])

@@ -77,12 +77,23 @@ class _FakeDB:
     def __init__(self, *, get_values=None, execute_values=None):
         self._get_values = list(get_values or [])
         self._execute_values = list(execute_values or [])
+        self.added = []
+        self.commits = 0
 
     async def get(self, *_args, **_kwargs):
         return self._get_values.pop(0)
 
     async def execute(self, *_args, **_kwargs):
         return self._execute_values.pop(0)
+
+    def add(self, value):
+        self.added.append(value)
+
+    async def commit(self):
+        self.commits += 1
+
+    async def refresh(self, _value):
+        return None
 
 
 class _FakeClient:
@@ -210,6 +221,7 @@ async def test_advisor_message_returns_cached_payload(monkeypatch):
     payload = await advisor.advisor_message(
         book_id,
         body=_message_body(("user", "What next?")),
+        response=Response(),
         db=db,
         current_user=SimpleNamespace(id=user_id),
         _=None,
@@ -543,7 +555,7 @@ async def test_advisor_suggestions_adds_sparse_proactive_audit(monkeypatch):
         get_values=[book],
         execute_values=[
             _Result(scalars=[]),
-            _Result(scalars=[thread]),
+            _Result(scalars=[]),
             _Result(scalars=[]),
             _Result(scalars=[]),
             _Result(all_rows=[]),
@@ -978,7 +990,7 @@ async def test_series_continuity_check_handles_no_prior_books_and_full_review(mo
     async def _fake_story_context(*_args, **_kwargs):
         return "Series context"
 
-    async def _fake_embed_text(_text):
+    async def _fake_embed_text(_text, **_kwargs):
         return [0.4, 0.2]
 
     monkeypatch.setattr(advisor, "build_series_story_context", _fake_story_context)

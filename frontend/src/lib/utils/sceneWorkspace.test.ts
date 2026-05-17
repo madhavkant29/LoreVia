@@ -52,8 +52,8 @@ describe("scene workspace utilities", () => {
     ])
     expect(reorderSceneIds(["scene-1", "scene-2", "scene-3"], "scene-1", "scene-3")).toEqual([
       "scene-2",
-      "scene-3",
       "scene-1",
+      "scene-3",
     ])
     expect(reorderSceneIds(["scene-1", "scene-2", "scene-3"], "scene-1", "scene-2", "after")).toEqual([
       "scene-2",

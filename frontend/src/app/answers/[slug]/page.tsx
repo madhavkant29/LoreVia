@@ -17,8 +17,9 @@ export function generateStaticParams() {
   return answerPages.map((answer) => ({ slug: answer.slug }))
 }
 
-export function generateMetadata({ params }: { params: { slug: string } }): Metadata {
-  const answer = getAnswerPageBySlug(params.slug)
+export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
+  const { slug } = await params
+  const answer = getAnswerPageBySlug(slug)
 
   if (!answer) {
     return {}
@@ -54,8 +55,9 @@ export function generateMetadata({ params }: { params: { slug: string } }): Meta
   }
 }
 
-export default function AnswerPage({ params }: { params: { slug: string } }) {
-  const answer = getAnswerPageBySlug(params.slug)
+export default async function AnswerPage({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params
+  const answer = getAnswerPageBySlug(slug)
 
   if (!answer) {
     notFound()
@@ -139,7 +141,7 @@ export default function AnswerPage({ params }: { params: { slug: string } }) {
                   <h2 className="mt-4 text-2xl font-semibold tracking-[-0.03em] text-foreground">{article.title}</h2>
                   <p className="app-copy mt-3 text-sm">{article.description}</p>
                   <Link href={`/blog/${article.slug}`} className="mt-5 inline-flex items-center gap-2 font-semibold text-[rgb(var(--accent))]">
-                    Open guide
+                    {article.title}
                     <ContentArrowIcon />
                   </Link>
                 </div>

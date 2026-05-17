@@ -83,6 +83,7 @@ def upgrade() -> None:
         tables.add("beta_read_assignments")
 
     if "beta_read_assignments" in tables:
+        inspector = sa.inspect(bind)
         columns = _column_names(inspector, "beta_read_assignments")
         if "author_questions_json" not in columns:
             op.add_column(
@@ -94,8 +95,10 @@ def upgrade() -> None:
                 "beta_read_assignments",
                 sa.Column("feedback_payload", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default=sa.text("'{}'::jsonb")),
             )
+        inspector = sa.inspect(bind)
+        columns = _column_names(inspector, "beta_read_assignments")
         indexes = _index_names(inspector, "beta_read_assignments")
-        for name, columns in (
+        for name, index_columns in (
             ("ix_beta_read_assignments_book_id", ["book_id"]),
             ("ix_beta_read_assignments_author_user_id", ["author_user_id"]),
             ("ix_beta_read_assignments_reader_user_id", ["reader_user_id"]),
@@ -118,8 +121,8 @@ def upgrade() -> None:
             ("ix_beta_read_assignments_created_at", ["created_at"]),
             ("ix_beta_read_assignments_updated_at", ["updated_at"]),
         ):
-            if name not in indexes:
-                op.create_index(name, "beta_read_assignments", columns)
+            if name not in indexes and set(index_columns).issubset(columns):
+                op.create_index(name, "beta_read_assignments", index_columns)
 
     if "users" in tables:
         columns = _column_names(inspector, "users")

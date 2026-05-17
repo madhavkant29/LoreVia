@@ -1,11 +1,13 @@
 import pytest
 from starlette.responses import Response
+from types import SimpleNamespace
 
 from app.core import events
 from app.main import _LazyMountedApp, _lazy_api_app, ready
 
 
 def test_api_app_is_not_built_at_import_time() -> None:
+    _lazy_api_app._app = None
     assert _lazy_api_app._app is None
 
 
@@ -25,7 +27,8 @@ async def test_on_startup_skips_db_and_redis_checks(monkeypatch) -> None:
         redis_called = True
         raise AssertionError("startup should not resolve redis")
 
-    monkeypatch.setattr("app.core.database.engine.connect", _FailConnect())
+    fake_engine = SimpleNamespace(connect=_FailConnect())
+    monkeypatch.setattr("app.core.database.engine", fake_engine)
     monkeypatch.setattr("app.core.redis.get_redis", _fail_get_redis)
 
     await events.on_startup()
@@ -42,7 +45,8 @@ async def test_on_shutdown_disposes_engine(monkeypatch) -> None:
         nonlocal disposed
         disposed = True
 
-    monkeypatch.setattr("app.core.database.engine.dispose", _fake_dispose)
+    fake_engine = SimpleNamespace(dispose=_fake_dispose)
+    monkeypatch.setattr("app.core.database.engine", fake_engine)
 
     await events.on_shutdown()
 

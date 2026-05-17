@@ -3,7 +3,7 @@ import asyncio
 import json
 
 from app.core.database import AsyncSessionLocal
-from app.services.monetization_service import send_due_trial_emails
+from app.services.trial_email_service import send_due_trial_emails
 
 
 async def _run(limit: int) -> dict[str, int]:

@@ -257,6 +257,14 @@ def _leading_title(name: str | None) -> str:
     return tokens[0] if tokens and tokens[0] in _NAME_TITLES else ""
 
 
+def partition_identity_key(name: str | None) -> str:
+    normalized = normalize_character_name(name)
+    if not normalized:
+        return ""
+    title = _leading_title(name)
+    return f"{title}:{normalized}" if title else normalized
+
+
 def has_conflicting_title_identity(name1: str | None, name2: str | None) -> bool:
     left_group = _TITLE_IDENTITY_GROUPS.get(_leading_title(name1))
     right_group = _TITLE_IDENTITY_GROUPS.get(_leading_title(name2))
@@ -953,11 +961,16 @@ async def partition_character(
         cleaned_name = clean_optional_text(partition.get("name"))
         if not cleaned_name:
             continue
-        key = normalize_character_name(cleaned_name)
-        if not key or key in seen_names:
+        normalized_name = normalize_character_name(cleaned_name)
+        identity_key = partition_identity_key(cleaned_name)
+        if not identity_key or identity_key in seen_names:
             continue
-        seen_names.add(key)
-        aliases = [alias for alias in clean_string_list(partition.get("aliases") if isinstance(partition.get("aliases"), list) else []) if normalize_character_name(alias) != key]
+        seen_names.add(identity_key)
+        aliases = [
+            alias
+            for alias in clean_string_list(partition.get("aliases") if isinstance(partition.get("aliases"), list) else [])
+            if normalize_character_name(alias) != normalized_name
+        ]
         cleaned_partitions.append({"name": cleaned_name, "aliases": aliases})
 
     if len(cleaned_partitions) < 2:
@@ -1154,10 +1167,13 @@ async def merge_characters(
         primary.embedding = secondary.embedding
     if primary.voice_profile and secondary.voice_profile:
         _merge_voice_profiles(primary.voice_profile, secondary.voice_profile)
-        await db.delete(secondary.voice_profile)
+        # Detach the secondary profile and let delete-orphan remove it once.
+        secondary.voice_profile = None
     elif primary.voice_profile is None and secondary.voice_profile is not None:
-        secondary.voice_profile.character_id = primary.id
-        secondary.voice_profile.book_id = primary.book_id
+        moved_voice_profile = secondary.voice_profile
+        secondary.voice_profile = None
+        primary.voice_profile = moved_voice_profile
+        moved_voice_profile.book_id = primary.book_id
 
     state_rows_result = await db.execute(select(CharacterState).where(CharacterState.character_id == secondary.id))
     state_rows = state_rows_result.scalars().all()

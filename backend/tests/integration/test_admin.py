@@ -82,7 +82,7 @@ async def test_admin_subscription_metrics_reports_trial_conversion_and_post_canc
     admin_user.tier = "admin"
     await db.commit()
 
-    cohort_start = datetime(2026, 5, 1, 9, 0, tzinfo=UTC)
+    cohort_start = datetime(2010, 5, 1, 9, 0, tzinfo=UTC)
     converted_user = User(
         email=f"metrics-converted-{uuid.uuid4().hex[:8]}@lorevia.app",
         username=f"metricsconv{uuid.uuid4().hex[:8]}",
@@ -147,14 +147,14 @@ async def test_admin_subscription_metrics_reports_trial_conversion_and_post_canc
     await db.commit()
 
     response = await client.get(
-        "/api/v1/admin/subscription-metrics?start_date=2026-05-01&end_date=2026-05-31&reactivation_window_days=3",
+        "/api/v1/admin/subscription-metrics?start_date=2010-05-01&end_date=2010-05-31&reactivation_window_days=3",
         headers=headers,
     )
 
     assert response.status_code == 200
     assert response.json() == {
-        "cohort_start": "2026-05-01",
-        "cohort_end": "2026-05-31",
+        "cohort_start": "2010-05-01",
+        "cohort_end": "2010-05-31",
         "trial_starts": 3,
         "trial_to_paid_conversions": 2,
         "trial_to_paid_rate": 66.67,

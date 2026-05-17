@@ -43,7 +43,7 @@ async def test_upload_pipeline_stages_and_processes_multiple_chapters(client, db
         {"number": 3, "title": "Three", "text": "They form a pact and leave before dawn."},
     ]
 
-    async def _fake_extract(_text: str) -> dict:
+    async def _fake_extract(_text: str, **_kwargs) -> dict:
         return {
             "characters": [
                 {

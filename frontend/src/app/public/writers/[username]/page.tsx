@@ -96,7 +96,7 @@ export default function PublicWriterProfilePage() {
               </div>
               <div className={`rounded-3xl border px-5 py-5 ${isDark ? "border-white/10 bg-black/20" : "border-[#eadfce] bg-[#fbf7f0]"}`}>
                 <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>Trust snapshot</p>
-                <p className="mt-3 text-2xl font-semibold">{profile.trust_level}</p>
+                <p className="mt-3 text-2xl font-semibold">Strong engagement</p>
                 <p className={`mt-3 text-sm leading-7 ${isDark ? "text-slate-400" : "text-slate-600"}`}>
                   Use this as lightweight context, not the main product story. LoreVia is still built first for private manuscript work, with public trust signals as an optional add-on.
                 </p>

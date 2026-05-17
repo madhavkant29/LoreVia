@@ -38,12 +38,16 @@ class _FakeDB:
     def __init__(self, *, get_values=None, execute_values=None):
         self._get_values = list(get_values or [])
         self._execute_values = list(execute_values or [])
+        self.added = []
 
     async def get(self, *_args, **_kwargs):
         return self._get_values.pop(0)
 
     async def execute(self, *_args, **_kwargs):
         return self._execute_values.pop(0)
+
+    def add(self, value):
+        self.added.append(value)
 
 
 class _FakeClient:

@@ -664,6 +664,8 @@ def _extract_heading(text: str, *, next_text: str | None = None, permissive: boo
     if heading_candidate and score >= threshold:
         return heading_candidate
     cleaned_line = re.sub(r"[^\w\s]", "", first_line).strip()
+    if re.match(r"^part\s+of\b", cleaned_line, flags=re.IGNORECASE):
+        return None
     if cleaned_line and HEADING_FALLBACK_RE.match(cleaned_line):
         return cleaned_line
     return None

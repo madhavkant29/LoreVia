@@ -7,12 +7,16 @@ from app.models.book import Book, Series, SeriesBook
 from app.models.intelligence import WorldBuildingDocument
 from app.models.user import SubscriptionEvent, User
 from app.utils.billing_utils import (
+    append_billing_confirmation_token,
     build_subscription_metrics_summary,
     calculate_upload_usage_summary,
+    create_billing_confirmation_token,
     ensure_upload_capacity,
     normalize_tier,
     paddle_plan_from_event_data,
+    recommended_paddle_default_checkout_url,
     summary_mode_allowed,
+    verify_billing_confirmation_token,
     worldbuilding_upload_cost_for_book,
 )
 
@@ -103,7 +107,13 @@ async def test_ensure_upload_capacity_blocks_author_when_series_weight_pushes_pa
 
 @pytest.mark.asyncio
 async def test_ensure_upload_capacity_blocks_free_users_after_single_upload(db):
-    user = User(email="billing-free-cap@lorevia.app", username="billingfreecap", password_hash="hash", tier="free")
+    user = User(
+        email="billing-free-cap@lorevia.app",
+        username="billingfreecap",
+        password_hash="hash",
+        tier="free",
+        created_at=datetime.now(UTC) - timedelta(days=20),
+    )
     db.add(user)
     await db.flush()
 
@@ -119,7 +129,13 @@ async def test_ensure_upload_capacity_blocks_free_users_after_single_upload(db):
 
 @pytest.mark.asyncio
 async def test_ensure_upload_capacity_treats_legacy_reader_alias_like_non_author_owner_for_uploads(db):
-    user = User(email="billing-reader-cap@lorevia.app", username="billingreadercap", password_hash="hash", tier="reader")
+    user = User(
+        email="billing-reader-cap@lorevia.app",
+        username="billingreadercap",
+        password_hash="hash",
+        tier="reader",
+        created_at=datetime.now(UTC) - timedelta(days=20),
+    )
     db.add(user)
     await db.flush()
 
@@ -152,14 +168,71 @@ def test_paddle_plan_from_event_data_maps_legacy_pro_labels_to_author_plan():
     assert paddle_plan_from_event_data(payload) == "author_monthly"
 
 
+def test_recommended_paddle_default_checkout_url_uses_app_url(monkeypatch):
+    monkeypatch.setattr("app.utils.billing_utils.settings.APP_URL", "https://app.getlorevia.com", raising=False)
+
+    assert recommended_paddle_default_checkout_url() == "https://app.getlorevia.com/checkout"
+
+
+def test_billing_confirmation_token_round_trip(monkeypatch):
+    monkeypatch.setattr("app.utils.billing_utils.settings.JWT_SECRET", "jwt-secret", raising=False)
+    monkeypatch.setattr("app.utils.billing_utils.settings.JWT_ALGORITHM", "HS256", raising=False)
+
+    token = create_billing_confirmation_token("txn_123")
+
+    assert verify_billing_confirmation_token(token, "txn_123") is True
+    assert verify_billing_confirmation_token(token, "txn_other") is False
+
+
+def test_append_billing_confirmation_token_preserves_existing_checkout_query():
+    updated = append_billing_confirmation_token(
+        "https://getlorevia.com/checkout?_ptxn=txn_123",
+        "token_123",
+    )
+
+    assert updated == "https://getlorevia.com/checkout?_ptxn=txn_123&lvct=token_123"
+
+
 def test_normalize_tier_maps_legacy_reader_aliases_back_to_free():
     assert normalize_tier("collaborator") == "free"
     assert normalize_tier("reader") == "free"
 
 
-def test_summary_modes_are_available_across_free_author_and_architect_tiers():
-    for tier in ("free", "author", "architect"):
-        user = User(email=f"{tier}@lorevia.app", username=f"{tier}user", password_hash="hash", tier=tier)
+def test_summary_modes_allow_short_for_all_tiers_but_restrict_post_trial_free_users():
+    expired_free_user = User(
+        email="free@lorevia.app",
+        username="freeuser",
+        password_hash="hash",
+        tier="free",
+        created_at=datetime.now(UTC) - timedelta(days=20),
+    )
+    active_trial_user = User(
+        email="trial@lorevia.app",
+        username="trialuser",
+        password_hash="hash",
+        tier="free",
+        created_at=datetime.now(UTC),
+    )
+    legacy_reader_user = User(
+        email="reader@lorevia.app",
+        username="readeruser",
+        password_hash="hash",
+        tier="reader",
+        created_at=datetime.now(UTC) - timedelta(days=20),
+    )
+    paid_user = User(
+        email="author@lorevia.app",
+        username="authoruser",
+        password_hash="hash",
+        tier="author",
+        created_at=datetime.now(UTC) - timedelta(days=20),
+    )
+
+    assert summary_mode_allowed(expired_free_user, "short") is True
+    assert summary_mode_allowed(expired_free_user, "detailed") is False
+    assert summary_mode_allowed(expired_free_user, "key_points") is False
+
+    for user in (active_trial_user, legacy_reader_user, paid_user):
         assert summary_mode_allowed(user, "short") is True
         assert summary_mode_allowed(user, "detailed") is True
         assert summary_mode_allowed(user, "key_points") is True
@@ -167,8 +240,8 @@ def test_summary_modes_are_available_across_free_author_and_architect_tiers():
 
 @pytest.mark.asyncio
 async def test_build_subscription_metrics_summary_reports_trial_conversion_and_post_cancel_churn(db):
-    now = datetime(2026, 5, 16, 12, 0, tzinfo=UTC)
-    cohort_start = datetime(2026, 5, 1, 8, 0, tzinfo=UTC)
+    now = datetime(2030, 6, 20, 12, 0, tzinfo=UTC)
+    cohort_start = datetime(2030, 5, 1, 8, 0, tzinfo=UTC)
 
     converted_user = User(
         email="metrics-converted@lorevia.app",
@@ -242,16 +315,16 @@ async def test_build_subscription_metrics_summary_reports_trial_conversion_and_p
                 source_event_id="evt_unresolved_cancel",
                 plan="author_monthly",
                 status="canceled",
-                occurred_at=now - timedelta(days=5),
-            ),
-        ]
-    )
+                    occurred_at=now - timedelta(days=5),
+                ),
+            ]
+        )
     await db.commit()
 
     summary = await build_subscription_metrics_summary(
         db,
         cohort_start=cohort_start.date(),
-        cohort_end=(cohort_start + timedelta(days=15)).date(),
+        cohort_end=now.date(),
         reactivation_window_days=30,
         now=now,
     )

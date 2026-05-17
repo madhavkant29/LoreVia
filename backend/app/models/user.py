@@ -40,7 +40,7 @@ class User(Base):
     reputation_dislikes_received: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    books = relationship("Book", back_populates="user", cascade="all, delete-orphan")
+    books = relationship("Book", foreign_keys="Book.user_id", back_populates="user", cascade="all, delete-orphan")
     subscriptions = relationship("Subscription", back_populates="user", cascade="all, delete-orphan")
     subscription_events = relationship("SubscriptionEvent", back_populates="user", cascade="all, delete-orphan")
     reading_progress = relationship("ReadingProgress", back_populates="user", cascade="all, delete-orphan")
@@ -50,7 +50,7 @@ class User(Base):
     device_trials = relationship("DeviceTrial", back_populates="user", cascade="all, delete-orphan")
     trial_email_events = relationship("TrialEmailEvent", back_populates="user", cascade="all, delete-orphan")
     writing_activities = relationship("UserWritingActivity", back_populates="user", cascade="all, delete-orphan")
-    llm_usage_events = relationship("LlmUsageEvent", cascade="all, delete-orphan")
+    llm_usage_events = relationship("LlmUsageEvent", back_populates="user", cascade="all, delete-orphan")
     forum_comments = relationship("BookForumComment", back_populates="author", cascade="all, delete-orphan")
     forum_comment_reactions = relationship("BookForumCommentReaction", back_populates="user", cascade="all, delete-orphan")
 
@@ -93,6 +93,24 @@ class SubscriptionEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
     user = relationship("User", back_populates="subscription_events")
+
+
+class PaddleWebhookEvent(Base):
+    __tablename__ = "paddle_webhook_events"
+    __table_args__ = (
+        UniqueConstraint("event_id", name="uq_paddle_webhook_events_event_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    event_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    event_type: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    notification_id: Mapped[str | None] = mapped_column(String)
+    processing_status: Mapped[str] = mapped_column(String, nullable=False, default="processing", server_default="processing", index=True)
+    payload_json: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
+    first_received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    last_error: Mapped[str | None] = mapped_column(Text)
+    duplicate_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
 
 
 class UserRateLimitOverride(Base):
@@ -177,4 +195,4 @@ class LlmUsageEvent(Base):
     metadata_json: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
-    user = relationship("User")
+    user = relationship("User", back_populates="llm_usage_events")

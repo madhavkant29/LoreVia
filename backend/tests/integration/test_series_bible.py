@@ -4,12 +4,17 @@ import uuid
 
 import pytest
 
-from app.api.deps.auth import get_current_user
-from app.main import app
+from app.core.security import create_access_token
 from app.models.book import Book, Dialogue, Scene, Series, SeriesBook
 from app.models.character import Character
 from app.models.intelligence import CharacterRelationship, PlotThread, WikiEntry
 from app.models.user import User
+
+
+def _auth_headers(user_id) -> dict[str, str]:
+    token = create_access_token(str(user_id))
+    assert token
+    return {"Cookie": f"lorevia_access_token={token}"}
 
 
 async def _build_series_bible_fixture(db):
@@ -132,15 +137,10 @@ async def _build_series_bible_fixture(db):
 @pytest.mark.asyncio
 async def test_series_bible_endpoint_aggregates_recurring_screenplay_entities(client, db):
     user, series = await _build_series_bible_fixture(db)
-
-    async def override_current_user():
-        return user
-
-    app.dependency_overrides[get_current_user] = override_current_user
-    try:
-        response = await client.get(f"/api/v1/books/series/{series.id}/bible")
-    finally:
-        app.dependency_overrides.pop(get_current_user, None)
+    response = await client.get(
+        f"/api/v1/books/series/{series.id}/bible",
+        headers=_auth_headers(user.id),
+    )
 
     assert response.status_code == 200
     payload = response.json()

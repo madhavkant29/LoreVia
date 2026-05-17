@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.book import Book, Chapter
@@ -24,6 +25,59 @@ class BookReadyStats:
     relationship_count: int
     plot_thread_count: int
     continuity_issue_count: int
+
+
+def make_notification_idempotency_key(*parts: Any) -> str:
+    segments = [str(part).strip() for part in parts if str(part).strip()]
+    if not segments:
+        raise ValueError("Notification idempotency keys require at least one non-empty segment.")
+    return ":".join(segments)
+
+
+async def create_notification_once(
+    db: AsyncSession,
+    *,
+    user_id,
+    kind: str,
+    title: str,
+    body: str,
+    idempotency_key: str,
+    book_id=None,
+    data: dict[str, Any] | None = None,
+) -> tuple[Notification, bool]:
+    existing = (
+        await db.execute(
+            select(Notification).where(Notification.idempotency_key == idempotency_key)
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        return existing, False
+
+    notification = Notification(
+        user_id=user_id,
+        book_id=book_id,
+        kind=kind,
+        idempotency_key=idempotency_key,
+        title=title,
+        body=body,
+        data=data,
+    )
+
+    try:
+        async with db.begin_nested():
+            db.add(notification)
+            await db.flush()
+    except IntegrityError:
+        existing = (
+            await db.execute(
+                select(Notification).where(Notification.idempotency_key == idempotency_key)
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            return existing, False
+        raise
+
+    return notification, True
 
 
 def _revision_digest_signature(payload: dict[str, Any]) -> str:

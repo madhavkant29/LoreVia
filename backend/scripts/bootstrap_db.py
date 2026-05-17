@@ -64,7 +64,9 @@ def main() -> int:
         if stamp_exit != 0:
             return stamp_exit
 
-    upgrade_exit = _run_alembic("upgrade", "head")
+    # Local bootstrap needs to apply every reachable head because the repo
+    # keeps compatibility branches in migration history.
+    upgrade_exit = _run_alembic("upgrade", "heads")
     if upgrade_exit != 0:
         return upgrade_exit
 

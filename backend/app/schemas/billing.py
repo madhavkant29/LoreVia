@@ -16,6 +16,20 @@ class CheckoutBody(BaseModel):
     plan: PaidPlanCode
 
 
+class BillingConfirmationOut(BaseModel):
+    transaction_id: str
+    status: str
+    plan: str
+    billing_interval: Literal["monthly", "annual"]
+    display_name: str
+    currency_code: str | None = None
+    total: str | None = None
+    invoice_number: str | None = None
+    invoice_pdf_url: str | None = None
+    subscription_id: str | None = None
+    customer_email: str | None = None
+
+
 class BillingPlanStatusOut(BaseModel):
     code: str
     display_name: str
@@ -31,6 +45,7 @@ class BillingStatusOut(BaseModel):
     paddle_api_key_present: bool
     webhook_secret_present: bool
     default_checkout_url_present: bool
+    recommended_default_checkout_url: str
     resend_api_key_present: bool
     internal_job_secret_present: bool
     fully_configured_plan_count: int

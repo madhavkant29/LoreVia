@@ -85,6 +85,10 @@ async def test_reader_chapter_repairs_stale_character_first_appearance(client, d
             "html": "<p><span class='mention-token' data-mention='Captain Mira'>Captain Mira</span> steps onto the deck before sunrise.</p>",
         },
     )
+    monkeypatch.setattr(
+        "app.api.v1.routes.reader.download_book",
+        lambda _key: b"stored chapter payload",
+    )
 
     response = await client.get(f"/api/v1/reader/{book.id}/chapter/1", headers=auth_headers)
 

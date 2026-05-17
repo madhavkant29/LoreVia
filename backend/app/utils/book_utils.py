@@ -886,7 +886,9 @@ def _revision_board_state_map(workspace: dict[str, Any]) -> dict[str, dict[str, 
 def _overlay_revision_state(item: dict[str, Any], state_map: dict[str, dict[str, Any]]) -> dict[str, Any]:
     payload = dict(item)
     state = state_map.get(str(item.get("id") or ""))
-    payload["status"] = str(state.get("status") or payload.get("status") or "pending") if state else str(payload.get("status") or "pending")
+    if not isinstance(state, dict):
+        state = {}
+    payload["status"] = str(state.get("status") or payload.get("status") or "pending")
     payload["assigned_version_id"] = str(state.get("assigned_version_id") or "").strip() or payload.get("assigned_version_id")
     payload["task_id"] = str(state.get("task_id") or "").strip() or payload.get("task_id")
     return payload
@@ -2081,6 +2083,7 @@ COLLABORATION_ROLE_DEFAULT_PERMISSIONS = {
     },
     "beta_reader": {
         **COLLABORATION_DEFAULT_PERMISSIONS,
+        "can_view_story_bible": True,
         "can_comment": True,
         "can_view_selected_chapters_only": True,
     },

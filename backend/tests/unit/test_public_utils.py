@@ -1,3 +1,4 @@
+from datetime import UTC, datetime, timedelta
 import uuid
 from types import SimpleNamespace
 
@@ -133,9 +134,12 @@ def test_public_forum_guards_allow_public_reads_and_writes(monkeypatch):
     ensure_public_forum_write_enabled()
 
 
-def test_public_authoring_access_requires_paid_author_tier():
+def test_public_authoring_access_allows_trial_and_paid_author_tiers():
     assert has_public_authoring_access(SimpleNamespace(tier="author", created_at=None)) is True
     assert has_public_authoring_access(SimpleNamespace(tier="architect", created_at=None)) is True
+    assert has_public_authoring_access(
+        SimpleNamespace(tier="free", created_at=datetime.now(UTC) - timedelta(days=1))
+    ) is True
     assert has_public_authoring_access(SimpleNamespace(tier="free", created_at=None)) is False
     with pytest.raises(HTTPException) as exc:
         ensure_public_authoring_access(SimpleNamespace(tier="free", created_at=None), action_label="Opening a public discussion")
@@ -310,15 +314,14 @@ async def test_create_public_forum_post_allows_new_post_when_previous_one_is_clo
     user_id = uuid.uuid4()
     book_id = uuid.uuid4()
     book = SimpleNamespace(id=book_id, user_id=user_id, is_public=False, hidden_at=None, archived_at=None)
-    closed_post = SimpleNamespace(id=uuid.uuid4(), book_id=book_id, status="closed")
     db = _FakeDB(
-        execute_values=[_Result(scalar_one_or_none=closed_post)],
+        execute_values=[_Result(scalar_one_or_none=None)],
         get_values=[book],
     )
 
     payload = await create_public_forum_post(
         db,
-        current_user=SimpleNamespace(id=user_id),
+        current_user=SimpleNamespace(id=user_id, tier="author"),
         body=PublicForumPostCreateBody(
             book_id=book_id,
             headline="Need mystery beta readers",
@@ -355,7 +358,7 @@ async def test_create_public_forum_post_checks_only_for_existing_open_posts(monk
 
     payload = await create_public_forum_post(
         db,
-        current_user=SimpleNamespace(id=user_id),
+        current_user=SimpleNamespace(id=user_id, tier="author"),
         body=PublicForumPostCreateBody(
             book_id=book_id,
             headline="Need line-edit beta readers",
@@ -390,6 +393,53 @@ async def test_create_public_forum_post_blocks_free_author():
         )
 
     assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_create_public_forum_post_allows_trial_user_for_approved_public_share(monkeypatch):
+    invalidated = []
+
+    async def _fake_invalidate():
+        invalidated.append(True)
+
+    async def _fake_get_detail(_db, *, post_id, current_user=None):
+        return SimpleNamespace(id=str(post_id), author_user_id=str(current_user.id))
+
+    monkeypatch.setattr("app.utils.public_utils._invalidate_public_forum_cache", _fake_invalidate)
+    monkeypatch.setattr("app.utils.public_utils.get_public_forum_post_detail", _fake_get_detail)
+
+    user_id = uuid.uuid4()
+    book_id = uuid.uuid4()
+    public_share_book = SimpleNamespace(
+        id=book_id,
+        user_id=user_id,
+        mode="author",
+        is_public=True,
+        source_kind="user_public_share",
+        public_share_status="approved",
+        hidden_at=None,
+        archived_at=None,
+    )
+    db = _FakeDB(
+        execute_values=[_Result(scalar_one_or_none=None)],
+        get_values=[public_share_book],
+    )
+
+    payload = await create_public_forum_post(
+        db,
+        current_user=SimpleNamespace(id=user_id, tier="free", created_at=datetime.now(UTC) - timedelta(days=1)),
+        body=PublicForumPostCreateBody(
+            book_id=book_id,
+            headline="Need public sample readers",
+            body="Looking for reactions to the public-facing sample before I widen the beta pool.",
+            desired_beta_reader_count=2,
+            allow_contact_requests=True,
+        ),
+    )
+
+    assert payload.author_user_id == str(user_id)
+    assert db.commits == 1
+    assert invalidated == [True]
 
 
 @pytest.mark.asyncio
@@ -432,8 +482,7 @@ async def test_list_author_public_forum_posts_returns_open_and_closed_threads():
     payload = await list_author_public_forum_posts(db, author_user_id=author_id)
 
     assert [item.status for item in payload] == ["open", "closed"]
-    assert len(db.added) == 1
-    assert invalidated == [True]
+    assert db.added == []
 
 
 @pytest.mark.asyncio
@@ -519,7 +568,7 @@ async def test_list_public_forum_comments_allows_author_to_view_closed_post_comm
     )
     author = SimpleNamespace(username="writer", reputation_score=12)
     db = _FakeDB(
-        execute_values=[_Result(all_rows=[(comment, author)])],
+        execute_values=[_Result(all_rows=[(comment, author)]), _Result(all_rows=[])],
         get_values=[post, book],
     )
 
@@ -555,10 +604,10 @@ async def test_update_public_forum_post_blocks_reopening_when_another_open_post_
     )
 
     with pytest.raises(HTTPException) as exc:
-        await update_public_forum_post(
-            db,
-            post_id=post.id,
-            current_user=SimpleNamespace(id=user_id),
+            await update_public_forum_post(
+                db,
+                post_id=post.id,
+                current_user=SimpleNamespace(id=user_id, tier="author"),
             body=PublicForumPostUpdateBody(
                 headline="Reopen me",
                 body="Trying to reopen with a second open thread already present.",

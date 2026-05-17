@@ -79,7 +79,7 @@ Required for payments:
 
 Recommended:
 
-- `PADDLE_DEFAULT_CHECKOUT_URL=https://your-frontend-domain/pricing`
+- `PADDLE_DEFAULT_CHECKOUT_URL=https://your-frontend-domain/checkout`
 
 Required for email/lifecycle:
 
@@ -123,7 +123,7 @@ In Paddle, do all of these:
    - Architect monthly
    - Architect annual
 2. Register this webhook endpoint:
-   - `https://your-backend-domain/api/v1/webhooks/paddle`
+   - `https://api.getlorevia.com/api/v1/webhooks/paddle`
 3. Subscribe the webhook to these supported events:
    - `transaction.completed`
    - `subscription.created`

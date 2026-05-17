@@ -443,6 +443,15 @@ export default function LibraryPage() {
 
               <button
                 type="button"
+                onClick={() => router.push("/public/forum" as Route)}
+                className={`inline-flex min-h-[3.35rem] items-center justify-center gap-3 rounded-xl border px-5 text-sm font-medium transition ${controlClass}`}
+              >
+                <ForumIcon className={isDark ? "text-[#c8c4bd]" : "text-stone-600"} />
+                Beta Forum
+              </button>
+
+              <button
+                type="button"
                 onClick={() => {
                   setUploadPreset({})
                   setShowUpload(true)
@@ -1066,6 +1075,15 @@ function FilterIcon({ className }: { className?: string }) {
   return (
     <svg className={`h-5 w-5 ${className ?? ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16l-6 7v5l-4 2v-7L4 6z" />
+    </svg>
+  )
+}
+
+function ForumIcon({ className }: { className?: string }) {
+  return (
+    <svg className={`h-5 w-5 ${className ?? ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M7 10h10M7 14h6" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M5 5h14a2 2 0 012 2v8a2 2 0 01-2 2H9l-4 3v-3H5a2 2 0 01-2-2V7a2 2 0 012-2z" />
     </svg>
   )
 }

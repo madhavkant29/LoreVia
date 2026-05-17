@@ -6,13 +6,18 @@ import zipfile
 
 import pytest
 
-from app.api.deps.auth import get_current_user
-from app.main import app
+from app.core.security import create_access_token
 from app.models.book import Book, Chapter, NoteSeriesLink, NovelScene, ObsidianVaultNote, Series
 from app.models.character import Character
 from app.models.intelligence import ChapterSummary, PlotThread, WikiEntry
 from app.models.user import User
 from app.utils.export_utils import EXPORT_ATTRIBUTION
+
+
+def _auth_headers(user_id) -> dict[str, str]:
+    token = create_access_token(str(user_id))
+    assert token
+    return {"Cookie": f"lorevia_access_token={token}"}
 
 
 async def _build_obsidian_preview_book(db):
@@ -174,15 +179,10 @@ async def _build_obsidian_series_link(db):
 @pytest.mark.asyncio
 async def test_obsidian_bible_preview_returns_folder_manifest(client, db):
     user, book = await _build_obsidian_preview_book(db)
-
-    async def override_current_user():
-        return user
-
-    app.dependency_overrides[get_current_user] = override_current_user
-    try:
-        response = await client.get(f"/api/v1/books/{book.id}/export/character-bible/preview")
-    finally:
-        app.dependency_overrides.pop(get_current_user, None)
+    response = await client.get(
+        f"/api/v1/books/{book.id}/export/character-bible/preview",
+        headers=_auth_headers(user.id),
+    )
 
     assert response.status_code == 200
     payload = response.json()
@@ -206,122 +206,117 @@ async def test_obsidian_note_series_links_are_bound_to_source_book(db):
 @pytest.mark.asyncio
 async def test_obsidian_bible_notes_save_is_visible_in_preview_and_notes_list(client, db):
     user, book = await _build_obsidian_preview_book(db)
+    headers = _auth_headers(user.id)
+    preview_before = await client.get(
+        f"/api/v1/books/{book.id}/export/character-bible/preview",
+        headers=headers,
+    )
+    assert preview_before.status_code == 200
+    baseline = preview_before.json()
+    target_path = next(file["path"] for file in baseline["files"] if file["path"].endswith("Characters/Aria.md"))
 
-    async def override_current_user():
-        return user
+    save_response = await client.put(
+        f"/api/v1/books/{book.id}/export/character-bible/notes",
+        headers=headers,
+        json={"path": target_path, "content": "# Aria\n\nEdited in app"},
+    )
+    assert save_response.status_code == 200
+    assert save_response.json()["persisted"] is True
 
-    app.dependency_overrides[get_current_user] = override_current_user
-    try:
-        preview_before = await client.get(f"/api/v1/books/{book.id}/export/character-bible/preview")
-        assert preview_before.status_code == 200
-        baseline = preview_before.json()
-        target_path = next(file["path"] for file in baseline["files"] if file["path"].endswith("Characters/Aria.md"))
+    preview_after = await client.get(
+        f"/api/v1/books/{book.id}/export/character-bible/preview",
+        headers=headers,
+    )
+    assert preview_after.status_code == 200
+    updated = preview_after.json()
+    updated_aria = next(file for file in updated["files"] if file["path"] == target_path)
+    assert "Edited in app" in updated_aria["content"]
+    assert updated_aria["content"].rstrip().endswith(EXPORT_ATTRIBUTION)
 
-        save_response = await client.put(
-            f"/api/v1/books/{book.id}/export/character-bible/notes",
-            json={"path": target_path, "content": "# Aria\n\nEdited in app"},
-        )
-        assert save_response.status_code == 200
-        assert save_response.json()["persisted"] is True
-
-        preview_after = await client.get(f"/api/v1/books/{book.id}/export/character-bible/preview")
-        assert preview_after.status_code == 200
-        updated = preview_after.json()
-        updated_aria = next(file for file in updated["files"] if file["path"] == target_path)
-        assert "Edited in app" in updated_aria["content"]
-        assert updated_aria["content"].rstrip().endswith(EXPORT_ATTRIBUTION)
-
-        notes_response = await client.get(f"/api/v1/books/{book.id}/export/character-bible/notes")
-        assert notes_response.status_code == 200
-        notes = notes_response.json()
-        assert len(notes) == 1
-        assert notes[0]["path"] == target_path
-        assert "Edited in app" in notes[0]["content"]
-        assert not notes[0]["content"].rstrip().endswith(EXPORT_ATTRIBUTION)
-    finally:
-        app.dependency_overrides.pop(get_current_user, None)
+    notes_response = await client.get(
+        f"/api/v1/books/{book.id}/export/character-bible/notes",
+        headers=headers,
+    )
+    assert notes_response.status_code == 200
+    notes = notes_response.json()
+    assert len(notes) == 1
+    assert notes[0]["path"] == target_path
+    assert "Edited in app" in notes[0]["content"]
+    assert not notes[0]["content"].rstrip().endswith(EXPORT_ATTRIBUTION)
 
 
 @pytest.mark.asyncio
 async def test_user_obsidian_notes_crud_graph_and_export(client, db):
     user, book = await _build_obsidian_preview_book(db)
+    headers = _auth_headers(user.id)
+    save_one = await client.put(
+        f"/api/v1/books/{book.id}/notes/obsidian",
+        headers=headers,
+        json={"path": "Characters/Aria.md", "content": "# Aria\n\nLinks to [[Blaire]]."},
+    )
+    assert save_one.status_code == 200
+    assert save_one.json()["source"] == "user_notes"
 
-    async def override_current_user():
-        return user
+    save_two = await client.put(
+        f"/api/v1/books/{book.id}/notes/obsidian",
+        headers=headers,
+        json={"path": "Characters/Blaire.md", "content": "# Blaire"},
+    )
+    assert save_two.status_code == 200
 
-    app.dependency_overrides[get_current_user] = override_current_user
-    try:
-        save_one = await client.put(
-            f"/api/v1/books/{book.id}/notes/obsidian",
-            json={"path": "Characters/Aria.md", "content": "# Aria\n\nLinks to [[Blaire]]."},
-        )
-        assert save_one.status_code == 200
-        assert save_one.json()["source"] == "user_notes"
+    list_response = await client.get(f"/api/v1/books/{book.id}/notes/obsidian", headers=headers)
+    assert list_response.status_code == 200
+    notes = list_response.json()
+    assert len(notes) == 2
 
-        save_two = await client.put(
-            f"/api/v1/books/{book.id}/notes/obsidian",
-            json={"path": "Characters/Blaire.md", "content": "# Blaire"},
-        )
-        assert save_two.status_code == 200
+    graph_response = await client.get(f"/api/v1/books/{book.id}/notes/obsidian/graph", headers=headers)
+    assert graph_response.status_code == 200
+    graph = graph_response.json()
+    assert len(graph["nodes"]) == 2
+    assert graph["edges"][0]["source"] == "Characters/Aria.md"
+    assert graph["edges"][0]["target"] == "Characters/Blaire.md"
 
-        list_response = await client.get(f"/api/v1/books/{book.id}/notes/obsidian")
-        assert list_response.status_code == 200
-        notes = list_response.json()
-        assert len(notes) == 2
+    relations_response = await client.get(
+        f"/api/v1/books/{book.id}/notes/obsidian/relations",
+        headers=headers,
+        params={"path": "Characters/Aria.md"},
+    )
+    assert relations_response.status_code == 200
+    relations = relations_response.json()
+    assert len(relations["links"]) == 1
+    assert relations["links"][0]["target_note_path"] == "Characters/Blaire.md"
+    assert relations["tags"] == []
 
-        graph_response = await client.get(f"/api/v1/books/{book.id}/notes/obsidian/graph")
-        assert graph_response.status_code == 200
-        graph = graph_response.json()
-        assert len(graph["nodes"]) == 2
-        assert graph["edges"][0]["source"] == "Characters/Aria.md"
-        assert graph["edges"][0]["target"] == "Characters/Blaire.md"
+    export_response = await client.get(f"/api/v1/books/{book.id}/notes/obsidian/export", headers=headers)
+    assert export_response.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(export_response.content)) as archive:
+        assert sorted(archive.namelist()) == ["Characters/Aria.md", "Characters/Blaire.md"]
 
-        relations_response = await client.get(
-            f"/api/v1/books/{book.id}/notes/obsidian/relations",
-            params={"path": "Characters/Aria.md"},
-        )
-        assert relations_response.status_code == 200
-        relations = relations_response.json()
-        assert len(relations["links"]) == 1
-        assert relations["links"][0]["target_note_path"] == "Characters/Blaire.md"
-        assert relations["tags"] == []
-
-        export_response = await client.get(f"/api/v1/books/{book.id}/notes/obsidian/export")
-        assert export_response.status_code == 200
-        with zipfile.ZipFile(io.BytesIO(export_response.content)) as archive:
-            assert sorted(archive.namelist()) == ["Characters/Aria.md", "Characters/Blaire.md"]
-
-        delete_response = await client.delete(f"/api/v1/books/{book.id}/notes/obsidian/Characters/Blaire.md")
-        assert delete_response.status_code == 204
-    finally:
-        app.dependency_overrides.pop(get_current_user, None)
+    delete_response = await client.delete(
+        f"/api/v1/books/{book.id}/notes/obsidian/Characters/Blaire.md",
+        headers=headers,
+    )
+    assert delete_response.status_code == 204
 
 
 @pytest.mark.asyncio
 async def test_user_obsidian_notes_import_zip(client, db):
     user, book = await _build_obsidian_preview_book(db)
 
-    async def override_current_user():
-        return user
-
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("Plot/Thread.md", "# Thread\n\n[[Characters]]")
         archive.writestr("Characters.md", "# Characters")
-
-    app.dependency_overrides[get_current_user] = override_current_user
-    try:
-        response = await client.post(
-            f"/api/v1/books/{book.id}/notes/obsidian/import",
-            files={"file": ("vault.zip", buffer.getvalue(), "application/zip")},
-        )
-        assert response.status_code == 200
-        payload = response.json()
-        assert len(payload) == 2
-        assert {item["path"] for item in payload} == {"Plot/Thread.md", "Characters.md"}
-        assert all(item["source"] == "user_notes" for item in payload)
-    finally:
-        app.dependency_overrides.pop(get_current_user, None)
+    response = await client.post(
+        f"/api/v1/books/{book.id}/notes/obsidian/import",
+        headers=_auth_headers(user.id),
+        files={"file": ("vault.zip", buffer.getvalue(), "application/zip")},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload) == 2
+    assert {item["path"] for item in payload} == {"Plot/Thread.md", "Characters.md"}
+    assert all(item["source"] == "user_notes" for item in payload)
 
 
 @pytest.mark.asyncio
@@ -343,17 +338,11 @@ async def test_manuscript_export_includes_manual_scenes_without_server_error(cli
     db.add(manual_scene)
     await db.commit()
 
-    async def override_current_user():
-        return user
-
-    app.dependency_overrides[get_current_user] = override_current_user
-    try:
-        response = await client.get(
-            f"/api/v1/books/{book.id}/manuscript/export",
-            params={"format": "docx"},
-        )
-    finally:
-        app.dependency_overrides.pop(get_current_user, None)
+    response = await client.get(
+        f"/api/v1/books/{book.id}/manuscript/export",
+        headers=_auth_headers(user.id),
+        params={"format": "docx"},
+    )
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith(

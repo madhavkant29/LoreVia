@@ -123,6 +123,10 @@ When adding a new table or changing schema:
 
 ### Migration Best Practices
 
+- **Never edit an existing migration after it has been pushed to Git, shared with anyone else, or applied to any non-local database.**
+- If a shipped migration needs correction, **create a new follow-up Alembic revision** that repairs the schema or data state instead of rewriting the old migration file.
+- Treat previously pushed migration files as **immutable history** unless the user explicitly asks for a one-off local-only reset and confirms the migration has never left the machine.
+
 **Always handle edge cases and prevent duplication:**
 
 - **Check if tables exist before creating them:**

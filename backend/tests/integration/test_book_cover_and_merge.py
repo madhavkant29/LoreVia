@@ -126,10 +126,14 @@ async def test_merge_characters_endpoint_merges_duplicate_records(client, db):
     assert response.status_code == 200
     assert response.json()["merged"] == str(primary.id)
 
-    merged = await db.get(Character, primary.id)
-    deleted = await db.get(Character, secondary.id)
-    states = (await db.execute(select(CharacterState).where(CharacterState.character_id == primary.id))).scalars().all()
-    relationships = (await db.execute(select(CharacterRelationship).where(CharacterRelationship.book_id == book.id))).scalars().all()
+    book_id = book.id
+    primary_id = primary.id
+    secondary_id = secondary.id
+    db.expire_all()
+    merged = await db.get(Character, primary_id)
+    deleted = await db.get(Character, secondary_id)
+    states = (await db.execute(select(CharacterState).where(CharacterState.character_id == primary_id))).scalars().all()
+    relationships = (await db.execute(select(CharacterRelationship).where(CharacterRelationship.book_id == book_id))).scalars().all()
 
     assert merged is not None
     assert deleted is None
@@ -172,7 +176,9 @@ async def test_delete_character_endpoint_removes_false_positive(client, db):
 
     assert response.status_code == 200
     assert response.json()["deleted"] == str(false_positive.id)
-    assert await db.get(Character, false_positive.id) is None
+    false_positive_id = false_positive.id
+    db.expire_all()
+    assert await db.get(Character, false_positive_id) is None
 
 
 @pytest.mark.asyncio

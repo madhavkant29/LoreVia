@@ -20,6 +20,7 @@ from app.utils.ingestion_utils import (
     regroup_prose_chapters_for_reading,
     update_book_processing_state,
 )
+from app.utils.book_utils import serialize_manuscript_content
 
 
 def test_build_chapter_dispatch_plan_staggers_non_eager_chapters():
@@ -193,7 +194,7 @@ async def test_load_staged_chapter_payload_uses_existing_chapter_key(monkeypatch
 
     def _fake_download(storage_key: str) -> bytes:
         calls.append(storage_key)
-        return b'{"text":"Chapter body","html":"<p>Chapter body</p>"}'
+        return serialize_manuscript_content("Chapter body", "<p>Chapter body</p>").encode("utf-8")
 
     monkeypatch.setattr("app.utils.ingestion_utils.download_book", _fake_download)
 
@@ -203,7 +204,7 @@ async def test_load_staged_chapter_payload_uses_existing_chapter_key(monkeypatch
         chapter_s3_key="chapters/custom/chapter-7.txt",
     )
 
-    assert payload == {"text": "Chapter body", "html": "<p>Chapter body</p>"}
+    assert payload == {"format": "rich_text_v1", "text": "Chapter body", "html": "<p>Chapter body</p>"}
     assert calls == ["chapters/custom/chapter-7.txt"]
 
 
@@ -216,7 +217,7 @@ async def test_load_staged_chapter_payload_falls_back_to_deterministic_key(monke
         calls.append(storage_key)
         if storage_key == "missing-key":
             raise FileNotFoundError(storage_key)
-        return b'{"text":"Recovered chapter","html":null}'
+        return serialize_manuscript_content("Recovered chapter").encode("utf-8")
 
     monkeypatch.setattr("app.utils.ingestion_utils.download_book", _fake_download)
 
@@ -226,7 +227,7 @@ async def test_load_staged_chapter_payload_falls_back_to_deterministic_key(monke
         chapter_s3_key="missing-key",
     )
 
-    assert payload == {"text": "Recovered chapter", "html": None}
+    assert payload == {"format": "rich_text_v1", "text": "Recovered chapter", "html": "<p>Recovered chapter</p>"}
     assert calls == ["missing-key", f"chapters/{book_id}/3.txt"]
 
 

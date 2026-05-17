@@ -38,6 +38,7 @@ from app.utils.book_utils import (
     normalize_collaboration_permissions,
     normalize_collaboration_scope,
 )
+from app.utils.notification_utils import create_notification_once, make_notification_idempotency_key
 
 ACTIVE_READER_STATES = {
     BetaReadAssignmentState.ACTIVE.value,
@@ -736,47 +737,59 @@ async def expire_beta_assignment_if_due(
         now=current,
         missed_reason="deadline_expired",
     )
-    assignment.counted_toward_missed_streak = True
+    penalty_applied = False
     collaborator = await db.get(BookCollaborator, assignment.collaborator_id) if assignment.collaborator_id else None
     sync_beta_read_access(assignment, collaborator)
     reader = await db.get(User, assignment.reader_user_id) if assignment.reader_user_id else None
     if reader is not None:
-        apply_missed_beta_read_penalty(reader, now=current)
-        db.add(
-            Notification(
-                user_id=reader.id,
-                book_id=assignment.book_id,
-                kind="beta_read_deadline_missed",
-                title="Beta read deadline missed",
-                body="This beta read expired before completion, so no points were awarded.",
-                data={
-                    "assignment_id": str(assignment.id),
-                    "counted_toward_missed_streak": True,
-                    "penalty_status": reader.beta_read_penalty_status,
-                },
-            )
+        if not assignment.counted_toward_missed_streak:
+            apply_missed_beta_read_penalty(reader, now=current)
+            assignment.counted_toward_missed_streak = True
+            penalty_applied = True
+        await create_notification_once(
+            db,
+            user_id=reader.id,
+            book_id=assignment.book_id,
+            kind="beta_read_deadline_missed",
+            title="Beta read deadline missed",
+            body="This beta read expired before completion, so no points were awarded.",
+            data={
+                "assignment_id": str(assignment.id),
+                "counted_toward_missed_streak": assignment.counted_toward_missed_streak or penalty_applied,
+                "penalty_status": reader.beta_read_penalty_status,
+            },
+            idempotency_key=make_notification_idempotency_key(
+                "beta_read_deadline_missed",
+                assignment.id,
+            ),
         )
         warning = penalty_warning_for_user(reader)
         if warning:
-            db.add(
-                Notification(
-                    user_id=reader.id,
-                    book_id=assignment.book_id,
-                    kind="beta_read_penalty_warning",
-                    title="Beta read warning",
-                    body=warning,
-                    data={"assignment_id": str(assignment.id), "penalty_status": reader.beta_read_penalty_status},
-                )
+            await create_notification_once(
+                db,
+                user_id=reader.id,
+                book_id=assignment.book_id,
+                kind="beta_read_penalty_warning",
+                title="Beta read warning",
+                body=warning,
+                data={"assignment_id": str(assignment.id), "penalty_status": reader.beta_read_penalty_status},
+                idempotency_key=make_notification_idempotency_key(
+                    "beta_read_penalty_warning",
+                    assignment.id,
+                ),
             )
-    db.add(
-        Notification(
-            user_id=assignment.author_user_id,
-            book_id=assignment.book_id,
-            kind="beta_read_missed_author_notice",
-            title="A beta read deadline passed",
-            body="A beta reader missed the deadline for this assignment.",
-            data={"assignment_id": str(assignment.id), "book_id": str(assignment.book_id)},
-        )
+    await create_notification_once(
+        db,
+        user_id=assignment.author_user_id,
+        book_id=assignment.book_id,
+        kind="beta_read_missed_author_notice",
+        title="A beta read deadline passed",
+        body="A beta reader missed the deadline for this assignment.",
+        data={"assignment_id": str(assignment.id), "book_id": str(assignment.book_id)},
+        idempotency_key=make_notification_idempotency_key(
+            "beta_read_missed_author_notice",
+            assignment.id,
+        ),
     )
     return True
 
@@ -1664,15 +1677,18 @@ async def award_submitted_beta_reads(
         completed_at = utc_now()
         set_beta_assignment_state(assignment, BetaReadAssignmentState.COMPLETED.value, now=completed_at)
         reset_missed_beta_read_penalty(reader)
-        db.add(
-            Notification(
-                user_id=reader.id,
-                book_id=assignment.book_id,
-                kind="beta_read_completed",
-                title="Beta read completed",
-                body="Thanks for submitting your beta read on time.",
-                data={"assignment_id": str(assignment.id)},
-            )
+        await create_notification_once(
+            db,
+            user_id=reader.id,
+            book_id=assignment.book_id,
+            kind="beta_read_completed",
+            title="Beta read completed",
+            body="Thanks for submitting your beta read on time.",
+            data={"assignment_id": str(assignment.id)},
+            idempotency_key=make_notification_idempotency_key(
+                "beta_read_completed",
+                assignment.id,
+            ),
         )
         completed += 1
     return completed
@@ -1717,6 +1733,7 @@ async def send_beta_read_reminders(
             .where(BetaReadAssignment.state.in_(list(ACTIVE_READER_STATES)))
             .order_by(BetaReadAssignment.expires_at.asc())
             .limit(limit)
+            .with_for_update(skip_locked=True)
         )
     ).scalars().all()
     sent = 0
@@ -1724,25 +1741,36 @@ async def send_beta_read_reminders(
         if assignment.reader_user_id is None:
             continue
         hours_left = (ensure_timezone(assignment.expires_at) - now).total_seconds() / 3600
+        reminder_window_hours: int | None = None
         if 23 <= hours_left <= 24 and assignment.reminder_24h_sent_at is None:
             assignment.reminder_24h_sent_at = now
             sent += 1
             body = "24 hours left. Complete before the deadline."
+            reminder_window_hours = 24
         elif 5 <= hours_left <= 6 and assignment.reminder_6h_sent_at is None:
             assignment.reminder_6h_sent_at = now
             sent += 1
             body = "6 hours left. Finish the reading and feedback before the assignment closes."
+            reminder_window_hours = 6
         else:
             continue
-        db.add(
-            Notification(
-                user_id=assignment.reader_user_id,
-                book_id=assignment.book_id,
-                kind="beta_read_deadline_reminder",
-                title="Beta read deadline reminder",
-                body=body,
-                data={"assignment_id": str(assignment.id), "expires_at": assignment.expires_at.isoformat()},
-            )
+        await create_notification_once(
+            db,
+            user_id=assignment.reader_user_id,
+            book_id=assignment.book_id,
+            kind="beta_read_deadline_reminder",
+            title="Beta read deadline reminder",
+            body=body,
+            data={
+                "assignment_id": str(assignment.id),
+                "expires_at": assignment.expires_at.isoformat(),
+                "reminder_window_hours": reminder_window_hours,
+            },
+            idempotency_key=make_notification_idempotency_key(
+                "beta_read_deadline_reminder",
+                assignment.id,
+                reminder_window_hours,
+            ),
         )
     return sent
 

@@ -28,8 +28,6 @@ class _FakeDB:
 
 @pytest.mark.asyncio
 async def test_submit_beta_read_feedback_requires_current_requirements(monkeypatch):
-    called = {}
-
     async def _fake_expire(*_args, **_kwargs):
         return False
 
@@ -45,15 +43,6 @@ async def test_submit_beta_read_feedback_requires_current_requirements(monkeypat
 
     monkeypatch.setattr(beta_read_utils, "expire_beta_assignment_if_due", _fake_expire)
     monkeypatch.setattr(beta_read_utils, "sync_beta_assignment_progress", _fake_sync)
-
-    async def _fake_grant_review_points(_db, user, *, source_id, book_id=None, assignment_id=None):
-        called["user_id"] = user.id
-        called["source_id"] = source_id
-        called["book_id"] = book_id
-        called["assignment_id"] = assignment_id
-        return None
-
-    monkeypatch.setattr(beta_read_utils, "grant_review_feedback_points", _fake_grant_review_points)
 
     current_user = SimpleNamespace(id=uuid.uuid4())
     assignment = SimpleNamespace(
@@ -88,8 +77,10 @@ async def test_submit_beta_read_feedback_requires_current_requirements(monkeypat
     assert updated.submitted_answer_count == 1
     assert updated.submitted_before_deadline is True
     assert updated.late_feedback is False
-    assert called["user_id"] == current_user.id
-    assert called["source_id"] == str(assignment.id)
+    assert len(db.added) == 1
+    notification = db.added[0]
+    assert notification.kind == "beta_read_feedback_submitted"
+    assert notification.user_id == assignment.author_user_id
     assert db.commits == 1
 
 

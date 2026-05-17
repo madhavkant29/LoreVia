@@ -57,7 +57,8 @@ class Book(Base):
     hidden_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    user = relationship("User", back_populates="books")
+    user = relationship("User", foreign_keys=[user_id], back_populates="books")
+    public_share_approved_by_user = relationship("User", foreign_keys=[public_share_approved_by_user_id])
     chapters = relationship("Chapter", back_populates="book", cascade="all, delete-orphan")
     characters = relationship("Character", back_populates="book", cascade="all, delete-orphan")
     chunks = relationship("BookChunk", back_populates="book", cascade="all, delete-orphan")

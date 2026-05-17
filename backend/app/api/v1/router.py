@@ -47,7 +47,7 @@ api_router.include_router(collaboration.router, prefix="/books",         tags=["
 api_router.include_router(books.router,         prefix="/books",         tags=["books"], dependencies=[Depends(rate_limit_api)])
 api_router.include_router(manuscript.router,    prefix="/books",         tags=["manuscript"], dependencies=[Depends(rate_limit_api)])
 api_router.include_router(public.router,        prefix="/public",        tags=["public"], dependencies=[Depends(rate_limit_public)])
-api_router.include_router(billing.router,       prefix="/billing",       tags=["billing"], dependencies=[Depends(rate_limit_api)])
+api_router.include_router(billing.router,       prefix="/billing",       tags=["billing"])
 api_router.include_router(beta_reads.router,    tags=["beta-reads"], dependencies=[Depends(rate_limit_api)])
 api_router.include_router(internal.router,      prefix="/internal",      tags=["internal"])
 api_router.include_router(webhooks.router,      prefix="/webhooks",      tags=["webhooks"])

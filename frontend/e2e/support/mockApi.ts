@@ -1708,7 +1708,7 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
 
     if (path === "/api/v1/books/book-1/collaborators" && method === "POST") {
       const payload = JSON.parse(route.request().postData() || "{}")
-      return json(route, {
+      const created = {
         id: "collab-2",
         book_id: "book-1",
         email: payload.email,
@@ -1719,7 +1719,9 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
         invite_status: "active",
         invited_at: "2026-05-11T10:00:00Z",
         updated_at: "2026-05-11T10:00:00Z",
-      }, 201)
+      }
+      collaborators.push(created)
+      return json(route, created, 201)
     }
 
     if (path === "/api/v1/books/book-1/beta-reads" && method === "GET") {

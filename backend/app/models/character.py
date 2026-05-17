@@ -94,6 +94,7 @@ class CharacterVoiceProfile(Base):
     __table_args__ = (
         UniqueConstraint("character_id", name="uq_character_voice_profiles_character_id"),
     )
+    __mapper_args__ = {"confirm_deleted_rows": False}
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     book_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)

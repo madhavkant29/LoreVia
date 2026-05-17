@@ -19,9 +19,9 @@ describe("loginMessages", () => {
     )
   })
 
-  it("maps invalid credentials details to create-account guidance", () => {
+  it("maps invalid credentials details to an invalid-password message", () => {
     expect(normalizeLoginError("Invalid credentials")).toBe(
-      "No account found for that sign-in. Create one if you're new to LoreVia, or use the same sign-in method you originally chose, like Google.",
+      "Invalid email or password.",
     )
   })
 

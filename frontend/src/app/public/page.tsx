@@ -23,7 +23,7 @@ export default function PublicLibraryPage() {
       <div className="mx-auto max-w-6xl px-4 py-10">
         <div className="max-w-3xl">
           <p className={`text-xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-cyan-300" : "text-cyan-700"}`}>Optional public showcase</p>
-          <h1 className="mt-4 text-4xl font-semibold tracking-tight">Explore author-shared samples and curated LoreVia demos.</h1>
+          <h1 className="mt-4 text-4xl font-semibold tracking-tight">Explore public LoreVia demos and author-shared samples.</h1>
           <p className={`mt-4 text-base leading-8 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
             This library is a secondary showcase surface for public-domain examples and author-shared samples. LoreVia's core workflow still lives in the private author workspace.
           </p>

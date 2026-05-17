@@ -12,27 +12,12 @@ import { canUseAuthorFeatures } from "@/lib/billing/plans"
 import { publicApi } from "@/lib/api/public"
 import { asQueryKey } from "@/lib/query/cacheKeys"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
-import { formatReputationScore } from "@/lib/utils/publicForum"
+import { formatReputationScore, getEligibleForumAuthorBooks } from "@/lib/utils/publicForum"
 import type { Book } from "@/types/book"
-import type { PublicForumPost, PublicForumPostListResponse } from "@/types/public"
+import type { PublicForumPostListResponse } from "@/types/public"
 import type { User } from "@/types/user"
 
 const FORUM_PAGE_SIZE = 20
-
-function getEligibleAuthorBooks(books: Book[], myForumPosts: PublicForumPost[]) {
-  const openDiscussionBookIds = new Set(
-    myForumPosts
-      .filter((post) => post.status === "open")
-      .map((post) => post.book_id),
-  )
-  return books.filter((book) => (
-    book.mode === "author"
-    && !book.is_public
-    && !book.hidden_at
-    && !book.archived_at
-    && !openDiscussionBookIds.has(book.id)
-  ))
-}
 
 export default function PublicForumPage() {
   const router = useRouter()
@@ -91,7 +76,7 @@ export default function PublicForumPage() {
         setComposerStatus("Could not load your existing public discussions right now. Refresh before opening a new one.")
         return
       }
-      const eligibleBooks = getEligibleAuthorBooks(booksPayload, myForumPosts)
+      const eligibleBooks = getEligibleForumAuthorBooks(booksPayload, myForumPosts)
       setAuthorForumLoadFailed(false)
       setComposerStatus(null)
       setAuthorBooks(eligibleBooks)
@@ -117,7 +102,7 @@ export default function PublicForumPage() {
       return
     }
     if (!selectedBookId || !headline.trim() || !body.trim()) {
-      setComposerStatus("Choose a private manuscript, headline, and discussion brief first.")
+      setComposerStatus("Choose an eligible manuscript, headline, and discussion brief first.")
       return
     }
     const hasDesiredCount = desiredCount.trim().length > 0
@@ -175,9 +160,9 @@ export default function PublicForumPage() {
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div className="max-w-3xl">
                 <p className={`text-xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>Author-only setup</p>
-                <h2 className="mt-2 font-serif text-3xl tracking-tight">Open a public beta discussion for one private manuscript.</h2>
+                <h2 className="mt-2 font-serif text-3xl tracking-tight">Open a public beta discussion for one eligible novel.</h2>
                 <p className={`mt-3 text-sm leading-7 ${isDark ? "text-slate-300" : "text-slate-600"}`}>
-                  Use this only when you want outside discovery. Your main manuscript workflow and invited beta-reader collaboration stay inside the private author workspace.
+                  Use this when you want outside discovery for a private draft or an approved public-share novel. Your main manuscript workflow and invited beta-reader collaboration still stay inside the LoreVia author workspace.
                 </p>
               </div>
               <p className={`text-xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>Signed in as @{viewer.username || "member"}</p>
@@ -185,7 +170,7 @@ export default function PublicForumPage() {
 
             {!canOpenPublicDiscussions ? (
               <div className={`mt-5 rounded-3xl border px-5 py-6 text-sm ${isDark ? "border-amber-400/25 bg-amber-400/10 text-amber-100" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
-                Public manuscript discussions are limited to Author and Architect plans. Free accounts can still browse discussions, comment, react, and offer to beta read.
+                Opening public manuscript discussions is limited to Trial, Author, and Architect access. Free accounts can still browse discussions, comment, react, and offer to beta read.
                 <div className="mt-4">
                   <button
                     type="button"
@@ -200,7 +185,7 @@ export default function PublicForumPage() {
               <div className={`mt-5 rounded-3xl border border-dashed px-5 py-6 text-sm ${isDark ? "border-white/10 text-slate-400" : "border-[#d8c6ab] text-slate-500"}`}>
                 {authorForumLoadFailed
                   ? "LoreVia could not verify your current public forum threads right now. Refresh before opening a new discussion."
-                  : "No eligible private author manuscripts are available for a public beta discussion right now. Manuscripts with an existing open discussion are excluded until that thread is closed."}
+                  : "No eligible author projects are available for a public beta discussion right now. Private drafts and approved public-share novels with an existing open discussion are excluded until that thread is closed."}
               </div>
             ) : (
               <div className="mt-6 space-y-4">

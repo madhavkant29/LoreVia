@@ -258,20 +258,20 @@ async def test_reorder_chapter_scenes_persists_sort_order_and_structure_version(
     ]
     assert [scene["sort_order"] for scene in payload["scenes"]] == [1, 2, 3]
 
+    book_id = book.id
+    chapter_id = chapter.id
+    expected_scene_ids = [str(scene.id) for scene in (scenes[2], scenes[0], scenes[1])]
+    db.expire_all()
     persisted = (
         await db.execute(
             select(NovelScene)
-            .where(NovelScene.book_id == book.id, NovelScene.chapter_number == 2)
+            .where(NovelScene.book_id == book_id, NovelScene.chapter_number == 2)
             .order_by(NovelScene.sort_order.asc())
         )
     ).scalars().all()
-    assert [str(scene.id) for scene in persisted] == [
-        str(scenes[2].id),
-        str(scenes[0].id),
-        str(scenes[1].id),
-    ]
+    assert [str(scene.id) for scene in persisted] == expected_scene_ids
 
-    refreshed_chapter = await db.get(Chapter, chapter.id)
+    refreshed_chapter = await db.get(Chapter, chapter_id)
     assert refreshed_chapter is not None
     assert refreshed_chapter.structure_version == 5
     stored = deserialize_manuscript_content(download_book(refreshed_chapter.s3_key))
@@ -403,6 +403,17 @@ async def test_private_manuscript_annotations_stay_hidden_from_collaborators(cli
                 "can_comment": True,
                 "can_view_selected_chapters_only": True,
             },
+            scope_chapter_start=1,
+            scope_chapter_end=3,
+            scope_character_bible=False,
+            scope_continuity_report=False,
+            scope_reader_confusion_report=False,
+            permission_can_edit_manuscript=False,
+            permission_can_view_story_bible=False,
+            permission_can_run_ai_scans=False,
+            permission_can_export=False,
+            permission_can_comment=True,
+            permission_can_view_selected_chapters_only=True,
             invite_status="active",
         )
     )

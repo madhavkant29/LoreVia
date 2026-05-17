@@ -3,9 +3,10 @@ import Script from "next/script"
 import type { Route } from "next"
 import type { ReactNode } from "react"
 import { AudienceSection } from "@/components/marketing/AudienceSection"
+import { HomePricingSection } from "@/components/marketing/HomePricingSection"
 import { Reveal } from "@/components/marketing/Reveal"
 import { BrandLockup } from "@/components/layout/BrandLockup"
-import { pricingTierAccessLabel, pricingTiers as billingPricingTiers } from "@/lib/billing/catalog"
+import { pricingTiers as billingPricingTiers } from "@/lib/billing/catalog"
 import { SITE_NAME, toAbsoluteUrl } from "@/lib/seo"
 
 const navItems = [
@@ -106,52 +107,6 @@ const comparisonRows = [
   ["Detect dropped plot threads", "No", "No", "No", "Yes"],
   ["Character voice consistency checks", "No", "No", "No", "Yes"],
 ]
-
-const pricingTiers = billingPricingTiers.map((tier) => ({
-  name: tier.name,
-  accessLabel: pricingTierAccessLabel(tier),
-  price: tier.priceMonthly,
-  subtitle:
-    tier.name === "Free"
-      ? "Explore LoreVia with a single project."
-      : tier.name === "Author"
-        ? "For active manuscript drafting, revision, collaborator feedback, and continuity work."
-        : "For multi-book projects and expansive story worlds.",
-  bullets:
-    tier.name === "Free"
-      ? [
-          "1 upload total",
-          "Explore sample LoreVia workflows",
-          "Join author-invited beta reads for free",
-          "Basic story recall with strict limits",
-          "Short chapter summaries only",
-          "3 searches/day, 1 prediction/day, 1 advisor turn/day, 1 continuity check/day",
-        ]
-      : tier.name === "Author"
-        ? [
-            "Everything in Free, plus",
-            "Continuity scans and manuscript feedback",
-            "Author collaboration workflows",
-            "Character reference generation",
-            "Relationship and timeline tracking",
-            "High monthly usage limits",
-          ]
-        : [
-            "Everything in Author, plus",
-            "Cross-book continuity analysis",
-            "Advanced world consistency checks",
-            "Series-wide relationship tracking",
-            "Early access to new features",
-            "Extended analysis capacity",
-          ],
-  cta:
-    tier.name === "Free"
-      ? "Start free"
-      : tier.name === "Author"
-        ? "Start writing"
-        : "Build your world",
-  highlighted: tier.name === "Author",
-}))
 
 const faqItems = [
   {
@@ -661,68 +616,6 @@ function ComparisonSection() {
   )
 }
 
-function PricingSection({ ctaHref }: { ctaHref: Route }) {
-  return (
-    <Section id="pricing">
-      <SectionHeader
-        title="Choose the workspace that fits your writing."
-        body="Every signup starts with a 10-day Author trial at no charge. After that, Free remains available and only Author or Architect are paid."
-        align="center"
-      />
-      <div className="mt-12 grid gap-5 md:grid-cols-2 lg:grid-cols-4">
-        {pricingTiers.map((tier, index) => (
-          <Reveal key={tier.name} delay={index * 70} className="h-full">
-            <article
-              className={`relative flex h-full flex-col rounded-2xl p-6 transition hover:-translate-y-1 ${
-                tier.highlighted
-                  ? "border border-cyan-300/50 bg-[#121b30] shadow-[0_24px_70px_-45px_rgba(125,211,252,0.8)]"
-                  : "border border-white/10 bg-[#080d18]"
-              }`}
-            >
-              {tier.highlighted ? (
-                <div className="absolute -top-3 left-6 rounded-md bg-cyan-300 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-slate-950">
-                  Best value
-                </div>
-              ) : null}
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <h3 className="text-xl font-semibold text-white">{tier.name}</h3>
-                  <p className="mt-2 text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200">
-                    {tier.accessLabel}
-                  </p>
-                  <p className="mt-2 text-sm leading-6 text-slate-400">{tier.subtitle}</p>
-                </div>
-              </div>
-              <div className="mt-8 flex items-baseline gap-1">
-                <span className="text-5xl font-semibold tracking-tight text-white">${tier.price}</span>
-                {tier.price > 0 ? <span className="text-sm text-slate-500">/mo</span> : null}
-              </div>
-              <ul className="mt-8 space-y-4">
-                {tier.bullets.map((bullet) => (
-                  <li key={bullet} className="flex gap-3 text-sm leading-6 text-slate-300">
-                    <span className={tier.highlighted ? "text-cyan-200" : "text-slate-500"}>+</span>
-                    <span>{bullet}</span>
-                  </li>
-                ))}
-              </ul>
-              <Link
-                href={ctaHref}
-                className={`mt-auto inline-flex w-full items-center justify-center rounded-md px-4 py-3.5 text-sm font-semibold transition ${
-                  tier.highlighted
-                    ? "bg-white text-slate-950 hover:bg-slate-200"
-                    : "border border-white/10 text-white hover:border-white/25 hover:bg-white/8"
-                }`}
-              >
-                {tier.cta}
-              </Link>
-            </article>
-          </Reveal>
-        ))}
-      </div>
-    </Section>
-  )
-}
-
 function FAQSection() {
   return (
     <Section id="faq">
@@ -764,11 +657,11 @@ export default function HomePage() {
     url: toAbsoluteUrl("/"),
     description:
       "LoreVia helps fiction authors analyze manuscripts, track characters, manage continuity, and build a searchable story workspace.",
-    offers: pricingTiers
-      .filter((tier) => tier.price >= 0)
+    offers: billingPricingTiers
+      .filter((tier) => tier.priceMonthly >= 0)
       .map((tier) => ({
         "@type": "Offer",
-        price: tier.price.toString(),
+        price: tier.priceMonthly.toString(),
         priceCurrency: "USD",
         name: tier.name,
         url: toAbsoluteUrl("/pricing"),
@@ -831,10 +724,10 @@ export default function HomePage() {
               Fiction authors only
             </p>
             <h1
-              className="mt-7 text-5xl font-[650] leading-[0.98] tracking-[-0.04em] text-white md:text-7xl xl:text-[5.15rem]"
+              className="mt-7 text-5xl font-[600] leading-[0.98] tracking-[-0.04em] text-white md:text-7xl xl:text-[4.15rem]"
               style={{ fontFamily: '"Inter", "Geist", "Satoshi", var(--font-ui), sans-serif' }}
             >
-              LoreVia helps authors understand, revise, and maintain continuity in complex manuscripts.
+              For authors who need story memory, sharper revisions, and continuity control.
             </h1>
             <p className="mt-6 max-w-2xl text-lg leading-9 text-slate-300 md:text-xl">
               LoreVia turns your manuscript into an author workspace with character tracking, manuscript intelligence, relationship memory, grounded story questions, and continuity scans that stay tied to the draft.
@@ -878,7 +771,7 @@ export default function HomePage() {
       <ProcessSection />
       <AudienceSection />
       <ComparisonSection />
-      <PricingSection ctaHref={ctaHref} />
+      <HomePricingSection ctaHref={ctaHref} />
       <FAQSection />
 
       <section className="border-t border-white/10 bg-[#030711]">

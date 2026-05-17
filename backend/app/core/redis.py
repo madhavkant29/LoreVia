@@ -34,7 +34,7 @@ async def get_redis() -> aioredis.Redis:
 
 async def cache_set(key: str, value: object, ttl: int) -> None:
     r = await get_redis()
-    await r.setex(key, ttl, json.dumps(value))
+    await r.setex(key, ttl, json.dumps(value, default=str))
 
 
 async def cache_get(key: str) -> object | None:
@@ -106,7 +106,7 @@ async def store_password_reset_token(token: str, user_id: str, ttl_seconds: int)
     token_hash = _hash_ephemeral_token(token)
     async with r.pipeline(transaction=True) as pipe:
         if previous_token:
-            pipe.delete(key_password_reset(previous_token))
+            pipe.delete(key_password_reset(_hash_ephemeral_token(previous_token)))
         pipe.setex(key_password_reset(token_hash), ttl_seconds, user_id)
         pipe.setex(key_password_reset_user(user_id), ttl_seconds, token)
         await pipe.execute()

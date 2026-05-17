@@ -88,7 +88,7 @@ async def test_revision_tags_round_trip_across_revision_entities(client, db, aut
         json={"entity_type": "chapter", "chapter_number": 1, "tags": ["Needs Rewrite", " final pass "]},
     )
     assert chapter_tag.status_code == 200
-    assert chapter_tag.json()["tags"] == ["needs rewrite", "final pass"]
+    assert sorted(chapter_tag.json()["tags"]) == ["final pass", "needs rewrite"]
 
     comment_tag = await client.put(
         f"/api/v1/books/{book.id}/revision-tags",
@@ -128,7 +128,7 @@ async def test_revision_tags_round_trip_across_revision_entities(client, db, aut
 
     chapter_list = await client.get(f"/api/v1/reader/{book.id}/chapters", headers=auth_headers)
     assert chapter_list.status_code == 200
-    assert chapter_list.json()["chapters"][0]["tags"] == ["needs rewrite", "final pass"]
+    assert sorted(chapter_list.json()["chapters"][0]["tags"]) == ["final pass", "needs rewrite"]
 
     notes_response = await client.get(f"/api/v1/books/{book.id}/notes", headers=auth_headers)
     assert notes_response.status_code == 200

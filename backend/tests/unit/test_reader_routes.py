@@ -146,7 +146,7 @@ async def test_get_chapter_media_public_validates_token_and_download(monkeypatch
 async def test_get_chapter_supports_fallback_and_stored_content(monkeypatch):
     user_id = uuid.uuid4()
     book = _book(user_id=user_id, total_chapters=8, fmt="pdf")
-    db = _FakeDB(get_values=[book], execute_values=[_Result(scalar=None), _Result(scalars=[])])
+    db = _FakeDB(get_values=[book], execute_values=[_Result(scalar=None), _Result(scalars=[]), _Result(scalars=[])])
     monkeypatch.setattr(reader, "consolidate_characters", lambda *_args, **_kwargs: None)
     async def _fake_consolidate(*_args, **_kwargs):
         return None
@@ -156,6 +156,7 @@ async def test_get_chapter_supports_fallback_and_stored_content(monkeypatch):
     async def _fake_available(*_args, **_kwargs):
         return True
     monkeypatch.setattr(reader, "chapter_intelligence_available", _fake_available)
+    monkeypatch.setattr(reader, "backfill_character_first_chapters_for_chapter_text", _async_value(False))
     monkeypatch.setattr(reader, "get_custom_tags_for_entity", _async_value([]))
 
     payload = await reader.get_chapter(book.id, 2, db=db, current_user=_user(user_id))
@@ -164,7 +165,7 @@ async def test_get_chapter_supports_fallback_and_stored_content(monkeypatch):
     assert payload["can_copy_manuscript"] is True
 
     chapter_id = uuid.uuid4()
-    chapter = SimpleNamespace(id=chapter_id, book_id=book.id, number=2, title="Stored", s3_key="stored.json")
+    chapter = SimpleNamespace(id=chapter_id, book_id=book.id, number=2, title="Stored", s3_key="stored.json", content_version=3)
     character = SimpleNamespace(
         id=uuid.uuid4(),
         name="Iris",
@@ -174,6 +175,8 @@ async def test_get_chapter_supports_fallback_and_stored_content(monkeypatch):
         archetype="hero",
         personality_tags=["brave"],
         trait_state={"eyes": "blue"},
+        arc_summary="steady",
+        motivations=[],
     )
     state = SimpleNamespace(character_id=character.id, trait_snapshot={"eyes": "green"})
     db = _FakeDB(
@@ -189,7 +192,11 @@ async def test_get_chapter_supports_fallback_and_stored_content(monkeypatch):
     monkeypatch.setattr(reader, "parse_chapter_from_source", lambda *_args: {"title": "Recovered", "text": "[[IMAGE:1]] recovered", "images": [{"src": "b"}]})
     monkeypatch.setattr(reader, "serialize_inline_images", lambda images: [{"count": len(images)}])
     monkeypatch.setattr(reader, "merge_media_items", lambda stored, fallback: stored + fallback)
-    monkeypatch.setattr(reader, "build_description", lambda traits, archetype: f"{archetype}:{traits['eyes']}")
+    monkeypatch.setattr(
+        reader,
+        "compose_character_description",
+        lambda trait_state, archetype, arc_summary, personality_tags, motivations: f"{archetype}:{trait_state['eyes']}",
+    )
     monkeypatch.setattr(reader, "get_presigned_url", lambda key: f"url:{key}")
     monkeypatch.setattr(reader, "get_custom_tags_for_entity", _async_value([]))
 
@@ -204,7 +211,7 @@ async def test_get_chapter_supports_fallback_and_stored_content(monkeypatch):
 async def test_get_chapter_uses_manual_scene_workspace_when_body_is_placeholder(monkeypatch):
     user_id = uuid.uuid4()
     book = _book(user_id=user_id, total_chapters=4, fmt="pdf")
-    chapter = SimpleNamespace(id=uuid.uuid4(), book_id=book.id, number=2, title="Chapter 2", s3_key="stored.json")
+    chapter = SimpleNamespace(id=uuid.uuid4(), book_id=book.id, number=2, title="Chapter 2", s3_key="stored.json", content_version=1)
     manual_scene = SimpleNamespace(
         id=uuid.uuid4(),
         title="Arrival",
@@ -217,6 +224,7 @@ async def test_get_chapter_uses_manual_scene_workspace_when_body_is_placeholder(
         execute_values=[
             _Result(scalar=chapter),
             _Result(scalars=[manual_scene]),
+            _Result(scalars=[]),
             _Result(scalars=[]),
         ],
     )
@@ -231,6 +239,7 @@ async def test_get_chapter_uses_manual_scene_workspace_when_body_is_placeholder(
         return True
 
     monkeypatch.setattr(reader, "consolidate_characters", _fake_consolidate)
+    monkeypatch.setattr(reader, "backfill_character_first_chapters_for_chapter_text", _async_value(False))
     monkeypatch.setattr(reader, "download_book", lambda _key: b"payload")
     monkeypatch.setattr(reader, "deserialize_manuscript_content", lambda _raw: {"text": "2.", "html": "<p>2.</p>"})
     monkeypatch.setattr(reader, "serialize_chapter_media", _fake_serialize_media)
@@ -256,9 +265,9 @@ async def test_get_chapter_blocks_copy_for_private_read_only_shares(monkeypatch)
         permissions={"can_edit_manuscript": False, "can_view_selected_chapters_only": True},
     )
     book = _book(user_id=uuid.uuid4(), total_chapters=3, fmt="epub")
-    chapter = SimpleNamespace(id=uuid.uuid4(), book_id=book.id, number=2, title="Chapter 2", s3_key="stored.json")
+    chapter = SimpleNamespace(id=uuid.uuid4(), book_id=book.id, number=2, title="Chapter 2", s3_key="stored.json", content_version=1)
     db = _FakeDB(
-        execute_values=[_Result(scalar=chapter), _Result(scalars=[]), _Result(scalars=[])],
+        execute_values=[_Result(scalar=chapter), _Result(scalars=[]), _Result(scalars=[]), _Result(scalars=[])],
     )
 
     async def _fake_consolidate(*_args, **_kwargs):
@@ -275,6 +284,7 @@ async def test_get_chapter_blocks_copy_for_private_read_only_shares(monkeypatch)
 
     monkeypatch.setattr(reader, "get_book_with_collaboration_access", _fake_access)
     monkeypatch.setattr(reader, "consolidate_characters", _fake_consolidate)
+    monkeypatch.setattr(reader, "backfill_character_first_chapters_for_chapter_text", _async_value(False))
     monkeypatch.setattr(reader, "download_book", lambda _key: b"payload")
     monkeypatch.setattr(reader, "deserialize_manuscript_content", lambda _raw: {"text": "private text", "html": "<p>private text</p>"})
     monkeypatch.setattr(reader, "serialize_chapter_media", _fake_serialize_media)
@@ -310,6 +320,7 @@ async def test_smart_tap_handles_processing_character_and_search_paths(monkeypat
         personality_tags=[],
         motivations=[],
         fears=[],
+        arc_summary="steady",
         first_chapter=1,
     )
     state = SimpleNamespace(trait_snapshot={"eyes": "green"}, arc_note="Recovering")
@@ -319,7 +330,11 @@ async def test_smart_tap_handles_processing_character_and_search_paths(monkeypat
         scalar_values=[1],
         execute_values=[_Result(scalar=char), _Result(scalar=state), _Result(scalars=[rel])],
     )
-    monkeypatch.setattr(reader, "build_description", lambda traits, archetype: f"{archetype}:{traits['eyes']}")
+    monkeypatch.setattr(
+        reader,
+        "compose_character_description",
+        lambda trait_state, archetype, arc_summary, personality_tags, motivations: f"{archetype}:{trait_state['eyes']}",
+    )
     payload = await reader.smart_tap(book.id, q="Iris", chapter=2, db=db, current_user=_user(user_id))
     assert payload["type"] == "character"
     assert payload["character"]["description"] == "hero:green"
@@ -390,6 +405,7 @@ async def test_reader_collection_routes_cover_events_relationships_search_and_ch
         name="Iris",
         role="mc",
         first_chapter=1,
+        mention_count=4,
         aliases=[],
         motivations=[],
         fears=[],
@@ -409,7 +425,7 @@ async def test_reader_collection_routes_cover_events_relationships_search_and_ch
         from_chapter=2,
         to_chapter=None,
     )
-    chapter = SimpleNamespace(id=uuid.uuid4(), number=1, title="One", processed=False)
+    chapter = SimpleNamespace(id=uuid.uuid4(), number=1, title="One", processed=False, content_version=1)
     async def _fake_cache_get(_key):
         return None
     async def _fake_cache_set(*_args, **_kwargs):

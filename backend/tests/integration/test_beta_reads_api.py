@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import select
@@ -9,6 +9,7 @@ from sqlalchemy import select
 from app.core.security import create_access_token
 from app.models.beta_read import BetaReadAssignment
 from app.models.book import Book, BookCollaborator
+from app.models.intelligence import Notification
 from app.models.progress import ReadingProgress
 from app.models.user import User
 from app.utils.beta_read_utils import run_beta_read_jobs
@@ -304,7 +305,7 @@ async def test_beta_read_assignment_rejects_windows_outside_three_to_seven_days(
         },
     )
     assert too_short.status_code == 422
-    assert "window_days" in str(too_short.json())
+    assert too_short.json()["detail"] == "Invalid request."
 
     too_long = await client.post(
         f"/api/v1/books/{book.id}/beta-reads",
@@ -316,7 +317,7 @@ async def test_beta_read_assignment_rejects_windows_outside_three_to_seven_days(
         },
     )
     assert too_long.status_code == 422
-    assert "window_days" in str(too_long.json())
+    assert too_long.json()["detail"] == "Invalid request."
 
 
 @pytest.mark.asyncio
@@ -443,6 +444,103 @@ async def test_expired_assignments_move_to_missed_and_increment_consecutive_coun
 
     await db.refresh(reader)
     assert reader.consecutive_missed_beta_reads == 1
+
+
+@pytest.mark.asyncio
+async def test_beta_read_jobs_are_idempotent_for_expirations_and_notifications(client, db):
+    author = await _create_user(db, email="author-idempotent-expire@lorevia.test", tier="author")
+    reader = await _create_user(db, email="reader-idempotent-expire@lorevia.test", tier="reader")
+    book = await _create_book(db, author_id=author.id)
+
+    create_response = await client.post(
+        f"/api/v1/books/{book.id}/beta-reads",
+        headers=_auth_headers(author.id),
+        json={
+            "reader_email": reader.email,
+            "task_label": "Idempotent expiry",
+            "window_days": 3,
+        },
+    )
+    assignment_id = create_response.json()["id"]
+
+    assignment = (
+        await db.execute(select(BetaReadAssignment).where(BetaReadAssignment.id == uuid.UUID(assignment_id)))
+    ).scalar_one()
+    assignment.expires_at = assignment.expires_at - timedelta(days=10)
+    await db.commit()
+
+    await run_beta_read_jobs(db, limit=20)
+    await run_beta_read_jobs(db, limit=20)
+    await db.commit()
+
+    await db.refresh(reader)
+    await db.refresh(assignment)
+
+    notifications = (
+        await db.execute(
+            select(Notification).where(
+                Notification.book_id == book.id,
+                Notification.kind.in_(
+                    [
+                        "beta_read_deadline_missed",
+                        "beta_read_missed_author_notice",
+                        "beta_read_penalty_warning",
+                    ]
+                ),
+            )
+        )
+    ).scalars().all()
+
+    assert assignment.state == "missed"
+    assert assignment.counted_toward_missed_streak is True
+    assert reader.consecutive_missed_beta_reads == 1
+    assert sorted(notification.kind for notification in notifications) == [
+        "beta_read_deadline_missed",
+        "beta_read_missed_author_notice",
+        "beta_read_penalty_warning",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_beta_read_jobs_do_not_duplicate_deadline_reminders(client, db):
+    author = await _create_user(db, email="author-idempotent-reminder@lorevia.test", tier="author")
+    reader = await _create_user(db, email="reader-idempotent-reminder@lorevia.test", tier="reader")
+    book = await _create_book(db, author_id=author.id)
+
+    create_response = await client.post(
+        f"/api/v1/books/{book.id}/beta-reads",
+        headers=_auth_headers(author.id),
+        json={
+            "reader_email": reader.email,
+            "task_label": "Reminder me once",
+            "window_days": 3,
+        },
+    )
+    assignment_id = create_response.json()["id"]
+
+    assignment = (
+        await db.execute(select(BetaReadAssignment).where(BetaReadAssignment.id == uuid.UUID(assignment_id)))
+    ).scalar_one()
+    assignment.expires_at = datetime.now(UTC) + timedelta(hours=23, minutes=30)
+    await db.commit()
+
+    await run_beta_read_jobs(db, limit=20)
+    await run_beta_read_jobs(db, limit=20)
+    await db.commit()
+    await db.refresh(assignment)
+
+    reminders = (
+        await db.execute(
+            select(Notification).where(
+                Notification.user_id == reader.id,
+                Notification.book_id == book.id,
+                Notification.kind == "beta_read_deadline_reminder",
+            )
+        )
+    ).scalars().all()
+
+    assert len(reminders) == 1
+    assert assignment.reminder_24h_sent_at is not None
 
 
 @pytest.mark.asyncio

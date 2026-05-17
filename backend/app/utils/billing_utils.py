@@ -7,8 +7,10 @@ from datetime import UTC, date, datetime, time, timedelta
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from fastapi import HTTPException
+import jwt
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,11 +35,17 @@ UNLIMITED_OWNER_UPLOAD_TIERS = {ARCHITECT_TIER, ADMIN_TIER}
 DAILY_LIMIT_MESSAGE = "Your daily limit refreshes tomorrow. Want higher limits now? Upgrade."
 SUPPORTED_PADDLE_WEBHOOK_EVENTS = (
     "transaction.completed",
-    "subscription.created",
-    "subscription.updated",
+    "transaction.past_due",
+    "transaction.payment_failed",
+    "transaction.updated",
+    "subscription.activated",
     "subscription.canceled",
+    "subscription.created",
     "subscription.past_due",
     "subscription.paused",
+    "subscription.resumed",
+    "subscription.trialing",
+    "subscription.updated",
 )
 PADDLE_WEBHOOK_ENDPOINT_PATH = "/api/v1/webhooks/paddle"
 TRIAL_EMAIL_JOB_ENDPOINT_PATH = "/api/v1/internal/jobs/send-due-trial-emails"
@@ -46,6 +54,9 @@ PRIORITY_QUEUE_NAMES = (
     "extraction_priority",
     "analysis_priority",
 )
+BILLING_CONFIRMATION_TOKEN_TYPE = "billing_confirmation"
+BILLING_CONFIRMATION_TOKEN_TTL_SECONDS = 3600
+BILLING_CONFIRMATION_QUERY_KEY = "lvct"
 PLACEHOLDER_ENV_VALUES = {
     "pdl_live_or_sandbox_key_here",
     "pdl_webhook_secret_here",
@@ -162,6 +173,48 @@ def normalize_plan_code(plan: str | None) -> str:
 def has_meaningful_setting_value(value: str | None) -> bool:
     cleaned = (value or "").strip()
     return bool(cleaned) and cleaned.lower() not in PLACEHOLDER_ENV_VALUES
+
+
+def recommended_paddle_default_checkout_url() -> str:
+    default_app_url = "http://localhost:3000" if settings.DEBUG else "https://getlorevia.com"
+    raw_app_url = (settings.APP_URL or "").strip() or default_app_url
+    if "://" not in raw_app_url:
+        raw_app_url = f"https://{raw_app_url.lstrip('/')}"
+    return f"{raw_app_url.rstrip('/')}/checkout"
+
+
+def create_billing_confirmation_token(transaction_id: str) -> str:
+    normalized_transaction_id = transaction_id.strip()
+    expire = datetime.now(UTC) + timedelta(seconds=BILLING_CONFIRMATION_TOKEN_TTL_SECONDS)
+    return jwt.encode(
+        {
+            "txn": normalized_transaction_id,
+            "exp": expire,
+            "type": BILLING_CONFIRMATION_TOKEN_TYPE,
+        },
+        settings.JWT_SECRET,
+        algorithm=settings.JWT_ALGORITHM,
+    )
+
+
+def verify_billing_confirmation_token(token: str | None, transaction_id: str) -> bool:
+    if not token:
+        return False
+    try:
+        payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+    except jwt.PyJWTError:
+        return False
+    return (
+        str(payload.get("type") or "") == BILLING_CONFIRMATION_TOKEN_TYPE
+        and str(payload.get("txn") or "").strip() == transaction_id.strip()
+    )
+
+
+def append_billing_confirmation_token(checkout_url: str, confirmation_token: str) -> str:
+    parts = urlsplit(checkout_url)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    query[BILLING_CONFIRMATION_QUERY_KEY] = confirmation_token
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
 
 
 def tier_from_plan_code(plan: str | None, price_id: str = "", plan_name: str = "") -> str:
@@ -471,6 +524,7 @@ def billing_configuration_status() -> dict[str, Any]:
 
     fully_configured_plan_count = sum(1 for plan in plans if plan["configured"])
     external_action_items = [
+        f"Set Paddle > Checkout > Default payment link to `{recommended_paddle_default_checkout_url()}` and get that domain approved in the live workspace.",
         f"Register `{PADDLE_WEBHOOK_ENDPOINT_PATH}` in Paddle and subscribe it to the supported events.",
         "Run one live or sandbox checkout end to end and confirm the paid tier upgrades after the webhook lands.",
         f"Run a scheduler that calls `POST {TRIAL_EMAIL_JOB_ENDPOINT_PATH}` or invokes `{TRIAL_EMAIL_RUNNER_SCRIPT} --limit 100`.",
@@ -482,6 +536,7 @@ def billing_configuration_status() -> dict[str, Any]:
         "paddle_api_key_present": paddle_api_key_present,
         "webhook_secret_present": webhook_secret_present,
         "default_checkout_url_present": default_checkout_url_present,
+        "recommended_default_checkout_url": recommended_paddle_default_checkout_url(),
         "resend_api_key_present": resend_api_key_present,
         "internal_job_secret_present": internal_job_secret_present,
         "fully_configured_plan_count": fully_configured_plan_count,
@@ -508,12 +563,16 @@ def event_id_from_paddle_payload(payload: dict[str, Any]) -> str:
 def subscription_service_is_active(event_type: str, status: str | None) -> bool:
     normalized_status = (status or "").strip().lower()
     if event_type == "transaction.completed":
+        return normalized_status in {"active", "trialing"}
+    if event_type in {"subscription.activated", "subscription.resumed", "subscription.trialing"}:
         return True
     return normalized_status in {"active", "trialing"}
 
 
 def subscription_event_type_for_metrics(event_type: str, status: str | None) -> str | None:
-    if event_type in {"transaction.completed", "subscription.created", "subscription.updated"}:
+    if event_type in {"transaction.completed", "subscription.activated", "subscription.resumed", "subscription.trialing"}:
+        return "subscription_activated" if subscription_service_is_active(event_type, status) else None
+    if event_type in {"subscription.created", "subscription.updated"}:
         return "subscription_activated" if subscription_service_is_active(event_type, status) else None
     if event_type == "subscription.canceled":
         return "subscription_canceled"
@@ -762,4 +821,13 @@ def continuity_limit_per_day(user: Any) -> int:
 
 
 def summary_mode_allowed(user: Any, mode: str) -> bool:
-    return mode in {"short", "detailed", "key_points"}
+    if mode == "short":
+        return True
+    if mode not in {"detailed", "key_points"}:
+        return False
+
+    raw_tier = (getattr(user, "tier", "") or "").strip().lower()
+    if raw_tier == "reader":
+        return True
+
+    return has_paid_reading_access(user)

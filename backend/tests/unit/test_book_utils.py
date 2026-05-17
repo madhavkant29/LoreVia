@@ -673,15 +673,15 @@ def test_normalize_writer_workspace_sanitizes_revision_board_items():
 
 
 def test_build_narration_signature_detects_first_person_anchor():
-    signature = _build_narration_signature('I ran through the gate. My hands shook. "Stop," Kael said.')
+    signature = _build_narration_signature("I ran through the gate. My hands shook. I tasted blood on my lip.")
 
     assert signature["pov_mode"] == "first-person"
-    assert signature["first_person_hits"] >= 2
+    assert signature["first_person_hits"] >= 3
 
 
 def test_describe_narration_shift_flags_mode_change():
-    previous = _build_narration_signature("She crossed the gate and kept her head down.")
-    current = _build_narration_signature("I crossed the gate and kept my head down.")
+    previous = _build_narration_signature("She crossed the gate and kept her head down. Her breath stayed measured.")
+    current = _build_narration_signature("I crossed the gate and kept my head down. My breath stayed measured.")
 
     assert _describe_narration_shift(previous, current) == "Narration shifts from third-person anchoring into first-person anchoring."
 
