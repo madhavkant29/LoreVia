@@ -1,6 +1,6 @@
 import type { Metadata } from "next"
-import Script from "next/script"
 
+import { JsonLdScript } from "@/components/seo/JsonLdScript"
 import { PublicForumPostPageClient } from "@/components/public/PublicForumPostPageClient"
 import { getPublicForumPostServer } from "@/lib/api/public.server"
 import {
@@ -59,16 +59,12 @@ export default async function PublicForumPostPage({ params }: { params: Promise<
   ]) : null
 
   return (
-    <>
+      <>
       {post && threadJsonLd ? (
-        <Script id={`public-forum-post-jsonld-${post.id}`} type="application/ld+json" strategy="beforeInteractive">
-          {JSON.stringify(threadJsonLd).replace(/</g, "\\u003c")}
-        </Script>
+        <JsonLdScript id={`public-forum-post-jsonld-${post.id}`} data={threadJsonLd} />
       ) : null}
       {post && breadcrumbJsonLd ? (
-        <Script id={`public-forum-post-breadcrumbs-jsonld-${post.id}`} type="application/ld+json" strategy="beforeInteractive">
-          {JSON.stringify(breadcrumbJsonLd).replace(/</g, "\\u003c")}
-        </Script>
+        <JsonLdScript id={`public-forum-post-breadcrumbs-jsonld-${post.id}`} data={breadcrumbJsonLd} />
       ) : null}
       <PublicForumPostPageClient postId={postId} initialPost={post} />
     </>

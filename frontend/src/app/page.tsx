@@ -1,5 +1,4 @@
 import Link from "next/link"
-import Script from "next/script"
 import type { Metadata } from "next"
 import type { Route } from "next"
 import type { ReactNode } from "react"
@@ -8,6 +7,7 @@ import { HomePricingSection } from "@/components/marketing/HomePricingSection"
 import { Reveal } from "@/components/marketing/Reveal"
 import { BrandLockup } from "@/components/layout/BrandLockup"
 import { pricingTiers as billingPricingTiers } from "@/lib/billing/catalog"
+import { JsonLdScript } from "@/components/seo/JsonLdScript"
 import {
   DEFAULT_OG_IMAGE,
   SITE_NAME,
@@ -716,12 +716,8 @@ export default function HomePage() {
 
   return (
     <main className="min-h-screen overflow-hidden bg-[#050814] text-white">
-      <Script id="home-faq-jsonld" type="application/ld+json" strategy="beforeInteractive">
-        {JSON.stringify(faqJsonLd).replace(/</g, "\\u003c")}
-      </Script>
-      <Script id="home-software-jsonld" type="application/ld+json" strategy="beforeInteractive">
-        {JSON.stringify(softwareJsonLd).replace(/</g, "\\u003c")}
-      </Script>
+      <JsonLdScript id="home-faq-jsonld" data={faqJsonLd} />
+      <JsonLdScript id="home-software-jsonld" data={softwareJsonLd} />
       <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(circle_at_20%_0%,rgba(125,211,252,0.09),transparent_28%),radial-gradient(circle_at_80%_12%,rgba(196,181,253,0.08),transparent_24%),linear-gradient(180deg,#050814_0%,#070b14_42%,#0b1020_100%)]" />
 
       <header className="sticky top-0 z-50 border-b border-white/10 bg-[#050814]/88 backdrop-blur-xl">

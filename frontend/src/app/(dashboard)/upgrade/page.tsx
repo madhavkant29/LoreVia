@@ -1,4 +1,5 @@
 import type { Metadata } from "next"
+import { headers } from "next/headers"
 
 import { PricingPlans } from "@/components/billing/PricingPlans"
 
@@ -6,7 +7,9 @@ export const metadata: Metadata = {
   title: "Upgrade",
 }
 
-export default function UpgradePage() {
+export default async function UpgradePage() {
+  const nonce = (await headers()).get("x-nonce") ?? undefined
+
   return (
     <section className="space-y-4">
       <div>
@@ -17,7 +20,7 @@ export default function UpgradePage() {
         </p>
       </div>
 
-      <PricingPlans surface="app" />
+      <PricingPlans surface="app" nonce={nonce} />
     </section>
   )
 }

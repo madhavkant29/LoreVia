@@ -1,9 +1,9 @@
 import type { Metadata } from "next"
 import Link from "next/link"
-import Script from "next/script"
 
 import { PublicContentHeader, ContentArrowIcon } from "@/components/marketing/PublicContentHeader"
 import { Reveal } from "@/components/marketing/Reveal"
+import { JsonLdScript } from "@/components/seo/JsonLdScript"
 import { blogArticles, demoPages, getAnswersByArticleSlug } from "@/lib/content"
 import { BLOG_RSS_PATH, DEFAULT_OG_IMAGE, SITE_NAME, SITE_URL, buildCollectionPageJsonLd } from "@/lib/seo"
 
@@ -67,9 +67,7 @@ export default function BlogPage() {
     <main className="app-shell overflow-hidden">
       <div className="app-shell__mesh" />
       <div className="absolute inset-x-0 top-0 -z-10 h-[34rem] bg-[radial-gradient(circle_at_top,rgba(15,118,110,0.16),transparent_40%),radial-gradient(circle_at_82%_10%,rgba(180,83,9,0.16),transparent_24%)]" />
-      <Script id="blog-collection-jsonld" type="application/ld+json" strategy="beforeInteractive">
-        {JSON.stringify(jsonLd).replace(/</g, "\\u003c")}
-      </Script>
+      <JsonLdScript id="blog-collection-jsonld" data={jsonLd} />
 
       <PublicContentHeader activeSection="blog" />
 
