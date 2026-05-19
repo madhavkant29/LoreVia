@@ -25,11 +25,10 @@ celery -A app.workers.celery_app worker -Q intelligence,analysis,analysis_priori
 celery -A app.workers.celery_app flower --port=5555
 ```
 
-## Cloudflare Tunnel (production origin security)
+## Production web server
 
-1. Go to Cloudflare Zero Trust → Tunnels → Create tunnel
-2. Copy the tunnel token → set `CLOUDFLARE_TUNNEL_TOKEN` in .env
-3. Deploy — `start.sh` starts cloudflared automatically alongside uvicorn
+Production containers start the API with Gunicorn using Uvicorn workers via `start.sh`.
+Use plain `uvicorn app.main:app --reload` only for direct local development outside Docker.
 
 ## Testing
 

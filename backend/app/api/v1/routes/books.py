@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 import bleach  # type: ignore[import-untyped]
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
 from sqlalchemy import and_, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -76,9 +76,15 @@ def _validate_cover_magic(raw: bytes) -> tuple[str, str]:
     raise HTTPException(400, "Cover image must be a JPEG, PNG, GIF, or WebP file.")
 
 from app.api.deps.auth import get_current_user
-from app.api.deps.rate_limit import rate_limit_manuscript_import, rate_limit_upload
+from app.api.deps.rate_limit import (
+    rate_limit_manuscript_import,
+    rate_limit_public_publish,
+    rate_limit_public_unpublish,
+    rate_limit_upload,
+)
 from app.api.deps.subscription import check_upload_limit
 from app.core import storage
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import create_asset_token, decode_token
 from app.engine.character.consolidator import consolidate_characters
@@ -139,8 +145,13 @@ from app.schemas.books import (
     WriterWorkspaceBody,
     WriterWorkspaceOut,
 )
+from app.schemas.public import PublicBookCreateOut, PublicBookShareBody
 from app.utils.advisor_utils import invalidate_advisor_caches
 from app.utils.billing_utils import calculate_upload_usage_summary, require_author_access
+from app.services.pipeline_state_service import (
+    build_writer_workspace_response,
+    build_writer_workspace_update,
+)
 from app.utils.book_utils import (
     _append_recent_revision_edit,
     as_bool,
@@ -182,9 +193,9 @@ from app.utils.book_utils import (
     list_user_notes,
     load_obsidian_vault_overrides,
     next_chapter_number,
+    normalize_chapter_title,
     normalize_book_work_type,
     normalize_imported_chapters,
-    normalize_writer_workspace,
     parse_book_upload_for_ingestion,
     parse_screenplay_upload,
     refresh_screenplay_scene_rows,
@@ -204,20 +215,35 @@ from app.utils.character_utils import (
     append_unique_summary,
     apply_graph_visibility_override,
     apply_manual_character_description,
-    build_character_arc_tracker,
     build_manual_character,
-    character_status,
     clean_optional_text,
     clean_string_list,
-    compose_character_description,
     dedupe_preserve_order,
-    get_graph_visibility_override,
     is_displayable_character,
     merge_characters,
     partition_character,
     relationship_summary_for_character,
+    serialize_book_character,
 )
-from app.utils.public_utils import ensure_public_mode_enabled
+from app.utils.public_utils import (
+    CONTENT_SOURCE_TYPE_ADMIN_SEEDED,
+    CONTENT_SOURCE_TYPE_PUBLIC_DOMAIN,
+    MODERATION_STATUS_HIDDEN,
+    MODERATION_STATUS_REMOVED,
+    MODERATION_STATUS_UNDER_REVIEW,
+    PUBLIC_DEMO_SOURCE_KIND,
+    PUBLIC_SHARE_STATUS_APPROVED,
+    PUBLIC_STATUS_HIDDEN,
+    PUBLIC_STATUS_PUBLISHED,
+    USER_PUBLIC_SHARE_SOURCE_KIND,
+    add_moderation_action,
+    enforce_daily_public_publish_limit,
+    ensure_content_source_allowed_for_user,
+    ensure_public_mode_enabled,
+    get_public_share_status,
+    hash_text,
+    normalize_public_slug,
+)
 from app.utils.export_utils import (
     build_character_bible_obsidian_context,
     character_bible_docx,
@@ -255,6 +281,7 @@ from app.utils.user_utils import (
     build_writing_activity_entry,
     build_writing_dashboard_stats,
 )
+from app.utils.upload_security_utils import validate_document_upload_bytes
 from app.workers.consumers.analysis_consumer import analyse_chapter
 from app.workers.consumers.extraction_consumer import _process_chapter
 from app.workers.tasks.extraction_tasks import process_book_task
@@ -310,64 +337,6 @@ def _serialize_relationship_record(relationship: CharacterRelationship) -> dict[
         "description": relationship.description,
         "from_chapter": relationship.from_chapter,
         "to_chapter": relationship.to_chapter,
-    }
-
-
-def _serialize_book_character(
-    char: Character,
-    *,
-    rel_summaries: dict[str, list[str]],
-    states: list[CharacterState],
-    relationships: list[CharacterRelationship],
-    counterpart_names: dict[uuid.UUID, str],
-    voice_profile: CharacterVoiceProfile | None,
-    total_chapters: int | None,
-    tags: list[str] | None = None,
-) -> dict[str, Any]:
-    return {
-        "id": str(char.id),
-        "book_id": str(char.book_id),
-        "name": char.name,
-        "aliases": char.aliases or [],
-        "role": char.role,
-        "first_chapter": char.first_chapter,
-        "last_seen_chapter": char.last_seen_chapter,
-        "mention_count": char.mention_count or 0,
-        "status": character_status(char),
-        "trait_state": char.trait_state or {},
-        "description": compose_character_description(
-            trait_state=char.trait_state or {},
-            archetype=char.archetype,
-            arc_summary=char.arc_summary,
-            personality_tags=char.personality_tags or [],
-            motivations=char.motivations or [],
-            relationship_summaries=dedupe_preserve_order(rel_summaries.get(str(char.id), [])),
-        ),
-        "personality_tags": char.personality_tags or [],
-        "goal": char.goal,
-        "motivations": char.motivations or [],
-        "fears": char.fears or [],
-        "lie_they_believe": char.lie_they_believe,
-        "backstory_wound": char.backstory_wound,
-        "arc_type": char.arc_type,
-        "archetype": char.archetype,
-        "arc_summary": char.arc_summary,
-        "growth_events": char.growth_events or [],
-        "relationship_summaries": dedupe_preserve_order(rel_summaries.get(str(char.id), [])),
-        "character_type": char.character_type,
-        "character_type_score": char.character_type_score,
-        "subtype_scores": char.subtype_scores or {},
-        "is_manual": getattr(char, "is_manual", False),
-        "graph_visibility_override": get_graph_visibility_override(char),
-        "tags": tags or [],
-        "arc_tracker": build_character_arc_tracker(
-            char,
-            states=states,
-            relationships=relationships,
-            counterpart_names=counterpart_names,
-            voice_profile=voice_profile,
-            total_chapters=total_chapters,
-        ),
     }
 
 
@@ -439,13 +408,14 @@ async def upload_book_endpoint(
 
     is_public = False
     # Stream-read with a hard size cap to prevent OOM DoS.
-    raw = await _read_upload_bounded(file, MAX_BOOK_UPLOAD_BYTES, "Book file")
+    raw = await _read_upload_bounded(file, settings.BOOK_UPLOAD_MAX_BYTES, "Book file")
     if not raw:
         raise HTTPException(400, "Uploaded file is empty")
+    validate_document_upload_bytes(file.filename, raw, fmt)
     book_id = uuid.uuid4()
     cover_raw = None
     if not as_bool(auto_extract_cover) and cover_file is not None and cover_file.filename:
-        cover_raw = await _read_upload_bounded(cover_file, MAX_COVER_UPLOAD_BYTES, "Cover image")
+        cover_raw = await _read_upload_bounded(cover_file, settings.COVER_UPLOAD_MAX_BYTES, "Cover image")
         if cover_raw:
             # Validate magic bytes — never trust client-supplied MIME or extension.
             _validate_cover_magic(cover_raw)
@@ -612,7 +582,7 @@ async def import_manuscript_content(
     screenplay_batches: list[dict[str, object]] = []
     daily_words_added = 0
     imported_content_versions: dict[int, int] = {}
-    normalized_title = _clean_optional_text(title)
+    normalized_title = normalize_chapter_title(title) if title is not None else None
     next_number = await next_chapter_number(db, book.id)
     replace_flag = as_bool(replace_existing)
     chunk_flag = as_bool(chunk_long_documents)
@@ -662,11 +632,10 @@ async def import_manuscript_content(
                 )
             )
 
-    MAX_MANUSCRIPT_BYTES = 20 * 1024 * 1024  # 20 MB per file
     for upload in files or []:
         if not upload.filename:
             continue
-        raw = await _read_upload_bounded(upload, MAX_MANUSCRIPT_BYTES, "Manuscript file")
+        raw = await _read_upload_bounded(upload, settings.MANUSCRIPT_IMPORT_MAX_BYTES, "Manuscript file")
         if not raw:
             continue
         total_file_size += len(raw)
@@ -674,6 +643,7 @@ async def import_manuscript_content(
             upload.filename,
             work_type if work_type is not None else book.work_type,
         )
+        validate_document_upload_bytes(upload.filename, raw, fmt)
         resolved_import_format = resolved_import_format or fmt
         parsed_payload = await parse_book_upload_for_ingestion(
             format_name=fmt,
@@ -1415,7 +1385,7 @@ async def import_book_obsidian_notes(
     _=Depends(rate_limit_manuscript_import),
 ):
     book = await get_owned_book(db, book_id, current_user.id)
-    archive_bytes = await _read_upload_bounded(file, 25 * 1024 * 1024, "ZIP file")
+    archive_bytes = await _read_upload_bounded(file, settings.OBSIDIAN_IMPORT_MAX_BYTES, "ZIP file")
     return await import_obsidian_notes_zip(
         db,
         book=book,
@@ -1562,7 +1532,7 @@ async def get_writer_workspace(
         raise HTTPException(403, "This share cannot edit the manuscript.")
     if collaborator is None:
         require_author_access(current_user)
-    return WriterWorkspaceOut(**build_writer_workspace_payload(book))
+    return build_writer_workspace_response(book)
 
 
 @router.put("/{book_id}/writer-workspace", response_model=WriterWorkspaceOut)
@@ -1577,16 +1547,11 @@ async def update_writer_workspace(
         raise HTTPException(403, "This share cannot edit the manuscript.")
     if collaborator is None:
         require_author_access(current_user)
-    next_payload = normalize_writer_workspace(
-        {
-            **build_writer_workspace_payload(book),
-            **body.model_dump(exclude_none=True),
-        }
-    )
+    next_payload = build_writer_workspace_update(book, body.model_dump(exclude_none=True))
     book.writer_workspace = next_payload
     await db.commit()
     await db.refresh(book)
-    return WriterWorkspaceOut(**build_writer_workspace_payload(book))
+    return build_writer_workspace_response(book)
 
 
 @router.post("/{book_id}/manuscript/readability", response_model=ReadabilityMetricsOut)
@@ -1774,6 +1739,105 @@ async def archive_book(
     return await book_out(db, book, current_user.id)
 
 
+@router.post(
+    "/{book_id}/publish",
+    response_model=PublicBookCreateOut,
+    dependencies=[Depends(rate_limit_public_publish)],
+)
+async def publish_book_publicly(
+    book_id: uuid.UUID,
+    body: PublicBookShareBody,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await db.get(Book, book_id)
+    if not book or book.user_id != current_user.id or book.hidden_at is not None or book.archived_at is not None:
+        raise HTTPException(404, "Book not found")
+    if getattr(current_user, "email_verified_at", None) is None and current_user.tier != "admin":
+        raise HTTPException(403, "Verify your email before publishing a public book.")
+
+    moderation_status = str(getattr(book, "moderation_status", "") or "").strip().lower()
+    if moderation_status in {MODERATION_STATUS_HIDDEN, MODERATION_STATUS_REMOVED, MODERATION_STATUS_UNDER_REVIEW}:
+        raise HTTPException(409, "This book is not eligible for public publishing right now.")
+    if getattr(book, "takedown_at", None) is not None:
+        raise HTTPException(409, "This book is under takedown and cannot be republished.")
+    if not (body.rights_confirmation or body.confirm_public_share):
+        raise HTTPException(400, "Public publishing requires explicit rights confirmation.")
+    if not body.public_slug:
+        raise HTTPException(400, "Public publishing requires a public URL slug.")
+
+    content_source_type = ensure_content_source_allowed_for_user(current_user, body.content_source_type)
+    await enforce_daily_public_publish_limit(db, user=current_user)
+
+    normalized_slug = normalize_public_slug(body.public_slug)
+    existing_slug = (
+        await db.execute(
+            select(Book.id).where(
+                Book.public_slug == normalized_slug,
+                Book.id != book.id,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing_slug is not None:
+        raise HTTPException(409, "That public URL is already in use.")
+
+    previous_status = str(getattr(book, "public_status", "") or "") or None
+    now = datetime.now(UTC)
+    source_kind = (
+        PUBLIC_DEMO_SOURCE_KIND
+        if content_source_type in {CONTENT_SOURCE_TYPE_PUBLIC_DOMAIN, CONTENT_SOURCE_TYPE_ADMIN_SEEDED}
+        else USER_PUBLIC_SHARE_SOURCE_KIND
+    )
+
+    book.public_slug = normalized_slug
+    book.public_description = _clean_optional_text(body.description)
+    book.rights_confirmation = True
+    book.rights_confirmation_at = now
+    book.rights_confirmation_ip_hash = hash_text(request.client.host if request.client else None)
+    book.rights_confirmation_user_agent = request.headers.get("user-agent")
+    book.content_source_type = content_source_type
+    book.source_kind = source_kind
+    book.public_visibility = "public"
+    book.public_status = PUBLIC_STATUS_PUBLISHED
+    book.moderation_status = "clean"
+    book.moderation_reason = None
+    book.takedown_reason = None
+    book.takedown_at = None
+    book.takedown_by_user_id = None
+    book.published_at = book.published_at or now
+    book.public_upload_counted_at = now
+    book.is_public = True
+    book.public_share_status = PUBLIC_SHARE_STATUS_APPROVED
+    book.public_share_requested_at = now
+    book.public_share_approved_at = now
+    book.public_share_approved_by_user_id = current_user.id if current_user.tier == "admin" else None
+    await add_moderation_action(
+        db,
+        action_type="book_published",
+        actor_user_id=current_user.id,
+        target_user_id=current_user.id,
+        book_id=book.id,
+        previous_status=previous_status,
+        new_status=book.public_status,
+        reason="Creator published book publicly with rights confirmation.",
+        metadata={
+            "public_slug": normalized_slug,
+            "content_source_type": content_source_type,
+        },
+    )
+    await db.commit()
+    return PublicBookCreateOut(
+        book_id=str(book.id),
+        status=book.status,
+        visibility="public",
+        public_kind=source_kind,
+        approval_status=book.public_status,
+        public_slug=book.public_slug,
+        message="Public book is now live.",
+    )
+
+
 @router.put("/{book_id}/hide", response_model=BookOut)
 async def hide_book(
     book_id: uuid.UUID,
@@ -1790,6 +1854,45 @@ async def hide_book(
     await db.commit()
     await db.refresh(book)
     return await book_out(db, book, current_user.id)
+
+
+@router.post(
+    "/{book_id}/unpublish",
+    response_model=PublicBookCreateOut,
+    dependencies=[Depends(rate_limit_public_unpublish)],
+)
+async def unpublish_book_publicly(
+    book_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await db.get(Book, book_id)
+    if not book or book.user_id != current_user.id:
+        raise HTTPException(404, "Book not found")
+    previous_status = str(getattr(book, "public_status", "") or "") or None
+    book.is_public = False
+    book.public_status = PUBLIC_STATUS_HIDDEN
+    book.public_visibility = "private"
+    await add_moderation_action(
+        db,
+        action_type="book_unpublished",
+        actor_user_id=current_user.id,
+        target_user_id=current_user.id,
+        book_id=book.id,
+        previous_status=previous_status,
+        new_status=book.public_status,
+        reason="Creator unpublished book from public view.",
+    )
+    await db.commit()
+    return PublicBookCreateOut(
+        book_id=str(book.id),
+        status=book.status,
+        visibility="private",
+        public_kind=book.source_kind or USER_PUBLIC_SHARE_SOURCE_KIND,
+        approval_status=book.public_status,
+        public_slug=book.public_slug,
+        message="Book removed from public view.",
+    )
 
 
 @router.get("/{book_id}/characters")
@@ -1852,7 +1955,7 @@ async def get_book_characters(book_id: uuid.UUID, db: AsyncSession = Depends(get
     )
 
     return [
-        _serialize_book_character(
+        serialize_book_character(
             char,
             rel_summaries=rel_summaries,
             states=states_by_character.get(char.id, []),
@@ -1905,7 +2008,7 @@ async def create_book_character(
     db.add(character)
     await db.commit()
     await db.refresh(character)
-    return _serialize_book_character(
+    return serialize_book_character(
         character,
         rel_summaries={},
         states=[],
@@ -2057,7 +2160,7 @@ async def update_book_character(
         )
     ).scalar_one_or_none()
 
-    return _serialize_book_character(
+    return serialize_book_character(
         character,
         rel_summaries={},
         states=list(states),

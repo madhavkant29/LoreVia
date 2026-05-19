@@ -19,17 +19,17 @@ def test_load_env_file_allows_dotenv_local_to_override_repo_defaults(tmp_path, m
     from app.core.config import _load_env_file
     import os
 
-    monkeypatch.delenv("LOREVIA_TEST_OVERRIDE", raising=False)
+    monkeypatch.delenv("LoreVia_TEST_OVERRIDE", raising=False)
 
     base_env = tmp_path / ".env"
     local_env = tmp_path / ".env.local"
-    base_env.write_text("LOREVIA_TEST_OVERRIDE=base\n", encoding="utf-8")
-    local_env.write_text("LOREVIA_TEST_OVERRIDE=local\n", encoding="utf-8")
+    base_env.write_text("LoreVia_TEST_OVERRIDE=base\n", encoding="utf-8")
+    local_env.write_text("LoreVia_TEST_OVERRIDE=local\n", encoding="utf-8")
 
     _load_env_file(base_env)
     _load_env_file(local_env, override_loaded_values=True)
 
-    assert os.environ["LOREVIA_TEST_OVERRIDE"] == "local"
+    assert os.environ["LoreVia_TEST_OVERRIDE"] == "local"
 
 
 def test_cors_middleware_options_only_allow_localhost_regex_in_debug(monkeypatch):

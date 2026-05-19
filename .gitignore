@@ -109,3 +109,4 @@ local_settings.py
 
 .docker-config/
 .docker-config
+frontend\test-results

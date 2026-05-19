@@ -37,6 +37,11 @@ async def cache_set(key: str, value: object, ttl: int) -> None:
     await r.setex(key, ttl, json.dumps(value, default=str))
 
 
+async def cache_set_if_absent(key: str, value: object, ttl: int) -> bool:
+    r = await get_redis()
+    return bool(await r.set(key, json.dumps(value, default=str), ex=ttl, nx=True))
+
+
 async def cache_get(key: str) -> object | None:
     r = await get_redis()
     data = await r.get(key)
@@ -160,6 +165,18 @@ def key_character_profile(character_id: str) -> str:
 
 def key_chapter_summary(chapter_id: str, mode: str) -> str:
     return f"chapter:summary:{chapter_id}:{mode}"
+
+
+def key_analysis_inflight(chapter_id: str) -> str:
+    return f"analysis:inflight:{chapter_id}"
+
+
+def key_extraction_inflight(book_id: str, chapter_number: int) -> str:
+    return f"extraction:inflight:{book_id}:{chapter_number}"
+
+
+def key_chapter_recovery_inflight(chapter_id: str) -> str:
+    return f"chapter_recovery:inflight:{chapter_id}"
 
 def key_relationship_graph(book_id: str, chapter: int) -> str:
     return f"relationship:graph:{book_id}:{chapter}"

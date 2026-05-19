@@ -1,5 +1,6 @@
 import Link from "next/link"
 import Script from "next/script"
+import type { Metadata } from "next"
 import type { Route } from "next"
 import type { ReactNode } from "react"
 import { AudienceSection } from "@/components/marketing/AudienceSection"
@@ -7,7 +8,44 @@ import { HomePricingSection } from "@/components/marketing/HomePricingSection"
 import { Reveal } from "@/components/marketing/Reveal"
 import { BrandLockup } from "@/components/layout/BrandLockup"
 import { pricingTiers as billingPricingTiers } from "@/lib/billing/catalog"
-import { SITE_NAME, toAbsoluteUrl } from "@/lib/seo"
+import {
+  DEFAULT_OG_IMAGE,
+  SITE_NAME,
+  SITE_URL,
+  buildFaqPageJsonLd,
+  toAbsoluteUrl,
+} from "@/lib/seo"
+
+export const metadata: Metadata = {
+  title: "Fiction Writing Software for Manuscript Intelligence",
+  description:
+    "LoreVia helps fiction authors analyze manuscripts, track characters, catch continuity errors, build story bibles, and ask chapter-grounded questions during revision.",
+  keywords: [
+    "fiction writing software",
+    "manuscript analysis tool",
+    "continuity checker for fiction",
+    "character tracking for writers",
+    "story bible software",
+    "novel revision software",
+  ],
+  alternates: {
+    canonical: "/",
+  },
+  openGraph: {
+    title: "LoreVia | Fiction Writing Software for Manuscript Intelligence",
+    description:
+      "LoreVia helps fiction authors analyze manuscripts, track characters, catch continuity errors, build story bibles, and ask chapter-grounded questions during revision.",
+    url: SITE_URL,
+    images: [DEFAULT_OG_IMAGE],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "LoreVia | Fiction Writing Software for Manuscript Intelligence",
+    description:
+      "LoreVia helps fiction authors analyze manuscripts, track characters, catch continuity errors, build story bibles, and ask chapter-grounded questions during revision.",
+    images: [DEFAULT_OG_IMAGE],
+  },
+}
 
 const navItems = [
   { label: "Product", href: "#product" },
@@ -636,18 +674,12 @@ function FAQSection() {
 
 export default function HomePage() {
   const ctaHref: Route = "/register"
-  const faqJsonLd = {
-    "@context": "https://schema.org",
-    "@type": "FAQPage",
-    mainEntity: faqItems.map((item) => ({
-      "@type": "Question",
-      name: item.q,
-      acceptedAnswer: {
-        "@type": "Answer",
-        text: item.a,
-      },
+  const faqJsonLd = buildFaqPageJsonLd(
+    faqItems.map((item) => ({
+      question: item.q,
+      answer: item.a,
     })),
-  }
+  )
   const softwareJsonLd = {
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
@@ -655,6 +687,12 @@ export default function HomePage() {
     applicationCategory: "BusinessApplication",
     operatingSystem: "Web",
     url: toAbsoluteUrl("/"),
+    keywords: [
+      "fiction writing software",
+      "manuscript analysis",
+      "continuity checker",
+      "story bible",
+    ],
     description:
       "LoreVia helps fiction authors analyze manuscripts, track characters, manage continuity, and build a searchable story workspace.",
     offers: billingPricingTiers
@@ -666,6 +704,14 @@ export default function HomePage() {
         name: tier.name,
         url: toAbsoluteUrl("/pricing"),
       })),
+    featureList: [
+      "Character tracking",
+      "Continuity scans",
+      "Timeline review",
+      "Story bible generation",
+      "Chapter-grounded story questions",
+      "Beta-reader collaboration",
+    ],
   }
 
   return (

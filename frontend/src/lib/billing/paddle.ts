@@ -18,6 +18,14 @@ export function getPaddleEnvironment(token: string | null): PaddleEnvironment | 
   return null
 }
 
+export function assertPaddleEnvironment(token: string | null): PaddleEnvironment {
+  const environment = getPaddleEnvironment(token)
+  if (!environment) {
+    throw new Error("Invalid Paddle client-side token. Expected a token starting with test_ or live_.")
+  }
+  return environment
+}
+
 export function getPaddleTransactionId(
   searchParams: Pick<URLSearchParams, "get"> | null | undefined
 ): string | null {
@@ -50,11 +58,29 @@ export function getBillingConfirmationTokenFromCheckoutUrl(url: string | null | 
   }
 }
 
+export function getPublicAppUrl(): string | null {
+  const url = process.env.NEXT_PUBLIC_APP_URL?.trim()
+  if (!url) return null
+
+  try {
+    return new URL(url).toString().replace(/\/$/, "")
+  } catch {
+    return null
+  }
+}
+
+export function getAbsoluteCheckoutSuccessUrl(): string | null {
+  const appUrl = getPublicAppUrl()
+  if (!appUrl) return null
+  return `${appUrl}/checkout/success`
+}
+
 export function buildPaddleCheckoutSettings(successUrl?: string) {
   const locale =
     typeof navigator !== "undefined" && navigator.language
       ? navigator.language
       : "en"
+  const resolvedSuccessUrl = successUrl ?? getAbsoluteCheckoutSuccessUrl() ?? undefined
 
   return {
     allowLogout: false as const,
@@ -62,6 +88,6 @@ export function buildPaddleCheckoutSettings(successUrl?: string) {
     locale,
     theme: "light" as const,
     variant: "one-page" as const,
-    ...(successUrl ? { successUrl } : {}),
+    ...(resolvedSuccessUrl ? { successUrl: resolvedSuccessUrl } : {}),
   }
 }

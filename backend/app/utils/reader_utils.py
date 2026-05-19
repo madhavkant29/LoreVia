@@ -17,6 +17,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.redis import cache_del, cache_set_if_absent, key_analysis_inflight
 from app.core.security import create_asset_token
 from app.core.storage import download_book, get_presigned_url
 from app.engine.character.deduplicator import names_equivalent
@@ -36,6 +37,8 @@ from app.engine.character.profile_builder import build_description
 from app.models.book import Book, Chapter, ChapterMedia
 from app.models.character import Character
 from app.models.intelligence import ChapterSummary, PlotThread
+from app.utils.book_utils import deserialize_manuscript_content
+from app.utils.ingestion_utils import ANALYSIS_INFLIGHT_TTL_SECONDS, build_analysis_chapter_state
 from app.utils.ingestion_utils import apply_chapter_number_strategy
 
 BLEACH_EMPTY_TAGS: Any = frozenset()
@@ -536,11 +539,32 @@ async def timeline_visible_chapter_set(
 async def queue_analysis_if_missing(db: AsyncSession, chapter: Chapter, current_user=None) -> None:
     if await chapter_has_detailed_summary(db, chapter.id):
         return
+    analysis_state = chapter.analysis_state if isinstance(chapter.analysis_state, dict) else {}
+    if str(analysis_state.get("status") or "").strip() in {"queued", "running"}:
+        return
+    inflight_key = key_analysis_inflight(str(chapter.id))
+    if not await cache_set_if_absent(
+        inflight_key,
+        {"chapter_id": str(chapter.id)},
+        ANALYSIS_INFLIGHT_TTL_SECONDS,
+    ):
+        return
     from app.workers.tasks.analysis_tasks import analyse_chapter_task
     try:
-        chapter_text = download_book(chapter.s3_key).decode("utf-8", errors="ignore")
+        raw = download_book(chapter.s3_key)
+        chapter_text = str(deserialize_manuscript_content(raw).get("text") or "").strip()
     except Exception:
+        await cache_del(inflight_key)
         return
+    if not chapter_text:
+        await cache_del(inflight_key)
+        return
+    chapter.analysis_state = build_analysis_chapter_state(
+        analysis_state,
+        status="queued",
+        increment_attempt=True,
+    )
+    await db.commit()
     analyse_chapter_task.apply_async(
         args=[str(chapter.id), chapter_text, chapter.title or ""],
         queue=queue_for_user(current_user, "analysis") if current_user else "analysis",
@@ -562,6 +586,42 @@ async def chapter_has_detailed_summary(db: AsyncSession, chapter_id: uuid.UUID) 
 async def chapter_intelligence_available(db: AsyncSession, book: Book, current_user, chapter_num: int) -> bool:
     availability = await chapter_intelligence_map(db, book, current_user)
     return availability.get(chapter_num, False)
+
+
+def chapter_analysis_status(chapter: Chapter | None) -> dict[str, Any] | None:
+    if chapter is None or not isinstance(getattr(chapter, "analysis_state", None), dict):
+        return None
+    source = chapter.analysis_state
+    payload = {
+        "status": " ".join(str(source.get("status") or "").split()).strip() or "pending",
+        "generated_modes": [
+            str(mode).strip()
+            for mode in (source.get("generated_modes") or [])
+            if str(mode).strip()
+        ],
+        "attempt_count": int(source.get("attempt_count") or 0),
+        "last_error": " ".join(str(source.get("last_error") or "").split()).strip() or None,
+        "updated_at": source.get("updated_at"),
+    }
+    return payload
+
+
+def chapter_source_integrity(chapter: Chapter | None) -> dict[str, Any] | None:
+    source = (
+        chapter.analysis_state.get("source_integrity")
+        if chapter is not None and isinstance(getattr(chapter, "analysis_state", None), dict)
+        else None
+    )
+    if not isinstance(source, dict):
+        return None
+    return {
+        "text_present": bool(source.get("text_present")),
+        "media_marker_count": int(source.get("media_marker_count") or 0),
+        "stored_media_count": int(source.get("stored_media_count") or 0),
+        "recovery_status": " ".join(str(source.get("recovery_status") or "").split()).strip() or "ok",
+        "last_recovery_error": " ".join(str(source.get("last_recovery_error") or "").split()).strip() or None,
+        "updated_at": source.get("updated_at"),
+    }
 
 
 async def chapter_intelligence_map(db: AsyncSession, book: Book, current_user) -> dict[int, bool]:

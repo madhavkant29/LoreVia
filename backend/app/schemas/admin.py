@@ -40,6 +40,49 @@ class PendingPublicShareOut(BaseModel):
     title: str
     author: str | None = None
     genre: str | None = None
+    isbn: str | None = None
+    copyright_warning: bool = False
     public_description: str | None = None
     requested_at: datetime | None = None
+    created_at: datetime
+
+
+class AdminBookModerationBody(BaseModel):
+    reason: str
+
+
+class AdminRestoreBookBody(BaseModel):
+    reason: str | None = None
+
+
+class CreatorStrikeCreateBody(BaseModel):
+    book_id: str | None = None
+    report_id: str | None = None
+    strike_type: str
+    severity: str
+    reason: str
+
+
+class ContentReportAdminOut(BaseModel):
+    id: str
+    reported_book_id: str
+    reported_author_user_id: str | None = None
+    reporter_user_id: str | None = None
+    reporter_email: str | None = None
+    report_type: str
+    status: str
+    reason: str
+    details: str | None = None
+    created_at: datetime
+
+
+class CreatorStrikeOut(BaseModel):
+    id: str
+    user_id: str
+    book_id: str | None = None
+    report_id: str | None = None
+    strike_type: str
+    severity: str
+    reason: str
+    is_active: bool
     created_at: datetime

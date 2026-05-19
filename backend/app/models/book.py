@@ -17,6 +17,9 @@ class ObsidianVaultNoteSource(str, enum.Enum):
 
 class Book(Base):
     __tablename__ = "books"
+    __table_args__ = (
+        UniqueConstraint("public_slug", name="uq_books_public_slug"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -43,6 +46,35 @@ class Book(Base):
     series_order: Mapped[int | None] = mapped_column(Integer)
     is_public: Mapped[bool] = mapped_column(Boolean, default=False)
     public_description: Mapped[str | None] = mapped_column(String)
+    public_status: Mapped[str] = mapped_column(String, nullable=False, default="draft", server_default="draft", index=True)
+    public_slug: Mapped[str | None] = mapped_column(String, index=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    public_visibility: Mapped[str] = mapped_column(String, nullable=False, default="private", server_default="private", index=True)
+    rights_confirmation: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    rights_confirmation_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    rights_confirmation_ip_hash: Mapped[str | None] = mapped_column(String)
+    rights_confirmation_user_agent: Mapped[str | None] = mapped_column(Text)
+    content_source_type: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        default="user_original",
+        server_default="user_original",
+        index=True,
+    )
+    moderation_status: Mapped[str] = mapped_column(String, nullable=False, default="clean", server_default="clean", index=True)
+    moderation_reason: Mapped[str | None] = mapped_column(Text)
+    takedown_reason: Mapped[str | None] = mapped_column(Text)
+    takedown_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    takedown_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        index=True,
+    )
+    public_upload_counted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    source_title: Mapped[str | None] = mapped_column(String)
+    source_author: Mapped[str | None] = mapped_column(String)
+    source_public_domain_note: Mapped[str | None] = mapped_column(Text)
+    source_url: Mapped[str | None] = mapped_column(Text)
     public_share_status: Mapped[str] = mapped_column(String, default="not_requested", server_default="not_requested", index=True)
     public_share_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     public_share_approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
@@ -59,6 +91,7 @@ class Book(Base):
 
     user = relationship("User", foreign_keys=[user_id], back_populates="books")
     public_share_approved_by_user = relationship("User", foreign_keys=[public_share_approved_by_user_id])
+    takedown_by_user = relationship("User", foreign_keys=[takedown_by_user_id])
     chapters = relationship("Chapter", back_populates="book", cascade="all, delete-orphan")
     characters = relationship("Character", back_populates="book", cascade="all, delete-orphan")
     chunks = relationship("BookChunk", back_populates="book", cascade="all, delete-orphan")
@@ -135,11 +168,13 @@ class BookForumPost(Base):
     __table_args__ = (
         Index("ix_book_forum_posts_book_status", "book_id", "status"),
         Index("ix_book_forum_posts_status_created_at", "status", "created_at"),
+        Index("ix_book_forum_posts_thread_type_status_created_at", "thread_type", "status", "created_at"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    book_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
+    book_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), index=True)
     author_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    thread_type: Mapped[str] = mapped_column(String, nullable=False, default="novel", server_default="novel", index=True)
     headline: Mapped[str] = mapped_column(String, nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
     desired_beta_reader_count: Mapped[int | None] = mapped_column(Integer)
@@ -185,7 +220,7 @@ class BookForumComment(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     post_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("book_forum_posts.id", ondelete="CASCADE"), nullable=False, index=True)
-    book_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
+    book_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), index=True)
     author_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     body: Mapped[str] = mapped_column(Text, nullable=False)
     like_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
@@ -231,6 +266,7 @@ class Chapter(Base):
     token_count: Mapped[int | None] = mapped_column(Integer)
     word_count: Mapped[int | None] = mapped_column(Integer)
     processed: Mapped[bool] = mapped_column(Boolean, default=False)
+    analysis_state: Mapped[dict | None] = mapped_column(JSONB, default=dict)
 
     book = relationship("Book", back_populates="chapters")
     chunks = relationship("BookChunk", back_populates="chapter", cascade="all, delete-orphan")

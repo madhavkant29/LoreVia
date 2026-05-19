@@ -58,7 +58,4 @@ class BillingStatusOut(BaseModel):
     trial_email_automation_code_ready: bool
     priority_processing_code_ready: bool
     priority_queue_names: list[str] = Field(default_factory=list)
-    points_wallet_ready: bool
-    points_spend_ready: bool
-    rewarded_ads_code_ready: bool
     external_action_items: list[str] = Field(default_factory=list)

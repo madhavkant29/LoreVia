@@ -8,8 +8,8 @@ They are not enforced by `docker-compose.yml`.
 Recommended baseline:
 
 - Allow `22/tcp` from your admin IPs only
-- Allow `80/tcp` from Cloudflare IP ranges only
-- Allow `443/tcp` from Cloudflare IP ranges only
+- Allow `80/tcp` and `443/tcp` from the public internet if the VPS is the TLS terminator
+- If Cloudflare still proxies the site, keep `80/tcp` and `443/tcp` restricted to Cloudflare IP ranges instead
 - Deny all other inbound traffic
 
 Example UFW shape:
@@ -62,6 +62,14 @@ Do not expose:
 - `5555`
 - `6379`
 
+## TLS
+
+The current repo ships with a Cloudflare Origin Certificate for `api.getlorevia.com` in `ops/nginx/certs/`, so if Cloudflare is still proxying the site you do **not** need Certbot for browser traffic.
+
+If Hetzner is serving the site directly without Cloudflare proxying, replace the origin certificate with a publicly trusted certificate such as Let's Encrypt via Certbot.
+
+If you switch to Certbot, `80/tcp` must be reachable for HTTP-01 validation unless you use DNS-01.
+
 ## Monitoring
 
 Minimum recommended production checks:
@@ -71,6 +79,10 @@ Minimum recommended production checks:
 - Sentry enabled for FastAPI and Celery workers
 - Hetzner alerts for CPU, RAM, disk, and bandwidth
 - Docker log rotation is already configured in `docker-compose.yml`
+
+## Startup
+
+Use systemd to start the Docker Compose stack automatically on VPS reboot. The unit template lives in [ops/systemd/lorevia-compose.service](/C:/Users/madha/.vscode/prod/LoreVia2/ops/systemd/lorevia-compose.service), with a setup guide in [docs/hetzner-service-management.md](/C:/Users/madha/.vscode/prod/LoreVia2/docs/hetzner-service-management.md). The root-level [deploy.sh](/C:/Users/madha/.vscode/prod/LoreVia2/deploy.sh) now installs and enables the unit by default.
 
 ## Protected Routes
 

@@ -68,6 +68,22 @@ class BookOut(BaseModel):
     series_name: str | None
     series_order: int | None
     is_public: bool
+    public_status: str = "draft"
+    public_slug: str | None = None
+    published_at: datetime | None = None
+    public_visibility: str = "private"
+    rights_confirmation: bool = False
+    rights_confirmation_at: datetime | None = None
+    content_source_type: str = "user_original"
+    moderation_status: str = "clean"
+    moderation_reason: str | None = None
+    takedown_reason: str | None = None
+    takedown_at: datetime | None = None
+    public_upload_counted_at: datetime | None = None
+    source_title: str | None = None
+    source_author: str | None = None
+    source_public_domain_note: str | None = None
+    source_url: str | None = None
     public_description: str | None
     public_share_status: str | None = None
     public_share_requested_at: datetime | None = None
@@ -461,6 +477,51 @@ class PublishingPresetOut(BaseModel):
     mirror_margins: bool = True
 
 
+class EditorPreferencesOut(BaseModel):
+    font_family: str = "Times New Roman"
+    font_size: int = 12
+    line_height: float = 1.8
+    manuscript_width: str = "standard"
+    show_page_guides: bool = True
+    focus_mode: bool = False
+    default_scene_separator: str = "asterisks"
+
+
+class ReadingThemesOut(BaseModel):
+    active_theme: str = "light"
+    allow_dark_mode: bool = True
+
+
+class TypewriterModeOut(BaseModel):
+    enabled: bool = False
+    center_offset_px: int = 160
+
+
+class ManuscriptLayoutOut(BaseModel):
+    margins: str = "standard"
+    page_size: str = "letter"
+    orientation: str = "portrait"
+    show_headers: bool = True
+    show_footers: bool = True
+    page_numbering: bool = True
+    different_first_page: bool = True
+
+
+class WorkspaceStructureNodeOut(BaseModel):
+    id: str
+    label: str
+    kind: str
+    chapter_number: int | None = None
+    scene_id: str | None = None
+    children: list["WorkspaceStructureNodeOut"] = Field(default_factory=list)
+
+
+class WorkspaceBreadcrumbOut(BaseModel):
+    id: str
+    label: str
+    kind: str
+
+
 class ManuscriptFrontMatterOut(BaseModel):
     author_name: str = ""
     pen_name: str = ""
@@ -495,7 +556,23 @@ class RevisionBoardOut(BaseModel):
     last_generated_at: str | None = None
 
 
+class ProcessingPipelineStageOut(BaseModel):
+    status: str | None = None
+    completed_chapters: int | None = None
+    total_chapters: int | None = None
+    updated_at: datetime | None = None
+    eta_seconds: int | None = None
+    last_error: str | None = None
+    failed_chapters: list[int] = Field(default_factory=list)
+
+
+class ProcessingPipelineOut(BaseModel):
+    extraction: ProcessingPipelineStageOut | None = None
+    analysis: ProcessingPipelineStageOut | None = None
+
+
 class BookProcessingOut(BaseModel):
+
     status: str | None = None
     stage: str | None = None
     progress_pct: float | None = None
@@ -509,6 +586,9 @@ class BookProcessingOut(BaseModel):
     updated_at: datetime | None = None
     last_error: str | None = None
     parser_diagnostics: dict[str, Any] | None = None
+    is_fully_ready: bool = False
+    pipeline: ProcessingPipelineOut | None = None
+    retry_actions: list[str] = Field(default_factory=list)
 
 
 class WriterWorkspaceOut(BaseModel):
@@ -519,6 +599,11 @@ class WriterWorkspaceOut(BaseModel):
     publishing: PublishingPresetOut
     manuscript_front_matter: ManuscriptFrontMatterOut
     revision_board: RevisionBoardOut
+    editor_preferences: EditorPreferencesOut = Field(default_factory=EditorPreferencesOut)
+    reading_themes: ReadingThemesOut = Field(default_factory=ReadingThemesOut)
+    typewriter_mode: TypewriterModeOut = Field(default_factory=TypewriterModeOut)
+    manuscript_layout: ManuscriptLayoutOut = Field(default_factory=ManuscriptLayoutOut)
+    structure_tree: list[WorkspaceStructureNodeOut] = Field(default_factory=list)
     processing: BookProcessingOut | None = None
 
 
@@ -560,6 +645,45 @@ class PublishingPresetBody(BaseModel):
     trim_size: str = "6x9"
     include_title_page: bool = True
     mirror_margins: bool = True
+
+
+class EditorPreferencesBody(BaseModel):
+    font_family: str | None = None
+    font_size: int | None = None
+    line_height: float | None = None
+    manuscript_width: str | None = None
+    show_page_guides: bool | None = None
+    focus_mode: bool | None = None
+    default_scene_separator: str | None = None
+
+
+class ReadingThemesBody(BaseModel):
+    active_theme: str | None = None
+    allow_dark_mode: bool | None = None
+
+
+class TypewriterModeBody(BaseModel):
+    enabled: bool | None = None
+    center_offset_px: int | None = None
+
+
+class ManuscriptLayoutBody(BaseModel):
+    margins: str | None = None
+    page_size: str | None = None
+    orientation: str | None = None
+    show_headers: bool | None = None
+    show_footers: bool | None = None
+    page_numbering: bool | None = None
+    different_first_page: bool | None = None
+
+
+class WorkspaceStructureNodeBody(BaseModel):
+    id: str
+    label: str
+    kind: str
+    chapter_number: int | None = None
+    scene_id: str | None = None
+    children: list["WorkspaceStructureNodeBody"] = Field(default_factory=list)
 
 
 class ManuscriptFrontMatterBody(BaseModel):
@@ -604,6 +728,11 @@ class WriterWorkspaceBody(BaseModel):
     publishing: PublishingPresetBody | None = None
     manuscript_front_matter: ManuscriptFrontMatterBody | None = None
     revision_board: RevisionBoardBody | None = None
+    editor_preferences: EditorPreferencesBody | None = None
+    reading_themes: ReadingThemesBody | None = None
+    typewriter_mode: TypewriterModeBody | None = None
+    manuscript_layout: ManuscriptLayoutBody | None = None
+    structure_tree: list[WorkspaceStructureNodeBody] | None = None
 
 
 class RevisionActionItemOut(BaseModel):
@@ -875,12 +1004,36 @@ class ObsidianNoteLinkListOut(BaseModel):
     series_links: list[ObsidianNoteSeriesLinkOut]
 
 
+class SceneMetadataBody(BaseModel):
+    pov: str | None = None
+    timeline: str | None = None
+    location: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    mood: list[str] = Field(default_factory=list)
+    status_note: str | None = None
+    anchors: list[str] = Field(default_factory=list)
+    bookmarks: list[str] = Field(default_factory=list)
+    summary: str | None = None
+
+
+class SceneMetadataOut(BaseModel):
+    pov: str | None = None
+    timeline: str | None = None
+    location: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    mood: list[str] = Field(default_factory=list)
+    status_note: str | None = None
+    anchors: list[str] = Field(default_factory=list)
+    bookmarks: list[str] = Field(default_factory=list)
+    summary: str | None = None
+
+
 class NovelSceneBody(BaseModel):
     title: str
     description: str | None = None
     body: str
     html_body: str | None = None
-    metadata: dict[str, Any] | None = None
+    metadata: SceneMetadataBody | dict[str, Any] | None = None
     path: str | None = None
     chapter_number: int | None = None
     status: str | None = None
@@ -896,7 +1049,7 @@ class NovelSceneOut(BaseModel):
     description: str | None = None
     body: str
     html_body: str | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] | SceneMetadataOut = Field(default_factory=dict)
     path: str
     status: str
     sort_order: int
@@ -938,6 +1091,8 @@ class ManuscriptWorkspaceTreeOut(BaseModel):
     chapters: list[WorkspaceChapterNodeOut] = Field(default_factory=list)
     scene_groups: list[WorkspaceSceneGroupOut] = Field(default_factory=list)
     note_paths: list[str] = Field(default_factory=list)
+    structure_tree: list[WorkspaceStructureNodeOut] = Field(default_factory=list)
+    scene_breadcrumbs: dict[str, list[WorkspaceBreadcrumbOut]] = Field(default_factory=dict)
 
 
 class ChapterSceneOrderItemOut(BaseModel):
@@ -969,6 +1124,34 @@ class ObsidianGraphEdgeOut(BaseModel):
 class ObsidianGraphOut(BaseModel):
     nodes: list[ObsidianGraphNodeOut]
     edges: list[ObsidianGraphEdgeOut]
+
+
+class WorkspaceSearchFiltersBody(BaseModel):
+    chapter_number: int | None = Field(None, ge=1)
+    scene_id: str | None = None
+    pov: str | None = None
+    location: str | None = None
+    tags: list[str] = Field(default_factory=list)
+
+
+class WorkspaceSearchBody(BaseModel):
+    query: str = Field(default="", max_length=200)
+    scopes: list[str] = Field(default_factory=lambda: ["manuscript", "scenes", "notes"])
+    case_sensitive: bool = False
+    whole_word: bool = False
+    regex: bool = False
+    filters: WorkspaceSearchFiltersBody = Field(default_factory=WorkspaceSearchFiltersBody)
+
+
+class WorkspaceSearchResultOut(BaseModel):
+    scope: str
+    id: str
+    title: str
+    excerpt: str
+    chapter_number: int | None = None
+    scene_id: str | None = None
+    note_path: str | None = None
+    rank: float = 0
 
 
 class WritingPeriodStatOut(BaseModel):
@@ -1063,6 +1246,10 @@ class DialogueOut(BaseModel):
     line_number: int
     word_count: int | None = None
     created_at: datetime
+
+
+WorkspaceStructureNodeOut.model_rebuild()
+WorkspaceStructureNodeBody.model_rebuild()
 
 
 class ScreenplayImportResult(BaseModel):

@@ -289,12 +289,29 @@ async def test_notifications_include_revision_digest_for_author_books(client, db
         s3_key="books/ash-ledger.txt",
         status="ready",
         mode="author",
+        writer_workspace={
+            "revision_recent_edits": [
+                {
+                    "id": "edit-1",
+                    "kind": "chapter",
+                    "chapter_number": 1,
+                    "unit_label": "Chapter 1",
+                    "before_text": "Lina finds the vial and stays quiet.",
+                    "after_text": "Lina finds the vial and tells the court immediately.",
+                    "updated_at": "2026-05-13T12:00:00Z",
+                }
+            ]
+        },
     )
     db.add(book)
     await db.flush()
 
-    chapter = Chapter(book_id=book.id, number=1, title="The Vial", s3_key="chapters/ash-ledger-1.txt", word_count=1500, processed=True)
-    db.add(chapter)
+    chapters = [
+        Chapter(book_id=book.id, number=1, title="The Vial", s3_key="chapters/ash-ledger-1.txt", word_count=1500, processed=True),
+        Chapter(book_id=book.id, number=2, title="The Hearing", s3_key="chapters/ash-ledger-2.txt", word_count=1400, processed=True),
+        Chapter(book_id=book.id, number=3, title="Night Court", s3_key="chapters/ash-ledger-3.txt", word_count=1450, processed=True),
+    ]
+    db.add_all(chapters)
     db.add(
         Character(
             book_id=book.id,
@@ -319,13 +336,21 @@ async def test_notifications_include_revision_digest_for_author_books(client, db
     )
     await db.commit()
 
-    monkeypatch.setattr(
-        "app.utils.book_utils.download_book",
-        lambda key: serialize_manuscript_content(
-            "Lina finds the vial and wonders who used it. The court speaks in fragments around the poison.",
+    chapter_payloads = {
+        "chapters/ash-ledger-1.txt": serialize_manuscript_content(
+            "Lina finds the vial and tells the court immediately. The poison rumor spreads too quickly.",
             None,
         ),
-    )
+        "chapters/ash-ledger-2.txt": serialize_manuscript_content(
+            "The hearing contradicts Lina's earlier caution, and the court questions why she spoke so soon.",
+            None,
+        ),
+        "chapters/ash-ledger-3.txt": serialize_manuscript_content(
+            "At night court, the poison story splinters again while Lina tries to hold the facts together.",
+            None,
+        ),
+    }
+    monkeypatch.setattr("app.utils.book_utils.download_book", lambda key: chapter_payloads[key])
 
     response = await client.get("/api/v1/notifications", headers=auth_headers)
 
@@ -339,3 +364,35 @@ async def test_notifications_include_revision_digest_for_author_books(client, db
     mark_read = await client.put(f"/api/v1/notifications/{revision_item['id']}/read", headers=auth_headers)
     assert mark_read.status_code == 200
     assert mark_read.json()["read_at"] is not None
+    revision_response = await client.get(f"/api/v1/books/{book.id}/revision-intelligence", headers=auth_headers)
+    assert revision_response.status_code == 200
+    change_impacts = revision_response.json()["change_impacts"]
+    assert change_impacts
+    first_item_id = change_impacts[0]["id"]
+
+    workspace_update = await client.put(
+        f"/api/v1/books/{book.id}/writer-workspace",
+        headers=auth_headers,
+        json={
+            "revision_board": {
+                "items": [
+                    {
+                        "item_id": first_item_id,
+                        "status": "fixed",
+                    }
+                ]
+            }
+        },
+    )
+    assert workspace_update.status_code == 200
+
+    refreshed_response = await client.get("/api/v1/notifications", headers=auth_headers)
+    assert refreshed_response.status_code == 200
+    refreshed_payload = refreshed_response.json()
+    revision_items = [
+        item for item in refreshed_payload["items"]
+        if item["kind"] == "revision_digest" and item["book_id"] == str(book.id)
+    ]
+    assert len(revision_items) == 1
+    assert revision_items[0]["id"] == revision_item["id"]
+    assert revision_items[0]["read_at"] is None

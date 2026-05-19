@@ -78,6 +78,7 @@ from app.utils.tag_utils import (
     get_custom_tags_for_entity,
     list_custom_tags_for_entity_ids,
 )
+from app.utils.upload_security_utils import validate_zip_archive_safety
 from app.schemas.books import (
     BookOut,
     BookCollaboratorOut,
@@ -119,21 +120,26 @@ MANUSCRIPT_ALLOWED_TAGS = [
     "span",
     "div",
     "img",
+    "mark",
+    "hr",
+    "a",
 ]
 MANUSCRIPT_ALLOWED_ATTRIBUTES = {
     "p": ["style", "class", "data-text-align"],
-    "div": ["style", "class", "data-text-align"],
-    "span": ["style", "class"],
+    "div": ["style", "class", "data-text-align", "data-scene-break", "data-page-break"],
+    "span": ["style", "class", "data-mention"],
     "h1": ["style", "class", "data-text-align"],
     "h2": ["style", "class", "data-text-align"],
     "h3": ["style", "class", "data-text-align"],
     "blockquote": ["style", "class", "data-text-align"],
-    "ul": ["style", "class"],
+    "ul": ["style", "class", "data-type"],
     "ol": ["style", "class"],
-    "li": ["style", "class"],
+    "li": ["style", "class", "data-type", "data-checked"],
     "img": ["src", "alt", "title", "width", "height"],
+    "a": ["href", "target", "rel"],
+    "mark": ["style", "class"],
 }
-MANUSCRIPT_ALLOWED_STYLES = ["text-align"]
+MANUSCRIPT_ALLOWED_STYLES = ["text-align", "color", "background-color", "font-family", "font-size", "line-height", "margin-bottom", "text-indent"]
 MANUSCRIPT_ALLOWED_PROTOCOLS = ["http", "https", "mailto", "tel", "data"]
 OBSIDIAN_WIKI_LINK_RE = re.compile(r"\[\[([^\[\]\n]+)\]\]")
 OBSIDIAN_NOTE_REFERENCE_RE = re.compile(r"(!?)\[\[([^\[\]\n]+)\]\]")
@@ -153,6 +159,27 @@ MANUSCRIPT_ANNOTATION_CATEGORIES = {
     "line_edit",
     "theme",
 }
+CHAPTER_TITLE_MIN_WORDS = 1
+CHAPTER_TITLE_MAX_WORDS = 4
+CHAPTER_TITLE_WORD_RE = re.compile(r"[A-Za-z0-9]+(?:['’-][A-Za-z0-9]+)*")
+CHAPTER_TITLE_STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "as",
+    "at",
+    "by",
+    "for",
+    "from",
+    "in",
+    "into",
+    "of",
+    "on",
+    "or",
+    "the",
+    "to",
+    "with",
+}
 
 BLEACH_EMPTY_TAGS: Any = frozenset()
 
@@ -169,6 +196,68 @@ def _clean_optional_text(value: str | None) -> str | None:
 def _count_words(text: str) -> int:
     cleaned = " ".join((text or "").split()).strip()
     return len(cleaned.split()) if cleaned else 0
+
+
+def _chapter_title_word_count(title: str | None) -> int:
+    return len(CHAPTER_TITLE_WORD_RE.findall(title or ""))
+
+
+def normalize_chapter_title(title: str | None) -> str | None:
+    cleaned = _clean_optional_text(" ".join(str(title or "").split()).strip())
+    if cleaned is None:
+        return None
+    word_count = _chapter_title_word_count(cleaned)
+    if word_count < CHAPTER_TITLE_MIN_WORDS or word_count > CHAPTER_TITLE_MAX_WORDS:
+        raise HTTPException(
+            400,
+            f"Chapter title must be between {CHAPTER_TITLE_MIN_WORDS} and {CHAPTER_TITLE_MAX_WORDS} words.",
+        )
+    return cleaned
+
+
+def chapter_title_is_placeholder(title: str | None, *, chapter_number: int | None = None) -> bool:
+    cleaned = " ".join(str(title or "").split()).strip().lower()
+    if not cleaned:
+        return True
+    if chapter_number is not None and cleaned == f"chapter {chapter_number}".lower():
+        return True
+    return bool(
+        re.fullmatch(
+            r"(chapter|part|section|scene|act|book|episode|volume)\s+([0-9]+|[ivxlcdm]+|[a-z])",
+            cleaned,
+        )
+    )
+
+
+def build_chapter_title_from_summary(
+    summary: str | None,
+    *,
+    key_events: list[dict[str, Any]] | None = None,
+) -> str | None:
+    candidates: list[str] = []
+    for event in key_events or []:
+        if not isinstance(event, dict):
+            continue
+        event_title = _clean_optional_text(str(event.get("event_title") or event.get("event") or "").strip())
+        if event_title:
+            candidates.append(event_title)
+    cleaned_summary = _clean_optional_text(summary)
+    if cleaned_summary:
+        first_sentence = re.split(r"(?<=[.!?])\s+", cleaned_summary, maxsplit=1)[0].strip()
+        if first_sentence:
+            candidates.append(first_sentence)
+        candidates.append(cleaned_summary)
+
+    for candidate in candidates:
+        words = CHAPTER_TITLE_WORD_RE.findall(candidate)
+        if not words:
+            continue
+        meaningful_words = [word for word in words if word.lower() not in CHAPTER_TITLE_STOPWORDS]
+        selected_words = (meaningful_words or words)[:CHAPTER_TITLE_MAX_WORDS]
+        generated = " ".join(word.capitalize() for word in selected_words).strip()
+        if generated:
+            return generated
+    return None
 
 
 DEFAULT_WRITING_TEMPLATES = [
@@ -235,6 +324,33 @@ DEFAULT_WRITER_WORKSPACE = {
         "include_title_page": True,
         "mirror_margins": True,
     },
+    "editor_preferences": {
+        "font_family": "Times New Roman",
+        "font_size": 12,
+        "line_height": 1.8,
+        "manuscript_width": "standard",
+        "show_page_guides": True,
+        "focus_mode": False,
+        "default_scene_separator": "asterisks",
+    },
+    "reading_themes": {
+        "active_theme": "light",
+        "allow_dark_mode": True,
+    },
+    "typewriter_mode": {
+        "enabled": False,
+        "center_offset_px": 160,
+    },
+    "manuscript_layout": {
+        "margins": "standard",
+        "page_size": "letter",
+        "orientation": "portrait",
+        "show_headers": True,
+        "show_footers": True,
+        "page_numbering": True,
+        "different_first_page": True,
+    },
+    "structure_tree": [],
     "manuscript_front_matter": {
         "author_name": "",
         "pen_name": "",
@@ -312,6 +428,7 @@ SCENE_METADATA_ALIASES = {
     "plot threads": "plot_threads",
 }
 SCENE_METADATA_LIST_FIELDS = {"characters", "objects", "goals", "plot_threads", "mood"}
+SCENE_METADATA_UI_FIELDS = {"pov", "timeline", "location", "tags", "mood", "status_note", "anchors", "bookmarks", "summary"}
 REVISION_ITEM_STATUSES = {"pending", "fixed", "ignored", "task_created"}
 REVISION_GENRE_CHECKS = {
     "fantasy": {
@@ -590,6 +707,13 @@ def _normalize_processing_state(raw: dict | None) -> dict | None:
     updated_at = source.get("updated_at")
     last_error = " ".join(str(source.get("last_error") or "").split()).strip() or None
     parser_diagnostics = source.get("parser_diagnostics") if isinstance(source.get("parser_diagnostics"), dict) else None
+    is_fully_ready = bool(source.get("is_fully_ready", False))
+    retry_actions = [
+        " ".join(str(item).split()).strip()
+        for item in (source.get("retry_actions") or [])
+        if " ".join(str(item).split()).strip()
+    ]
+    raw_pipeline = source.get("pipeline") if isinstance(source.get("pipeline"), dict) else {}
 
     payload: dict[str, Any] = {}
     if status:
@@ -618,6 +742,46 @@ def _normalize_processing_state(raw: dict | None) -> dict | None:
         payload["last_error"] = last_error
     if parser_diagnostics:
         payload["parser_diagnostics"] = parser_diagnostics
+    if is_fully_ready:
+        payload["is_fully_ready"] = True
+    if retry_actions:
+        payload["retry_actions"] = retry_actions
+    if raw_pipeline:
+        pipeline: dict[str, Any] = {}
+        for key in ("extraction", "analysis"):
+            stage = raw_pipeline.get(key) if isinstance(raw_pipeline.get(key), dict) else None
+            if not stage:
+                continue
+            normalized_stage: dict[str, Any] = {}
+            normalized_status = " ".join(str(stage.get("status") or "").split()).strip() or None
+            if normalized_status:
+                normalized_stage["status"] = normalized_status
+            completed = stage.get("completed_chapters")
+            if isinstance(completed, (int, float)) and int(completed) >= 0:
+                normalized_stage["completed_chapters"] = int(completed)
+            total = stage.get("total_chapters")
+            if isinstance(total, (int, float)) and int(total) >= 0:
+                normalized_stage["total_chapters"] = int(total)
+            stage_updated = stage.get("updated_at")
+            if stage_updated:
+                normalized_stage["updated_at"] = str(stage_updated).strip()
+            stage_eta = stage.get("eta_seconds")
+            if isinstance(stage_eta, (int, float)) and int(stage_eta) >= 0:
+                normalized_stage["eta_seconds"] = int(stage_eta)
+            stage_error = " ".join(str(stage.get("last_error") or "").split()).strip() or None
+            if stage_error:
+                normalized_stage["last_error"] = stage_error
+            failed_chapters = stage.get("failed_chapters")
+            if isinstance(failed_chapters, list):
+                normalized_stage["failed_chapters"] = [
+                    int(item)
+                    for item in failed_chapters
+                    if isinstance(item, (int, float)) and int(item) > 0
+                ]
+            if normalized_stage:
+                pipeline[key] = normalized_stage
+        if pipeline:
+            payload["pipeline"] = pipeline
 
     return payload or None
 
@@ -837,6 +1001,48 @@ def normalize_writer_workspace(raw: dict | None) -> dict:
             "include_title_page": bool(publishing.get("include_title_page", True)),
             "mirror_margins": bool(publishing.get("mirror_margins", True)),
         }
+
+    editor_preferences = source.get("editor_preferences")
+    if isinstance(editor_preferences, dict):
+        payload["editor_preferences"] = {
+            "font_family": " ".join(str(editor_preferences.get("font_family") or "Times New Roman").split()).strip() or "Times New Roman",
+            "font_size": int(editor_preferences.get("font_size")) if isinstance(editor_preferences.get("font_size"), (int, float)) and 8 <= int(editor_preferences.get("font_size")) <= 36 else 12,
+            "line_height": float(editor_preferences.get("line_height")) if isinstance(editor_preferences.get("line_height"), (int, float)) and 1 <= float(editor_preferences.get("line_height")) <= 3 else 1.8,
+            "manuscript_width": " ".join(str(editor_preferences.get("manuscript_width") or "standard").split()).strip() or "standard",
+            "show_page_guides": bool(editor_preferences.get("show_page_guides", True)),
+            "focus_mode": bool(editor_preferences.get("focus_mode", False)),
+            "default_scene_separator": " ".join(str(editor_preferences.get("default_scene_separator") or "asterisks").split()).strip() or "asterisks",
+        }
+
+    reading_themes = source.get("reading_themes")
+    if isinstance(reading_themes, dict):
+        payload["reading_themes"] = {
+            "active_theme": " ".join(str(reading_themes.get("active_theme") or "light").split()).strip() or "light",
+            "allow_dark_mode": bool(reading_themes.get("allow_dark_mode", True)),
+        }
+
+    typewriter_mode = source.get("typewriter_mode")
+    if isinstance(typewriter_mode, dict):
+        payload["typewriter_mode"] = {
+            "enabled": bool(typewriter_mode.get("enabled", False)),
+            "center_offset_px": int(typewriter_mode.get("center_offset_px")) if isinstance(typewriter_mode.get("center_offset_px"), (int, float)) else 160,
+        }
+
+    manuscript_layout = source.get("manuscript_layout")
+    if isinstance(manuscript_layout, dict):
+        payload["manuscript_layout"] = {
+            "margins": " ".join(str(manuscript_layout.get("margins") or "standard").split()).strip() or "standard",
+            "page_size": " ".join(str(manuscript_layout.get("page_size") or "letter").split()).strip() or "letter",
+            "orientation": " ".join(str(manuscript_layout.get("orientation") or "portrait").split()).strip() or "portrait",
+            "show_headers": bool(manuscript_layout.get("show_headers", True)),
+            "show_footers": bool(manuscript_layout.get("show_footers", True)),
+            "page_numbering": bool(manuscript_layout.get("page_numbering", True)),
+            "different_first_page": bool(manuscript_layout.get("different_first_page", True)),
+        }
+
+    structure_tree = source.get("structure_tree")
+    if isinstance(structure_tree, list):
+        payload["structure_tree"] = json.loads(json.dumps(structure_tree))
 
     payload["manuscript_front_matter"] = _derive_front_matter_defaults(source.get("manuscript_front_matter"))
     payload["revision_board"] = _normalize_revision_board(source.get("revision_board"))
@@ -3493,6 +3699,14 @@ async def import_obsidian_notes_zip(
     if not archive_bytes:
         raise HTTPException(400, "ZIP file is empty")
 
+    validate_zip_archive_safety(
+        archive_bytes,
+        max_entries=settings.UPLOAD_ARCHIVE_MAX_ENTRIES,
+        max_total_uncompressed_bytes=settings.UPLOAD_ARCHIVE_MAX_UNCOMPRESSED_BYTES,
+        max_compression_ratio=settings.UPLOAD_ARCHIVE_MAX_COMPRESSION_RATIO,
+        label="ZIP file",
+    )
+
     imported: list[dict] = []
     try:
         with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
@@ -3759,6 +3973,42 @@ def extract_scene_metadata(text: str, *, description: str | None = None) -> dict
     if description and "summary" not in metadata:
         metadata["summary"] = _clean_text(description)
     return {key: value for key, value in metadata.items() if value not in ("", [], None)}
+
+
+def normalize_scene_metadata(metadata: dict[str, Any] | None, *, description: str | None = None) -> dict[str, Any]:
+    base = extract_scene_metadata("", description=description)
+    source = metadata if isinstance(metadata, dict) else {}
+    normalized: dict[str, Any] = {}
+
+    def _clean_list(values: object) -> list[str]:
+        cleaned_values: list[str] = []
+        if isinstance(values, list):
+            for value in values:
+                cleaned = _clean_text(value)
+                if cleaned and cleaned not in cleaned_values:
+                    cleaned_values.append(cleaned)
+        elif values is not None:
+            cleaned = _clean_text(values)
+            if cleaned:
+                cleaned_values.append(cleaned)
+        return cleaned_values
+
+    for key in SCENE_METADATA_UI_FIELDS:
+        value = source.get(key)
+        if key in {"tags", "mood", "anchors", "bookmarks"}:
+            cleaned_list = _clean_list(value)
+            if cleaned_list:
+                normalized[key] = cleaned_list
+            continue
+        cleaned = _clean_optional_text(cast(str | None, value))
+        if cleaned:
+            normalized[key] = cleaned
+
+    inferred = extract_scene_metadata(str(source.get("summary") or ""), description=description)
+    merged = {**base, **inferred, **normalized}
+    if description and "summary" not in merged:
+        merged["summary"] = _clean_text(description)
+    return {key: value for key, value in merged.items() if value not in ("", [], None)}
 
 
 def _scene_title_line_matches(line: str, title: str) -> bool:
@@ -4228,6 +4478,13 @@ async def replace_chapter_novel_scenes(
 
 
 def _scene_out(scene: NovelScene, *, tags: list[str] | None = None) -> dict[str, Any]:
+    metadata = normalize_scene_metadata(cast(dict[str, Any] | None, scene.scene_metadata), description=scene.description)
+    if tags:
+        existing_tags = metadata.get("tags")
+        if isinstance(existing_tags, list):
+            metadata["tags"] = [*existing_tags, *[tag for tag in tags if tag not in existing_tags]]
+        else:
+            metadata["tags"] = tags
     return {
         "id": str(scene.id),
         "book_id": str(scene.book_id),
@@ -4237,7 +4494,7 @@ def _scene_out(scene: NovelScene, *, tags: list[str] | None = None) -> dict[str,
         "description": scene.description,
         "body": scene.body,
         "html_body": scene.html_body,
-        "metadata": scene.scene_metadata or {},
+        "metadata": metadata,
         "path": scene.path,
         "status": scene.status,
         "sort_order": scene.sort_order,
@@ -4431,7 +4688,7 @@ async def save_novel_scene(
     if not normalized_body:
         raise HTTPException(400, "Scene body is required")
     normalized_description = _clean_optional_text(description)
-    normalized_metadata = metadata if isinstance(metadata, dict) else {}
+    normalized_metadata = normalize_scene_metadata(metadata, description=normalized_description)
     inferred_metadata = extract_scene_metadata(normalized_body, description=normalized_description)
     normalized_metadata = {**inferred_metadata, **normalized_metadata}
     normalized_chapter_number = int(chapter_number) if isinstance(chapter_number, int) and chapter_number > 0 else None
@@ -4791,6 +5048,7 @@ async def build_manuscript_workspace_tree(
     user_id: uuid.UUID,
     collaborator: BookCollaborator | None = None,
 ) -> dict[str, Any]:
+    workspace = build_writer_workspace_payload(book)
     chapter_rows = list((
         await db.execute(
             select(Chapter.id, Chapter.number, Chapter.title, Chapter.structure_version)
@@ -4870,6 +5128,48 @@ async def build_manuscript_workspace_tree(
             }
         )
 
+    chapter_title_by_number = {int(number): chapter_title for _chapter_id, number, chapter_title, _structure_version in chapter_rows}
+    scene_breadcrumbs = {
+        str(scene.id): [
+            {"id": f"book-{book.id}", "label": book.title, "kind": "book"},
+            {"id": f"chapter-{scene.chapter_number}", "label": f"Chapter {scene.chapter_number}: {chapter_title_by_number.get(int(scene.chapter_number or 0)) or f'Chapter {scene.chapter_number}'}", "kind": "chapter"},
+            {"id": str(scene.id), "label": scene.title, "kind": "scene"},
+        ]
+        for scene in scenes
+        if scene.chapter_number
+    }
+
+    configured_structure = workspace.get("structure_tree")
+    if isinstance(configured_structure, list) and configured_structure:
+        structure_tree = configured_structure
+    else:
+        structure_tree = [{
+            "id": f"book-{book.id}",
+            "label": book.title,
+            "kind": "book",
+            "children": [
+                {
+                    "id": f"chapter-{int(number)}",
+                    "label": chapter_title or f"Chapter {int(number)}",
+                    "kind": "chapter",
+                    "chapter_number": int(number),
+                    "children": [
+                        {
+                            "id": str(scene.id),
+                            "label": scene.title,
+                            "kind": "scene",
+                            "chapter_number": int(number),
+                            "scene_id": str(scene.id),
+                            "children": [],
+                        }
+                        for scene in scenes
+                        if scene.chapter_number == int(number)
+                    ],
+                }
+                for _chapter_id, number, chapter_title, _structure_version in chapter_rows
+            ],
+        }]
+
     return {
         "chapters": [
             {
@@ -4883,7 +5183,165 @@ async def build_manuscript_workspace_tree(
         ],
         "scene_groups": scene_groups,
         "note_paths": note_paths,
+        "structure_tree": structure_tree,
+        "scene_breadcrumbs": scene_breadcrumbs,
     }
+
+
+def _workspace_excerpt(text: str, query: str, *, radius: int = 90) -> str:
+    normalized_text = " ".join((text or "").split()).strip()
+    if not normalized_text:
+        return ""
+    if not query:
+        return normalized_text[:radius * 2]
+    index = normalized_text.lower().find(query.lower())
+    if index < 0:
+        return normalized_text[:radius * 2]
+    start = max(0, index - radius)
+    end = min(len(normalized_text), index + len(query) + radius)
+    excerpt = normalized_text[start:end]
+    if start > 0:
+        excerpt = f"...{excerpt}"
+    if end < len(normalized_text):
+        excerpt = f"{excerpt}..."
+    return excerpt
+
+
+async def search_author_workspace(
+    db: AsyncSession,
+    *,
+    book: Book,
+    user_id: uuid.UUID,
+    query: str,
+    scopes: list[str],
+    case_sensitive: bool = False,
+    whole_word: bool = False,
+    regex: bool = False,
+    filters: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    search_query = " ".join((query or "").split()).strip()
+    normalized_scopes = {scope for scope in scopes if scope in {"manuscript", "scenes", "notes"}} or {"manuscript", "scenes", "notes"}
+    filter_payload = filters if isinstance(filters, dict) else {}
+    chapter_filter = filter_payload.get("chapter_number")
+    scene_id_filter = " ".join(str(filter_payload.get("scene_id") or "").split()).strip() or None
+    pov_filter = " ".join(str(filter_payload.get("pov") or "").split()).strip().lower() or None
+    location_filter = " ".join(str(filter_payload.get("location") or "").split()).strip().lower() or None
+    tag_filters = {
+        " ".join(str(tag or "").split()).strip().lower()
+        for tag in (filter_payload.get("tags") or [])
+        if " ".join(str(tag or "").split()).strip()
+    }
+
+    flags = 0 if case_sensitive else re.IGNORECASE
+    pattern: re.Pattern[str] | None = None
+    if regex and search_query:
+        try:
+            pattern = re.compile(search_query, flags)
+        except re.error as exc:
+            raise HTTPException(400, f"Invalid search pattern: {exc}") from exc
+    elif search_query and whole_word:
+        pattern = re.compile(rf"\b{re.escape(search_query)}\b", flags)
+
+    def _matches(value: str) -> bool:
+        haystack = value or ""
+        if not search_query:
+            return True
+        if pattern is not None:
+            return bool(pattern.search(haystack))
+        if case_sensitive:
+            return search_query in haystack
+        return search_query.lower() in haystack.lower()
+
+    results: list[dict[str, Any]] = []
+
+    if "scenes" in normalized_scopes:
+        scene_rows = await list_novel_scenes(
+            db,
+            book=book,
+            chapter_number=int(chapter_filter) if isinstance(chapter_filter, int) and chapter_filter > 0 else None,
+            query=None,
+        )
+        for scene in scene_rows:
+            metadata = scene.get("metadata") if isinstance(scene.get("metadata"), dict) else {}
+            if scene_id_filter and str(scene.get("id")) != scene_id_filter:
+                continue
+            if pov_filter and str(metadata.get("pov") or "").strip().lower() != pov_filter:
+                continue
+            if location_filter and str(metadata.get("location") or "").strip().lower() != location_filter:
+                continue
+            scene_tags = {
+                " ".join(str(tag or "").split()).strip().lower()
+                for tag in (metadata.get("tags") or scene.get("tags") or [])
+                if " ".join(str(tag or "").split()).strip()
+            }
+            if tag_filters and not tag_filters.issubset(scene_tags):
+                continue
+            searchable = "\n".join([str(scene.get("title") or ""), str(scene.get("description") or ""), str(scene.get("body") or "")])
+            if not _matches(searchable):
+                continue
+            results.append({
+                "scope": "scenes",
+                "id": str(scene["id"]),
+                "title": str(scene.get("title") or "Scene"),
+                "excerpt": _workspace_excerpt(str(scene.get("body") or scene.get("description") or ""), search_query),
+                "chapter_number": scene.get("chapter_number"),
+                "scene_id": str(scene["id"]),
+                "note_path": None,
+                "rank": 3,
+            })
+
+    if "notes" in normalized_scopes:
+        notes = await list_obsidian_notes(
+            db,
+            book=book,
+            user_id=user_id,
+            source=ObsidianVaultNoteSource.USER_NOTES.value,
+        )
+        for note in notes:
+            path = str(note.get("path") or "")
+            content = str(note.get("content") or "")
+            if not _matches(f"{path}\n{content}"):
+                continue
+            results.append({
+                "scope": "notes",
+                "id": path,
+                "title": obsidian_note_title(path),
+                "excerpt": _workspace_excerpt(content, search_query),
+                "chapter_number": None,
+                "scene_id": None,
+                "note_path": path,
+                "rank": 2,
+            })
+
+    if "manuscript" in normalized_scopes:
+        chapter_stmt = select(Chapter).where(Chapter.book_id == book.id).order_by(Chapter.number.asc())
+        if isinstance(chapter_filter, int) and chapter_filter > 0:
+            chapter_stmt = chapter_stmt.where(Chapter.number == int(chapter_filter))
+        chapter_rows = list((await db.execute(chapter_stmt)).scalars().all())
+        for chapter in chapter_rows:
+            if not chapter.s3_key:
+                continue
+            try:
+                stored = deserialize_manuscript_content(await asyncio.to_thread(download_book, chapter.s3_key))
+            except Exception:
+                continue
+            text = str(stored.get("text") or "")
+            title = chapter.title or f"Chapter {chapter.number}"
+            if not _matches(f"{title}\n{text}"):
+                continue
+            results.append({
+                "scope": "manuscript",
+                "id": f"chapter-{chapter.number}",
+                "title": title,
+                "excerpt": _workspace_excerpt(text, search_query),
+                "chapter_number": chapter.number,
+                "scene_id": None,
+                "note_path": None,
+                "rank": 1,
+            })
+
+    results.sort(key=lambda item: (-float(item.get("rank") or 0), int(item.get("chapter_number") or 0), str(item.get("title") or "").lower()))
+    return results
 
 
 def _series_bible_key(value: str | None) -> str:
@@ -5248,6 +5706,22 @@ async def book_out(
         series_name=book.series_name,
         series_order=book.series_order,
         is_public=book.is_public,
+        public_status=getattr(book, "public_status", "draft"),
+        public_slug=getattr(book, "public_slug", None),
+        published_at=getattr(book, "published_at", None),
+        public_visibility=getattr(book, "public_visibility", "private"),
+        rights_confirmation=bool(getattr(book, "rights_confirmation", False)),
+        rights_confirmation_at=getattr(book, "rights_confirmation_at", None),
+        content_source_type=getattr(book, "content_source_type", "user_original"),
+        moderation_status=getattr(book, "moderation_status", "clean"),
+        moderation_reason=getattr(book, "moderation_reason", None),
+        takedown_reason=getattr(book, "takedown_reason", None),
+        takedown_at=getattr(book, "takedown_at", None),
+        public_upload_counted_at=getattr(book, "public_upload_counted_at", None),
+        source_title=getattr(book, "source_title", None),
+        source_author=getattr(book, "source_author", None),
+        source_public_domain_note=getattr(book, "source_public_domain_note", None),
+        source_url=getattr(book, "source_url", None),
         public_description=book.public_description,
         public_share_status=getattr(book, "public_share_status", None),
         public_share_requested_at=getattr(book, "public_share_requested_at", None),

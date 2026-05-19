@@ -1,6 +1,7 @@
 "use client"
 
 import { useQuery } from "@tanstack/react-query"
+import React from "react"
 import { useEffect, useMemo, useState } from "react"
 import type { Route } from "next"
 import Link from "next/link"
@@ -53,6 +54,7 @@ type NavItem = {
   label: string
   href: Route
   tone: string
+  helper: string
   icon: NavIcon
 }
 
@@ -96,53 +98,53 @@ const NAV_SECTIONS = (bookId: string, currentChapter = 1): NavSection[] => [
   {
     title: "Manuscript",
     items: [
-      { id: "overview", label: "Overview", href: `/${bookId}` as Route, tone: "Home", icon: "book" },
-      { id: "read", label: "Preview Draft", href: `/${bookId}/chapter/${currentChapter}` as Route, tone: "Continue", icon: "read" },
-      { id: "chapters", label: "Chapters", href: `/${bookId}/chapters` as Route, tone: "Switch", icon: "chapters" },
+      { id: "overview", label: "Overview", href: `/${bookId}` as Route, tone: "Home", helper: "See progress, next steps, and the latest signals around this book.", icon: "book" },
+      { id: "read", label: "Preview Draft", href: `/${bookId}/chapter/${currentChapter}` as Route, tone: "Continue", helper: "Open the current draft in reading view and pick up where the story last left off.", icon: "read" },
+      { id: "chapters", label: "Chapters", href: `/${bookId}/chapters` as Route, tone: "Switch", helper: "Jump across chapters and move through the manuscript without losing your place.", icon: "chapters" },
     ],
   },
   {
     title: "Writing",
     authorOnly: true,
     items: [
-      { id: "manuscript", label: "Manuscript Editor", href: `/${bookId}/manuscript` as Route, tone: "Drafting", icon: "pen" },
-      { id: "scenes", label: "Scene Workspace", href: `/${bookId}/scenes` as Route, tone: "File tree", icon: "files" },
-      { id: "add-scene", label: "Add Scene", href: `/${bookId}/scenes` as Route, tone: "Create", icon: "plus" },
+      { id: "manuscript", label: "Manuscript Editor", href: `/${bookId}/manuscript` as Route, tone: "Drafting", helper: "Write, revise, and shape the working manuscript with your drafting tools close by.", icon: "pen" },
+      { id: "scenes", label: "Scene Workspace", href: `/${bookId}/scenes` as Route, tone: "File tree", helper: "Organize scenes, reorder structure, and manage the story at a scene-by-scene level.", icon: "files" },
+      { id: "add-scene", label: "Add Scene", href: `/${bookId}/scenes` as Route, tone: "Create", helper: "Start a new scene and drop it into the manuscript flow without breaking momentum.", icon: "plus" },
     ],
   },
   {
     title: "Intelligence",
     authorOnly: true,
     items: [
-      { id: "advisor", label: "Story Advisor", href: `/${bookId}/advisor` as Route, tone: "Continuity", icon: "spark" },
-      { id: "editorial-review", label: "Editorial Review", href: `/${bookId}/editorial-review` as Route, tone: "Line edit", icon: "quill" },
-      { id: "voice", label: "Voice Consistency", href: `/${bookId}/voice` as Route, tone: "Dialogue drift", icon: "voice" },
-      { id: "ask", label: "Ask LoreVia", href: `/${bookId}/ask` as Route, tone: "Questions", icon: "chat" },
-      { id: "world-gap", label: "World Gap Detection", href: `/${bookId}/world-gap` as Route, tone: "Lore cleanup", icon: "gap" },
-      { id: "characters", label: "Character Bible", href: `/${bookId}/characters` as Route, tone: "Profiles", icon: "users" },
-      { id: "relationships", label: "Relationships", href: `/${bookId}/graph` as Route, tone: "Network", icon: "links" },
-      { id: "plot-threads", label: "Plot Threads", href: `/${bookId}/plot-threads` as Route, tone: "Arc tracking", icon: "threads" },
+      { id: "advisor", label: "Story Advisor", href: `/${bookId}/advisor` as Route, tone: "Continuity", helper: "Review continuity risks, unresolved threads, and high-priority story pressure points.", icon: "spark" },
+      { id: "editorial-review", label: "Editorial Review", href: `/${bookId}/editorial-review` as Route, tone: "Line edit", helper: "Run an editorial pass that calls out clarity, pacing, and prose-level friction.", icon: "quill" },
+      { id: "voice", label: "Voice Consistency", href: `/${bookId}/voice` as Route, tone: "Dialogue drift", helper: "Check whether character voice stays consistent across scenes and revisions.", icon: "voice" },
+      { id: "ask", label: "Ask LoreVia", href: `/${bookId}/ask` as Route, tone: "Questions", helper: "Ask direct questions about the manuscript and get answers grounded in the current draft.", icon: "chat" },
+      { id: "world-gap", label: "World Gap Detection", href: `/${bookId}/world-gap` as Route, tone: "Lore cleanup", helper: "Spot missing lore, weak canon links, and worldbuilding details that need support.", icon: "gap" },
+      { id: "characters", label: "Character Bible", href: `/${bookId}/characters` as Route, tone: "Profiles", helper: "Track character profiles, arcs, and duplicate identity issues across the story.", icon: "users" },
+      { id: "relationships", label: "Relationships", href: `/${bookId}/graph` as Route, tone: "Network", helper: "Map connections between characters so alliances, conflicts, and ties stay clear.", icon: "links" },
+      { id: "plot-threads", label: "Plot Threads", href: `/${bookId}/plot-threads` as Route, tone: "Arc tracking", helper: "Follow open arcs and see which plot threads are moving, drifting, or unresolved.", icon: "threads" },
     ],
   },
   {
     title: "Story Tools",
     items: [
-      { id: "search", label: "Search Passages", href: `/${bookId}/search` as Route, tone: "Find", icon: "search" },
-      { id: "timeline", label: "Major Events", href: `/${bookId}/timeline` as Route, tone: "Plot", icon: "events" },
-      { id: "summaries", label: "Recaps", href: `/${bookId}/summaries` as Route, tone: "Recap", icon: "summary" },
-      { id: "quotes", label: "Saved Quotes", href: "/quotes" as Route, tone: "Highlights", icon: "quote" },
-      { id: "analysis", label: "Analysis", href: `/${bookId}/analysis` as Route, tone: "Advanced", icon: "analysis" },
+      { id: "search", label: "Search Passages", href: `/${bookId}/search` as Route, tone: "Find", helper: "Search the manuscript for names, lines, or moments without manually scanning chapters.", icon: "search" },
+      { id: "timeline", label: "Major Events", href: `/${bookId}/timeline` as Route, tone: "Plot", helper: "Review key events in sequence so the story timeline stays easy to reason about.", icon: "events" },
+      { id: "summaries", label: "Recaps", href: `/${bookId}/summaries` as Route, tone: "Recap", helper: "Read chapter and story recaps when you need context fast before editing.", icon: "summary" },
+      { id: "quotes", label: "Saved Quotes", href: "/quotes" as Route, tone: "Highlights", helper: "Revisit memorable lines and collected excerpts pulled from this and other projects.", icon: "quote" },
+      { id: "analysis", label: "Analysis", href: `/${bookId}/analysis` as Route, tone: "Advanced", helper: "Open deeper analysis views for broader manuscript diagnostics and story signals.", icon: "analysis" },
     ],
   },
   {
     title: "Workspace",
     authorOnly: true,
     items: [
-      { id: "notes", label: "Notes", href: `/${bookId}/notes` as Route, tone: "Vault", icon: "notes" },
-      { id: "author-loop", label: "Author Loop", href: `/${bookId}/author-loop` as Route, tone: "Launch flow", icon: "spark" },
-      { id: "beta-feedback", label: "Beta Feedback", href: `/${bookId}/beta-feedback` as Route, tone: "Collaborator loop", icon: "users" },
-      { id: "collaboration", label: "Collaborators", href: `/${bookId}/collaboration` as Route, tone: "Invite", icon: "users" },
-      { id: "export", label: "Import & Export", href: `/${bookId}/export` as Route, tone: "Files", icon: "files" },
+      { id: "notes", label: "Notes", href: `/${bookId}/notes` as Route, tone: "Vault", helper: "Keep book-specific notes, reminders, and reference details beside the draft.", icon: "notes" },
+      { id: "author-loop", label: "Author Loop", href: `/${bookId}/author-loop` as Route, tone: "Launch flow", helper: "Move through LoreVia's guided author workflow for revision and decision-making.", icon: "spark" },
+      { id: "beta-feedback", label: "Beta Feedback", href: `/${bookId}/beta-feedback` as Route, tone: "Collaborator loop", helper: "Review outside feedback and turn beta-reader notes into concrete next steps.", icon: "users" },
+      { id: "collaboration", label: "Collaborators", href: `/${bookId}/collaboration` as Route, tone: "Invite", helper: "Manage who can access the book and what each collaborator is allowed to do.", icon: "users" },
+      { id: "export", label: "Import & Export", href: `/${bookId}/export` as Route, tone: "Files", helper: "Bring files in, send drafts out, and package the manuscript for other workflows.", icon: "files" },
     ],
   },
 ]
@@ -202,16 +204,19 @@ export function AuthorToolsNav({
 
   const rail = variant === "rail"
   const containerClass = rail
-    ? `group/rail sticky top-24 z-20 flex h-[calc(100vh-7.5rem)] w-[4.75rem] flex-col overflow-hidden rounded-2xl border p-3 shadow-[0_24px_70px_-48px_rgba(0,0,0,0.75)] transition-[width,background-color,border-color] duration-300 hover:w-72 focus-within:w-72 ${
-        isDark ? "border-white/10 bg-[#0d0f12]/90" : "border-stone-200 bg-white/90"
+    ? `group/rail sticky top-24 z-20 flex h-[calc(100vh-7.5rem)] w-[4.9rem] flex-col overflow-hidden rounded-[1.6rem] border p-3 shadow-[0_26px_80px_-52px_rgba(0,0,0,0.82)] backdrop-blur transition-[width,background-color,border-color,box-shadow] duration-300 hover:w-[18.5rem] focus-within:w-[18.5rem] ${
+        isDark ? "border-white/10 bg-[#0a0d11]/92 text-white hover:border-white/14 hover:bg-[#0d1117]/96" : "border-stone-200/90 bg-white/95 text-stone-950 hover:border-stone-300 hover:bg-white"
       }`
     : `rounded-2xl border p-4 ${isDark ? "border-white/10 bg-[#0d0f12]/90" : "border-stone-200 bg-white/92"}`
   const labelVisibility = rail ? "opacity-0 group-hover/rail:opacity-100 group-focus-within/rail:opacity-100" : "opacity-100"
+  const helperVisibility = rail
+    ? "max-h-0 translate-y-1 opacity-0 group-hover/rail:max-h-20 group-hover/rail:translate-y-0 group-hover/rail:opacity-100 group-focus-within/rail:max-h-20 group-focus-within/rail:translate-y-0 group-focus-within/rail:opacity-100"
+    : "max-h-20 opacity-100"
 
   return (
-    <aside className={containerClass}>
+    <aside className={containerClass} data-testid={`author-tools-nav-${variant}`}>
       <div className="flex items-center gap-3 px-1">
-        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border ${isDark ? "border-white/10 bg-white/5 text-slate-100" : "border-stone-200 bg-stone-50 text-stone-900"}`}>
+        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border shadow-sm ${isDark ? "border-white/10 bg-white/5 text-slate-100" : "border-stone-200 bg-stone-50 text-stone-900"}`}>
           <NavSvg icon="book" />
         </div>
         <div className={`min-w-0 transition-opacity duration-200 ${labelVisibility}`}>
@@ -224,14 +229,14 @@ export function AuthorToolsNav({
         {description}
       </p>
 
-      <div className={`mt-4 space-y-4 ${rail ? "min-h-0 flex-1 overflow-y-auto overflow-x-hidden pr-1" : ""}`}>
+      <div className={`mt-5 space-y-5 ${rail ? "min-h-0 flex-1 overflow-y-auto overflow-x-hidden pr-1" : ""}`}>
         {sections.map((section) => {
           const sectionMarkup = (
           <div>
             <p className={`mb-2 px-1 text-[10px] font-semibold uppercase tracking-[0.24em] transition-opacity duration-200 ${labelVisibility} ${isDark ? "text-slate-600" : "text-stone-400"}`}>
               {section.title}
             </p>
-            <div className="space-y-1">
+            <div className="space-y-1.5">
               {section.items.map((item) => {
                 const selected = item.id === active
                 return (
@@ -239,23 +244,46 @@ export function AuthorToolsNav({
                     key={item.id}
                     href={item.href}
                     title={item.label}
-                    className={`flex h-11 items-center gap-3 rounded-xl px-2 text-sm transition ${
+                    data-testid={`author-nav-item-${item.id}`}
+                    className={`group/item flex min-h-[4rem] items-start gap-3 rounded-2xl px-2.5 py-2.5 text-sm outline-none transition-[background-color,color,box-shadow,transform] duration-200 focus-visible:ring-2 focus-visible:ring-offset-0 ${
                       selected
                         ? isDark
-                          ? "bg-white text-stone-950"
-                          : "bg-stone-950 text-white"
+                          ? "bg-white text-stone-950 shadow-[0_18px_38px_-28px_rgba(255,255,255,0.45)]"
+                          : "bg-stone-950 text-white shadow-[0_18px_34px_-26px_rgba(28,25,23,0.45)]"
                         : isDark
-                          ? "text-slate-300 hover:bg-white/8 hover:text-white"
-                          : "text-stone-600 hover:bg-stone-100 hover:text-stone-950"
+                          ? "text-slate-300 hover:bg-white/[0.07] hover:text-white focus-visible:ring-white/25"
+                          : "text-stone-600 hover:bg-stone-100 focus-visible:ring-stone-300 hover:text-stone-950"
                     }`}
                   >
-                    <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${selected ? "bg-transparent" : isDark ? "bg-white/[0.04]" : "bg-white"}`}>
+                    <span className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border transition-colors ${
+                      selected
+                        ? isDark
+                          ? "border-stone-200/70 bg-stone-100 text-stone-950"
+                          : "border-white/20 bg-white/15 text-white"
+                        : isDark
+                          ? "border-white/[0.06] bg-white/[0.04] text-slate-200 group-hover/item:bg-white/[0.08]"
+                          : "border-stone-200 bg-white text-stone-700 group-hover/item:border-stone-300"
+                    }`}>
                       <NavSvg icon={item.icon} />
                     </span>
-                    <span className={`min-w-0 transition-opacity duration-200 ${labelVisibility}`}>
+                    <span className={`min-w-0 flex-1 transition-opacity duration-200 ${labelVisibility}`}>
                       <span className="block truncate font-semibold">{item.label}</span>
-                      <span className={`block truncate text-[10px] uppercase tracking-[0.18em] ${selected ? (isDark ? "text-stone-700" : "text-white/70") : (isDark ? "text-slate-600" : "text-stone-400")}`}>
+                      <span className={`mt-0.5 block truncate text-[10px] uppercase tracking-[0.18em] ${selected ? (isDark ? "text-stone-700" : "text-white/70") : (isDark ? "text-slate-600" : "text-stone-400")}`}>
                         {item.tone}
+                      </span>
+                      <span
+                        data-testid={`author-nav-helper-${item.id}`}
+                        className={`mt-1.5 block overflow-hidden text-[11px] leading-4 transition-all duration-200 ${helperVisibility} ${
+                          selected
+                            ? isDark
+                              ? "text-stone-700"
+                              : "text-white/80"
+                            : isDark
+                              ? "text-slate-400"
+                              : "text-stone-500"
+                        }`}
+                      >
+                        {item.helper}
                       </span>
                     </span>
                   </Link>

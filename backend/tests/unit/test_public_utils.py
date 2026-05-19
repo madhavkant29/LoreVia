@@ -7,11 +7,14 @@ from fastapi import HTTPException
 
 from app.utils.public_utils import (
     MAX_PUBLIC_FORUM_PAGE_SIZE,
+    FORUM_THREAD_TYPE_GENERAL,
+    FORUM_THREAD_TYPE_NOVEL,
     PUBLIC_SHARE_STATUS_APPROVED,
     PUBLIC_SHARE_STATUS_NOT_REQUESTED,
     PUBLIC_SHARE_STATUS_PENDING,
     _build_public_user_project_out,
     create_public_forum_post,
+    enforce_daily_general_forum_post_limit,
     ensure_public_authoring_access,
     ensure_public_forum_read_enabled,
     ensure_public_forum_write_enabled,
@@ -299,6 +302,16 @@ async def test_list_public_forum_posts_caps_page_size():
 
 
 @pytest.mark.asyncio
+async def test_enforce_daily_general_forum_post_limit_blocks_sixth_thread():
+    db = _FakeDB([_Result(scalar_one=5)])
+
+    with pytest.raises(HTTPException) as exc:
+        await enforce_daily_general_forum_post_limit(db, user_id=uuid.uuid4())
+
+    assert exc.value.status_code == 429
+
+
+@pytest.mark.asyncio
 async def test_create_public_forum_post_allows_new_post_when_previous_one_is_closed(monkeypatch):
     invalidated = []
 
@@ -306,14 +319,18 @@ async def test_create_public_forum_post_allows_new_post_when_previous_one_is_clo
         invalidated.append(True)
 
     async def _fake_get_detail(_db, *, post_id, current_user=None):
-        return SimpleNamespace(id=str(post_id), author_user_id=str(current_user.id))
+        return SimpleNamespace(id=str(post_id), thread_type=FORUM_THREAD_TYPE_NOVEL, author_user_id=str(current_user.id))
+
+    async def _fake_get_book(_db, *, book_id, author_user_id):
+        return book
 
     monkeypatch.setattr("app.utils.public_utils._invalidate_public_forum_cache", _fake_invalidate)
     monkeypatch.setattr("app.utils.public_utils.get_public_forum_post_detail", _fake_get_detail)
+    monkeypatch.setattr("app.utils.public_utils._get_forum_eligible_owned_book", _fake_get_book)
 
     user_id = uuid.uuid4()
     book_id = uuid.uuid4()
-    book = SimpleNamespace(id=book_id, user_id=user_id, is_public=False, hidden_at=None, archived_at=None)
+    book = SimpleNamespace(id=book_id, user_id=user_id, mode="author", is_public=False, hidden_at=None, archived_at=None)
     db = _FakeDB(
         execute_values=[_Result(scalar_one_or_none=None)],
         get_values=[book],
@@ -343,14 +360,18 @@ async def test_create_public_forum_post_checks_only_for_existing_open_posts(monk
         invalidated.append(True)
 
     async def _fake_get_detail(_db, *, post_id, current_user=None):
-        return SimpleNamespace(id=str(post_id), author_user_id=str(current_user.id))
+        return SimpleNamespace(id=str(post_id), thread_type=FORUM_THREAD_TYPE_NOVEL, author_user_id=str(current_user.id))
+
+    async def _fake_get_book(_db, *, book_id, author_user_id):
+        return book
 
     monkeypatch.setattr("app.utils.public_utils._invalidate_public_forum_cache", _fake_invalidate)
     monkeypatch.setattr("app.utils.public_utils.get_public_forum_post_detail", _fake_get_detail)
+    monkeypatch.setattr("app.utils.public_utils._get_forum_eligible_owned_book", _fake_get_book)
 
     user_id = uuid.uuid4()
     book_id = uuid.uuid4()
-    book = SimpleNamespace(id=book_id, user_id=user_id, is_public=False, hidden_at=None, archived_at=None)
+    book = SimpleNamespace(id=book_id, user_id=user_id, mode="author", is_public=False, hidden_at=None, archived_at=None)
     db = _FakeDB(
         execute_values=[_Result(scalar_one_or_none=None)],
         get_values=[book],
@@ -396,6 +417,57 @@ async def test_create_public_forum_post_blocks_free_author():
 
 
 @pytest.mark.asyncio
+async def test_create_public_general_forum_post_allows_any_signed_in_user(monkeypatch):
+    invalidated = []
+
+    async def _fake_invalidate():
+        invalidated.append(True)
+
+    async def _fake_get_detail(_db, *, post_id, current_user=None):
+        return SimpleNamespace(id=str(post_id), thread_type="general", author_user_id=str(current_user.id))
+
+    monkeypatch.setattr("app.utils.public_utils._invalidate_public_forum_cache", _fake_invalidate)
+    monkeypatch.setattr("app.utils.public_utils.get_public_forum_post_detail", _fake_get_detail)
+
+    db = _FakeDB(execute_values=[_Result(scalar_one=1)], get_values=[])
+
+    payload = await create_public_forum_post(
+        db,
+        current_user=SimpleNamespace(id=uuid.uuid4(), tier="free", created_at=None),
+        body=PublicForumPostCreateBody(
+            thread_type="general",
+            headline="How do you pace a slow-burn reveal?",
+            body="I want advice on keeping tension alive when the main reveal is intentionally delayed for several chapters.",
+        ),
+    )
+
+    assert payload.thread_type == "general"
+    assert invalidated == [True]
+    created_post = db.added[0]
+    assert created_post.thread_type == FORUM_THREAD_TYPE_GENERAL
+    assert created_post.book_id is None
+
+
+@pytest.mark.asyncio
+async def test_create_public_general_forum_post_rejects_book_link(monkeypatch):
+    monkeypatch.setattr("app.utils.public_utils._invalidate_public_forum_cache", lambda: None)
+
+    with pytest.raises(HTTPException) as exc:
+        await create_public_forum_post(
+            _FakeDB(execute_values=[], get_values=[]),
+            current_user=SimpleNamespace(id=uuid.uuid4(), tier="free", created_at=None),
+            body=PublicForumPostCreateBody(
+                thread_type="general",
+                book_id=uuid.uuid4(),
+                headline="General thread",
+                body="This should fail because general discussions cannot be attached to a manuscript.",
+            ),
+        )
+
+    assert exc.value.status_code == 400
+
+
+@pytest.mark.asyncio
 async def test_create_public_forum_post_allows_trial_user_for_approved_public_share(monkeypatch):
     invalidated = []
 
@@ -403,10 +475,14 @@ async def test_create_public_forum_post_allows_trial_user_for_approved_public_sh
         invalidated.append(True)
 
     async def _fake_get_detail(_db, *, post_id, current_user=None):
-        return SimpleNamespace(id=str(post_id), author_user_id=str(current_user.id))
+        return SimpleNamespace(id=str(post_id), thread_type=FORUM_THREAD_TYPE_NOVEL, author_user_id=str(current_user.id))
+
+    async def _fake_get_book(_db, *, book_id, author_user_id):
+        return public_share_book
 
     monkeypatch.setattr("app.utils.public_utils._invalidate_public_forum_cache", _fake_invalidate)
     monkeypatch.setattr("app.utils.public_utils.get_public_forum_post_detail", _fake_get_detail)
+    monkeypatch.setattr("app.utils.public_utils._get_forum_eligible_owned_book", _fake_get_book)
 
     user_id = uuid.uuid4()
     book_id = uuid.uuid4()
@@ -554,7 +630,7 @@ async def test_list_public_forum_comments_allows_author_to_view_closed_post_comm
     book_id = uuid.uuid4()
     post_id = uuid.uuid4()
     post = SimpleNamespace(id=post_id, book_id=book_id, author_user_id=user_id, status="closed")
-    book = SimpleNamespace(id=book_id, hidden_at=None, archived_at=None, is_public=False)
+    book = SimpleNamespace(id=book_id, mode="author", hidden_at=None, archived_at=None, is_public=False)
     comment = SimpleNamespace(
         id=uuid.uuid4(),
         post_id=post_id,
@@ -572,11 +648,19 @@ async def test_list_public_forum_comments_allows_author_to_view_closed_post_comm
         get_values=[post, book],
     )
 
-    payload = await list_public_forum_comments(
-        db,
-        post_id=post_id,
-        current_user=SimpleNamespace(id=user_id),
-    )
+    async def _fake_author_post(_db, *, post_id, author_user_id):
+        return post, book
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr("app.utils.public_utils._get_author_accessible_forum_post", _fake_author_post)
+    try:
+        payload = await list_public_forum_comments(
+            db,
+            post_id=post_id,
+            current_user=SimpleNamespace(id=user_id),
+        )
+    finally:
+        monkeypatch.undo()
 
     assert len(payload) == 1
     assert payload[0].body == "A saved comment"
@@ -596,7 +680,7 @@ async def test_update_public_forum_post_blocks_reopening_when_another_open_post_
         allow_contact_requests=True,
         status="closed",
     )
-    book = SimpleNamespace(id=book_id, user_id=user_id, is_public=False, hidden_at=None, archived_at=None)
+    book = SimpleNamespace(id=book_id, user_id=user_id, mode="author", is_public=False, hidden_at=None, archived_at=None)
     other_open_post = SimpleNamespace(id=uuid.uuid4(), book_id=book_id, status="open")
     db = _FakeDB(
         execute_values=[_Result(scalar_one_or_none=other_open_post)],
@@ -604,10 +688,10 @@ async def test_update_public_forum_post_blocks_reopening_when_another_open_post_
     )
 
     with pytest.raises(HTTPException) as exc:
-            await update_public_forum_post(
-                db,
-                post_id=post.id,
-                current_user=SimpleNamespace(id=user_id, tier="author"),
+        await update_public_forum_post(
+            db,
+            post_id=post.id,
+            current_user=SimpleNamespace(id=user_id, tier="author"),
             body=PublicForumPostUpdateBody(
                 headline="Reopen me",
                 body="Trying to reopen with a second open thread already present.",
@@ -628,10 +712,19 @@ async def test_update_public_forum_post_allows_free_author_to_close_without_edit
         invalidated.append(True)
 
     async def _fake_get_detail(_db, *, post_id, current_user=None):
-        return SimpleNamespace(id=str(post_id), status="closed", author_user_id=str(current_user.id))
+        return SimpleNamespace(
+            id=str(post_id),
+            thread_type=FORUM_THREAD_TYPE_NOVEL,
+            status="closed",
+            author_user_id=str(current_user.id),
+        )
+
+    async def _fake_get_book(_db, *, book_id, author_user_id):
+        return book
 
     monkeypatch.setattr("app.utils.public_utils._invalidate_public_forum_cache", _fake_invalidate)
     monkeypatch.setattr("app.utils.public_utils.get_public_forum_post_detail", _fake_get_detail)
+    monkeypatch.setattr("app.utils.public_utils._get_forum_eligible_owned_book", _fake_get_book)
 
     user_id = uuid.uuid4()
     book_id = uuid.uuid4()
@@ -645,7 +738,7 @@ async def test_update_public_forum_post_allows_free_author_to_close_without_edit
         allow_contact_requests=True,
         status="open",
     )
-    book = SimpleNamespace(id=book_id, user_id=user_id, is_public=False, hidden_at=None, archived_at=None)
+    book = SimpleNamespace(id=book_id, user_id=user_id, mode="author", is_public=False, hidden_at=None, archived_at=None)
     db = _FakeDB(execute_values=[], get_values=[post, book])
 
     payload = await update_public_forum_post(
@@ -667,7 +760,7 @@ async def test_update_public_forum_post_allows_free_author_to_close_without_edit
 
 
 @pytest.mark.asyncio
-async def test_update_public_forum_post_blocks_free_author_reopen():
+async def test_update_public_forum_post_blocks_free_author_reopen(monkeypatch):
     user_id = uuid.uuid4()
     book_id = uuid.uuid4()
     post = SimpleNamespace(
@@ -680,9 +773,12 @@ async def test_update_public_forum_post_blocks_free_author_reopen():
         allow_contact_requests=True,
         status="closed",
     )
-    book = SimpleNamespace(id=book_id, user_id=user_id, is_public=False, hidden_at=None, archived_at=None)
+    book = SimpleNamespace(id=book_id, user_id=user_id, mode="author", is_public=False, hidden_at=None, archived_at=None)
     db = _FakeDB(execute_values=[], get_values=[post, book])
 
+    async def _fake_get_book(_db, *, book_id, author_user_id):
+        return book
+    monkeypatch.setattr("app.utils.public_utils._get_forum_eligible_owned_book", _fake_get_book)
     with pytest.raises(HTTPException) as exc:
         await update_public_forum_post(
             db,
@@ -701,7 +797,7 @@ async def test_update_public_forum_post_blocks_free_author_reopen():
 
 
 @pytest.mark.asyncio
-async def test_update_public_forum_post_blocks_free_author_edit():
+async def test_update_public_forum_post_blocks_free_author_edit(monkeypatch):
     user_id = uuid.uuid4()
     book_id = uuid.uuid4()
     post = SimpleNamespace(
@@ -717,6 +813,9 @@ async def test_update_public_forum_post_blocks_free_author_edit():
     book = SimpleNamespace(id=book_id, user_id=user_id, is_public=False, hidden_at=None, archived_at=None)
     db = _FakeDB(execute_values=[], get_values=[post, book])
 
+    async def _fake_get_book(_db, *, book_id, author_user_id):
+        return book
+    monkeypatch.setattr("app.utils.public_utils._get_forum_eligible_owned_book", _fake_get_book)
     with pytest.raises(HTTPException) as exc:
         await update_public_forum_post(
             db,

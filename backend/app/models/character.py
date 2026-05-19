@@ -58,6 +58,7 @@ class Character(Base):
     character_type: Mapped[str | None] = mapped_column(String)  # complex | normal | gag | meme
     character_type_score: Mapped[int | None] = mapped_column(Integer)  # 0-10 score for main type
     subtype_scores: Mapped[dict | None] = mapped_column(JSONB, default=dict)  # {"stoic": 7, "broken": 3, ...}
+    analysis_metadata: Mapped[dict | None] = mapped_column(JSONB, default=dict)
 
     # pgvector identity anchor
     embedding: Mapped[list[float] | None] = mapped_column(Vector(1536))

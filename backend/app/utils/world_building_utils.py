@@ -1488,6 +1488,15 @@ def _serialize_world_document(document: WorldBuildingDocument) -> dict:
 
 def _serialize_world_element(element: WorldElement) -> dict:
     metadata = element.analysis_metadata or {}
+    quality_flags = list(metadata.get("quality_flags") or [])
+    grounding_passage_count = int(metadata.get("grounding_passage_count") or 0)
+    confidence = metadata.get("confidence")
+    if metadata.get("confidence_band"):
+        confidence_band = metadata.get("confidence_band")
+    elif isinstance(confidence, (int, float)):
+        confidence_band = "high" if float(confidence) >= 0.85 else ("medium" if float(confidence) >= 0.6 else "low")
+    else:
+        confidence_band = None
     return {
         "id": str(element.id),
         "book_id": str(element.book_id),
@@ -1523,6 +1532,9 @@ def _serialize_world_element(element: WorldElement) -> dict:
         "source_excerpt": metadata.get("source_excerpt"),
         "character_id": metadata.get("character_id"),
         "author_override": bool(metadata.get("author_override")),
+        "quality_flags": quality_flags,
+        "grounding_passage_count": grounding_passage_count,
+        "confidence_band": confidence_band,
     }
 
 

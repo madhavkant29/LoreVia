@@ -10,7 +10,7 @@ import re
 import uuid
 from collections import Counter, defaultdict
 from difflib import SequenceMatcher
-from typing import Any
+from typing import Any, cast
 
 import bleach  # type: ignore[import-untyped]
 from sqlalchemy import or_, select
@@ -226,6 +226,193 @@ def clean_string_list(values: list[str] | None) -> list[str]:
         seen.add(key)
         cleaned.append(item)
     return cleaned
+
+
+def build_character_analysis_payload(char: Character) -> dict[str, Any]:
+    metadata = dict(getattr(char, "analysis_metadata", None) or {})
+    mention_count = int(getattr(char, "mention_count", 0) or 0)
+    is_manual = bool(getattr(char, "is_manual", False))
+
+    if "grounding_passage_count" in metadata and metadata.get("grounding_passage_count") is not None:
+        grounding_passage_count = int(metadata.get("grounding_passage_count") or 0)
+    elif "evidence_count" in metadata and metadata.get("evidence_count") is not None:
+        grounding_passage_count = int(metadata.get("evidence_count") or 0)
+    else:
+        grounding_passage_count = mention_count
+    quality_flags = [
+        str(flag).strip()
+        for flag in (metadata.get("quality_flags") or [])
+        if str(flag).strip()
+    ]
+    if grounding_passage_count <= 1 and not is_manual and "light_grounding" not in quality_flags:
+        quality_flags.append("light_grounding")
+
+    if "evidence_count" in metadata and metadata.get("evidence_count") is not None:
+        evidence_count = int(metadata.get("evidence_count") or 0)
+    else:
+        evidence_count = grounding_passage_count
+
+    confidence_band = str(metadata.get("confidence_band") or "").strip() or None
+    if confidence_band not in {"high", "medium", "low", None}:
+        confidence_band = None
+    if confidence_band is None:
+        if grounding_passage_count >= 3:
+            confidence_band = "high"
+        elif grounding_passage_count >= 1 or evidence_count >= 1 or is_manual:
+            confidence_band = "medium"
+        else:
+            confidence_band = "low"
+
+    summary_quality = str(metadata.get("summary_quality") or "").strip() or None
+    if summary_quality is None:
+        if "generic_summary" in quality_flags:
+            summary_quality = "generic"
+        elif grounding_passage_count >= 2:
+            summary_quality = "grounded"
+        else:
+            summary_quality = "thin"
+
+    persistence_reason = str(metadata.get("persistence_reason") or "").strip() or None
+    if persistence_reason is None and is_manual:
+        persistence_reason = "manual_character"
+
+    rejected_duplicate_candidates = [
+        str(item).strip()
+        for item in (metadata.get("rejected_duplicate_candidates") or [])
+        if str(item).strip()
+    ]
+
+    return {
+        "persistence_reason": persistence_reason,
+        "evidence_count": evidence_count,
+        "summary_quality": summary_quality,
+        "needs_review": bool(metadata.get("needs_review")) or bool(quality_flags),
+        "rejected_duplicate_candidates": rejected_duplicate_candidates,
+        "quality_flags": quality_flags,
+        "grounding_passage_count": grounding_passage_count,
+        "confidence_band": confidence_band,
+    }
+
+
+def serialize_character_detail(char: Character) -> dict[str, Any]:
+    return {
+        "id": char.id,
+        "book_id": char.book_id,
+        "name": char.name,
+        "aliases": getattr(char, "aliases", None) or [],
+        "role": getattr(char, "role", None),
+        "first_chapter": getattr(char, "first_chapter", 0),
+        "trait_state": getattr(char, "trait_state", None) or {},
+        "hair": getattr(char, "hair", None),
+        "eyes": getattr(char, "eyes", None),
+        "build": getattr(char, "build", None),
+        "age_descriptor": getattr(char, "age_descriptor", None),
+        "distinguishing": getattr(char, "distinguishing", None),
+        "personality_tags": getattr(char, "personality_tags", None) or [],
+        "motivations": getattr(char, "motivations", None) or [],
+        "fears": getattr(char, "fears", None) or [],
+        "archetype": getattr(char, "archetype", None),
+        "arc_summary": getattr(char, "arc_summary", None),
+        "last_seen_chapter": getattr(char, "last_seen_chapter", None),
+        "mention_count": getattr(char, "mention_count", None) or 0,
+        "growth_events": getattr(char, "growth_events", None) or [],
+        "character_type": getattr(char, "character_type", None),
+        "character_type_score": getattr(char, "character_type_score", None),
+        "subtype_scores": getattr(char, "subtype_scores", None) or {},
+        "analysis_metadata": build_character_analysis_payload(char),
+        "created_at": getattr(char, "created_at"),
+    }
+
+
+def serialize_book_character(
+    char: Character,
+    *,
+    rel_summaries: dict[str, list[str]],
+    states: list[CharacterState],
+    relationships: list[CharacterRelationship],
+    counterpart_names: dict[uuid.UUID, str],
+    voice_profile: CharacterVoiceProfile | None,
+    total_chapters: int | None,
+    tags: list[str] | None = None,
+) -> dict[str, Any]:
+    relationship_summaries = dedupe_preserve_order(rel_summaries.get(str(char.id), []))
+    return {
+        "id": str(char.id),
+        "book_id": str(char.book_id),
+        "name": char.name,
+        "aliases": char.aliases or [],
+        "role": char.role,
+        "first_chapter": char.first_chapter,
+        "last_seen_chapter": char.last_seen_chapter,
+        "mention_count": char.mention_count or 0,
+        "status": character_status(char),
+        "trait_state": char.trait_state or {},
+        "description": compose_character_description(
+            trait_state=char.trait_state or {},
+            archetype=char.archetype,
+            arc_summary=char.arc_summary,
+            personality_tags=char.personality_tags or [],
+            motivations=char.motivations or [],
+            relationship_summaries=relationship_summaries,
+        ),
+        "personality_tags": char.personality_tags or [],
+        "goal": char.goal,
+        "motivations": char.motivations or [],
+        "fears": char.fears or [],
+        "lie_they_believe": char.lie_they_believe,
+        "backstory_wound": char.backstory_wound,
+        "arc_type": char.arc_type,
+        "archetype": char.archetype,
+        "arc_summary": char.arc_summary,
+        "growth_events": char.growth_events or [],
+        "relationship_summaries": relationship_summaries,
+        "character_type": char.character_type,
+        "character_type_score": char.character_type_score,
+        "subtype_scores": char.subtype_scores or {},
+        "analysis_metadata": build_character_analysis_payload(char),
+        "is_manual": getattr(char, "is_manual", False),
+        "graph_visibility_override": get_graph_visibility_override(char),
+        "tags": tags or [],
+        "arc_tracker": build_character_arc_tracker(
+            char,
+            states=states,
+            relationships=relationships,
+            counterpart_names=counterpart_names,
+            voice_profile=voice_profile,
+            total_chapters=total_chapters,
+        ),
+    }
+
+
+def serialize_reader_character(
+    char: Character,
+    *,
+    trait_snapshot: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    resolved_traits = dict(cast(dict[str, Any], trait_snapshot or char.trait_state or {}))
+    return {
+        "id": str(char.id),
+        "name": char.name,
+        "aliases": char.aliases or [],
+        "role": char.role,
+        "first_chapter": char.first_chapter,
+        "description": compose_character_description(
+            trait_state=resolved_traits,
+            archetype=char.archetype,
+            arc_summary=char.arc_summary,
+            personality_tags=char.personality_tags or [],
+            motivations=char.motivations or [],
+        ),
+        "trait_state": resolved_traits,
+        "personality_tags": char.personality_tags or [],
+        "motivations": char.motivations or [],
+        "fears": char.fears or [],
+        "archetype": char.archetype,
+        "arc_summary": char.arc_summary,
+        "mention_count": char.mention_count or 0,
+        "is_manual": getattr(char, "is_manual", False),
+        "analysis_metadata": build_character_analysis_payload(char),
+    }
 
 
 # ─── Name / similarity helpers ───────────────────────────────────────────────

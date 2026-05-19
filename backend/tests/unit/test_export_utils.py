@@ -2,6 +2,7 @@
 
 from io import BytesIO
 import uuid
+from zipfile import ZipFile
 
 from docx import Document
 import reportlab.platypus
@@ -17,8 +18,11 @@ from app.utils.export_utils import (
     character_bible_markdown,
     character_bible_pdf,
     export_filename_base,
+    manuscript_epub_compiled,
     manuscript_docx,
+    manuscript_pdf_compiled,
     manuscript_obsidian_vault_zip,
+    _chapter_body_blocks,
 )
 
 
@@ -254,6 +258,27 @@ def test_manuscript_docx_uses_front_matter_for_title_page():
     assert "Chapter 1" in text
 
 
+def test_chapter_body_blocks_preserve_paragraph_lines_and_scene_break_variants():
+    blocks = _chapter_body_blocks(
+        "First line.\nSecond line.\n\n* * *\n\nThird paragraph.\n\n---\n\nFourth paragraph.\n\n~~~\n\nFifth paragraph."
+    )
+
+    assert blocks == [
+        ("paragraph", "First line.\nSecond line."),
+        ("scene_break", "***"),
+        ("paragraph", "Third paragraph."),
+        ("scene_break", "***"),
+        ("paragraph", "Fourth paragraph."),
+        ("scene_break", "***"),
+        ("paragraph", "Fifth paragraph."),
+    ]
+
+
+def test_chapter_body_blocks_handle_blank_input():
+    assert _chapter_body_blocks("") == []
+    assert _chapter_body_blocks(" \n \n ") == []
+
+
 def test_manuscript_docx_includes_special_headings_manual_scenes_and_end_marker():
     raw = manuscript_docx(
         title="Atlas",
@@ -282,6 +307,123 @@ def test_manuscript_docx_includes_special_headings_manual_scenes_and_end_marker(
     assert "Lantern Walk" in text
     assert "***" in text
     assert "THE END" in text
+
+
+def test_manuscript_docx_resets_indentation_after_scene_break_and_preserves_line_breaks():
+    raw = manuscript_docx(
+        title="Atlas",
+        chapters=[
+            {
+                "number": 1,
+                "title": "Opening",
+                "text": "First paragraph.\nWrapped line.\n\n---\n\nSecond paragraph after break.\nStill same paragraph.\n\nThird paragraph.",
+            }
+        ],
+        scenes=[],
+        front_matter={"title": "Atlas Rising", "author_name": "A. Writer"},
+    )
+
+    doc = Document(BytesIO(raw))
+    prose_paragraphs = [paragraph for paragraph in doc.paragraphs if paragraph.text in {
+        "First paragraph.\nWrapped line.",
+        "***",
+        "Second paragraph after break.\nStill same paragraph.",
+        "Third paragraph.",
+    }]
+
+    assert [paragraph.text for paragraph in prose_paragraphs] == [
+        "First paragraph.\nWrapped line.",
+        "***",
+        "Second paragraph after break.\nStill same paragraph.",
+        "Third paragraph.",
+    ]
+    assert prose_paragraphs[0].paragraph_format.first_line_indent.inches == 0
+    assert prose_paragraphs[2].paragraph_format.first_line_indent.inches == 0
+    assert prose_paragraphs[3].paragraph_format.first_line_indent.inches == 0.5
+
+
+def test_manuscript_pdf_compiled_preserves_scene_break_order(monkeypatch):
+    captured: dict[str, object] = {}
+    original_template = reportlab.platypus.SimpleDocTemplate
+
+    class FakeCanvas:
+        def saveState(self) -> None:
+            return None
+
+        def restoreState(self) -> None:
+            return None
+
+        def setFont(self, *_args) -> None:
+            return None
+
+        def setTitle(self, _value: str) -> None:
+            return None
+
+        def setAuthor(self, _value: str) -> None:
+            return None
+
+        def setSubject(self, _value: str) -> None:
+            return None
+
+        def setCreator(self, _value: str) -> None:
+            return None
+
+        def drawRightString(self, *_args) -> None:
+            return None
+
+        def getPageNumber(self) -> int:
+            return 1
+
+    class FakeDoc:
+        def __init__(self, buffer, **kwargs):
+            self.buffer = buffer
+            self.pagesize = kwargs["pagesize"]
+            self.rightMargin = kwargs["rightMargin"]
+
+        def build(self, story, onFirstPage=None, onLaterPages=None):
+            captured["story"] = story
+            if onFirstPage is not None:
+                onFirstPage(FakeCanvas(), self)
+            if onLaterPages is not None:
+                onLaterPages(FakeCanvas(), self)
+
+    monkeypatch.setattr(reportlab.platypus, "SimpleDocTemplate", FakeDoc)
+    try:
+        manuscript_pdf_compiled(
+            title="Atlas",
+            chapters=[{"number": 1, "title": "Opening", "text": "First paragraph.\nLine two.\n\n~~~\n\nSecond paragraph.\n\nThird paragraph."}],
+            scenes=[],
+            front_matter={"title": "Atlas Rising", "author_name": "A. Writer"},
+        )
+    finally:
+        monkeypatch.setattr(reportlab.platypus, "SimpleDocTemplate", original_template)
+
+    story = captured["story"]
+    paragraph_text = [item.getPlainText() for item in story if hasattr(item, "getPlainText")]
+
+    assert "First paragraph.Line two." in paragraph_text
+    assert "***" in paragraph_text
+    assert "Second paragraph." in paragraph_text
+    assert "Third paragraph." in paragraph_text
+    assert paragraph_text.index("***") > paragraph_text.index("First paragraph.Line two.")
+    assert paragraph_text.index("Second paragraph.") > paragraph_text.index("***")
+
+
+def test_manuscript_epub_compiled_preserves_scene_breaks_and_line_breaks():
+    raw = manuscript_epub_compiled(
+        title="Atlas",
+        chapters=[{"number": 1, "title": "Opening", "text": "First paragraph.\nLine two.\n\n#\n\nSecond paragraph.\n\nThird paragraph."}],
+        scenes=[],
+        front_matter={"title": "Atlas Rising", "author_name": "A. Writer"},
+    )
+
+    with ZipFile(BytesIO(raw)) as archive:
+        chapter_html = archive.read("EPUB/chapter-1.xhtml").decode("utf-8")
+
+    assert '<p class="first-paragraph">First paragraph.<br/>Line two.</p>' in chapter_html
+    assert '<p class="scene-break">***</p>' in chapter_html
+    assert '<p class="first-paragraph">Second paragraph.</p>' in chapter_html
+    assert "<p>Third paragraph.</p>" in chapter_html
 
 
 def test_manuscript_obsidian_vault_zip_creates_expected_folders():

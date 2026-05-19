@@ -49,6 +49,12 @@ export default function AnswersPage() {
     description:
       "Short, useful question pages for fiction authors on character tracking, continuity, manuscript analysis, story bibles, timelines, and beta-reader prep.",
     path: "/answers",
+    about: [
+      "fiction writing questions",
+      "character tracking",
+      "continuity checking",
+      "story bibles",
+    ],
   })
 
   return (

@@ -22,6 +22,8 @@ from app.schemas.books import (
     SceneVersionDetailOut,
     SceneVersionOut,
     SceneVersionRestoreOut,
+    WorkspaceSearchBody,
+    WorkspaceSearchResultOut,
 )
 from app.utils.book_utils import (
     build_manuscript_workspace_tree,
@@ -45,6 +47,7 @@ from app.utils.book_utils import (
     restore_scene_version,
     save_manuscript_annotation,
     save_novel_scene,
+    search_author_workspace,
     snapshot_chapter_version,
     snapshot_scene_version,
     manuscript_text_to_html,
@@ -72,6 +75,31 @@ async def get_manuscript_workspace_tree(
         book=book,
         user_id=current_user.id,
         collaborator=collaborator,
+    )
+
+
+@router.post("/{book_id}/workspace/search", response_model=list[WorkspaceSearchResultOut])
+async def search_workspace(
+    book_id: uuid.UUID,
+    body: WorkspaceSearchBody,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
+    if collaborator and not collaboration_can_edit(collaborator):
+        raise HTTPException(403, "This share cannot search the author workspace.")
+    if collaborator is None:
+        require_author_access(current_user)
+    return await search_author_workspace(
+        db,
+        book=book,
+        user_id=current_user.id,
+        query=body.query,
+        scopes=body.scopes,
+        case_sensitive=body.case_sensitive,
+        whole_word=body.whole_word,
+        regex=body.regex,
+        filters=body.filters.model_dump(),
     )
 
 
@@ -219,7 +247,7 @@ async def create_novel_scene(
         chapter_number=body.chapter_number,
         status=body.status,
         sort_order=body.sort_order,
-        metadata=body.metadata,
+        metadata=body.metadata.model_dump() if hasattr(body.metadata, "model_dump") else body.metadata,
         path=body.path,
     )
 
@@ -259,7 +287,7 @@ async def update_novel_scene(
         chapter_number=body.chapter_number,
         status=body.status,
         sort_order=body.sort_order,
-        metadata=body.metadata,
+        metadata=body.metadata.model_dump() if hasattr(body.metadata, "model_dump") else body.metadata,
         path=body.path,
     )
 

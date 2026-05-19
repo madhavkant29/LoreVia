@@ -5,6 +5,44 @@ APP_DIR="${APP_DIR:-/opt/lorevia/current}"
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}"
 COMPOSE="docker compose -f ${COMPOSE_FILE}"
 BACKUP_DIR="${BACKUP_DIR:-/opt/lorevia/backups/supabase}"
+SYSTEMD_UNIT_SOURCE="${SYSTEMD_UNIT_SOURCE:-${APP_DIR}/ops/systemd/lorevia-compose.service}"
+SYSTEMD_UNIT_TARGET="${SYSTEMD_UNIT_TARGET:-/etc/systemd/system/lorevia-compose.service}"
+ENABLE_SYSTEMD_UNIT="${ENABLE_SYSTEMD_UNIT:-1}"
+SYSTEMD_RELOAD="${SYSTEMD_RELOAD:-1}"
+
+if [[ -z "${SUDO:-}" ]]; then
+  if [[ "$(id -u)" -eq 0 ]]; then
+    SUDO=""
+  else
+    SUDO="sudo"
+  fi
+fi
+
+enable_systemd_unit() {
+  if [[ "${ENABLE_SYSTEMD_UNIT}" != "1" ]]; then
+    echo "Skipping systemd unit installation because ENABLE_SYSTEMD_UNIT is not 1."
+    return 0
+  fi
+
+  if ! command -v systemctl >/dev/null 2>&1; then
+    echo "systemctl is not available; cannot enable lorevia-compose.service."
+    return 0
+  fi
+
+  if [[ ! -f "${SYSTEMD_UNIT_SOURCE}" ]]; then
+    echo "Missing systemd unit source: ${SYSTEMD_UNIT_SOURCE}"
+    exit 1
+  fi
+
+  echo "Installing systemd unit to ${SYSTEMD_UNIT_TARGET}."
+  ${SUDO} install -m 0644 "${SYSTEMD_UNIT_SOURCE}" "${SYSTEMD_UNIT_TARGET}"
+
+  if [[ "${SYSTEMD_RELOAD}" == "1" ]]; then
+    ${SUDO} systemctl daemon-reload
+  fi
+
+  ${SUDO} systemctl enable lorevia-compose.service
+}
 
 cd "${APP_DIR}"
 
@@ -69,6 +107,8 @@ if ! printf '%s\n' "${post_current_output}" | awk 'NF {print $1}' | grep -Fx "${
   printf '%s\n' "${post_current_output}"
   exit 1
 fi
+
+enable_systemd_unit
 
 ${COMPOSE} up -d nginx backend worker-extraction worker-analysis worker-intelligence celery-beat
 

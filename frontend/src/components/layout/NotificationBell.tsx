@@ -1,6 +1,7 @@
 "use client"
 
 import Link from "next/link"
+import React from "react"
 import { useState } from "react"
 import { NotificationsPanel } from "@/components/layout/NotificationsPanel"
 import { useNotifications } from "@/lib/hooks/useNotifications"
@@ -11,18 +12,24 @@ export function NotificationBell() {
   const { theme } = usePreferencesStore()
   const { unreadCount } = useNotifications(10)
   const isDark = theme === "dark"
+  const hasUnread = unreadCount > 0
+  const badgeLabel = hasUnread ? `${unreadCount > 9 ? "9+" : unreadCount}` : null
+  const buttonTone = hasUnread
+    ? "border-rose-400/40 bg-rose-500/10 text-rose-600 hover:bg-rose-500/15"
+    : "border-border bg-card text-foreground hover:bg-muted"
+  const ariaLabel = hasUnread ? `Open notifications, ${unreadCount} unread` : "Open notifications"
 
   return (
     <>
       <Link
         href="/notifications"
-        className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-card text-foreground transition-colors hover:bg-muted lg:hidden"
-        aria-label="Open notifications"
+        className={`relative flex h-10 w-10 items-center justify-center rounded-xl border transition-colors lg:hidden ${buttonTone}`}
+        aria-label={ariaLabel}
       >
-        <BellIcon />
-        {unreadCount > 0 ? (
-          <span className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-semibold text-white">
-            {Math.min(unreadCount, 9)}
+        <BellIcon hasUnread={hasUnread} />
+        {badgeLabel ? (
+          <span className="absolute -right-0.5 -top-0.5 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-semibold text-white ring-2 ring-background shadow-sm shadow-rose-500/30">
+            {badgeLabel}
           </span>
         ) : null}
       </Link>
@@ -30,13 +37,13 @@ export function NotificationBell() {
       <button
         type="button"
         onClick={() => setOpen((current) => !current)}
-        className="relative hidden h-10 w-10 items-center justify-center rounded-xl border border-border bg-card text-foreground transition-colors hover:bg-muted lg:flex"
-        aria-label="Toggle notifications"
+        className={`relative hidden h-10 w-10 items-center justify-center rounded-xl border transition-colors lg:flex ${buttonTone}`}
+        aria-label={hasUnread ? `Toggle notifications, ${unreadCount} unread` : "Toggle notifications"}
       >
-        <BellIcon />
-        {unreadCount > 0 ? (
-          <span className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-semibold text-white">
-            {Math.min(unreadCount, 9)}
+        <BellIcon hasUnread={hasUnread} />
+        {badgeLabel ? (
+          <span className="absolute -right-0.5 -top-0.5 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-semibold text-white ring-2 ring-background shadow-sm shadow-rose-500/30">
+            {badgeLabel}
           </span>
         ) : null}
       </button>
@@ -58,9 +65,9 @@ export function NotificationBell() {
   )
 }
 
-function BellIcon() {
+function BellIcon({ hasUnread }: { hasUnread: boolean }) {
   return (
-    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+    <svg className={`h-5 w-5 transition-colors ${hasUnread ? "text-rose-500" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M14.857 17H9.143m5.714 0H18l-1.286-1.286A2 2 0 0116 14.286V11a4 4 0 10-8 0v3.286a2 2 0 01-.714 1.428L6 17h3.143m5.714 0a3 3 0 11-5.714 0" />
     </svg>
   )

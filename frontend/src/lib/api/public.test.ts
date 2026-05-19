@@ -71,6 +71,7 @@ describe("public api", () => {
 
   it("creates a public forum post", async () => {
     await publicApi.createForumPost({
+      threadType: "novel",
       bookId: "book-1",
       headline: "Need mystery beta readers",
       body: "Looking for readers who can flag continuity gaps and pacing issues.",
@@ -79,6 +80,7 @@ describe("public api", () => {
     })
 
     expect(postMock).toHaveBeenCalledWith("/public/forum/posts", {
+      thread_type: "novel",
       book_id: "book-1",
       headline: "Need mystery beta readers",
       body: "Looking for readers who can flag continuity gaps and pacing issues.",
@@ -87,8 +89,25 @@ describe("public api", () => {
     })
   })
 
+  it("creates a general forum post without a book id", async () => {
+    await publicApi.createForumPost({
+      threadType: "general",
+      headline: "How do you handle midpoint sag?",
+      body: "I want practical advice on keeping the second act tense without speeding through character work.",
+    })
+
+    expect(postMock).toHaveBeenCalledWith("/public/forum/posts", {
+      thread_type: "general",
+      headline: "How do you handle midpoint sag?",
+      body: "I want practical advice on keeping the second act tense without speeding through character work.",
+      desired_beta_reader_count: null,
+      allow_contact_requests: true,
+    })
+  })
+
   it("updates a public forum post", async () => {
     await publicApi.updateForumPost("post-9", {
+      threadType: "novel",
       headline: "Updated headline",
       body: "Updated forum body with more detail for collaborators.",
       desiredBetaReaderCount: 6,
@@ -97,6 +116,7 @@ describe("public api", () => {
     })
 
     expect(putMock).toHaveBeenCalledWith("/public/forum/posts/post-9", {
+      thread_type: "novel",
       headline: "Updated headline",
       body: "Updated forum body with more detail for collaborators.",
       desired_beta_reader_count: 6,
@@ -107,6 +127,7 @@ describe("public api", () => {
 
   it("preserves backend default status when no explicit status is supplied", async () => {
     await publicApi.updateForumPost("post-10", {
+      threadType: "novel",
       headline: "Keep this open",
       body: "Still looking for continuity and pacing feedback from collaborators.",
       desiredBetaReaderCount: 2,
@@ -114,6 +135,7 @@ describe("public api", () => {
     })
 
     expect(putMock).toHaveBeenCalledWith("/public/forum/posts/post-10", {
+      thread_type: "novel",
       headline: "Keep this open",
       body: "Still looking for continuity and pacing feedback from collaborators.",
       desired_beta_reader_count: 2,

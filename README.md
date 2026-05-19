@@ -98,7 +98,7 @@ Workers parse books, generate chunks, compute embeddings, extract characters and
 
 ## Running Locally
 
-This project is intended to run locally with Docker only.
+This project is intended to run locally with Docker only. Production deployment is on a Hetzner VPS, with Nginx in front of a Gunicorn-managed FastAPI backend and Cloudflare-origin TLS for the current edge setup.
 
 ### Prerequisites
 
@@ -158,8 +158,10 @@ Notes:
 - Keep `backend/.env.local` out of version control.
 - For local development, file storage is mounted to a Docker volume instead of cloud storage.
 - Paddle checkout requires the API key, webhook secret, and plan price IDs to be set together.
-- In Paddle Checkout settings, set the default payment link to your public checkout page, such as `https://getlorevia.com/checkout` in production or `http://localhost:3000/checkout` in local sandbox testing.
+- In Paddle Checkout settings, set the default payment link to your public HTTPS checkout page, such as `https://getlorevia.com/checkout` on the Hetzner deployment or `http://localhost:3000/checkout` in local sandbox testing.
 - Trial lifecycle emails can be run from a scheduler with `python backend/scripts/run_due_trial_emails.py --limit 100` or through the protected internal job endpoint.
+
+Production deployment notes for the Hetzner VPS live in [docs/hetzner-production-launch-checklist-2026-05-18.md](/C:/Users/madha/.vscode/prod/LoreVia2/docs/hetzner-production-launch-checklist-2026-05-18.md), and the systemd startup unit is documented in [docs/hetzner-service-management.md](/C:/Users/madha/.vscode/prod/LoreVia2/docs/hetzner-service-management.md).
 
 ### 2. Create frontend environment file
 

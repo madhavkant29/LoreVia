@@ -312,6 +312,29 @@ async def test_upload_book_endpoint_validates_and_persists(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_upload_book_endpoint_rejects_disguised_pdf(monkeypatch):
+    user = _user()
+
+    monkeypatch.setattr(books, "resolve_owned_series_ids", _async_value([]))
+    monkeypatch.setattr(books, "check_upload_limit", _async_value(None))
+
+    with pytest.raises(HTTPException) as exc_info:
+        await books.upload_book_endpoint(
+            file=_upload("atlas.pdf", b"<html>nope</html>"),
+            title="Atlas",
+            visibility="private",
+            mode="reader",
+            work_type="novel",
+            db=_FakeDB(),
+            current_user=user,
+            __=None,
+        )
+
+    assert exc_info.value.status_code == 400
+    assert "valid PDF" in exc_info.value.detail
+
+
+@pytest.mark.asyncio
 async def test_update_mode_and_events_routes(monkeypatch):
     user = _user()
     book = _book(user_id=user.id, mode="reader", source_kind=None)
@@ -522,6 +545,36 @@ async def test_import_manuscript_content_rejects_stale_content_version(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_import_manuscript_content_rejects_author_titles_over_four_words(monkeypatch):
+    user = _user()
+    book = _book(user_id=user.id, mode="author", total_chapters=1)
+
+    monkeypatch.setattr(books, "get_owned_book", _async_value(book))
+    monkeypatch.setattr(books, "require_author_access", lambda *_args, **_kwargs: None)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await books.import_manuscript_content(
+            book.id,
+            text="Updated opening",
+            html="<p>Updated opening</p>",
+            title="The Last Ember Gate Opens",
+            files=None,
+            work_type=None,
+            chapter_number=1,
+            replace_existing="true",
+            expected_content_version=1,
+            chunk_long_documents="false",
+            split_into_chapters="true",
+            db=_FakeDB(),
+            current_user=user,
+            _=None,
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "Chapter title must be between 1 and 4 words."
+
+
+@pytest.mark.asyncio
 async def test_import_manuscript_content_preserves_source_chapter_count_for_long_file_chapters(monkeypatch):
     user = _user()
     book = _book(user_id=user.id, mode="reader", total_chapters=0, preserve_source_chapters=True)
@@ -598,7 +651,7 @@ async def test_import_manuscript_content_preserves_source_chapter_count_for_long
         text=None,
         html=None,
         title=None,
-        files=[_upload("story.pdf", b"%PDF-1.4 mock")],
+            files=[_upload("story.pdf", b"%PDF-1.4\nmock body\n%%EOF")],
         work_type=None,
         chapter_number=None,
         replace_existing="false",
@@ -758,8 +811,8 @@ async def test_book_notes_obsidian_and_workspace_routes(monkeypatch):
     monkeypatch.setattr(books, "build_story_health_payload", _async_value({"score": 82, "status": "healthy", "summary": "Good", "metrics": []}))
     monkeypatch.setattr(books, "list_chapter_consistency_reports", _async_value([]))
     monkeypatch.setattr(books, "list_chapter_versions", _async_value([chapter_version]))
-    monkeypatch.setattr(books, "build_writer_workspace_payload", lambda _current_book: books.normalize_writer_workspace(_workspace_payload()))
-    monkeypatch.setattr(books, "normalize_writer_workspace", lambda payload: payload)
+    monkeypatch.setattr(books, "build_writer_workspace_response", lambda _current_book: books.WriterWorkspaceOut(**_workspace_payload()))
+    monkeypatch.setattr(books, "build_writer_workspace_update", lambda _current_book, updates: {**_workspace_payload(), **updates})
     monkeypatch.setattr(books, "require_author_access", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(books, "get_book_with_collaboration_access", _async_value((book, None)))
     monkeypatch.setattr(books, "estimate_readability", lambda _text: {"words": 3, "sentences": 1, "paragraphs": 1, "average_sentence_length": 3.0, "reading_ease": 80.0, "grade_level": 4.0, "label": "easy"})
@@ -823,6 +876,7 @@ async def test_export_cover_archive_hide_and_delete_routes(monkeypatch):
     user = _user()
     book = _book(user_id=user.id, title="Atlas Draft")
     chapter = SimpleNamespace(number=1, title="One", s3_key="chapters/1.json")
+    compiled_calls: list[dict[str, object]] = []
 
     monkeypatch.setattr(books, "get_owned_book", _async_value(book))
     monkeypatch.setattr(books, "require_author_access", lambda *_args, **_kwargs: None)
@@ -833,8 +887,8 @@ async def test_export_cover_archive_hide_and_delete_routes(monkeypatch):
     monkeypatch.setattr(books, "list_novel_scenes", _async_value([{"source": "manual", "status": "active"}]))
     monkeypatch.setattr(books, "list_obsidian_notes", _async_value([{"path": "Lore/Scene.md"}]))
     monkeypatch.setattr(books, "get_book_with_collaboration_access", _async_value((book, None)))
-    monkeypatch.setattr(books, "manuscript_pdf_compiled", lambda **_kwargs: b"pdf")
-    monkeypatch.setattr(books, "manuscript_epub_compiled", lambda **_kwargs: b"epub")
+    monkeypatch.setattr(books, "manuscript_pdf_compiled", lambda **kwargs: compiled_calls.append({"format": "pdf", **kwargs}) or b"pdf")
+    monkeypatch.setattr(books, "manuscript_epub_compiled", lambda **kwargs: compiled_calls.append({"format": "epub", **kwargs}) or b"epub")
     monkeypatch.setattr(books, "manuscript_obsidian_vault_zip", lambda **_kwargs: b"zip")
     monkeypatch.setattr(books, "manuscript_docx", lambda **_kwargs: b"docx")
 
@@ -860,6 +914,9 @@ async def test_export_cover_archive_hide_and_delete_routes(monkeypatch):
         assert response.media_type == media_type
         expected_name = "Atlas-Draft-manuscript-vault.zip" if fmt == "obsidian" else f"Atlas-Draft-manuscript.{fmt}"
         assert response.headers["Content-Disposition"] == f'attachment; filename="{expected_name}"'
+
+    assert [call["format"] for call in compiled_calls] == ["pdf", "epub"]
+    assert all(call["chapters"] == [{"number": 1, "title": "One", "text": "Body", "html": None}] for call in compiled_calls)
 
     cover_book = _book(user_id=user.id, cover_s3_key="covers/atlas.png")
     monkeypatch.setattr(books, "ensure_book_cover", _async_value(None))
@@ -906,6 +963,7 @@ async def test_character_routes_cover_crud_and_exports(monkeypatch):
         character_type="complex",
         character_type_score=9,
         subtype_scores={"stoic": 4},
+        analysis_metadata={"quality_flags": ["generic_summary"], "grounding_passage_count": 0},
     )
     other_character = SimpleNamespace(
         id=other_id,
@@ -959,13 +1017,44 @@ async def test_character_routes_cover_crud_and_exports(monkeypatch):
     monkeypatch.setattr(books, "dedupe_preserve_order", lambda items: list(dict.fromkeys(items)))
     monkeypatch.setattr(
         books,
-        "compose_character_description",
-        lambda trait_state, archetype, arc_summary, personality_tags, motivations, relationship_summaries=None: (
-            f"{archetype}:{trait_state.get('eyes', 'na')}|{len(relationship_summaries or [])}"
-        ),
+        "serialize_book_character",
+        lambda char, **kwargs: {
+            "id": str(char.id),
+            "book_id": str(char.book_id),
+            "name": char.name,
+            "aliases": char.aliases or [],
+            "role": char.role,
+            "first_chapter": char.first_chapter,
+            "last_seen_chapter": getattr(char, "last_seen_chapter", None),
+            "mention_count": getattr(char, "mention_count", 0) or 0,
+            "status": "active",
+            "trait_state": char.trait_state or {},
+            "description": f"{char.archetype}:{(char.trait_state or {}).get('eyes', 'na')}|{len((kwargs.get('rel_summaries') or {}).get(str(char.id), []))}",
+            "personality_tags": char.personality_tags or [],
+            "goal": getattr(char, "goal", None),
+            "motivations": char.motivations or [],
+            "fears": char.fears or [],
+            "lie_they_believe": getattr(char, "lie_they_believe", None),
+            "backstory_wound": getattr(char, "backstory_wound", None),
+            "arc_type": getattr(char, "arc_type", None),
+            "archetype": getattr(char, "archetype", None),
+            "arc_summary": getattr(char, "arc_summary", None),
+            "growth_events": getattr(char, "growth_events", []) or [],
+            "relationship_summaries": list((kwargs.get("rel_summaries") or {}).get(str(char.id), [])),
+            "character_type": getattr(char, "character_type", None),
+            "character_type_score": getattr(char, "character_type_score", None),
+            "subtype_scores": getattr(char, "subtype_scores", {}) or {},
+            "analysis_metadata": {"persistence_reason": "manual_character" if getattr(char, "is_manual", False) else None, "quality_flags": ["generic_summary", "light_grounding"], "confidence_band": "low"},
+            "is_manual": getattr(char, "is_manual", False),
+            "graph_visibility_override": (
+                ((char.trait_state or {}).get("graph_visibility_override") or {}).get("value")
+                if isinstance((char.trait_state or {}).get("graph_visibility_override"), dict)
+                else getattr(char, "graph_visibility_override", None)
+            ),
+            "tags": kwargs.get("tags", []) or [],
+            "arc_tracker": {"goal": "Protect the city", "diagnostics": []},
+        },
     )
-    monkeypatch.setattr(books, "character_status", lambda _character: "active")
-    monkeypatch.setattr(books, "build_character_arc_tracker", lambda *_args, **_kwargs: {"goal": "Protect the city", "diagnostics": []})
     monkeypatch.setattr(books, "merge_characters", _async_value(character))
     monkeypatch.setattr(books, "partition_character", _async_value([character, other_character]))
     monkeypatch.setattr(books, "clean_string_list", lambda values: [value.strip() for value in values if value.strip()])
@@ -1014,6 +1103,8 @@ async def test_character_routes_cover_crud_and_exports(monkeypatch):
     assert payload[0]["description"] == "hero:green|1"
     assert payload[0]["goal"] == "Protect the city"
     assert payload[0]["arc_tracker"]["goal"] == "Protect the city"
+    assert payload[0]["analysis_metadata"]["quality_flags"] == ["generic_summary", "light_grounding"]
+    assert payload[0]["analysis_metadata"]["confidence_band"] == "low"
 
     created_character = SimpleNamespace(
         id=uuid.uuid4(),
@@ -1038,6 +1129,7 @@ async def test_character_routes_cover_crud_and_exports(monkeypatch):
         character_type=None,
         character_type_score=None,
         subtype_scores={},
+        analysis_metadata={},
         is_manual=True,
     )
     monkeypatch.setattr(books, "build_manual_character", lambda **_kwargs: created_character)
@@ -1051,6 +1143,7 @@ async def test_character_routes_cover_crud_and_exports(monkeypatch):
     assert created["name"] == "Aunt May"
     assert created["role"] == "sc"
     assert created["is_manual"] is True
+    assert created["analysis_metadata"]["persistence_reason"] == "manual_character"
     assert create_db.added == [created_character]
     assert create_db.commits == 1
 

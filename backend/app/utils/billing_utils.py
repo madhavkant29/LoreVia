@@ -494,6 +494,8 @@ def billing_configuration_status() -> dict[str, Any]:
         missing_configuration.append("PADDLE_API_KEY")
     if not webhook_secret_present:
         missing_configuration.append("PADDLE_WEBHOOK_SECRET")
+    if not default_checkout_url_present:
+        missing_configuration.append("PADDLE_DEFAULT_CHECKOUT_URL")
     if not resend_api_key_present:
         missing_configuration.append("RESEND_API_KEY")
     if not internal_job_secret_present:
@@ -532,7 +534,12 @@ def billing_configuration_status() -> dict[str, Any]:
     ]
     return {
         "billing_enabled": paddle_api_key_present and fully_configured_plan_count > 0,
-        "payments_ready": paddle_api_key_present and webhook_secret_present and fully_configured_plan_count == len(VALID_PAID_PLAN_CODES),
+        "payments_ready": (
+            paddle_api_key_present
+            and webhook_secret_present
+            and default_checkout_url_present
+            and fully_configured_plan_count == len(VALID_PAID_PLAN_CODES)
+        ),
         "paddle_api_key_present": paddle_api_key_present,
         "webhook_secret_present": webhook_secret_present,
         "default_checkout_url_present": default_checkout_url_present,
@@ -549,9 +556,6 @@ def billing_configuration_status() -> dict[str, Any]:
         "trial_email_automation_code_ready": True,
         "priority_processing_code_ready": True,
         "priority_queue_names": list(PRIORITY_QUEUE_NAMES),
-        "points_wallet_ready": True,
-        "points_spend_ready": True,
-        "rewarded_ads_code_ready": True,
         "external_action_items": external_action_items,
     }
 

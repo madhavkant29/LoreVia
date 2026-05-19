@@ -79,14 +79,14 @@ async def test_reader_chapter_repairs_stale_character_first_appearance(client, d
     await db.commit()
 
     monkeypatch.setattr(
-        "app.api.v1.routes.reader.deserialize_manuscript_content",
+        "app.services.chapter_recovery_service.deserialize_manuscript_content",
         lambda _raw: {
             "text": "Captain Mira steps onto the deck before sunrise.",
             "html": "<p><span class='mention-token' data-mention='Captain Mira'>Captain Mira</span> steps onto the deck before sunrise.</p>",
         },
     )
     monkeypatch.setattr(
-        "app.api.v1.routes.reader.download_book",
+        "app.services.chapter_recovery_service.download_book",
         lambda _key: b"stored chapter payload",
     )
 
@@ -96,6 +96,7 @@ async def test_reader_chapter_repairs_stale_character_first_appearance(client, d
     payload = response.json()
     assert [item["name"] for item in payload["characters"]] == ["Captain Mira"]
     assert payload["characters"][0]["first_chapter"] == 1
+    assert payload["characters"][0]["analysis_metadata"]["confidence_band"] in {"medium", "high"}
 
     await db.refresh(character)
     assert character.first_chapter == 1

@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import React, { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 
 import {
@@ -29,6 +29,8 @@ export default function SettingsPage() {
   const [goalDraft, setGoalDraft] = useState("1000")
   const [goalSaving, setGoalSaving] = useState(false)
   const [goalMessage, setGoalMessage] = useState<string | null>(null)
+  const [permissionSaving, setPermissionSaving] = useState(false)
+  const [permissionMessage, setPermissionMessage] = useState<string | null>(null)
   const router = useRouter()
   const displayTier = user?.tier_label ?? tierLabel(user?.tier)
   const purchasedTier = tierLabel(user?.plan_tier)
@@ -91,6 +93,20 @@ export default function SettingsPage() {
       setGoalMessage("We could not save the daily goal right now.")
     } finally {
       setGoalSaving(false)
+    }
+  }
+
+  const changeMessagingPermission = async (messagingPermission: "anyone" | "friends_only") => {
+    setPermissionSaving(true)
+    setPermissionMessage(null)
+    try {
+      const updated = await authApi.setMessagingPermission(messagingPermission)
+      setUser(updated)
+      setPermissionMessage("Messaging privacy updated.")
+    } catch {
+      setPermissionMessage("We could not save your messaging privacy right now.")
+    } finally {
+      setPermissionSaving(false)
     }
   }
 
@@ -157,15 +173,15 @@ export default function SettingsPage() {
               </p>
             ) : (
               <p className="mt-5 max-w-2xl text-sm leading-7 text-[rgb(var(--muted-foreground))]">
-                Purchased plan: {purchasedTier}. Payment details and cancellations live in the billing portal.
+                Purchased plan: {purchasedTier}. Canceling, payment method changes, and invoice access live in the billing portal.
               </p>
             )}
             <p className="mt-5 max-w-2xl text-sm leading-7 text-[rgb(var(--muted-foreground))]">
-              Subscription changes still begin from pricing, while payment details and cancellations live in the billing portal.
+              Use the billing portal when you need to cancel renewal, update payment details, or download invoices. Subscription upgrades still begin from pricing.
             </p>
             <div className="mt-5 flex flex-wrap gap-3">
               <button onClick={openBillingPortal} disabled={billingBusy} className="app-button-primary disabled:opacity-60">
-                {billingBusy ? "Opening billing..." : "Open billing portal"}
+                {billingBusy ? "Opening billing..." : "Manage billing / cancel subscription"}
               </button>
             </div>
             {billingMessage ? (
@@ -240,6 +256,43 @@ export default function SettingsPage() {
               )
             })}
           </div>
+        </WorkspacePanel>
+
+        <WorkspacePanel className="p-6">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="app-eyebrow">Messaging privacy</p>
+              <h2 className="mt-3 text-2xl font-semibold text-[rgb(var(--foreground))]">
+                Control who can start a direct message
+              </h2>
+            </div>
+            <p className="max-w-2xl text-sm leading-7 text-[rgb(var(--muted-foreground))]">
+              Choose whether anyone can message you, or whether new chats should unlock only after a friend request is accepted from notifications.
+            </p>
+          </div>
+
+          <div className="mt-5 grid gap-3 lg:grid-cols-2">
+            {[
+              { value: "anyone" as const, label: "Anyone can message me", desc: "People can open a chat immediately from search, forum, or profile entrypoints." },
+              { value: "friends_only" as const, label: "Friends only", desc: "People must send a friend request first, and you accept it from notifications." },
+            ].map((option) => {
+              const active = (user?.messaging_permission ?? "anyone") === option.value
+              return (
+                <button
+                  key={option.value}
+                  onClick={() => void changeMessagingPermission(option.value)}
+                  disabled={permissionSaving}
+                  className={`rounded-[1.3rem] border p-5 text-left transition ${active ? "border-[rgba(var(--accent),0.3)] bg-[rgba(var(--accent),0.12)]" : "border-[rgba(var(--border),0.8)] bg-[rgba(255,255,255,0.38)] hover:bg-[rgba(255,255,255,0.58)] dark:bg-[rgba(255,255,255,0.03)]"}`}
+                >
+                  <p className="text-sm font-semibold text-[rgb(var(--foreground))]">{option.label}</p>
+                  <p className="mt-2 text-sm leading-6 text-[rgb(var(--muted-foreground))]">{option.desc}</p>
+                </button>
+              )
+            })}
+          </div>
+          {permissionMessage ? (
+            <p className="mt-4 text-sm text-[rgb(var(--muted-foreground))]">{permissionMessage}</p>
+          ) : null}
         </WorkspacePanel>
 
         <WorkspacePanel className="p-6">

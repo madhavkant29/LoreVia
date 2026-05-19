@@ -80,9 +80,10 @@ const book = {
   },
 }
 
-const publicForumPosts = [
+let publicForumPosts = [
   {
     id: "forum-post-1",
+    thread_type: "novel",
     book_id: "book-1",
     author_user_id: "user-1",
     author_username: "author",
@@ -111,12 +112,43 @@ const publicForumPosts = [
     created_at: "2026-05-14T08:00:00Z",
     updated_at: "2026-05-14T12:00:00Z",
   },
+  {
+    id: "forum-post-2",
+    thread_type: "general",
+    book_id: null,
+    author_user_id: "reader-1",
+    author_username: "beta_reader",
+    author_reputation_score: 9,
+    author_trust_level: "Trusted",
+    title: null,
+    author: null,
+    genre: null,
+    work_type: null,
+    headline: "How do you keep second acts from flattening out?",
+    body: "Looking for practical advice on keeping a long middle section tense without rushing character payoffs.",
+    desired_beta_reader_count: null,
+    allow_contact_requests: false,
+    status: "open",
+    viewer_interest_status: null,
+    interest_count: 0,
+    comment_count: 1,
+    rating_summary: {
+      average_rating: null,
+      rating_count: 0,
+      positive_rating_count: 0,
+      neutral_rating_count: 0,
+      negative_rating_count: 0,
+    },
+    discoverability_score: 16,
+    created_at: "2026-05-14T10:00:00Z",
+    updated_at: "2026-05-14T10:30:00Z",
+  },
 ]
 
 let publicForumComments: Array<{
   id: string
   post_id: string
-  book_id: string
+  book_id: string | null
   author_user_id: string
   author_username: string | null
   author_reputation_score: number
@@ -161,6 +193,22 @@ let publicForumComments: Array<{
     created_at: "2026-05-14T09:30:00Z",
     updated_at: "2026-05-14T09:30:00Z",
   },
+  {
+    id: "forum-comment-3",
+    post_id: "forum-post-2",
+    book_id: null,
+    author_user_id: "user-1",
+    author_username: "author",
+    author_reputation_score: 18,
+    author_trust_level: "Trusted",
+    body: "I try to make every middle-chapter scene either cash in the premise or threaten it.",
+    like_count: 3,
+    dislike_count: 0,
+    reaction: null,
+    can_edit: true,
+    created_at: "2026-05-14T11:00:00Z",
+    updated_at: "2026-05-14T11:00:00Z",
+  },
 ]
 
 const publicWriterProfiles = {
@@ -180,9 +228,61 @@ const publicWriterProfiles = {
       description: "A storm-lashed fantasy about a gate city, a vanished oath, and the cost of holding the wall.",
       progress_words: 20000,
       source: "public_book",
-      forum_post_id: null,
+      forum_post_id: "forum-post-1",
       public_book_id: "public-book-1",
     },
+    posts: [
+      {
+        id: "forum-post-1",
+        thread_type: "novel",
+        status: "open",
+        headline: "Looking for sharp beta readers for an ash-storm fantasy.",
+        body: "I need readers who can flag pacing drift, trust weak scenes, and tell me where momentum slips before the midpoint.",
+        title: "Sky of Ash",
+        genre: "Epic Fantasy",
+        work_type: "novel",
+        book_id: "book-1",
+        comment_count: 2,
+        interest_count: 3,
+        like_count: 6,
+        dislike_count: 0,
+        created_at: "2026-05-14T08:00:00Z",
+        updated_at: "2026-05-14T12:00:00Z",
+      },
+      {
+        id: "forum-post-3",
+        thread_type: "novel",
+        status: "closed",
+        headline: "Closed thread for revision-round readers.",
+        body: "This beta round is wrapped, but I am keeping the notes visible for future readers.",
+        title: "Sky of Ash",
+        genre: "Epic Fantasy",
+        work_type: "novel",
+        book_id: "book-1",
+        comment_count: 1,
+        interest_count: 0,
+        like_count: 1,
+        dislike_count: 0,
+        created_at: "2026-05-10T08:00:00Z",
+        updated_at: "2026-05-11T10:00:00Z",
+      },
+    ],
+    comments: [
+      {
+        id: "forum-comment-4",
+        post_id: "forum-post-2",
+        thread_type: "general",
+        post_status: "open",
+        post_headline: "How do you keep second acts from flattening out?",
+        post_title: null,
+        book_id: null,
+        body: "I usually tighten the promise of the midpoint so every scene is either earning or delaying that turn.",
+        like_count: 7,
+        dislike_count: 1,
+        created_at: "2026-05-14T11:00:00Z",
+        updated_at: "2026-05-14T11:00:00Z",
+      },
+    ],
     created_at: "2026-04-01T09:00:00Z",
   },
 }
@@ -200,6 +300,7 @@ const publicBooks = [
     status: "ready",
     total_chapters: 1,
     copyright_warning: false,
+    active_forum_post_id: "forum-post-1",
     created_at: "2026-05-14T08:00:00Z",
   },
 ]
@@ -2252,6 +2353,58 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
       return json(route, { items: publicForumPosts, total: publicForumPosts.length, page: 1, page_size: 20, has_more: false })
     }
 
+    if (path === "/api/v1/public/forum/my-posts" && method === "GET") {
+      return json(route, publicForumPosts.filter((post) => post.author_user_id === "user-1"))
+    }
+
+    if (path === "/api/v1/public/forum/posts" && method === "POST") {
+      const payload = route.request().postDataJSON() as {
+        thread_type?: "novel" | "general"
+        book_id?: string | null
+        headline?: string
+        body?: string
+        desired_beta_reader_count?: number | null
+        allow_contact_requests?: boolean
+      } | null
+      const threadType = payload?.thread_type ?? "novel"
+      if (threadType === "novel" && payload?.book_id === "book-1" && publicForumPosts.some((post) => post.thread_type === "novel" && post.book_id === "book-1" && post.status === "open")) {
+        return route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ detail: "This manuscript already has a beta forum post. Update it instead." }) })
+      }
+      const created = {
+        id: `forum-post-${publicForumPosts.length + 1}`,
+        thread_type: threadType,
+        book_id: threadType === "novel" ? (payload?.book_id ?? "book-1") : null,
+        author_user_id: "user-1",
+        author_username: "author",
+        author_reputation_score: 18,
+        author_trust_level: "Trusted",
+        title: threadType === "novel" ? "Sky of Ash" : null,
+        author: threadType === "novel" ? "M. Vale" : null,
+        genre: threadType === "novel" ? "Epic Fantasy" : null,
+        work_type: threadType === "novel" ? "novel" : null,
+        headline: payload?.headline ?? "",
+        body: payload?.body ?? "",
+        desired_beta_reader_count: threadType === "novel" ? (payload?.desired_beta_reader_count ?? null) : null,
+        allow_contact_requests: threadType === "novel" ? Boolean(payload?.allow_contact_requests ?? true) : false,
+        status: "open",
+        viewer_interest_status: null,
+        interest_count: 0,
+        comment_count: 0,
+        rating_summary: {
+          average_rating: null,
+          rating_count: 0,
+          positive_rating_count: 0,
+          neutral_rating_count: 0,
+          negative_rating_count: 0,
+        },
+        discoverability_score: threadType === "novel" ? 42 : 8,
+        created_at: "2026-05-14T13:00:00Z",
+        updated_at: "2026-05-14T13:00:00Z",
+      }
+      publicForumPosts = [created, ...publicForumPosts]
+      return json(route, created, 201)
+    }
+
     if (path === "/api/v1/public/books" && method === "GET") {
       return json(route, publicBooks)
     }
@@ -2268,20 +2421,27 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
       return chapter ? json(route, chapter) : notFound(route)
     }
 
-    if (path === "/api/v1/public/forum/posts/forum-post-1" && method === "GET") {
-      return json(route, publicForumPosts[0])
+    const publicForumPostMatch = path.match(/^\/api\/v1\/public\/forum\/posts\/([^/]+)$/)
+    if (publicForumPostMatch && method === "GET") {
+      const post = publicForumPosts.find((item) => item.id === publicForumPostMatch[1])
+      return post ? json(route, post) : notFound(route)
     }
 
-    if (path === "/api/v1/public/forum/posts/forum-post-1/comments" && method === "GET") {
-      return json(route, { items: publicForumComments })
+    const publicForumCommentsMatch = path.match(/^\/api\/v1\/public\/forum\/posts\/([^/]+)\/comments$/)
+    if (publicForumCommentsMatch && method === "GET") {
+      const postId = publicForumCommentsMatch[1]
+      return json(route, { items: publicForumComments.filter((comment) => comment.post_id === postId) })
     }
 
-    if (path === "/api/v1/public/forum/posts/forum-post-1/comments" && method === "POST") {
+    if (publicForumCommentsMatch && method === "POST") {
       const payload = route.request().postDataJSON() as { body?: string } | null
+      const postId = publicForumCommentsMatch[1]
+      const post = publicForumPosts.find((item) => item.id === postId)
+      if (!post) return notFound(route)
       const created = {
         id: `forum-comment-${publicForumComments.length + 1}`,
-        post_id: "forum-post-1",
-        book_id: "book-1",
+        post_id: postId,
+        book_id: post.book_id,
         author_user_id: "user-1",
         author_username: "author",
         author_reputation_score: 18,
@@ -2295,7 +2455,7 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
         updated_at: "2026-05-14T13:00:00Z",
       }
       publicForumComments = [...publicForumComments, created]
-      publicForumPosts[0].comment_count = publicForumComments.length
+      publicForumPosts = publicForumPosts.map((item) => item.id === postId ? { ...item, comment_count: publicForumComments.filter((comment) => comment.post_id === postId).length } : item)
       return json(route, created, 201)
     }
 

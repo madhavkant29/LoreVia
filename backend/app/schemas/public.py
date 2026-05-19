@@ -21,16 +21,26 @@ class PublicBookManualIn(BaseModel):
 class PublicBookOut(BaseModel):
     id: str
     public_kind: str | None = None
+    public_slug: str | None = None
     title: str
     author: str | None = None
     author_username: str | None = None
+    creator_display_name: str | None = None
     genre: str | None = None
     description: str | None = None
     format: str
     work_type: str
     status: str
+    public_status: str = "draft"
+    moderation_status: str = "clean"
+    content_source_type: str = "user_original"
+    source_title: str | None = None
+    source_author: str | None = None
+    source_public_domain_note: str | None = None
+    source_url: str | None = None
     total_chapters: int | None = None
     copyright_warning: bool = False
+    active_forum_post_id: str | None = None
     created_at: datetime | None = None
 
 
@@ -42,6 +52,7 @@ class PublicBookChapterMetaOut(BaseModel):
 
 class PublicBookDetailOut(PublicBookOut):
     chapters: list[PublicBookChapterMetaOut] = Field(default_factory=list)
+    visibility_notice: str | None = None
 
 
 class PublicChapterOut(BaseModel):
@@ -62,12 +73,45 @@ class PublicBookCreateOut(BaseModel):
     visibility: str
     public_kind: str
     approval_status: str
+    public_slug: str | None = None
     message: str | None = None
 
 
 class PublicBookShareBody(BaseModel):
+    public_slug: str | None = Field(default=None, min_length=3, max_length=120)
+    rights_confirmation: bool = False
     confirm_public_share: bool = False
+    content_source_type: str = Field(default="user_original", min_length=4, max_length=32)
     description: str | None = Field(default=None, max_length=2000)
+
+
+class PublicBookListOut(BaseModel):
+    items: list[PublicBookOut]
+    total: int
+    page: int
+    limit: int
+    has_more: bool
+
+
+class ContentReportCreateBody(BaseModel):
+    book_id: uuid.UUID
+    report_type: str = Field(..., min_length=3, max_length=64)
+    reason: str = Field(..., min_length=5, max_length=5000)
+    details: str | None = Field(default=None, max_length=5000)
+    reporter_email: str | None = Field(default=None, max_length=320)
+    copyright_owner_name: str | None = Field(default=None, max_length=255)
+    copyright_work_description: str | None = Field(default=None, max_length=5000)
+    copyright_original_url: str | None = Field(default=None, max_length=2000)
+    reported_content_url: str | None = Field(default=None, max_length=2000)
+
+
+class ContentReportOut(BaseModel):
+    id: str
+    status: str
+    report_type: str
+    reported_book_id: str
+    created_at: datetime
+    message: str | None = None
 
 
 class PublicChapterAppendOut(BaseModel):
@@ -85,7 +129,8 @@ class PublicForumRatingSummaryOut(BaseModel):
 
 
 class PublicForumPostCreateBody(BaseModel):
-    book_id: uuid.UUID
+    thread_type: str = Field(default="novel", min_length=5, max_length=16)
+    book_id: uuid.UUID | None = None
     headline: str = Field(..., min_length=3, max_length=200)
     body: str = Field(..., min_length=20, max_length=5000)
     desired_beta_reader_count: int | None = Field(default=None, ge=1, le=500)
@@ -93,6 +138,7 @@ class PublicForumPostCreateBody(BaseModel):
 
 
 class PublicForumPostUpdateBody(BaseModel):
+    thread_type: str = Field(default="novel", min_length=5, max_length=16)
     headline: str = Field(..., min_length=3, max_length=200)
     body: str = Field(..., min_length=20, max_length=5000)
     desired_beta_reader_count: int | None = Field(default=None, ge=1, le=500)
@@ -102,15 +148,16 @@ class PublicForumPostUpdateBody(BaseModel):
 
 class PublicForumPostOut(BaseModel):
     id: str
-    book_id: str
+    thread_type: str
+    book_id: str | None = None
     author_user_id: str
     author_username: str | None = None
     author_reputation_score: int = 0
     author_trust_level: str
-    title: str
+    title: str | None = None
     author: str | None = None
     genre: str | None = None
-    work_type: str
+    work_type: str | None = None
     headline: str
     body: str
     desired_beta_reader_count: int | None = None
@@ -166,7 +213,7 @@ class PublicForumCommentReactionBody(BaseModel):
 class PublicForumCommentOut(BaseModel):
     id: str
     post_id: str
-    book_id: str
+    book_id: str | None = None
     author_user_id: str
     author_username: str | None = None
     author_reputation_score: int = 0
@@ -195,6 +242,39 @@ class PublicUserProjectOut(BaseModel):
     public_book_id: str | None = None
 
 
+class PublicUserActivityPostOut(BaseModel):
+    id: str
+    thread_type: str
+    status: str
+    headline: str
+    body: str
+    title: str | None = None
+    genre: str | None = None
+    work_type: str | None = None
+    book_id: str | None = None
+    comment_count: int = 0
+    interest_count: int = 0
+    like_count: int = 0
+    dislike_count: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+
+class PublicUserActivityCommentOut(BaseModel):
+    id: str
+    post_id: str
+    thread_type: str
+    post_status: str
+    post_headline: str
+    post_title: str | None = None
+    book_id: str | None = None
+    body: str
+    like_count: int = 0
+    dislike_count: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+
 class PublicUserProfileOut(BaseModel):
     user_id: str
     username: str
@@ -205,4 +285,6 @@ class PublicUserProfileOut(BaseModel):
     forum_post_count: int = 0
     forum_comment_count: int = 0
     current_project: PublicUserProjectOut | None = None
+    posts: list[PublicUserActivityPostOut] = Field(default_factory=list)
+    comments: list[PublicUserActivityCommentOut] = Field(default_factory=list)
     created_at: datetime

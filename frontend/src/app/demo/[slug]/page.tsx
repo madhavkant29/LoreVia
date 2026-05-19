@@ -11,7 +11,13 @@ import {
   getBlogArticleBySlug,
   getDemoPageBySlug,
 } from "@/lib/content"
-import { DEFAULT_OG_IMAGE, SITE_NAME, buildBreadcrumbJsonLd, toAbsoluteUrl } from "@/lib/seo"
+import {
+  DEFAULT_OG_IMAGE,
+  SITE_NAME,
+  buildArticleJsonLd,
+  buildBreadcrumbJsonLd,
+  toAbsoluteUrl,
+} from "@/lib/seo"
 
 export function generateStaticParams() {
   return demoPages.map((demo) => ({ slug: demo.slug }))
@@ -66,19 +72,13 @@ export default async function DemoPage({ params }: { params: Promise<{ slug: str
   const article = getBlogArticleBySlug(demo.articleSlug)
   const relatedAnswers = getAnswerPagesBySlugs(demo.answerSlugs)
 
-  const jsonLd = {
-    "@context": "https://schema.org",
-    "@type": "Article",
-    headline: demo.title,
+  const jsonLd = buildArticleJsonLd({
+    title: demo.title,
     description: demo.description,
+    path: `/demo/${demo.slug}`,
     datePublished: demo.publishedAt,
-    dateModified: demo.publishedAt,
-    author: {
-      "@type": "Organization",
-      name: SITE_NAME,
-    },
-    mainEntityOfPage: toAbsoluteUrl(`/demo/${demo.slug}`),
-  }
+    about: [demo.sourceWork, demo.sourceAuthor, "fiction analysis demo"],
+  })
   const breadcrumbJsonLd = buildBreadcrumbJsonLd([
     { name: "Home", path: "/" },
     { name: "Demo", path: "/demo" },

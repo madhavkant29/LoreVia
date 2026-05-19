@@ -263,6 +263,43 @@ async def rate_limit_upload(
     )
 
 
+async def rate_limit_public_publish(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await _user_window_limit(
+        db,
+        current_user.id,
+        "public_publish",
+        field="public_publish_per_hour",
+        default=6,
+        window=3600,
+        message="Public publishing rate limit exceeded. Please wait before trying again.",
+    )
+
+
+async def rate_limit_public_unpublish(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await _user_window_limit(
+        db,
+        current_user.id,
+        "public_unpublish",
+        field="public_unpublish_per_hour",
+        default=12,
+        window=3600,
+        message="Public unpublish rate limit exceeded. Please wait before trying again.",
+    )
+
+
+async def rate_limit_public_report(request: Request):
+    identifier = _client_identifier(request)
+    ok = await _window(key_ratelimit(f"public-report:{identifier}", "report"), 8, 3600)
+    if not ok:
+        raise HTTPException(429, "Report rate limit exceeded. Please wait before sending another report.")
+
+
 async def rate_limit_manuscript_import(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),

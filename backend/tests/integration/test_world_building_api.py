@@ -44,6 +44,7 @@ async def test_world_building_documents_gap_detection_and_notes(client, db, monk
     monkeypatch.setattr("app.core.storage.upload_binary", fake_upload_binary)
     monkeypatch.setattr("app.core.storage.upload_text", fake_upload_text)
     monkeypatch.setattr("app.core.storage.download_book", fake_download_book)
+    monkeypatch.setattr("app.services.chapter_recovery_service.download_book", fake_download_book)
     monkeypatch.setattr("app.utils.world_building_utils.upload_binary", fake_upload_binary)
     monkeypatch.setattr("app.utils.world_building_utils.download_book", fake_download_book)
     monkeypatch.setattr("app.api.v1.routes.reader.download_book", fake_download_book)
@@ -211,6 +212,7 @@ async def test_series_world_building_analysis_checks_across_member_books(client,
 
     monkeypatch.setattr("app.core.storage.upload_binary", fake_upload_binary)
     monkeypatch.setattr("app.core.storage.download_book", fake_download_book)
+    monkeypatch.setattr("app.services.chapter_recovery_service.download_book", fake_download_book)
     monkeypatch.setattr("app.utils.world_building_utils.upload_binary", fake_upload_binary)
     monkeypatch.setattr("app.utils.world_building_utils.download_book", fake_download_book)
     monkeypatch.setattr("app.api.v1.routes.world_building.download_book", fake_download_book)

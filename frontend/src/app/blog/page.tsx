@@ -55,6 +55,12 @@ export default function BlogPage() {
     description:
       "Long-form LoreVia guides for fiction authors on character tracking, continuity, story bibles, writing software, and revision workflows.",
     path: "/blog",
+    about: [
+      "fiction author guides",
+      "character tracking",
+      "continuity checking",
+      "revision workflow",
+    ],
   })
 
   return (

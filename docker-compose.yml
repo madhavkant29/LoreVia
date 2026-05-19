@@ -29,7 +29,7 @@ services:
       context: .
       dockerfile: backend/Dockerfile.api
     env_file:
-      - ./ops/env/backend.env
+      - ./backend/.env
     restart: unless-stopped
     expose:
       - "8000"
@@ -55,7 +55,7 @@ services:
       context: .
       dockerfile: backend/Dockerfile.worker
     env_file:
-      - ./ops/env/backend.env
+      - ./backend/.env
     command: sh -c 'celery -A app.workers.celery_app worker -n worker-extraction@%h -Q extraction,extraction_priority --loglevel=info -c $${EXTRACTION_CONCURRENCY:-1}'
     restart: unless-stopped
     healthcheck:
@@ -75,7 +75,7 @@ services:
       context: .
       dockerfile: backend/Dockerfile.worker
     env_file:
-      - ./ops/env/backend.env
+      - ./backend/.env
     command: sh -c 'celery -A app.workers.celery_app worker -n worker-analysis@%h -Q analysis,analysis_priority,embedding --loglevel=info -c $${ANALYSIS_CONCURRENCY:-1}'
     restart: unless-stopped
     healthcheck:
@@ -95,7 +95,7 @@ services:
       context: .
       dockerfile: backend/Dockerfile.worker
     env_file:
-      - ./ops/env/backend.env
+      - ./backend/.env
     command: sh -c 'celery -A app.workers.celery_app worker -n worker-intelligence@%h -Q intelligence --loglevel=info -c $${INTELLIGENCE_CONCURRENCY:-1}'
     restart: unless-stopped
     healthcheck:
@@ -115,7 +115,7 @@ services:
       context: .
       dockerfile: backend/Dockerfile.worker
     env_file:
-      - ./ops/env/backend.env
+      - ./backend/.env
     command: celery -A app.workers.celery_app beat --loglevel=info --schedule /tmp/celerybeat-schedule
     restart: unless-stopped
     healthcheck:
@@ -141,7 +141,7 @@ services:
       context: .
       dockerfile: backend/Dockerfile.worker
     env_file:
-      - ./ops/env/backend.env
+      - ./backend/.env
     command: celery -A app.workers.celery_app flower --port=5555
     restart: unless-stopped
     ports:

@@ -1,5 +1,6 @@
 import io
 import uuid
+import zipfile
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
@@ -49,6 +50,44 @@ async def _register_user(client, email: str) -> tuple[dict[str, str], uuid.UUID]
     return {"Cookie": f"lorevia_access_token={token}"}, uuid.UUID(me_response.json()["id"])
 
 
+def _minimal_docx_bytes(text: str = "Author Draft") -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(
+            "[Content_Types].xml",
+            (
+                '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+                '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+                '<Default Extension="xml" ContentType="application/xml"/>'
+                '<Override PartName="/word/document.xml" '
+                'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
+                "</Types>"
+            ),
+        )
+        archive.writestr(
+            "_rels/.rels",
+            (
+                '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+                '<Relationship Id="rId1" '
+                'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" '
+                'Target="word/document.xml"/>'
+                "</Relationships>"
+            ),
+        )
+        archive.writestr(
+            "word/document.xml",
+            (
+                '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+                f"<w:body><w:p><w:r><w:t>{text}</w:t></w:r></w:p></w:body>"
+                "</w:document>"
+            ),
+        )
+    return buffer.getvalue()
+
+
 @pytest.mark.asyncio
 async def test_character_routes_do_not_leak_across_users(client, db):
     owner_headers, owner_id = await _register_user(client, "owner-access@lorevia.app")
@@ -85,6 +124,9 @@ async def test_character_routes_do_not_leak_across_users(client, db):
 
     owner_visible = await client.get(f"/api/v1/characters/{character.id}", headers=owner_headers)
     assert owner_visible.status_code == 200
+    owner_payload = owner_visible.json()
+    assert owner_payload["analysis_metadata"]["grounding_passage_count"] == 0
+    assert owner_payload["analysis_metadata"]["confidence_band"] == "low"
 
 
 @pytest.mark.asyncio
@@ -270,7 +312,13 @@ async def test_author_can_upload_author_mode_book(client, db):
     response = await client.post(
         "/api/v1/books/upload",
         headers=headers,
-        files={"file": ("draft.docx", b"fake-docx-payload", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+        files={
+            "file": (
+                "draft.docx",
+                _minimal_docx_bytes(),
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+        },
         data={
             "title": "Author Draft",
             "mode": "author",

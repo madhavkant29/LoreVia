@@ -1,11 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
+  assertPaddleEnvironment,
   buildPaddleCheckoutSettings,
   getBillingConfirmationToken,
   getBillingConfirmationTokenFromCheckoutUrl,
+  getAbsoluteCheckoutSuccessUrl,
   getPaddleClientToken,
   getPaddleEnvironment,
+  getPublicAppUrl,
   getPaddleTransactionId,
   getTransactionIdFromCheckoutUrl,
 } from "./paddle"
@@ -39,6 +42,12 @@ describe("paddle billing helpers", () => {
     expect(getPaddleEnvironment("pdl_invalid")).toBeNull()
   })
 
+  it("throws for an invalid token in the strict environment helper", () => {
+    expect(() => assertPaddleEnvironment("pdl_invalid")).toThrow(
+      "Invalid Paddle client-side token. Expected a token starting with test_ or live_."
+    )
+  })
+
   it("extracts the transaction id from the Paddle query string", () => {
     const params = new URLSearchParams("_ptxn=txn_123")
 
@@ -65,12 +74,32 @@ describe("paddle billing helpers", () => {
     expect(getBillingConfirmationTokenFromCheckoutUrl("https://getlorevia.com/checkout?_ptxn=txn_456&lvct=token_456")).toBe("token_456")
   })
 
+  it("returns the normalized public app url", () => {
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://getlorevia.com/")
+
+    expect(getPublicAppUrl()).toBe("https://getlorevia.com")
+  })
+
+  it("builds an absolute checkout success url from NEXT_PUBLIC_APP_URL", () => {
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://getlorevia.com/")
+
+    expect(getAbsoluteCheckoutSuccessUrl()).toBe("https://getlorevia.com/checkout/success")
+  })
+
   it("builds one-page overlay checkout settings with a success url", () => {
     const settings = buildPaddleCheckoutSettings("https://getlorevia.com/checkout/success")
 
     expect(settings.displayMode).toBe("overlay")
     expect(settings.variant).toBe("one-page")
     expect(settings.allowLogout).toBe(false)
+    expect(settings.successUrl).toBe("https://getlorevia.com/checkout/success")
+  })
+
+  it("defaults the checkout success url to the public app url", () => {
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://getlorevia.com")
+
+    const settings = buildPaddleCheckoutSettings()
+
     expect(settings.successUrl).toBe("https://getlorevia.com/checkout/success")
   })
 })

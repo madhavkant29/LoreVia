@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+import hashlib
+import re
 import uuid
+from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException
 from sqlalchemy import Numeric, and_, case, cast, func, literal, literal_column, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.redis import cache_incr, key_public_forum_cache_version
+from app.core.redis import cache_del, cache_incr, key_public_books, key_public_forum_cache_version
 from app.models.beta_read import BetaReadAssignment
 from app.models.book import Book, BookForumComment, BookForumCommentReaction, BookForumInterest, BookForumPost, Chapter
 from app.models.intelligence import Notification
+from app.models.moderation import ContentReport, CreatorStrike, ModerationAction
 from app.models.user import User
 from app.schemas.public import (
     PublicForumCommentCreateBody,
@@ -22,6 +26,8 @@ from app.schemas.public import (
     PublicForumPostOut,
     PublicForumPostUpdateBody,
     PublicForumRatingSummaryOut,
+    PublicUserActivityCommentOut,
+    PublicUserActivityPostOut,
     PublicUserProfileOut,
     PublicUserProjectOut,
 )
@@ -31,6 +37,9 @@ from app.utils.beta_read_utils import NEUTRAL_RATING_MIN, POSITIVE_RATING_MIN, R
 FORUM_POST_OPEN = "open"
 FORUM_POST_CLOSED = "closed"
 VALID_FORUM_POST_STATUSES = {FORUM_POST_OPEN, FORUM_POST_CLOSED}
+FORUM_THREAD_TYPE_NOVEL = "novel"
+FORUM_THREAD_TYPE_GENERAL = "general"
+VALID_FORUM_THREAD_TYPES = {FORUM_THREAD_TYPE_NOVEL, FORUM_THREAD_TYPE_GENERAL}
 FORUM_COMMENT_REACTION_LIKE = "like"
 FORUM_COMMENT_REACTION_DISLIKE = "dislike"
 FORUM_COMMENT_REACTION_CLEAR = "clear"
@@ -61,6 +70,246 @@ VALID_PUBLIC_SHARE_STATUSES = {
 }
 DEFAULT_PUBLIC_FORUM_PAGE_SIZE = 20
 MAX_PUBLIC_FORUM_PAGE_SIZE = 100
+GENERAL_PUBLIC_FORUM_DAILY_POST_LIMIT = 5
+PUBLIC_STATUS_DRAFT = "draft"
+PUBLIC_STATUS_PENDING_REVIEW = "pending_review"
+PUBLIC_STATUS_PUBLISHED = "published"
+PUBLIC_STATUS_HIDDEN = "hidden"
+PUBLIC_STATUS_REMOVED = "removed"
+MODERATION_STATUS_CLEAN = "clean"
+MODERATION_STATUS_REPORTED = "reported"
+MODERATION_STATUS_UNDER_REVIEW = "under_review"
+MODERATION_STATUS_HIDDEN = "hidden"
+MODERATION_STATUS_REMOVED = "removed"
+CONTENT_SOURCE_TYPE_USER_ORIGINAL = "user_original"
+CONTENT_SOURCE_TYPE_PUBLIC_DOMAIN = "public_domain"
+CONTENT_SOURCE_TYPE_LICENSED = "licensed"
+CONTENT_SOURCE_TYPE_ADMIN_SEEDED = "admin_seeded"
+REPORT_TYPE_COPYRIGHT = "copyright"
+REPORT_TYPE_PLAGIARISM = "plagiarism"
+REPORT_TYPE_IMPERSONATION = "impersonation"
+REPORT_TYPE_SPAM = "spam"
+REPORT_TYPE_ILLEGAL_CONTENT = "illegal_content"
+REPORT_TYPE_HARASSMENT = "harassment"
+REPORT_TYPE_OTHER = "other"
+REPORT_STATUS_OPEN = "open"
+REPORT_STATUS_TRIAGED = "triaged"
+REPORT_STATUS_CONTENT_HIDDEN = "content_hidden"
+REPORT_STATUS_REJECTED = "rejected"
+REPORT_STATUS_RESOLVED = "resolved"
+STRIKE_SEVERITY_LOW = "low"
+STRIKE_SEVERITY_MEDIUM = "medium"
+STRIKE_SEVERITY_HIGH = "high"
+STRIKE_SEVERITY_CRITICAL = "critical"
+VALID_PUBLIC_STATUSES = {
+    PUBLIC_STATUS_DRAFT,
+    PUBLIC_STATUS_PENDING_REVIEW,
+    PUBLIC_STATUS_PUBLISHED,
+    PUBLIC_STATUS_HIDDEN,
+    PUBLIC_STATUS_REMOVED,
+}
+VALID_MODERATION_STATUSES = {
+    MODERATION_STATUS_CLEAN,
+    MODERATION_STATUS_REPORTED,
+    MODERATION_STATUS_UNDER_REVIEW,
+    MODERATION_STATUS_HIDDEN,
+    MODERATION_STATUS_REMOVED,
+}
+VALID_CONTENT_SOURCE_TYPES = {
+    CONTENT_SOURCE_TYPE_USER_ORIGINAL,
+    CONTENT_SOURCE_TYPE_PUBLIC_DOMAIN,
+    CONTENT_SOURCE_TYPE_LICENSED,
+    CONTENT_SOURCE_TYPE_ADMIN_SEEDED,
+}
+VALID_REPORT_TYPES = {
+    REPORT_TYPE_COPYRIGHT,
+    REPORT_TYPE_PLAGIARISM,
+    REPORT_TYPE_IMPERSONATION,
+    REPORT_TYPE_SPAM,
+    REPORT_TYPE_ILLEGAL_CONTENT,
+    REPORT_TYPE_HARASSMENT,
+    REPORT_TYPE_OTHER,
+}
+VALID_REPORT_STATUSES = {
+    REPORT_STATUS_OPEN,
+    REPORT_STATUS_TRIAGED,
+    REPORT_STATUS_CONTENT_HIDDEN,
+    REPORT_STATUS_REJECTED,
+    REPORT_STATUS_RESOLVED,
+}
+SERIOUS_STRIKE_SEVERITIES = {STRIKE_SEVERITY_HIGH, STRIKE_SEVERITY_CRITICAL}
+PUBLIC_PUBLISH_LIMIT_NEW_USER = 1
+PUBLIC_PUBLISH_LIMIT_STANDARD = 3
+PUBLIC_SLUG_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+
+
+def is_admin_user(user: User | None) -> bool:
+    return bool(user is not None and str(getattr(user, "tier", "") or "").strip().lower() == "admin")
+
+
+def normalize_public_slug(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", (value or "").strip().lower()).strip("-")
+    slug = re.sub(r"-{2,}", "-", slug)
+    if len(slug) < 3 or len(slug) > 120 or not PUBLIC_SLUG_PATTERN.fullmatch(slug):
+        raise HTTPException(400, "Public slug must be 3-120 characters and use lowercase letters, numbers, or hyphens.")
+    return slug
+
+
+def hash_text(value: str | None) -> str | None:
+    normalized = (value or "").strip()
+    if not normalized:
+        return None
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def resolve_optional_user(user: User | None) -> User | None:
+    if user is None:
+        return None
+    return user if getattr(user, "id", None) is not None else None
+
+
+def can_view_public_book(book: Book | None) -> bool:
+    if book is None or getattr(book, "hidden_at", None) is not None or getattr(book, "archived_at", None) is not None:
+        return False
+    if not bool(getattr(book, "is_public", False)):
+        return False
+
+    public_status = str(getattr(book, "public_status", "") or "").strip().lower()
+    moderation_status = str(getattr(book, "moderation_status", "") or "").strip().lower()
+    if public_status or moderation_status:
+        return public_status == PUBLIC_STATUS_PUBLISHED and (
+            not moderation_status or moderation_status == MODERATION_STATUS_CLEAN
+        )
+
+    # Backward-compatible fallback for older public records created before the
+    # moderation-state columns existed.
+    return is_public_demo_book(book) or is_approved_user_public_share_book(book)
+
+
+def can_owner_or_admin_view_hidden_book(user: User | None, book: Book | None) -> bool:
+    if user is None or book is None:
+        return False
+    owner_user_id = getattr(book, "user_id", None)
+    viewer_user_id = getattr(user, "id", None)
+    if owner_user_id is None or viewer_user_id is None:
+        return False
+    return is_admin_user(user) or owner_user_id == viewer_user_id
+
+
+def public_visibility_notice(book: Book | None) -> str | None:
+    if book is None:
+        return None
+    public_status = str(getattr(book, "public_status", "") or "").strip().lower()
+    moderation_status = str(getattr(book, "moderation_status", "") or "").strip().lower()
+    if public_status in {PUBLIC_STATUS_HIDDEN, PUBLIC_STATUS_REMOVED} or moderation_status in {
+        MODERATION_STATUS_HIDDEN,
+        MODERATION_STATUS_REMOVED,
+        MODERATION_STATUS_UNDER_REVIEW,
+        MODERATION_STATUS_REPORTED,
+    }:
+        return "This book is currently hidden from public view due to a policy or copyright report."
+    if public_status == PUBLIC_STATUS_PENDING_REVIEW:
+        return "This book is waiting for review before it can appear publicly."
+    return None
+
+
+async def active_serious_strike_count(db: AsyncSession, *, user_id: uuid.UUID) -> int:
+    now = datetime.now(UTC)
+    result = await db.execute(
+        select(func.count(CreatorStrike.id)).where(
+            CreatorStrike.user_id == user_id,
+            CreatorStrike.is_active.is_(True),
+            CreatorStrike.severity.in_(list(SERIOUS_STRIKE_SEVERITIES)),
+            or_(CreatorStrike.expires_at.is_(None), CreatorStrike.expires_at > now),
+        )
+    )
+    return int(result.scalar_one() or 0)
+
+
+async def public_publish_limit_for_user(db: AsyncSession, *, user: User) -> int:
+    if is_admin_user(user):
+        return PUBLIC_PUBLISH_LIMIT_STANDARD
+    serious_strikes = await active_serious_strike_count(db, user_id=user.id)
+    if serious_strikes >= 3:
+        raise HTTPException(403, "Public publishing is disabled for this account due to repeated policy violations.")
+    if serious_strikes >= 2:
+        raise HTTPException(403, "Public publishing is temporarily disabled for this account pending review.")
+    user_book_count = int(
+        (
+            await db.execute(
+                select(func.count(Book.id)).where(
+                    Book.user_id == user.id,
+                    Book.mode == "author",
+                )
+            )
+        ).scalar_one()
+        or 0
+    )
+    return PUBLIC_PUBLISH_LIMIT_NEW_USER if user_book_count <= 1 else PUBLIC_PUBLISH_LIMIT_STANDARD
+
+
+async def enforce_daily_public_publish_limit(db: AsyncSession, *, user: User) -> None:
+    limit = await public_publish_limit_for_user(db, user=user)
+    since = datetime.now(UTC) - timedelta(days=1)
+    published_count = int(
+        (
+            await db.execute(
+                select(func.count(Book.id)).where(
+                    Book.user_id == user.id,
+                    Book.public_upload_counted_at.is_not(None),
+                    Book.public_upload_counted_at >= since,
+                )
+            )
+        ).scalar_one()
+        or 0
+    )
+    if published_count >= limit:
+        raise HTTPException(429, f"Daily public publishing limit reached. You can publish up to {limit} public book(s) per day.")
+
+
+def ensure_content_source_allowed_for_user(user: User, content_source_type: str) -> str:
+    normalized = str(content_source_type or "").strip().lower()
+    if normalized not in VALID_CONTENT_SOURCE_TYPES:
+        raise HTTPException(400, "Invalid content source type.")
+    if normalized != CONTENT_SOURCE_TYPE_USER_ORIGINAL and not is_admin_user(user):
+        raise HTTPException(403, "Only admins can publish public-domain, licensed, or admin-seeded books.")
+    return normalized
+
+
+def ensure_report_type_supported(report_type: str) -> str:
+    normalized = str(report_type or "").strip().lower()
+    if normalized not in VALID_REPORT_TYPES:
+        raise HTTPException(400, "Invalid report type.")
+    return normalized
+
+
+async def add_moderation_action(
+    db: AsyncSession,
+    *,
+    action_type: str,
+    actor_user_id: uuid.UUID | None = None,
+    target_user_id: uuid.UUID | None = None,
+    book_id: uuid.UUID | None = None,
+    report_id: uuid.UUID | None = None,
+    previous_status: str | None = None,
+    new_status: str | None = None,
+    reason: str | None = None,
+    metadata: dict | None = None,
+) -> ModerationAction:
+    action = ModerationAction(
+        actor_user_id=actor_user_id,
+        target_user_id=target_user_id,
+        book_id=book_id,
+        report_id=report_id,
+        action_type=action_type,
+        previous_status=previous_status,
+        new_status=new_status,
+        reason=reason,
+        metadata_json=metadata or {},
+    )
+    db.add(action)
+    await db.flush()
+    return action
 
 
 def has_public_authoring_access(user: User | None) -> bool:
@@ -182,6 +431,13 @@ def _normalize_forum_status(value: str | None) -> str:
     return status
 
 
+def _normalize_forum_thread_type(value: str | None) -> str:
+    thread_type = str(value or FORUM_THREAD_TYPE_NOVEL).strip().lower()
+    if thread_type not in VALID_FORUM_THREAD_TYPES:
+        raise HTTPException(400, "Invalid forum thread type.")
+    return thread_type
+
+
 def _normalize_forum_comment_reaction(value: str | None) -> str:
     reaction = str(value or "").strip().lower()
     if reaction not in VALID_FORUM_COMMENT_REACTIONS:
@@ -212,7 +468,8 @@ def _reaction_delta(old_reaction: str | None, new_reaction: str | None) -> tuple
 def _book_is_forum_eligible(book: Book | None) -> bool:
     if book is None:
         return False
-    if str(getattr(book, "mode", "") or "").strip().lower() != "author":
+    raw_mode = getattr(book, "mode", None)
+    if raw_mode is not None and str(raw_mode or "").strip().lower() != "author":
         return False
     if getattr(book, "hidden_at", None) is not None or getattr(book, "archived_at", None) is not None:
         return False
@@ -233,6 +490,23 @@ def _book_is_forum_eligible_expression():
             ),
         ),
     )
+
+
+def _forum_book_visibility_expression():
+    return and_(
+        Book.hidden_at.is_(None),
+        Book.archived_at.is_(None),
+        Book.mode == "author",
+        _book_is_forum_eligible_expression(),
+    )
+
+
+def _forum_post_thread_type(post: BookForumPost | None) -> str:
+    return _normalize_forum_thread_type(getattr(post, "thread_type", FORUM_THREAD_TYPE_NOVEL))
+
+
+def _is_general_forum_post(post: BookForumPost | None) -> bool:
+    return _forum_post_thread_type(post) == FORUM_THREAD_TYPE_GENERAL
 
 
 async def _get_forum_eligible_owned_book(
@@ -256,10 +530,12 @@ async def _get_forum_post(db: AsyncSession, *, post_id: uuid.UUID) -> BookForumP
     return post
 
 
-async def _get_visible_forum_post(db: AsyncSession, *, post_id: uuid.UUID) -> tuple[BookForumPost, Book]:
+async def _get_visible_forum_post(db: AsyncSession, *, post_id: uuid.UUID) -> tuple[BookForumPost, Book | None]:
     post = await _get_forum_post(db, post_id=post_id)
     if post.status != FORUM_POST_OPEN:
         raise HTTPException(404, "Forum post not found.")
+    if _is_general_forum_post(post):
+        return post, None
     book = await db.get(Book, post.book_id)
     if not _book_is_forum_eligible(book):
         raise HTTPException(404, "Forum post not found.")
@@ -271,18 +547,39 @@ async def _get_author_accessible_forum_post(
     *,
     post_id: uuid.UUID,
     author_user_id: uuid.UUID,
-) -> tuple[BookForumPost, Book]:
+) -> tuple[BookForumPost, Book | None]:
     post = await _get_forum_post(db, post_id=post_id)
     if post.author_user_id != author_user_id:
         raise HTTPException(404, "Forum post not found.")
+    if _is_general_forum_post(post):
+        return post, None
     book = await db.get(Book, post.book_id)
     if not _book_is_forum_eligible(book):
         raise HTTPException(404, "Forum post not found.")
     return post, book
 
 
+async def enforce_daily_general_forum_post_limit(db: AsyncSession, *, user_id: uuid.UUID) -> None:
+    since = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+    count = int(
+        (
+            await db.execute(
+                select(func.count(BookForumPost.id)).where(
+                    BookForumPost.author_user_id == user_id,
+                    BookForumPost.thread_type == FORUM_THREAD_TYPE_GENERAL,
+                    BookForumPost.created_at >= since,
+                )
+            )
+        ).scalar_one()
+        or 0
+    )
+    if count >= GENERAL_PUBLIC_FORUM_DAILY_POST_LIMIT:
+        raise HTTPException(429, "You have reached today's limit for general public discussions.")
+
+
 async def _invalidate_public_forum_cache() -> None:
     await cache_incr(key_public_forum_cache_version(), default=1)
+    await cache_del(key_public_books())
 
 
 def _normalize_public_forum_pagination(page: int, page_size: int) -> tuple[int, int]:
@@ -293,11 +590,27 @@ def _normalize_public_forum_pagination(page: int, page_size: int) -> tuple[int, 
 
 def _public_forum_visibility_filters() -> tuple:
     return (
-        BookForumPost.status == FORUM_POST_OPEN,
-        Book.hidden_at.is_(None),
-        Book.archived_at.is_(None),
-        Book.mode == "author",
-        _book_is_forum_eligible_expression(),
+        or_(
+            and_(
+                BookForumPost.thread_type == FORUM_THREAD_TYPE_GENERAL,
+                BookForumPost.status == FORUM_POST_OPEN,
+            ),
+            and_(
+                BookForumPost.thread_type == FORUM_THREAD_TYPE_NOVEL,
+                BookForumPost.status == FORUM_POST_OPEN,
+                _forum_book_visibility_expression(),
+            ),
+        ),
+    )
+
+
+def _public_profile_forum_visibility_expression():
+    return or_(
+        BookForumPost.thread_type == FORUM_THREAD_TYPE_GENERAL,
+        and_(
+            BookForumPost.thread_type == FORUM_THREAD_TYPE_NOVEL,
+            _forum_book_visibility_expression(),
+        ),
     )
 
 
@@ -448,7 +761,7 @@ def _public_forum_post_select_statement(
             ).label("viewer_interest_status"),
             discoverability_score,
         )
-        .join(Book, Book.id == BookForumPost.book_id)
+        .outerjoin(Book, Book.id == BookForumPost.book_id)
         .join(User, User.id == BookForumPost.author_user_id)
         .outerjoin(comment_subquery, comment_subquery.c.post_id == BookForumPost.id)
         .outerjoin(interest_subquery, interest_subquery.c.post_id == BookForumPost.id)
@@ -492,17 +805,20 @@ def _author_forum_post_select_statement(
             literal(None).label("viewer_interest_status"),
             discoverability_score,
         )
-        .join(Book, Book.id == BookForumPost.book_id)
+        .outerjoin(Book, Book.id == BookForumPost.book_id)
         .join(User, User.id == BookForumPost.author_user_id)
         .outerjoin(comment_subquery, comment_subquery.c.post_id == BookForumPost.id)
         .outerjoin(interest_subquery, interest_subquery.c.post_id == BookForumPost.id)
         .outerjoin(rating_subquery, rating_subquery.c.book_id == BookForumPost.book_id)
         .where(
             BookForumPost.author_user_id == author_user_id,
-            Book.hidden_at.is_(None),
-            Book.archived_at.is_(None),
-            Book.mode == "author",
-            _book_is_forum_eligible_expression(),
+            or_(
+                BookForumPost.thread_type == FORUM_THREAD_TYPE_GENERAL,
+                and_(
+                    BookForumPost.thread_type == FORUM_THREAD_TYPE_NOVEL,
+                    _forum_book_visibility_expression(),
+                ),
+            ),
         )
     )
     if post_id is not None:
@@ -591,11 +907,9 @@ async def _build_public_user_project_out(db: AsyncSession, *, user_id: uuid.UUID
             .join(Book, Book.id == BookForumPost.book_id)
             .where(
                 BookForumPost.author_user_id == user_id,
+                BookForumPost.thread_type == FORUM_THREAD_TYPE_NOVEL,
                 BookForumPost.status == FORUM_POST_OPEN,
-                Book.hidden_at.is_(None),
-                Book.archived_at.is_(None),
-                Book.mode == "author",
-                _book_is_forum_eligible_expression(),
+                _forum_book_visibility_expression(),
             )
             .order_by(BookForumPost.last_activity_at.desc(), BookForumPost.updated_at.desc())
             .limit(1)
@@ -646,14 +960,10 @@ async def public_profile_activity_counts(db: AsyncSession, *, user_id: uuid.UUID
     public_forum_post_count = (
         await db.execute(
             select(func.count(BookForumPost.id))
-            .join(Book, Book.id == BookForumPost.book_id)
+            .outerjoin(Book, Book.id == BookForumPost.book_id)
             .where(
                 BookForumPost.author_user_id == user_id,
-                BookForumPost.status == FORUM_POST_OPEN,
-                Book.hidden_at.is_(None),
-                Book.archived_at.is_(None),
-                Book.mode == "author",
-                _book_is_forum_eligible_expression(),
+                _public_profile_forum_visibility_expression(),
             )
         )
     ).scalar_one()
@@ -661,14 +971,10 @@ async def public_profile_activity_counts(db: AsyncSession, *, user_id: uuid.UUID
         await db.execute(
             select(func.count(BookForumComment.id))
             .join(BookForumPost, BookForumPost.id == BookForumComment.post_id)
-            .join(Book, Book.id == BookForumComment.book_id)
+            .outerjoin(Book, Book.id == BookForumComment.book_id)
             .where(
                 BookForumComment.author_user_id == user_id,
-                BookForumPost.status == FORUM_POST_OPEN,
-                Book.hidden_at.is_(None),
-                Book.archived_at.is_(None),
-                Book.mode == "author",
-                _book_is_forum_eligible_expression(),
+                _public_profile_forum_visibility_expression(),
             )
         )
     ).scalar_one()
@@ -693,12 +999,101 @@ async def _user_has_public_profile_presence(db: AsyncSession, *, user_id: uuid.U
     return any(await public_profile_activity_counts(db, user_id=user_id))
 
 
+async def list_public_user_activity_posts(db: AsyncSession, *, user_id: uuid.UUID) -> list[PublicUserActivityPostOut]:
+    comment_subquery = _public_forum_comment_count_subquery()
+    interest_subquery = _public_forum_interest_count_subquery()
+    reaction_subquery = (
+        select(
+            BookForumComment.post_id.label("post_id"),
+            func.coalesce(func.sum(BookForumComment.like_count), 0).label("like_count"),
+            func.coalesce(func.sum(BookForumComment.dislike_count), 0).label("dislike_count"),
+        )
+        .group_by(BookForumComment.post_id)
+        .subquery()
+    )
+    rows = (
+        await db.execute(
+            select(
+                BookForumPost,
+                Book,
+                func.coalesce(comment_subquery.c.comment_count, 0).label("comment_count"),
+                func.coalesce(interest_subquery.c.interest_count, 0).label("interest_count"),
+                func.coalesce(reaction_subquery.c.like_count, 0).label("like_count"),
+                func.coalesce(reaction_subquery.c.dislike_count, 0).label("dislike_count"),
+            )
+            .outerjoin(Book, Book.id == BookForumPost.book_id)
+            .outerjoin(comment_subquery, comment_subquery.c.post_id == BookForumPost.id)
+            .outerjoin(interest_subquery, interest_subquery.c.post_id == BookForumPost.id)
+            .outerjoin(reaction_subquery, reaction_subquery.c.post_id == BookForumPost.id)
+            .where(
+                BookForumPost.author_user_id == user_id,
+                _public_profile_forum_visibility_expression(),
+            )
+            .order_by(BookForumPost.updated_at.desc(), BookForumPost.created_at.desc())
+        )
+    ).all()
+    return [
+        PublicUserActivityPostOut(
+            id=str(post.id),
+            thread_type=_forum_post_thread_type(post),
+            status=post.status,
+            headline=post.headline,
+            body=post.body,
+            title=getattr(book, "title", None),
+            genre=getattr(book, "genre", None),
+            work_type=getattr(book, "work_type", None),
+            book_id=str(post.book_id) if post.book_id is not None else None,
+            comment_count=int(comment_count or 0),
+            interest_count=int(interest_count or 0) if _forum_post_thread_type(post) == FORUM_THREAD_TYPE_NOVEL else 0,
+            like_count=int(like_count or 0),
+            dislike_count=int(dislike_count or 0),
+            created_at=post.created_at,
+            updated_at=post.updated_at,
+        )
+        for post, book, comment_count, interest_count, like_count, dislike_count in rows
+    ]
+
+
+async def list_public_user_activity_comments(db: AsyncSession, *, user_id: uuid.UUID) -> list[PublicUserActivityCommentOut]:
+    rows = (
+        await db.execute(
+            select(BookForumComment, BookForumPost, Book)
+            .join(BookForumPost, BookForumPost.id == BookForumComment.post_id)
+            .outerjoin(Book, Book.id == BookForumComment.book_id)
+            .where(
+                BookForumComment.author_user_id == user_id,
+                _public_profile_forum_visibility_expression(),
+            )
+            .order_by(BookForumComment.updated_at.desc(), BookForumComment.created_at.desc())
+        )
+    ).all()
+    return [
+        PublicUserActivityCommentOut(
+            id=str(comment.id),
+            post_id=str(post.id),
+            thread_type=_forum_post_thread_type(post),
+            post_status=post.status,
+            post_headline=post.headline,
+            post_title=getattr(book, "title", None),
+            book_id=str(comment.book_id) if comment.book_id is not None else None,
+            body=comment.body,
+            like_count=int(comment.like_count or 0),
+            dislike_count=int(comment.dislike_count or 0),
+            created_at=comment.created_at,
+            updated_at=comment.updated_at,
+        )
+        for comment, post, book in rows
+    ]
+
+
 async def build_public_user_profile_out(
     db: AsyncSession,
     *,
     user: User,
 ) -> PublicUserProfileOut:
     forum_post_count, forum_comment_count, _public_book_count = await public_profile_activity_counts(db, user_id=user.id)
+    posts = await list_public_user_activity_posts(db, user_id=user.id)
+    comments = await list_public_user_activity_comments(db, user_id=user.id)
     return PublicUserProfileOut(
         user_id=str(user.id),
         username=user.username or "",
@@ -709,6 +1104,8 @@ async def build_public_user_profile_out(
         forum_post_count=forum_post_count,
         forum_comment_count=forum_comment_count,
         current_project=await _build_public_user_project_out(db, user_id=user.id),
+        posts=posts,
+        comments=comments,
         created_at=user.created_at,
     )
 
@@ -716,7 +1113,7 @@ async def build_public_user_profile_out(
 def build_public_forum_post_out(
     *,
     post: BookForumPost,
-    book: Book,
+    book: Book | None,
     author_user: User,
     rating_summary: PublicForumRatingSummaryOut | None = None,
     interest_count: int = 0,
@@ -724,6 +1121,7 @@ def build_public_forum_post_out(
     viewer_interest_status: str | None = None,
     discoverability_score: float | None = None,
 ) -> PublicForumPostOut:
+    thread_type = _forum_post_thread_type(post)
     rating_payload = rating_summary or PublicForumRatingSummaryOut()
     resolved_discoverability_score = discoverability_score
     if resolved_discoverability_score is None:
@@ -736,24 +1134,25 @@ def build_public_forum_post_out(
         )
     return PublicForumPostOut(
         id=str(post.id),
-        book_id=str(post.book_id),
+        thread_type=thread_type,
+        book_id=str(post.book_id) if post.book_id is not None else None,
         author_user_id=str(post.author_user_id),
         author_username=author_user.username,
         author_reputation_score=int(author_user.reputation_score or 0),
         author_trust_level=reputation_trust_level(author_user.reputation_score),
-        title=book.title,
-        author=book.author,
-        genre=book.genre,
-        work_type=book.work_type,
+        title=getattr(book, "title", None),
+        author=getattr(book, "author", None),
+        genre=getattr(book, "genre", None),
+        work_type=getattr(book, "work_type", None),
         headline=post.headline,
         body=post.body,
-        desired_beta_reader_count=post.desired_beta_reader_count,
-        allow_contact_requests=bool(post.allow_contact_requests),
+        desired_beta_reader_count=post.desired_beta_reader_count if thread_type == FORUM_THREAD_TYPE_NOVEL else None,
+        allow_contact_requests=bool(post.allow_contact_requests) if thread_type == FORUM_THREAD_TYPE_NOVEL else False,
         status=post.status,
-        viewer_interest_status=viewer_interest_status,
-        interest_count=interest_count,
+        viewer_interest_status=viewer_interest_status if thread_type == FORUM_THREAD_TYPE_NOVEL else None,
+        interest_count=interest_count if thread_type == FORUM_THREAD_TYPE_NOVEL else 0,
         comment_count=comment_count,
-        rating_summary=rating_payload,
+        rating_summary=rating_payload if thread_type == FORUM_THREAD_TYPE_NOVEL else PublicForumRatingSummaryOut(),
         discoverability_score=float(resolved_discoverability_score),
         created_at=post.created_at,
         updated_at=post.updated_at,
@@ -766,30 +1165,45 @@ async def create_public_forum_post(
     current_user: User,
     body: PublicForumPostCreateBody,
 ) -> PublicForumPostOut:
-    ensure_public_authoring_access(current_user, action_label="Opening a public discussion")
-    book = await _get_forum_eligible_owned_book(db, book_id=body.book_id, author_user_id=current_user.id)
+    thread_type = _normalize_forum_thread_type(body.thread_type)
     headline = " ".join(body.headline.split()).strip()
     description = body.body.strip()
     if not headline or not description:
         raise HTTPException(400, "Forum headline and body are required.")
-    existing_open_post = (
-        await db.execute(
-            select(BookForumPost).where(
-                BookForumPost.book_id == book.id,
-                BookForumPost.status == FORUM_POST_OPEN,
+    book = None
+    desired_beta_reader_count = None
+    allow_contact_requests = False
+    if thread_type == FORUM_THREAD_TYPE_NOVEL:
+        ensure_public_authoring_access(current_user, action_label="Opening a public discussion")
+        if body.book_id is None:
+            raise HTTPException(400, "Novel discussions require a manuscript.")
+        book = await _get_forum_eligible_owned_book(db, book_id=body.book_id, author_user_id=current_user.id)
+        existing_open_post = (
+            await db.execute(
+                select(BookForumPost).where(
+                    BookForumPost.book_id == book.id,
+                    BookForumPost.thread_type == FORUM_THREAD_TYPE_NOVEL,
+                    BookForumPost.status == FORUM_POST_OPEN,
+                )
             )
-        )
-    ).scalar_one_or_none()
-    if existing_open_post is not None:
-        raise HTTPException(409, "This manuscript already has a beta forum post. Update it instead.")
+        ).scalar_one_or_none()
+        if existing_open_post is not None:
+            raise HTTPException(409, "This manuscript already has a beta forum post. Update it instead.")
+        desired_beta_reader_count = body.desired_beta_reader_count
+        allow_contact_requests = bool(body.allow_contact_requests)
+    else:
+        if body.book_id is not None:
+            raise HTTPException(400, "General discussions cannot be attached to a manuscript.")
+        await enforce_daily_general_forum_post_limit(db, user_id=current_user.id)
 
     post = BookForumPost(
-        book_id=book.id,
+        book_id=book.id if book is not None else None,
         author_user_id=current_user.id,
+        thread_type=thread_type,
         headline=headline,
         body=description,
-        desired_beta_reader_count=body.desired_beta_reader_count,
-        allow_contact_requests=bool(body.allow_contact_requests),
+        desired_beta_reader_count=desired_beta_reader_count,
+        allow_contact_requests=allow_contact_requests,
         status=FORUM_POST_OPEN,
     )
     db.add(post)
@@ -809,13 +1223,21 @@ async def update_public_forum_post(
     post = await _get_forum_post(db, post_id=post_id)
     if post.author_user_id != current_user.id:
         raise HTTPException(404, "Forum post not found.")
-    book = await _get_forum_eligible_owned_book(db, book_id=post.book_id, author_user_id=current_user.id)
+    thread_type = _forum_post_thread_type(post)
+    requested_thread_type = _normalize_forum_thread_type(body.thread_type)
+    if requested_thread_type != thread_type:
+        raise HTTPException(400, "Forum thread type cannot be changed.")
+    book = None
+    if thread_type == FORUM_THREAD_TYPE_NOVEL:
+        if post.book_id is None:
+            raise HTTPException(409, "Novel discussion is missing its manuscript link.")
+        book = await _get_forum_eligible_owned_book(db, book_id=post.book_id, author_user_id=current_user.id)
     headline = " ".join(body.headline.split()).strip()
     description = body.body.strip()
     if not headline or not description:
         raise HTTPException(400, "Forum headline and body are required.")
     next_status = _normalize_forum_status(body.status)
-    if not has_public_authoring_access(current_user):
+    if thread_type == FORUM_THREAD_TYPE_NOVEL and not has_public_authoring_access(current_user):
         attempted_non_closing_change = (
             headline != post.headline
             or description != post.body
@@ -825,11 +1247,12 @@ async def update_public_forum_post(
         )
         if attempted_non_closing_change:
             raise HTTPException(403, "Opening or editing a public discussion requires Trial, Author, or Architect access.")
-    if next_status == FORUM_POST_OPEN:
+    if thread_type == FORUM_THREAD_TYPE_NOVEL and next_status == FORUM_POST_OPEN and book is not None:
         existing_open_post = (
             await db.execute(
                 select(BookForumPost).where(
                     BookForumPost.book_id == book.id,
+                    BookForumPost.thread_type == FORUM_THREAD_TYPE_NOVEL,
                     BookForumPost.status == FORUM_POST_OPEN,
                     BookForumPost.id != post.id,
                 )
@@ -839,8 +1262,8 @@ async def update_public_forum_post(
             raise HTTPException(409, "This manuscript already has another open beta forum post.")
     post.headline = headline
     post.body = description
-    post.desired_beta_reader_count = body.desired_beta_reader_count
-    post.allow_contact_requests = bool(body.allow_contact_requests)
+    post.desired_beta_reader_count = body.desired_beta_reader_count if thread_type == FORUM_THREAD_TYPE_NOVEL else None
+    post.allow_contact_requests = bool(body.allow_contact_requests) if thread_type == FORUM_THREAD_TYPE_NOVEL else False
     post.status = next_status
     await db.commit()
     await db.refresh(post)
@@ -859,7 +1282,7 @@ async def list_public_forum_posts(
     normalized_page, normalized_page_size = _normalize_public_forum_pagination(page, page_size)
     total_statement = (
         select(func.count(BookForumPost.id))
-        .join(Book, Book.id == BookForumPost.book_id)
+        .outerjoin(Book, Book.id == BookForumPost.book_id)
         .join(User, User.id == BookForumPost.author_user_id)
         .where(*_public_forum_visibility_filters())
     )
@@ -1015,6 +1438,8 @@ async def create_public_forum_interest(
     body: PublicForumInterestCreateBody,
 ) -> PublicForumInterestOut:
     post, _book = await _get_visible_forum_post(db, post_id=post_id)
+    if _is_general_forum_post(post):
+        raise HTTPException(409, "General discussions do not accept collaborator requests.")
     message = body.message.strip()
     if not message:
         raise HTTPException(400, "A contact message is required.")
@@ -1071,6 +1496,8 @@ async def list_public_forum_interests_for_author(
     post = await _get_forum_post(db, post_id=post_id)
     if post.author_user_id != author_user_id:
         raise HTTPException(404, "Forum post not found.")
+    if _is_general_forum_post(post):
+        return []
     interests = (
         await db.execute(
             select(BookForumInterest)
@@ -1096,7 +1523,7 @@ async def build_public_forum_comment_out(
     return PublicForumCommentOut(
         id=str(comment.id),
         post_id=str(comment.post_id),
-        book_id=str(comment.book_id),
+        book_id=str(comment.book_id) if comment.book_id is not None else None,
         author_user_id=str(comment.author_user_id),
         author_username=resolved_author.username,
         author_reputation_score=int(resolved_author.reputation_score or 0),
@@ -1173,13 +1600,19 @@ async def create_public_forum_comment(
     post.last_activity_at = func.now()
     db.add(comment)
     if post.author_user_id != current_user.id:
+        notification_title = "New beta forum comment" if _forum_post_thread_type(post) == FORUM_THREAD_TYPE_NOVEL else "New forum comment"
+        notification_body = (
+            "Someone replied to your public beta forum post."
+            if _forum_post_thread_type(post) == FORUM_THREAD_TYPE_NOVEL
+            else "Someone replied to your public discussion."
+        )
         db.add(
             Notification(
                 user_id=post.author_user_id,
                 book_id=post.book_id,
                 kind="beta_forum_comment_received",
-                title="New beta forum comment",
-                body="Someone replied to your public beta forum post.",
+                title=notification_title,
+                body=notification_body,
                 data={
                     "post_id": str(post.id),
                     "book_id": str(post.book_id),

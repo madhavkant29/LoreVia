@@ -9,7 +9,7 @@ import {
 } from "@/lib/query/cacheKeys"
 import { invalidateQueryKeys } from "@/lib/query/queryClient"
 import { normalizeBookRouteId } from "@/lib/utils/bookRoutes"
-import type { Book, BookCollaborator, BookEvents, BookNote, BookSeries, BookWorkType, ChapterConsistencyReport, ChapterSceneOrder, ChapterVersion, ChapterVersionDetail, CollaborationPermissions, CollaborationRole, CollaborationScope, EmotionalArcOverview, ManuscriptAnnotation, ManuscriptWorkspaceTree, NovelScene, ObsidianGraph, ObsidianNoteRelations, ObsidianPreview, ObsidianVaultNote, ObsidianVaultNoteSaveResult, PreWritingCheck, ReadabilityMetrics, RevisionIntelligence, RevisionTagSet, RevisionTagTarget, SavedQuote, SceneVersion, SceneVersionDetail, SeriesBible, StoryHealth, UserStats, WriterWorkspace } from "@/types/book"
+import type { Book, BookCollaborator, BookEvents, BookNote, BookSeries, BookWorkType, ChapterConsistencyReport, ChapterSceneOrder, ChapterVersion, ChapterVersionDetail, CollaborationPermissions, CollaborationRole, CollaborationScope, EmotionalArcOverview, ManuscriptAnnotation, ManuscriptWorkspaceTree, NovelScene, ObsidianGraph, ObsidianNoteRelations, ObsidianPreview, ObsidianVaultNote, ObsidianVaultNoteSaveResult, PreWritingCheck, ReadabilityMetrics, RevisionIntelligence, RevisionTagSet, RevisionTagTarget, SavedQuote, SceneMetadata, SceneVersion, SceneVersionDetail, SeriesBible, StoryHealth, UserStats, WorkspaceSearchFilters, WorkspaceSearchResult, WriterWorkspace } from "@/types/book"
 import type { Character, CharacterShareResponse, RelationshipGraph } from "@/types/character"
 import type { BetaReadAssignment, BetaReadAssignmentCreateInput, BetaReadAssignmentListResponse } from "@/types/reader"
 
@@ -169,6 +169,24 @@ export const booksApi = {
     }),
   getWorkspaceTree: (id: string) =>
     apiClient.get<ManuscriptWorkspaceTree>(bookPath(id, "/workspace/tree")).then(r => r.data),
+  searchWorkspace: (
+    id: string,
+    payload: {
+      query: string
+      scopes?: Array<"manuscript" | "scenes" | "notes">
+      caseSensitive?: boolean
+      wholeWord?: boolean
+      regex?: boolean
+      filters?: WorkspaceSearchFilters
+    }
+  ) => apiClient.post<WorkspaceSearchResult[]>(bookPath(id, "/workspace/search"), {
+    query: payload.query,
+    scopes: payload.scopes ?? ["manuscript", "scenes", "notes"],
+    case_sensitive: payload.caseSensitive ?? false,
+    whole_word: payload.wholeWord ?? false,
+    regex: payload.regex ?? false,
+    filters: payload.filters ?? {},
+  }).then(r => r.data),
   listScenes: (id: string, params?: { chapterNumber?: number; status?: string; query?: string }) =>
     apiClient.get<NovelScene[]>(bookPath(id, "/scenes"), {
       params: {
@@ -185,7 +203,7 @@ export const booksApi = {
       description?: string | null
       body: string
       html_body?: string | null
-      metadata?: Record<string, unknown> | null
+      metadata?: SceneMetadata | null
       path?: string | null
       chapter_number?: number | null
       status?: string | null
@@ -523,6 +541,21 @@ export const booksApi = {
       return fallback.data
     }
   },
+  publishPublicly: (id: string, payload: { publicSlug: string; rightsConfirmation: boolean; description?: string | null }) =>
+    apiClient.post<{ book_id: string; public_slug?: string | null; message?: string | null }>(bookPath(id, "/publish"), {
+      public_slug: payload.publicSlug,
+      rights_confirmation: payload.rightsConfirmation,
+      content_source_type: "user_original",
+      description: payload.description ?? null,
+    }).then(r => {
+      invalidateBookCache(id)
+      return r.data
+    }),
+  unpublishPublicly: (id: string) =>
+    apiClient.post<{ book_id: string; message?: string | null }>(bookPath(id, "/unpublish")).then(r => {
+      invalidateBookCache(id)
+      return r.data
+    }),
   listSeries: () =>
     apiClient.get<BookSeries[]>("/books/series").then(r => r.data),
   getSeriesBible: (seriesId: string) =>

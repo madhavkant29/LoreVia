@@ -14,6 +14,7 @@ from app.core.llm import complete_with_fallback
 from app.engine.character.entity_filters import (
     looks_like_person_entity_name,
     person_name_shape_score,
+    character_persistence_decision,
 )
 
 log = logging.getLogger("lorevia.character.extractor")
@@ -129,17 +130,55 @@ async def extract_characters_and_relationships(
     )
     try:
         parsed = json.loads(raw)
-        characters = _clean_character_entries(parsed.get("characters", []), candidate_names, chunk_text)
+        rejected_characters: list[dict] = []
+        characters = _clean_character_entries(
+            parsed.get("characters", []),
+            candidate_names,
+            chunk_text,
+            rejected_characters=rejected_characters,
+        )
         relationships = parsed.get("relationships", [])
-        characters = _augment_with_named_mentions(chunk_text, characters, candidate_names)
+        characters = _augment_with_named_mentions(
+            chunk_text,
+            characters,
+            candidate_names,
+            rejected_characters=rejected_characters,
+        )
         characters = _apply_anti_merge_hints(chunk_text, characters)
         return {
             "characters": characters,
             "relationships": relationships,
+            "rejected_characters": rejected_characters,
         }
     except json.JSONDecodeError:
-        characters = _augment_with_named_mentions(chunk_text, [], candidate_names)
-        return {"characters": _apply_anti_merge_hints(chunk_text, characters), "relationships": []}
+        rejected_characters: list[dict] = []
+        characters = _augment_with_named_mentions(
+            chunk_text,
+            [],
+            candidate_names,
+            rejected_characters=rejected_characters,
+        )
+        return {
+            "characters": _apply_anti_merge_hints(chunk_text, characters),
+            "relationships": [],
+            "rejected_characters": rejected_characters,
+        }
+
+
+def fallback_character_mentions(chunk_text: str) -> dict:
+    candidate_names = _candidate_names(chunk_text)
+    rejected_characters: list[dict] = []
+    characters = _augment_with_named_mentions(
+        chunk_text,
+        [],
+        candidate_names,
+        rejected_characters=rejected_characters,
+    )
+    return {
+        "characters": _apply_anti_merge_hints(chunk_text, characters),
+        "relationships": [],
+        "rejected_characters": rejected_characters,
+    }
 
 
 HONORIFIC_RE = re.compile(r"\b(?:Mr|Mrs|Ms|Miss|Dr|Lady|Lord|Sir)\.?\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?\b")
@@ -185,6 +224,7 @@ MAX_AUTO_AUGMENTED_CHARACTERS = 10
 MIN_CHARACTER_CONFIDENCE = 0.78
 MIN_BORDERLINE_CONFIDENCE = 0.55
 SAVE_SINGLE_MENTION_CONFIDENCE = 0.90
+FALLBACK_STRONG_MENTION_CONFIDENCE = 0.92
 FRAGMENT_PREFIXES = (
     "about", "after", "before", "because", "but", "even", "following", "if", "just",
     "meeting", "nodded", "right", "seeing", "since", "then", "what", "when", "where", "with",
@@ -207,13 +247,18 @@ TITLE_PREFIXES = (
 )
 GENERIC_PROFILE_PHRASES = {
     "appearance not yet described",
+    "background character",
+    "is a character",
     "mysterious figure",
+    "plain character",
     "tragic figure",
     "normal character",
     "supporting character",
+    "this character is a character",
     "protagonist",
     "antagonist",
     "puppet master",
+    "unknown character",
 }
 NON_CHARACTER_EXACT = {
     "back nozzle", "even", "feather island", "grim reaper", "imaginary weapon", "just",
@@ -232,7 +277,35 @@ ENTITY_NON_PERSON_TOKENS = {
 }
 
 
-def _augment_with_named_mentions(chunk_text: str, characters: list[dict], candidates: list[str] | None = None) -> list[dict]:
+def _record_rejected_character(
+    rejected_characters: list[dict] | None,
+    *,
+    stage: str,
+    name: str,
+    reason: str,
+    confidence: float | None = None,
+    evidence: dict | None = None,
+) -> None:
+    if rejected_characters is None:
+        return
+    rejected_characters.append(
+        {
+            "name": name,
+            "stage": stage,
+            "reason": reason,
+            "confidence": confidence,
+            "evidence": evidence or {},
+        }
+    )
+
+
+def _augment_with_named_mentions(
+    chunk_text: str,
+    characters: list[dict],
+    candidates: list[str] | None = None,
+    *,
+    rejected_characters: list[dict] | None = None,
+) -> list[dict]:
     existing_names = {_normalize_name(item.get("name")) for item in characters if item.get("name")}
     existing_aliases = {
         _normalize_name(alias)
@@ -248,7 +321,35 @@ def _augment_with_named_mentions(chunk_text: str, characters: list[dict], candid
         if not normalized or normalized in known:
             continue
         if not _allow_auto_augmentation(chunk_text, candidate):
+            evidence = _build_evidence(chunk_text, candidate, {}, [])
+            _record_rejected_character(
+                rejected_characters,
+                stage="candidate_augmentation",
+                name=candidate,
+                reason="insufficient_augmentation_support",
+                evidence=evidence,
+            )
             continue
+        evidence = _build_evidence(chunk_text, candidate, {}, [])
+        decision = character_persistence_decision(
+            candidate,
+            evidence=evidence,
+            entity_type="person",
+        )
+        if not decision.allowed:
+            _record_rejected_character(
+                rejected_characters,
+                stage="candidate_augmentation",
+                name=candidate,
+                reason=";".join(decision.reasons) if decision.reasons else "save_gate_rejected",
+                evidence=evidence,
+            )
+            continue
+        confidence = (
+            FALLBACK_STRONG_MENTION_CONFIDENCE
+            if int(evidence.get("strong_mention_count") or 0) >= 1
+            else MIN_CHARACTER_CONFIDENCE
+        )
         characters.append(
             {
                 "name": candidate,
@@ -256,7 +357,7 @@ def _augment_with_named_mentions(chunk_text: str, characters: list[dict], candid
                 "aliases": [],
                 "entity_type": "person",
                 "is_character": True,
-                "confidence": MIN_CHARACTER_CONFIDENCE,
+                "confidence": confidence,
                 "traits": {},
                 "personality_tags": [],
                 "goal": None,
@@ -268,6 +369,8 @@ def _augment_with_named_mentions(chunk_text: str, characters: list[dict], candid
                 "arc_summary": None,
                 "archetype": None,
                 "first_appearance_context": "Named in the passage but not yet richly described.",
+                "mention_count": evidence["mention_count"],
+                "evidence": evidence,
                 "rejection_reason": None,
                 "growth_event": None,
             }
@@ -294,7 +397,7 @@ def _candidate_names(text: str) -> list[str]:
     candidates.extend(
         name
         for name, count in single_counts.items()
-        if _has_character_context(text, name) or count >= 4
+        if _has_character_context(text, name) or count >= 2
     )
 
     deduped: list[str] = []
@@ -448,19 +551,6 @@ def _apply_anti_merge_hints(source_text: str, characters: list[dict]) -> list[di
     return characters
 
 
-def _should_keep_character(name: str, confidence: float, source_text: str, traits: dict, arc_summary: str | None) -> bool:
-    mentions, strong_mentions = _mention_support_score(source_text, name)
-    if confidence < MIN_BORDERLINE_CONFIDENCE:
-        return False
-    if confidence >= MIN_CHARACTER_CONFIDENCE:
-        return True
-    if mentions >= 2 and strong_mentions >= 1:
-        return True
-    if confidence >= SAVE_SINGLE_MENTION_CONFIDENCE and (traits or arc_summary):
-        return True
-    return False
-
-
 def _looks_like_character_name(name: str, source_text: str) -> bool:
     cleaned = " ".join(name.split()).strip(" .,:;!?\"'")
     if not cleaned:
@@ -488,7 +578,13 @@ def _looks_like_character_name(name: str, source_text: str) -> bool:
     return _has_name_support(source_text, cleaned)
 
 
-def _clean_character_entries(characters: list[dict], candidate_names: list[str], source_text: str) -> list[dict]:
+def _clean_character_entries(
+    characters: list[dict],
+    candidate_names: list[str],
+    source_text: str,
+    *,
+    rejected_characters: list[dict] | None = None,
+) -> list[dict]:
     cleaned: list[dict] = []
     seen: set[str] = set()
     candidate_norms = {_normalize_name(name) for name in candidate_names}
@@ -505,27 +601,82 @@ def _clean_character_entries(characters: list[dict], candidate_names: list[str],
             continue
 
         if not _contains_supported_subspan(raw_name, cleaned_name, source_text):
+            _record_rejected_character(
+                rejected_characters,
+                stage="llm_clean",
+                name=raw_name,
+                reason="unsupported_subspan",
+                confidence=float(item.get("confidence") or 0.0),
+            )
             continue
 
         entity_type = str(item.get("entity_type") or "").strip().casefold() or "person"
         is_character = bool(item.get("is_character", True))
         confidence = float(item.get("confidence") or 0.0)
         if entity_type not in {"person", "alias", "unknown"} or not is_character:
+            _record_rejected_character(
+                rejected_characters,
+                stage="llm_clean",
+                name=raw_name,
+                reason="non_character_entity_type",
+                confidence=confidence,
+            )
             continue
 
         rejection_reason = _reject_obvious_bad_name(cleaned_name)
         if rejection_reason:
             log.info("Rejected extracted character '%s': %s", raw_name, rejection_reason)
+            _record_rejected_character(
+                rejected_characters,
+                stage="llm_clean",
+                name=raw_name,
+                reason=rejection_reason,
+                confidence=confidence,
+            )
             continue
 
         if normalized not in candidate_norms and not _looks_like_character_name(cleaned_name, source_text):
+            _record_rejected_character(
+                rejected_characters,
+                stage="llm_clean",
+                name=raw_name,
+                reason="fails_character_name_shape",
+                confidence=confidence,
+            )
             continue
         if normalized in candidate_norms and person_name_shape_score(cleaned_name) < 1 and not _looks_like_character_name(cleaned_name, source_text):
+            _record_rejected_character(
+                rejected_characters,
+                stage="llm_clean",
+                name=raw_name,
+                reason="candidate_name_shape_too_weak",
+                confidence=confidence,
+            )
             continue
 
         traits = cast(dict[str, object], item.get("traits") if isinstance(item.get("traits"), dict) else {})
         arc_summary = _sanitize_summary(item.get("arc_summary"))
-        if not _should_keep_character(cleaned_name, confidence, source_text, traits, arc_summary):
+        evidence = _build_evidence(source_text, cleaned_name, traits, [])
+        decision = character_persistence_decision(
+            cleaned_name,
+            entity_type=entity_type,
+            evidence=evidence,
+            personality_tags=item.get("personality_tags") if isinstance(item.get("personality_tags"), list) else None,
+            motivations=item.get("motivations") if isinstance(item.get("motivations"), list) else None,
+            fears=item.get("fears") if isinstance(item.get("fears"), list) else None,
+            archetype=item.get("archetype") if isinstance(item.get("archetype"), str) else None,
+            trait_state=traits,
+            arc_summary=arc_summary,
+        )
+        if not decision.allowed:
+            _record_rejected_character(
+                rejected_characters,
+                stage="llm_clean",
+                name=raw_name,
+                reason=";".join(decision.reasons) if decision.reasons else "save_gate_rejected",
+                confidence=confidence,
+                evidence=evidence,
+            )
             continue
 
         aliases = []
@@ -585,7 +736,7 @@ def _has_character_context(text: str, name: str) -> bool:
     if _looks_like_sentence_fragment(name):
         return False
 
-    escaped = re.escape(name)
+    escaped = re.escape(name.casefold())
     context_patterns = [
         rf"\b{escaped}\b\s+(?:said|asked|replied|called|told|whispered|shouted|muttered)\b",
         rf"\b(?:said|asked|replied|called|told|whispered|shouted|muttered)\s+\b{escaped}\b",
@@ -658,8 +809,6 @@ def _mention_has_person_context(before: str, after: str) -> bool:
 
 def _allow_auto_augmentation(text: str, name: str) -> bool:
     words = re.findall(r"[A-Za-z][A-Za-z'-]*", name)
-    if len(words) == 1:
-        return False
     mentions = _find_name_mentions(text, name)
     if not mentions:
         return False
@@ -672,6 +821,8 @@ def _allow_auto_augmentation(text: str, name: str) -> bool:
             non_sentence_start_mentions += 1
         if _mention_has_person_context(context_before, context_after):
             strong_mentions += 1
+    if len(words) == 1:
+        return strong_mentions >= 1
     return strong_mentions >= 1 and (non_sentence_start_mentions >= 1 or len(mentions) >= 2)
 
 

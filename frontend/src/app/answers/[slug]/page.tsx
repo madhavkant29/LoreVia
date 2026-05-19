@@ -11,7 +11,13 @@ import {
   getBlogArticleBySlug,
   getDemoPageBySlug,
 } from "@/lib/content"
-import { DEFAULT_OG_IMAGE, SITE_NAME, buildBreadcrumbJsonLd, toAbsoluteUrl } from "@/lib/seo"
+import {
+  DEFAULT_OG_IMAGE,
+  SITE_NAME,
+  buildBreadcrumbJsonLd,
+  buildFaqPageJsonLd,
+  toAbsoluteUrl,
+} from "@/lib/seo"
 
 export function generateStaticParams() {
   return answerPages.map((answer) => ({ slug: answer.slug }))
@@ -66,20 +72,12 @@ export default async function AnswerPage({ params }: { params: Promise<{ slug: s
   const article = getBlogArticleBySlug(answer.articleSlug)
   const demoPage = answer.demoSlug ? getDemoPageBySlug(answer.demoSlug) : null
 
-  const jsonLd = {
-    "@context": "https://schema.org",
-    "@type": "FAQPage",
-    mainEntity: [
-      {
-        "@type": "Question",
-        name: answer.question,
-        acceptedAnswer: {
-          "@type": "Answer",
-          text: answer.shortAnswer,
-        },
-      },
-    ],
-  }
+  const jsonLd = buildFaqPageJsonLd([
+    {
+      question: answer.question,
+      answer: answer.shortAnswer,
+    },
+  ])
   const breadcrumbJsonLd = buildBreadcrumbJsonLd([
     { name: "Home", path: "/" },
     { name: "Answers", path: "/answers" },

@@ -125,6 +125,7 @@ async def test_list_public_beta_forum_posts_returns_cached_payload(monkeypatch):
     monkeypatch.setattr("app.core.config.settings.PUBLIC_FORUM_STATUS", "public", raising=False)
     cached_post = {
         "id": str(uuid.uuid4()),
+        "thread_type": "novel",
         "book_id": str(uuid.uuid4()),
         "author_user_id": str(uuid.uuid4()),
         "author_username": "writer",
@@ -219,8 +220,12 @@ async def test_list_public_books_builds_and_caches_rows(monkeypatch):
     async def _fake_cache_set(key, value, ttl):
         captured["args"] = (key, value, ttl)
 
+    async def _fake_active_forum_post_map(*_args, **_kwargs):
+        return {}
+
     monkeypatch.setattr(public, "cache_get", _fake_cache_get)
     monkeypatch.setattr(public, "cache_set", _fake_cache_set)
+    monkeypatch.setattr(public, "_active_forum_post_map", _fake_active_forum_post_map)
     book = SimpleNamespace(
         id=uuid.uuid4(),
         is_public=True,
@@ -256,8 +261,12 @@ async def test_list_public_books_includes_approved_user_shared_books(monkeypatch
     async def _fake_cache_set(_key, _value, _ttl):
         return None
 
+    async def _fake_active_forum_post_map(*_args, **_kwargs):
+        return {}
+
     monkeypatch.setattr(public, "cache_get", _fake_cache_get)
     monkeypatch.setattr(public, "cache_set", _fake_cache_set)
+    monkeypatch.setattr(public, "_active_forum_post_map", _fake_active_forum_post_map)
     demo_book = SimpleNamespace(
         id=uuid.uuid4(),
         is_public=True,
@@ -324,8 +333,12 @@ async def test_get_public_book_skips_cache_for_user_shared_samples(monkeypatch):
     async def _fake_cache_set(*args):
         cache_set_calls.append(args)
 
+    async def _fake_active_forum_post_map(*_args, **_kwargs):
+        return {}
+
     monkeypatch.setattr(public, "cache_get", _fake_cache_get)
     monkeypatch.setattr(public, "cache_set", _fake_cache_set)
+    monkeypatch.setattr(public, "_active_forum_post_map", _fake_active_forum_post_map)
     book_id = uuid.uuid4()
     book = SimpleNamespace(
         id=book_id,
@@ -401,8 +414,12 @@ async def test_get_public_book_builds_payload(monkeypatch):
     async def _fake_cache_set(key, value, ttl):
         cached["args"] = (key, value, ttl)
 
+    async def _fake_active_forum_post_map(*_args, **_kwargs):
+        return {}
+
     monkeypatch.setattr(public, "cache_get", _fake_cache_get)
     monkeypatch.setattr(public, "cache_set", _fake_cache_set)
+    monkeypatch.setattr(public, "_active_forum_post_map", _fake_active_forum_post_map)
     book_id = uuid.uuid4()
     book = SimpleNamespace(
         id=book_id,
@@ -693,6 +710,48 @@ async def test_publish_user_shared_book_creates_pending_approval_request(monkeyp
     assert book.source_kind == "user_public_share"
     assert book.public_description == "Public draft"
     assert book.public_share_status == "pending"
+
+
+@pytest.mark.asyncio
+async def test_publish_user_shared_book_refreshes_copyright_signals_before_request(monkeypatch):
+    user_id = uuid.uuid4()
+    book_id = uuid.uuid4()
+    book = SimpleNamespace(
+        id=book_id,
+        user_id=user_id,
+        is_public=False,
+        hidden_at=None,
+        archived_at=None,
+        source_kind="single_upload",
+        status="ready",
+        public_description=None,
+        s3_key="books/sample.pdf",
+        format="pdf",
+        isbn=None,
+        copyright_warning=False,
+    )
+    db = _FakeDB(get_values=[book])
+
+    monkeypatch.setattr(public, "download_book", lambda _key: b"%PDF-1.4 sample")
+
+    async def _fake_evaluate_document_copyright(*, format_name, raw, existing_isbn=None):
+        assert format_name == "pdf"
+        assert raw == b"%PDF-1.4 sample"
+        assert existing_isbn is None
+        return {"isbn": "9780306406157", "copyright_warning": True}
+
+    monkeypatch.setattr(public, "evaluate_document_copyright", _fake_evaluate_document_copyright)
+
+    payload = await public.publish_user_shared_book(
+        book_id,
+        PublicBookShareBody(confirm_public_share=True, description="Public draft"),
+        db=db,
+        current_user=SimpleNamespace(id=user_id, tier="author"),
+    )
+
+    assert payload["approval_status"] == "pending"
+    assert book.isbn == "9780306406157"
+    assert book.copyright_warning is True
 
 
 @pytest.mark.asyncio

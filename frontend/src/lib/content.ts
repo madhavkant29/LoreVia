@@ -328,7 +328,7 @@ export const blogArticles: BlogArticle[] = [
     publishedLabel: "May 14, 2026",
     readTime: "12 min read",
     keywords: [
-      "scrivener vs lorevia",
+      "scrivener vs LoreVia",
       "campfire write alternative",
       "scrivener alternative for authors",
       "campfire write comparison",

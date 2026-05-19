@@ -1423,19 +1423,33 @@ def _approx_word_count_label(count: int) -> str:
     return f"Approx. {max(100, int(round(count / 100.0) * 100)):,} words"
 
 
+SCENE_BREAK_PATTERN = re.compile(r"^(?:(?:\*\s*){3,}|#{1,3}|(?:-|\u2013|\u2014){3,}|[~]{3,})$")
+
+
+def _normalize_manuscript_block(block: str) -> str:
+    return "\n".join(line.rstrip() for line in block.replace("\r\n", "\n").replace("\r", "\n").split("\n")).strip()
+
+
+def _is_scene_break_block(block: str) -> bool:
+    normalized = _normalize_manuscript_block(block)
+    if not normalized:
+        return False
+    return bool(SCENE_BREAK_PATTERN.fullmatch(normalized.replace("\n", " ").replace("\t", " ").strip()))
+
+
 def _chapter_body_blocks(text: str) -> list[tuple[str, str]]:
     normalized = (text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
     if not normalized:
         return []
     blocks: list[tuple[str, str]] = []
-    for raw_block in normalized.split("\n\n"):
-        block = raw_block.strip()
+    for raw_block in re.split(r"\n{2,}", normalized):
+        block = _normalize_manuscript_block(raw_block)
         if not block:
             continue
-        if re.fullmatch(r"(?:#(?:\s*#)*|\*\s*\*\s*\*)", block):
+        if _is_scene_break_block(block):
             blocks.append(("scene_break", "***"))
         else:
-            blocks.append(("paragraph", " ".join(line.strip() for line in block.splitlines() if line.strip())))
+            blocks.append(("paragraph", block))
     return blocks
 
 
@@ -1570,10 +1584,15 @@ def manuscript_docx(
                 paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 paragraph.paragraph_format.first_line_indent = Pt(0)
                 paragraph.add_run("***")
+                first_paragraph = True
                 continue
             paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
             paragraph.paragraph_format.first_line_indent = Inches(0) if first_paragraph else Inches(0.5)
-            paragraph.add_run(block)
+            lines = block.split("\n")
+            paragraph.add_run(lines[0] if lines else "")
+            for line in lines[1:]:
+                paragraph.add_run("\n")
+                paragraph.add_run(line)
             first_paragraph = False
 
     for chapter in chapters:
@@ -1826,12 +1845,11 @@ def manuscript_pdf_compiled(
         for kind, block in _chapter_body_blocks(body_text):
             story.append(
                 Paragraph(
-                    "***" if kind == "scene_break" else escaped(block),
+                    "***" if kind == "scene_break" else escaped(block).replace("\n", "<br/>"),
                     centered if kind == "scene_break" else (body_first if first_paragraph else body),
                 )
             )
-            if kind != "scene_break":
-                first_paragraph = False
+            first_paragraph = kind == "scene_break"
 
     for chapter in chapters:
         story.append(PageBreak())
@@ -1926,9 +1944,10 @@ def manuscript_epub_compiled(
         for kind, block in _chapter_body_blocks(text):
             if kind == "scene_break":
                 parts.append("<p class='scene-break'>***</p>")
+                first_paragraph = True
                 continue
             css_class = "first-paragraph" if first_paragraph else ""
-            safe_block = escape(block)
+            safe_block = escape(block).replace("\n", "<br/>")
             parts.append(f"<p class='{css_class}'>{safe_block}</p>" if css_class else f"<p>{safe_block}</p>")
             first_paragraph = False
         return "".join(parts) or "<p class='first-paragraph'></p>"

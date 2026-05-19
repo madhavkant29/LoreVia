@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps.auth import get_current_user
 from app.api.deps.rate_limit import rate_limit_world_building_ai, rate_limit_world_building_upload
 from app.api.deps.subscription import check_upload_limit
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.storage import download_book
 from app.models.book import Book, Series
@@ -52,26 +53,10 @@ from app.utils.world_building_utils import (
     update_world_building_document,
 )
 from app.utils.tag_utils import ENTITY_TYPE_WORLD_NOTE, get_custom_tags_for_entity, list_custom_tags_for_entity_ids
+from app.utils.upload_security_utils import read_upload_bounded
 from app.utils.billing_utils import worldbuilding_upload_cost_for_book
 
 router = APIRouter()
-
-MAX_WORLD_UPLOAD_BYTES = 20 * 1024 * 1024
-
-
-async def _read_upload_bounded(upload: UploadFile, max_bytes: int, label: str) -> bytes:
-    parts: list[bytes] = []
-    total = 0
-    while True:
-        chunk = await upload.read(1024 * 1024)
-        if not chunk:
-            break
-        total += len(chunk)
-        if total > max_bytes:
-            raise HTTPException(413, f"{label} exceeds the maximum allowed size ({max_bytes // 1024 // 1024} MB).")
-        parts.append(chunk)
-    await upload.seek(0)
-    return b"".join(parts)
 
 
 def _serialize_note(note: WorldNote, *, tags: list[str] | None = None) -> WorldNoteOut:
@@ -170,7 +155,7 @@ async def upload_world_documents(
     for upload in files or []:
         if not upload.filename:
             continue
-        raw = await _read_upload_bounded(upload, MAX_WORLD_UPLOAD_BYTES, "World-building file")
+        raw = await read_upload_bounded(upload, settings.WORLD_BUILDING_UPLOAD_MAX_BYTES, "World-building file")
         if raw:
             raw_files.append((upload.filename, raw))
     prepared = await prepare_world_building_uploads(files=raw_files, text=text, html=html, title=title)

@@ -38,7 +38,7 @@ async def test_deliver_verification_email_uses_public_safe_url_and_shared_copy(m
 
 
 @pytest.mark.asyncio
-async def test_send_onboarding_email_renders_long_form_lorevia_copy(monkeypatch):
+async def test_send_onboarding_email_renders_long_form_LoreVia_copy(monkeypatch):
     captured: list[dict] = []
 
     monkeypatch.setattr("app.core.config.settings.APP_URL", "https://getlorevia.com/", raising=False)

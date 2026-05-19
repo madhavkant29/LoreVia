@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import functools
 import re
+from dataclasses import dataclass
 from collections.abc import Iterable
 
 PERSON_ROLE_WORDS = {
@@ -37,13 +38,13 @@ COMMON_NON_NAME_WORDS = {
     # High-frequency English words that often appear capitalized at sentence start
     # and should almost never be treated as character entities.
     "a", "an", "and", "as", "at", "back", "because", "before", "but", "by",
-    "for", "from", "had", "has", "have", "he", "her", "here", "him", "his",
+    "come", "for", "from", "had", "has", "have", "he", "her", "here", "him", "his",
     "how", "i", "if", "in", "into", "is", "it", "its", "like", "me", "more",
     "my", "near", "no", "not", "now", "of", "off", "on", "once", "one",
     "or", "our", "out", "over", "she", "so", "some", "than", "that", "the",
     "their", "them", "then", "there", "these", "they", "this", "those", "to",
     "too", "up", "us", "was", "we", "were", "what", "when", "where", "which",
-    "who", "why", "with", "without", "you", "your",
+    "who", "why", "well", "would", "with", "without", "you", "your",
 }
 
 NON_NAME_PATTERNS = (
@@ -145,11 +146,170 @@ def profile_evidence_score(
         score += 1
     if archetype:
         score += 1
-    if trait_state:
+    if _has_meaningful_trait_state(trait_state):
         score += 1
     if relationship_count > 0:
         score += 1
     return score
+
+
+GENERIC_PROFILE_PHRASES = {
+    "appearance not yet described",
+    "background character",
+    "is a character",
+    "mysterious figure",
+    "normal character",
+    "plain character",
+    "protagonist",
+    "supporting character",
+    "this character is a character",
+    "tragic figure",
+    "unknown character",
+}
+
+
+def _has_meaningful_text(value: str | None) -> bool:
+    cleaned = re.sub(r"\s+", " ", (value or "").strip()).casefold()
+    return bool(cleaned) and cleaned not in GENERIC_PROFILE_PHRASES
+
+
+def _has_meaningful_trait_state(trait_state: dict | None) -> bool:
+    if not isinstance(trait_state, dict):
+        return False
+    for value in trait_state.values():
+        if not isinstance(value, dict):
+            continue
+        raw_value = str(value.get("value") or "").strip()
+        if raw_value and raw_value.casefold() not in GENERIC_PROFILE_PHRASES:
+            return True
+    return False
+
+
+def _evidence_support_score(evidence: dict | None) -> int:
+    if not isinstance(evidence, dict):
+        return 0
+
+    score = 0
+    mention_count = int(evidence.get("mention_count") or 0)
+    strong_mention_count = int(evidence.get("strong_mention_count") or 0)
+    if mention_count >= 2:
+        score += 1
+    if strong_mention_count >= 1:
+        score += 2
+    if strong_mention_count >= 2:
+        score += 1
+    if evidence.get("has_dialogue_or_action"):
+        score += 1
+    if evidence.get("has_physical_description"):
+        score += 1
+    if evidence.get("appears_multiple_times"):
+        score += 1
+    return score
+
+
+def _single_token_name(name: str | None) -> str | None:
+    words = entity_words(name)
+    if len(words) != 1:
+        return None
+    return words[0].casefold()
+
+
+@dataclass(frozen=True)
+class CharacterPersistenceDecision:
+    allowed: bool
+    score: int
+    reasons: tuple[str, ...]
+
+
+def character_persistence_decision(
+    name: str | None,
+    *,
+    confidence: float | None = None,
+    role: str | None = None,
+    aliases: Iterable[str] | None = None,
+    personality_tags: Iterable[str] | None = None,
+    motivations: Iterable[str] | None = None,
+    fears: Iterable[str] | None = None,
+    archetype: str | None = None,
+    trait_state: dict | None = None,
+    relationship_count: int = 0,
+    arc_summary: str | None = None,
+    evidence: dict | None = None,
+    entity_type: str | None = None,
+    stopwords: frozenset[str] = frozenset(COMMON_NON_NAME_WORDS),
+    exact_blocklist: frozenset[str] = frozenset(),
+    concept_suffixes: tuple[str, ...] = (),
+    non_name_patterns: tuple[re.Pattern[str], ...] = NON_NAME_PATTERNS,
+    use_ner: bool = True,
+) -> CharacterPersistenceDecision:
+    score = character_visibility_score(
+        name,
+        role=role,
+        aliases=aliases,
+        arc_summary=arc_summary,
+        personality_tags=personality_tags,
+        motivations=motivations,
+        fears=fears,
+        archetype=archetype,
+        trait_state=trait_state,
+        relationship_count=relationship_count,
+        stopwords=stopwords,
+        exact_blocklist=exact_blocklist,
+        concept_suffixes=concept_suffixes,
+        non_name_patterns=non_name_patterns,
+        use_ner=use_ner,
+    )
+
+    reasons: list[str] = []
+    normalized_entity_type = re.sub(r"\s+", " ", (entity_type or "person").strip()).casefold()
+    if normalized_entity_type not in {"person", "alias", "unknown"}:
+        reasons.append("entity_type_not_person")
+
+    support_score = _evidence_support_score(evidence)
+    profile_score = profile_evidence_score(
+        role=role,
+        aliases=aliases,
+        personality_tags=personality_tags,
+        motivations=motivations,
+        fears=fears,
+        archetype=archetype,
+        trait_state=trait_state,
+        relationship_count=relationship_count,
+    )
+
+    if score < VISIBILITY_THRESHOLD and support_score < 2 and profile_score == 0:
+        reasons.append("visibility_score_below_threshold")
+    if support_score == 0 and profile_score == 0:
+        reasons.append("insufficient_passage_support")
+
+    if _single_token_name(name):
+        if support_score < 2 and profile_score < 2:
+            reasons.append("single_token_needs_stronger_support")
+        if support_score < 3 and profile_score == 0:
+            reasons.append("single_token_lacks_profile_evidence")
+
+    if any(reason == "visibility_score_below_threshold" for reason in reasons):
+        return CharacterPersistenceDecision(allowed=False, score=score, reasons=tuple(reasons))
+
+    if arc_summary and not _has_meaningful_text(arc_summary):
+        if profile_score == 0 and support_score < 2:
+            reasons.append("generic_profile_summary")
+
+    if support_score < 2 and profile_score == 0:
+        reasons.append("no_profile_or_passage_signal")
+
+    if support_score < 2 and profile_score < 2 and _single_token_name(name):
+        reasons.append("single_token_requires_more_evidence")
+
+    allowed = not reasons
+    return CharacterPersistenceDecision(allowed=allowed, score=score, reasons=tuple(reasons))
+
+
+def can_persist_character(
+    name: str | None,
+    **kwargs,
+) -> bool:
+    return character_persistence_decision(name, **kwargs).allowed
 
 
 def is_displayable_character_entity(
@@ -327,7 +487,7 @@ def character_visibility_score(
     )
 
     # 4. Arc summary bonus
-    if arc_summary:
+    if _has_meaningful_text(arc_summary):
         score += ARC_EVIDENCE_BONUS
 
     # 5. Single proper-name candidate bonus.

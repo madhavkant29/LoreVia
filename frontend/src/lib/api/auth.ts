@@ -72,6 +72,8 @@ export const authApi = {
     apiClient.patch(`/auth/me/reading-mode?mode=${mode}`).then(r => r.data),
   setDailyWordGoal: (dailyWordGoal: number) =>
     apiClient.patch<User>("/auth/me/daily-word-goal", { daily_word_goal: dailyWordGoal }).then(r => r.data),
+  setMessagingPermission: (messagingPermission: "anyone" | "friends_only") =>
+    apiClient.patch<User>("/auth/me/messaging-permission", { messaging_permission: messagingPermission }).then(r => r.data),
   setUsername: (username: string) =>
     apiClient.patch<User>("/auth/me/username", null, { params: { username } }).then(r => r.data),
   getTierLimits: () => apiClient.get<TierLimits>("/auth/tier-limits").then(r => r.data),

@@ -15,10 +15,12 @@ from app.utils.book_utils import (
     _build_knowledge_timeline,
     _build_narration_signature,
     _describe_narration_shift,
+    build_chapter_title_from_summary,
     build_emotional_arc_payload,
     build_book_processing_payload,
     build_blank_cover_image,
     build_workspace_chapter_text_from_scenes,
+    chapter_title_is_placeholder,
     clean_markdown_asterisks_str,
     clean_manuscript_html,
     chapter_body_needs_scene_workspace_fallback,
@@ -29,12 +31,15 @@ from app.utils.book_utils import (
     build_scene_chapter_import_text,
     markdown_to_html,
     manuscript_html_to_text,
+    normalize_chapter_title,
     normalize_imported_chapters,
+    normalize_scene_metadata,
     normalize_scene_reorder_ids,
     normalize_writer_workspace,
     parse_screenplay_upload,
     parse_book_upload_for_ingestion,
     resolve_upload_format_and_work_type,
+    search_author_workspace,
     save_manuscript_annotation,
     serialize_manuscript_content,
     strip_scene_metadata_from_manuscript_text,
@@ -290,6 +295,10 @@ def test_normalize_writer_workspace_preserves_defaults_and_sanitizes_cards():
     assert workspace["corkboard_cards"][0]["title"] == "Opening turn"
     assert workspace["corkboard_cards"][0]["lane"] == "drafting"
     assert workspace["publishing"]["active_preset"] == "kdp_paperback"
+    assert workspace["editor_preferences"]["font_family"] == "Times New Roman"
+    assert workspace["reading_themes"]["active_theme"] == "light"
+    assert workspace["typewriter_mode"]["enabled"] is False
+    assert workspace["manuscript_layout"]["page_size"] == "letter"
     assert workspace["revision_board"]["items"] == []
     assert workspace["processing"]["status"] == "processing"
     assert workspace["processing"]["last_chapter_title"] == "Chapter 2"
@@ -561,6 +570,35 @@ def test_story_unit_helpers_switch_to_scene_language_for_screenplays():
     assert story_unit_label(screenplay_book, 3, short=True) == "Sc. 3"
 
 
+def test_normalize_chapter_title_accepts_one_to_four_words():
+    assert normalize_chapter_title("  Ember Gate  ") == "Ember Gate"
+    assert normalize_chapter_title("Ash") == "Ash"
+    assert normalize_chapter_title("The Last Ember Gate") == "The Last Ember Gate"
+
+
+def test_normalize_chapter_title_rejects_more_than_four_words():
+    with pytest.raises(HTTPException) as exc_info:
+        normalize_chapter_title("The Last Ember Gate Opens")
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "Chapter title must be between 1 and 4 words."
+
+
+def test_build_chapter_title_from_summary_prefers_key_event_titles_and_limits_words():
+    derived = build_chapter_title_from_summary(
+        "Mira reaches the shattered gate and realizes the city is already under watch.",
+        key_events=[{"event_title": "The Shattered Gate Opens Wide"}],
+    )
+
+    assert derived == "Shattered Gate Opens Wide"
+
+
+def test_chapter_title_is_placeholder_detects_generic_labels():
+    assert chapter_title_is_placeholder("Chapter 7", chapter_number=7) is True
+    assert chapter_title_is_placeholder("Part IV") is True
+    assert chapter_title_is_placeholder("Ember Gate", chapter_number=7) is False
+
+
 def test_build_knowledge_timeline_keeps_all_chapters_in_matrix():
     timeline = _build_knowledge_timeline(
         knowledge_matrix=[
@@ -626,6 +664,11 @@ def test_normalize_writer_workspace_includes_front_matter_defaults():
 
     assert workspace["goal_calendar"] == []
     assert workspace["revision_board"]["items"] == []
+    assert workspace["editor_preferences"]["font_size"] == 12
+    assert workspace["reading_themes"]["allow_dark_mode"] is True
+    assert workspace["typewriter_mode"]["center_offset_px"] == 160
+    assert workspace["manuscript_layout"]["different_first_page"] is True
+    assert workspace["structure_tree"] == []
     assert front_matter["author_name"] == ""
     assert front_matter["title"] == ""
     assert front_matter["include_dedication"] is False
@@ -670,6 +713,103 @@ def test_normalize_writer_workspace_sanitizes_revision_board_items():
     ]
     assert workspace["revision_recent_edits"][0]["kind"] == "scene"
     assert workspace["revision_recent_edits"][0]["scene_title"] == "Gate Approach"
+
+
+def test_normalize_scene_metadata_preserves_structured_fields_and_cleans_lists():
+    metadata = normalize_scene_metadata(
+        {
+            "pov": " Mira ",
+            "timeline": " Day 3 ",
+            "location": " Harbor ",
+            "tags": [" reveal ", "dagger", "dagger"],
+            "mood": [" tense ", "", "foreboding"],
+            "status_note": " revised ",
+            "anchors": ["^dock", " ^dock ", ""],
+            "bookmarks": ["scene-1"],
+        },
+        description="A turning-point scene.",
+    )
+
+    assert metadata["pov"] == "Mira"
+    assert metadata["timeline"] == "Day 3"
+    assert metadata["location"] == "Harbor"
+    assert metadata["tags"] == ["reveal", "dagger"]
+    assert metadata["mood"] == ["tense", "foreboding"]
+    assert metadata["status_note"] == "revised"
+    assert metadata["anchors"] == ["^dock"]
+    assert metadata["bookmarks"] == ["scene-1"]
+    assert metadata["summary"] == "A turning-point scene."
+
+
+@pytest.mark.asyncio
+async def test_search_author_workspace_returns_scoped_results(monkeypatch):
+    book = Book(
+        id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        title="Atlas",
+        format="txt",
+        work_type="novel",
+        s3_key="atlas.txt",
+        status="ready",
+        mode="author",
+    )
+
+    class _ScalarRows:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def scalars(self):
+            return self
+
+        def all(self):
+            return self._rows
+
+    class _FakeSearchDB:
+        async def execute(self, *_args, **_kwargs):
+            chapter = Chapter(
+                id=uuid.uuid4(),
+                book_id=book.id,
+                number=4,
+                title="The Gate",
+                s3_key="chapter-4.txt",
+                content_version=1,
+            )
+            return _ScalarRows([chapter])
+
+    async def _fake_list_novel_scenes(*_args, **_kwargs):
+        return [{
+            "id": "scene-1",
+            "title": "Gate Approach",
+            "description": "Mira heads to the harbor gate.",
+            "body": "Mira reaches the silver gate with the dagger hidden in her sleeve.",
+            "chapter_number": 4,
+            "metadata": {"pov": "Mira", "location": "Harbor", "tags": ["dagger", "reveal"]},
+            "tags": ["dagger", "reveal"],
+        }]
+
+    async def _fake_list_obsidian_notes(*_args, **_kwargs):
+        return [{"path": "Plot Threads/Silver Gate.md", "content": "# Silver Gate\n\nMira hides the dagger near the gate."}]
+
+    monkeypatch.setattr("app.utils.book_utils.list_novel_scenes", _fake_list_novel_scenes)
+    monkeypatch.setattr("app.utils.book_utils.list_obsidian_notes", _fake_list_obsidian_notes)
+    monkeypatch.setattr(
+        "app.utils.book_utils.download_book",
+        lambda _key: serialize_manuscript_content("The silver gate loomed over the harbor.", "<p>The silver gate loomed over the harbor.</p>").encode("utf-8"),
+    )
+
+    results = await search_author_workspace(
+        _FakeSearchDB(),
+        book=book,
+        user_id=book.user_id,
+        query="silver gate",
+        scopes=["manuscript", "scenes", "notes"],
+        filters={"pov": "Mira", "location": "Harbor", "tags": ["dagger"]},
+    )
+
+    assert [item["scope"] for item in results] == ["scenes", "notes", "manuscript"]
+    assert results[0]["scene_id"] == "scene-1"
+    assert results[1]["note_path"] == "Plot Threads/Silver Gate.md"
+    assert results[2]["chapter_number"] == 4
 
 
 def test_build_narration_signature_detects_first_person_anchor():

@@ -24,6 +24,8 @@ export function useNotifications(limit = 40) {
     queryKey,
     queryFn: () => notificationsApi.list(limit),
     enabled: Boolean(user),
+    refetchInterval: user ? 30_000 : false,
+    refetchIntervalInBackground: false,
   })
 
   const refresh = useCallback(async () => {

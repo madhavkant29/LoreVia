@@ -1,6 +1,8 @@
 import { apiClient } from "./client"
 import type { PublicBook, PublicBookDetail, PublicChapter } from "@/types/book"
 import type {
+  ContentReportPayload,
+  ContentReportResponse,
   PublicForumComment,
   PublicForumCommentListResponse,
   PublicForumInterest,
@@ -29,20 +31,23 @@ export const publicApi = {
   listMyForumPosts: () =>
     apiClient.get<PublicForumPost[]>("/public/forum/my-posts").then((response) => response.data),
   createForumPost: (payload: {
-    bookId: string
+    threadType?: "novel" | "general"
+    bookId?: string | null
     headline: string
     body: string
     desiredBetaReaderCount?: number | null
     allowContactRequests?: boolean
   }) =>
     apiClient.post<PublicForumPost>("/public/forum/posts", {
-      book_id: payload.bookId,
+      thread_type: payload.threadType ?? "novel",
+      ...(payload.bookId ? { book_id: payload.bookId } : {}),
       headline: payload.headline,
       body: payload.body,
       desired_beta_reader_count: payload.desiredBetaReaderCount ?? null,
       allow_contact_requests: payload.allowContactRequests ?? true,
     }).then((response) => response.data),
   updateForumPost: (postId: string, payload: {
+    threadType?: "novel" | "general"
     headline: string
     body: string
     desiredBetaReaderCount?: number | null
@@ -50,6 +55,7 @@ export const publicApi = {
     status?: string
   }) =>
     apiClient.put<PublicForumPost>(`/public/forum/posts/${postId}`, {
+      thread_type: payload.threadType ?? "novel",
       headline: payload.headline,
       body: payload.body,
       desired_beta_reader_count: payload.desiredBetaReaderCount ?? null,
@@ -68,4 +74,16 @@ export const publicApi = {
     apiClient.put<PublicForumComment>(`/public/forum/comments/${commentId}/reaction`, { reaction }).then((response) => response.data),
   getUserProfile: (username: string) =>
     apiClient.get<PublicUserProfile>(`/public/users/${encodeURIComponent(username)}`).then((response) => response.data),
+  createContentReport: (payload: ContentReportPayload) =>
+    apiClient.post<ContentReportResponse>("/reports/content", {
+      book_id: payload.bookId,
+      report_type: payload.reportType,
+      reason: payload.reason,
+      details: payload.details,
+      reporter_email: payload.reporterEmail,
+      copyright_owner_name: payload.copyrightOwnerName,
+      copyright_work_description: payload.copyrightWorkDescription,
+      copyright_original_url: payload.copyrightOriginalUrl,
+      reported_content_url: payload.reportedContentUrl,
+    }).then((response) => response.data),
 }

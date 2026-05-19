@@ -115,3 +115,29 @@ def test_timeline_plot_thread_span_clamps_to_visible_window():
     span = reader_utils.timeline_plot_thread_span(2, 5, {1, 2, 3})
 
     assert span == (2, 3)
+
+
+@pytest.mark.asyncio
+async def test_queue_analysis_if_missing_skips_duplicate_inflight(monkeypatch):
+    chapter = SimpleNamespace(
+        id=uuid.uuid4(),
+        s3_key="chapters/test/1.txt",
+        title="One",
+        analysis_state={"status": "queued", "generated_modes": [], "attempt_count": 1},
+    )
+    db = AsyncMock()
+
+    monkeypatch.setattr(reader_utils, "chapter_has_detailed_summary", AsyncMock(return_value=False))
+
+    called = {"queued": False}
+
+    class _Task:
+        @staticmethod
+        def apply_async(*args, **kwargs):
+            called["queued"] = True
+
+    monkeypatch.setattr("app.workers.tasks.analysis_tasks.analyse_chapter_task", _Task(), raising=False)
+
+    await reader_utils.queue_analysis_if_missing(db, chapter)
+
+    assert called["queued"] is False

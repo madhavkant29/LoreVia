@@ -42,6 +42,7 @@ from app.schemas.auth import (
     DailyWordGoalBody,
     ForgotPasswordBody,
     LoginBody,
+    MessagingPermissionBody,
     RefreshBody,
     RegisterBody,
     RegisterOut,
@@ -132,6 +133,7 @@ def _build_user_out(user: User) -> UserOut:
         longest_login_streak_days=max(int(user.longest_login_streak_days or 0), 0),
         login_activity_dates=login_activity_dates(user),
         email_verified=bool(user.email_verified_at),
+        messaging_permission=(user.messaging_permission or "anyone"),
         created_at=created_at,
     )
 
@@ -504,6 +506,18 @@ async def set_daily_word_goal(
     current_user: User = Depends(get_current_user),
 ):
     current_user.daily_word_goal = body.daily_word_goal
+    await db.commit()
+    await db.refresh(current_user)
+    return _build_user_out(current_user)
+
+
+@router.patch("/me/messaging-permission", response_model=UserOut)
+async def set_messaging_permission(
+    body: MessagingPermissionBody,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    current_user.messaging_permission = body.messaging_permission
     await db.commit()
     await db.refresh(current_user)
     return _build_user_out(current_user)

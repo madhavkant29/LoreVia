@@ -38,11 +38,16 @@ class UserOut(BaseModel):
     longest_login_streak_days: int
     login_activity_dates: list[date] = Field(default_factory=list)
     email_verified: bool
+    messaging_permission: str
     created_at: datetime
 
 
 class DailyWordGoalBody(BaseModel):
     daily_word_goal: int = Field(..., ge=1, le=1000000)
+
+
+class MessagingPermissionBody(BaseModel):
+    messaging_permission: str = Field(..., pattern="^(anyone|friends_only)$")
 
 
 class RegisterOut(BaseModel):

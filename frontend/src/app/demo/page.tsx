@@ -49,6 +49,12 @@ export default function DemoIndexPage() {
     description:
       "Public-domain LoreVia demos showing how character tracking, relationship mapping, and timeline analysis support fiction authors.",
     path: "/demo",
+    about: [
+      "public-domain fiction",
+      "character tracking demo",
+      "timeline analysis",
+      "relationship mapping",
+    ],
   })
 
   return (

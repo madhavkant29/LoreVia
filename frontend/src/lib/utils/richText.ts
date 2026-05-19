@@ -19,6 +19,8 @@ const SAFE_TAGS = new Set([
   "span",
   "a",
   "img",
+  "mark",
+  "hr",
 ])
 
 const SAFE_ALIGNMENTS = new Set(["left", "center", "right", "justify"])
@@ -69,12 +71,29 @@ export function sanitizeRichTextHtml(html: string, onCharacterClick?: (character
     const alt = tag === "img" ? node.getAttribute("alt") : null
     const mention = tag === "span" ? node.getAttribute("data-mention") : null
     const className = tag === "span" && element.classList.contains("mention-token") ? "mention-token" : null
+    const sceneBreak = tag === "div" && node.getAttribute("data-scene-break") === "true"
+    const pageBreak = tag === "div" && node.getAttribute("data-page-break") === "true"
+    const color = element.style.color
+    const backgroundColor = element.style.backgroundColor
+    const fontFamily = element.style.fontFamily
+    const fontSize = element.style.fontSize
+    const lineHeight = element.style.lineHeight
+    const marginBottom = element.style.marginBottom
+    const textIndent = element.style.textIndent
 
     Array.from(node.attributes).forEach((attribute) => node.removeAttribute(attribute.name))
 
     if (textAlign && SAFE_ALIGNMENTS.has(textAlign)) {
       element.style.textAlign = textAlign
     }
+
+    if (color) element.style.color = color
+    if (backgroundColor) element.style.backgroundColor = backgroundColor
+    if (fontFamily) element.style.fontFamily = fontFamily
+    if (fontSize) element.style.fontSize = fontSize
+    if (lineHeight) element.style.lineHeight = lineHeight
+    if (marginBottom) element.style.marginBottom = marginBottom
+    if (textIndent) element.style.textIndent = textIndent
 
     if (tag === "a" && href) {
       const safeHref = sanitizeHref(href)
@@ -105,6 +124,18 @@ export function sanitizeRichTextHtml(html: string, onCharacterClick?: (character
         element.style.cursor = "pointer"
         element.onclick = () => onCharacterClick(mention)
       }
+    }
+
+    if (sceneBreak) {
+      node.setAttribute("data-scene-break", "true")
+      node.setAttribute("class", "scene-break-node")
+      node.textContent = "***"
+    }
+
+    if (pageBreak) {
+      node.setAttribute("data-page-break", "true")
+      node.setAttribute("class", "page-break-node")
+      node.textContent = "Page break"
     }
   }
 

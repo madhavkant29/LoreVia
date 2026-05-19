@@ -15,7 +15,9 @@ from app.api.v1.routes import (
     manuscript,
     notifications,
     public,
+    reports,
     reader,
+    social,
     webhooks,
     world_building,
 )
@@ -47,6 +49,7 @@ api_router.include_router(collaboration.router, prefix="/books",         tags=["
 api_router.include_router(books.router,         prefix="/books",         tags=["books"], dependencies=[Depends(rate_limit_api)])
 api_router.include_router(manuscript.router,    prefix="/books",         tags=["manuscript"], dependencies=[Depends(rate_limit_api)])
 api_router.include_router(public.router,        prefix="/public",        tags=["public"], dependencies=[Depends(rate_limit_public)])
+api_router.include_router(reports.router,       prefix="/reports",       tags=["reports"])
 api_router.include_router(billing.router,       prefix="/billing",       tags=["billing"])
 api_router.include_router(beta_reads.router,    tags=["beta-reads"], dependencies=[Depends(rate_limit_api)])
 api_router.include_router(internal.router,      prefix="/internal",      tags=["internal"])
@@ -54,6 +57,7 @@ api_router.include_router(webhooks.router,      prefix="/webhooks",      tags=["
 api_router.include_router(characters.router,    prefix="/characters",    tags=["characters"], dependencies=[Depends(rate_limit_api)])
 api_router.include_router(reader.router,        prefix="/reader",        tags=["reader"], dependencies=[Depends(rate_limit_api)])
 api_router.include_router(notifications.router, prefix="/notifications", tags=["notifications"], dependencies=[Depends(rate_limit_api)])
+api_router.include_router(social.router,        prefix="/social",        tags=["social"], dependencies=[Depends(rate_limit_api)])
 api_router.include_router(intelligence.router,  prefix="/intelligence",  tags=["intelligence"], dependencies=[Depends(rate_limit_api)])
 api_router.include_router(advisor.router,       prefix="/intelligence",  tags=["advisor"],      dependencies=[Depends(rate_limit_api)])
 api_router.include_router(world_building.router, prefix="/intelligence", tags=["world-building"], dependencies=[Depends(rate_limit_api)])

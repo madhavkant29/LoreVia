@@ -10,10 +10,16 @@ from app.core.database import get_db
 from app.core.redis import cache_del, key_public_book_detail, key_public_books
 import app.core.redis
 from app.models.book import Book
+from app.models.moderation import ContentReport, CreatorStrike
 from app.models.character import Character
 from app.models.intelligence import BookChunk, ChapterSummary
 from app.models.user import User, UserRateLimitOverride
 from app.schemas.admin import (
+    AdminBookModerationBody,
+    AdminRestoreBookBody,
+    ContentReportAdminOut,
+    CreatorStrikeCreateBody,
+    CreatorStrikeOut,
     PendingPublicShareOut,
     PublicShareApprovalBody,
     RateLimitOverrideBody,
@@ -26,10 +32,18 @@ from app.utils.billing_utils import (
     normalize_tier,
 )
 from app.utils.public_utils import (
+    MODERATION_STATUS_CLEAN,
+    MODERATION_STATUS_HIDDEN,
+    MODERATION_STATUS_REMOVED,
+    PUBLIC_STATUS_HIDDEN,
+    PUBLIC_STATUS_PUBLISHED,
+    PUBLIC_STATUS_REMOVED,
     PUBLIC_SHARE_STATUS_APPROVED,
     PUBLIC_SHARE_STATUS_NOT_REQUESTED,
     PUBLIC_SHARE_STATUS_PENDING,
     USER_PUBLIC_SHARE_SOURCE_KIND,
+    add_moderation_action,
+    active_serious_strike_count,
     get_public_share_status,
 )
 from app.utils.redis_utils import maybe_await
@@ -63,6 +77,8 @@ async def list_pending_public_shares(
             title=book.title,
             author=book.author,
             genre=book.genre,
+            isbn=book.isbn,
+            copyright_warning=bool(book.copyright_warning),
             public_description=book.public_description,
             requested_at=book.public_share_requested_at,
             created_at=book.created_at,
@@ -94,9 +110,14 @@ async def review_public_share(
         book.public_share_approved_at = datetime.now(UTC)
         book.public_share_approved_by_user_id = admin_user.id
         book.is_public = True
+        book.public_status = PUBLIC_STATUS_PUBLISHED
+        book.public_visibility = "public"
+        book.moderation_status = MODERATION_STATUS_CLEAN
         visibility = "public"
     else:
         book.is_public = False
+        book.public_status = PUBLIC_STATUS_HIDDEN
+        book.public_visibility = "private"
         if current_status == PUBLIC_SHARE_STATUS_PENDING:
             book.public_share_status = PUBLIC_SHARE_STATUS_NOT_REQUESTED
             book.public_share_requested_at = None
@@ -236,3 +257,172 @@ async def update_user_tier(
     user.tier = tier
     await db.commit()
     return {"ok": True, "user_id": str(user_id), "tier": tier}
+
+
+@router.get("/reports", response_model=list[ContentReportAdminOut])
+async def list_content_reports(
+    db: AsyncSession = Depends(get_db),
+    _=Depends(get_admin),
+):
+    reports = (
+        await db.execute(
+            select(ContentReport).order_by(ContentReport.created_at.desc())
+        )
+    ).scalars().all()
+    return [
+        ContentReportAdminOut(
+            id=str(report.id),
+            reported_book_id=str(report.reported_book_id),
+            reported_author_user_id=str(report.reported_author_user_id) if report.reported_author_user_id else None,
+            reporter_user_id=str(report.reporter_user_id) if report.reporter_user_id else None,
+            reporter_email=report.reporter_email,
+            report_type=report.report_type,
+            status=report.status,
+            reason=report.reason,
+            details=report.details,
+            created_at=report.created_at,
+        )
+        for report in reports
+    ]
+
+
+@router.post("/books/{book_id}/hide")
+async def hide_public_book(
+    book_id: uuid.UUID,
+    body: AdminBookModerationBody,
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(get_admin),
+):
+    book = await db.get(Book, book_id)
+    if book is None:
+        raise HTTPException(404, "Book not found")
+    previous_status = str(getattr(book, "moderation_status", "") or "") or None
+    book.moderation_status = MODERATION_STATUS_HIDDEN
+    book.public_status = PUBLIC_STATUS_HIDDEN
+    book.is_public = False
+    book.takedown_reason = body.reason
+    book.takedown_at = datetime.now(UTC)
+    book.takedown_by_user_id = admin_user.id
+    await add_moderation_action(
+        db,
+        action_type="book_hidden",
+        actor_user_id=admin_user.id,
+        target_user_id=book.user_id,
+        book_id=book.id,
+        previous_status=previous_status,
+        new_status=book.moderation_status,
+        reason=body.reason,
+    )
+    await db.commit()
+    return {"ok": True, "book_id": str(book.id), "moderation_status": book.moderation_status}
+
+
+@router.post("/books/{book_id}/remove")
+async def remove_public_book(
+    book_id: uuid.UUID,
+    body: AdminBookModerationBody,
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(get_admin),
+):
+    book = await db.get(Book, book_id)
+    if book is None:
+        raise HTTPException(404, "Book not found")
+    previous_status = str(getattr(book, "moderation_status", "") or "") or None
+    book.moderation_status = MODERATION_STATUS_REMOVED
+    book.public_status = PUBLIC_STATUS_REMOVED
+    book.is_public = False
+    book.takedown_reason = body.reason
+    book.takedown_at = datetime.now(UTC)
+    book.takedown_by_user_id = admin_user.id
+    await add_moderation_action(
+        db,
+        action_type="book_removed",
+        actor_user_id=admin_user.id,
+        target_user_id=book.user_id,
+        book_id=book.id,
+        previous_status=previous_status,
+        new_status=book.moderation_status,
+        reason=body.reason,
+    )
+    await db.commit()
+    return {"ok": True, "book_id": str(book.id), "moderation_status": book.moderation_status}
+
+
+@router.post("/books/{book_id}/restore")
+async def restore_public_book(
+    book_id: uuid.UUID,
+    body: AdminRestoreBookBody,
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(get_admin),
+):
+    book = await db.get(Book, book_id)
+    if book is None:
+        raise HTTPException(404, "Book not found")
+    previous_status = str(getattr(book, "moderation_status", "") or "") or None
+    book.moderation_status = MODERATION_STATUS_CLEAN
+    book.public_status = PUBLIC_STATUS_PUBLISHED
+    book.is_public = True
+    book.takedown_reason = None
+    book.takedown_at = None
+    book.takedown_by_user_id = None
+    await add_moderation_action(
+        db,
+        action_type="book_restored",
+        actor_user_id=admin_user.id,
+        target_user_id=book.user_id,
+        book_id=book.id,
+        previous_status=previous_status,
+        new_status=book.moderation_status,
+        reason=body.reason,
+    )
+    await db.commit()
+    return {"ok": True, "book_id": str(book.id), "moderation_status": book.moderation_status}
+
+
+@router.post("/users/{user_id}/strikes", response_model=CreatorStrikeOut)
+async def add_creator_strike(
+    user_id: uuid.UUID,
+    body: CreatorStrikeCreateBody,
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(get_admin),
+):
+    user = await db.get(User, user_id)
+    if user is None:
+        raise HTTPException(404, "User not found")
+    strike = CreatorStrike(
+        user_id=user_id,
+        book_id=uuid.UUID(body.book_id) if body.book_id else None,
+        report_id=uuid.UUID(body.report_id) if body.report_id else None,
+        strike_type=body.strike_type,
+        severity=body.severity,
+        reason=body.reason,
+        created_by_user_id=admin_user.id,
+        is_active=True,
+    )
+    db.add(strike)
+    await db.flush()
+    serious_count = await active_serious_strike_count(db, user_id=user_id)
+    await add_moderation_action(
+        db,
+        action_type="strike_added",
+        actor_user_id=admin_user.id,
+        target_user_id=user_id,
+        book_id=strike.book_id,
+        report_id=strike.report_id,
+        previous_status=None,
+        new_status=f"serious_strikes:{serious_count}",
+        reason=body.reason,
+        metadata={"severity": body.severity, "strike_type": body.strike_type},
+    )
+    await db.commit()
+    return CreatorStrikeOut(
+        id=str(strike.id),
+        user_id=str(strike.user_id),
+        book_id=str(strike.book_id) if strike.book_id else None,
+        report_id=str(strike.report_id) if strike.report_id else None,
+        strike_type=strike.strike_type,
+        severity=strike.severity,
+        reason=strike.reason,
+        is_active=bool(strike.is_active),
+        created_at=strike.created_at,
+    )

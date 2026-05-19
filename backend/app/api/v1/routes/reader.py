@@ -24,11 +24,11 @@ from app.core.redis import (
     key_search_results,
 )
 from app.core.security import decode_token
-from app.core.storage import download_book, get_presigned_url
+from app.core.storage import download_book
 from app.engine.analysis.recall import generate_recall
 from app.engine.character.consolidator import consolidate_characters
 from app.engine.search.semantic import build_search_result, find_context_for_tap, semantic_search
-from app.models.book import Book, Chapter, ChapterMedia, NovelScene
+from app.models.book import Book, Chapter, ChapterMedia
 from app.models.character import Character, CharacterState
 from app.models.intelligence import (
     BookChunk,
@@ -45,22 +45,19 @@ from app.schemas.reader import (
     TimelineResponseOut,
     UpdatePlotThreadBody,
 )
+from app.services.chapter_recovery_service import resolve_reader_chapter_payload
 from app.services.summary_service import get_or_generate_summary
 from app.utils.beta_read_utils import sync_beta_assignments_for_reader_book
 from app.utils.billing_utils import summary_mode_allowed
 from app.utils.book_utils import (
-    build_workspace_chapter_text_from_scenes,
-    chapter_body_needs_scene_workspace_fallback,
     collaboration_allows_chapter,
     collaboration_can_copy_manuscript,
-    deserialize_manuscript_content,
     get_book_with_collaboration_access,
-    manuscript_text_to_html,
     normalize_collaboration_scope,
 )
 from app.utils.character_utils import (
     backfill_character_first_chapters_for_chapter_text,
-    compose_character_description,
+    serialize_reader_character,
 )
 from app.utils.plot_thread_utils import derive_plot_thread_status
 from app.utils.public_utils import ensure_public_mode_enabled
@@ -69,25 +66,21 @@ from app.utils.queue_utils import queue_for_user
 # ── Utils imports ──────────────────────────────────────────────────────────────
 from app.utils.reader_utils import (
     build_timeline_track_payload,
+    chapter_analysis_status,
     chapter_intelligence_available,
     chapter_intelligence_map,
     collapse_graph_characters,
     dedupe_timeline_events,
-    extract_media_markers,
     graph_character_visibility_analysis,
     is_graph_character_visible,
     is_valid_timeline_character,
     list_plot_threads,
-    merge_media_items,
     normalize_summary_response,
-    parse_chapter_from_source,
     queue_analysis_if_missing,
     read_available_chapter_set,
     read_chapter_set,
     relationship_node_description,
     require_summary_access,
-    serialize_chapter_media,
-    serialize_inline_images,
     summary_visible_chapter_set,
     timeline_character_detail,
     timeline_plot_thread_span,
@@ -190,79 +183,17 @@ async def get_chapter(
     chapter = (await db.execute(
         select(Chapter).where(Chapter.book_id == book_id, Chapter.number == chapter_num)
     )).scalar()
-    fallback_text = None
-    fallback_title = None
-    fallback_media = []
-    stored_text_content = None
-    stored_html_content = None
-    stored_media = []
-    if not chapter:
-        fallback = parse_chapter_from_source(book, chapter_num)
-        if fallback:
-            fallback_title = fallback.get("title")
-            fallback_text = fallback.get("text")
-            fallback_media = serialize_inline_images(fallback.get("images", []))
-        if fallback_text is None:
-            raise HTTPException(404, "Chapter not found")
-    else:
-        if chapter.s3_key:
-            try:
-                stored_payload = deserialize_manuscript_content(download_book(chapter.s3_key))
-                stored_text_content = str(stored_payload.get("text") or "")
-                stored_html_content = str(stored_payload.get("html") or "") or None
-            except Exception:
-                stored_text_content = None
-                stored_html_content = None
-        else:
-            stored_html_content = None
-        stored_media = await serialize_chapter_media(db, chapter.id)
+    resolved_chapter = await resolve_reader_chapter_payload(
+        db,
+        book=book,
+        chapter=chapter,
+        chapter_num=chapter_num,
+        current_user=current_user,
+    )
+    if resolved_chapter is None:
+        raise HTTPException(404, "Chapter not found")
 
-        stored_markers = extract_media_markers(stored_text_content)
-        needs_source_recovery = (
-            book.format == "pdf"
-            and (
-                not stored_text_content
-                or ("[[IMAGE:" in stored_text_content and not stored_media)
-                or (stored_media and not stored_markers)
-                or (stored_markers and len(stored_markers) != len(stored_media))
-            )
-        )
-        if needs_source_recovery:
-            fallback = parse_chapter_from_source(book, chapter_num)
-            if fallback:
-                fallback_title = fallback.get("title")
-                fallback_text = fallback.get("text")
-                fallback_media = serialize_inline_images(fallback.get("images", []))
-                fallback_markers = extract_media_markers(fallback_text)
-                if fallback_text and fallback_markers and len(fallback_markers) == len(fallback_media):
-                    stored_text_content = fallback_text
-                    stored_media = fallback_media
-                else:
-                    if not stored_text_content and fallback_text:
-                        stored_text_content = fallback_text
-                    if fallback_media:
-                        stored_media = merge_media_items(stored_media, fallback_media)
-
-        if chapter_body_needs_scene_workspace_fallback(
-            stored_text_content,
-            chapter_number=chapter_num,
-            chapter_title=chapter.title,
-        ):
-            manual_scenes = (
-                await db.execute(
-                    select(NovelScene).where(
-                        NovelScene.book_id == book_id,
-                        NovelScene.chapter_number == chapter_num,
-                        NovelScene.status != "archived",
-                    ).order_by(NovelScene.sort_order.asc(), NovelScene.created_at.asc())
-                )
-            ).scalars().all()
-            compiled_text = build_workspace_chapter_text_from_scenes(list(manual_scenes))
-            if compiled_text:
-                stored_text_content = compiled_text
-                stored_html_content = manuscript_text_to_html(compiled_text)
-
-    chapter_text_content = stored_text_content if chapter else fallback_text
+    chapter_text_content = resolved_chapter["text_content"]
     if await backfill_character_first_chapters_for_chapter_text(
         db,
         book_id=book_id,
@@ -294,34 +225,21 @@ async def get_chapter(
     for char in chars:
         char_state = states_by_character.get(char.id)
         trait_snapshot_raw = cast(dict[str, Any], char_state.trait_snapshot) if char_state else cast(dict[str, Any], char.trait_state or {})
-        trait_snapshot = dict(trait_snapshot_raw)
-        char_data.append({
-            "id": str(char.id),
-            "name": char.name,
-            "aliases": char.aliases or [],
-            "role": char.role,
-            "first_chapter": char.first_chapter,
-            "description": compose_character_description(
-                trait_state=trait_snapshot,
-                archetype=char.archetype,
-                arc_summary=char.arc_summary,
-                personality_tags=char.personality_tags or [],
-                motivations=char.motivations or [],
-            ),
-            "personality_tags": char.personality_tags or [],
-        })
+        char_data.append(serialize_reader_character(char, trait_snapshot=dict(trait_snapshot_raw)))
 
     return {
         "chapter_number": chapter_num,
-        "chapter_title": chapter.title if chapter else fallback_title,
-        "content_version": int(chapter.content_version or 1) if chapter else None,
+        "chapter_title": resolved_chapter["chapter_title"],
+        "content_version": resolved_chapter["content_version"],
         "total_chapters": book.total_chapters,
         "intelligence_available": await chapter_intelligence_available(db, book, current_user, chapter_num),
+        "analysis_status": resolved_chapter["analysis_status"],
+        "source_integrity": resolved_chapter["source_integrity"],
         "can_copy_manuscript": collaboration_can_copy_manuscript(book, collaborator),
-        "text_url": get_presigned_url(chapter.s3_key) if chapter and chapter.s3_key else None,
-        "text_content": stored_text_content if chapter else fallback_text,
-        "html_content": stored_html_content if chapter else None,
-        "media": stored_media if chapter else fallback_media,
+        "text_url": resolved_chapter["text_url"],
+        "text_content": resolved_chapter["text_content"],
+        "html_content": resolved_chapter["html_content"],
+        "media": resolved_chapter["media"],
         "tags": (
             await get_custom_tags_for_entity(
                 db,
@@ -396,23 +314,8 @@ async def smart_tap(
         return {
             "type": "character",
             "character": {
-                "id": str(char.id),
-                "name": char.name,
-                "aliases": char.aliases or [],
-                "role": char.role,
-                "trait_state": trait_snapshot,
-                "description": compose_character_description(
-                    trait_state=trait_snapshot,
-                    archetype=char.archetype,
-                    arc_summary=char.arc_summary,
-                    personality_tags=char.personality_tags or [],
-                    motivations=char.motivations or [],
-                ),
-                "personality_tags": char.personality_tags or [],
-                "motivations": char.motivations or [],
-                "fears": char.fears or [],
+                **serialize_reader_character(char, trait_snapshot=trait_snapshot),
                 "arc_note": char_state.arc_note if char_state else None,
-                "first_chapter": char.first_chapter,
             },
             "relationships": [
                 {
@@ -474,10 +377,17 @@ async def get_summary(
     if not data:
         await queue_analysis_if_missing(db, chapter, current_user)
         raise HTTPException(503, "Chapter text not available yet")
+    if data.get("status") != "ready":
+        await queue_analysis_if_missing(db, chapter, current_user)
+        return {
+            "status": data.get("status") or "pending",
+            "content": None,
+            "diagnostics": data.get("diagnostics") or {"analysis_status": chapter_analysis_status(chapter)},
+        }
 
     data = normalize_summary_response(data["content"], data.get("key_events"), data.get("char_changes"), data.get("clues"))
     await cache_set(key_chapter_summary(str(chapter.id), mode), data, settings.REDIS_TTL_SUMMARY)
-    return data
+    return {"status": "ready", **data, "diagnostics": {"analysis_status": chapter_analysis_status(chapter)}}
 
 
 @router.get("/{book_id}/events", response_model=BookEventsOut)
@@ -777,7 +687,7 @@ async def get_chapter_list(
             "current_chapter": read_upto,
             "chapters": [
                 {"number": number, "title": f"Chapter {number}", "processed": False,
-                 "intelligence_available": True, "read": number in read_set}
+                 "intelligence_available": True, "read": number in read_set, "analysis_status": None}
                 for number in range(first, min(last, book.total_chapters) + 1)
             ],
         }
@@ -801,6 +711,7 @@ async def get_chapter_list(
                 "number": chapter.number, "title": chapter.title, "processed": chapter.processed,
                 "intelligence_available": intelligence_map.get(chapter.number, True),
                 "read": book.mode == "author" or chapter.number in read_set,
+                "analysis_status": chapter_analysis_status(chapter),
                 "tags": tags_by_chapter.get(chapter.id, []),
             }
             for chapter in chapters
@@ -853,7 +764,7 @@ async def get_summary_collection(
             continue
         await queue_analysis_if_missing(db, chapter, current_user)
         summary_data = await get_or_generate_summary(db, book_id, chapter.number, "short")
-        if summary_data:
+        if summary_data and summary_data.get("status") == "ready":
             summary_by_chapter_id[chapter_key] = {
                 "content": summary_data["content"],
                 "key_events": summary_data.get("key_events") or [],
@@ -867,6 +778,7 @@ async def get_summary_collection(
                 "chapter_title": chapter.title,
                 "read": book.mode == "author" or chapter.number <= read_upto,
                 "available": str(chapter.id) in summary_by_chapter_id,
+                "status": "ready" if str(chapter.id) in summary_by_chapter_id else str((chapter_analysis_status(chapter) or {}).get("status") or "pending"),
                 "content": summary_by_chapter_id.get(str(chapter.id), {}).get("content"),
                 "key_events": summary_by_chapter_id.get(str(chapter.id), {}).get("key_events", []),
             }
@@ -912,38 +824,8 @@ async def get_foreshadowing_highlights(
             .order_by(Chapter.number)
         )
     ).scalars().all()
-
-    from app.engine.analysis.summariser import generate_summary
-
-    generated_rows = []
     for chapter in chapters:
-        existing = (await db.execute(
-            select(ChapterSummary).where(ChapterSummary.chapter_id == chapter.id, ChapterSummary.mode == "detailed")
-        )).scalar()
-        if existing:
-            generated_rows.append((chapter.number, chapter.title, existing.clues or []))
-            continue
         await queue_analysis_if_missing(db, chapter, current_user)
-        if not chapter.s3_key:
-            continue
-        try:
-            chapter_text = download_book(chapter.s3_key).decode("utf-8", errors="ignore")
-        except Exception:
-            continue
-        data = await generate_summary(chapter_text, "detailed", chapter.title or "")
-        row = ChapterSummary(chapter_id=chapter.id, mode="detailed", content=data["content"],
-                             key_events=data.get("key_events"), char_changes=data.get("char_changes"), clues=data.get("clues"))
-        db.add(row)
-        generated_rows.append((chapter.number, chapter.title, data.get("clues") or []))
-
-    if generated_rows:
-        await db.commit()
-
-    for number, title, clues in generated_rows:
-        for clue in clues or []:
-            if isinstance(clue, dict) and clue.get("clue"):
-                items.append({"chapter_number": number, "chapter_title": title,
-                               "clue": clue.get("clue"), "foreshadows": clue.get("foreshadows")})
     return {"items": items}
 
 

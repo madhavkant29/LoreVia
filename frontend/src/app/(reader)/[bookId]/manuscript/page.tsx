@@ -1,6 +1,6 @@
 "use client"
 
-import type { CSSProperties, ReactNode } from "react"
+import type { ReactNode } from "react"
 import type { Route } from "next"
 import axios from "axios"
 import { useQuery } from "@tanstack/react-query"
@@ -9,6 +9,7 @@ import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 
 import { WhatsTheWordPanel } from "@/components/intelligence/WhatsTheWordPanel"
+import { EditorToolbar, RichTextEditor } from "@/components/editor/SharedRichTextEditor"
 import { ManuscriptPagedPreview } from "@/components/reader/ManuscriptPagedPreview"
 import { booksApi } from "@/lib/api/books"
 import { intelligenceApi } from "@/lib/api/intelligence"
@@ -52,6 +53,10 @@ type RightPane = "context" | "advisor" | "notes" | "arcs" | "insights" | "charac
 type SceneOrderSaveState = "idle" | "saving" | "saved" | "failed"
 type DraggedSceneState = { chapterNumber: number; sceneId: string }
 type SceneDropTarget = { chapterNumber: number; index: number }
+const EMPTY_CHARACTERS: Character[] = []
+const EMPTY_ANNOTATIONS: ManuscriptAnnotation[] = []
+const EMPTY_NOTES: BookNote[] = []
+const EMPTY_CHAPTER_VERSIONS: ChapterVersion[] = []
 const SCENE_DRAG_SCENE_ID_MIME = "application/x-lorevia-scene-id"
 const SCENE_DRAG_CHAPTER_MIME = "application/x-lorevia-chapter-number"
 
@@ -130,6 +135,7 @@ export default function ManuscriptPage() {
   const [sceneTitleDraft, setSceneTitleDraft] = useState("")
   const [sceneDescriptionDraft, setSceneDescriptionDraft] = useState("")
   const [sceneBodyDraft, setSceneBodyDraft] = useState("")
+  const [sceneHtmlDraft, setSceneHtmlDraft] = useState("<p></p>")
   const [sceneChapterDraft, setSceneChapterDraft] = useState<number | null>(null)
   const [sceneSaving, setSceneSaving] = useState(false)
   const [restoringVersionId, setRestoringVersionId] = useState<string | null>(null)
@@ -233,7 +239,7 @@ export default function ManuscriptPage() {
   const pendingAnnotationJumpIdRef = useRef<string | null>(null)
   const selectionMenuAnchorRef = useRef<ManuscriptSelectionAnchor | null>(null)
 
-  const { data: charactersData = [] } = useQuery<Character[]>({
+  const { data: charactersData = EMPTY_CHARACTERS } = useQuery<Character[]>({
     queryKey: [`manuscript:${bookId}:characters`],
     queryFn: () => booksApi.getCharacters(bookId),
   })
@@ -254,7 +260,7 @@ export default function ManuscriptPage() {
     queryFn: () => booksApi.getWorkspaceTree(bookId),
   })
   const {
-    data: annotationsData = [],
+    data: annotationsData = EMPTY_ANNOTATIONS,
     isFetching: annotationsQueryLoading,
     refetch: refetchAnnotations,
   } = useQuery<ManuscriptAnnotation[]>({
@@ -262,7 +268,7 @@ export default function ManuscriptPage() {
     queryFn: () => booksApi.getManuscriptAnnotations(bookId),
   })
   const {
-    data: notesData = [],
+    data: notesData = EMPTY_NOTES,
     isFetching: notesQueryLoading,
     refetch: refetchNotes,
   } = useQuery<BookNote[]>({
@@ -270,7 +276,7 @@ export default function ManuscriptPage() {
     queryFn: () => booksApi.getBookNotes(bookId),
     enabled: showRightRail && activeRightPane === "notes",
   })
-  const { data: chapterVersionsData = [] } = useQuery<ChapterVersion[]>({
+  const { data: chapterVersionsData = EMPTY_CHAPTER_VERSIONS } = useQuery<ChapterVersion[]>({
     queryKey: selectedChapter !== null ? [`manuscript:${bookId}:chapter-versions:${selectedChapter}`] : [`manuscript:${bookId}:chapter-versions:none`],
     queryFn: async () => {
       if (selectedChapter === null) return []
@@ -660,6 +666,7 @@ export default function ManuscriptPage() {
     setSceneTitleDraft(recoveredDraft?.title ?? nextScene?.title ?? "")
     setSceneDescriptionDraft(recoveredDraft?.description ?? nextScene?.description ?? "")
     setSceneBodyDraft(recoveredDraft?.body ?? nextScene?.body ?? "")
+    setSceneHtmlDraft(nextScene?.html_body ?? textToHtml(recoveredDraft?.body ?? nextScene?.body ?? ""))
     setSceneChapterDraft(recoveredDraft?.chapterNumber ?? fallbackChapterNumber)
     setSceneVersionDetail(null)
     setSceneVersionNameDraft("")
@@ -684,6 +691,7 @@ export default function ManuscriptPage() {
     setSceneTitleDraft("")
     setSceneDescriptionDraft("")
     setSceneBodyDraft("")
+    setSceneHtmlDraft("<p></p>")
     setSceneChapterDraft(selectedChapter ?? null)
     setSceneVersions([])
     setSceneVersionDetail(null)
@@ -709,6 +717,7 @@ export default function ManuscriptPage() {
         title: sceneTitleDraft.trim(),
         description: sceneDescriptionDraft.trim() || null,
         body: sceneBodyDraft,
+        html_body: sceneHtmlDraft,
         chapter_number: sceneChapterDraft,
         status: sceneChapterDraft ? "assigned" : "unassigned",
         sort_order: editingScene?.sort_order,
@@ -833,6 +842,7 @@ export default function ManuscriptPage() {
       setSceneTitleDraft(restored.scene.title)
       setSceneDescriptionDraft(restored.scene.description ?? "")
       setSceneBodyDraft(restored.scene.body)
+      setSceneHtmlDraft(restored.scene.html_body ?? textToHtml(restored.scene.body))
       setSceneChapterDraft(restored.scene.chapter_number ?? null)
       setSceneVersions(restored.versions)
       setSceneVersionDetail(null)
@@ -3178,7 +3188,7 @@ export default function ManuscriptPage() {
                     {autosaveMetaLabel(activeChapterNumber) ? <p className={`mt-3 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{autosaveMetaLabel(activeChapterNumber)}</p> : null}
                   </div>
                   <div className={`sticky top-3 z-10 border-b px-4 py-3 transition-all duration-200 translate-y-0 opacity-100 pointer-events-auto ${isDark ? "border-white/10 bg-[#0d1117]/95 backdrop-blur" : "border-[#e6dfd4] bg-[#f7f3ed]/95 backdrop-blur"}`}>
-                    <EditorToolbar isDark={isDark} compact characters={characters} onAddComment={() => openAnnotationComposer()} onOpenNotes={() => openRightPane("notes")} />
+                    <EditorToolbar editorKey={`chapter-${activeChapterNumber}`} isDark={isDark} compact characters={characters} onAddComment={() => openAnnotationComposer()} onOpenNotes={() => openRightPane("notes")} />
                   </div>
                   <RichTextEditor
                     html={html}
@@ -3296,7 +3306,7 @@ export default function ManuscriptPage() {
                         </div>
                       </div>
                       <div className={`sticky top-3 z-10 border-b px-4 py-3 transition-all duration-200 translate-y-0 opacity-100 pointer-events-auto ${isDark ? "border-white/10 bg-[#0d1117]/95 backdrop-blur" : "border-[#e6dfd4] bg-[#f7f3ed]/95 backdrop-blur"}`}>
-                        <EditorToolbar isDark={isDark} compact characters={characters} onAddComment={() => openAnnotationComposer()} onOpenNotes={() => openRightPane("notes")} />
+                        <EditorToolbar editorKey={`book-${chapter.number}`} isDark={isDark} compact characters={characters} onAddComment={() => openAnnotationComposer()} onOpenNotes={() => openRightPane("notes")} />
                       </div>
                       <RichTextEditor
                         html={draft.html}
@@ -4080,8 +4090,9 @@ export default function ManuscriptPage() {
                       className={`w-full rounded-[0.9rem] border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
                     />
                     <div className={`overflow-hidden rounded-[1rem] border ${isDark ? "border-white/10 bg-[#0b0f17]" : "border-stone-200 bg-white"}`}>
-                      <EditorToolbar isDark={isDark} compact characters={characters} />
+                      <EditorToolbar editorKey="note-editor-modal" isDark={isDark} compact characters={characters} />
                       <RichTextEditor
+                        editorKey="note-editor-modal"
                         html={noteBody}
                         onChange={(nextHtml, nextText) => {
                           setNoteBody(nextHtml)
@@ -4388,7 +4399,7 @@ export default function ManuscriptPage() {
                 <div>
                   <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-emerald-300" : "text-emerald-700"}`}>Scene workspace</p>
                   <h3 className="mt-2 text-2xl font-semibold">{editingScene ? "Edit chapter scene" : "New chapter scene"}</h3>
-                  <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>Scenes live in the chapter file tree. LoreVia extracts metadata from labels like POV, Location, Characters, Goals, Conflict, and Plot Threads when you save.</p>
+                  <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>Scenes live in the chapter file tree. Rich text, scene breaks, comments, and character mentions now share the same editor foundation as the manuscript.</p>
                 </div>
                 <button onClick={closeSceneEditor} className={`rounded-full px-3 py-1.5 text-sm ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}>Close</button>
               </div>
@@ -4427,13 +4438,19 @@ export default function ManuscriptPage() {
               </label>
               <label className="mt-4 block text-sm">
                 <span className={`mb-2 block text-xs font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Scene body</span>
-                <textarea
-                  value={sceneBodyDraft}
-                  onChange={(event) => setSceneBodyDraft(event.target.value)}
-                  rows={14}
-                  placeholder="Write the scene here..."
-                  className={`w-full rounded-[1rem] border px-4 py-3 text-sm leading-7 ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
-                />
+                <div className={`overflow-hidden rounded-[1rem] border ${isDark ? "border-white/10 bg-black" : "border-stone-200 bg-white"}`}>
+                  <EditorToolbar editorKey="scene-editor-modal" isDark={isDark} compact characters={characters} />
+                  <RichTextEditor
+                    editorKey="scene-editor-modal"
+                    html={sceneHtmlDraft}
+                    onChange={(nextHtml, nextText) => {
+                      setSceneHtmlDraft(nextHtml)
+                      setSceneBodyDraft(nextText)
+                    }}
+                    placeholder="Write the scene here..."
+                    className={`min-h-[18rem] px-4 py-3 text-sm leading-7 outline-none ${isDark ? "text-slate-100" : "text-stone-900"}`}
+                  />
+                </div>
               </label>
               <p className={`mt-3 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Unsaved scene changes autosave locally and stay separate from manual scene versions.</p>
               {editingScene?.id ? (
@@ -4602,268 +4619,6 @@ export default function ManuscriptPage() {
         ) : null}
       </div>
     </div>
-  )
-}
-
-function EditorToolbar({
-  isDark,
-  compact = false,
-  characters = [],
-  onAddComment,
-  onOpenNotes,
-}: {
-  isDark: boolean
-  compact?: boolean
-  characters?: Character[]
-  onAddComment?: () => void
-  onOpenNotes?: () => void
-}) {
-  const [showMentionPicker, setShowMentionPicker] = useState(false)
-  const fileInputRef = useRef<HTMLInputElement | null>(null)
-  const selectionRef = useRef<Range | null>(null)
-
-  const run = (command: string, value?: string) => {
-    document.execCommand(command, false, value)
-  }
-
-  const cacheSelection = () => {
-    const selection = window.getSelection()
-    if (!selection || selection.rangeCount === 0) return
-    selectionRef.current = selection.getRangeAt(0).cloneRange()
-  }
-
-  const restoreSelection = () => {
-    const selection = window.getSelection()
-    if (!selection || !selectionRef.current) return
-    selection.removeAllRanges()
-    selection.addRange(selectionRef.current)
-  }
-
-  const insertLink = () => {
-    const href = window.prompt("Enter a URL")
-    if (!href) return
-    const label = window.getSelection()?.toString().trim()
-    if (label) {
-      run("createLink", href)
-      return
-    }
-    run("insertHTML", `<a href="${escapeAttribute(href)}" target="_blank" rel="noreferrer noopener">${escapeHtml(href)}</a>`)
-  }
-
-  const insertImage = () => {
-    cacheSelection()
-    fileInputRef.current?.click()
-  }
-
-  const insertMention = (name: string) => {
-    run(
-      "insertHTML",
-      `<span class="mention-token" data-mention="${escapeAttribute(name)}">@${escapeHtml(name)}</span>&nbsp;`
-    )
-    setShowMentionPicker(false)
-  }
-
-  const insertSceneBreak = () => {
-    restoreSelection()
-    run("insertHTML", "<p>* * *</p><p><br></p>")
-  }
-
-  const shellClass = compact
-    ? `border-b px-3 py-2 ${isDark ? "border-white/10 bg-[#0f131a]/85 backdrop-blur" : "border-stone-200 bg-[#f6f1e8]/90 backdrop-blur"}`
-    : ""
-  const groupClass = "flex flex-wrap items-center gap-1.5"
-  const buttonClass = `rounded-md px-2.5 py-2 text-[11px] font-medium transition ${
-    isDark ? "text-slate-200 hover:bg-white/8" : "text-stone-700 hover:bg-white"
-  }`
-  const dividerClass = isDark ? "h-5 w-px bg-white/10" : "h-5 w-px bg-stone-200"
-  const mentionableCharacters = characters.slice(0, 8)
-
-  return (
-    <div className={`flex flex-wrap items-center justify-between gap-3 ${shellClass}`}>
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*"
-        className="hidden"
-        onChange={(event) => {
-          const file = event.target.files?.[0]
-          if (!file) return
-          const reader = new FileReader()
-          reader.onload = () => {
-            const result = typeof reader.result === "string" ? reader.result : ""
-            if (!result) return
-            restoreSelection()
-            run("insertHTML", `<p><img src="${escapeAttribute(result)}" alt="${escapeAttribute(file.name || "Embedded image")}" /></p>`)
-            event.target.value = ""
-          }
-          reader.readAsDataURL(file)
-        }}
-      />
-      <div className={`${groupClass} ${compact ? "justify-start" : ""}`}>
-        <button type="button" title="Heading 2 (Ctrl/Cmd+Alt+1)" onMouseDown={(event) => { event.preventDefault(); cacheSelection() }} onClick={() => run("formatBlock", "<h2>")} className={buttonClass}>H</button>
-        <button type="button" title="Heading 3 (Ctrl/Cmd+Alt+2)" onMouseDown={(event) => { event.preventDefault(); cacheSelection() }} onClick={() => run("formatBlock", "<h3>")} className={buttonClass}>H3</button>
-        <button type="button" title="Bold (Ctrl+B)" onMouseDown={(event) => { event.preventDefault(); cacheSelection() }} onClick={() => run("bold")} className={buttonClass}>B</button>
-        <button type="button" title="Italic (Ctrl+I)" onMouseDown={(event) => { event.preventDefault(); cacheSelection() }} onClick={() => run("italic")} className={buttonClass}>I</button>
-        <span className={dividerClass} />
-        <button type="button" title="Bulleted list" onMouseDown={(event) => { event.preventDefault(); cacheSelection() }} onClick={() => run("insertUnorderedList")} className={buttonClass}>List</button>
-        <button type="button" title="Numbered list" onMouseDown={(event) => { event.preventDefault(); cacheSelection() }} onClick={() => run("insertOrderedList")} className={buttonClass}>1.</button>
-        <button type="button" title="Quote (Ctrl/Cmd+Shift+7)" onMouseDown={(event) => { event.preventDefault(); cacheSelection() }} onClick={() => run("formatBlock", "<blockquote>")} className={buttonClass}>Quote</button>
-        <button type="button" title="Scene break (Ctrl/Cmd+Shift+8)" onMouseDown={(event) => { event.preventDefault(); cacheSelection() }} onClick={insertSceneBreak} className={buttonClass}>***</button>
-        <span className={dividerClass} />
-        <button type="button" title="Insert link" onMouseDown={(event) => { event.preventDefault(); cacheSelection() }} onClick={insertLink} className={buttonClass}>Link</button>
-        <button type="button" title="Insert image" onMouseDown={(event) => { event.preventDefault(); cacheSelection() }} onClick={insertImage} className={buttonClass}>Image</button>
-        <div className="relative">
-          <button
-            type="button"
-            title="Mention character"
-            onMouseDown={(event) => { event.preventDefault(); cacheSelection() }}
-            onClick={() => setShowMentionPicker((current) => !current)}
-            className={buttonClass}
-          >
-            @
-          </button>
-          {showMentionPicker && mentionableCharacters.length > 0 ? (
-            <div
-              className={`absolute left-0 top-full z-20 mt-2 w-52 rounded-xl border p-1 shadow-[0_18px_50px_-24px_rgba(15,23,42,0.4)] ${
-                isDark ? "border-white/10 bg-[#0f172a]" : "border-stone-200 bg-white"
-              }`}
-            >
-              {mentionableCharacters.map((character) => (
-                <button
-                  key={character.id}
-                  type="button"
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => insertMention(character.name)}
-                  className={`block w-full rounded-lg px-3 py-2 text-left text-sm transition ${
-                    isDark ? "text-slate-200 hover:bg-white/8" : "text-stone-700 hover:bg-stone-100"
-                  }`}
-                >
-                  @{character.name}
-                </button>
-              ))}
-            </div>
-          ) : null}
-        </div>
-        {onAddComment ? (
-          <button type="button" title="Add comment (Ctrl/Cmd+Shift+M)" onMouseDown={(event) => { event.preventDefault(); cacheSelection() }} onClick={onAddComment} className={buttonClass}>Comment</button>
-        ) : null}
-        {onOpenNotes ? (
-          <button type="button" title="Open notes (Ctrl/Cmd+Shift+N)" onMouseDown={(event) => { event.preventDefault(); cacheSelection() }} onClick={onOpenNotes} className={buttonClass}>Notes</button>
-        ) : null}
-      </div>
-      <div className={groupClass}>
-        <button type="button" title="Align left" onMouseDown={(event) => { event.preventDefault(); cacheSelection() }} onClick={() => run("justifyLeft")} className={buttonClass}>Left</button>
-        <button type="button" title="Align center" onMouseDown={(event) => { event.preventDefault(); cacheSelection() }} onClick={() => run("justifyCenter")} className={buttonClass}>Center</button>
-        <button type="button" title="Align right" onMouseDown={(event) => { event.preventDefault(); cacheSelection() }} onClick={() => run("justifyRight")} className={buttonClass}>Right</button>
-        <span className={dividerClass} />
-        <button type="button" title="Undo (Ctrl+Z)" onMouseDown={(event) => { event.preventDefault(); cacheSelection() }} onClick={() => run("undo")} className={buttonClass}>Undo</button>
-        <button type="button" title="Redo (Ctrl+Y)" onMouseDown={(event) => { event.preventDefault(); cacheSelection() }} onClick={() => run("redo")} className={buttonClass}>Redo</button>
-      </div>
-    </div>
-  )
-}
-
-function RichTextEditor({
-  html,
-  onChange,
-  placeholder,
-  className,
-  style,
-  contentClassName,
-  editorKey,
-  onFocus,
-  onBlur,
-  onCharacterClick,
-  onShortcutSave,
-  onShortcutComment,
-  onShortcutNotes,
-}: {
-  html: string
-  onChange: (html: string, text: string) => void
-  placeholder?: string
-  className?: string
-  style?: CSSProperties
-  contentClassName?: string
-  editorKey?: string
-  onFocus?: () => void
-  onBlur?: () => void
-  onCharacterClick?: (characterName: string) => void
-  onShortcutSave?: () => void
-  onShortcutComment?: () => void
-  onShortcutNotes?: () => void
-}) {
-  const ref = useRef<HTMLDivElement | null>(null)
-
-  useEffect(() => {
-    if (!ref.current) return
-    if (ref.current.innerHTML !== html) {
-      ref.current.innerHTML = html || "<p></p>"
-    }
-  }, [html])
-
-  return (
-    <div
-      ref={ref}
-      contentEditable
-      suppressContentEditableWarning
-      data-editor-key={editorKey}
-      data-placeholder={placeholder}
-      onFocus={onFocus}
-      onBlur={onBlur}
-      onKeyDown={(event) => {
-        const usesModifier = event.ctrlKey || event.metaKey
-        if (!usesModifier) return
-
-        const key = event.key.toLowerCase()
-        if (key === "s") {
-          event.preventDefault()
-          onShortcutSave?.()
-          return
-        }
-
-        if (event.altKey && key === "1") {
-          event.preventDefault()
-          document.execCommand("formatBlock", false, "<h2>")
-          return
-        }
-
-        if (event.altKey && key === "2") {
-          event.preventDefault()
-          document.execCommand("formatBlock", false, "<h3>")
-          return
-        }
-
-        if (event.shiftKey && key === "7") {
-          event.preventDefault()
-          document.execCommand("formatBlock", false, "<blockquote>")
-          return
-        }
-
-        if (event.shiftKey && key === "8") {
-          event.preventDefault()
-          document.execCommand("insertHTML", false, "<p>* * *</p><p><br></p>")
-          return
-        }
-
-        if (event.shiftKey && key === "m") {
-          event.preventDefault()
-          onShortcutComment?.()
-          return
-        }
-
-        if (event.shiftKey && key === "n") {
-          event.preventDefault()
-          onShortcutNotes?.()
-        }
-      }}
-      onInput={(event) => {
-        const nextHtml = sanitizeRichTextHtml(event.currentTarget.innerHTML, onCharacterClick)
-        const nextText = htmlToPlainText(nextHtml)
-        onChange(nextHtml, nextText)
-      }}
-      className={`${className ?? ""} ${contentClassName ?? ""} manuscript-editor`}
-      style={style}
-    />
   )
 }
 

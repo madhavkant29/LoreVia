@@ -181,6 +181,8 @@ export function ObsidianNotesEditor({
   const [workspaceTree, setWorkspaceTree] = useState<ManuscriptWorkspaceTree | null>(null)
   const [sceneChapterNumber, setSceneChapterNumber] = useState<number | null>(null)
   const [sceneSending, setSceneSending] = useState(false)
+  const [findWithinNote, setFindWithinNote] = useState("")
+  const [replaceWithinNote, setReplaceWithinNote] = useState("")
   const deferredQuery = useDeferredValue(query)
   const saveTimersRef = useRef<Record<string, number>>({})
   const latestDraftRef = useRef<Record<string, string>>({})
@@ -709,13 +711,20 @@ export function ObsidianNotesEditor({
     { key: "bold", label: "B", title: "Bold", action: () => replaceSelectedText("**", "**", "bold text") },
     { key: "italic", label: "I", title: "Italic", className: "italic", action: () => replaceSelectedText("*", "*", "italic text") },
     { key: "strike", label: "S", title: "Strikethrough", className: "line-through", action: () => replaceSelectedText("~~", "~~", "crossed text") },
+    { key: "underline", label: "U", title: "Underline helper", className: "underline", action: () => replaceSelectedText("<u>", "</u>", "underlined text") },
     { key: "h1", label: "H1", title: "Heading 1", action: () => prefixSelectedLines("# ", "Heading") },
     { key: "h2", label: "H2", title: "Heading 2", action: () => prefixSelectedLines("## ", "Section heading") },
     { key: "h3", label: "H3", title: "Heading 3", action: () => prefixSelectedLines("### ", "Subsection") },
     { key: "bullets", label: "-", title: "Bullet list", action: () => prefixSelectedLines("- ", "List item") },
+    { key: "numbers", label: "1.", title: "Numbered list", action: () => prefixSelectedLines("1. ", "Numbered item") },
     { key: "check", label: "[ ]", title: "Checklist", action: () => prefixSelectedLines("- [ ] ", "Checklist item") },
+    { key: "quote", label: '"', title: "Blockquote", action: () => prefixSelectedLines("> ", "Quoted note") },
     { key: "code", label: "</>", title: "Code", action: () => replaceSelectedText("`", "`", "code") },
     { key: "link", label: "[[]]", title: "Wiki link", action: () => replaceSelectedText("[[", "]]", "Linked note") },
+    { key: "divider", label: "---", title: "Divider", action: () => insertSnippet("\n---\n") },
+    { key: "scene-break", label: "***", title: "Scene break", action: () => insertSnippet("\n***\n") },
+    { key: "bookmark", label: "#", title: "Bookmark / anchor", action: () => insertSnippet("\n^anchor-name\n") },
+    { key: "template", label: "Tpl", title: "Scene note template", action: () => insertSnippet("\n## Scene note\n- POV:\n- Location:\n- Timeline:\n- Tags:\n- Continuity risk:\n\n") },
     { key: "table", label: "tbl", title: "Table", action: () => insertSnippet("\n| Column | Detail |\n| --- | --- |\n| Item | Note |\n") },
   ]
 
@@ -754,6 +763,13 @@ export function ObsidianNotesEditor({
     } finally {
       setSceneSending(false)
     }
+  }
+
+  const replaceInSelectedNote = () => {
+    if (!selectedNote || !findWithinNote.trim()) return
+    const currentValue = drafts[selectedNote.path] ?? selectedNote.content
+    updateDraft(selectedNote.path, currentValue.split(findWithinNote).join(replaceWithinNote))
+    setStatus("Updated note draft with replacements")
   }
 
   return (
@@ -1017,18 +1033,37 @@ export function ObsidianNotesEditor({
                 <WhatsTheWordPanel bookId={bookId} isDark={isDark} className="mb-4" />
                 <div className={`overflow-hidden rounded-[1.4rem] border ${isDark ? "border-white/8 bg-[#0a1323]" : "border-stone-200 bg-stone-50"}`}>
                   {(mode === "edit" || mode === "split") ? (
-                    <div className={`flex flex-wrap gap-2 border-b px-3 py-3 ${isDark ? "border-white/8 bg-white/[0.02]" : "border-stone-200 bg-white/80"}`}>
-                      {toolbarButtons.map((button) => (
-                        <button
-                          key={button.key}
-                          type="button"
-                          onClick={button.action}
-                          title={button.title}
-                          className={`${markdownButtonClass(isDark)} ${button.className ?? ""}`}
-                        >
-                          {button.label}
+                    <div className={`border-b px-3 py-3 ${isDark ? "border-white/8 bg-white/[0.02]" : "border-stone-200 bg-white/80"}`}>
+                      <div className="flex flex-wrap gap-2">
+                        {toolbarButtons.map((button) => (
+                          <button
+                            key={button.key}
+                            type="button"
+                            onClick={button.action}
+                            title={button.title}
+                            className={`${markdownButtonClass(isDark)} ${button.className ?? ""}`}
+                          >
+                            {button.label}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="mt-3 grid gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+                        <input
+                          value={findWithinNote}
+                          onChange={(event) => setFindWithinNote(event.target.value)}
+                          placeholder="Find in this note"
+                          className={`rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/8 bg-[#08111d] text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
+                        />
+                        <input
+                          value={replaceWithinNote}
+                          onChange={(event) => setReplaceWithinNote(event.target.value)}
+                          placeholder="Replace with"
+                          className={`rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/8 bg-[#08111d] text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
+                        />
+                        <button type="button" onClick={replaceInSelectedNote} disabled={!findWithinNote.trim()} className={`rounded-xl px-4 py-2 text-sm font-medium ${isDark ? "bg-white/10 text-slate-200 disabled:opacity-40" : "bg-stone-100 text-stone-700 disabled:opacity-40"}`}>
+                          Replace all
                         </button>
-                      ))}
+                      </div>
                     </div>
                   ) : null}
 
@@ -1065,6 +1100,7 @@ export function ObsidianNotesEditor({
                     <span>{fileCharacterCount(selectedContent).toLocaleString()} characters</span>
                     <span>{countMarkdownHeadings(selectedContent)} headings</span>
                     <span>{countWikiLinks(selectedContent)} links</span>
+                    <span>{Math.max(1, Math.ceil(fileWordCount(selectedContent) / 250))} min read</span>
                     <span className="ml-auto">Markdown</span>
                   </div>
                 </div>

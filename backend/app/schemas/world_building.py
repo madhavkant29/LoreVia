@@ -63,6 +63,9 @@ class WorldElementOut(BaseModel):
     source_excerpt: str | None = None
     character_id: str | None = None
     author_override: bool = False
+    quality_flags: list[str] = Field(default_factory=list)
+    grounding_passage_count: int = 0
+    confidence_band: str | None = None
 
 
 class WorldGapItemOut(BaseModel):

@@ -24,6 +24,22 @@ export interface Book {
   series_name?: string | null
   series_order?: number | null
   is_public?: boolean
+  public_status?: "draft" | "pending_review" | "published" | "hidden" | "removed" | string | null
+  public_slug?: string | null
+  published_at?: string | null
+  public_visibility?: string | null
+  rights_confirmation?: boolean
+  rights_confirmation_at?: string | null
+  content_source_type?: "user_original" | "public_domain" | "licensed" | "admin_seeded" | string | null
+  moderation_status?: "clean" | "reported" | "under_review" | "hidden" | "removed" | string | null
+  moderation_reason?: string | null
+  takedown_reason?: string | null
+  takedown_at?: string | null
+  public_upload_counted_at?: string | null
+  source_title?: string | null
+  source_author?: string | null
+  source_public_domain_note?: string | null
+  source_url?: string | null
   public_description?: string | null
   public_share_status?: "not_requested" | "pending" | "approved" | string | null
   public_share_requested_at?: string | null
@@ -159,22 +175,33 @@ export interface PublicChapterMeta {
 export interface PublicBook {
   id: string
   public_kind?: "public_demo" | "user_public_share"
+  public_slug?: string | null
   title: string
   author: string | null
   author_username: string | null
+  creator_display_name?: string | null
   genre: string | null
   description: string | null
   format: BookFormat
   work_type: BookWorkType
   status: BookStatus
+  public_status?: string
+  moderation_status?: string
+  content_source_type?: "user_original" | "public_domain" | "licensed" | "admin_seeded" | string
+  source_title?: string | null
+  source_author?: string | null
+  source_public_domain_note?: string | null
+  source_url?: string | null
   cover_url?: string | null
   total_chapters: number | null
   copyright_warning?: boolean
+  active_forum_post_id?: string | null
   created_at?: string
 }
 
 export interface PublicBookDetail extends PublicBook {
   chapters: PublicChapterMeta[]
+  visibility_notice?: string | null
 }
 
 export interface PublicChapter {
@@ -529,6 +556,64 @@ export interface PublishingPreset {
   mirror_margins: boolean
 }
 
+export interface EditorPreferences {
+  font_family: string
+  font_size: number
+  line_height: number
+  manuscript_width: "narrow" | "standard" | "wide"
+  show_page_guides: boolean
+  focus_mode: boolean
+  default_scene_separator: "asterisks" | "hashes" | "divider"
+}
+
+export interface ReadingThemes {
+  active_theme: "light" | "dark" | "sepia" | "paper"
+  allow_dark_mode: boolean
+}
+
+export interface TypewriterModeSettings {
+  enabled: boolean
+  center_offset_px: number
+}
+
+export interface ManuscriptLayoutSettings {
+  margins: "standard" | "wide" | "custom"
+  page_size: string
+  orientation: "portrait" | "landscape"
+  show_headers: boolean
+  show_footers: boolean
+  page_numbering: boolean
+  different_first_page: boolean
+}
+
+export interface WorkspaceStructureNode {
+  id: string
+  label: string
+  kind: "book" | "part" | "arc" | "chapter" | "scene"
+  chapter_number?: number | null
+  scene_id?: string | null
+  children: WorkspaceStructureNode[]
+}
+
+export interface WorkspaceBreadcrumb {
+  id: string
+  label: string
+  kind: "book" | "part" | "arc" | "chapter" | "scene"
+}
+
+export interface SceneMetadata {
+  pov?: string | null
+  timeline?: string | null
+  location?: string | null
+  tags?: string[]
+  mood?: string[]
+  status_note?: string | null
+  anchors?: string[]
+  bookmarks?: string[]
+  summary?: string | null
+  [key: string]: unknown
+}
+
 export interface ManuscriptFrontMatter {
   author_name: string
   pen_name: string
@@ -580,6 +665,11 @@ export interface WriterWorkspace {
   publishing: PublishingPreset
   manuscript_front_matter: ManuscriptFrontMatter
   revision_board: RevisionBoard
+  editor_preferences?: EditorPreferences
+  reading_themes?: ReadingThemes
+  typewriter_mode?: TypewriterModeSettings
+  manuscript_layout?: ManuscriptLayoutSettings
+  structure_tree?: WorkspaceStructureNode[]
   processing?: BookProcessing | null
 }
 
@@ -671,7 +761,7 @@ export interface NovelScene {
   description?: string | null
   body: string
   html_body?: string | null
-  metadata?: Record<string, unknown>
+  metadata?: SceneMetadata
   path: string
   status: string
   sort_order: number
@@ -703,6 +793,27 @@ export interface ManuscriptWorkspaceTree {
   chapters: WorkspaceChapterNode[]
   scene_groups: WorkspaceSceneGroup[]
   note_paths: string[]
+  structure_tree?: WorkspaceStructureNode[]
+  scene_breadcrumbs?: Record<string, WorkspaceBreadcrumb[]>
+}
+
+export interface WorkspaceSearchFilters {
+  chapter_number?: number | null
+  scene_id?: string | null
+  pov?: string | null
+  location?: string | null
+  tags?: string[]
+}
+
+export interface WorkspaceSearchResult {
+  scope: "manuscript" | "scenes" | "notes"
+  id: string
+  title: string
+  excerpt: string
+  chapter_number?: number | null
+  scene_id?: string | null
+  note_path?: string | null
+  rank: number
 }
 
 export interface ChapterSceneOrder {

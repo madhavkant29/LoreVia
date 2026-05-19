@@ -486,6 +486,36 @@ async def test_trial_users_can_open_discussions_and_submit_public_samples(client
 
 
 @pytest.mark.asyncio
+async def test_general_public_discussions_are_open_to_signed_in_users_and_visible_on_profiles(client, db):
+    member = await _create_user(db, email="general-forum-member@lorevia.test", tier="free")
+
+    create_response = await client.post(
+        "/api/v1/public/forum/posts",
+        headers=_auth_headers(member.id),
+        json={
+            "thread_type": "general",
+            "headline": "How do you keep dialogue tense in quiet scenes?",
+            "body": "Looking for practical advice on preserving friction during low-action chapters without making the dialogue feel artificial.",
+        },
+    )
+    assert create_response.status_code == 201
+    payload = create_response.json()
+    assert payload["thread_type"] == "general"
+    assert payload["book_id"] is None
+    assert payload["allow_contact_requests"] is False
+
+    forum_list = await client.get("/api/v1/public/forum/posts")
+    assert forum_list.status_code == 200
+    assert any(item["thread_type"] == "general" for item in forum_list.json()["items"])
+
+    profile_response = await client.get(f"/api/v1/public/users/{member.username}")
+    assert profile_response.status_code == 200
+    profile = profile_response.json()
+    assert profile["forum_post_count"] == 1
+    assert profile["posts"][0]["thread_type"] == "general"
+
+
+@pytest.mark.asyncio
 async def test_public_forum_beta_mode_is_read_only(client, db, monkeypatch):
     monkeypatch.setattr("app.core.config.settings.PUBLIC_FORUM_STATUS", "beta", raising=False)
 

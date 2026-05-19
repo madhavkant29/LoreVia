@@ -170,9 +170,10 @@ function countWarnings(book: Book) {
 }
 
 function getPublicSampleStatus(book: Book) {
-  if (book.source_kind !== "user_public_share") return null
-  if (book.public_share_status === "pending") return "Public sample pending approval"
-  if (book.is_public || book.public_share_status === "approved") return "Public sample approved"
+  if (book.public_status === "published" && book.is_public) return "Public book live"
+  if (book.public_status === "hidden") return "Public book hidden"
+  if (book.public_status === "removed") return "Public book removed"
+  if (book.public_status === "pending_review") return "Public review pending"
   return null
 }
 
@@ -186,6 +187,10 @@ export default function LibraryPage() {
   const isDark = theme === "dark"
 
   const [showUpload, setShowUpload] = useState(false)
+  const [publishBook, setPublishBook] = useState<Book | null>(null)
+  const [publishSlug, setPublishSlug] = useState("")
+  const [publishDescription, setPublishDescription] = useState("")
+  const [publishConfirmed, setPublishConfirmed] = useState(false)
   const [uploadPreset, setUploadPreset] = useState<{ mode?: "reader" | "author"; existingBookId?: string }>({})
   const [busyBookId, setBusyBookId] = useState<string | null>(null)
   const [search, setSearch] = useState("")
@@ -293,6 +298,36 @@ export default function LibraryPage() {
   function togglePinned(bookId: string) {
     setPinnedIds((current) => ({ ...current, [bookId]: !current[bookId] }))
     setMenuBookId(null)
+  }
+
+  async function handlePublish(book: Book) {
+    if (!publishConfirmed || !publishSlug.trim()) return
+    setBusyBookId(book.id)
+    try {
+      await booksApi.publishPublicly(book.id, {
+        publicSlug: publishSlug.trim(),
+        rightsConfirmation: true,
+        description: publishDescription.trim() || null,
+      })
+      setPublishBook(null)
+      setPublishConfirmed(false)
+      setPublishSlug("")
+      setPublishDescription("")
+      await refetch()
+    } finally {
+      setBusyBookId(null)
+    }
+  }
+
+  async function handleUnpublish(bookId: string) {
+    setBusyBookId(bookId)
+    try {
+      await booksApi.unpublishPublicly(bookId)
+      await refetch()
+      setMenuBookId(null)
+    } finally {
+      setBusyBookId(null)
+    }
   }
 
   const pageBackground = isDark
@@ -500,6 +535,13 @@ export default function LibraryPage() {
                     onRestore={() => handleArchive(book.id, false)}
                     onRemove={() => handleRemove(book.id)}
                     onAddChapter={() => handleAddChapter(book.id)}
+                    onPublish={() => {
+                      setPublishBook(book)
+                      setPublishSlug(book.public_slug ?? book.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""))
+                      setPublishDescription(book.public_description ?? "")
+                      setPublishConfirmed(false)
+                    }}
+                    onUnpublish={() => void handleUnpublish(book.id)}
                   />
                 ))}
               </div>
@@ -520,6 +562,13 @@ export default function LibraryPage() {
                     onRestore={() => handleArchive(book.id, false)}
                     onRemove={() => handleRemove(book.id)}
                     onAddChapter={() => handleAddChapter(book.id)}
+                    onPublish={() => {
+                      setPublishBook(book)
+                      setPublishSlug(book.public_slug ?? book.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""))
+                      setPublishDescription(book.public_description ?? "")
+                      setPublishConfirmed(false)
+                    }}
+                    onUnpublish={() => void handleUnpublish(book.id)}
                   />
                 ))}
               </div>
@@ -565,6 +614,13 @@ export default function LibraryPage() {
                     onRestore={() => handleArchive(book.id, false)}
                     onRemove={() => handleRemove(book.id)}
                     onAddChapter={() => handleAddChapter(book.id)}
+                    onPublish={() => {
+                      setPublishBook(book)
+                      setPublishSlug(book.public_slug ?? book.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""))
+                      setPublishDescription(book.public_description ?? "")
+                      setPublishConfirmed(false)
+                    }}
+                    onUnpublish={() => void handleUnpublish(book.id)}
                   />
                 ))}
 
@@ -593,6 +649,13 @@ export default function LibraryPage() {
                     onRestore={() => handleArchive(book.id, false)}
                     onRemove={() => handleRemove(book.id)}
                     onAddChapter={() => handleAddChapter(book.id)}
+                    onPublish={() => {
+                      setPublishBook(book)
+                      setPublishSlug(book.public_slug ?? book.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""))
+                      setPublishDescription(book.public_description ?? "")
+                      setPublishConfirmed(false)
+                    }}
+                    onUnpublish={() => void handleUnpublish(book.id)}
                   />
                 ))}
 
@@ -619,6 +682,38 @@ export default function LibraryPage() {
             void refetch()
           }}
         />
+      ) : null}
+
+      {publishBook ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 py-8">
+          <div className={`w-full max-w-2xl rounded-[1.5rem] border p-6 ${surfaceClass}`}>
+            <p className={`text-[0.68rem] font-semibold uppercase tracking-[0.28em] ${mutedText}`}>Public book</p>
+            <h2 className={`mt-3 font-serif text-[2rem] tracking-[-0.03em] ${headingText}`}>Publish your own original work</h2>
+            <p className={`mt-3 text-sm leading-7 ${mutedText}`}>
+              Private Workspace and Public Book are different states. Do not publish books, chapters, EPUBs, web novels, paid content, or third-party works unless you own the rights or have explicit permission.
+            </p>
+            <div className="mt-6 grid gap-4">
+              <label className="grid gap-2 text-sm">
+                <span className={headingText}>Public URL slug</span>
+                <input value={publishSlug} onChange={(event) => setPublishSlug(event.target.value)} className={`rounded-xl border px-4 py-3 ${controlClass}`} />
+              </label>
+              <label className="grid gap-2 text-sm">
+                <span className={headingText}>Public description</span>
+                <textarea value={publishDescription} onChange={(event) => setPublishDescription(event.target.value)} rows={4} className={`rounded-xl border px-4 py-3 ${controlClass}`} />
+              </label>
+              <label className={`flex items-start gap-3 rounded-xl border px-4 py-3 text-sm leading-7 ${controlClass}`}>
+                <input type="checkbox" checked={publishConfirmed} onChange={(event) => setPublishConfirmed(event.target.checked)} className="mt-1" />
+                <span>I confirm that I own the rights to this content or have permission to upload and publish it on LoreVia.</span>
+              </label>
+            </div>
+            <div className="mt-6 flex justify-end gap-3">
+              <button type="button" onClick={() => setPublishBook(null)} className={`rounded-full px-4 py-2 text-sm ${controlClass}`}>Cancel</button>
+              <button type="button" disabled={!publishConfirmed || !publishSlug.trim() || busyBookId === publishBook.id} onClick={() => void handlePublish(publishBook)} className="rounded-full bg-[#33206f] px-5 py-2 text-sm font-semibold text-white disabled:opacity-50">
+                Publish publicly
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
     </div>
   )
@@ -688,6 +783,8 @@ function ProjectCard({
   onRestore,
   onRemove,
   onAddChapter,
+  onPublish,
+  onUnpublish,
 }: {
   book: Book
   isDark: boolean
@@ -701,6 +798,8 @@ function ProjectCard({
   onRestore: () => void
   onRemove: () => void
   onAddChapter: () => void
+  onPublish: () => void
+  onUnpublish: () => void
 }) {
   const accentClass = getAccentClass(book)
   const progress = clampProgress(book.progress_pct)
@@ -768,12 +867,15 @@ function ProjectCard({
                 isPinned={isPinned}
                 isArchived={isArchived}
                 isAuthor={book.mode === "author"}
+                isPublic={Boolean(book.is_public && book.public_status === "published")}
                 workType={book.work_type}
                 onTogglePinned={onTogglePinned}
                 onArchive={onArchive}
                 onRestore={onRestore}
                 onRemove={onRemove}
                 onAddChapter={onAddChapter}
+                onPublish={onPublish}
+                onUnpublish={onUnpublish}
               />
             ) : null}
           </div>
@@ -817,6 +919,8 @@ function ProjectRow({
   onRestore,
   onRemove,
   onAddChapter,
+  onPublish,
+  onUnpublish,
 }: {
   book: Book
   isDark: boolean
@@ -830,6 +934,8 @@ function ProjectRow({
   onRestore: () => void
   onRemove: () => void
   onAddChapter: () => void
+  onPublish: () => void
+  onUnpublish: () => void
 }) {
   const accentClass = getAccentClass(book)
   const progress = clampProgress(book.progress_pct)
@@ -919,12 +1025,15 @@ function ProjectRow({
                 isPinned={isPinned}
                 isArchived={isArchived}
                 isAuthor={book.mode === "author"}
+                isPublic={Boolean(book.is_public && book.public_status === "published")}
                 workType={book.work_type}
                 onTogglePinned={onTogglePinned}
                 onArchive={onArchive}
                 onRestore={onRestore}
                 onRemove={onRemove}
                 onAddChapter={onAddChapter}
+                onPublish={onPublish}
+                onUnpublish={onUnpublish}
               />
             ) : null}
           </div>
@@ -940,24 +1049,30 @@ function ProjectMenu({
   isPinned,
   isArchived,
   isAuthor,
+  isPublic,
   workType,
   onTogglePinned,
   onArchive,
   onRestore,
   onRemove,
   onAddChapter,
+  onPublish,
+  onUnpublish,
 }: {
   isDark: boolean
   busy: boolean
   isPinned: boolean
   isArchived: boolean
   isAuthor: boolean
+  isPublic: boolean
   workType: Book["work_type"]
   onTogglePinned: () => void
   onArchive: () => void
   onRestore: () => void
   onRemove: () => void
   onAddChapter: () => void
+  onPublish: () => void
+  onUnpublish: () => void
 }) {
   return (
     <div
@@ -966,6 +1081,7 @@ function ProjectMenu({
     >
       <MenuButton isDark={isDark} onClick={onTogglePinned} label={isPinned ? "Unpin project" : "Pin project"} />
       {isAuthor ? <MenuButton isDark={isDark} onClick={onAddChapter} label={`Add ${storyUnitLabel(workType)}`} /> : null}
+      {isAuthor ? <MenuButton isDark={isDark} onClick={isPublic ? onUnpublish : onPublish} label={isPublic ? "Unpublish public book" : "Publish publicly"} disabled={busy} /> : null}
       {isArchived ? (
         <MenuButton isDark={isDark} onClick={onRestore} label="Restore" disabled={busy} />
       ) : (

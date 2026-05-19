@@ -11,7 +11,13 @@ import {
   getBlogArticleBySlug,
   getDemoPageBySlug,
 } from "@/lib/content"
-import { DEFAULT_OG_IMAGE, SITE_NAME, buildBreadcrumbJsonLd, toAbsoluteUrl } from "@/lib/seo"
+import {
+  DEFAULT_OG_IMAGE,
+  SITE_NAME,
+  buildArticleJsonLd,
+  buildBreadcrumbJsonLd,
+  toAbsoluteUrl,
+} from "@/lib/seo"
 
 export function generateStaticParams() {
   return blogArticles.map((article) => ({ slug: article.slug }))
@@ -67,23 +73,15 @@ export default function BlogArticlePage({ params }: { params: { slug: string } }
   const supportingAnswers = getAnswerPagesBySlugs(article.supportingAnswerSlugs)
   const demoPage = getDemoPageBySlug(article.demoSlug)
 
-  const jsonLd = {
-    "@context": "https://schema.org",
-    "@type": "BlogPosting",
-    headline: article.title,
+  const jsonLd = buildArticleJsonLd({
+    type: "BlogPosting",
+    title: article.title,
     description: article.description,
+    path: `/blog/${article.slug}`,
     datePublished: article.publishedAt,
-    dateModified: article.publishedAt,
-    author: {
-      "@type": "Organization",
-      name: SITE_NAME,
-    },
-    publisher: {
-      "@type": "Organization",
-      name: SITE_NAME,
-    },
-    mainEntityOfPage: toAbsoluteUrl(`/blog/${article.slug}`),
-  }
+    keywords: article.keywords,
+    about: [article.category, "fiction writing", "manuscript revision"],
+  })
   const breadcrumbJsonLd = buildBreadcrumbJsonLd([
     { name: "Home", path: "/" },
     { name: "Blog", path: "/blog" },

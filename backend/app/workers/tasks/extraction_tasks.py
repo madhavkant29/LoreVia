@@ -2,6 +2,7 @@ import asyncio
 
 from app.workers.celery_app import celery_app
 from app.workers.consumers.extraction_consumer import _process_chapter, process_book
+from app.services.chapter_recovery_service import repair_chapter_payload_from_source
 from app.utils.ingestion_utils import (
     extract_queue_wait_ms,
     is_book_hidden,
@@ -75,6 +76,39 @@ def process_chapter_task(self, book_id: str, chapter_num: int):
                 chapter_payload,
                 queue_wait_ms=queue_wait_ms,
             )
+    try:
+        _run_coro(_run())
+    except Exception as exc:
+        if not is_retryable_processing_error(exc):
+            raise
+        raise self.retry(exc=exc)
+
+
+@celery_app.task(bind=True, name="extraction_tasks.repair_chapter_payload",
+                 queue="extraction", max_retries=3)
+def repair_chapter_payload_task(self, book_id: str, chapter_num: int):
+    async def _run():
+        import uuid
+
+        from sqlalchemy import select
+
+        from app.core.database import AsyncSessionLocal
+        from app.models.book import Book, Chapter
+
+        async with AsyncSessionLocal() as db:
+            book = await db.get(Book, uuid.UUID(book_id))
+            if not book:
+                return
+            chapter = (
+                await db.execute(
+                    select(Chapter).where(Chapter.book_id == book.id, Chapter.number == chapter_num)
+                )
+            ).scalar()
+            if chapter is None:
+                return
+            if await is_book_hidden(db, book.id):
+                return
+            await repair_chapter_payload_from_source(db, book=book, chapter=chapter)
     try:
         _run_coro(_run())
     except Exception as exc:

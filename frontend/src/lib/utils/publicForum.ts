@@ -28,7 +28,7 @@ export function isEligibleForumAuthorBook(book: Book): boolean {
 export function getEligibleForumAuthorBooks(books: Book[], myForumPosts: PublicForumPost[]): Book[] {
   const openDiscussionBookIds = new Set(
     myForumPosts
-      .filter((post) => post.status === "open")
+      .filter((post) => post.status === "open" && (post.thread_type || "novel") === "novel" && post.book_id)
       .map((post) => post.book_id),
   )
 

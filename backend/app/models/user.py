@@ -38,6 +38,7 @@ class User(Base):
     reputation_score: Mapped[int] = mapped_column(Integer, default=0, server_default="0", index=True)
     reputation_likes_received: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     reputation_dislikes_received: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    messaging_permission: Mapped[str] = mapped_column(String, default="anyone", server_default="anyone")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     books = relationship("Book", foreign_keys="Book.user_id", back_populates="user", cascade="all, delete-orphan")
@@ -53,6 +54,11 @@ class User(Base):
     llm_usage_events = relationship("LlmUsageEvent", back_populates="user", cascade="all, delete-orphan")
     forum_comments = relationship("BookForumComment", back_populates="author", cascade="all, delete-orphan")
     forum_comment_reactions = relationship("BookForumCommentReaction", back_populates="user", cascade="all, delete-orphan")
+    friend_requests_sent = relationship("FriendRequest", foreign_keys="FriendRequest.requester_user_id", back_populates="requester", cascade="all, delete-orphan")
+    friend_requests_received = relationship("FriendRequest", foreign_keys="FriendRequest.addressee_user_id", back_populates="addressee", cascade="all, delete-orphan")
+    direct_conversations_as_a = relationship("DirectConversation", foreign_keys="DirectConversation.participant_a_user_id", back_populates="participant_a", cascade="all, delete-orphan")
+    direct_conversations_as_b = relationship("DirectConversation", foreign_keys="DirectConversation.participant_b_user_id", back_populates="participant_b", cascade="all, delete-orphan")
+    direct_messages_sent = relationship("DirectMessage", foreign_keys="DirectMessage.sender_user_id", back_populates="sender", cascade="all, delete-orphan")
 
 
 class Subscription(Base):

@@ -36,7 +36,9 @@ from app.models.intelligence import (
     WorldGapAnalysis,
     WorldNote,
 )
+from app.models.moderation import ContentReport, CreatorStrike, ModerationAction
 from app.models.progress import ReadingProgress, ReadingSession
+from app.models.social import DirectConversation, DirectMessage, FriendRequest
 from app.models.tag import CustomTag
 from app.models.user import (
     DeviceTrial,

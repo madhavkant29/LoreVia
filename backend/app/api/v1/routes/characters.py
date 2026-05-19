@@ -8,11 +8,13 @@ from app.api.deps.auth import get_current_user
 from app.core.database import get_db
 from app.models.book import Book
 from app.models.character import Character, CharacterState
+from app.schemas.character import CharacterOut
+from app.utils.character_utils import serialize_character_detail
 
 router = APIRouter()
 
 
-@router.get("/{character_id}")
+@router.get("/{character_id}", response_model=CharacterOut)
 async def get_character(
     character_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
@@ -24,7 +26,7 @@ async def get_character(
     book = await db.get(Book, char.book_id)
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
-    return char
+    return serialize_character_detail(char)
 
 
 @router.get("/{character_id}/state")
