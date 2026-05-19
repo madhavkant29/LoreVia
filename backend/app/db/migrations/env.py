@@ -55,9 +55,6 @@ def _index_names(inspector: sa.Inspector, table_name: str) -> set[str]:
 
 
 def _destructive_upgrade_still_has_runtime_impact(path: Path) -> bool:
-    if path.name != "20260517_finalize_subscription_events_and_remove_monetization.py":
-        return True
-
     engine = create_engine(
         db_url.replace("postgresql://", "postgresql+psycopg://"),
         poolclass=pool.NullPool,
@@ -68,24 +65,35 @@ def _destructive_upgrade_still_has_runtime_impact(path: Path) -> bool:
             inspector = sa.inspect(connection)
             tables = _table_names(inspector)
 
-            if any(table_name in tables for table_name in ("rewarded_ad_sessions", "referrals", "point_ledger_entries")):
-                return True
-
-            if "users" in tables and "referral_code" in _column_names(inspector, "users"):
-                return True
-
-            if "beta_read_assignments" in tables:
-                columns = _column_names(inspector, "beta_read_assignments")
-                indexes = _index_names(inspector, "beta_read_assignments")
-                if (
-                    "ix_beta_read_assignments_awarded_at" in indexes
-                    or "awarded_at" in columns
-                    or "awarded_points" in columns
-                    or "reward_points" in columns
-                ):
+            if path.name == "20260517_finalize_subscription_events_and_remove_monetization.py":
+                if any(table_name in tables for table_name in ("rewarded_ad_sessions", "referrals", "point_ledger_entries")):
                     return True
 
-            return False
+                if "users" in tables and "referral_code" in _column_names(inspector, "users"):
+                    return True
+
+                if "beta_read_assignments" in tables:
+                    columns = _column_names(inspector, "beta_read_assignments")
+                    indexes = _index_names(inspector, "beta_read_assignments")
+                    if (
+                        "ix_beta_read_assignments_awarded_at" in indexes
+                        or "awarded_at" in columns
+                        or "awarded_points" in columns
+                        or "reward_points" in columns
+                    ):
+                        return True
+
+                return False
+
+            if path.name == "20260519_remove_beta_read_awarded_at_residue.py":
+                if "beta_read_assignments" not in tables:
+                    return False
+
+                columns = _column_names(inspector, "beta_read_assignments")
+                indexes = _index_names(inspector, "beta_read_assignments")
+                return "awarded_at" in columns or "ix_beta_read_assignments_awarded_at" in indexes
+
+            return True
     finally:
         engine.dispose()
 
