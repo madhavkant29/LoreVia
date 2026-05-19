@@ -42,20 +42,26 @@ export async function generateMetadata({ params }: { params: Promise<{ username:
 
 export default async function PublicWriterProfilePage({ params }: { params: Promise<{ username: string }> }) {
   const { username } = await params
-  const profile = await getPublicUserProfileServer(username)
-  const description = `Public LoreVia profile for @${profile.username}, with visible forum activity, trust signals, and any surfaced manuscript sample or discussion.`
-  const profileJsonLd = buildProfilePageJsonLd({
-    username: profile.username,
-    description,
-    path: `/public/writers/${profile.username}`,
-  })
+  const profile = await getPublicUserProfileServer(username).catch(() => null)
+  const description = profile
+    ? `Public LoreVia profile for @${profile.username}, with visible forum activity, trust signals, and any surfaced manuscript sample or discussion.`
+    : null
+  const profileJsonLd = profile && description
+    ? buildProfilePageJsonLd({
+        username: profile.username,
+        description,
+        path: `/public/writers/${profile.username}`,
+      })
+    : null
 
   return (
     <>
-      <Script id={`public-writer-jsonld-${profile.username}`} type="application/ld+json" strategy="beforeInteractive">
-        {JSON.stringify(profileJsonLd).replace(/</g, "\\u003c")}
-      </Script>
-      <PublicWriterProfilePageClient username={profile.username} initialProfile={profile} />
+      {profile && profileJsonLd ? (
+        <Script id={`public-writer-jsonld-${profile.username}`} type="application/ld+json" strategy="beforeInteractive">
+          {JSON.stringify(profileJsonLd).replace(/</g, "\\u003c")}
+        </Script>
+      ) : null}
+      <PublicWriterProfilePageClient username={profile?.username || username} initialProfile={profile} />
     </>
   )
 }

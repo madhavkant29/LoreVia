@@ -37,12 +37,8 @@ export function PublicWriterProfilePageClient({
   }
 
   const project = profile.current_project
-  const projectHref = project?.source === "public_book" && project.public_book_id
-    ? `/public/${project.public_book_id}`
-    : project?.source === "forum" && project.forum_post_id
-      ? `/public/forum/${project.forum_post_id}`
-      : null
-  const projectLabel = project?.source === "public_book" ? "Read public sample" : "Open forum discussion"
+  const publicSampleHref = project?.public_book_id ? `/public/${project.public_book_id}` : null
+  const forumDiscussionHref = project?.forum_post_id ? `/public/forum/${project.forum_post_id}` : null
 
   return (
     <div className={`min-h-screen ${isDark ? "bg-[#0a1016] text-slate-100" : "bg-[#f4efe7] text-slate-950"}`}>
@@ -124,14 +120,24 @@ export function PublicWriterProfilePageClient({
                   <span className={`rounded-full px-3 py-1 text-xs ${isDark ? "bg-white/6 text-slate-300" : "bg-white text-slate-600"}`}>{formatWordProgress(project.progress_words)}</span>
                 </div>
                 <p className={`mt-5 text-sm leading-7 ${isDark ? "text-slate-300" : "text-slate-700"}`}>{project.description || "This writer has not added a project description yet."}</p>
-                {projectHref ? (
+                {publicSampleHref || forumDiscussionHref ? (
                   <div className="mt-5 flex flex-wrap gap-3">
-                    <Link
-                      href={projectHref as Route}
-                      className={`inline-flex rounded-full px-4 py-2 text-sm font-semibold ${isDark ? "bg-amber-400 text-slate-950 hover:bg-amber-300" : "bg-slate-950 text-white hover:bg-slate-800"}`}
-                    >
-                      {projectLabel}
-                    </Link>
+                    {forumDiscussionHref ? (
+                      <Link
+                        href={forumDiscussionHref as Route}
+                        className={`inline-flex rounded-full px-4 py-2 text-sm font-semibold ${isDark ? "bg-amber-400 text-slate-950 hover:bg-amber-300" : "bg-slate-950 text-white hover:bg-slate-800"}`}
+                      >
+                        Open forum discussion
+                      </Link>
+                    ) : null}
+                    {publicSampleHref ? (
+                      <Link
+                        href={publicSampleHref as Route}
+                        className={`inline-flex rounded-full px-4 py-2 text-sm font-semibold ${isDark ? "border border-white/10 bg-white/[0.04] text-white hover:bg-white/[0.08]" : "border border-slate-200 bg-white text-slate-900 hover:bg-slate-50"}`}
+                      >
+                        Read public sample
+                      </Link>
+                    ) : null}
                   </div>
                 ) : null}
               </div>

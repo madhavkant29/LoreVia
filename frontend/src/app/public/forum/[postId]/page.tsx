@@ -43,29 +43,33 @@ export async function generateMetadata({ params }: { params: Promise<{ postId: s
 
 export default async function PublicForumPostPage({ params }: { params: Promise<{ postId: string }> }) {
   const { postId } = await params
-  const post = await getPublicForumPostServer(postId)
-  const threadJsonLd = buildForumThreadJsonLd({
+  const post = await getPublicForumPostServer(postId).catch(() => null)
+  const threadJsonLd = post ? buildForumThreadJsonLd({
     title: post.headline,
     body: post.body,
     path: `/public/forum/${post.id}`,
     createdAt: post.created_at,
     updatedAt: post.updated_at,
     authorName: post.author_username || post.author || "LoreVia author",
-  })
-  const breadcrumbJsonLd = buildBreadcrumbJsonLd([
+  }) : null
+  const breadcrumbJsonLd = post ? buildBreadcrumbJsonLd([
     { name: "Home", path: "/" },
     { name: "Public Forum", path: "/public/forum" },
     { name: post.headline, path: `/public/forum/${post.id}` },
-  ])
+  ]) : null
 
   return (
     <>
-      <Script id={`public-forum-post-jsonld-${post.id}`} type="application/ld+json" strategy="beforeInteractive">
-        {JSON.stringify(threadJsonLd).replace(/</g, "\\u003c")}
-      </Script>
-      <Script id={`public-forum-post-breadcrumbs-jsonld-${post.id}`} type="application/ld+json" strategy="beforeInteractive">
-        {JSON.stringify(breadcrumbJsonLd).replace(/</g, "\\u003c")}
-      </Script>
+      {post && threadJsonLd ? (
+        <Script id={`public-forum-post-jsonld-${post.id}`} type="application/ld+json" strategy="beforeInteractive">
+          {JSON.stringify(threadJsonLd).replace(/</g, "\\u003c")}
+        </Script>
+      ) : null}
+      {post && breadcrumbJsonLd ? (
+        <Script id={`public-forum-post-breadcrumbs-jsonld-${post.id}`} type="application/ld+json" strategy="beforeInteractive">
+          {JSON.stringify(breadcrumbJsonLd).replace(/</g, "\\u003c")}
+        </Script>
+      ) : null}
       <PublicForumPostPageClient postId={postId} initialPost={post} />
     </>
   )

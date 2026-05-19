@@ -773,7 +773,7 @@ export default function HomePage() {
               className="mt-7 text-5xl font-[600] leading-[0.98] tracking-[-0.04em] text-white md:text-7xl xl:text-[4.15rem]"
               style={{ fontFamily: '"Inter", "Geist", "Satoshi", var(--font-ui), sans-serif' }}
             >
-              For authors who need story memory, sharper revisions, and continuity control.
+              LoreVia for authors who need story memory, sharper revisions, and continuity control.
             </h1>
             <p className="mt-6 max-w-2xl text-lg leading-9 text-slate-300 md:text-xl">
               LoreVia turns your manuscript into an author workspace with character tracking, manuscript intelligence, relationship memory, grounded story questions, and continuity scans that stay tied to the draft.

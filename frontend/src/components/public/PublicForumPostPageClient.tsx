@@ -14,10 +14,10 @@ import type { User } from "@/types/user"
 
 export function PublicForumPostPageClient({
   postId,
-  initialPost,
+  initialPost = null,
 }: {
   postId: string
-  initialPost: PublicForumPost
+  initialPost?: PublicForumPost | null
 }) {
   const [post, setPost] = useState<PublicForumPost | null>(initialPost)
   const [comments, setComments] = useState<PublicForumComment[]>([])
@@ -25,10 +25,10 @@ export function PublicForumPostPageClient({
   const [viewer, setViewer] = useState<User | null>(null)
   const [draft, setDraft] = useState("")
   const [interestDraft, setInterestDraft] = useState("")
-  const [editHeadline, setEditHeadline] = useState(initialPost.headline)
-  const [editBody, setEditBody] = useState(initialPost.body)
-  const [editDesiredCount, setEditDesiredCount] = useState(initialPost.desired_beta_reader_count ? String(initialPost.desired_beta_reader_count) : "")
-  const [editAllowContactRequests, setEditAllowContactRequests] = useState(initialPost.allow_contact_requests)
+  const [editHeadline, setEditHeadline] = useState(initialPost?.headline ?? "")
+  const [editBody, setEditBody] = useState(initialPost?.body ?? "")
+  const [editDesiredCount, setEditDesiredCount] = useState(initialPost?.desired_beta_reader_count ? String(initialPost.desired_beta_reader_count) : "")
+  const [editAllowContactRequests, setEditAllowContactRequests] = useState(initialPost?.allow_contact_requests ?? true)
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [interestSubmitting, setInterestSubmitting] = useState(false)

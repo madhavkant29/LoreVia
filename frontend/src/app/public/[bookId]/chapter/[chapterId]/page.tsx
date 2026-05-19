@@ -65,33 +65,37 @@ export default async function PublicChapterPage({
   const { bookId, chapterId } = await params
   const chapterNumber = Number.parseInt(chapterId, 10)
   const [book, chapter] = await Promise.all([
-    getPublicBookServer(bookId),
-    getPublicChapterServer(bookId, chapterNumber),
+    getPublicBookServer(bookId).catch(() => null),
+    getPublicChapterServer(bookId, chapterNumber).catch(() => null),
   ])
-  const routeId = book.public_slug || book.id
-  const chapterTitle = chapter.chapter_title || `Chapter ${chapter.chapter_number}`
-  const articleJsonLd = buildArticleJsonLd({
+  const routeId = book?.public_slug || book?.id || bookId
+  const chapterTitle = chapter?.chapter_title || (chapter ? `Chapter ${chapter.chapter_number}` : null)
+  const articleJsonLd = book && chapter && chapterTitle ? buildArticleJsonLd({
     title: `${chapterTitle} - ${book.title}`,
     description: chapter.chapter_description ?? `Read ${chapterTitle} from ${book.title} on LoreVia.`,
     path: `/public/${routeId}/chapter/${chapter.chapter_number}`,
     datePublished: book.created_at ?? new Date().toISOString(),
     about: [book.title, chapterTitle, "public manuscript sample"],
-  })
-  const breadcrumbJsonLd = buildBreadcrumbJsonLd([
+  }) : null
+  const breadcrumbJsonLd = book && chapter && chapterTitle ? buildBreadcrumbJsonLd([
     { name: "Home", path: "/" },
     { name: "Public Library", path: "/public" },
     { name: book.title, path: `/public/${routeId}` },
     { name: chapterTitle, path: `/public/${routeId}/chapter/${chapter.chapter_number}` },
-  ])
+  ]) : null
 
   return (
     <>
-      <Script id={`public-chapter-jsonld-${routeId}-${chapter.chapter_number}`} type="application/ld+json" strategy="beforeInteractive">
-        {JSON.stringify(articleJsonLd).replace(/</g, "\\u003c")}
-      </Script>
-      <Script id={`public-chapter-breadcrumbs-jsonld-${routeId}-${chapter.chapter_number}`} type="application/ld+json" strategy="beforeInteractive">
-        {JSON.stringify(breadcrumbJsonLd).replace(/</g, "\\u003c")}
-      </Script>
+      {chapter && articleJsonLd ? (
+        <Script id={`public-chapter-jsonld-${routeId}-${chapter.chapter_number}`} type="application/ld+json" strategy="beforeInteractive">
+          {JSON.stringify(articleJsonLd).replace(/</g, "\\u003c")}
+        </Script>
+      ) : null}
+      {chapter && breadcrumbJsonLd ? (
+        <Script id={`public-chapter-breadcrumbs-jsonld-${routeId}-${chapter.chapter_number}`} type="application/ld+json" strategy="beforeInteractive">
+          {JSON.stringify(breadcrumbJsonLd).replace(/</g, "\\u003c")}
+        </Script>
+      ) : null}
       <PublicChapterPageClient bookId={routeId} chapterId={chapterId} initialChapter={chapter} />
     </>
   )

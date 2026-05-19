@@ -44,30 +44,34 @@ export async function generateMetadata({ params }: { params: Promise<{ bookId: s
 
 export default async function PublicBookPage({ params }: { params: Promise<{ bookId: string }> }) {
   const { bookId } = await params
-  const book = await getPublicBookServer(bookId)
-  const routeId = book.public_slug || book.id
-  const bookJsonLd = buildBookJsonLd({
+  const book = await getPublicBookServer(bookId).catch(() => null)
+  const routeId = book?.public_slug || book?.id || bookId
+  const bookJsonLd = book ? buildBookJsonLd({
     title: book.title,
     author: book.author || book.creator_display_name,
     description: book.description,
     path: `/public/${routeId}`,
     genre: book.genre,
     chapterCount: book.total_chapters,
-  })
-  const breadcrumbJsonLd = buildBreadcrumbJsonLd([
+  }) : null
+  const breadcrumbJsonLd = book ? buildBreadcrumbJsonLd([
     { name: "Home", path: "/" },
     { name: "Public Library", path: "/public" },
     { name: book.title, path: `/public/${routeId}` },
-  ])
+  ]) : null
 
   return (
     <>
-      <Script id={`public-book-jsonld-${routeId}`} type="application/ld+json" strategy="beforeInteractive">
-        {JSON.stringify(bookJsonLd).replace(/</g, "\\u003c")}
-      </Script>
-      <Script id={`public-book-breadcrumbs-jsonld-${routeId}`} type="application/ld+json" strategy="beforeInteractive">
-        {JSON.stringify(breadcrumbJsonLd).replace(/</g, "\\u003c")}
-      </Script>
+      {book && bookJsonLd ? (
+        <Script id={`public-book-jsonld-${routeId}`} type="application/ld+json" strategy="beforeInteractive">
+          {JSON.stringify(bookJsonLd).replace(/</g, "\\u003c")}
+        </Script>
+      ) : null}
+      {book && breadcrumbJsonLd ? (
+        <Script id={`public-book-breadcrumbs-jsonld-${routeId}`} type="application/ld+json" strategy="beforeInteractive">
+          {JSON.stringify(breadcrumbJsonLd).replace(/</g, "\\u003c")}
+        </Script>
+      ) : null}
       <PublicBookPageClient bookId={bookId} initialBook={book} />
     </>
   )
