@@ -810,6 +810,7 @@ function CurrentProjectCard({
 
           {canOpenManuscript ? (
             <button
+              type="button"
               onClick={onOpenManuscript}
               className={`mt-auto inline-flex h-10 items-center justify-center gap-2 rounded-md px-4 text-xs font-semibold transition ${isDark ? "bg-violet-500/12 text-violet-300 hover:bg-violet-500/18" : "bg-violet-50 text-violet-700 hover:bg-violet-100"}`}
             >
@@ -1445,7 +1446,7 @@ function GoalCalendarCard({
                   {saveMessage || (editable ? "Changes save back into this book workspace." : "Loading planner...")}
                 </p>
               </div>
-              <button onClick={onOpenManuscript} className="text-xs font-semibold text-violet-500">
+              <button type="button" onClick={onOpenManuscript} className="text-xs font-semibold text-violet-500">
                 Adjust word goals
               </button>
             </div>

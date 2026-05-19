@@ -16,7 +16,7 @@ export function PublicLibraryPageClient({ initialBooks = [] }: { initialBooks?: 
     queryKey: asQueryKey("public:books"),
     queryFn: () => publicApi.listBooks(),
     staleTime: 60_000,
-    initialData: initialBooks,
+    initialData: initialBooks.length > 0 ? initialBooks : undefined,
   })
 
   return (

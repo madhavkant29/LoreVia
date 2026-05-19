@@ -455,11 +455,15 @@ body::before {
 .reader-display-published .book-special-block,
 .reader-display-published .book-layout__body.note-rich-content blockquote {
   margin: 1.45rem clamp(1rem, 5vw, 2.8rem);
+  margin-left: clamp(1rem, 5vw, 2.8rem);
+  margin-right: clamp(1rem, 5vw, 2.8rem);
   border: 1px solid var(--book-inset-border);
   border-left: 4px solid rgba(var(--accent), 0.55);
   border-radius: 1rem;
   background: var(--book-inset-bg);
   padding: 1rem 1.25rem;
+  padding-left: 1.25rem;
+  padding-right: 1.25rem;
   text-align: left;
   text-indent: 0;
   white-space: pre-line;

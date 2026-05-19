@@ -400,6 +400,7 @@ export default function AdvisorPage() {
   const suggestionsMeta = suggestionsPayload?.meta ?? defaultScanMeta
 
   const [tab, setTab] = useState<AdvisorPanel>("checker")
+  const [autoOpenedScan, setAutoOpenedScan] = useState(false)
   const [messages, setMessages] = useState<AdvisorMessage[]>([])
   const [passages, setPassages] = useState<AdvisorPassage[]>([])
   const [worldAnalysis, setWorldAnalysis] = useState<AdvisorWorldAnalysis | null>(null)
@@ -432,6 +433,12 @@ export default function AdvisorPage() {
   useEffect(() => {
     capture("author_advisor_opened", { book_id: bookId })
   }, [bookId])
+
+  useEffect(() => {
+    if (autoOpenedScan || tab !== "checker" || !suggestionsPayload || suggestionsPayload.suggestions.length === 0) return
+    setTab("suggestions")
+    setAutoOpenedScan(true)
+  }, [autoOpenedScan, suggestionsPayload, tab])
 
   useEffect(() => {
     if (!bookData) return
@@ -631,6 +638,7 @@ export default function AdvisorPage() {
           {/* ── Tab switcher ──────────────────────────────────────────────────── */}
           <div className={`mb-6 inline-flex overflow-hidden rounded-[1rem] border ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white"}`}>
             <button
+              type="button"
               id="advisor-tab-chat"
               onClick={() => setTab("checker")}
               className={`px-5 py-2.5 text-sm font-medium transition ${tab === "checker" ? isDark ? "bg-white text-slate-950" : "bg-stone-900 text-white" : isDark ? "text-slate-300 hover:bg-white/8" : "text-stone-600 hover:bg-stone-50"}`}
@@ -638,6 +646,7 @@ export default function AdvisorPage() {
               Continuity Checker
             </button>
             <button
+              type="button"
               id="advisor-tab-scan"
               onClick={() => setTab("suggestions")}
               className={`relative px-5 py-2.5 text-sm font-medium transition ${tab === "suggestions" ? isDark ? "bg-white text-slate-950" : "bg-stone-900 text-white" : isDark ? "text-slate-300 hover:bg-white/8" : "text-stone-600 hover:bg-stone-50"}`}
@@ -909,6 +918,7 @@ export default function AdvisorPage() {
               {/* Sub-tab switcher */}
               <div className="hidden">
                 <button
+                  type="button"
                   id="suggestions-tab-scan"
                   onClick={() => setSugTab("scan")}
                   className={`px-5 py-2.5 text-sm font-medium transition ${sugTab === "scan" ? isDark ? "bg-white text-slate-950" : "bg-stone-900 text-white" : isDark ? "text-slate-300 hover:bg-white/8" : "text-stone-600 hover:bg-stone-50"}`}
@@ -916,6 +926,7 @@ export default function AdvisorPage() {
                   Continuity Scan
                 </button>
                 <button
+                  type="button"
                   id="suggestions-tab-editorial"
                   onClick={() => setSugTab("editorial")}
                   className={`px-5 py-2.5 text-sm font-medium transition ${sugTab === "editorial" ? isDark ? "bg-white text-slate-950" : "bg-stone-900 text-white" : isDark ? "text-slate-300 hover:bg-white/8" : "text-stone-600 hover:bg-stone-50"}`}

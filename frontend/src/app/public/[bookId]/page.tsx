@@ -72,7 +72,7 @@ export default async function PublicBookPage({ params }: { params: Promise<{ boo
           {JSON.stringify(breadcrumbJsonLd).replace(/</g, "\\u003c")}
         </Script>
       ) : null}
-      <PublicBookPageClient bookId={bookId} initialBook={book} />
+      <PublicBookPageClient bookId={book?.id || bookId} initialBook={book} />
     </>
   )
 }

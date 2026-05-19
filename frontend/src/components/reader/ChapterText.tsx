@@ -396,7 +396,16 @@ function renderPublishedTextBlock(
 
   if (block.semanticType === "quote") {
     return (
-      <blockquote key={`block-${index}`} className={`${blockClass} book-special-block`}>
+      <blockquote
+        key={`block-${index}`}
+        className={`${blockClass} book-special-block`}
+        style={{
+          marginLeft: "clamp(1rem, 5vw, 2.8rem)",
+          marginRight: "clamp(1rem, 5vw, 2.8rem)",
+          paddingLeft: "1.25rem",
+          paddingRight: "1.25rem",
+        }}
+      >
         {renderSegments(block.segments, index, mentionClass, onTap)}
       </blockquote>
     )

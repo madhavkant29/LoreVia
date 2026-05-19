@@ -44,7 +44,7 @@ export function PublicBookPageClient({
     queryKey: asQueryKey(`public:book:${bookId}`),
     queryFn: () => publicApi.getBook(bookId),
     staleTime: 60_000,
-    initialData: initialBook,
+    initialData: initialBook ?? undefined,
   })
 
   async function submitReport() {

@@ -31,7 +31,7 @@ export function PublicChapterPageClient({
     queryKey: asQueryKey(`public:chapter:${bookId}:${chapterNum}`),
     queryFn: () => publicApi.getChapter(bookId, chapterNum),
     enabled: hasValidChapterNumber,
-    initialData: initialChapter,
+    initialData: initialChapter ?? undefined,
   })
   const { data: text = "" } = useQuery<string>({
     queryKey: asQueryKey(`public:chapter-text:${bookId}:${chapterNum}`),
@@ -41,7 +41,7 @@ export function PublicChapterPageClient({
       return response.text()
     },
     enabled: Boolean(chapter && (chapter.text_content || chapter.text_url)),
-    initialData: initialChapter?.text_content ?? "",
+    initialData: initialChapter?.text_content || undefined,
   })
 
   if (isLoading) {
