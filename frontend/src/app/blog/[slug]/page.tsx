@@ -23,8 +23,9 @@ export function generateStaticParams() {
   return blogArticles.map((article) => ({ slug: article.slug }))
 }
 
-export function generateMetadata({ params }: { params: { slug: string } }): Metadata {
-  const article = getBlogArticleBySlug(params.slug)
+export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
+  const { slug } = await params
+  const article = getBlogArticleBySlug(slug)
 
   if (!article) {
     return {}
@@ -63,8 +64,9 @@ export function generateMetadata({ params }: { params: { slug: string } }): Meta
   }
 }
 
-export default function BlogArticlePage({ params }: { params: { slug: string } }) {
-  const article = getBlogArticleBySlug(params.slug)
+export default async function BlogArticlePage({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params
+  const article = getBlogArticleBySlug(slug)
 
   if (!article) {
     notFound()

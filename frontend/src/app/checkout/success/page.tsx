@@ -1,12 +1,20 @@
 "use client"
 
 import Link from "next/link"
-import { useEffect, useState } from "react"
+import { Suspense, useEffect, useState } from "react"
 import { useSearchParams } from "next/navigation"
 
 import { billingApi, type BillingConfirmation } from "@/lib/api/billing"
 
 export default function CheckoutSuccessPage() {
+  return (
+    <Suspense fallback={null}>
+      <CheckoutSuccessInner />
+    </Suspense>
+  )
+}
+
+function CheckoutSuccessInner() {
   const searchParams = useSearchParams()
   const transactionId = searchParams.get("txn")?.trim() ?? ""
   const confirmationToken = searchParams.get("confirmation_token")?.trim() ?? ""

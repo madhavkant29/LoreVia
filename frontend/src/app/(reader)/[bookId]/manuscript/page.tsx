@@ -4,7 +4,7 @@ import type { ReactNode } from "react"
 import type { Route } from "next"
 import axios from "axios"
 import { useQuery } from "@tanstack/react-query"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { Suspense, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 
@@ -92,6 +92,14 @@ function buildSceneDraftStorageKey(bookId: string, scene?: NovelScene | null, ch
 }
 
 export default function ManuscriptPage() {
+  return (
+    <Suspense fallback={null}>
+      <ManuscriptPageInner />
+    </Suspense>
+  )
+}
+
+function ManuscriptPageInner() {
   const { bookId } = useParams<{ bookId: string }>()
   const router = useRouter()
   const searchParams = useSearchParams()

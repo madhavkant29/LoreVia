@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect } from "react"
+import { Suspense, useEffect } from "react"
 import type { Route } from "next"
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation"
 
@@ -8,6 +8,14 @@ import { booksApi } from "@/lib/api/books"
 import { getBookRouteSegment, normalizeBookRouteId, replaceBookRouteSegment } from "@/lib/utils/bookRoutes"
 
 export default function BookLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <Suspense fallback={children}>
+      <BookLayoutInner>{children}</BookLayoutInner>
+    </Suspense>
+  )
+}
+
+function BookLayoutInner({ children }: { children: React.ReactNode }) {
   const { bookId } = useParams<{ bookId: string }>()
   const pathname = usePathname()
   const router = useRouter()

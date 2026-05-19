@@ -1,4 +1,5 @@
 import type { Metadata } from "next"
+import { Suspense } from "react"
 
 import { PaddleCheckoutPage } from "@/components/billing/PaddleCheckoutPage"
 
@@ -12,5 +13,9 @@ export const metadata: Metadata = {
 }
 
 export default function CheckoutPage() {
-  return <PaddleCheckoutPage />
+  return (
+    <Suspense fallback={null}>
+      <PaddleCheckoutPage />
+    </Suspense>
+  )
 }

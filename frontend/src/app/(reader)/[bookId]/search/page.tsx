@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
-import { useEffect, useState } from "react"
+import { Suspense, useEffect, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 
 import { booksApi } from "@/lib/api/books"
@@ -22,6 +22,14 @@ const AUTHOR_PROMPTS = [
 ]
 
 export default function SearchPage() {
+  return (
+    <Suspense fallback={null}>
+      <SearchPageInner />
+    </Suspense>
+  )
+}
+
+function SearchPageInner() {
   const { bookId } = useParams<{ bookId: string }>()
   const router = useRouter()
   const searchParams = useSearchParams()
