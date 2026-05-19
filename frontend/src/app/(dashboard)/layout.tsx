@@ -1,4 +1,5 @@
 import type { Metadata } from "next"
+import { AppRuntime } from "@/components/app/AppRuntime"
 import { DashboardShell } from "@/components/layout/DashboardShell"
 
 export const metadata: Metadata = {
@@ -9,5 +10,9 @@ export const metadata: Metadata = {
 }
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  return <DashboardShell>{children}</DashboardShell>
+  return (
+    <AppRuntime>
+      <DashboardShell>{children}</DashboardShell>
+    </AppRuntime>
+  )
 }

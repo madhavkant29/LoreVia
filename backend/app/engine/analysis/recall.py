@@ -2,6 +2,8 @@
 Memory recall - generates a grounded recap for returning readers.
 """
 
+import uuid
+
 from app.core.config import settings
 from app.core.llm import complete_with_fallback
 
@@ -26,6 +28,9 @@ async def generate_recall(
     recent_summary: str,
     active_characters: list[str],
     open_threads: list[str],
+    *,
+    user_id: uuid.UUID | None = None,
+    book_id: uuid.UUID | None = None,
 ) -> str:
     context = (
         f"Recent events:\n{recent_summary}\n\n"
@@ -40,6 +45,10 @@ async def generate_recall(
         gemini_model=settings.GEMINI_EXTRACT_MODEL,
         temperature=0.25,
         max_tokens=220,
+        usage_feature="reader_recall",
+        usage_user_id=user_id,
+        usage_book_id=book_id,
+        usage_metadata={"last_chapter": last_chapter},
     )
     return _polish_recall(content)
 

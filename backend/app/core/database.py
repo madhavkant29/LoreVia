@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 def _build_engine_config() -> tuple[str, dict]:
     url = make_url(settings.DATABASE_URL.replace("postgresql://", "postgresql+psycopg://"))
-    return url.render_as_string(hide_password=False), {}
+    return url.render_as_string(hide_password=False), {"prepare_threshold": None}
 
 
 engine_url, engine_connect_args = _build_engine_config()

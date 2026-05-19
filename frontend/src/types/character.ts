@@ -23,13 +23,20 @@ export interface Character {
   trait_state: TraitState
   description: string | null
   personality_tags: string[]
+  goal?: string | null
   motivations: string[]
   fears: string[]
+  lie_they_believe?: string | null
+  backstory_wound?: string | null
+  arc_type?: string | null
   archetype: string | null
   arc_summary: string | null
   character_type?: "complex" | "normal" | "gag" | "meme" | null
   character_type_score?: number | null
   subtype_scores?: Record<string, number>
+  is_manual?: boolean
+  tags?: string[]
+  graph_visibility_override?: "include" | "exclude" | null
   growth_events?: Array<{
     chapter?: number | null
     chapter_number?: number | null
@@ -46,6 +53,47 @@ export interface Character {
     tone?: string | null
   }>
   relationship_summaries?: string[]
+  arc_tracker?: {
+    goal?: string | null
+    motivation?: string | null
+    motivations?: string[]
+    fear?: string | null
+    fears?: string[]
+    lie_they_believe?: string | null
+    wound_backstory?: string | null
+    arc_type?: string | null
+    first_appearance?: number | null
+    major_turning_points?: Array<{
+      chapter_number: number
+      title: string
+      description?: string | null
+      impact_score?: number | null
+      growth_direction?: string | null
+      is_major?: boolean
+    }>
+    relationship_changes?: Array<{
+      counterpart_id: string
+      counterpart_name: string
+      chapter_number: number
+      to_chapter?: number | null
+      type: string
+      sentiment?: number | null
+      description?: string | null
+    }>
+    contradictions?: string[]
+    voice_markers?: string[]
+    physical_description_history?: Array<{
+      chapter_number: number
+      trait: string
+      label: string
+      value: string
+      previous_value?: string | null
+    }>
+    arc_timeline?: string[]
+    diagnostics?: string[]
+    latest_arc_note?: string | null
+    summary?: string | null
+  }
 }
 
 export interface CharacterShareResponse {
@@ -66,6 +114,11 @@ export interface RelationshipGraph {
     name: string; 
     role: string | null; 
     first_chapter: number;
+    mention_count?: number;
+    is_manual?: boolean;
+    graph_visibility_override?: "include" | "exclude" | null;
+    visibility_score?: number;
+    visibility_reasons?: string[];
     description?: string | null;
     personality_tags?: string[];
     aliases?: string[];
@@ -83,5 +136,18 @@ export interface RelationshipGraph {
     description: string | null
     from_chapter?: number | null
     to_chapter?: number | null
+    status?: "ongoing" | "ended"
+  }>
+  hidden_nodes?: Array<{
+    id: string
+    name: string
+    role: string | null
+    first_chapter: number
+    mention_count: number
+    is_manual?: boolean
+    graph_visibility_override?: "include" | "exclude" | null
+    visibility_score: number
+    visibility_reasons: string[]
+    connected_relationship_count: number
   }>
 }

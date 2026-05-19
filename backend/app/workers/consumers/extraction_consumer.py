@@ -15,6 +15,7 @@ from sqlalchemy import update as sa_update
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
+from app.core.redis import cache_del, cache_set_if_absent, key_extraction_inflight
 from app.core.storage import download_book, upload_binary
 from app.engine.character.consolidator import consolidate_characters
 from app.engine.character.deduplicator import (
@@ -24,37 +25,41 @@ from app.engine.character.deduplicator import (
     merge_alias,
     names_equivalent,
 )
-from app.engine.character.extractor import extract_characters_and_relationships
+from app.engine.character.entity_filters import character_persistence_decision
+from app.engine.character.extractor import extract_characters_and_relationships, fallback_character_mentions
 from app.engine.character.profile_builder import build_character_profile, update_profile
 from app.engine.embeddings.embedder import embed_batch
 from app.models.book import Book, Chapter, ChapterMedia
 from app.models.character import Character, CharacterState, CharacterVoiceProfile
-from app.models.intelligence import BookChunk, CharacterRelationship, Notification
+from app.models.intelligence import BookChunk, CharacterRelationship
 from app.models.user import User
 from app.parsers.chunker import ChunkingConfig, chunk_text, count_tokens
-from app.services.monetization_service import qualify_referral_if_ready, reward_first_processed_book
 from app.services.email_service import send_processing_complete_with_stats
-from app.utils.compliance.copyright_check import check_isbn
-from app.utils.external.isbn_lookup import extract_isbn_from_pdf
+from app.utils.billing_utils import has_paid_reading_access
 from app.utils.book_utils import parse_book_upload_for_ingestion, refresh_screenplay_scene_rows
-from app.utils.intelligence_utils import (
-    compute_voice_metrics,
-    extract_dialogue_samples_by_character,
-    merge_voice_profile_metrics,
-)
+from app.utils.character_utils import find_earliest_character_mention_chapter
+from app.utils.compliance.copyright_check import evaluate_document_copyright
 from app.utils.ingestion_utils import (
     apply_chapter_number_strategy,
+    build_analysis_chapter_state,
+    build_source_integrity_state,
     build_chapter_dispatch_plan,
     chunked,
+    current_parser_diagnostics,
     elapsed_ms,
+    EXTRACTION_INFLIGHT_TTL_SECONDS,
     get_processing_started_at,
     is_book_hidden,
     mark_book_processing_cancelled,
     persist_chapter_payloads,
     update_book_processing_state,
 )
-from app.utils.billing_utils import user_access_tier
-from app.utils.notification_utils import build_book_ready_notification, collect_book_ready_stats
+from app.utils.intelligence_utils import (
+    compute_voice_metrics,
+    extract_dialogue_samples_by_character,
+    merge_voice_profile_metrics,
+)
+from app.utils.notification_utils import collect_book_ready_stats, upsert_book_ready_notification
 from app.utils.queue_utils import queue_for_user
 
 log = logging.getLogger("lorevia.extraction")
@@ -112,13 +117,14 @@ async def process_book(book_id: str, queue_wait_ms: int | None = None) -> dict:
             except Exception:
                 log.warning("cover_extraction_upload_failed book_id=%s", book_id, exc_info=True)
 
-        if book.is_public and book.format == "pdf" and not book.isbn:
-            detected_isbn = extract_isbn_from_pdf(raw)
-            if detected_isbn:
-                book.isbn = detected_isbn
-        if book.is_public and book.isbn:
-            copyright_info = await check_isbn(book.isbn)
-            book.copyright_warning = bool(copyright_info.get("found", False))
+        copyright_info = await evaluate_document_copyright(
+            format_name=book.format,
+            raw=raw,
+            existing_isbn=book.isbn,
+        )
+        if copyright_info.get("isbn"):
+            book.isbn = str(copyright_info["isbn"])
+        book.copyright_warning = bool(copyright_info.get("copyright_warning", False))
         await db.commit()
 
         parse_started = time.perf_counter()
@@ -161,7 +167,7 @@ async def process_book(book_id: str, queue_wait_ms: int | None = None) -> dict:
         was_truncated = False
         ai_chapters = all_chapters
 
-        if user and user_access_tier(user) not in ("reader", "author", "architect", "admin"):
+        if user and not has_paid_reading_access(user):
             result = await db.execute(
                 select(func.sum(Book.total_tokens))
                 .where(Book.user_id == user.id, Book.id != book.id, Book.status != "error")
@@ -329,192 +335,234 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
         return
 
     chapter_number = int(ch_data["number"])
-    started_at = time.perf_counter()
-    user = await db.get(User, book.user_id)
-    db_load_started = time.perf_counter()
-    chapter = (
-        await db.execute(
-            select(Chapter).where(Chapter.book_id == book.id, Chapter.number == chapter_number)
+    inflight_key = key_extraction_inflight(str(book.id), chapter_number)
+    if not await cache_set_if_absent(
+        inflight_key,
+        {"book_id": str(book.id), "chapter_number": chapter_number},
+        EXTRACTION_INFLIGHT_TTL_SECONDS,
+    ):
+        log.info("Skipping duplicate extraction in-flight book_id=%s chapter=%s", book.id, chapter_number)
+        return
+
+    try:
+        started_at = time.perf_counter()
+        user = await db.get(User, book.user_id)
+        db_load_started = time.perf_counter()
+        chapter = (
+            await db.execute(
+                select(Chapter).where(Chapter.book_id == book.id, Chapter.number == chapter_number)
+            )
+        ).scalar()
+        log.info(
+            "ingestion_timing stage=chapter_db_load book_id=%s chapter=%s elapsed_ms=%s",
+            book.id,
+            chapter_number,
+            elapsed_ms(db_load_started),
         )
-    ).scalar()
-    log.info(
-        "ingestion_timing stage=chapter_db_load book_id=%s chapter=%s elapsed_ms=%s",
-        book.id,
-        chapter_number,
-        elapsed_ms(db_load_started),
-    )
-    log.info(
-        "ingestion_timing stage=chapter_queue_wait book_id=%s chapter=%s queue_wait_ms=%s",
-        book.id,
-        chapter_number,
-        queue_wait_ms,
-    )
-
-    s3_key = chapter.s3_key if chapter is not None else ""
-    if chapter is None:
-        chapter = Chapter(
-            book_id=book.id,
-            number=chapter_number,
-            title=ch_data.get("title"),
-            description=ch_data.get("description"),
-            s3_key=s3_key,
-            word_count=_count_words(ch_data.get("text", "")),
-            processed=True,
+        log.info(
+            "ingestion_timing stage=chapter_queue_wait book_id=%s chapter=%s queue_wait_ms=%s",
+            book.id,
+            chapter_number,
+            queue_wait_ms,
         )
-        db.add(chapter)
-        await db.flush()
-        await _sync_chapter_media(db, book, chapter, ch_data)
-    else:
-        chapter_changed = False
-        if ch_data.get("title") and chapter.title != ch_data["title"]:
-            chapter.title = ch_data["title"]
-            chapter_changed = True
-        if ch_data.get("description") and chapter.description != ch_data["description"]:
-            chapter.description = ch_data["description"]
-            chapter_changed = True
-        if not chapter.processed:
-            chapter.processed = True
-            chapter_changed = True
-        next_word_count = _count_words(ch_data.get("text", ""))
-        if next_word_count and chapter.word_count != next_word_count:
-            chapter.word_count = next_word_count
-            chapter_changed = True
-        if chapter_changed:
-            await db.flush()
-        await _sync_chapter_media(db, book, chapter, ch_data)
 
-    assert chapter is not None
-    await db.execute(delete(BookChunk).where(BookChunk.chapter_id == chapter.id))
-
-    chunk_started = time.perf_counter()
-    chunks = chunk_text(
-        ch_data["text"],
-        config=ChunkingConfig(
-            target_tokens=settings.CHUNK_TARGET_TOKENS,
-            max_tokens=settings.CHUNK_MAX_TOKENS,
-            min_tokens=settings.CHUNK_MIN_TOKENS,
-            overlap_tokens=settings.CHUNK_OVERLAP_TOKENS,
-            overlap_ratio=settings.CHUNK_OVERLAP_RATIO,
-        ),
-    )
-    log.info(
-        "ingestion_timing stage=chunk book_id=%s chapter=%s elapsed_ms=%s chunks=%s",
-        book.id,
-        chapter_number,
-        elapsed_ms(chunk_started),
-        len(chunks),
-    )
-
-    embed_started = time.perf_counter()
-    chunk_batches = chunked(chunks, settings.EXTRACTION_EMBED_BATCH_SIZE)
-    embed_semaphore = asyncio.Semaphore(
-        max(1, min(settings.EXTRACTION_EMBED_CONCURRENCY, len(chunk_batches) or 1))
-    )
-
-    async def _embed_with_limit(batch: list[str]) -> list[list[float]]:
-        async with embed_semaphore:
-            return await embed_batch(batch)
-
-    embedded_batches = await asyncio.gather(*(_embed_with_limit(batch) for batch in chunk_batches))
-    chunk_embeddings = [embedding for batch in embedded_batches for embedding in batch]
-    log.info(
-        "ingestion_timing stage=embed book_id=%s chapter=%s elapsed_ms=%s batches=%s",
-        book.id,
-        chapter_number,
-        elapsed_ms(embed_started),
-        len(chunk_batches),
-    )
-
-    for index, (chunk_text_val, emb) in enumerate(zip(chunks, chunk_embeddings)):
-        db.add(
-            BookChunk(
+        s3_key = chapter.s3_key if chapter is not None else ""
+        if chapter is None:
+            chapter = Chapter(
                 book_id=book.id,
-                chapter_id=chapter.id,
-                chunk_index=index,
-                text=chunk_text_val,
-                embedding=emb,
-                token_count=len(chunk_text_val.split()),
+                number=chapter_number,
+                content_version=int(ch_data.get("content_version") or 1),
+                title=ch_data.get("title"),
+                description=ch_data.get("description"),
+                s3_key=s3_key,
+                word_count=_count_words(ch_data.get("text", "")),
+                processed=True,
             )
+            db.add(chapter)
+            await db.flush()
+            await _sync_chapter_media(db, book, chapter, ch_data)
+        else:
+            chapter_changed = False
+            if ch_data.get("title") and chapter.title != ch_data["title"]:
+                chapter.title = ch_data["title"]
+                chapter_changed = True
+            if ch_data.get("description") and chapter.description != ch_data["description"]:
+                chapter.description = ch_data["description"]
+                chapter_changed = True
+            if not chapter.processed:
+                chapter.processed = True
+                chapter_changed = True
+            next_word_count = _count_words(ch_data.get("text", ""))
+            if next_word_count and chapter.word_count != next_word_count:
+                chapter.word_count = next_word_count
+                chapter_changed = True
+            next_content_version = ch_data.get("content_version")
+            if next_content_version is not None and int(chapter.content_version or 1) != int(next_content_version):
+                chapter.content_version = int(next_content_version)
+                chapter_changed = True
+            if chapter_changed:
+                await db.flush()
+            await _sync_chapter_media(db, book, chapter, ch_data)
+
+        chapter.analysis_state = build_analysis_chapter_state(
+            chapter.analysis_state if isinstance(chapter.analysis_state, dict) else None,
+            status="pending",
+            source_integrity=build_source_integrity_state(
+                text_present=bool(str(ch_data.get("text") or "").strip()),
+                media_marker_count=len(re.findall(r"\[\[IMAGE:[^\]]+\]\]", str(ch_data.get("text") or ""))),
+                stored_media_count=len(ch_data.get("images") or []),
+                recovery_status="ok",
+            ),
+        )
+        await db.flush()
+
+        assert chapter is not None
+        await db.execute(delete(BookChunk).where(BookChunk.chapter_id == chapter.id))
+
+        chunk_started = time.perf_counter()
+        chunks = chunk_text(
+            ch_data["text"],
+            config=ChunkingConfig(
+                target_tokens=settings.CHUNK_TARGET_TOKENS,
+                max_tokens=settings.CHUNK_MAX_TOKENS,
+                min_tokens=settings.CHUNK_MIN_TOKENS,
+                overlap_tokens=settings.CHUNK_OVERLAP_TOKENS,
+                overlap_ratio=settings.CHUNK_OVERLAP_RATIO,
+            ),
+        )
+        log.info(
+            "ingestion_timing stage=chunk book_id=%s chapter=%s elapsed_ms=%s chunks=%s",
+            book.id,
+            chapter_number,
+            elapsed_ms(chunk_started),
+            len(chunks),
         )
 
-    existing_characters = (
-        await db.execute(
-            select(Character).where(Character.book_id == book.id).order_by(Character.first_chapter, Character.created_at)
+        embed_started = time.perf_counter()
+        chunk_batches = chunked(chunks, settings.EXTRACTION_EMBED_BATCH_SIZE)
+        embed_semaphore = asyncio.Semaphore(
+            max(1, min(settings.EXTRACTION_EMBED_CONCURRENCY, len(chunk_batches) or 1))
         )
-    ).scalars().all()
 
-    llm_started = time.perf_counter()
-    extraction_batches = _group_chunks_for_extraction(chunks)
-    extraction_results = await asyncio.gather(
-        *(extract_characters_and_relationships("\n\n".join(chunk_batch)) for chunk_batch in extraction_batches),
-        return_exceptions=True,
-    )
-
-    for result in extraction_results:
-        if isinstance(result, Exception):
-            continue
-        result = cast(dict[str, Any], result)
-
-        character_entities = [
-            entity
-            for entity in result.get("characters", [])
-            if isinstance(entity, dict) and entity.get("name")
-        ]
-        for entity in character_entities:
-            blocked_ids = _blocked_character_ids(existing_characters, entity)
-            existing_id = _find_character_id_in_cache(
-                existing_characters,
-                entity["name"],
-                entity.get("aliases", []),
-                blocked_ids=blocked_ids,
-            )
-
-            if existing_id:
-                if not _should_update_existing_character(entity):
-                    continue
-                char = await db.get(Character, existing_id)
-                if char:
-                    updated = update_profile(char, {**entity, "first_chapter": chapter_number})
-                    changed = _changed(char.trait_state or {}, updated["trait_state"])
-                    await db.execute(sa_update(Character).where(Character.id == existing_id).values(**updated))
-                    if changed:
-                        growth_event = entity.get("growth_event")
-                        if isinstance(growth_event, dict):
-                            growth_event = {**growth_event, "chapter": chapter_number}
-                        db.add(
-                            CharacterState(
-                                character_id=existing_id,
-                                at_chapter=chapter_number,
-                                trait_snapshot=updated["trait_state"],
-                                prompt_delta=_diff(char.trait_state or {}, updated["trait_state"]),
-                                arc_note=entity.get("arc_summary"),
-                                growth_event=growth_event if isinstance(growth_event, dict) else None,
-                            )
-                        )
-                await merge_alias(db, existing_id, entity["name"])
-            else:
-                if not _can_auto_save_character(entity):
-                    log.info(
-                        "Rejected new character '%s' at save gate: confidence=%s evidence=%s",
-                        entity.get("name"),
-                        entity.get("confidence"),
-                        entity.get("evidence"),
-                    )
-                    continue
-                emb = await embed_for_dedup(entity["name"], entity.get("traits", {}))
-                if not emb:
-                    continue
-                existing_id = await find_similar(
-                    db,
-                    book.id,
-                    emb,
-                    settings.DEDUP_SIMILARITY_THRESHOLD,
-                    excluded_ids=blocked_ids,
+        async def _embed_with_limit(batch: list[str]) -> list[list[float]]:
+            async with embed_semaphore:
+                return await embed_batch(
+                    batch,
+                    user_id=book.user_id,
+                    book_id=book.id,
+                    feature="chapter_chunk_embedding",
                 )
+
+        embedded_batches = await asyncio.gather(*(_embed_with_limit(batch) for batch in chunk_batches))
+        chunk_embeddings = [embedding for batch in embedded_batches for embedding in batch]
+        log.info(
+            "ingestion_timing stage=embed book_id=%s chapter=%s elapsed_ms=%s batches=%s",
+            book.id,
+            chapter_number,
+            elapsed_ms(embed_started),
+            len(chunk_batches),
+        )
+
+        for index, (chunk_text_val, emb) in enumerate(zip(chunks, chunk_embeddings)):
+            db.add(
+                BookChunk(
+                    book_id=book.id,
+                    chapter_id=chapter.id,
+                    chunk_index=index,
+                    text=chunk_text_val,
+                    embedding=emb,
+                    token_count=len(chunk_text_val.split()),
+                )
+            )
+
+        existing_characters = (
+            await db.execute(
+                select(Character).where(Character.book_id == book.id).order_by(Character.first_chapter, Character.created_at)
+            )
+        ).scalars().all()
+
+        llm_started = time.perf_counter()
+        extraction_batches = _group_chunks_for_extraction(chunks)
+        extraction_batch_texts = ["\n\n".join(chunk_batch) for chunk_batch in extraction_batches]
+        extraction_results = await asyncio.gather(
+            *(
+                extract_characters_and_relationships(
+                    batch_text,
+                    user_id=book.user_id,
+                    book_id=book.id,
+                )
+                for batch_text in extraction_batch_texts
+            ),
+            return_exceptions=True,
+        )
+        extraction_failed_batches = 0
+        extraction_fallback_batches = 0
+        extraction_fallback_character_count = 0
+        extraction_rejected_characters: list[dict[str, Any]] = []
+
+        for batch_index, (batch_text, result) in enumerate(zip(extraction_batch_texts, extraction_results), start=1):
+            if isinstance(result, Exception):
+                extraction_failed_batches += 1
+                log.warning(
+                    "character_extraction_batch_failed book_id=%s chapter=%s batch=%s",
+                    book.id,
+                    chapter_number,
+                    batch_index,
+                    exc_info=result,
+                )
+                result = fallback_character_mentions(batch_text)
+                extraction_fallback_batches += 1
+                extraction_fallback_character_count += len(result.get("characters", []))
+            result = cast(dict[str, Any], result)
+            _append_rejected_character_reports(extraction_rejected_characters, result.get("rejected_characters"))
+
+            character_entities = [
+                entity
+                for entity in result.get("characters", [])
+                if isinstance(entity, dict) and entity.get("name")
+            ]
+            for entity in character_entities:
+                blocked_ids = _blocked_character_ids(existing_characters, entity)
+                existing_id = _find_character_id_in_cache(
+                    existing_characters,
+                    entity["name"],
+                    entity.get("aliases", []),
+                    blocked_ids=blocked_ids,
+                )
+                decision = _character_save_decision(entity)
+
                 if existing_id:
+                    if not decision.allowed:
+                        log.info(
+                            "Rejected existing character update '%s' at save gate: confidence=%s reasons=%s evidence=%s",
+                            entity.get("name"),
+                            entity.get("confidence"),
+                            decision.reasons,
+                            entity.get("evidence"),
+                        )
+                        _append_rejected_character_reports(
+                            extraction_rejected_characters,
+                            [{
+                                "name": entity.get("name"),
+                                "stage": "save_gate_update",
+                                "reason": ";".join(decision.reasons) if decision.reasons else "save_gate_rejected",
+                                "confidence": entity.get("confidence"),
+                                "evidence": entity.get("evidence") or {},
+                            }],
+                        )
+                        continue
                     char = await db.get(Character, existing_id)
-                    if char and _should_update_existing_character(entity):
+                    if char:
                         updated = update_profile(char, {**entity, "first_chapter": chapter_number})
+                        earliest_chapter = await find_earliest_character_mention_chapter(
+                            db,
+                            book_id=book.id,
+                            name=char.name,
+                            aliases=updated.get("aliases") or char.aliases or [],
+                            upto_chapter=chapter_number,
+                        )
+                        if earliest_chapter is not None:
+                            updated["first_chapter"] = min(updated["first_chapter"], earliest_chapter)
                         changed = _changed(char.trait_state or {}, updated["trait_state"])
                         await db.execute(sa_update(Character).where(Character.id == existing_id).values(**updated))
                         if changed:
@@ -526,243 +574,316 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                                     character_id=existing_id,
                                     at_chapter=chapter_number,
                                     trait_snapshot=updated["trait_state"],
+                                    motivations_snapshot=updated.get("motivations") or [],
+                                    fears_snapshot=updated.get("fears") or [],
                                     prompt_delta=_diff(char.trait_state or {}, updated["trait_state"]),
                                     arc_note=entity.get("arc_summary"),
                                     growth_event=growth_event if isinstance(growth_event, dict) else None,
                                 )
                             )
                     await merge_alias(db, existing_id, entity["name"])
+                else:
+                    if not decision.allowed:
+                        log.info(
+                            "Rejected new character '%s' at save gate: confidence=%s reasons=%s evidence=%s",
+                            entity.get("name"),
+                            entity.get("confidence"),
+                            decision.reasons,
+                            entity.get("evidence"),
+                        )
+                        _append_rejected_character_reports(
+                            extraction_rejected_characters,
+                            [{
+                                "name": entity.get("name"),
+                                "stage": "save_gate_create",
+                                "reason": ";".join(decision.reasons) if decision.reasons else "save_gate_rejected",
+                                "confidence": entity.get("confidence"),
+                                "evidence": entity.get("evidence") or {},
+                            }],
+                        )
+                        continue
+                    emb = await embed_for_dedup(entity["name"], entity.get("traits", {}))
+                    if not emb:
+                        continue
+                    existing_id = await find_similar(
+                        db,
+                        book.id,
+                        emb,
+                        settings.DEDUP_SIMILARITY_THRESHOLD,
+                        excluded_ids=blocked_ids,
+                    )
+                    if existing_id:
+                        char = await db.get(Character, existing_id)
+                        if char and decision.allowed:
+                            updated = update_profile(char, {**entity, "first_chapter": chapter_number})
+                            earliest_chapter = await find_earliest_character_mention_chapter(
+                                db,
+                                book_id=book.id,
+                                name=char.name,
+                                aliases=updated.get("aliases") or char.aliases or [],
+                                upto_chapter=chapter_number,
+                            )
+                            if earliest_chapter is not None:
+                                updated["first_chapter"] = min(updated["first_chapter"], earliest_chapter)
+                            changed = _changed(char.trait_state or {}, updated["trait_state"])
+                            await db.execute(sa_update(Character).where(Character.id == existing_id).values(**updated))
+                            if changed:
+                                growth_event = entity.get("growth_event")
+                                if isinstance(growth_event, dict):
+                                    growth_event = {**growth_event, "chapter": chapter_number}
+                                db.add(
+                                    CharacterState(
+                                        character_id=existing_id,
+                                        at_chapter=chapter_number,
+                                        trait_snapshot=updated["trait_state"],
+                                        motivations_snapshot=updated.get("motivations") or [],
+                                        fears_snapshot=updated.get("fears") or [],
+                                        prompt_delta=_diff(char.trait_state or {}, updated["trait_state"]),
+                                        arc_note=entity.get("arc_summary"),
+                                        growth_event=growth_event if isinstance(growth_event, dict) else None,
+                                    )
+                                )
+                        await merge_alias(db, existing_id, entity["name"])
+                        continue
+                    profile = build_character_profile(entity, book.id, chapter_number)
+                    earliest_chapter = await find_earliest_character_mention_chapter(
+                        db,
+                        book_id=book.id,
+                        name=profile["name"],
+                        aliases=profile["aliases"],
+                        upto_chapter=chapter_number,
+                    )
+                    if earliest_chapter is not None:
+                        profile["first_chapter"] = min(profile["first_chapter"], earliest_chapter)
+                    char = Character(**profile, embedding=emb)
+                    db.add(char)
+                    await db.flush()
+                    existing_characters.append(char)
+
+            for rel in result.get("relationships", []):
+                if not isinstance(rel, dict):
                     continue
-                profile = build_character_profile(entity, book.id, chapter_number)
-                char = Character(**profile, embedding=emb)
-                db.add(char)
-                await db.flush()
-                existing_characters.append(char)
-
-        for rel in result.get("relationships", []):
-            if not isinstance(rel, dict):
-                continue
-            if not rel.get("character_a") or not rel.get("character_b"):
-                continue
-            char_a = _find_character_in_cache(existing_characters, rel["character_a"])
-            char_b = _find_character_in_cache(existing_characters, rel["character_b"])
-            if char_a and char_b:
-                db.add(
-                    CharacterRelationship(
-                        book_id=book.id,
-                        character_a_id=char_a.id,
-                        character_b_id=char_b.id,
-                        rel_type=rel.get("type", "neutral"),
-                        sentiment=rel.get("sentiment"),
-                        description=rel.get("description"),
-                        from_chapter=chapter_number,
+                if not rel.get("character_a") or not rel.get("character_b"):
+                    continue
+                char_a = _find_character_in_cache(existing_characters, rel["character_a"])
+                char_b = _find_character_in_cache(existing_characters, rel["character_b"])
+                if char_a and char_b:
+                    db.add(
+                        CharacterRelationship(
+                            book_id=book.id,
+                            character_a_id=char_a.id,
+                            character_b_id=char_b.id,
+                            rel_type=rel.get("type", "neutral"),
+                            sentiment=rel.get("sentiment"),
+                            description=rel.get("description"),
+                            from_chapter=chapter_number,
+                        )
                     )
-                )
 
-    dialogue_samples = extract_dialogue_samples_by_character(
-        str(ch_data.get("text") or ""),
-        [{"id": str(char.id), "name": char.name, "aliases": char.aliases or []} for char in existing_characters if char.name],
-    )
-    if dialogue_samples:
-        existing_voice_profiles = (
-            await db.execute(
-                select(CharacterVoiceProfile).where(CharacterVoiceProfile.book_id == book.id)
-            )
-        ).scalars().all()
-        profiles_by_character_id = {profile.character_id: profile for profile in existing_voice_profiles}
-        for char in existing_characters:
-            samples = dialogue_samples.get(char.name)
-            if not samples:
-                continue
-            metrics = compute_voice_metrics(samples)
-            if int(metrics.get("sample_dialogue_count") or 0) <= 0:
-                continue
-            current_profile = profiles_by_character_id.get(char.id)
-            merged_metrics = merge_voice_profile_metrics(
-                {
-                    "sample_dialogue_count": current_profile.sample_dialogue_count if current_profile else 0,
-                    "sample_word_count": current_profile.sample_word_count if current_profile else 0,
-                    "avg_sentence_length": current_profile.avg_sentence_length if current_profile else 0,
-                    "avg_word_length_x100": current_profile.avg_word_length_x100 if current_profile else 0,
-                    "contraction_rate_x1000": current_profile.contraction_rate_x1000 if current_profile else 0,
-                    "question_rate_x1000": current_profile.question_rate_x1000 if current_profile else 0,
-                    "exclamation_rate_x1000": current_profile.exclamation_rate_x1000 if current_profile else 0,
-                    "ellipsis_rate_x1000": current_profile.ellipsis_rate_x1000 if current_profile else 0,
-                    "dash_rate_x1000": current_profile.dash_rate_x1000 if current_profile else 0,
-                    "uppercase_rate_x1000": current_profile.uppercase_rate_x1000 if current_profile else 0,
-                    "formality_score_x1000": current_profile.formality_score_x1000 if current_profile else 0,
-                    "lexical_complexity_x1000": current_profile.lexical_complexity_x1000 if current_profile else 0,
-                    "emotional_intensity_x1000": current_profile.emotional_intensity_x1000 if current_profile else 0,
-                    "dominant_markers": current_profile.dominant_markers if current_profile else {},
-                    "signature_phrases": current_profile.signature_phrases if current_profile else [],
-                } if current_profile else None,
-                metrics,
-            )
-            if current_profile is None:
-                db.add(
-                    CharacterVoiceProfile(
-                        book_id=book.id,
-                        character_id=char.id,
-                        **merged_metrics,
-                    )
-                )
-            else:
-                for key, value in merged_metrics.items():
-                    setattr(current_profile, key, value)
-
-    log.info(
-        "ingestion_timing stage=llm_extract book_id=%s chapter=%s elapsed_ms=%s batches=%s",
-        book.id,
-        chapter_number,
-        elapsed_ms(llm_started),
-        len(extraction_batches),
-    )
-
-    if await is_book_hidden(db, book.id):
-        await mark_book_processing_cancelled(
-            db,
-            book,
-            stage="chapter_extract",
-            rollback=True,
-            queue_wait_ms=queue_wait_ms,
-            chapter_number=chapter_number,
-            chapter_title=chapter.title,
-            last_error="Book was removed while processing.",
+        dialogue_samples = extract_dialogue_samples_by_character(
+            str(ch_data.get("text") or ""),
+            [{"id": str(char.id), "name": char.name, "aliases": char.aliases or []} for char in existing_characters if char.name],
         )
-        return
-
-    commit_started = time.perf_counter()
-    await db.commit()
-    log.info(
-        "ingestion_timing stage=chapter_db_commit book_id=%s chapter=%s elapsed_ms=%s",
-        book.id,
-        chapter_number,
-        elapsed_ms(commit_started),
-    )
-
-    processed_count = int(
-        (
-            await db.execute(
-                select(func.count()).select_from(Chapter).where(
-                    Chapter.book_id == book.id,
-                    Chapter.processed.is_(True),
+        if dialogue_samples:
+            existing_voice_profiles = (
+                await db.execute(
+                    select(CharacterVoiceProfile).where(CharacterVoiceProfile.book_id == book.id)
                 )
+            ).scalars().all()
+            profiles_by_character_id = {profile.character_id: profile for profile in existing_voice_profiles}
+            for char in existing_characters:
+                samples = dialogue_samples.get(char.name)
+                if not samples:
+                    continue
+                metrics = compute_voice_metrics(samples)
+                if int(metrics.get("sample_dialogue_count") or 0) <= 0:
+                    continue
+                current_profile = profiles_by_character_id.get(char.id)
+                merged_metrics = merge_voice_profile_metrics(
+                    {
+                        "sample_dialogue_count": current_profile.sample_dialogue_count if current_profile else 0,
+                        "sample_word_count": current_profile.sample_word_count if current_profile else 0,
+                        "avg_sentence_length": current_profile.avg_sentence_length if current_profile else 0,
+                        "avg_word_length_x100": current_profile.avg_word_length_x100 if current_profile else 0,
+                        "contraction_rate_x1000": current_profile.contraction_rate_x1000 if current_profile else 0,
+                        "question_rate_x1000": current_profile.question_rate_x1000 if current_profile else 0,
+                        "exclamation_rate_x1000": current_profile.exclamation_rate_x1000 if current_profile else 0,
+                        "ellipsis_rate_x1000": current_profile.ellipsis_rate_x1000 if current_profile else 0,
+                        "dash_rate_x1000": current_profile.dash_rate_x1000 if current_profile else 0,
+                        "uppercase_rate_x1000": current_profile.uppercase_rate_x1000 if current_profile else 0,
+                        "formality_score_x1000": current_profile.formality_score_x1000 if current_profile else 0,
+                        "lexical_complexity_x1000": current_profile.lexical_complexity_x1000 if current_profile else 0,
+                        "emotional_intensity_x1000": current_profile.emotional_intensity_x1000 if current_profile else 0,
+                        "dominant_markers": current_profile.dominant_markers if current_profile else {},
+                        "signature_phrases": current_profile.signature_phrases if current_profile else [],
+                    } if current_profile else None,
+                    metrics,
+                )
+                if current_profile is None:
+                    db.add(
+                        CharacterVoiceProfile(
+                            book_id=book.id,
+                            character_id=char.id,
+                            **merged_metrics,
+                        )
+                    )
+                else:
+                    for key, value in merged_metrics.items():
+                        setattr(current_profile, key, value)
+
+        log.info(
+            "ingestion_timing stage=llm_extract book_id=%s chapter=%s elapsed_ms=%s batches=%s",
+            book.id,
+            chapter_number,
+            elapsed_ms(llm_started),
+            len(extraction_batches),
+        )
+        extraction_diagnostics = dict(current_parser_diagnostics(book) or {})
+        extraction_diagnostics["character_extraction"] = {
+            "total_batches": len(extraction_batch_texts),
+            "failed_batches": extraction_failed_batches,
+            "fallback_batches": extraction_fallback_batches,
+            "fallback_character_count": extraction_fallback_character_count,
+        }
+        if extraction_rejected_characters:
+            extraction_diagnostics["character_extraction"]["rejected_characters"] = _summarize_rejected_character_reports(
+                extraction_rejected_characters
             )
-        ).scalar_one()
-    )
-    processing_total = int(book.total_chapters or processed_count or 0) or None
-    book.writer_workspace = update_book_processing_state(
-        book,
-        status="processing",
-        stage="chapter_complete",
-        total_chapters=processing_total,
-        completed_chapters=processed_count,
-        started_at=get_processing_started_at(book),
-        queue_wait_ms=queue_wait_ms,
-        chapter_number=chapter_number,
-        chapter_title=chapter.title,
-    )
-    await db.commit()
-    processing_state = book.writer_workspace.get("processing") if isinstance(book.writer_workspace, dict) else None
-    log.info(
-        "ingestion_progress book_id=%s chapter=%s completed=%s total=%s progress_pct=%s eta_seconds=%s queue_wait_ms=%s",
-        book.id,
-        chapter_number,
-        processed_count,
-        processing_total,
-        (processing_state or {}).get("progress_pct") if isinstance(processing_state, dict) else None,
-        (processing_state or {}).get("eta_seconds") if isinstance(processing_state, dict) else None,
-        queue_wait_ms,
-    )
 
-    if await _should_consolidate_after_chapter(db, book, chapter.number):
-        await consolidate_characters(db, book.id, up_to_chapter=chapter_number)
+        if await is_book_hidden(db, book.id):
+            await mark_book_processing_cancelled(
+                db,
+                book,
+                stage="chapter_extract",
+                rollback=True,
+                queue_wait_ms=queue_wait_ms,
+                chapter_number=chapter_number,
+                chapter_title=chapter.title,
+                last_error="Book was removed while processing.",
+            )
+            return
+
+        commit_started = time.perf_counter()
         await db.commit()
+        log.info(
+            "ingestion_timing stage=chapter_db_commit book_id=%s chapter=%s elapsed_ms=%s",
+            book.id,
+            chapter_number,
+            elapsed_ms(commit_started),
+        )
 
-    if await _book_processing_complete(db, book.id):
-        book.status = "ready"
+        processed_count = int(
+            (
+                await db.execute(
+                    select(func.count()).select_from(Chapter).where(
+                        Chapter.book_id == book.id,
+                        Chapter.processed.is_(True),
+                    )
+                )
+            ).scalar_one()
+        )
+        processing_total = int(book.total_chapters or processed_count or 0) or None
         book.writer_workspace = update_book_processing_state(
             book,
-            status="ready",
-            stage="complete",
+            status="processing",
+            stage="chapter_complete",
             total_chapters=processing_total,
             completed_chapters=processed_count,
             started_at=get_processing_started_at(book),
             queue_wait_ms=queue_wait_ms,
             chapter_number=chapter_number,
             chapter_title=chapter.title,
+            parser_diagnostics=extraction_diagnostics,
+        )
+        await db.commit()
+        processing_state = book.writer_workspace.get("processing") if isinstance(book.writer_workspace, dict) else None
+        log.info(
+            "ingestion_progress book_id=%s chapter=%s completed=%s total=%s progress_pct=%s eta_seconds=%s queue_wait_ms=%s",
+            book.id,
+            chapter_number,
+            processed_count,
+            processing_total,
+            (processing_state or {}).get("progress_pct") if isinstance(processing_state, dict) else None,
+            (processing_state or {}).get("eta_seconds") if isinstance(processing_state, dict) else None,
+            queue_wait_ms,
         )
 
-        if book.mode == "author" and book.total_chapters:
-            from app.models.progress import ReadingProgress
-
-            progress_result = await db.execute(
-                select(ReadingProgress).where(
-                    ReadingProgress.user_id == book.user_id,
-                    ReadingProgress.book_id == book.id,
-                )
-            )
-            progress = progress_result.scalar()
-
-            chapters_read = list(range(1, book.total_chapters + 1))
-            if progress is None:
-                progress = ReadingProgress(
-                    user_id=book.user_id,
-                    book_id=book.id,
-                    current_chapter=book.total_chapters,
-                    scroll_pct=1.0,
-                    chapters_read=chapters_read,
-                )
-                db.add(progress)
-            else:
-                progress.current_chapter = book.total_chapters
-                progress.scroll_pct = 1.0
-                progress.chapters_read = chapters_read
-
-        existing_ready_notification = (
-            await db.execute(
-                select(Notification).where(
-                    Notification.book_id == book.id,
-                    Notification.user_id == book.user_id,
-                    Notification.kind == "book_ready",
-                )
-            )
-        ).scalar()
-        ready_stats = await collect_book_ready_stats(db, book)
-        if existing_ready_notification is None:
-            db.add(build_book_ready_notification(book, ready_stats))
-
-        await db.commit()
-
-        user = await db.get(User, book.user_id)
-        if user and existing_ready_notification is None:
-            await reward_first_processed_book(db, user, book)
-            await qualify_referral_if_ready(db, user, source_book_id=book.id)
+        if await _should_consolidate_after_chapter(db, book, chapter.number):
+            await consolidate_characters(db, book.id, up_to_chapter=chapter_number)
             await db.commit()
 
-        if user and user.email and existing_ready_notification is None:
-            await send_processing_complete_with_stats(
-                user.email,
-                book_title=book.title,
-                character_count=ready_stats.character_count,
-                relationship_count=ready_stats.relationship_count,
-                plot_thread_count=ready_stats.plot_thread_count,
-                continuity_issue_count=ready_stats.continuity_issue_count,
+        if await _book_processing_complete(db, book.id):
+            book.status = "ready"
+            book.writer_workspace = update_book_processing_state(
+                book,
+                status="ready",
+                stage="complete",
+                total_chapters=processing_total,
+                completed_chapters=processed_count,
+                started_at=get_processing_started_at(book),
+                queue_wait_ms=queue_wait_ms,
+                chapter_number=chapter_number,
+                chapter_title=chapter.title,
+                parser_diagnostics=extraction_diagnostics,
             )
 
-    from app.workers.tasks.analysis_tasks import analyse_chapter_task
+            if book.mode == "author" and book.total_chapters:
+                from app.models.progress import ReadingProgress
 
-    analyse_chapter_task.apply_async(
-        args=[str(chapter.id), ch_data["text"], ch_data.get("title") or ""],
-        queue=queue_for_user(user, "analysis") if user else "analysis",
-    )
+                progress_result = await db.execute(
+                    select(ReadingProgress).where(
+                        ReadingProgress.user_id == book.user_id,
+                        ReadingProgress.book_id == book.id,
+                    )
+                )
+                progress = progress_result.scalar()
 
-    log.info(
-        "ingestion_timing stage=chapter_total book_id=%s chapter=%s elapsed_ms=%s",
-        book.id,
-        chapter_number,
-        elapsed_ms(started_at),
-    )
+                chapters_read = list(range(1, book.total_chapters + 1))
+                if progress is None:
+                    progress = ReadingProgress(
+                        user_id=book.user_id,
+                        book_id=book.id,
+                        current_chapter=book.total_chapters,
+                        scroll_pct=1.0,
+                        chapters_read=chapters_read,
+                    )
+                    db.add(progress)
+                else:
+                    progress.current_chapter = book.total_chapters
+                    progress.scroll_pct = 1.0
+                    progress.chapters_read = chapters_read
+
+            ready_stats = await collect_book_ready_stats(db, book)
+            _, created_ready_notification = await upsert_book_ready_notification(db, book, ready_stats)
+
+            await db.commit()
+
+            user = await db.get(User, book.user_id)
+            if user and user.email and created_ready_notification and ready_stats.analysis_complete:
+                await send_processing_complete_with_stats(
+                    user.email,
+                    book_title=book.title,
+                    character_count=ready_stats.character_count,
+                    relationship_count=ready_stats.relationship_count,
+                    plot_thread_count=ready_stats.plot_thread_count,
+                    continuity_issue_count=ready_stats.continuity_issue_count,
+                )
+
+        from app.workers.tasks.analysis_tasks import analyse_chapter_task
+
+        analyse_chapter_task.apply_async(
+            args=[str(chapter.id), ch_data["text"], ch_data.get("title") or ""],
+            queue=queue_for_user(user, "analysis") if user else "analysis",
+        )
+
+        log.info(
+            "ingestion_timing stage=chapter_total book_id=%s chapter=%s elapsed_ms=%s",
+            book.id,
+            chapter_number,
+            elapsed_ms(started_at),
+        )
+    finally:
+        await cache_del(inflight_key)
 
 
 async def _ensure_chapter_stub(db, book, ch_data: dict, *, s3_key: str):
@@ -867,33 +988,102 @@ def _should_update_existing_character(entity: dict) -> bool:
         evidence.get("has_dialogue_or_action")
         or evidence.get("has_physical_description")
         or evidence.get("appears_multiple_times")
+        or _has_character_profile_signal(entity)
     ))
 
 
-def _can_auto_save_character(entity: dict) -> bool:
-    entity_type = str(entity.get("entity_type") or "person").casefold()
-    if entity_type not in {"person", "alias"}:
-        return False
-
-    confidence = float(entity.get("confidence") or 0.0)
-    if confidence < AUTO_SAVE_CONFIDENCE:
-        return False
-
-    evidence = _entity_evidence(entity)
-    mention_count = int(entity.get("mention_count") or evidence.get("mention_count") or 0)
-    has_dialogue_or_action = bool(evidence.get("has_dialogue_or_action"))
-    has_physical_description = bool(evidence.get("has_physical_description"))
-    appears_multiple_times = bool(evidence.get("appears_multiple_times")) or mention_count >= 2
-
-    if not (has_dialogue_or_action or has_physical_description or appears_multiple_times):
-        return False
-
-    if mention_count < 2 and not (
-        confidence >= SINGLE_MENTION_SAVE_CONFIDENCE and (has_dialogue_or_action or has_physical_description)
+def _has_character_profile_signal(entity: dict) -> bool:
+    traits = entity.get("traits")
+    if isinstance(traits, dict) and any(
+        isinstance(value, dict) and str(value.get("value") or "").strip()
+        for value in traits.values()
     ):
-        return False
+        return True
+    if any(
+        str(entity.get(field) or "").strip()
+        for field in ("goal", "lie_they_believe", "backstory_wound", "arc_type", "archetype")
+    ):
+        return True
+    if any(entity.get(field) for field in ("personality_tags", "motivations", "fears")):
+        return True
+    arc_summary = str(entity.get("arc_summary") or "").strip().casefold()
+    if arc_summary and arc_summary not in {
+        "appearance not yet described",
+        "background character",
+        "is a character",
+        "mysterious figure",
+        "normal character",
+        "plain character",
+        "supporting character",
+        "this character is a character",
+        "protagonist",
+        "antagonist",
+        "puppet master",
+        "tragic figure",
+        "unknown character",
+    }:
+        return True
+    growth_event = entity.get("growth_event")
+    return isinstance(growth_event, dict) and bool(str(growth_event.get("event") or "").strip())
 
-    return True
+
+def _can_auto_save_character(entity: dict) -> bool:
+    return _character_save_decision(entity).allowed
+
+
+def _character_save_decision(entity: dict):
+    evidence = _entity_evidence(entity)
+    traits = entity.get("traits")
+    trait_state = traits if isinstance(traits, dict) else {}
+    return character_persistence_decision(
+        entity.get("name"),
+        role=entity.get("role"),
+        aliases=entity.get("aliases") if isinstance(entity.get("aliases"), list) else None,
+        personality_tags=entity.get("personality_tags") if isinstance(entity.get("personality_tags"), list) else None,
+        motivations=entity.get("motivations") if isinstance(entity.get("motivations"), list) else None,
+        fears=entity.get("fears") if isinstance(entity.get("fears"), list) else None,
+        archetype=entity.get("archetype"),
+        trait_state=trait_state,
+        relationship_count=int(entity.get("relationship_count") or 0),
+        arc_summary=entity.get("arc_summary"),
+        evidence=evidence,
+        entity_type=str(entity.get("entity_type") or "person"),
+    )
+
+
+def _append_rejected_character_reports(target: list[dict[str, Any]], entries: list[dict[str, Any]] | None) -> None:
+    if not entries:
+        return
+    seen = {
+        (
+            str(item.get("name") or "").casefold(),
+            str(item.get("stage") or "").casefold(),
+            str(item.get("reason") or "").casefold(),
+        )
+        for item in target
+    }
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        key = (
+            str(entry.get("name") or "").casefold(),
+            str(entry.get("stage") or "").casefold(),
+            str(entry.get("reason") or "").casefold(),
+        )
+        if not key[0] or key in seen:
+            continue
+        seen.add(key)
+        target.append({
+            "name": str(entry.get("name") or ""),
+            "stage": str(entry.get("stage") or ""),
+            "reason": str(entry.get("reason") or ""),
+            "confidence": entry.get("confidence"),
+            "evidence": entry.get("evidence") or {},
+        })
+
+
+def _summarize_rejected_character_reports(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return entries[:40]
 
 
 async def _book_processing_complete(db, book_id: uuid.UUID) -> bool:

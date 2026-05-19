@@ -1,7 +1,11 @@
 from app.utils.advisor_utils import (
+    advisor_response_cache,
     build_advisor_world_context,
     build_fallback_advisor_suggestions,
     detect_advisor_world_mode,
+    identify_character_mentions,
+    invalidate_advisor_caches,
+    normalize_proactive_scan_result,
 )
 
 
@@ -91,3 +95,41 @@ def test_build_advisor_world_context_compacts_alerts_suggestions_and_citations()
     assert "WORLD ANALYSIS" in context
     assert "Magic rule conflict" in context
     assert "Moon Gate [place] source=worldbuilding" in context
+
+
+def test_identify_character_mentions_matches_punctuation_and_possessives():
+    matches = identify_character_mentions(
+        "Gregor's breathing caught. Later, Grete whispered, \"Not now.\"",
+        [
+            {"name": "Gregor", "aliases": [], "first_chapter": 1},
+            {"name": "Grete", "aliases": [], "first_chapter": 1},
+            {"name": "Mother", "aliases": [], "first_chapter": 1},
+        ],
+    )
+
+    assert [item["name"] for item in matches] == ["Gregor", "Grete"]
+
+
+def test_invalidate_advisor_caches_clears_cached_entries():
+    advisor_response_cache.set("book-key", {"reply": "cached"})
+
+    invalidate_advisor_caches()
+
+    assert advisor_response_cache.get("book-key") is None
+
+
+def test_normalize_proactive_scan_result_keeps_valid_findings():
+    payload = normalize_proactive_scan_result(
+        '{"findings":[{"severity":"warning","type":"event_conflict","title":"Broken alibi","description":"The alibi fails in chapter 9.","chapter_ref":9,"action_label":"Trace the alibi","ask_prompt":"Where does the alibi break?"}],"overall_note":"One continuity risk found."}'
+    )
+
+    assert payload["overall_note"] == "One continuity risk found."
+    assert payload["findings"][0]["type"] == "event_conflict"
+    assert payload["findings"][0]["chapter_ref"] == 9
+
+
+def test_normalize_proactive_scan_result_falls_back_on_invalid_json():
+    payload = normalize_proactive_scan_result("not-json")
+
+    assert payload["findings"] == []
+    assert "not-json" in payload["overall_note"]

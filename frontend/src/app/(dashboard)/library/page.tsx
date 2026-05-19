@@ -2,11 +2,14 @@
 
 import type { ReactNode } from "react"
 import { useEffect, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
 import type { Route } from "next"
 import { useRouter } from "next/navigation"
 
+import { UpcomingBetaReadsCard } from "@/components/library/UpcomingBetaReadsCard"
 import { UploadModal } from "@/components/modals/UploadModal"
 import { booksApi } from "@/lib/api/books"
+import { asQueryKey, booksListCacheKey } from "@/lib/query/cacheKeys"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { getBookHref } from "@/lib/utils/bookRoutes"
 import type { Book, BookStatus } from "@/types/book"
@@ -166,6 +169,14 @@ function countWarnings(book: Book) {
   return warnings
 }
 
+function getPublicSampleStatus(book: Book) {
+  if (book.public_status === "published" && book.is_public) return "Public book live"
+  if (book.public_status === "hidden") return "Public book hidden"
+  if (book.public_status === "removed") return "Public book removed"
+  if (book.public_status === "pending_review") return "Public review pending"
+  return null
+}
+
 function formatNumber(value: number) {
   return NUMBER_FORMAT.format(value)
 }
@@ -175,9 +186,11 @@ export default function LibraryPage() {
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
 
-  const [books, setBooks] = useState<Book[]>([])
-  const [loading, setLoading] = useState(true)
   const [showUpload, setShowUpload] = useState(false)
+  const [publishBook, setPublishBook] = useState<Book | null>(null)
+  const [publishSlug, setPublishSlug] = useState("")
+  const [publishDescription, setPublishDescription] = useState("")
+  const [publishConfirmed, setPublishConfirmed] = useState(false)
   const [uploadPreset, setUploadPreset] = useState<{ mode?: "reader" | "author"; existingBookId?: string }>({})
   const [busyBookId, setBusyBookId] = useState<string | null>(null)
   const [search, setSearch] = useState("")
@@ -191,11 +204,20 @@ export default function LibraryPage() {
   const [pinnedIds, setPinnedIds] = useState<Record<string, boolean>>({})
   const [pinsReady, setPinsReady] = useState(false)
 
-  const load = () => booksApi.list(true).then(setBooks).finally(() => setLoading(false))
-
-  useEffect(() => {
-    load()
-  }, [])
+  const {
+    data: books = [],
+    isLoading: loading,
+    refetch,
+  } = useQuery<Book[]>({
+    queryKey: asQueryKey(booksListCacheKey(true)),
+    queryFn: () => booksApi.list(true),
+    staleTime: 20_000,
+    refetchInterval: (query) => {
+      const items = (query.state.data as Book[] | undefined) ?? []
+      const hasProcessingBook = items.some((book) => book.status === "processing" || (!book.cover_url && book.format === "pdf"))
+      return hasProcessingBook ? 5_000 : false
+    },
+  })
 
   useEffect(() => {
     try {
@@ -215,18 +237,6 @@ export default function LibraryPage() {
     if (!pinsReady) return
     window.localStorage.setItem(PINNED_STORAGE_KEY, JSON.stringify(pinnedIds))
   }, [pinnedIds, pinsReady])
-
-  useEffect(() => {
-    if (loading) return
-    const hasProcessingBook = books.some((book) => book.status === "processing" || (!book.cover_url && book.format === "pdf"))
-    if (!hasProcessingBook) return
-
-    const interval = window.setInterval(() => {
-      load()
-    }, 5000)
-
-    return () => window.clearInterval(interval)
-  }, [books, loading])
 
   const normalizedSearch = search.trim().toLowerCase()
   const visibleBooks = books.filter((book) => !book.hidden_at)
@@ -255,7 +265,7 @@ export default function LibraryPage() {
     setBusyBookId(bookId)
     try {
       await booksApi.archive(bookId, archived)
-      await load()
+      await refetch()
       setMenuBookId(null)
     } finally {
       setBusyBookId(null)
@@ -269,7 +279,7 @@ export default function LibraryPage() {
     setBusyBookId(bookId)
     try {
       await booksApi.hide(bookId, true)
-      await load()
+      await refetch()
       setMenuBookId(null)
     } finally {
       setBusyBookId(null)
@@ -288,6 +298,36 @@ export default function LibraryPage() {
   function togglePinned(bookId: string) {
     setPinnedIds((current) => ({ ...current, [bookId]: !current[bookId] }))
     setMenuBookId(null)
+  }
+
+  async function handlePublish(book: Book) {
+    if (!publishConfirmed || !publishSlug.trim()) return
+    setBusyBookId(book.id)
+    try {
+      await booksApi.publishPublicly(book.id, {
+        publicSlug: publishSlug.trim(),
+        rightsConfirmation: true,
+        description: publishDescription.trim() || null,
+      })
+      setPublishBook(null)
+      setPublishConfirmed(false)
+      setPublishSlug("")
+      setPublishDescription("")
+      await refetch()
+    } finally {
+      setBusyBookId(null)
+    }
+  }
+
+  async function handleUnpublish(bookId: string) {
+    setBusyBookId(bookId)
+    try {
+      await booksApi.unpublishPublicly(bookId)
+      await refetch()
+      setMenuBookId(null)
+    } finally {
+      setBusyBookId(null)
+    }
   }
 
   const pageBackground = isDark
@@ -309,7 +349,7 @@ export default function LibraryPage() {
           <div className="flex flex-col gap-8 xl:flex-row xl:items-end xl:justify-between">
             <div className="space-y-3 pt-1">
               <h1 className={`font-serif text-[3.25rem] leading-[0.94] tracking-[-0.04em] sm:text-[3.5rem] ${headingText}`}>Library</h1>
-              <p className={`max-w-xl text-lg leading-8 ${mutedText}`}>All your projects. All your worlds.</p>
+              <p className={`max-w-xl text-lg leading-8 ${mutedText}`}>Understand, revise, and maintain continuity across every manuscript.</p>
             </div>
 
             <div className="flex w-full flex-col gap-3 xl:w-auto xl:flex-row xl:items-center xl:justify-end">
@@ -341,8 +381,8 @@ export default function LibraryPage() {
                         <div className="mt-3 flex flex-wrap gap-2">
                           {[
                             ["all", "All"],
-                            ["author", "Author"],
-                            ["reader", "Reader"],
+                            ["author", "Author Workspace"],
+                            ["reader", "Collaborator Preview"],
                           ].map(([value, label]) => (
                             <button
                               key={value}
@@ -438,6 +478,15 @@ export default function LibraryPage() {
 
               <button
                 type="button"
+                onClick={() => router.push("/public/forum" as Route)}
+                className={`inline-flex min-h-[3.35rem] items-center justify-center gap-3 rounded-xl border px-5 text-sm font-medium transition ${controlClass}`}
+              >
+                <ForumIcon className={isDark ? "text-[#c8c4bd]" : "text-stone-600"} />
+                Beta Forum
+              </button>
+
+              <button
+                type="button"
                 onClick={() => {
                   setUploadPreset({})
                   setShowUpload(true)
@@ -449,6 +498,8 @@ export default function LibraryPage() {
               </button>
             </div>
           </div>
+
+          <UpcomingBetaReadsCard isDark={isDark} />
 
           <section className="space-y-5">
             <SectionHeading
@@ -484,6 +535,13 @@ export default function LibraryPage() {
                     onRestore={() => handleArchive(book.id, false)}
                     onRemove={() => handleRemove(book.id)}
                     onAddChapter={() => handleAddChapter(book.id)}
+                    onPublish={() => {
+                      setPublishBook(book)
+                      setPublishSlug(book.public_slug ?? book.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""))
+                      setPublishDescription(book.public_description ?? "")
+                      setPublishConfirmed(false)
+                    }}
+                    onUnpublish={() => void handleUnpublish(book.id)}
                   />
                 ))}
               </div>
@@ -504,6 +562,13 @@ export default function LibraryPage() {
                     onRestore={() => handleArchive(book.id, false)}
                     onRemove={() => handleRemove(book.id)}
                     onAddChapter={() => handleAddChapter(book.id)}
+                    onPublish={() => {
+                      setPublishBook(book)
+                      setPublishSlug(book.public_slug ?? book.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""))
+                      setPublishDescription(book.public_description ?? "")
+                      setPublishConfirmed(false)
+                    }}
+                    onUnpublish={() => void handleUnpublish(book.id)}
                   />
                 ))}
               </div>
@@ -549,6 +614,13 @@ export default function LibraryPage() {
                     onRestore={() => handleArchive(book.id, false)}
                     onRemove={() => handleRemove(book.id)}
                     onAddChapter={() => handleAddChapter(book.id)}
+                    onPublish={() => {
+                      setPublishBook(book)
+                      setPublishSlug(book.public_slug ?? book.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""))
+                      setPublishDescription(book.public_description ?? "")
+                      setPublishConfirmed(false)
+                    }}
+                    onUnpublish={() => void handleUnpublish(book.id)}
                   />
                 ))}
 
@@ -577,6 +649,13 @@ export default function LibraryPage() {
                     onRestore={() => handleArchive(book.id, false)}
                     onRemove={() => handleRemove(book.id)}
                     onAddChapter={() => handleAddChapter(book.id)}
+                    onPublish={() => {
+                      setPublishBook(book)
+                      setPublishSlug(book.public_slug ?? book.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""))
+                      setPublishDescription(book.public_description ?? "")
+                      setPublishConfirmed(false)
+                    }}
+                    onUnpublish={() => void handleUnpublish(book.id)}
                   />
                 ))}
 
@@ -600,9 +679,41 @@ export default function LibraryPage() {
           onClose={() => {
             setShowUpload(false)
             setUploadPreset({})
-            load()
+            void refetch()
           }}
         />
+      ) : null}
+
+      {publishBook ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 py-8">
+          <div className={`w-full max-w-2xl rounded-[1.5rem] border p-6 ${surfaceClass}`}>
+            <p className={`text-[0.68rem] font-semibold uppercase tracking-[0.28em] ${mutedText}`}>Public book</p>
+            <h2 className={`mt-3 font-serif text-[2rem] tracking-[-0.03em] ${headingText}`}>Publish your own original work</h2>
+            <p className={`mt-3 text-sm leading-7 ${mutedText}`}>
+              Private Workspace and Public Book are different states. Do not publish books, chapters, EPUBs, web novels, paid content, or third-party works unless you own the rights or have explicit permission.
+            </p>
+            <div className="mt-6 grid gap-4">
+              <label className="grid gap-2 text-sm">
+                <span className={headingText}>Public URL slug</span>
+                <input value={publishSlug} onChange={(event) => setPublishSlug(event.target.value)} className={`rounded-xl border px-4 py-3 ${controlClass}`} />
+              </label>
+              <label className="grid gap-2 text-sm">
+                <span className={headingText}>Public description</span>
+                <textarea value={publishDescription} onChange={(event) => setPublishDescription(event.target.value)} rows={4} className={`rounded-xl border px-4 py-3 ${controlClass}`} />
+              </label>
+              <label className={`flex items-start gap-3 rounded-xl border px-4 py-3 text-sm leading-7 ${controlClass}`}>
+                <input type="checkbox" checked={publishConfirmed} onChange={(event) => setPublishConfirmed(event.target.checked)} className="mt-1" />
+                <span>I confirm that I own the rights to this content or have permission to upload and publish it on LoreVia.</span>
+              </label>
+            </div>
+            <div className="mt-6 flex justify-end gap-3">
+              <button type="button" onClick={() => setPublishBook(null)} className={`rounded-full px-4 py-2 text-sm ${controlClass}`}>Cancel</button>
+              <button type="button" disabled={!publishConfirmed || !publishSlug.trim() || busyBookId === publishBook.id} onClick={() => void handlePublish(publishBook)} className="rounded-full bg-[#33206f] px-5 py-2 text-sm font-semibold text-white disabled:opacity-50">
+                Publish publicly
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
     </div>
   )
@@ -672,6 +783,8 @@ function ProjectCard({
   onRestore,
   onRemove,
   onAddChapter,
+  onPublish,
+  onUnpublish,
 }: {
   book: Book
   isDark: boolean
@@ -685,6 +798,8 @@ function ProjectCard({
   onRestore: () => void
   onRemove: () => void
   onAddChapter: () => void
+  onPublish: () => void
+  onUnpublish: () => void
 }) {
   const accentClass = getAccentClass(book)
   const progress = clampProgress(book.progress_pct)
@@ -692,6 +807,7 @@ function ProjectCard({
   const targetWords = estimateTargetWordCount(book, currentWords)
   const warningCount = countWarnings(book)
   const isArchived = !!book.archived_at
+  const publicSampleStatus = getPublicSampleStatus(book)
 
   return (
     <article
@@ -723,6 +839,11 @@ function ProjectCard({
                 <span className={`h-2.5 w-2.5 rounded-full ${DOT_CLASSES[book.status]}`} />
               </div>
               <p className={`truncate text-[0.95rem] ${isDark ? "text-[#b7b4bd]" : "text-stone-600"}`}>{getGenreLabel(book)}</p>
+              {publicSampleStatus ? (
+                <p className={`mt-2 inline-flex rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${isDark ? "bg-cyan-400/12 text-cyan-200" : "bg-cyan-100 text-cyan-800"}`}>
+                  {publicSampleStatus}
+                </p>
+              ) : null}
             </div>
           </div>
 
@@ -746,12 +867,15 @@ function ProjectCard({
                 isPinned={isPinned}
                 isArchived={isArchived}
                 isAuthor={book.mode === "author"}
+                isPublic={Boolean(book.is_public && book.public_status === "published")}
                 workType={book.work_type}
                 onTogglePinned={onTogglePinned}
                 onArchive={onArchive}
                 onRestore={onRestore}
                 onRemove={onRemove}
                 onAddChapter={onAddChapter}
+                onPublish={onPublish}
+                onUnpublish={onUnpublish}
               />
             ) : null}
           </div>
@@ -795,6 +919,8 @@ function ProjectRow({
   onRestore,
   onRemove,
   onAddChapter,
+  onPublish,
+  onUnpublish,
 }: {
   book: Book
   isDark: boolean
@@ -808,12 +934,15 @@ function ProjectRow({
   onRestore: () => void
   onRemove: () => void
   onAddChapter: () => void
+  onPublish: () => void
+  onUnpublish: () => void
 }) {
   const accentClass = getAccentClass(book)
   const progress = clampProgress(book.progress_pct)
   const currentWords = estimateWordCount(book)
   const targetWords = estimateTargetWordCount(book, currentWords)
   const isArchived = !!book.archived_at
+  const publicSampleStatus = getPublicSampleStatus(book)
 
   return (
     <article
@@ -840,6 +969,11 @@ function ProjectRow({
               <span className={`h-2.5 w-2.5 rounded-full ${DOT_CLASSES[book.status]}`} />
             </div>
             <p className={`mt-1 truncate text-[0.95rem] ${isDark ? "text-[#b7b4bd]" : "text-stone-600"}`}>{getGenreLabel(book)}</p>
+            {publicSampleStatus ? (
+              <p className={`mt-2 inline-flex rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${isDark ? "bg-cyan-400/12 text-cyan-200" : "bg-cyan-100 text-cyan-800"}`}>
+                {publicSampleStatus}
+              </p>
+            ) : null}
             <p className={`mt-1.5 text-[0.95rem] ${isDark ? "text-[#8c8994]" : "text-stone-500"}`}>{getProgressLine(book)}</p>
           </div>
         </div>
@@ -891,12 +1025,15 @@ function ProjectRow({
                 isPinned={isPinned}
                 isArchived={isArchived}
                 isAuthor={book.mode === "author"}
+                isPublic={Boolean(book.is_public && book.public_status === "published")}
                 workType={book.work_type}
                 onTogglePinned={onTogglePinned}
                 onArchive={onArchive}
                 onRestore={onRestore}
                 onRemove={onRemove}
                 onAddChapter={onAddChapter}
+                onPublish={onPublish}
+                onUnpublish={onUnpublish}
               />
             ) : null}
           </div>
@@ -912,24 +1049,30 @@ function ProjectMenu({
   isPinned,
   isArchived,
   isAuthor,
+  isPublic,
   workType,
   onTogglePinned,
   onArchive,
   onRestore,
   onRemove,
   onAddChapter,
+  onPublish,
+  onUnpublish,
 }: {
   isDark: boolean
   busy: boolean
   isPinned: boolean
   isArchived: boolean
   isAuthor: boolean
+  isPublic: boolean
   workType: Book["work_type"]
   onTogglePinned: () => void
   onArchive: () => void
   onRestore: () => void
   onRemove: () => void
   onAddChapter: () => void
+  onPublish: () => void
+  onUnpublish: () => void
 }) {
   return (
     <div
@@ -938,6 +1081,7 @@ function ProjectMenu({
     >
       <MenuButton isDark={isDark} onClick={onTogglePinned} label={isPinned ? "Unpin project" : "Pin project"} />
       {isAuthor ? <MenuButton isDark={isDark} onClick={onAddChapter} label={`Add ${storyUnitLabel(workType)}`} /> : null}
+      {isAuthor ? <MenuButton isDark={isDark} onClick={isPublic ? onUnpublish : onPublish} label={isPublic ? "Unpublish public book" : "Publish publicly"} disabled={busy} /> : null}
       {isArchived ? (
         <MenuButton isDark={isDark} onClick={onRestore} label="Restore" disabled={busy} />
       ) : (
@@ -1047,6 +1191,15 @@ function FilterIcon({ className }: { className?: string }) {
   return (
     <svg className={`h-5 w-5 ${className ?? ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16l-6 7v5l-4 2v-7L4 6z" />
+    </svg>
+  )
+}
+
+function ForumIcon({ className }: { className?: string }) {
+  return (
+    <svg className={`h-5 w-5 ${className ?? ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M7 10h10M7 14h6" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M5 5h14a2 2 0 012 2v8a2 2 0 01-2 2H9l-4 3v-3H5a2 2 0 01-2-2V7a2 2 0 012-2z" />
     </svg>
   )
 }

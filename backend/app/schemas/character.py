@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class TraitOut(BaseModel):
@@ -11,6 +11,16 @@ class TraitOut(BaseModel):
 
 
 class CharacterOut(BaseModel):
+    class CharacterAnalysisOut(BaseModel):
+        persistence_reason: str | None = None
+        evidence_count: int | None = None
+        summary_quality: str | None = None
+        needs_review: bool = False
+        rejected_duplicate_candidates: list[str] = Field(default_factory=list)
+        quality_flags: list[str] = Field(default_factory=list)
+        grounding_passage_count: int = 0
+        confidence_band: str | None = None
+
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
@@ -36,6 +46,7 @@ class CharacterOut(BaseModel):
     character_type: str | None = None
     character_type_score: int | None = None
     subtype_scores: dict | None = None
+    analysis_metadata: CharacterAnalysisOut | None = None
     created_at: datetime
 
 

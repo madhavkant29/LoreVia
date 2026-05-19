@@ -21,7 +21,7 @@ The second pass compared this inventory against:
 
 ## High-Level Architecture
 
-LoreVia is a reader and author intelligence platform. The same book record can operate in reader mode for spoiler-safe reading intelligence or author mode for manuscript drafting, continuity, revision, world-building, and export.
+LoreVia is a manuscript intelligence platform for fiction authors. The core product is an author workspace for drafting, revision, continuity, world-building, export, and invited collaborator review when authors need outside feedback.
 
 ### Frontend Architecture
 
@@ -30,7 +30,7 @@ The frontend is a Next.js 15 and React 19 application. Routes are grouped into a
 Design-wise, the frontend is organized around workspaces rather than marketing pages. The main product surfaces are:
 
 - Library and series dashboards.
-- Per-book reader workspace.
+- Per-book collaborator reading and review workspace.
 - Per-book author manuscript workspace.
 - Character, graph, timeline, search, summary, foreshadowing, plot, world, export, notes, and advisor tool pages.
 - Shared interactive components for reading, rich text editing, graph exploration, notes, exports, notifications, and upload/import workflows.
@@ -52,7 +52,7 @@ The backend API is mounted under `/api/v1` and is split by domain:
 - Billing and webhooks.
 - Notifications.
 - Admin controls.
-- Public reading endpoints, currently disabled by a feature flag.
+- Public reading endpoints, with public forum writes intentionally gated by launch status.
 
 Core business logic lives outside route files in services, utilities, engines, parsers, and workers. Route modules primarily validate access, call helpers/services, and return API schemas.
 
@@ -612,7 +612,7 @@ The migration layer includes explicit Alembic safety utilities that detect non-l
 
 ### 69. Landing Page And Marketing Surface
 
-**What it does:** The public landing page presents product positioning, comparison content, pricing links, FAQs, and reader/writer calls to action.
+**What it does:** The public landing page presents product positioning, comparison content, pricing links, FAQs, and author-focused calls to action.
 
 **What makes it unique:** The landing page routes authenticated users toward the library while giving unauthenticated users login/register paths.
 
@@ -757,7 +757,7 @@ The migration layer includes explicit Alembic safety utilities that detect non-l
 
 ### Public Reading Routes
 
-- `/public/[bookId]/chapter/[chapterId]`: Public chapter reader route for public mode.
+- `/public/[bookId]/chapter/[chapterId]`: Public chapter reader route for the read-only public demo/library surface.
 
 ## Backend Route Inventory
 
@@ -843,7 +843,7 @@ The migration layer includes explicit Alembic safety utilities that detect non-l
 - Notification list/count/read/read-all.
 - Admin metrics, queue depth, and rate limit overrides.
 - Character detail and spoiler-free state.
-- Public books/detail/chapter/manual creation/append, currently disabled by feature flag.
+- Public books/detail/chapter endpoints remain available through public mode, while public forum writes are launch-gated behind `PUBLIC_FORUM_STATUS`.
 
 ## Data Model Inventory
 

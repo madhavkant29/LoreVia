@@ -1,5 +1,6 @@
 "use client"
 
+import { useQuery } from "@tanstack/react-query"
 import { useDeferredValue, useEffect, useMemo, useState, type ReactNode } from "react"
 import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
@@ -8,6 +9,7 @@ import RelationshipGraph from "@/components/intelligence/RelationshipGraph"
 import { booksApi } from "@/lib/api/books"
 import { CONFIDENCE_THRESHOLDS } from "@/lib/constants"
 import { intelligenceApi } from "@/lib/api/intelligence"
+import { asQueryKey, bookCacheKey, readerCacheKey } from "@/lib/query/cacheKeys"
 import { readerApi } from "@/lib/api/reader"
 import { saveContextualVaultNote } from "@/lib/utils/notes"
 import type { Book } from "@/types/book"
@@ -19,10 +21,28 @@ type EditDraft = {
   name: string
   aliases: string
   description: string
+  goal: string
+  lieTheyBelieve: string
+  backstoryWound: string
+  arcType: string
   arcSummary: string
   personalityTags: string
   motivations: string
   fears: string
+}
+
+type CreateDraft = EditDraft & {
+  role: "" | "mc" | "sc" | "background"
+  firstChapter: string
+}
+
+type RelationshipComposerDraft = {
+  counterpartId: string
+  relType: "ally" | "enemy" | "family" | "mentor" | "neutral" | "political" | "romantic" | "rival"
+  sentiment: string
+  description: string
+  fromChapter: string
+  toChapter: string
 }
 
 type CharacterTab = "overview" | "relationships" | "arc" | "evidence" | "continuity" | "notes"
@@ -63,6 +83,23 @@ type EvidenceCacheEntry = {
   results: SearchResult[]
 }
 
+const RELATIONSHIP_TYPE_OPTIONS: RelationshipComposerDraft["relType"][] = ["ally", "enemy", "family", "mentor", "neutral", "political", "romantic", "rival"]
+
+function relationshipChangeKey(
+  item: NonNullable<NonNullable<Character["arc_tracker"]>["relationship_changes"]>[number],
+  index: number,
+) {
+  return [
+    item.counterpart_id,
+    item.chapter_number,
+    item.type,
+    item.to_chapter ?? "open",
+    item.sentiment ?? "neutral",
+    item.description ?? "",
+    index,
+  ].join(":")
+}
+
 function listToString(values: string[] | undefined) {
   return (values ?? []).join(", ")
 }
@@ -72,6 +109,29 @@ function stringToList(value: string) {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean)
+}
+
+function parsePositiveInteger(value: string, fallback = 1) {
+  const parsed = Number.parseInt(value.trim(), 10)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
+}
+
+function parsePartitionTargets(value: string) {
+  return value
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [rawName, rawAliases] = line.split("|")
+      return {
+        name: rawName.trim(),
+        aliases: (rawAliases ?? "")
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean),
+      }
+    })
+    .filter((item) => item.name)
 }
 
 function normalizeText(value: string | null | undefined) {
@@ -125,10 +185,74 @@ function buildDraft(character: Character | null): EditDraft {
     name: character?.name ?? "",
     aliases: listToString(character?.aliases),
     description: character?.description ?? "",
+    goal: character?.goal ?? character?.arc_tracker?.goal ?? "",
+    lieTheyBelieve: character?.lie_they_believe ?? character?.arc_tracker?.lie_they_believe ?? "",
+    backstoryWound: character?.backstory_wound ?? character?.arc_tracker?.wound_backstory ?? "",
+    arcType: character?.arc_type ?? character?.arc_tracker?.arc_type ?? "",
     arcSummary: character?.arc_summary ?? "",
     personalityTags: listToString(character?.personality_tags),
     motivations: listToString(character?.motivations),
     fears: listToString(character?.fears),
+  }
+}
+
+function buildCreateDraft(firstChapter = 1): CreateDraft {
+  return {
+    ...buildDraft(null),
+    role: "",
+    firstChapter: String(Math.max(1, firstChapter)),
+  }
+}
+
+function buildRelationshipDraft(chapter = 1, counterpartId = ""): RelationshipComposerDraft {
+  return {
+    counterpartId,
+    relType: "neutral",
+    sentiment: "0",
+    description: "",
+    fromChapter: String(Math.max(1, chapter)),
+    toChapter: "",
+  }
+}
+
+function graphVisibilityLabel(value: Character["graph_visibility_override"]) {
+  if (value === "include") return "Forced into graph"
+  if (value === "exclude") return "Excluded from graph"
+  return "Auto visibility"
+}
+
+function graphVisibilityReasonCopy(reason: string) {
+  switch (reason) {
+    case "author_override_include":
+      return "Author override keeps this character visible."
+    case "author_override_exclude":
+      return "Author override hides this character."
+    case "manual_character":
+      return "Manual character entries count as cast members."
+    case "relationship_evidence":
+      return "Relationship history supports character visibility."
+    case "repeat_mentions":
+      return "Repeated mentions strengthen confidence."
+    case "has_aliases":
+      return "Alias evidence supports this identity."
+    case "has_arc_summary":
+      return "Arc summary gives stronger story evidence."
+    case "profile_details":
+      return "Profile details make this more likely to be a real character."
+    case "score_meets_threshold":
+      return "The current extraction score passes the graph threshold."
+    case "score_below_threshold":
+      return "The current extraction score falls below the graph threshold."
+    case "possessive_name_shape":
+      return "The name currently looks like a possessive phrase, not a person."
+    case "lowercase_single_word":
+      return "The name currently looks like a lowercase common word."
+    case "missing_name":
+      return "The character has no usable display name yet."
+    case "no_name_tokens":
+      return "The name does not currently parse into person-like tokens."
+    default:
+      return reason.replaceAll("_", " ")
   }
 }
 
@@ -282,11 +406,23 @@ function buildCharacterHealth(character: Character, mergeSuggestionIds: Set<stri
     score -= 10
     issues.push(`Arc has no update after chapter ${lastSeenChapter}`)
   }
+  for (const diagnostic of character.arc_tracker?.diagnostics ?? []) {
+    score -= diagnostic.includes("too abruptly") ? 12 : 8
+    issues.push(diagnostic)
+  }
+  if (!(character.arc_tracker?.voice_markers?.length ?? 0)) {
+    score -= 6
+    issues.push("Voice markers are not grounded yet")
+  }
+  if (!(character.goal ?? character.arc_tracker?.goal)) {
+    score -= 8
+    issues.push("Goal is missing")
+  }
   if (visibleTraitEntries(character).length < 2) {
     score -= 10
   }
 
-  const normalizedScore = Math.max(24, Math.min(98, Math.round(score)))
+  const normalizedScore = Math.max(24, Math.min(issues.length > 0 ? 86 : 94, Math.round(score)))
   const tone = healthTone(normalizedScore)
   const summary = tone === "strong"
     ? "Well-grounded across traits, continuity, and relationships."
@@ -515,16 +651,34 @@ export default function CharactersPage() {
   const { bookId } = useParams<{ bookId: string }>()
   const router = useRouter()
 
+  const { data: bookData = null, isLoading: bookLoading } = useQuery<Book | null>({
+    queryKey: asQueryKey(bookCacheKey(bookId, "detail")),
+    queryFn: () => booksApi.get(bookId),
+  })
+  const { data: progressData = null } = useQuery<ReadingProgress | null>({
+    queryKey: asQueryKey(readerCacheKey(bookId, "progress")),
+    queryFn: () => readerApi.getProgress(bookId).catch(() => null),
+  })
+  const {
+    data: charactersData = [],
+    refetch: refetchCharacters,
+    isLoading: charactersLoading,
+  } = useQuery<Character[]>({
+    queryKey: asQueryKey(bookCacheKey(bookId, "characters")),
+    queryFn: () => booksApi.getCharacters(bookId),
+  })
   const [book, setBook] = useState<Book | null>(null)
   const [progress, setProgress] = useState<ReadingProgress | null>(null)
   const [chars, setChars] = useState<Character[]>([])
   const [graphData, setGraphData] = useState<RelationshipGraphData | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const loading = bookLoading || charactersLoading
+  const error: string | null = null
   const [theme, setTheme] = useState<"light" | "dark">("light")
   const [search, setSearch] = useState("")
   const [selectedId, setSelectedId] = useState("")
   const [selectedMergeKey, setSelectedMergeKey] = useState("")
+  const [manualMergePrimaryId, setManualMergePrimaryId] = useState("")
+  const [manualMergeSecondaryId, setManualMergeSecondaryId] = useState("")
   const [activeTab, setActiveTab] = useState<CharacterTab>("overview")
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>("insights")
   const [castFilter, setCastFilter] = useState<CastFilter>("all")
@@ -533,15 +687,22 @@ export default function CharactersPage() {
   const [dismissedMergeKeys, setDismissedMergeKeys] = useState<string[]>([])
   const [mergeBusy, setMergeBusy] = useState(false)
   const [mergeError, setMergeError] = useState<string | null>(null)
+  const [creating, setCreating] = useState(false)
+  const [createBusy, setCreateBusy] = useState(false)
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [partitioning, setPartitioning] = useState(false)
   const [shareState, setShareState] = useState<"idle" | "copied" | "error">("idle")
   const [exporting, setExporting] = useState<false | "character" | "bible">()
   const [refreshingGraph, setRefreshingGraph] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [noteToast, setNoteToast] = useState<string | null>(null)
   const [draft, setDraft] = useState<EditDraft>(buildDraft(null))
+  const [createDraft, setCreateDraft] = useState<CreateDraft>(buildCreateDraft(1))
+  const [relationshipDraft, setRelationshipDraft] = useState<RelationshipComposerDraft>(buildRelationshipDraft(1))
+  const [createRelationshipBusy, setCreateRelationshipBusy] = useState(false)
+  const [graphOverrideBusy, setGraphOverrideBusy] = useState(false)
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [chatInput, setChatInput] = useState("")
   const [chatLoading, setChatLoading] = useState(false)
@@ -553,34 +714,17 @@ export default function CharactersPage() {
   const [characterMenuOpen, setCharacterMenuOpen] = useState(false)
 
   useEffect(() => {
-    let active = true
-    setLoading(true)
-    setError(null)
+    setBook(bookData)
+  }, [bookData])
 
-    Promise.all([
-      booksApi.get(bookId),
-      booksApi.getCharacters(bookId),
-      readerApi.getProgress(bookId).catch(() => null),
-    ])
-      .then(([bookData, characterData, progressData]) => {
-        if (!active) return
-        setBook(bookData)
-        setChars(characterData)
-        setProgress(progressData)
-        setSelectedId((current) => current || characterData[0]?.id || "")
-      })
-      .catch(() => {
-        if (!active) return
-        setError("Could not load the Character Bible yet.")
-      })
-      .finally(() => {
-        if (active) setLoading(false)
-      })
+  useEffect(() => {
+    setChars(charactersData)
+    setSelectedId((current) => current || charactersData[0]?.id || "")
+  }, [charactersData])
 
-    return () => {
-      active = false
-    }
-  }, [bookId])
+  useEffect(() => {
+    setProgress(progressData)
+  }, [progressData])
 
   useEffect(() => {
     const stored = window.localStorage.getItem("reader-theme")
@@ -595,7 +739,7 @@ export default function CharactersPage() {
     if (!book) return
 
     let active = true
-    readerApi.getRelationships(bookId, relationshipChapter)
+    readerApi.getRelationships(bookId, relationshipChapter, { includeInactive: book.mode === "author" })
       .then((data) => {
         if (active) setGraphData(data)
       })
@@ -741,16 +885,34 @@ export default function CharactersPage() {
   const visibleCastChars = showAllCast ? filteredChars : filteredChars.slice(0, 8)
 
   const selectedConnections = selectedCharacter ? connectionsByCharacter.get(selectedCharacter.id) ?? [] : []
+  const hiddenGraphNodes = graphData?.hidden_nodes ?? []
+  const selectedHiddenGraphRecord = selectedCharacter ? hiddenGraphNodes.find((node) => node.id === selectedCharacter.id) ?? null : null
   const selectedFlags = selectedCharacter ? qualityFlags(selectedCharacter, mergeSuggestionIds, selectedConnections) : []
   const selectedHealth = selectedCharacter ? healthByCharacter.get(selectedCharacter.id) ?? null : null
   const selectedCharacterSummary = buildSelectedCharacterSummary(selectedCharacter, selectedConnections)
   const selectedEvidence = selectedCharacter ? evidenceCache[selectedCharacter.id]?.results ?? [] : []
+  const selectedArcTracker = selectedCharacter?.arc_tracker ?? null
   const selectedGrowthEvents = (selectedCharacter?.growth_events ?? [])
     .slice()
     .sort((left, right) => (right.chapter_number ?? right.chapter ?? 0) - (left.chapter_number ?? left.chapter ?? 0))
+  const relationshipCounterpartOptions = useMemo(
+    () => chars.filter((char) => char.id !== selectedCharacter?.id).sort((left, right) => left.name.localeCompare(right.name)),
+    [chars, selectedCharacter?.id],
+  )
 
-  const selectedMergePrimary = selectedMergeSuggestion ? chars.find((char) => char.id === selectedMergeSuggestion.primaryId) ?? null : null
-  const selectedMergeSecondary = selectedMergeSuggestion ? chars.find((char) => char.id === selectedMergeSuggestion.secondaryId) ?? null : null
+  const mergeableCharacters = useMemo(
+    () => chars.slice().sort((left, right) => left.name.localeCompare(right.name)),
+    [chars],
+  )
+  const manualMergePrimary = manualMergePrimaryId ? chars.find((char) => char.id === manualMergePrimaryId) ?? null : null
+  const manualMergeSecondary = manualMergeSecondaryId ? chars.find((char) => char.id === manualMergeSecondaryId) ?? null : null
+  const isManualMerge = Boolean(manualMergePrimary && manualMergeSecondary)
+  const selectedMergePrimary = isManualMerge
+    ? manualMergePrimary
+    : selectedMergeSuggestion ? chars.find((char) => char.id === selectedMergeSuggestion.primaryId) ?? null : null
+  const selectedMergeSecondary = isManualMerge
+    ? manualMergeSecondary
+    : selectedMergeSuggestion ? chars.find((char) => char.id === selectedMergeSuggestion.secondaryId) ?? null : null
   const selectedMergePrimaryEvidence = selectedMergePrimary ? evidenceCache[selectedMergePrimary.id]?.results ?? [] : []
   const selectedMergeSecondaryEvidence = selectedMergeSecondary ? evidenceCache[selectedMergeSecondary.id]?.results ?? [] : []
 
@@ -762,6 +924,11 @@ export default function CharactersPage() {
   }, [editing, selectedCharacter])
 
   useEffect(() => {
+    const fallbackCounterpart = chars.find((char) => char.id !== selectedCharacter?.id)?.id ?? ""
+    setRelationshipDraft(buildRelationshipDraft(relationshipChapter, fallbackCounterpart))
+  }, [chars, relationshipChapter, selectedCharacter?.id])
+
+  useEffect(() => {
     setChatMessages([])
     setChatInput("")
     setChatHint(null)
@@ -771,6 +938,32 @@ export default function CharactersPage() {
     setCharacterMenuOpen(false)
     setPageMenuOpen(false)
   }, [selectedId, selectedMergeKey, workspaceMode])
+
+  useEffect(() => {
+    if (workspaceMode !== "duplicates" || !manualMergePrimaryId) return
+    if (!chars.some((char) => char.id === manualMergePrimaryId)) {
+      setManualMergePrimaryId("")
+    }
+  }, [chars, manualMergePrimaryId, workspaceMode])
+
+  useEffect(() => {
+    if (workspaceMode !== "duplicates" || !manualMergeSecondaryId) return
+    if (!chars.some((char) => char.id === manualMergeSecondaryId)) {
+      setManualMergeSecondaryId("")
+    }
+  }, [chars, manualMergeSecondaryId, workspaceMode])
+
+  function openCreateCharacter() {
+    setWorkspaceMode("profile")
+    setCreating(true)
+    setEditing(false)
+    setActiveTab("overview")
+    setSidebarTab("insights")
+    setCharacterMenuOpen(false)
+    setPageMenuOpen(false)
+    setActionError(null)
+    setCreateDraft(buildCreateDraft(progress?.current_chapter ?? 1))
+  }
 
   async function loadCharacterEvidence(character: Character, force = false) {
     const cached = evidenceCache[character.id]
@@ -810,7 +1003,7 @@ export default function CharactersPage() {
   }, [selectedMergePrimary, selectedMergeSecondary, workspaceMode])
 
   async function refreshCharacters() {
-    const refreshed = await booksApi.getCharacters(bookId)
+    const { data: refreshed = [] } = await refetchCharacters()
     setChars(refreshed)
     return refreshed
   }
@@ -818,7 +1011,7 @@ export default function CharactersPage() {
   async function refreshGraph() {
     setRefreshingGraph(true)
     try {
-      const refreshed = await readerApi.getRelationships(bookId, relationshipChapter)
+      const refreshed = await readerApi.getRelationships(bookId, relationshipChapter, { includeInactive: isAuthorMode })
       setGraphData(refreshed)
     } catch {
       setActionError("Could not rebuild the relationship graph.")
@@ -858,6 +1051,10 @@ export default function CharactersPage() {
         name: draft.name.trim(),
         aliases: stringToList(draft.aliases),
         description: draft.description.trim() || null,
+        goal: draft.goal.trim() || null,
+        lieTheyBelieve: draft.lieTheyBelieve.trim() || null,
+        backstoryWound: draft.backstoryWound.trim() || null,
+        arcType: draft.arcType.trim() || null,
         arcSummary: draft.arcSummary.trim() || null,
         personalityTags: stringToList(draft.personalityTags),
         motivations: stringToList(draft.motivations),
@@ -865,11 +1062,88 @@ export default function CharactersPage() {
       })
       setChars((current) => current.map((item) => item.id === updated.id ? updated : item))
       setSelectedId(updated.id)
+      await refreshGraph()
       setEditing(false)
     } catch {
       setActionError("Could not save character changes.")
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function handleGraphVisibilityOverride(override: "include" | "exclude" | null) {
+    if (!selectedCharacter) return
+    setGraphOverrideBusy(true)
+    setActionError(null)
+    try {
+      const updated = await booksApi.updateCharacter(bookId, selectedCharacter.id, {
+        graphVisibility: override,
+      })
+      setChars((current) => current.map((item) => item.id === updated.id ? updated : item))
+      await refreshGraph()
+    } catch {
+      setActionError("Could not update graph visibility for this character.")
+    } finally {
+      setGraphOverrideBusy(false)
+    }
+  }
+
+  async function handleCreateCharacter() {
+    setCreateBusy(true)
+    setActionError(null)
+    try {
+      const created = await booksApi.createCharacter(bookId, {
+        name: createDraft.name.trim(),
+        firstChapter: parsePositiveInteger(createDraft.firstChapter, progress?.current_chapter ?? 1),
+        aliases: stringToList(createDraft.aliases),
+        role: createDraft.role || null,
+        description: createDraft.description.trim() || null,
+        goal: createDraft.goal.trim() || null,
+        lieTheyBelieve: createDraft.lieTheyBelieve.trim() || null,
+        backstoryWound: createDraft.backstoryWound.trim() || null,
+        arcType: createDraft.arcType.trim() || null,
+        arcSummary: createDraft.arcSummary.trim() || null,
+        personalityTags: stringToList(createDraft.personalityTags),
+        motivations: stringToList(createDraft.motivations),
+        fears: stringToList(createDraft.fears),
+      })
+      setChars((current) => [...current, created])
+      setSelectedId(created.id)
+      await refreshGraph()
+      setCreating(false)
+      setCastFilter("all")
+      setSearch("")
+    } catch {
+      setActionError("Could not create this character.")
+    } finally {
+      setCreateBusy(false)
+    }
+  }
+
+  async function handleCreateRelationship() {
+    if (!selectedCharacter || !relationshipDraft.counterpartId) {
+      setActionError("Choose a counterpart before creating a relationship.")
+      return
+    }
+    setCreateRelationshipBusy(true)
+    setActionError(null)
+    try {
+      await booksApi.createRelationship(bookId, {
+        characterAId: selectedCharacter.id,
+        characterBId: relationshipDraft.counterpartId,
+        relType: relationshipDraft.relType,
+        description: relationshipDraft.description.trim() || null,
+        sentiment: relationshipDraft.sentiment === "" ? null : Number(relationshipDraft.sentiment),
+        fromChapter: parsePositiveInteger(relationshipDraft.fromChapter, relationshipChapter),
+        toChapter: relationshipDraft.toChapter === "" ? null : parsePositiveInteger(relationshipDraft.toChapter, relationshipChapter),
+      })
+      await refreshGraph()
+      setRelationshipDraft(buildRelationshipDraft(relationshipChapter, relationshipDraft.counterpartId))
+      setActiveTab("relationships")
+    } catch {
+      setActionError("Could not create the relationship.")
+    } finally {
+      setCreateRelationshipBusy(false)
     }
   }
 
@@ -892,7 +1166,9 @@ export default function CharactersPage() {
     setExporting("character")
     try {
       const blob = await booksApi.exportCharacterCard(bookId, selectedCharacter.id, format)
-      downloadBlob(blob, `${slugify(selectedCharacter.name)}-character-card.${format}`)
+      const bookBase = slugify(book?.title ?? "lorevia") || "lorevia"
+      const characterBase = slugify(selectedCharacter.name) || "character"
+      downloadBlob(blob, `${bookBase}-${characterBase}-character-card.${format}`)
       setCharacterMenuOpen(false)
     } finally {
       setExporting(false)
@@ -903,7 +1179,7 @@ export default function CharactersPage() {
     setExporting("bible")
     try {
       const blob = await booksApi.exportCharacterBible(bookId, format)
-      downloadBlob(blob, `${slugify(book?.title ?? "character-bible")}.${format}`)
+      downloadBlob(blob, `${slugify(book?.title ?? "lorevia") || "lorevia"}-character-bible.${format}`)
       setPageMenuOpen(false)
     } finally {
       setExporting(false)
@@ -922,12 +1198,47 @@ export default function CharactersPage() {
       const remaining = chars.filter((char) => char.id !== selectedCharacter.id)
       setChars(remaining)
       setSelectedId(remaining[0]?.id || "")
+      await refreshGraph()
       setEditing(false)
       setCharacterMenuOpen(false)
     } catch {
       setActionError("Could not delete this character.")
     } finally {
       setDeleting(false)
+    }
+  }
+
+  async function handlePartitionCharacter() {
+    if (!selectedCharacter) return
+    const suggestedTargets = selectedCharacter.aliases.length >= 2
+      ? selectedCharacter.aliases.slice(0, 4).join("\n")
+      : [selectedCharacter.name, ...selectedCharacter.aliases].filter(Boolean).join("\n")
+    const input = window.prompt(
+      "Split this character into separate cards.\nEnter one character per line.\nOptional aliases: Name | alias one, alias two",
+      suggestedTargets,
+    )
+    if (!input) return
+
+    const partitions = parsePartitionTargets(input)
+    if (partitions.length < 2) {
+      setActionError("Enter at least two distinct character names to split this card.")
+      return
+    }
+
+    setPartitioning(true)
+    setActionError(null)
+    try {
+      const response = await booksApi.partitionCharacter(bookId, selectedCharacter.id, { partitions })
+      const refreshed = await booksApi.getCharacters(bookId)
+      setChars(refreshed)
+      setSelectedId(response.created[0] ?? refreshed[0]?.id ?? "")
+      setEditing(false)
+      setWorkspaceMode("profile")
+      setCharacterMenuOpen(false)
+    } catch {
+      setActionError("Could not split this character card.")
+    } finally {
+      setPartitioning(false)
     }
   }
 
@@ -1006,11 +1317,30 @@ export default function CharactersPage() {
   }
 
   function openDuplicateReview(targetCharacterId?: string) {
+    setCreating(false)
     setWorkspaceMode("duplicates")
+    setManualMergePrimaryId("")
+    setManualMergeSecondaryId("")
     if (targetCharacterId) {
       const preferred = filteredMergeSuggestions.find((suggestion) => suggestion.primaryId === targetCharacterId || suggestion.secondaryId === targetCharacterId)
-      if (preferred) setSelectedMergeKey(preferred.key)
+      if (preferred) {
+        setSelectedMergeKey(preferred.key)
+        return
+      }
+      const fallbackSecondary = chars.find((char) => char.id !== targetCharacterId)?.id ?? ""
+      setManualMergePrimaryId(targetCharacterId)
+      setManualMergeSecondaryId(fallbackSecondary)
     }
+  }
+
+  function openManualMerge(primaryId?: string, secondaryId?: string) {
+    setCreating(false)
+    const primary = primaryId || selectedCharacter?.id || chars[0]?.id || ""
+    const fallbackSecondary = chars.find((char) => char.id !== primary)?.id ?? ""
+    setWorkspaceMode("duplicates")
+    setManualMergePrimaryId(primary)
+    setManualMergeSecondaryId(secondaryId && secondaryId !== primary ? secondaryId : fallbackSecondary)
+    setSelectedMergeKey("")
   }
 
   function resetFilters() {
@@ -1026,9 +1356,11 @@ export default function CharactersPage() {
   }
 
   const pageMenuActions: MenuAction[] = [
+    ...(isAuthorMode ? [{ label: "Add character", onClick: () => { openCreateCharacter(); setPageMenuOpen(false) } }] : []),
     { label: exporting === "bible" ? "Exporting bible..." : "Export character bible", onClick: () => void handleExportCharacterBible("md"), disabled: exporting === "bible" },
     { label: exporting === "bible" ? "Exporting PDF..." : "Export as PDF", onClick: () => void handleExportCharacterBible("pdf"), disabled: exporting === "bible" },
-    { label: "Review duplicate suggestions", onClick: () => { setWorkspaceMode("duplicates"); setPageMenuOpen(false) } },
+    { label: "Review duplicate suggestions", onClick: () => { openDuplicateReview(); setPageMenuOpen(false) } },
+    { label: "Start manual merge", onClick: () => { openManualMerge(); setPageMenuOpen(false) } },
     { label: refreshingGraph ? "Rebuilding graph..." : "Rebuild relationship graph", onClick: () => void refreshGraph(), disabled: refreshingGraph },
     { label: "Reset filters", onClick: resetFilters },
   ]
@@ -1068,6 +1400,18 @@ export default function CharactersPage() {
         openDuplicateReview(selectedCharacter.id)
         setCharacterMenuOpen(false)
       },
+    },
+    {
+      label: "Merge with another character",
+      onClick: () => {
+        openManualMerge(selectedCharacter.id)
+        setCharacterMenuOpen(false)
+      },
+    },
+    {
+      label: partitioning ? "Splitting character..." : "Split character card",
+      onClick: () => void handlePartitionCharacter(),
+      disabled: partitioning || !isAuthorMode,
     },
     {
       label: exporting === "character" ? "Exporting character..." : "Export character PDF",
@@ -1130,6 +1474,15 @@ export default function CharactersPage() {
             </div>
 
             <div className="flex items-center justify-end gap-3">
+              {isAuthorMode ? (
+                <button
+                  type="button"
+                  onClick={openCreateCharacter}
+                  className={`rounded-[1rem] border px-5 py-3 text-sm font-semibold transition ${isDark ? "border-white/10 bg-white/[0.05] text-white hover:bg-white/[0.08]" : "border-stone-200 bg-white text-stone-900 hover:bg-stone-50"}`}
+                >
+                  Add character
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={() => setWorkspaceMode((current) => current === "duplicates" ? "profile" : "duplicates")}
@@ -1145,7 +1498,7 @@ export default function CharactersPage() {
         {mergeError ? <p className="mt-3 text-sm text-amber-400">{mergeError}</p> : null}
         {error ? <p className="mt-3 text-sm text-rose-400">{error}</p> : null}
 
-        {!error && chars.length > 0 ? (
+        {!error && (chars.length > 0 || creating) ? (
           <div className={`mt-5 overflow-hidden rounded-[1.9rem] border shadow-[0_24px_70px_rgba(0,0,0,0.18)] ${isDark ? "border-white/10 bg-[#090b10]" : "border-stone-200 bg-white/94"}`}>
             <div className="grid xl:h-[calc(100vh-13.25rem)] xl:grid-cols-[420px_minmax(0,1fr)_390px] 2xl:grid-cols-[430px_minmax(0,1fr)_400px]">
               <aside className={`border-b xl:min-h-0 xl:overflow-y-auto xl:border-b-0 xl:border-r ${isDark ? "border-white/8" : "border-stone-200"}`}>
@@ -1154,7 +1507,9 @@ export default function CharactersPage() {
                     {workspaceMode === "duplicates" ? "Duplicate review" : "Cast"}
                   </p>
                   <p className={`mt-1 text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>
-                    {workspaceMode === "duplicates" ? `${filteredMergeSuggestions.length} suggestions` : `${filteredChars.length} characters`}
+                    {workspaceMode === "duplicates"
+                      ? `${filteredMergeSuggestions.length} suggestions${isManualMerge ? " · manual pair selected" : ""}`
+                      : `${filteredChars.length} characters`}
                   </p>
 
                   <div className={`mt-4 flex items-center gap-3 rounded-[1rem] border px-3 py-3 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50"}`}>
@@ -1207,6 +1562,7 @@ export default function CharactersPage() {
                           type="button"
                           onClick={() => {
                             setSelectedId(char.id)
+                            setCreating(false)
                             setEditing(false)
                             setWorkspaceMode("profile")
                           }}
@@ -1225,7 +1581,14 @@ export default function CharactersPage() {
                             <div className="min-w-0 flex-1">
                               <div className="flex items-start justify-between gap-3">
                                 <div className="min-w-0">
-                                  <p className={`truncate text-[15px] font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{char.name}</p>
+                                  <div className="flex items-center gap-2">
+                                    <p className={`truncate text-[15px] font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{char.name}</p>
+                                    {char.is_manual ? (
+                                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] ${isDark ? "bg-violet-500/15 text-violet-100" : "bg-violet-100 text-violet-700"}`}>
+                                        Manual
+                                      </span>
+                                    ) : null}
+                                  </div>
                                   <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>{relationshipCounts.get(char.id) ?? 0} ties</p>
                                 </div>
                                 <div className="flex items-center gap-2">
@@ -1250,7 +1613,18 @@ export default function CharactersPage() {
 
                     {filteredChars.length === 0 ? (
                       <div className="px-3 py-6">
-                        <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No characters match the current filters.</p>
+                        <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>
+                          {chars.length === 0 ? "No characters yet. Add one manually to start the bible." : "No characters match the current filters."}
+                        </p>
+                        {chars.length === 0 && isAuthorMode ? (
+                          <button
+                            type="button"
+                            onClick={openCreateCharacter}
+                            className="mt-3 rounded-[0.9rem] bg-[linear-gradient(135deg,#8b5cf6,#6d28d9)] px-4 py-2.5 text-sm font-semibold text-white"
+                          >
+                            Add character
+                          </button>
+                        ) : null}
                       </div>
                     ) : null}
                     {filteredChars.length > 8 ? (
@@ -1298,7 +1672,7 @@ export default function CharactersPage() {
 
                     {filteredMergeSuggestions.length === 0 ? (
                       <div className="px-3 py-6">
-                        <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No duplicate suggestions match the current search.</p>
+                        <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No duplicate suggestions match the current search. Use the manual merge tools in the main panel to compare any two records directly.</p>
                       </div>
                     ) : null}
                   </div>
@@ -1306,11 +1680,109 @@ export default function CharactersPage() {
               </aside>
 
               <section className={`border-b xl:min-h-0 xl:overflow-y-auto xl:border-b-0 xl:border-r ${isDark ? "border-white/8" : "border-stone-200"}`}>
-                {workspaceMode === "profile" && selectedCharacter ? (
+                {workspaceMode === "profile" && creating ? (
+                  <div className="p-5">
+                    <div>
+                      <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-violet-300" : "text-violet-600"}`}>Manual profile</p>
+                      <h2 className={`mt-2 text-3xl font-semibold tracking-tight ${isDark ? "text-white" : "text-stone-950"}`}>New character</h2>
+                      <p className={`mt-2 max-w-2xl text-sm leading-7 ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+                        Add a character LoreVia did not extract yet. This creates a real backend character record and makes it available across the Character Bible and other author tools.
+                      </p>
+                    </div>
+
+                    <SurfaceCard title="Add character" isDark={isDark} className="mt-5">
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <label className="space-y-1">
+                          <span className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Name</span>
+                          <input value={createDraft.name} onChange={(event) => setCreateDraft((value) => ({ ...value, name: event.target.value }))} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
+                        </label>
+                        <label className="space-y-1">
+                          <span className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Role</span>
+                          <select value={createDraft.role} onChange={(event) => setCreateDraft((value) => ({ ...value, role: event.target.value as CreateDraft["role"] }))} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`}>
+                            <option value="">Unclassified</option>
+                            <option value="mc">Primary character</option>
+                            <option value="sc">Supporting character</option>
+                            <option value="background">Minor character</option>
+                          </select>
+                        </label>
+                        <label className="space-y-1">
+                          <span className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>First chapter</span>
+                          <input value={createDraft.firstChapter} onChange={(event) => setCreateDraft((value) => ({ ...value, firstChapter: event.target.value }))} inputMode="numeric" className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
+                        </label>
+                        <label className="space-y-1">
+                          <span className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Aliases</span>
+                          <input value={createDraft.aliases} onChange={(event) => setCreateDraft((value) => ({ ...value, aliases: event.target.value }))} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
+                        </label>
+                        <label className="space-y-1 md:col-span-2">
+                          <span className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Description</span>
+                          <textarea value={createDraft.description} onChange={(event) => setCreateDraft((value) => ({ ...value, description: event.target.value }))} rows={4} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
+                        </label>
+                        <label className="space-y-1">
+                          <span className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Goal</span>
+                          <input value={createDraft.goal} onChange={(event) => setCreateDraft((value) => ({ ...value, goal: event.target.value }))} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
+                        </label>
+                        <label className="space-y-1">
+                          <span className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Arc type</span>
+                          <input value={createDraft.arcType} onChange={(event) => setCreateDraft((value) => ({ ...value, arcType: event.target.value }))} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
+                        </label>
+                        <label className="space-y-1 md:col-span-2">
+                          <span className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Lie they believe</span>
+                          <textarea value={createDraft.lieTheyBelieve} onChange={(event) => setCreateDraft((value) => ({ ...value, lieTheyBelieve: event.target.value }))} rows={2} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
+                        </label>
+                        <label className="space-y-1 md:col-span-2">
+                          <span className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Wound / backstory</span>
+                          <textarea value={createDraft.backstoryWound} onChange={(event) => setCreateDraft((value) => ({ ...value, backstoryWound: event.target.value }))} rows={3} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
+                        </label>
+                        <label className="space-y-1 md:col-span-2">
+                          <span className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Arc summary</span>
+                          <textarea value={createDraft.arcSummary} onChange={(event) => setCreateDraft((value) => ({ ...value, arcSummary: event.target.value }))} rows={3} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
+                        </label>
+                        <label className="space-y-1">
+                          <span className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Personality tags</span>
+                          <input value={createDraft.personalityTags} onChange={(event) => setCreateDraft((value) => ({ ...value, personalityTags: event.target.value }))} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
+                        </label>
+                        <label className="space-y-1">
+                          <span className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Motivations</span>
+                          <input value={createDraft.motivations} onChange={(event) => setCreateDraft((value) => ({ ...value, motivations: event.target.value }))} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
+                        </label>
+                        <label className="space-y-1 md:col-span-2">
+                          <span className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Fears</span>
+                          <input value={createDraft.fears} onChange={(event) => setCreateDraft((value) => ({ ...value, fears: event.target.value }))} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
+                        </label>
+                      </div>
+                      {actionError ? <p className="mt-3 text-sm text-rose-400">{actionError}</p> : null}
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        <button type="button" disabled={createBusy} onClick={() => void handleCreateCharacter()} className="rounded-full bg-[linear-gradient(135deg,#8b5cf6,#6d28d9)] px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-60">
+                          {createBusy ? "Creating..." : "Create character"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCreating(false)
+                            setCreateDraft(buildCreateDraft(progress?.current_chapter ?? 1))
+                            setActionError(null)
+                          }}
+                          className={`rounded-full border px-4 py-2.5 text-sm font-medium ${isDark ? "border-white/10 text-slate-300 hover:bg-white/[0.05]" : "border-stone-200 text-stone-700 hover:bg-white"}`}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </SurfaceCard>
+                  </div>
+                ) : null}
+
+                {workspaceMode === "profile" && selectedCharacter && !creating ? (
                   <div className="p-5">
                     <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                       <div className="min-w-0">
-                        <h2 className={`text-[2.4rem] font-semibold tracking-tight ${isDark ? "text-white" : "text-stone-950"}`}>{selectedCharacter.name}</h2>
+                        <div className="flex flex-wrap items-center gap-3">
+                          <h2 className={`text-[2.4rem] font-semibold tracking-tight ${isDark ? "text-white" : "text-stone-950"}`}>{selectedCharacter.name}</h2>
+                          {selectedCharacter.is_manual ? (
+                            <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] ${isDark ? "bg-violet-500/15 text-violet-100" : "bg-violet-100 text-violet-700"}`}>
+                              Manual profile
+                            </span>
+                          ) : null}
+                        </div>
                         <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
                           {formatRole(selectedCharacter.role)} / {formatStatus(selectedCharacter.status)} / {formatChapterRange(selectedCharacter.first_chapter, selectedCharacter.last_seen_chapter ?? null)} / {selectedCharacter.mention_count ?? 0} mentions / {selectedConnections.length} relationships
                         </p>
@@ -1397,6 +1869,46 @@ export default function CharactersPage() {
                           </dl>
                         </SurfaceCard>
 
+                        <SurfaceCard title="Graph visibility" isDark={isDark}>
+                          <div className="space-y-3">
+                            <div className={`rounded-xl border px-3 py-3 text-sm ${isDark ? "border-white/8 bg-black/20 text-slate-300" : "border-stone-200 bg-white text-stone-600"}`}>
+                              <p className={`font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{graphVisibilityLabel(selectedCharacter.graph_visibility_override ?? null)}</p>
+                              <p className="mt-1">
+                                {selectedHiddenGraphRecord
+                                  ? `${selectedCharacter.name} is currently hidden from the graph.`
+                                  : `${selectedCharacter.name} is currently visible in the graph.`}
+                              </p>
+                              {selectedHiddenGraphRecord ? (
+                                <p className={`mt-2 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>
+                                  Score {selectedHiddenGraphRecord.visibility_score}. {selectedHiddenGraphRecord.connected_relationship_count} relationship signals.
+                                </p>
+                              ) : null}
+                            </div>
+                            {selectedHiddenGraphRecord?.visibility_reasons?.length ? (
+                              <div className="flex flex-wrap gap-2">
+                                {selectedHiddenGraphRecord.visibility_reasons.map((reason) => (
+                                  <span key={reason} className={`rounded-full px-3 py-1.5 text-xs ${isDark ? "bg-white/[0.05] text-slate-200" : "border border-stone-200 bg-white text-stone-700"}`}>
+                                    {graphVisibilityReasonCopy(reason)}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : null}
+                            {isAuthorMode ? (
+                              <div className="flex flex-wrap gap-2">
+                                <button type="button" disabled={graphOverrideBusy} onClick={() => void handleGraphVisibilityOverride("include")} className="rounded-full bg-[linear-gradient(135deg,#0f766e,#0d9488)] px-4 py-2 text-xs font-semibold text-white disabled:opacity-60">
+                                  Include in graph
+                                </button>
+                                <button type="button" disabled={graphOverrideBusy} onClick={() => void handleGraphVisibilityOverride("exclude")} className={`rounded-full px-4 py-2 text-xs font-semibold disabled:opacity-60 ${isDark ? "border border-white/10 text-slate-200 hover:bg-white/[0.05]" : "border border-stone-200 text-stone-700 hover:bg-white"}`}>
+                                  Exclude from graph
+                                </button>
+                                <button type="button" disabled={graphOverrideBusy} onClick={() => void handleGraphVisibilityOverride(null)} className={`rounded-full px-4 py-2 text-xs font-semibold disabled:opacity-60 ${isDark ? "border border-white/10 text-slate-200 hover:bg-white/[0.05]" : "border border-stone-200 text-stone-700 hover:bg-white"}`}>
+                                  Return to auto
+                                </button>
+                              </div>
+                            ) : null}
+                          </div>
+                        </SurfaceCard>
+
                         <SurfaceCard title="Traits" isDark={isDark}>
                           <div className="flex flex-wrap gap-2">
                             {selectedCharacter.personality_tags.length > 0
@@ -1460,6 +1972,22 @@ export default function CharactersPage() {
                                 <span className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Description</span>
                                 <textarea value={draft.description} onChange={(event) => setDraft((value) => ({ ...value, description: event.target.value }))} rows={4} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
                               </label>
+                              <label className="space-y-1">
+                                <span className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Goal</span>
+                                <input value={draft.goal} onChange={(event) => setDraft((value) => ({ ...value, goal: event.target.value }))} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
+                              </label>
+                              <label className="space-y-1">
+                                <span className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Arc type</span>
+                                <input value={draft.arcType} onChange={(event) => setDraft((value) => ({ ...value, arcType: event.target.value }))} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
+                              </label>
+                              <label className="space-y-1 md:col-span-2">
+                                <span className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Lie they believe</span>
+                                <textarea value={draft.lieTheyBelieve} onChange={(event) => setDraft((value) => ({ ...value, lieTheyBelieve: event.target.value }))} rows={2} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
+                              </label>
+                              <label className="space-y-1 md:col-span-2">
+                                <span className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Wound / backstory</span>
+                                <textarea value={draft.backstoryWound} onChange={(event) => setDraft((value) => ({ ...value, backstoryWound: event.target.value }))} rows={3} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
+                              </label>
                               <label className="space-y-1 md:col-span-2">
                                 <span className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Arc summary</span>
                                 <textarea value={draft.arcSummary} onChange={(event) => setDraft((value) => ({ ...value, arcSummary: event.target.value }))} rows={3} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
@@ -1504,8 +2032,10 @@ export default function CharactersPage() {
                           bookId={bookId}
                           upToChapter={relationshipChapter}
                           authorMode={isAuthorMode}
+                          includeInactive={isAuthorMode}
                           theme={theme}
                           focusCharacterId={selectedCharacter.id}
+                          onGraphDataChange={setGraphData}
                           onSelectCharacterId={(characterId) => {
                             if (characterId) {
                               setSelectedId(characterId)
@@ -1513,6 +2043,114 @@ export default function CharactersPage() {
                             }
                           }}
                         />
+
+                        {isAuthorMode ? (
+                          <div className="grid gap-4 xl:grid-cols-2">
+                            <SurfaceCard title="Create relationship" isDark={isDark}>
+                              <div className="grid gap-3 md:grid-cols-2">
+                                <label className="space-y-1 md:col-span-2">
+                                  <span className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Counterpart</span>
+                                  <select
+                                    value={relationshipDraft.counterpartId}
+                                    onChange={(event) => setRelationshipDraft((value) => ({ ...value, counterpartId: event.target.value }))}
+                                    className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`}
+                                  >
+                                    <option value="">Choose a character</option>
+                                    {relationshipCounterpartOptions.map((character) => (
+                                      <option key={character.id} value={character.id}>{character.name}</option>
+                                    ))}
+                                  </select>
+                                </label>
+                                <label className="space-y-1">
+                                  <span className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Type</span>
+                                  <select
+                                    value={relationshipDraft.relType}
+                                    onChange={(event) => setRelationshipDraft((value) => ({ ...value, relType: event.target.value as RelationshipComposerDraft["relType"] }))}
+                                    className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`}
+                                  >
+                                    {RELATIONSHIP_TYPE_OPTIONS.map((type) => (
+                                      <option key={type} value={type}>{formatRelationshipType(type)}</option>
+                                    ))}
+                                  </select>
+                                </label>
+                                <label className="space-y-1">
+                                  <span className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Sentiment</span>
+                                  <input
+                                    type="number"
+                                    min={-1}
+                                    max={1}
+                                    step={0.1}
+                                    value={relationshipDraft.sentiment}
+                                    onChange={(event) => setRelationshipDraft((value) => ({ ...value, sentiment: event.target.value }))}
+                                    className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`}
+                                  />
+                                </label>
+                                <label className="space-y-1">
+                                  <span className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>From chapter</span>
+                                  <input
+                                    value={relationshipDraft.fromChapter}
+                                    onChange={(event) => setRelationshipDraft((value) => ({ ...value, fromChapter: event.target.value }))}
+                                    inputMode="numeric"
+                                    className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`}
+                                  />
+                                </label>
+                                <label className="space-y-1">
+                                  <span className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Ends chapter</span>
+                                  <input
+                                    value={relationshipDraft.toChapter}
+                                    onChange={(event) => setRelationshipDraft((value) => ({ ...value, toChapter: event.target.value }))}
+                                    inputMode="numeric"
+                                    placeholder="Optional"
+                                    className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`}
+                                  />
+                                </label>
+                                <label className="space-y-1 md:col-span-2">
+                                  <span className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Relationship note</span>
+                                  <textarea
+                                    value={relationshipDraft.description}
+                                    onChange={(event) => setRelationshipDraft((value) => ({ ...value, description: event.target.value }))}
+                                    rows={3}
+                                    className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`}
+                                  />
+                                </label>
+                              </div>
+                              <div className="mt-4 flex flex-wrap gap-2">
+                                <button type="button" disabled={createRelationshipBusy} onClick={() => void handleCreateRelationship()} className="rounded-full bg-[linear-gradient(135deg,#8b5cf6,#6d28d9)] px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-60">
+                                  {createRelationshipBusy ? "Saving..." : "Create relationship"}
+                                </button>
+                              </div>
+                            </SurfaceCard>
+
+                            <SurfaceCard title="Hidden from graph" isDark={isDark}>
+                              {hiddenGraphNodes.length > 0 ? (
+                                <div className="space-y-3">
+                                  {hiddenGraphNodes.slice(0, 8).map((node) => (
+                                    <div key={node.id} className={`rounded-xl border px-4 py-3 ${isDark ? "border-white/8 bg-black/20" : "border-stone-200 bg-white"}`}>
+                                      <div className="flex items-start justify-between gap-3">
+                                        <div>
+                                          <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{node.name}</p>
+                                          <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Score {node.visibility_score} • {node.connected_relationship_count} relationship signals</p>
+                                        </div>
+                                        <button type="button" onClick={() => { setSelectedId(node.id); setActiveTab("overview") }} className={`rounded-full px-3 py-1.5 text-xs font-semibold ${isDark ? "bg-white/[0.06] text-white" : "bg-stone-100 text-stone-800"}`}>
+                                          Review
+                                        </button>
+                                      </div>
+                                      <div className="mt-3 flex flex-wrap gap-2">
+                                        {node.visibility_reasons.map((reason) => (
+                                          <span key={`${node.id}-${reason}`} className={`rounded-full px-3 py-1 text-[11px] ${isDark ? "bg-white/[0.05] text-slate-300" : "border border-stone-200 bg-stone-50 text-stone-600"}`}>
+                                            {graphVisibilityReasonCopy(reason)}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No cast members are currently being filtered out of the graph.</p>
+                              )}
+                            </SurfaceCard>
+                          </div>
+                        ) : null}
 
                         <SurfaceCard title="Relationship table" isDark={isDark}>
                           {selectedConnections.length > 0 ? (
@@ -1525,7 +2163,7 @@ export default function CharactersPage() {
                                   </div>
                                   <div className={`text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>{formatRelationshipType(edge.type)}</div>
                                   <div className={`text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>{sentimentLabel(edge.sentiment)}</div>
-                                  <div className={`text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>{typeof edge.from_chapter === "number" ? `Ch. ${edge.from_chapter}` : "No ch."}</div>
+                                  <div className={`text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>{typeof edge.from_chapter === "number" ? `Ch. ${edge.from_chapter}` : "No ch."}{edge.status === "ended" ? " • ended" : ""}</div>
                                 </div>
                               ))}
                             </div>
@@ -1540,19 +2178,78 @@ export default function CharactersPage() {
                       <div className="mt-5 space-y-4">
                         <SurfaceCard title="Arc summary" isDark={isDark}>
                           <p className={`text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
-                            {selectedCharacter.arc_summary || "Current role and progression are still being inferred from the manuscript."}
+                            {selectedArcTracker?.summary || selectedCharacter.arc_summary || "Current role and progression are still being inferred from the manuscript."}
                           </p>
                         </SurfaceCard>
 
-                        <SurfaceCard title="Arc checkpoints" isDark={isDark}>
-                          {selectedGrowthEvents.length > 0 ? (
+                        <div className="grid gap-4 xl:grid-cols-2">
+                          <SurfaceCard title="Core arc profile" isDark={isDark}>
+                            <dl className="grid gap-3 text-sm">
+                              <div className="grid grid-cols-[132px_minmax(0,1fr)] gap-3">
+                                <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Goal</dt>
+                                <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedArcTracker?.goal || selectedCharacter.goal || "Not grounded yet"}</dd>
+                              </div>
+                              <div className="grid grid-cols-[132px_minmax(0,1fr)] gap-3">
+                                <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Motivation</dt>
+                                <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedArcTracker?.motivation || "Not grounded yet"}</dd>
+                              </div>
+                              <div className="grid grid-cols-[132px_minmax(0,1fr)] gap-3">
+                                <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Fear</dt>
+                                <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedArcTracker?.fear || "Not grounded yet"}</dd>
+                              </div>
+                              <div className="grid grid-cols-[132px_minmax(0,1fr)] gap-3">
+                                <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Lie</dt>
+                                <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedArcTracker?.lie_they_believe || selectedCharacter.lie_they_believe || "Not grounded yet"}</dd>
+                              </div>
+                              <div className="grid grid-cols-[132px_minmax(0,1fr)] gap-3">
+                                <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Wound</dt>
+                                <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedArcTracker?.wound_backstory || selectedCharacter.backstory_wound || "Not grounded yet"}</dd>
+                              </div>
+                              <div className="grid grid-cols-[132px_minmax(0,1fr)] gap-3">
+                                <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Arc type</dt>
+                                <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedArcTracker?.arc_type || selectedCharacter.arc_type || selectedCharacter.archetype || "Still inferring"}</dd>
+                              </div>
+                            </dl>
+                          </SurfaceCard>
+
+                          <SurfaceCard title="Voice markers" isDark={isDark}>
+                            {(selectedArcTracker?.voice_markers?.length ?? 0) > 0 ? (
+                              <div className="space-y-2">
+                                {selectedArcTracker?.voice_markers?.map((marker) => (
+                                  <div key={marker} className={`rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/8 bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+                                    {marker}
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No voice markers are grounded yet.</p>
+                            )}
+                          </SurfaceCard>
+                        </div>
+
+                        <SurfaceCard title="Arc timeline" isDark={isDark}>
+                          {(selectedArcTracker?.arc_timeline?.length ?? 0) > 0 ? (
                             <div className="space-y-3">
-                              {selectedGrowthEvents.map((event, index) => (
+                              {selectedArcTracker?.arc_timeline?.map((line) => (
+                                <div key={line} className={`rounded-xl border px-4 py-3 text-sm leading-6 ${isDark ? "border-white/8 bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+                                  {line}
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No chapter-by-chapter arc timeline has been captured yet.</p>
+                          )}
+                        </SurfaceCard>
+
+                        <SurfaceCard title="Arc checkpoints" isDark={isDark}>
+                          {(selectedArcTracker?.major_turning_points?.length ?? selectedGrowthEvents.length) > 0 ? (
+                            <div className="space-y-3">
+                              {(selectedArcTracker?.major_turning_points?.length ? selectedArcTracker.major_turning_points : selectedGrowthEvents).map((event, index) => (
                                 <div key={`${selectedCharacter.id}-growth-${index}`} className={`rounded-xl border px-4 py-3 ${isDark ? "border-white/8 bg-black/20" : "border-stone-200 bg-white"}`}>
                                   <div className="flex flex-wrap items-center gap-2">
-                                    {growthChapter(event) ? (
+                                    {("chapter_number" in event ? event.chapter_number : growthChapter(event)) ? (
                                       <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] ${isDark ? "bg-violet-500/15 text-violet-100" : "bg-violet-100 text-violet-700"}`}>
-                                        Chapter {growthChapter(event)}
+                                        Chapter {"chapter_number" in event ? event.chapter_number : growthChapter(event)}
                                       </span>
                                     ) : null}
                                     {event.is_major ? (
@@ -1561,10 +2258,10 @@ export default function CharactersPage() {
                                       </span>
                                     ) : null}
                                   </div>
-                                  <p className={`mt-2 text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{growthTitle(event)}</p>
-                                  {event.description || event.impact ? (
+                                  <p className={`mt-2 text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{"title" in event ? event.title : growthTitle(event)}</p>
+                                  {(event.description || ("impact" in event ? event.impact : null)) ? (
                                     <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
-                                      {event.description || event.impact}
+                                      {event.description || ("impact" in event ? event.impact : null)}
                                     </p>
                                   ) : null}
                                 </div>
@@ -1574,6 +2271,40 @@ export default function CharactersPage() {
                             <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No explicit arc checkpoints have been captured yet.</p>
                           )}
                         </SurfaceCard>
+
+                        <div className="grid gap-4 xl:grid-cols-2">
+                          <SurfaceCard title="Relationship changes" isDark={isDark}>
+                            {(selectedArcTracker?.relationship_changes?.length ?? 0) > 0 ? (
+                              <div className="space-y-3">
+                                {selectedArcTracker?.relationship_changes?.map((item, index) => (
+                                  <div key={relationshipChangeKey(item, index)} className={`rounded-xl border px-4 py-3 ${isDark ? "border-white/8 bg-black/20" : "border-stone-200 bg-white"}`}>
+                                    <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>Chapter {item.chapter_number}: {item.counterpart_name}</p>
+                                    <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{formatRelationshipType(item.type)} / {sentimentLabel(item.sentiment)}</p>
+                                    {item.description ? <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{item.description}</p> : null}
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No explicit relationship shifts are tracked yet.</p>
+                            )}
+                          </SurfaceCard>
+
+                          <SurfaceCard title="Physical description history" isDark={isDark}>
+                            {(selectedArcTracker?.physical_description_history?.length ?? 0) > 0 ? (
+                              <div className="space-y-3">
+                                {selectedArcTracker?.physical_description_history?.map((item) => (
+                                  <div key={`${item.chapter_number}-${item.trait}-${item.value}`} className={`rounded-xl border px-4 py-3 text-sm ${isDark ? "border-white/8 bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+                                    <span className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Chapter {item.chapter_number}</span>
+                                    <p className={`mt-1 font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{item.label}</p>
+                                    <p className="mt-1">{item.previous_value ? `${item.previous_value} -> ${item.value}` : item.value}</p>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No description history has been tracked yet.</p>
+                            )}
+                          </SurfaceCard>
+                        </div>
                       </div>
                     ) : null}
 
@@ -1648,17 +2379,31 @@ export default function CharactersPage() {
                         </SurfaceCard>
 
                         <SurfaceCard title="Continuity checklist" isDark={isDark}>
-                          {selectedHealth?.issues.length ? (
+                          {(selectedHealth?.issues.length || selectedArcTracker?.diagnostics?.length) ? (
                             <div className="space-y-3">
-                            {selectedHealth.issues.map((issue) => (
-                              <div key={issue} className={`flex items-start justify-between gap-3 rounded-xl border px-3 py-3 ${isDark ? "border-white/8 bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+                            {[...(selectedHealth?.issues ?? []), ...(selectedArcTracker?.diagnostics ?? [])].map((issue, index) => (
+                              <div key={`${issue}-${index}`} className={`flex items-start justify-between gap-3 rounded-xl border px-3 py-3 ${isDark ? "border-white/8 bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
                                 <span>{issue}</span>
                                 <span className={isDark ? "text-slate-500" : "text-stone-400"}>{">"}</span>
                               </div>
                             ))}
                             </div>
                           ) : (
-                            <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No continuity warnings are active.</p>
+                            <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No hard continuity breaks are tracked yet, but this profile still benefits from a fresh pass on motive drift, scene-to-scene state, and relationship evidence.</p>
+                          )}
+                        </SurfaceCard>
+
+                        <SurfaceCard title="Contradictions" isDark={isDark} className="xl:col-span-2">
+                          {(selectedArcTracker?.contradictions?.length ?? 0) > 0 ? (
+                            <div className="space-y-3">
+                              {selectedArcTracker?.contradictions?.map((item, index) => (
+                                <div key={`${item}-${index}`} className={`rounded-xl border px-4 py-3 text-sm leading-6 ${isDark ? "border-white/8 bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+                                  {item}
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No explicit contradiction is tracked yet, so the next useful check is pressure-testing this character&apos;s role labels, family aliases, and late-chapter motivation shifts.</p>
                           )}
                         </SurfaceCard>
                       </div>
@@ -1703,23 +2448,85 @@ export default function CharactersPage() {
                   </div>
                 ) : null}
 
-                {workspaceMode === "profile" && !selectedCharacter ? (
+                {workspaceMode === "profile" && !selectedCharacter && !creating ? (
                   <div className="p-5">
-                    <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No characters match the current filters.</p>
+                    <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>
+                      {chars.length === 0 ? "No character profiles are ready yet." : "No characters match the current filters."}
+                    </p>
+                    {chars.length === 0 && isAuthorMode ? (
+                      <button
+                        type="button"
+                        onClick={openCreateCharacter}
+                        className="mt-4 rounded-[1rem] bg-[linear-gradient(135deg,#8b5cf6,#6d28d9)] px-5 py-3 text-sm font-semibold text-white shadow-[0_15px_35px_rgba(109,40,217,0.22)] transition hover:translate-y-[-1px]"
+                      >
+                        Add character
+                      </button>
+                    ) : null}
                   </div>
                 ) : null}
 
                 {workspaceMode === "duplicates" ? (
                   <div className="p-5">
-                    {selectedMergeSuggestion && selectedMergePrimary && selectedMergeSecondary ? (
+                    {selectedMergePrimary && selectedMergeSecondary ? (
                       <div className="space-y-5">
                         <div>
                           <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-violet-300" : "text-violet-600"}`}>Duplicate review</p>
-                          <h2 className={`mt-2 text-3xl font-semibold tracking-tight ${isDark ? "text-white" : "text-stone-950"}`}>Merge suggestion</h2>
+                          <h2 className={`mt-2 text-3xl font-semibold tracking-tight ${isDark ? "text-white" : "text-stone-950"}`}>{isManualMerge ? "Manual merge" : "Merge suggestion"}</h2>
                           <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
                             Compare evidence before merging duplicate character records.
                           </p>
                         </div>
+
+                        <SurfaceCard title="Manual pair" isDark={isDark}>
+                          <div className="grid gap-3 xl:grid-cols-2">
+                            <label className="text-sm">
+                              <span className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Primary record</span>
+                              <select
+                                value={selectedMergePrimary.id}
+                                onChange={(event) => {
+                                  const nextPrimaryId = event.target.value
+                                  setManualMergePrimaryId(nextPrimaryId)
+                                  if (nextPrimaryId === selectedMergeSecondary.id) {
+                                    const fallbackSecondary = mergeableCharacters.find((char) => char.id !== nextPrimaryId)?.id ?? ""
+                                    setManualMergeSecondaryId(fallbackSecondary)
+                                  }
+                                }}
+                                className={`mt-2 w-full rounded-[0.9rem] border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-[#0b1220] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
+                              >
+                                {mergeableCharacters.map((character) => (
+                                  <option key={`manual-primary-${character.id}`} value={character.id}>{character.name}</option>
+                                ))}
+                              </select>
+                            </label>
+                            <label className="text-sm">
+                              <span className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Merge into primary</span>
+                              <select
+                                value={selectedMergeSecondary.id}
+                                onChange={(event) => setManualMergeSecondaryId(event.target.value)}
+                                className={`mt-2 w-full rounded-[0.9rem] border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-[#0b1220] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
+                              >
+                                {mergeableCharacters.filter((character) => character.id !== selectedMergePrimary.id).map((character) => (
+                                  <option key={`manual-secondary-${character.id}`} value={character.id}>{character.name}</option>
+                                ))}
+                              </select>
+                            </label>
+                          </div>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <button type="button" onClick={() => openManualMerge(selectedMergePrimary.id, selectedMergeSecondary.id)} className={actionButtonClasses(isDark)}>
+                              Use manual pair
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setManualMergePrimaryId("")
+                                setManualMergeSecondaryId("")
+                              }}
+                              className={actionButtonClasses(isDark)}
+                            >
+                              Return to suggestions
+                            </button>
+                          </div>
+                        </SurfaceCard>
 
                         <div className="grid gap-4 xl:grid-cols-2">
                           {[selectedMergePrimary, selectedMergeSecondary].map((character, index) => {
@@ -1826,31 +2633,68 @@ export default function CharactersPage() {
                             >
                               {mergeBusy ? "Merging..." : "Merge"}
                             </button>
-                            <button
-                              type="button"
-                              onClick={() => dismissMergeSuggestion(selectedMergeSuggestion.key)}
-                              className={actionButtonClasses(isDark)}
-                            >
-                              Keep separate
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => dismissMergeSuggestion(selectedMergeSuggestion.key)}
-                              className={actionButtonClasses(isDark)}
-                            >
-                              Dismiss
-                            </button>
+                            {selectedMergeSuggestion && !isManualMerge ? (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => dismissMergeSuggestion(selectedMergeSuggestion.key)}
+                                  className={actionButtonClasses(isDark)}
+                                >
+                                  Keep separate
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => dismissMergeSuggestion(selectedMergeSuggestion.key)}
+                                  className={actionButtonClasses(isDark)}
+                                >
+                                  Dismiss
+                                </button>
+                              </>
+                            ) : null}
                           </div>
                         </SurfaceCard>
                       </div>
                     ) : (
-                      <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No duplicate suggestions are available right now.</p>
+                      <div className="space-y-4">
+                        <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No duplicate suggestion is selected right now. Start with a manual pair and compare any two character records directly.</p>
+                        {chars.length >= 2 ? (
+                          <button
+                            type="button"
+                            onClick={() => openManualMerge()}
+                            className="rounded-[1rem] bg-[linear-gradient(135deg,#8b5cf6,#6d28d9)] px-5 py-3 text-sm font-semibold text-white shadow-[0_15px_35px_rgba(109,40,217,0.22)] transition hover:translate-y-[-1px]"
+                          >
+                            Start manual merge
+                          </button>
+                        ) : null}
+                      </div>
                     )}
                   </div>
                 ) : null}
               </section>
 
               <aside className="xl:min-h-0 xl:overflow-y-auto">
+                {workspaceMode === "profile" && creating ? (
+                  <div className="p-4">
+                    <div className="space-y-4">
+                      <section className={`rounded-[1.2rem] border p-4 ${isDark ? "border-white/10 bg-[#10141d]/88" : "border-stone-200 bg-stone-50/75"}`}>
+                        <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Manual add</p>
+                        <p className={`mt-3 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
+                          Use this for characters LoreVia missed, off-page characters you still want tracked, or deliberate naming choices you do not want to wait for extraction to infer.
+                        </p>
+                      </section>
+
+                      <section className={`rounded-[1.2rem] border p-4 ${isDark ? "border-white/10 bg-[#10141d]/88" : "border-stone-200 bg-stone-50/75"}`}>
+                        <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Tips</p>
+                        <div className="mt-4 space-y-3 text-sm leading-6">
+                          <p className={isDark ? "text-slate-300" : "text-stone-600"}>Add a short description if you want the new profile to read well immediately.</p>
+                          <p className={isDark ? "text-slate-300" : "text-stone-600"}>Set the first chapter to where this character truly enters the story so timeline tools stay grounded.</p>
+                          <p className={isDark ? "text-slate-300" : "text-stone-600"}>Aliases help duplicate review later if the manuscript uses family-role labels or nicknames.</p>
+                        </div>
+                      </section>
+                    </div>
+                  </div>
+                ) : null}
+
                 {workspaceMode === "profile" && selectedCharacter && selectedHealth ? (
                   <div className="p-4">
                     <div className="flex gap-6 border-b px-1 pb-3">
@@ -1888,8 +2732,8 @@ export default function CharactersPage() {
                           </div>
 
                           <div className="mt-4 space-y-2">
-                            {selectedHealth.issues.map((issue) => (
-                              <div key={issue} className={`flex items-center justify-between rounded-xl border px-3 py-2.5 ${isDark ? "border-white/8 bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+                            {selectedHealth.issues.map((issue, index) => (
+                              <div key={`${issue}-${index}`} className={`flex items-center justify-between rounded-xl border px-3 py-2.5 ${isDark ? "border-white/8 bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
                                 <span className="text-sm">{issue}</span>
                                 <span className={isDark ? "text-slate-500" : "text-stone-400"}>{">"}</span>
                               </div>
@@ -1902,7 +2746,9 @@ export default function CharactersPage() {
                           <div className="mt-4 grid gap-3 sm:grid-cols-2">
                             <QuickActionTile isDark={isDark} title="Find evidence" description="Search scenes and grounded passages." onClick={openCharacterEvidence} />
                             <QuickActionTile isDark={isDark} title="Open relationships" description="View the full relationship graph." onClick={openRelationships} />
-                            <QuickActionTile isDark={isDark} title="Review duplicates" description={`${mergeSuggestions.length} suggestions ready for review.`} onClick={() => openDuplicateReview(selectedCharacter.id)} />
+                            <QuickActionTile isDark={isDark} title="Review duplicates" description={mergeSuggestions.length > 0 ? `${mergeSuggestions.length} suggestions ready for review.` : "No suggestion yet? Start a manual merge for this character."} onClick={() => openDuplicateReview(selectedCharacter.id)} />
+                            <QuickActionTile isDark={isDark} title="Manual merge" description="Choose another record and merge it yourself." onClick={() => openManualMerge(selectedCharacter.id)} />
+                            <QuickActionTile isDark={isDark} title={partitioning ? "Splitting..." : "Split card"} description="Break one merged record into separate character cards and keep the new profiles." onClick={() => void handlePartitionCharacter()} />
                             <QuickActionTile isDark={isDark} title="Ask as character" description="Simulate a grounded reply in voice." onClick={openCharacterChat} />
                           </div>
                         </section>
@@ -2045,19 +2891,21 @@ export default function CharactersPage() {
 
                 {workspaceMode === "duplicates" ? (
                   <div className="p-4">
-                    {selectedMergeSuggestion && selectedMergePrimary && selectedMergeSecondary ? (
+                    {selectedMergePrimary && selectedMergeSecondary ? (
                       <div className="space-y-4">
                         <section className={`rounded-[1.2rem] border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50/75"}`}>
-                          <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Merge suggestion</p>
-                          <p className={`mt-3 text-2xl font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{selectedMergeSuggestion.confidence}%</p>
-                          <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>Confidence based on name overlap, alias collisions, and shared chapter context.</p>
-                          <div className="mt-4 space-y-2">
-                            {selectedMergeSuggestion.reasons.map((reason) => (
-                              <div key={reason} className={`rounded-xl border px-3 py-2.5 text-sm ${isDark ? "border-white/8 bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
-                                {reason}
-                              </div>
-                            ))}
-                          </div>
+                          <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{isManualMerge ? "Manual merge" : "Merge suggestion"}</p>
+                          <p className={`mt-3 text-2xl font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{selectedMergeSuggestion && !isManualMerge ? `${selectedMergeSuggestion.confidence}%` : "Manual review"}</p>
+                          <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{selectedMergeSuggestion && !isManualMerge ? "Confidence based on name overlap, alias collisions, and shared chapter context." : "Use this when a family-role alias or late rename was missed by automatic duplicate suggestions."}</p>
+                          {selectedMergeSuggestion && !isManualMerge ? (
+                            <div className="mt-4 space-y-2">
+                              {selectedMergeSuggestion.reasons.map((reason) => (
+                                <div key={reason} className={`rounded-xl border px-3 py-2.5 text-sm ${isDark ? "border-white/8 bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+                                  {reason}
+                                </div>
+                              ))}
+                            </div>
+                          ) : null}
                         </section>
 
                         <section className={`rounded-[1.2rem] border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50/75"}`}>
@@ -2084,13 +2932,31 @@ export default function CharactersPage() {
                               isDark={isDark}
                               title="Keep separate"
                               description="Dismiss this suggestion and leave both records untouched."
-                              onClick={() => dismissMergeSuggestion(selectedMergeSuggestion.key)}
+                              onClick={() => {
+                                if (selectedMergeSuggestion && !isManualMerge) {
+                                  dismissMergeSuggestion(selectedMergeSuggestion.key)
+                                  return
+                                }
+                                setManualMergePrimaryId("")
+                                setManualMergeSecondaryId("")
+                              }}
                             />
                           </div>
                         </section>
                       </div>
                     ) : (
-                      <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>Choose a merge suggestion to review.</p>
+                      <div className="space-y-4">
+                        <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>Choose a suggestion or start a manual merge to compare records the detector did not catch yet.</p>
+                        {chars.length >= 2 ? (
+                          <button
+                            type="button"
+                            onClick={() => openManualMerge()}
+                            className="w-full rounded-[1rem] bg-[linear-gradient(135deg,#8b5cf6,#6d28d9)] px-5 py-3 text-sm font-semibold text-white shadow-[0_15px_35px_rgba(109,40,217,0.22)] transition hover:translate-y-[-1px]"
+                          >
+                            Start manual merge
+                          </button>
+                        ) : null}
+                      </div>
                     )}
                   </div>
                 ) : null}
@@ -2099,7 +2965,16 @@ export default function CharactersPage() {
           </div>
         ) : !error ? (
           <div className={`mt-5 rounded-[1.4rem] border p-6 text-sm ${isDark ? "border-white/10 bg-black/20 text-slate-300" : "border-stone-200 bg-white/85 text-stone-600"}`}>
-            No character profiles are ready yet. Processing continues in the background after upload.
+            <p>No character profiles are ready yet. Processing continues in the background after upload.</p>
+            {isAuthorMode ? (
+              <button
+                type="button"
+                onClick={openCreateCharacter}
+                className="mt-4 rounded-[1rem] bg-[linear-gradient(135deg,#8b5cf6,#6d28d9)] px-5 py-3 text-sm font-semibold text-white shadow-[0_15px_35px_rgba(109,40,217,0.22)] transition hover:translate-y-[-1px]"
+              >
+                Add character manually
+              </button>
+            ) : null}
           </div>
         ) : null}
       </div>

@@ -155,6 +155,7 @@ export interface WorldNote {
   linked_integration_id?: string | null
   context_label?: string | null
   suggested_fix?: string | null
+  tags?: string[]
   created_at: string
   updated_at: string
   addressed_at?: string | null

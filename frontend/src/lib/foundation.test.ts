@@ -74,6 +74,32 @@ describe("foundation utilities", () => {
     expect(shouldSkipAuthBootstrap("/pricing")).toBe(true)
   })
 
+  it("skips auth bootstrap for the Paddle checkout landing page", () => {
+    expect(shouldSkipAuthBootstrap("/checkout")).toBe(true)
+  })
+
+  it("skips auth bootstrap for nested Paddle checkout routes", () => {
+    expect(shouldSkipAuthBootstrap("/checkout/success")).toBe(true)
+  })
+
+  it("skips auth bootstrap for the public blog page", () => {
+    expect(shouldSkipAuthBootstrap("/blog")).toBe(true)
+  })
+
+  it("skips auth bootstrap for public blog articles", () => {
+    expect(shouldSkipAuthBootstrap("/blog/how-to-track-characters-in-a-novel")).toBe(true)
+  })
+
+  it("skips auth bootstrap for the answers hub and nested answer pages", () => {
+    expect(shouldSkipAuthBootstrap("/answers")).toBe(true)
+    expect(shouldSkipAuthBootstrap("/answers/how-do-i-track-character-arcs")).toBe(true)
+  })
+
+  it("skips auth bootstrap for the demo hub and nested demo pages", () => {
+    expect(shouldSkipAuthBootstrap("/demo")).toBe(true)
+    expect(shouldSkipAuthBootstrap("/demo/gregor-samsa-character-tracker")).toBe(true)
+  })
+
   it("skips auth bootstrap for exact auth-excluded routes", () => {
     expect(shouldSkipAuthBootstrap("/login")).toBe(true)
   })
@@ -115,11 +141,14 @@ describe("foundation utilities", () => {
   })
 
   it("includes a stable site description", () => {
-    expect(SITE_DESCRIPTION).toContain("track characters")
+    expect(SITE_DESCRIPTION).toContain("story workspace")
   })
 
   it("includes public marketing routes in static public routes", () => {
     expect(STATIC_PUBLIC_ROUTES).toContain("/")
+    expect(STATIC_PUBLIC_ROUTES).toContain("/blog")
+    expect(STATIC_PUBLIC_ROUTES).toContain("/answers")
+    expect(STATIC_PUBLIC_ROUTES).toContain("/demo")
     expect(STATIC_PUBLIC_ROUTES).toContain("/pricing")
   })
 
@@ -128,7 +157,7 @@ describe("foundation utilities", () => {
   })
 
   it("builds website json-ld with the publisher logo", () => {
-    expect(websiteJsonLd.publisher.logo).toBe("https://getlorevia.com/image.png")
+    expect(websiteJsonLd.publisher.logo).toBe("https://getlorevia.com/logoandtext.png")
   })
 
   it("builds website json-ld with the site name", () => {
@@ -136,7 +165,7 @@ describe("foundation utilities", () => {
   })
 
   it("builds organization json-ld with the canonical logo", () => {
-    expect(organizationJsonLd.logo).toBe("https://getlorevia.com/image.png")
+    expect(organizationJsonLd.logo).toBe("https://getlorevia.com/logoandtext.png")
   })
 
   it("marks author tiers as able to use author features", () => {
@@ -147,28 +176,28 @@ describe("foundation utilities", () => {
     expect(canUseAuthorFeatures("admin")).toBe(true)
   })
 
-  it("does not mark reader tiers as able to use author features", () => {
-    expect(canUseAuthorFeatures("reader")).toBe(false)
+  it("does not mark invited beta-reader tiers as able to use author features", () => {
+    expect(canUseAuthorFeatures("collaborator")).toBe(false)
   })
 
-  it("treats reader as a paid tier", () => {
-    expect(isPaidTier("reader")).toBe(true)
+  it("does not treat invited beta-reader access as a paid tier", () => {
+    expect(isPaidTier("collaborator")).toBe(false)
   })
 
   it("does not treat free as a paid tier", () => {
     expect(isPaidTier("free")).toBe(false)
   })
 
-  it("returns a Reader label", () => {
-    expect(tierLabel("reader")).toBe("Reader")
+  it("returns an invited beta reader label", () => {
+    expect(tierLabel("collaborator")).toBe("Invited beta reader")
   })
 
   it("returns an Author label", () => {
     expect(tierLabel("author")).toBe("Author")
   })
 
-  it("returns a Lore Architect label", () => {
-    expect(tierLabel("architect")).toBe("Lore Architect")
+  it("returns an Architect label", () => {
+    expect(tierLabel("architect")).toBe("Architect")
   })
 
   it("returns an Admin label", () => {

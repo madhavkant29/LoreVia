@@ -7,7 +7,7 @@ FastAPI + Celery + PostgreSQL/pgvector + Redis
 ```bash
 cp .env.example .env       # fill in values
 pip install -r requirements.txt
-alembic upgrade heads     # run migrations for all active branches
+alembic upgrade head      # run migrations to the current repo head
 
 # API
 uvicorn app.main:app --reload
@@ -25,11 +25,10 @@ celery -A app.workers.celery_app worker -Q intelligence,analysis,analysis_priori
 celery -A app.workers.celery_app flower --port=5555
 ```
 
-## Cloudflare Tunnel (production origin security)
+## Production web server
 
-1. Go to Cloudflare Zero Trust → Tunnels → Create tunnel
-2. Copy the tunnel token → set `CLOUDFLARE_TUNNEL_TOKEN` in .env
-3. Deploy — `start.sh` starts cloudflared automatically alongside uvicorn
+Production containers start the API with Gunicorn using Uvicorn workers via `start.sh`.
+Use plain `uvicorn app.main:app --reload` only for direct local development outside Docker.
 
 ## Testing
 
@@ -48,6 +47,7 @@ Notes:
 - Prefer Docker Compose Local so tests run against the repo's pinned app image, Postgres, Redis, and extensions.
 - Some backend tests are DB-backed and require a safe local test database plus required extensions such as `pgvector`.
 - Backend tests are intended to pass in non-production environments; do not point them at production infrastructure.
+- Use `scripts/schema_drift_audit.sql` against dev or prod when you need a quick schema/head consistency check.
 
 ## Key endpoints
 

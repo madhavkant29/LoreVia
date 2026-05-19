@@ -65,7 +65,7 @@ class _FakeDB:
 
 
 def _user(user_id: uuid.UUID):
-    return SimpleNamespace(id=user_id, tier="reader")
+    return SimpleNamespace(id=user_id, tier="reader", email="reader@example.com")
 
 
 def _book(*, user_id: uuid.UUID, total_chapters: int = 6, mode: str = "reader", fmt: str = "epub"):
@@ -76,7 +76,15 @@ def _book(*, user_id: uuid.UUID, total_chapters: int = 6, mode: str = "reader", 
         total_chapters=total_chapters,
         mode=mode,
         format=fmt,
+        is_public=False,
     )
+
+
+def _async_value(value):
+    async def _inner(*_args, **_kwargs):
+        return value
+
+    return _inner
 
 
 def test_reader_route_helpers_normalize_payloads():
@@ -111,6 +119,12 @@ async def test_get_chapter_media_public_validates_token_and_download(monkeypatch
     media = SimpleNamespace(id=media_id, book_id=uuid.uuid4(), storage_key="media.bin", content_type="image/png")
     book = SimpleNamespace(id=media.book_id, user_id=user_id)
 
+    monkeypatch.setattr("app.core.config.settings.PUBLIC_MODE_ENABLED", False, raising=False)
+    with pytest.raises(HTTPException) as exc:
+        await reader.get_chapter_media_public(media_id, token="bad", db=_FakeDB())
+    assert exc.value.status_code == 503
+    monkeypatch.setattr("app.core.config.settings.PUBLIC_MODE_ENABLED", True, raising=False)
+
     db = _FakeDB(get_values=[media, book])
     monkeypatch.setattr(reader, "decode_token", lambda _token: None)
     with pytest.raises(HTTPException) as exc:
@@ -132,23 +146,45 @@ async def test_get_chapter_media_public_validates_token_and_download(monkeypatch
 async def test_get_chapter_supports_fallback_and_stored_content(monkeypatch):
     user_id = uuid.uuid4()
     book = _book(user_id=user_id, total_chapters=8, fmt="pdf")
-    db = _FakeDB(get_values=[book], execute_values=[_Result(scalar=None), _Result(scalars=[])])
+    db = _FakeDB(get_values=[book], execute_values=[_Result(scalar=None), _Result(scalars=[]), _Result(scalars=[])])
     monkeypatch.setattr(reader, "consolidate_characters", lambda *_args, **_kwargs: None)
     async def _fake_consolidate(*_args, **_kwargs):
         return None
     monkeypatch.setattr(reader, "consolidate_characters", _fake_consolidate)
-    monkeypatch.setattr(reader, "parse_chapter_from_source", lambda *_args: {"title": "Fallback", "text": "Fallback text", "images": [{"src": "a"}]})
-    monkeypatch.setattr(reader, "serialize_inline_images", lambda images: [{"count": len(images)}])
+    async def _fake_resolve_missing(*_args, **_kwargs):
+        return {
+            "chapter_title": "Fallback",
+            "content_version": None,
+            "text_url": None,
+            "text_content": "Fallback text",
+            "html_content": None,
+            "media": [{"count": 1}],
+            "analysis_status": None,
+            "source_integrity": None,
+        }
+    monkeypatch.setattr(reader, "resolve_reader_chapter_payload", _fake_resolve_missing)
     async def _fake_available(*_args, **_kwargs):
         return True
     monkeypatch.setattr(reader, "chapter_intelligence_available", _fake_available)
+    monkeypatch.setattr(reader, "backfill_character_first_chapters_for_chapter_text", _async_value(False))
+    monkeypatch.setattr(reader, "get_custom_tags_for_entity", _async_value([]))
 
     payload = await reader.get_chapter(book.id, 2, db=db, current_user=_user(user_id))
     assert payload["chapter_title"] == "Fallback"
     assert payload["text_content"] == "Fallback text"
+    assert payload["can_copy_manuscript"] is True
+    assert payload["analysis_status"] is None
 
     chapter_id = uuid.uuid4()
-    chapter = SimpleNamespace(id=chapter_id, book_id=book.id, number=2, title="Stored", s3_key="stored.json")
+    chapter = SimpleNamespace(
+        id=chapter_id,
+        book_id=book.id,
+        number=2,
+        title="Stored",
+        s3_key="stored.json",
+        content_version=3,
+        analysis_state={"status": "queued", "generated_modes": [], "attempt_count": 1, "source_integrity": {"text_present": True, "media_marker_count": 1, "stored_media_count": 0, "recovery_status": "ok"}},
+    )
     character = SimpleNamespace(
         id=uuid.uuid4(),
         name="Iris",
@@ -158,28 +194,151 @@ async def test_get_chapter_supports_fallback_and_stored_content(monkeypatch):
         archetype="hero",
         personality_tags=["brave"],
         trait_state={"eyes": "blue"},
+        arc_summary="steady",
+        motivations=[],
     )
     state = SimpleNamespace(character_id=character.id, trait_snapshot={"eyes": "green"})
     db = _FakeDB(
         get_values=[book],
         execute_values=[_Result(scalar=chapter), _Result(scalars=[character]), _Result(scalars=[state])],
     )
-    monkeypatch.setattr(reader, "download_book", lambda _key: b"payload")
-    monkeypatch.setattr(reader, "deserialize_manuscript_content", lambda _raw: {"text": "[[IMAGE:1]] body", "html": "<p>body</p>"})
-    async def _fake_serialize_media(*_args, **_kwargs):
-        return []
-    monkeypatch.setattr(reader, "serialize_chapter_media", _fake_serialize_media)
-    monkeypatch.setattr(reader, "extract_media_markers", lambda text: [] if text else [])
-    monkeypatch.setattr(reader, "parse_chapter_from_source", lambda *_args: {"title": "Recovered", "text": "[[IMAGE:1]] recovered", "images": [{"src": "b"}]})
-    monkeypatch.setattr(reader, "serialize_inline_images", lambda images: [{"count": len(images)}])
-    monkeypatch.setattr(reader, "merge_media_items", lambda stored, fallback: stored + fallback)
-    monkeypatch.setattr(reader, "build_description", lambda traits, archetype: f"{archetype}:{traits['eyes']}")
-    monkeypatch.setattr(reader, "get_presigned_url", lambda key: f"url:{key}")
+    async def _fake_resolve_stored(*_args, **_kwargs):
+        return {
+            "chapter_title": "Stored",
+            "content_version": 3,
+            "text_url": "url:stored.json",
+            "text_content": "[[IMAGE:1]] recovered",
+            "html_content": "<p>body</p>",
+            "media": [{"count": 1}],
+            "analysis_status": {"status": "queued", "generated_modes": [], "attempt_count": 1, "last_error": None, "updated_at": None},
+            "source_integrity": {"text_present": True, "media_marker_count": 1, "stored_media_count": 0, "recovery_status": "ok", "last_recovery_error": None, "updated_at": None},
+        }
+    monkeypatch.setattr(reader, "resolve_reader_chapter_payload", _fake_resolve_stored)
+    monkeypatch.setattr(
+        reader,
+        "serialize_reader_character",
+        lambda char, trait_snapshot=None: {
+            "id": str(char.id),
+            "name": char.name,
+            "aliases": [],
+            "role": char.role,
+            "first_chapter": char.first_chapter,
+            "description": f"{char.archetype}:{trait_snapshot['eyes']}",
+            "trait_state": trait_snapshot or {},
+            "personality_tags": char.personality_tags or [],
+            "motivations": char.motivations or [],
+            "fears": [],
+            "archetype": char.archetype,
+            "arc_summary": char.arc_summary,
+            "mention_count": 0,
+            "is_manual": False,
+            "analysis_metadata": {"confidence_band": "medium"},
+        },
+    )
+    monkeypatch.setattr(reader, "get_custom_tags_for_entity", _async_value([]))
 
     payload = await reader.get_chapter(book.id, 2, db=db, current_user=_user(user_id))
     assert payload["text_url"] == "url:stored.json"
     assert payload["chapter_title"] == "Stored"
     assert payload["characters"][0]["description"] == "hero:green"
+    assert payload["characters"][0]["analysis_metadata"]["confidence_band"] == "medium"
+    assert payload["can_copy_manuscript"] is True
+    assert payload["analysis_status"]["status"] == "queued"
+    assert payload["source_integrity"]["recovery_status"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_get_chapter_uses_manual_scene_workspace_when_body_is_placeholder(monkeypatch):
+    user_id = uuid.uuid4()
+    book = _book(user_id=user_id, total_chapters=4, fmt="pdf")
+    chapter = SimpleNamespace(id=uuid.uuid4(), book_id=book.id, number=2, title="Chapter 2", s3_key="stored.json", content_version=1)
+    db = _FakeDB(
+        get_values=[book],
+        execute_values=[
+            _Result(scalar=chapter),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+        ],
+    )
+
+    async def _fake_consolidate(*_args, **_kwargs):
+        return None
+
+    async def _fake_available(*_args, **_kwargs):
+        return True
+
+    monkeypatch.setattr(reader, "consolidate_characters", _fake_consolidate)
+    monkeypatch.setattr(reader, "backfill_character_first_chapters_for_chapter_text", _async_value(False))
+    monkeypatch.setattr(reader, "chapter_intelligence_available", _fake_available)
+    monkeypatch.setattr(reader, "get_custom_tags_for_entity", _async_value([]))
+    async def _fake_resolve_placeholder(*_args, **_kwargs):
+        return {
+            "chapter_title": "Chapter 2",
+            "content_version": 1,
+            "text_url": "url:stored.json",
+            "text_content": "## Scene 1 - Arrival\n\nPOV: Mira\n\nThe boat scraped against the pier.",
+            "html_content": "<p>The boat scraped against the pier.</p>",
+            "media": [],
+            "analysis_status": None,
+            "source_integrity": None,
+        }
+    monkeypatch.setattr(reader, "resolve_reader_chapter_payload", _fake_resolve_placeholder)
+
+    payload = await reader.get_chapter(book.id, 2, db=db, current_user=_user(user_id))
+
+    assert payload["text_content"].startswith("## Scene 1 - Arrival")
+    assert "POV: Mira" in payload["text_content"]
+    assert "The boat scraped against the pier." in payload["text_content"]
+    assert "boat scraped" in (payload["html_content"] or "")
+
+
+@pytest.mark.asyncio
+async def test_get_chapter_blocks_copy_for_private_read_only_shares(monkeypatch):
+    user_id = uuid.uuid4()
+    collaborator = SimpleNamespace(
+        role="beta_reader",
+        scope={"chapter_start": 1, "chapter_end": 3},
+        permissions={"can_edit_manuscript": False, "can_view_selected_chapters_only": True},
+    )
+    book = _book(user_id=uuid.uuid4(), total_chapters=3, fmt="epub")
+    chapter = SimpleNamespace(id=uuid.uuid4(), book_id=book.id, number=2, title="Chapter 2", s3_key="stored.json", content_version=1)
+    db = _FakeDB(
+        execute_values=[_Result(scalar=chapter), _Result(scalars=[]), _Result(scalars=[]), _Result(scalars=[])],
+    )
+
+    async def _fake_consolidate(*_args, **_kwargs):
+        return None
+
+    async def _fake_serialize_media(*_args, **_kwargs):
+        return []
+
+    async def _fake_available(*_args, **_kwargs):
+        return True
+
+    async def _fake_access(*_args, **_kwargs):
+        return book, collaborator
+
+    monkeypatch.setattr(reader, "get_book_with_collaboration_access", _fake_access)
+    monkeypatch.setattr(reader, "consolidate_characters", _fake_consolidate)
+    monkeypatch.setattr(reader, "backfill_character_first_chapters_for_chapter_text", _async_value(False))
+    monkeypatch.setattr(reader, "chapter_intelligence_available", _fake_available)
+    monkeypatch.setattr(reader, "get_custom_tags_for_entity", _async_value([]))
+    async def _fake_resolve_private(*_args, **_kwargs):
+        return {
+            "chapter_title": "Chapter 2",
+            "content_version": 1,
+            "text_url": "url:stored.json",
+            "text_content": "private text",
+            "html_content": "<p>private text</p>",
+            "media": [],
+            "analysis_status": None,
+            "source_integrity": None,
+        }
+    monkeypatch.setattr(reader, "resolve_reader_chapter_payload", _fake_resolve_private)
+
+    payload = await reader.get_chapter(book.id, 2, db=db, current_user=_user(user_id))
+
+    assert payload["can_copy_manuscript"] is False
 
 
 @pytest.mark.asyncio
@@ -204,6 +363,7 @@ async def test_smart_tap_handles_processing_character_and_search_paths(monkeypat
         personality_tags=[],
         motivations=[],
         fears=[],
+        arc_summary="steady",
         first_chapter=1,
     )
     state = SimpleNamespace(trait_snapshot={"eyes": "green"}, arc_note="Recovering")
@@ -213,10 +373,31 @@ async def test_smart_tap_handles_processing_character_and_search_paths(monkeypat
         scalar_values=[1],
         execute_values=[_Result(scalar=char), _Result(scalar=state), _Result(scalars=[rel])],
     )
-    monkeypatch.setattr(reader, "build_description", lambda traits, archetype: f"{archetype}:{traits['eyes']}")
+    monkeypatch.setattr(
+        reader,
+        "serialize_reader_character",
+        lambda char, trait_snapshot=None: {
+            "id": str(char.id),
+            "name": char.name,
+            "aliases": [],
+            "role": char.role,
+            "first_chapter": char.first_chapter,
+            "description": f"{char.archetype}:{trait_snapshot['eyes']}",
+            "trait_state": trait_snapshot or {},
+            "personality_tags": char.personality_tags or [],
+            "motivations": char.motivations or [],
+            "fears": char.fears or [],
+            "archetype": char.archetype,
+            "arc_summary": char.arc_summary,
+            "mention_count": 0,
+            "is_manual": False,
+            "analysis_metadata": {"confidence_band": "medium"},
+        },
+    )
     payload = await reader.smart_tap(book.id, q="Iris", chapter=2, db=db, current_user=_user(user_id))
     assert payload["type"] == "character"
     assert payload["character"]["description"] == "hero:green"
+    assert payload["character"]["analysis_metadata"]["confidence_band"] == "medium"
 
     db = _FakeDB(
         get_values=[book],
@@ -259,18 +440,19 @@ async def test_get_summary_handles_permissions_queue_and_success(monkeypatch):
 
     db = _FakeDB(get_values=[book], execute_values=[_Result(scalar=SimpleNamespace(id=uuid.uuid4()))])
     async def _fake_no_summary(*_args, **_kwargs):
-        return None
+        return {"status": "pending", "content": None, "diagnostics": {"analysis_status": "queued"}}
     monkeypatch.setattr(reader, "get_or_generate_summary", _fake_no_summary)
-    with pytest.raises(HTTPException) as exc:
-        await reader.get_summary(book.id, 2, mode="short", db=db, current_user=_user(user_id), _=None)
-    assert exc.value.status_code == 503
+    payload = await reader.get_summary(book.id, 2, mode="short", db=db, current_user=_user(user_id), _=None)
+    assert payload["status"] == "pending"
+    assert payload["content"] is None
 
     chapter = SimpleNamespace(id=uuid.uuid4())
     db = _FakeDB(get_values=[book], execute_values=[_Result(scalar=chapter)])
     async def _fake_summary(*_args, **_kwargs):
-        return {"content": "Summary", "key_events": [], "char_changes": [], "clues": []}
+        return {"status": "ready", "content": "Summary", "key_events": [], "char_changes": [], "clues": [], "diagnostics": {}}
     monkeypatch.setattr(reader, "get_or_generate_summary", _fake_summary)
     payload = await reader.get_summary(book.id, 2, mode="short", db=db, current_user=_user(user_id), _=None)
+    assert payload["status"] == "ready"
     assert payload["content"] == "Summary"
 
 
@@ -284,6 +466,7 @@ async def test_reader_collection_routes_cover_events_relationships_search_and_ch
         name="Iris",
         role="mc",
         first_chapter=1,
+        mention_count=4,
         aliases=[],
         motivations=[],
         fears=[],
@@ -303,7 +486,7 @@ async def test_reader_collection_routes_cover_events_relationships_search_and_ch
         from_chapter=2,
         to_chapter=None,
     )
-    chapter = SimpleNamespace(id=uuid.uuid4(), number=1, title="One", processed=False)
+    chapter = SimpleNamespace(id=uuid.uuid4(), number=1, title="One", processed=False, content_version=1)
     async def _fake_cache_get(_key):
         return None
     async def _fake_cache_set(*_args, **_kwargs):
@@ -326,11 +509,12 @@ async def test_reader_collection_routes_cover_events_relationships_search_and_ch
     async def _fake_summary_visible(*_args, **_kwargs):
         return {1}
     monkeypatch.setattr(reader, "summary_visible_chapter_set", _fake_summary_visible)
+    monkeypatch.setattr(reader, "list_custom_tags_for_entity_ids", _async_value({}))
     async def _fake_queue(*_args, **_kwargs):
         return None
     monkeypatch.setattr(reader, "queue_analysis_if_missing", _fake_queue)
     async def _fake_short_summary(*_args, **_kwargs):
-        return {"content": "Generated", "key_events": []}
+        return {"status": "ready", "content": "Generated", "key_events": [], "diagnostics": {}}
     monkeypatch.setattr(reader, "get_or_generate_summary", _fake_short_summary)
 
     db = _FakeDB(
@@ -362,6 +546,58 @@ async def test_reader_collection_routes_cover_events_relationships_search_and_ch
     assert search[0]["chapter_num"] == 3
     assert chapters["chapters"][0]["read"] is True
     assert summaries["summaries"][0]["available"] is True
+    assert summaries["summaries"][0]["status"] == "ready"
+
+
+@pytest.mark.asyncio
+async def test_get_relationships_returns_hidden_nodes_and_inactive_edges_for_author_review(monkeypatch):
+    user_id = uuid.uuid4()
+    book = _book(user_id=user_id, mode="author")
+    iris = SimpleNamespace(id=uuid.uuid4(), name="Iris", first_chapter=1, role="mc", aliases=[], arc_summary="Lead", mention_count=4, personality_tags=[], motivations=[], fears=[], archetype=None, trait_state={}, is_manual=False)
+    sol = SimpleNamespace(id=uuid.uuid4(), name="Sol", first_chapter=1, role="sc", aliases=[], arc_summary="Friend", mention_count=3, personality_tags=[], motivations=[], fears=[], archetype=None, trait_state={}, is_manual=False)
+    murmur = SimpleNamespace(id=uuid.uuid4(), name="Murmur", first_chapter=2, role=None, aliases=[], arc_summary=None, mention_count=1, personality_tags=[], motivations=[], fears=[], archetype=None, trait_state={}, is_manual=False)
+    rel = SimpleNamespace(id=uuid.uuid4(), character_a_id=iris.id, character_b_id=sol.id, rel_type="ally", sentiment=0.6, description="Trusted", from_chapter=1, to_chapter=2)
+
+    async def _fake_consolidate(*_args, **_kwargs):
+        return None
+
+    async def _fake_cache_get(*_args, **_kwargs):
+        return None
+
+    async def _fake_cache_set(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(reader, "consolidate_characters", _fake_consolidate)
+    monkeypatch.setattr(reader, "cache_get", _fake_cache_get)
+    monkeypatch.setattr(reader, "cache_set", _fake_cache_set)
+    monkeypatch.setattr(reader, "collapse_graph_characters", lambda chars: (chars, {str(char.id): str(char.id) for char in chars}))
+    monkeypatch.setattr(reader, "relationship_node_description", lambda c, *_args: c.name)
+    monkeypatch.setattr(reader, "is_graph_character_visible", lambda char: char.name != "Murmur")
+    monkeypatch.setattr(
+        reader,
+        "graph_character_visibility_analysis",
+        lambda char, _count=0: {
+            "visible": char.name != "Murmur",
+            "score": 4 if char.name != "Murmur" else 0,
+            "override": None,
+            "reasons": ["score_meets_threshold"] if char.name != "Murmur" else ["score_below_threshold"],
+        },
+    )
+
+    db = _FakeDB(
+        get_values=[book],
+        execute_values=[
+            _Result(scalars=[iris, sol, murmur]),
+            _Result(scalars=[rel]),
+            _Result(scalars=[]),
+        ],
+    )
+
+    relationships = await reader.get_relationships(book.id, chapter=5, include_inactive=True, db=db, current_user=_user(user_id))
+
+    assert [node["name"] for node in relationships["nodes"]] == ["Iris", "Sol"]
+    assert relationships["hidden_nodes"][0]["name"] == "Murmur"
+    assert relationships["edges"][0]["status"] == "ended"
 
 
 @pytest.mark.asyncio
@@ -398,7 +634,7 @@ async def test_reader_highlight_timeline_and_thematic_routes(monkeypatch):
             _Result(all_rows=[(1, "One", [{"event": "Start"}]), (2, "Two", [{"event": "Shift"}])]),
             _Result(all_rows=[("Iris", 1, "mc", [], "arc")]),
             _Result(all_rows=[(1, "One"), (2, "Two")]),
-            _Result(all_rows=[(uuid.uuid4(), "Door", 1, 2, "ongoing", None, "mystery")]),
+            _Result(all_rows=[(uuid.uuid4(), "Door", 1, 2, 2, "ongoing", None, "mystery")]),
             _Result(all_rows=[(rel, "Iris", "mc")]),
             _Result(scalars=[character]),
             _Result(scalars=[character]),
@@ -465,6 +701,14 @@ async def test_reader_crud_progress_and_recall_routes(monkeypatch):
     async def _fake_queue(*_args, **_kwargs):
         return None
     monkeypatch.setattr(reader, "queue_analysis_if_missing", _fake_queue)
+    async def _fake_sync_beta_assignments(*_args, **_kwargs):
+        return None
+    monkeypatch.setattr(reader, "sync_beta_assignments_for_reader_book", _fake_sync_beta_assignments)
+    monkeypatch.setattr(
+        __import__("app.utils.beta_read_utils", fromlist=["sync_reader_identity_for_beta_reads"]),
+        "sync_reader_identity_for_beta_reads",
+        _fake_sync_beta_assignments,
+    )
     task_calls = []
     monkeypatch.setattr(
         __import__("app.workers.tasks.extraction_tasks", fromlist=["process_chapter_task"]),
@@ -505,14 +749,15 @@ async def test_plot_thread_routes_and_relationship_evolution(monkeypatch):
     async def _fake_list_threads(*_args, **_kwargs):
         return [{"id": "1", "title": "Door", "status": "ongoing", "importance": 8, "character_ids": []}]
     async def _fake_update(*_args, **_kwargs):
-        return {"id": "1", "title": "Door", "status": "ongoing", "importance": 8, "character_ids": [], "note": "Updated"}
+        return {"id": "1", "title": "Door", "status": "paused", "importance": 8, "character_ids": [], "related_characters": [], "mention_count": 2, "note": "Updated"}
     monkeypatch.setattr(reader, "list_plot_threads", _fake_list_threads)
     monkeypatch.setattr(reader, "update_plot_thread_note", _fake_update)
 
     evolution = await reader.get_relationship_evolution(book.id, chapter=3, db=db, current_user=_user(user_id))
     threads = await reader.get_plot_threads(book.id, chapter=3, db=db, current_user=_user(user_id))
-    updated = await reader.save_plot_thread_note(book.id, uuid.uuid4(), UpdatePlotThreadBody(note="Updated"), db=db, current_user=_user(user_id))
+    updated = await reader.save_plot_thread_note(book.id, uuid.uuid4(), UpdatePlotThreadBody(note="Updated", status="paused"), db=db, current_user=_user(user_id))
 
     assert evolution["pairs"][0]["characters"] == ["Iris", "Milo"]
     assert threads[0]["title"] == "Door"
     assert updated["note"] == "Updated"
+    assert updated["status"] == "paused"

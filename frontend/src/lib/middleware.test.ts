@@ -61,6 +61,7 @@ describe("middleware CSP", () => {
     expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff")
     expect(response.headers.get("Referrer-Policy")).toBe("strict-origin-when-cross-origin")
     expect(response.headers.get("Permissions-Policy")).toContain("camera=()")
+    expect(response.headers.get("Permissions-Policy")).toContain("payment=*")
     expect(csp).toContain("style-src 'self' 'unsafe-inline'")
     expect(scriptDirective).not.toContain("'unsafe-eval'")
     expect(scriptDirective).not.toContain("'unsafe-inline'")

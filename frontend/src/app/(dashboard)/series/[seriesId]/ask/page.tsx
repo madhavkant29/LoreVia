@@ -1,12 +1,14 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
 import Link from "next/link"
 import { useParams } from "next/navigation"
 
 import { booksApi } from "@/lib/api/books"
 import { intelligenceApi } from "@/lib/api/intelligence"
 import { isPaidTier } from "@/lib/billing/plans"
+import { asQueryKey, booksSeriesCacheKey } from "@/lib/query/cacheKeys"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { renderMarkdownHtml } from "@/lib/utils/richText"
@@ -27,20 +29,17 @@ export default function SeriesAskPage() {
   const user = useAuthStore((state) => state.user)
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
-  const [series, setSeries] = useState<BookSeries | null>(null)
+  const { data: seriesList = [] } = useQuery<BookSeries[]>({
+    queryKey: asQueryKey(booksSeriesCacheKey()),
+    queryFn: () => booksApi.listSeries(),
+    enabled: Boolean(seriesId),
+  })
   const [askQuery, setAskQuery] = useState("")
   const [askMessages, setAskMessages] = useState<AdvisorMessage[]>([])
   const [askResponse, setAskResponse] = useState<AdvisorResponse | null>(null)
   const [askLoading, setAskLoading] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!seriesId) return
-    booksApi.listSeries().then((seriesList) => {
-      const found = seriesList.find((s) => s.id === seriesId)
-      setSeries(found || null)
-    })
-  }, [seriesId])
+  const series = useMemo(() => seriesList.find((s) => s.id === seriesId) ?? null, [seriesId, seriesList])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })

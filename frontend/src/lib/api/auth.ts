@@ -13,11 +13,13 @@ export interface RegisterResponse {
 
 export interface TierLimits {
   free_max_books: number
+  author_max_uploads: number
+  architect_uploads_unlimited: boolean
   free_total_token_budget: number
   free_search_per_day: number
   free_summary_per_hour: number
   free_prediction_per_day: number
-  reader_prediction_per_day: number
+  free_recall_per_day: number
   author_prediction_per_day: number
   architect_prediction_per_day: number
   trial_high_cost_turns_per_day: number
@@ -26,9 +28,7 @@ export interface TierLimits {
   free_advisor_per_day: number
   free_advisor_per_week: number
   free_advisor_per_month: number
-  reader_advisor_per_day: number
-  reader_advisor_per_week: number
-  reader_advisor_per_month: number
+  free_continuity_per_day: number
   author_advisor_per_day: number
   author_advisor_per_week: number
   author_advisor_per_month: number
@@ -36,7 +36,6 @@ export interface TierLimits {
   architect_advisor_per_week: number
   architect_advisor_per_month: number
   free_continuity_per_minute: number
-  reader_continuity_per_minute: number
   author_continuity_per_minute: number
   architect_continuity_per_minute: number
 }
@@ -73,6 +72,8 @@ export const authApi = {
     apiClient.patch(`/auth/me/reading-mode?mode=${mode}`).then(r => r.data),
   setDailyWordGoal: (dailyWordGoal: number) =>
     apiClient.patch<User>("/auth/me/daily-word-goal", { daily_word_goal: dailyWordGoal }).then(r => r.data),
+  setMessagingPermission: (messagingPermission: "anyone" | "friends_only") =>
+    apiClient.patch<User>("/auth/me/messaging-permission", { messaging_permission: messagingPermission }).then(r => r.data),
   setUsername: (username: string) =>
     apiClient.patch<User>("/auth/me/username", null, { params: { username } }).then(r => r.data),
   getTierLimits: () => apiClient.get<TierLimits>("/auth/tier-limits").then(r => r.data),

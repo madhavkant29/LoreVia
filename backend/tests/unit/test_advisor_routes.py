@@ -5,6 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
+from fastapi.responses import Response
+from pydantic import ValidationError
 
 from app.api.v1.routes import advisor
 from app.schemas.advisor import (
@@ -14,6 +16,7 @@ from app.schemas.advisor import (
     InlineContinuityRequest,
     ProseTightenRequest,
     VoiceConsistencyRequest,
+    WhatsTheWordRequest,
 )
 
 
@@ -74,12 +77,23 @@ class _FakeDB:
     def __init__(self, *, get_values=None, execute_values=None):
         self._get_values = list(get_values or [])
         self._execute_values = list(execute_values or [])
+        self.added = []
+        self.commits = 0
 
     async def get(self, *_args, **_kwargs):
         return self._get_values.pop(0)
 
     async def execute(self, *_args, **_kwargs):
         return self._execute_values.pop(0)
+
+    def add(self, value):
+        self.added.append(value)
+
+    async def commit(self):
+        self.commits += 1
+
+    async def refresh(self, _value):
+        return None
 
 
 class _FakeClient:
@@ -139,6 +153,19 @@ def test_best_issue_snippet_prefers_matching_sentence_and_falls_back():
     assert advisor._best_issue_snippet("No punctuation here", "missing") == "No punctuation here"
 
 
+def test_whats_the_word_request_requires_enough_description_words():
+    with pytest.raises(ValidationError):
+        WhatsTheWordRequest(description="too vague right now")
+
+    payload = WhatsTheWordRequest(
+        description="a smile that hides contempt behind politeness",
+        previous_word="smirk",
+    )
+
+    assert payload.description == "a smile that hides contempt behind politeness"
+    assert payload.previous_word == "smirk"
+
+
 @pytest.mark.asyncio
 async def test_advisor_message_validates_book_and_messages():
     db = _FakeDB(get_values=[None])
@@ -147,6 +174,7 @@ async def test_advisor_message_validates_book_and_messages():
         await advisor.advisor_message(
             uuid.uuid4(),
             body=body,
+            response=Response(),
             db=db,
             current_user=SimpleNamespace(id=uuid.uuid4()),
             _=None,
@@ -160,6 +188,7 @@ async def test_advisor_message_validates_book_and_messages():
         await advisor.advisor_message(
             book.id,
             body=AdvisorRequest(messages=[]),
+            response=Response(),
             db=db,
             current_user=SimpleNamespace(id=user_id),
             _=None,
@@ -171,6 +200,7 @@ async def test_advisor_message_validates_book_and_messages():
         await advisor.advisor_message(
             book.id,
             body=_message_body(("assistant", "Only assistant")),
+            response=Response(),
             db=db,
             current_user=SimpleNamespace(id=user_id),
             _=None,
@@ -191,6 +221,7 @@ async def test_advisor_message_returns_cached_payload(monkeypatch):
     payload = await advisor.advisor_message(
         book_id,
         body=_message_body(("user", "What next?")),
+        response=Response(),
         db=db,
         current_user=SimpleNamespace(id=user_id),
         _=None,
@@ -201,61 +232,127 @@ async def test_advisor_message_returns_cached_payload(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_advisor_message_builds_response_and_caches(monkeypatch):
+async def test_advisor_message_enqueues_task_when_not_cached(monkeypatch):
     book_id = uuid.uuid4()
     user_id = uuid.uuid4()
-    book = SimpleNamespace(id=book_id, user_id=user_id, title="Atlas {Saga}", total_chapters=12)
-    hits = [
-        SimpleNamespace(text="Storm clues matter here.", chapter_num=3, chapter_title="Storm", relevance=0.91),
-        SimpleNamespace(text="World lore excerpt.", chapter_num=4, chapter_title=None, relevance=0.73),
-    ]
-    db = _FakeDB(get_values=[book], execute_values=[_Result(fetchall_rows=hits)])
+    book = SimpleNamespace(id=book_id, user_id=user_id, title="Atlas", total_chapters=8)
     cache = _Cache()
-    client = _FakeClient("Advisor reply")
+    db = _FakeDB(get_values=[book])
+    captured: dict[str, object] = {}
 
-    async def _fake_classify_intent(_client, _message):
-        return "consistency"
+    class _TaskHandle:
+        id = "task-abc"
 
-    async def _fake_build_story_context(*_args, **_kwargs):
-        return "Story context"
+    class _Task:
+        def apply_async(self, *, kwargs):
+            captured["kwargs"] = kwargs
+            return _TaskHandle()
 
-    async def _fake_build_world_analysis(*_args, **_kwargs):
-        return {"mode": "gap_detection", "summary": "World gaps"}
+    async def _fake_cache_set(key, value, ttl):
+        captured["cache"] = (key, value, ttl)
 
-    async def _fake_embed_text(_text):
-        return [0.1, 0.2]
-
-    async def _fake_classify_response_type(_client, _reply):
-        return "analysis"
-
-    monkeypatch.setattr(advisor, "make_advisor_cache_key", lambda *_args: "advisor-key")
+    monkeypatch.setattr(advisor, "make_advisor_cache_key", lambda *_args: "queued-key")
     monkeypatch.setattr(advisor, "advisor_response_cache", cache)
-    monkeypatch.setattr(advisor, "AsyncOpenAI", lambda api_key: client)
-    monkeypatch.setattr(advisor, "classify_intent", _fake_classify_intent)
-    monkeypatch.setattr(advisor, "build_story_context", _fake_build_story_context)
-    monkeypatch.setattr(advisor, "detect_advisor_world_mode", lambda *_args: "gap_detection")
-    monkeypatch.setattr(advisor, "build_advisor_world_analysis", _fake_build_world_analysis)
-    monkeypatch.setattr(advisor, "build_advisor_world_context", lambda world: f"WORLD: {world['summary']}")
-    monkeypatch.setattr(advisor, "embed_text", _fake_embed_text)
-    monkeypatch.setattr(advisor, "classify_response_type", _fake_classify_response_type)
+    monkeypatch.setattr(advisor, "generate_advisor_reply_task", _Task())
+    monkeypatch.setattr(advisor, "cache_set", _fake_cache_set)
 
+    response = Response()
     payload = await advisor.advisor_message(
         book_id,
-        body=_message_body(("assistant", "Context"), ("user", "Check the storm lore"), total_chapters=8),
+        body=_message_body(("user", "What next?")),
+        response=response,
         db=db,
         current_user=SimpleNamespace(id=user_id),
         _=None,
     )
 
-    assert payload["reply"] == "Advisor reply"
-    assert payload["intent"] == "consistency"
-    assert payload["world_analysis"]["summary"] == "World gaps"
-    assert payload["retrieved_passages"][0]["chapter_num"] == 3
-    assert cache.set_calls
-    assert client.closed is True
-    sent_messages = client.calls[0]["messages"]
-    assert "Atlas {{Saga}}" in sent_messages[0]["content"]
-    assert "WORLD: World gaps" in sent_messages[-1]["content"]
+    assert response.status_code == 202
+    assert payload == {"task_id": "task-abc", "status": "queued", "cached": False}
+
+
+@pytest.mark.asyncio
+async def test_advisor_message_async_enqueues_task(monkeypatch):
+    book_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    book = SimpleNamespace(id=book_id, user_id=user_id, title="Atlas {Saga}", total_chapters=12)
+    db = _FakeDB(get_values=[book])
+    cache = _Cache()
+    captured: dict[str, object] = {}
+
+    class _TaskHandle:
+        id = "task-123"
+
+    class _Task:
+        def apply_async(self, *, kwargs):
+            captured["kwargs"] = kwargs
+            return _TaskHandle()
+
+    async def _fake_cache_set(key, value, ttl):
+        captured["cache"] = (key, value, ttl)
+
+    monkeypatch.setattr(advisor, "make_advisor_cache_key", lambda *_args: "advisor-key")
+    monkeypatch.setattr(advisor, "advisor_response_cache", cache)
+    monkeypatch.setattr(advisor, "generate_advisor_reply_task", _Task())
+    monkeypatch.setattr(advisor, "cache_set", _fake_cache_set)
+
+    response = Response()
+    payload = await advisor.advisor_message_async(
+        book_id,
+        body=_message_body(("assistant", "Context"), ("user", "Check the storm lore"), total_chapters=8),
+        response=response,
+        db=db,
+        current_user=SimpleNamespace(id=user_id),
+        _=None,
+    )
+
+    assert response.status_code == 202
+    assert payload == {"task_id": "task-123", "status": "queued", "cached": False}
+    assert captured["kwargs"] == {
+        "book_id": str(book_id),
+        "user_id": str(user_id),
+        "messages": [
+            {"role": "assistant", "content": "Context"},
+            {"role": "user", "content": "Check the storm lore"},
+        ],
+        "total_chapters": 8,
+    }
+
+
+@pytest.mark.asyncio
+async def test_advisor_message_async_status_returns_completed_payload(monkeypatch):
+    book_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    book = SimpleNamespace(id=book_id, user_id=user_id, title="Atlas", total_chapters=12)
+    db = _FakeDB(get_values=[book])
+
+    async def _fake_cache_get(_key):
+        return {"book_id": str(book_id), "user_id": str(user_id)}
+
+    async def _fake_cache_del(_key):
+        return None
+
+    class _ResultHandle:
+        state = "SUCCESS"
+        result = {"reply": "Advisor reply", "intent": "general", "response_type": "standard", "retrieved_passages": []}
+
+    class _Task:
+        @staticmethod
+        def AsyncResult(_task_id):
+            return _ResultHandle()
+
+    monkeypatch.setattr(advisor, "cache_get", _fake_cache_get)
+    monkeypatch.setattr(advisor, "cache_del", _fake_cache_del)
+    monkeypatch.setattr(advisor, "generate_advisor_reply_task", _Task())
+
+    payload = await advisor.advisor_message_async_status(
+        book_id,
+        "task-123",
+        db=db,
+        current_user=SimpleNamespace(id=user_id),
+    )
+
+    assert payload["status"] == "complete"
+    assert payload["result"]["reply"] == "Advisor reply"
 
 
 @pytest.mark.asyncio
@@ -272,6 +369,39 @@ async def test_advisor_greeting_counts_entities():
 
     assert payload["book_title"] == "Atlas"
     assert payload["stats"] == {"characters": 9, "plot_threads": 4, "total_chapters": 11}
+
+
+@pytest.mark.asyncio
+async def test_whats_the_word_validates_book_and_returns_result(monkeypatch):
+    book_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    book = SimpleNamespace(id=book_id, user_id=user_id, title="Atlas")
+    db = _FakeDB(get_values=[book])
+    client = _FakeClient('{"word":"acerbic","gloss":"sharp with cutting contempt"}')
+
+    async def _fake_generate(**kwargs):
+        assert kwargs["book_title"] == "Atlas"
+        assert kwargs["description"] == "a smile that hides contempt behind politeness"
+        assert kwargs["previous_word"] == "smirk"
+        return {"word": "acerbic", "gloss": "sharp with cutting contempt"}
+
+    monkeypatch.setattr(advisor, "AsyncOpenAI", lambda api_key: client)
+    monkeypatch.setattr(advisor, "generate_whats_the_word_result", _fake_generate)
+
+    payload = await advisor.whats_the_word(
+        book_id,
+        body=WhatsTheWordRequest(
+            description="a smile that hides contempt behind politeness",
+            previous_word="smirk",
+        ),
+        db=db,
+        current_user=SimpleNamespace(id=user_id),
+        _=None,
+    )
+
+    assert payload.word == "acerbic"
+    assert payload.gloss == "sharp with cutting contempt"
+    assert client.closed is True
 
 
 @pytest.mark.asyncio
@@ -300,6 +430,8 @@ async def test_advisor_suggestions_collects_sorted_categories():
         title="Locked Door",
         status="ongoing",
         introduced_at=2,
+        last_mentioned_at=4,
+        resolved_at=None,
         description="Door mystery",
         importance=8,
     )
@@ -321,9 +453,14 @@ async def test_advisor_suggestions_collects_sorted_categories():
         (["Rust key"], 4, "Vault"),
         ({"one": "Hidden map"}, 5, "Tunnel"),
     ]
+    lead_character = SimpleNamespace(id=char_id, name="Iris", mention_count=12, first_chapter=1)
     db = _FakeDB(
         get_values=[book],
         execute_values=[
+            _Result(scalars=[lead_character, absent, underused]),
+            _Result(scalars=[dropped]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
             _Result(all_rows=states),
             _Result(scalars=[dropped]),
             _Result(scalars=[absent]),
@@ -344,8 +481,101 @@ async def test_advisor_suggestions_collects_sorted_categories():
     assert "arc_opportunity" in types
     assert "foreshadowing_opportunity" in types
     assert "unresolved_clue" in types
+    assert payload["meta"]["character_count"] == 3
+    assert payload["meta"]["open_thread_count"] == 1
+    assert payload["meta"]["fallback_applied"] is False
+    assert payload["meta"]["proactive_audit_applied"] is False
     severities = [item["severity"] for item in payload["suggestions"]]
     assert severities == sorted(severities, key=lambda item: {"warning": 0, "direction": 1, "opportunity": 2, "info": 3}.get(item, 4))
+
+
+@pytest.mark.asyncio
+async def test_advisor_suggestions_uses_fallback_cards_when_heuristics_are_empty():
+    book_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    book = SimpleNamespace(id=book_id, user_id=user_id, title="Atlas", total_chapters=5)
+    db = _FakeDB(
+        get_values=[book],
+        execute_values=[
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(all_rows=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(all_rows=[]),
+        ],
+    )
+
+    payload = await advisor.advisor_suggestions(book_id, db=db, current_user=SimpleNamespace(id=user_id))
+
+    assert payload["total"] == 3
+    assert {item["source"] for item in payload["suggestions"]} == {"fallback"}
+    assert payload["meta"]["fallback_applied"] is True
+    assert payload["meta"]["proactive_audit_applied"] is False
+    assert "characters" in payload["meta"]["data_gaps"]
+    assert "plot threads" in payload["meta"]["data_gaps"]
+
+
+@pytest.mark.asyncio
+async def test_advisor_suggestions_adds_sparse_proactive_audit(monkeypatch):
+    book_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    thread_id = uuid.uuid4()
+    book = SimpleNamespace(id=book_id, user_id=user_id, title="Atlas", total_chapters=12)
+    thread = SimpleNamespace(
+        id=thread_id,
+        title="River bargain",
+        status="developing",
+        introduced_at=3,
+        last_mentioned_at=8,
+        resolved_at=None,
+        description="A deal with the ferryman remains unresolved.",
+        importance=6,
+    )
+    cache = _Cache()
+    client = _FakeClient(
+        '{"findings":[{"severity":"direction","type":"future_direction","title":"Audit thread pressure point","description":"The ferryman bargain needs a clearer payoff path before the finale.","chapter_ref":8,"action_label":"Plan the payoff","ask_prompt":"How should the ferryman bargain resolve?"}],"overall_note":"Sparse heuristics triggered a deeper audit."}'
+    )
+
+    async def _fake_story_context(*_args, **_kwargs):
+        return "Story context"
+
+    monkeypatch.setattr(advisor, "advisor_response_cache", cache)
+    monkeypatch.setattr(advisor, "AsyncOpenAI", lambda api_key: client)
+    monkeypatch.setattr(advisor, "build_story_context", _fake_story_context)
+    monkeypatch.setattr(advisor, "make_editorial_cache_key", lambda *_args: "scan-cache")
+    monkeypatch.setattr(advisor.settings, "OPENAI_API_KEY", "test-key", raising=False)
+    monkeypatch.setattr(advisor.settings, "OPENAI_INTEL_MODEL", "gpt-test", raising=False)
+
+    db = _FakeDB(
+        get_values=[book],
+        execute_values=[
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(all_rows=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(all_rows=[(["River token"], 8, "The Bargain")]),
+            _Result(all_rows=[(8, "The Bargain", "Nora reaches the ferryman.", [{"event_title": "Deal struck"}])]),
+        ],
+    )
+
+    payload = await advisor.advisor_suggestions(book_id, db=db, current_user=SimpleNamespace(id=user_id))
+
+    assert payload["meta"]["proactive_audit_applied"] is True
+    assert payload["meta"]["fallback_applied"] is False
+    assert payload["meta"]["audit_summary"] == "Sparse heuristics triggered a deeper audit."
+    assert any(item["source"] == "proactive_audit" for item in payload["suggestions"])
+    assert cache.set_calls
+    assert client.closed is True
 
 
 @pytest.mark.asyncio
@@ -640,60 +870,87 @@ async def test_continuity_report_supports_markdown_and_pdf(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_series_advisor_message_handles_cache_empty_and_success(monkeypatch):
+async def test_series_advisor_message_enqueues_task(monkeypatch):
     series_id = uuid.uuid4()
     user_id = uuid.uuid4()
-    book_id = uuid.uuid4()
     series = SimpleNamespace(id=series_id, user_id=user_id, name="Atlas Saga")
     cache = _Cache()
-    client = _FakeClient("Series reply")
+    db = _FakeDB(get_values=[series])
+    captured: dict[str, object] = {}
+
+    class _TaskHandle:
+        id = "series-task-123"
+
+    class _Task:
+        def apply_async(self, *, kwargs):
+            captured["kwargs"] = kwargs
+            return _TaskHandle()
+
+    async def _fake_cache_set(key, value, ttl):
+        captured["cache"] = (key, value, ttl)
 
     monkeypatch.setattr(advisor, "advisor_response_cache", cache)
     monkeypatch.setattr(advisor, "make_advisor_cache_key", lambda *_args: "series-key")
-    monkeypatch.setattr(advisor, "AsyncOpenAI", lambda api_key: client)
-    async def _fake_series_story_context(*_args, **_kwargs):
-        return "Series context"
+    monkeypatch.setattr(advisor, "generate_series_advisor_reply_task", _Task())
+    monkeypatch.setattr(advisor, "cache_set", _fake_cache_set)
 
-    monkeypatch.setattr(advisor, "build_series_story_context", _fake_series_story_context)
-    async def _fake_classify_response_type(_client, _reply):
-        return "analysis"
-
-    async def _fake_classify_intent(_client, _message):
-        return "direction"
-
-    monkeypatch.setattr(advisor, "classify_response_type", _fake_classify_response_type)
-    monkeypatch.setattr(advisor, "classify_intent", _fake_classify_intent)
-
-    db = _FakeDB(get_values=[series], execute_values=[_Result(all_rows=[])])
-    with pytest.raises(HTTPException) as exc:
-        await advisor.series_advisor_message(
-            series_id,
-            body=_message_body(("user", "Anything?")),
-            db=db,
-            current_user=SimpleNamespace(id=user_id),
-            _=None,
-        )
-    assert exc.value.detail == "No books found in this series."
-
-    db = _FakeDB(
-        get_values=[series],
-        execute_values=[
-            _Result(all_rows=[SimpleNamespace(book_id=book_id, position=1)]),
-            _Result(all_rows=[SimpleNamespace(id=book_id, title="Book One")]),
-        ],
-    )
+    response = Response()
     payload = await advisor.series_advisor_message(
         series_id,
         body=_message_body(("assistant", "ctx"), ("user", "Anything?")),
+        response=response,
         db=db,
         current_user=SimpleNamespace(id=user_id),
         _=None,
     )
 
-    assert payload["reply"] == "Series reply"
-    assert payload["book_count"] == 1
-    assert cache.set_calls
-    assert client.closed is True
+    assert response.status_code == 202
+    assert payload == {"task_id": "series-task-123", "status": "queued", "cached": False}
+    assert captured["kwargs"] == {
+        "series_id": str(series_id),
+        "user_id": str(user_id),
+        "messages": [
+            {"role": "assistant", "content": "ctx"},
+            {"role": "user", "content": "Anything?"},
+        ],
+    }
+
+
+@pytest.mark.asyncio
+async def test_series_advisor_message_status_returns_completed_payload(monkeypatch):
+    series_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    series = SimpleNamespace(id=series_id, user_id=user_id, name="Atlas Saga")
+    db = _FakeDB(get_values=[series])
+
+    async def _fake_cache_get(_key):
+        return {"scope": "series", "series_id": str(series_id), "user_id": str(user_id)}
+
+    async def _fake_cache_del(_key):
+        return None
+
+    class _ResultHandle:
+        state = "SUCCESS"
+        result = {"reply": "Series reply", "intent": "direction", "response_type": "standard", "retrieved_passages": []}
+
+    class _Task:
+        @staticmethod
+        def AsyncResult(_task_id):
+            return _ResultHandle()
+
+    monkeypatch.setattr(advisor, "cache_get", _fake_cache_get)
+    monkeypatch.setattr(advisor, "cache_del", _fake_cache_del)
+    monkeypatch.setattr(advisor, "generate_series_advisor_reply_task", _Task())
+
+    payload = await advisor.series_advisor_message_status(
+        series_id,
+        "series-task-123",
+        db=db,
+        current_user=SimpleNamespace(id=user_id),
+    )
+
+    assert payload["status"] == "complete"
+    assert payload["result"]["reply"] == "Series reply"
 
 
 @pytest.mark.asyncio
@@ -733,7 +990,7 @@ async def test_series_continuity_check_handles_no_prior_books_and_full_review(mo
     async def _fake_story_context(*_args, **_kwargs):
         return "Series context"
 
-    async def _fake_embed_text(_text):
+    async def _fake_embed_text(_text, **_kwargs):
         return [0.4, 0.2]
 
     monkeypatch.setattr(advisor, "build_series_story_context", _fake_story_context)

@@ -4,11 +4,25 @@ import pytest
 from sqlalchemy import select
 
 from app.engine.character.entity_filters import VISIBILITY_THRESHOLD, character_visibility_score
+from app.engine.character.profile_builder import build_description
 from app.models.book import Book, Chapter
 from app.models.character import Character, CharacterState, CharacterVoiceProfile
-from app.models.intelligence import ChapterSummary, CharacterRelationship, PlotThread, QuoteEntry, WikiEntry
+from app.models.intelligence import (
+    ChapterSummary,
+    CharacterRelationship,
+    PlotThread,
+    QuoteEntry,
+    WikiEntry,
+)
 from app.models.user import User
-from app.utils.character_utils import description_similarity, merge_characters, name_similarity
+from app.utils.character_utils import (
+    apply_manual_character_description,
+    compose_character_description,
+    description_similarity,
+    merge_characters,
+    name_similarity,
+    partition_character,
+)
 
 
 def test_name_similarity_scores_shared_surname_high():
@@ -19,16 +33,32 @@ def test_name_similarity_rejects_unrelated_names():
     assert name_similarity("Meme Oshino", "Akane Kurokawa") < 0.5
 
 
+def test_name_similarity_does_not_collapse_conflicting_honorifics():
+    assert name_similarity("Mr. Samsa", "Mrs. Samsa") < 0.5
+
+
 def test_names_equivalent_matches_honorific_short_name_to_full_name():
     from app.engine.character.deduplicator import names_equivalent
 
     assert names_equivalent("Houko-chan", [], "Yamiguchi Houko", []) is True
 
 
+def test_names_equivalent_keeps_mr_and_mrs_with_shared_surname_separate():
+    from app.engine.character.deduplicator import names_equivalent
+
+    assert names_equivalent("Mr. Samsa", [], "Mrs. Samsa", []) is False
+
+
 def test_names_equivalent_does_not_merge_shared_surname_with_different_given_names():
     from app.engine.character.deduplicator import names_equivalent
 
     assert names_equivalent("Saitou Kengo", [], "Saitou Masami", []) is False
+
+
+def test_names_equivalent_does_not_merge_titled_and_bare_shared_surname():
+    from app.engine.character.deduplicator import names_equivalent
+
+    assert names_equivalent("Mr. Samsa", [], "Samsa", []) is False
 
 
 def test_names_equivalent_matches_reversed_japanese_name_order():
@@ -59,6 +89,21 @@ def test_visibility_score_penalizes_phrase_like_noise():
         aliases=["Mr. Oshino"],
         arc_summary="A steady mentor with a clear arc.",
     ) >= VISIBILITY_THRESHOLD
+
+
+def test_compose_character_description_prefers_arc_summary_and_relationships_when_traits_are_sparse():
+    description = compose_character_description(
+        trait_state={},
+        archetype=None,
+        arc_summary="Gregor is the family provider, now trapped in a body he cannot control",
+        personality_tags=["anxious"],
+        motivations=["protect his sister"],
+        relationship_summaries=["Family bond with Grete."],
+    )
+
+    assert description == (
+        "Gregor is the family provider, now trapped in a body he cannot control. Family bond with Grete."
+    )
 
 
 @pytest.mark.asyncio
@@ -107,6 +152,9 @@ async def test_merge_characters_reparents_related_rows(db):
     )
     db.add_all([primary, secondary])
     await db.flush()
+
+    apply_manual_character_description(primary, "A dry-witted mentor with a watchful presence.")
+    apply_manual_character_description(secondary, "He hides concern behind teasing advice.")
 
     db.add(
         CharacterVoiceProfile(
@@ -180,6 +228,9 @@ async def test_merge_characters_reparents_related_rows(db):
     assert "Mister Oshino" in (merged.aliases or [])
     assert "Mr. Oshino" in (merged.aliases or [])
     assert merged.mention_count == 5
+    assert build_description(merged.trait_state or {}, merged.archetype) == (
+        "A dry-witted mentor with a watchful presence. He hides concern behind teasing advice."
+    )
     await db.refresh(merged, ["voice_profile"])
     assert merged.voice_profile is not None
     assert merged.voice_profile.sample_dialogue_count == 5
@@ -206,3 +257,134 @@ async def test_merge_characters_reparents_related_rows(db):
     assert updated_summary.key_events[0]["involved_characters"] == [str(merged.id)]
     assert updated_summary.char_changes[0]["character"] == "Meme Oshino"
     assert updated_quote.character_name == "Meme Oshino"
+
+
+@pytest.mark.asyncio
+async def test_partition_character_splits_record_and_reassigns_references(db, monkeypatch):
+    user = User(email="partition-user@lorevia.app", username="partition-user", password_hash="hash")
+    db.add(user)
+    await db.flush()
+
+    book = Book(
+        user_id=user.id,
+        title="Partition Test",
+        format="pdf",
+        s3_key="books/partition-test.pdf",
+        status="ready",
+        mode="author",
+    )
+    db.add(book)
+    await db.flush()
+
+    chapter_one = Chapter(book_id=book.id, number=1, title="Arrival", s3_key="chapters/1.txt")
+    chapter_two = Chapter(book_id=book.id, number=2, title="Kitchen", s3_key="chapters/2.txt")
+    db.add_all([chapter_one, chapter_two])
+    await db.flush()
+
+    from app.models.intelligence import BookChunk
+
+    db.add(BookChunk(book_id=book.id, chapter_id=chapter_one.id, chunk_index=0, text="Mr. Samsa coughed while Gregor watched."))
+    db.add(BookChunk(book_id=book.id, chapter_id=chapter_two.id, chunk_index=0, text="Mrs. Samsa called softly from the kitchen."))
+
+    source = Character(
+        book_id=book.id,
+        name="Samsa",
+        aliases=["Mr. Samsa", "Mrs. Samsa"],
+        role="sc",
+        first_chapter=1,
+        last_seen_chapter=2,
+        mention_count=4,
+    )
+    counterpart = Character(
+        book_id=book.id,
+        name="Gregor",
+        aliases=[],
+        role="mc",
+        first_chapter=1,
+        last_seen_chapter=2,
+        mention_count=5,
+    )
+    db.add_all([source, counterpart])
+    await db.flush()
+
+    db.add(CharacterState(character_id=source.id, at_chapter=1, trait_snapshot={"hair": {"value": "gray", "confidence": 0.9}}))
+    db.add(
+        CharacterRelationship(
+            book_id=book.id,
+            character_a_id=source.id,
+            character_b_id=counterpart.id,
+            rel_type="family",
+            description="Parent of Gregor",
+            from_chapter=1,
+        )
+    )
+    db.add(PlotThread(book_id=book.id, title="Samsa household", status="ongoing", introduced_at=1, character_ids=["Samsa"]))
+    db.add(WikiEntry(book_id=book.id, entry_type="concept", name="Household", related_char_ids=[str(source.id)]))
+    db.add(
+        ChapterSummary(
+            chapter_id=chapter_one.id,
+            mode="short",
+            content="Mr. Samsa arrives.",
+            key_events=[{"event_title": "Arrival", "involved_characters": [str(source.id)]}],
+            char_changes=[{"character": "Samsa", "change": "Arrives upset"}],
+        )
+    )
+    db.add(QuoteEntry(user_id=user.id, book_id=book.id, chapter_number=2, character_name="Samsa", quote_text="Mrs. Samsa whispered a prayer."))
+    await db.commit()
+
+    async def _fake_extract(text: str) -> dict:
+        if "Mrs. Samsa" in text:
+            return {
+                "characters": [
+                    {
+                        "name": "Mrs. Samsa",
+                        "aliases": [],
+                        "traits": {},
+                        "personality_tags": ["gentle"],
+                        "motivations": ["protect her son"],
+                        "fears": ["losing Gregor"],
+                        "arc_summary": "Protective and worried.",
+                    }
+                ],
+                "relationships": [],
+            }
+        return {
+            "characters": [
+                {
+                    "name": "Mr. Samsa",
+                    "aliases": [],
+                    "traits": {},
+                    "personality_tags": ["stern"],
+                    "motivations": ["restore order"],
+                    "fears": ["financial ruin"],
+                    "arc_summary": "Rigid and anxious.",
+                }
+            ],
+            "relationships": [],
+        }
+
+    monkeypatch.setattr("app.utils.character_utils.extract_characters_and_relationships", _fake_extract)
+
+    created = await partition_character(
+        db,
+        source=source,
+        partitions=[
+            {"name": "Mr. Samsa", "aliases": []},
+            {"name": "Mrs. Samsa", "aliases": []},
+        ],
+    )
+    await db.commit()
+
+    assert {character.name for character in created} == {"Mr. Samsa", "Mrs. Samsa"}
+    assert await db.get(Character, source.id) is None
+
+    plot_thread = (await db.execute(select(PlotThread).where(PlotThread.book_id == book.id))).scalar_one()
+    wiki_entry = (await db.execute(select(WikiEntry).where(WikiEntry.book_id == book.id))).scalar_one()
+    summary = (await db.execute(select(ChapterSummary).where(ChapterSummary.chapter_id == chapter_one.id))).scalar_one()
+    quote = (await db.execute(select(QuoteEntry).where(QuoteEntry.book_id == book.id))).scalar_one()
+
+    assert plot_thread.character_ids == ["Mr. Samsa", "Mrs. Samsa"]
+    assert len(wiki_entry.related_char_ids or []) == 2
+    assert summary.key_events[0]["involved_characters"] == [str(next(character.id for character in created if character.name == "Mr. Samsa"))]
+    assert summary.char_changes[0]["character"] == "Mr. Samsa"
+    assert quote.character_name == "Mrs. Samsa"

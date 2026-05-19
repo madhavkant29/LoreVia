@@ -3,14 +3,10 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 PaidPlanCode = Literal[
-    "reader_monthly",
-    "reader_annual",
     "author_monthly",
     "author_annual",
     "architect_monthly",
     "architect_annual",
-    "pro_monthly",
-    "pro_annual",
     "power_monthly",
     "power_annual",
 ]
@@ -18,6 +14,20 @@ PaidPlanCode = Literal[
 
 class CheckoutBody(BaseModel):
     plan: PaidPlanCode
+
+
+class BillingConfirmationOut(BaseModel):
+    transaction_id: str
+    status: str
+    plan: str
+    billing_interval: Literal["monthly", "annual"]
+    display_name: str
+    currency_code: str | None = None
+    total: str | None = None
+    invoice_number: str | None = None
+    invoice_pdf_url: str | None = None
+    subscription_id: str | None = None
+    customer_email: str | None = None
 
 
 class BillingPlanStatusOut(BaseModel):
@@ -35,6 +45,7 @@ class BillingStatusOut(BaseModel):
     paddle_api_key_present: bool
     webhook_secret_present: bool
     default_checkout_url_present: bool
+    recommended_default_checkout_url: str
     resend_api_key_present: bool
     internal_job_secret_present: bool
     fully_configured_plan_count: int
@@ -47,7 +58,4 @@ class BillingStatusOut(BaseModel):
     trial_email_automation_code_ready: bool
     priority_processing_code_ready: bool
     priority_queue_names: list[str] = Field(default_factory=list)
-    points_wallet_ready: bool
-    points_spend_ready: bool
-    rewarded_ads_code_ready: bool
     external_action_items: list[str] = Field(default_factory=list)

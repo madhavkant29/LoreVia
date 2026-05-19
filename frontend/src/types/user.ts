@@ -1,4 +1,4 @@
-export type UserTier = "free" | "reader" | "author" | "architect" | "admin"
+export type UserTier = "free" | "collaborator" | "reader" | "author" | "architect" | "admin"
 
 export interface User {
   id: string
@@ -17,5 +17,6 @@ export interface User {
   longest_login_streak_days: number
   login_activity_dates: string[]
   email_verified: boolean
+  messaging_permission: "anyone" | "friends_only"
   created_at: string
 }

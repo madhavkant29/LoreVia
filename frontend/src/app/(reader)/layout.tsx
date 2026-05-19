@@ -1,4 +1,5 @@
 import type { Metadata } from "next"
+import { AppRuntime } from "@/components/app/AppRuntime"
 
 export const metadata: Metadata = {
   robots: {
@@ -8,5 +9,9 @@ export const metadata: Metadata = {
 }
 
 export default function ReaderLayout({ children }: { children: React.ReactNode }) {
-  return <div className="min-h-screen bg-white">{children}</div>
+  return (
+    <AppRuntime>
+      <div className="min-h-screen bg-white">{children}</div>
+    </AppRuntime>
+  )
 }

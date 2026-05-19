@@ -1,70 +1,102 @@
-"use client"
+import type { Metadata } from "next"
+import Script from "next/script"
 
-import Link from "next/link"
-import type { Route } from "next"
-import { useEffect, useState } from "react"
-import { useParams } from "next/navigation"
+import { PublicChapterPageClient } from "@/components/public/PublicChapterPageClient"
+import { getPublicBookServer, getPublicChapterServer } from "@/lib/api/public.server"
+import {
+  DEFAULT_OG_IMAGE,
+  SITE_NAME,
+  buildArticleJsonLd,
+  buildBreadcrumbJsonLd,
+} from "@/lib/seo"
 
-import { booksApi } from "@/lib/api/books"
-import { renderRichTextHtml } from "@/lib/utils/richText"
-import { usePreferencesStore } from "@/lib/stores/preferencesStore"
-import type { PublicChapter } from "@/types/book"
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ bookId: string; chapterId: string }>
+}): Promise<Metadata> {
+  const { bookId, chapterId } = await params
+  const chapterNumber = Number.parseInt(chapterId, 10)
 
-export default function PublicChapterPage() {
-  const { bookId, chapterId } = useParams<{ bookId: string; chapterId: string }>()
-  const [chapter, setChapter] = useState<PublicChapter | null>(null)
-  const [text, setText] = useState("")
-  const { theme } = usePreferencesStore()
-  const isDark = theme === "dark"
-  const chapterNum = parseInt(chapterId)
-
-  useEffect(() => {
-    booksApi.getPublicChapter(bookId, chapterNum).then((payload) => {
-      setChapter(payload)
-      if (payload.text_content) {
-        setText(payload.text_content)
-      } else if (payload.text_url) {
-        fetch(payload.text_url).then((r) => r.text()).then(setText).catch(() => setText(""))
-      } else {
-        setText("")
-      }
-    })
-  }, [bookId, chapterNum])
-
-  if (!chapter) {
-    return <div className={`mx-auto max-w-4xl px-4 py-20 text-center ${isDark ? "text-slate-500" : "text-slate-400"}`}>Loading chapter...</div>
+  if (!Number.isFinite(chapterNumber) || chapterNumber <= 0) {
+    return {}
   }
 
+  const [book, chapter] = await Promise.all([
+    getPublicBookServer(bookId).catch(() => null),
+    getPublicChapterServer(bookId, chapterNumber).catch(() => null),
+  ])
+
+  if (!book || !chapter) {
+    return {}
+  }
+
+  const routeId = book.public_slug || book.id
+  const chapterTitle = chapter.chapter_title || `Chapter ${chapter.chapter_number}`
+  const description = chapter.chapter_description
+    ?? `Read ${chapterTitle} from ${book.title} on LoreVia.`
+
+  return {
+    title: `${chapterTitle} - ${book.title}`,
+    description,
+    alternates: {
+      canonical: `/public/${routeId}/chapter/${chapter.chapter_number}`,
+    },
+    openGraph: {
+      title: `${chapterTitle} | ${book.title} | ${SITE_NAME}`,
+      description,
+      url: `https://getlorevia.com/public/${routeId}/chapter/${chapter.chapter_number}`,
+      images: [DEFAULT_OG_IMAGE],
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: `${chapterTitle} | ${book.title} | ${SITE_NAME}`,
+      description,
+      images: [DEFAULT_OG_IMAGE],
+    },
+  }
+}
+
+export default async function PublicChapterPage({
+  params,
+}: {
+  params: Promise<{ bookId: string; chapterId: string }>
+}) {
+  const { bookId, chapterId } = await params
+  const chapterNumber = Number.parseInt(chapterId, 10)
+  const [book, chapter] = await Promise.all([
+    getPublicBookServer(bookId).catch(() => null),
+    getPublicChapterServer(bookId, chapterNumber).catch(() => null),
+  ])
+  const routeId = book?.public_slug || book?.id || bookId
+  const chapterTitle = chapter?.chapter_title || (chapter ? `Chapter ${chapter.chapter_number}` : null)
+  const articleJsonLd = book && chapter && chapterTitle ? buildArticleJsonLd({
+    title: `${chapterTitle} - ${book.title}`,
+    description: chapter.chapter_description ?? `Read ${chapterTitle} from ${book.title} on LoreVia.`,
+    path: `/public/${routeId}/chapter/${chapter.chapter_number}`,
+    datePublished: book.created_at ?? new Date().toISOString(),
+    about: [book.title, chapterTitle, "public manuscript sample"],
+  }) : null
+  const breadcrumbJsonLd = book && chapter && chapterTitle ? buildBreadcrumbJsonLd([
+    { name: "Home", path: "/" },
+    { name: "Public Library", path: "/public" },
+    { name: book.title, path: `/public/${routeId}` },
+    { name: chapterTitle, path: `/public/${routeId}/chapter/${chapter.chapter_number}` },
+  ]) : null
+
   return (
-    <div className={`min-h-screen ${isDark ? "bg-black text-white" : "bg-white text-slate-950"}`}>
-      <div className="mx-auto max-w-4xl px-4 py-8">
-        <div className="mb-8 flex flex-wrap items-center gap-3">
-          <Link href={`/public/${bookId}` as Route} className={`text-sm ${isDark ? "text-slate-400 hover:text-white" : "text-slate-500 hover:text-slate-900"}`}>
-            {"<- Back to public book"}
-          </Link>
-          <Link href="/public" className={`text-sm ${isDark ? "text-slate-400 hover:text-white" : "text-slate-500 hover:text-slate-900"}`}>
-            Public library
-          </Link>
-        </div>
-        <h1 className="font-serif text-4xl">{chapter.chapter_title || `Chapter ${chapter.chapter_number}`}</h1>
-        {chapter.chapter_description ? <p className={`mt-3 text-sm leading-6 ${isDark ? "text-slate-300" : "text-slate-600"}`}>{chapter.chapter_description}</p> : null}
-        <div
-          className="note-rich-content mt-8 text-lg leading-9"
-          dangerouslySetInnerHTML={{ __html: renderRichTextHtml((chapter.html_content ?? text) || "Chapter text is still syncing.") }}
-        />
-        <div className={`mt-10 flex flex-wrap gap-2 border-t pt-6 ${isDark ? "border-white/10" : "border-slate-200"}`}>
-          {chapter.chapter_number > 1 ? (
-            <Link href={`/public/${bookId}/chapter/${chapter.chapter_number - 1}` as Route} className={`rounded-full border px-4 py-2 text-sm ${isDark ? "border-white/10 bg-white/5 hover:bg-white/10" : "border-slate-200 bg-slate-50 hover:bg-slate-100"}`}>
-              Previous chapter
-            </Link>
-          ) : null}
-          {chapter.total_chapters === null || chapter.chapter_number < chapter.total_chapters ? (
-            <Link href={`/public/${bookId}/chapter/${chapter.chapter_number + 1}` as Route} className={`rounded-full border px-4 py-2 text-sm ${isDark ? "border-white/10 bg-white/5 hover:bg-white/10" : "border-slate-200 bg-slate-50 hover:bg-slate-100"}`}>
-              Next chapter
-            </Link>
-          ) : null}
-        </div>
-      </div>
-    </div>
+    <>
+      {chapter && articleJsonLd ? (
+        <Script id={`public-chapter-jsonld-${routeId}-${chapter.chapter_number}`} type="application/ld+json" strategy="beforeInteractive">
+          {JSON.stringify(articleJsonLd).replace(/</g, "\\u003c")}
+        </Script>
+      ) : null}
+      {chapter && breadcrumbJsonLd ? (
+        <Script id={`public-chapter-breadcrumbs-jsonld-${routeId}-${chapter.chapter_number}`} type="application/ld+json" strategy="beforeInteractive">
+          {JSON.stringify(breadcrumbJsonLd).replace(/</g, "\\u003c")}
+        </Script>
+      ) : null}
+      <PublicChapterPageClient bookId={routeId} chapterId={chapterId} initialChapter={chapter} />
+    </>
   )
 }

@@ -1,11 +1,16 @@
 from datetime import UTC, date, datetime
 from types import SimpleNamespace
 
+import pytest
+
 from app.utils.user_utils import (
     add_daily_word_progress,
+    build_writing_activity_entry,
+    build_writing_dashboard_stats,
     current_daily_word_count,
     current_daily_word_goal,
     login_activity_dates,
+    normalize_writing_entry_title,
     record_login_activity,
 )
 
@@ -73,3 +78,129 @@ def test_record_login_activity_does_not_double_count_same_day():
     assert user.login_streak_days == 2
     assert user.longest_login_streak_days == 2
     assert login_activity_dates(user) == [date(2026, 5, 6), date(2026, 5, 7)]
+
+
+def test_normalize_writing_entry_title_prefers_explicit_title():
+    assert normalize_writing_entry_title("  Epilogue  ", chapter_number=4, fallback="Atlas") == "Epilogue"
+
+
+def test_normalize_writing_entry_title_falls_back_to_chapter_number():
+    assert normalize_writing_entry_title("", chapter_number=8, fallback="Atlas") == "Chapter 8"
+
+
+def test_build_writing_activity_entry_ignores_non_positive_word_counts():
+    user = _user_stub(id="user-1")
+    book = SimpleNamespace(id="book-1", title="Atlas")
+
+    assert build_writing_activity_entry(user, book, 0, chapter_number=2, title="Storm") is None
+
+
+def test_build_writing_activity_entry_sets_date_and_title():
+    user = _user_stub(id="user-1")
+    book = SimpleNamespace(id="book-1", title="Atlas")
+
+    entry = build_writing_activity_entry(
+        user,
+        book,
+        315,
+        chapter_number=6,
+        title="  The Crossing  ",
+        now=datetime(2026, 5, 7, 9, 15, tzinfo=UTC),
+    )
+
+    assert entry is not None
+    assert entry.entry_title == "The Crossing"
+    assert entry.chapter_number == 6
+    assert entry.words_added == 315
+    assert entry.activity_date == date(2026, 5, 7)
+
+
+class _ScalarList:
+    def __init__(self, items):
+        self._items = items
+
+    def all(self):
+        return list(self._items)
+
+
+class _Result:
+    def __init__(self, items):
+        self._items = items
+
+    def scalars(self):
+        return _ScalarList(self._items)
+
+
+class _FakeDB:
+    def __init__(self, items):
+        self._items = items
+
+    async def execute(self, *_args, **_kwargs):
+        return _Result(self._items)
+
+
+@pytest.mark.asyncio
+async def test_build_writing_dashboard_stats_rolls_up_periods_and_entries():
+    user = _user_stub(id="user-1", daily_word_goal=1000)
+    now = datetime(2026, 5, 14, 12, 0, tzinfo=UTC)
+    activities = [
+        SimpleNamespace(
+            book_id="book-1",
+            chapter_number=36,
+            entry_title="Chapter XXXVI",
+            words_added=763,
+            activity_date=date(2026, 5, 14),
+            created_at=datetime(2026, 5, 14, 9, 0, tzinfo=UTC),
+        ),
+        SimpleNamespace(
+            book_id="book-1",
+            chapter_number=None,
+            entry_title="Epilogue",
+            words_added=439,
+            activity_date=date(2026, 5, 14),
+            created_at=datetime(2026, 5, 14, 10, 0, tzinfo=UTC),
+        ),
+        SimpleNamespace(
+            book_id="book-1",
+            chapter_number=35,
+            entry_title="Chapter XXXV",
+            words_added=1363,
+            activity_date=date(2026, 5, 12),
+            created_at=datetime(2026, 5, 12, 18, 0, tzinfo=UTC),
+        ),
+        SimpleNamespace(
+            book_id="book-1",
+            chapter_number=20,
+            entry_title="Chapter XX",
+            words_added=9600,
+            activity_date=date(2026, 5, 2),
+            created_at=datetime(2026, 5, 2, 12, 0, tzinfo=UTC),
+        ),
+        SimpleNamespace(
+            book_id="book-1",
+            chapter_number=4,
+            entry_title="Chapter IV",
+            words_added=47806,
+            activity_date=date(2026, 2, 14),
+            created_at=datetime(2026, 2, 14, 8, 0, tzinfo=UTC),
+        ),
+    ]
+
+    stats = await build_writing_dashboard_stats(_FakeDB(activities), user, now=now)
+
+    assert stats["today"]["words"] == 1202
+    assert stats["today"]["target_words"] == 1000
+    assert stats["today"]["progress_pct"] == 100
+    assert stats["this_week"]["words"] == 2565
+    assert stats["this_week"]["target_words"] == 7000
+    assert stats["this_month"]["words"] == 12165
+    assert stats["this_year"]["words"] == 59971
+    assert stats["last_24_hours"]["words"] == 1202
+    assert stats["last_7_days"]["words"] == 2565
+    assert stats["last_30_days"]["words"] == 12165
+    assert stats["last_year"]["words"] == 59971
+    assert stats["entries_today"][0]["title"] == "Epilogue"
+    assert stats["entries_today"][0]["words"] == 439
+    assert stats["entries_today"][1]["title"] == "Chapter XXXVI"
+    assert stats["entries_today"][1]["words"] == 763
+    assert len(stats["heatmap"]) == 140

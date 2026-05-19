@@ -5,6 +5,7 @@ import type { Route } from "next"
 import { usePathname, useRouter } from "next/navigation"
 import { authApi } from "@/lib/api/auth"
 import { BrandLockup } from "@/components/layout/BrandLockup"
+import { ChatLauncher } from "@/components/layout/ChatLauncher"
 import { NotificationBell } from "@/components/layout/NotificationBell"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
@@ -53,6 +54,7 @@ export function Navbar() {
           </Link>
 
           <div className="flex items-center gap-2">
+            <ChatLauncher />
             <NotificationBell />
             <button
               onClick={toggleTheme}

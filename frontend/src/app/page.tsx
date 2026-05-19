@@ -1,18 +1,58 @@
-"use client"
-
 import Link from "next/link"
+import Script from "next/script"
+import type { Metadata } from "next"
 import type { Route } from "next"
-import { useEffect, useRef, useState, type ReactNode } from "react"
+import type { ReactNode } from "react"
+import { AudienceSection } from "@/components/marketing/AudienceSection"
+import { HomePricingSection } from "@/components/marketing/HomePricingSection"
+import { Reveal } from "@/components/marketing/Reveal"
 import { BrandLockup } from "@/components/layout/BrandLockup"
 import { pricingTiers as billingPricingTiers } from "@/lib/billing/catalog"
-import { useAuthStore } from "@/lib/stores/authStore"
+import {
+  DEFAULT_OG_IMAGE,
+  SITE_NAME,
+  SITE_URL,
+  buildFaqPageJsonLd,
+  toAbsoluteUrl,
+} from "@/lib/seo"
+
+export const metadata: Metadata = {
+  title: "Fiction Writing Software for Manuscript Intelligence",
+  description:
+    "LoreVia helps fiction authors analyze manuscripts, track characters, catch continuity errors, build story bibles, and ask chapter-grounded questions during revision.",
+  keywords: [
+    "fiction writing software",
+    "manuscript analysis tool",
+    "continuity checker for fiction",
+    "character tracking for writers",
+    "story bible software",
+    "novel revision software",
+  ],
+  alternates: {
+    canonical: "/",
+  },
+  openGraph: {
+    title: "LoreVia | Fiction Writing Software for Manuscript Intelligence",
+    description:
+      "LoreVia helps fiction authors analyze manuscripts, track characters, catch continuity errors, build story bibles, and ask chapter-grounded questions during revision.",
+    url: SITE_URL,
+    images: [DEFAULT_OG_IMAGE],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "LoreVia | Fiction Writing Software for Manuscript Intelligence",
+    description:
+      "LoreVia helps fiction authors analyze manuscripts, track characters, catch continuity errors, build story bibles, and ask chapter-grounded questions during revision.",
+    images: [DEFAULT_OG_IMAGE],
+  },
+}
 
 const navItems = [
   { label: "Product", href: "#product" },
-  { label: "Authors", href: "#audiences" },
-  { label: "Readers", href: "#audiences" },
+  { label: "For Authors", href: "#audiences" },
+  { label: "Continuity", href: "#scan" },
   { label: "Pricing", href: "#pricing" },
-  { label: "About", href: "#faq" },
+  { label: "FAQ", href: "#faq" },
 ]
 
 const fileFormats = ["DOCX", "PDF", "EPUB", "MD", "TXT", "Obsidian"]
@@ -50,7 +90,7 @@ const workspaceModules = [
   },
   {
     title: "Story Advisor",
-    body: "Ask grounded questions with chapter-aware citations and spoiler limits.",
+    body: "Ask grounded questions with chapter-aware citations and collaborator-safe sharing limits.",
   },
 ]
 
@@ -87,33 +127,9 @@ const processSteps = [
   {
     number: "03",
     title: "Ask, revise, detect",
-    body: "Get spoiler-safe answers, continuity flags, and chapter references you can verify fast.",
+    body: "Get grounded answers, continuity flags, and chapter references you can verify fast.",
   },
 ]
-
-const audienceTabs = {
-  Authors: [
-    "Character bible built from the manuscript",
-    "Continuity scan for late-draft revisions",
-    "Plot thread tracker with first and latest mention",
-    "Voice and detail inconsistency detection",
-    "Worldbuilding gaps before beta readers find them",
-  ],
-  Screenwriters: [
-    "Scene continuity across drafts",
-    "Motivation tracking by character and beat",
-    "Dialogue voice checks",
-    "Location and prop consistency",
-    "Beat references for rewrites",
-  ],
-  Readers: [
-    "Spoiler-safe recap up to your chapter",
-    "Ask what happened without future reveals",
-    "Character reminders after long breaks",
-    "Relationship maps for dense casts",
-    "Reader-safe public-domain story scans",
-  ],
-}
 
 const comparisonRows = [
   ["Manuscript editor", "Yes", "Yes", "Yes", "Yes"],
@@ -130,65 +146,10 @@ const comparisonRows = [
   ["Character voice consistency checks", "No", "No", "No", "Yes"],
 ]
 
-const pricingTiers = billingPricingTiers.map((tier) => ({
-  name: tier.name,
-  price: tier.priceMonthly,
-  subtitle:
-    tier.name === "Free"
-      ? "Explore LoreVia with a single project."
-      : tier.name === "Reader"
-        ? "For readers following long stories and series."
-        : tier.name === "Author"
-          ? "For active manuscript drafting and revision."
-          : "For multi-book projects and expansive story worlds.",
-  bullets:
-    tier.name === "Free"
-      ? [
-          "2 active books",
-          "Character tracking and story recall",
-          "Basic chapter summaries",
-          "Standard usage limits",
-        ]
-      : tier.name === "Reader"
-        ? [
-            "Everything in Free, plus",
-            "Unlimited books",
-            "Multi-chapter summaries",
-            "Advanced story questions",
-            "Reader-focused workspace",
-          ]
-        : tier.name === "Author"
-          ? [
-              "Everything in Reader, plus",
-              "Continuity scans",
-              "Manuscript feedback",
-              "Character reference generation",
-              "Relationship and timeline tracking",
-              "High monthly usage limits",
-            ]
-          : [
-              "Everything in Author, plus",
-              "Cross-book continuity analysis",
-              "Advanced world consistency checks",
-              "Series-wide relationship tracking",
-              "Early access to new features",
-              "Extended analysis capacity",
-            ],
-  cta:
-    tier.name === "Free"
-      ? "Start free"
-      : tier.name === "Reader"
-        ? "Continue reading"
-        : tier.name === "Author"
-          ? "Start writing"
-          : "Build your world",
-  highlighted: tier.name === "Author",
-}))
-
 const faqItems = [
   {
     q: "Will LoreVia spoil future chapters?",
-    a: "Reader mode can stay bounded to a chapter, so answers avoid events past the point you choose.",
+    a: "Collaborator access can stay bounded to a chapter, so shared answers avoid events past the point you choose.",
   },
   {
     q: "Can I use it before my book is published?",
@@ -211,50 +172,6 @@ const faqItems = [
     a: "Yes. Higher tiers are shaped around larger manuscripts, multiple books, and recurring casts.",
   },
 ]
-
-function useInView(threshold = 0.14) {
-  const ref = useRef<HTMLDivElement>(null)
-  const [inView, setInView] = useState(false)
-
-  useEffect(() => {
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) setInView(true)
-      },
-      { threshold }
-    )
-
-    if (ref.current) observer.observe(ref.current)
-
-    return () => observer.disconnect()
-  }, [threshold])
-
-  return { ref, inView }
-}
-
-function Reveal({
-  children,
-  delay = 0,
-  className = "",
-}: {
-  children: ReactNode
-  delay?: number
-  className?: string
-}) {
-  const { ref, inView } = useInView()
-
-  return (
-    <div
-      ref={ref}
-      style={{ transitionDelay: `${delay}ms` }}
-      className={`transform-gpu transition-all duration-700 ease-out ${
-        inView ? "translate-y-0 opacity-100" : "translate-y-6 opacity-0"
-      } ${className}`}
-    >
-      {children}
-    </div>
-  )
-}
 
 function Section({
   id,
@@ -552,7 +469,7 @@ function WorkspacePreview() {
           <div className="max-w-3xl">
             <SectionHeader
               title="Everything your story needs, in one workspace."
-              body="Upload a manuscript and LoreVia turns it into a living workspace for chapters, characters, continuity checks, notes, timelines, and grounded story questions."
+              body="Upload a manuscript and LoreVia turns it into an author workspace for chapters, characters, continuity checks, notes, timelines, and grounded story questions."
             />
             <div className="mt-10 grid gap-px overflow-hidden rounded-2xl border border-white/10 bg-white/10 sm:grid-cols-2">
               {workspaceModules.map((item) => (
@@ -665,7 +582,7 @@ function ProcessSection() {
     <Section>
       <SectionHeader
         title="Three steps to a stronger story memory."
-        body="The process is simple, but the output is useful enough for real revision: import, extract, then ask or scan with evidence."
+        body="The process is simple, but the output is built for real author revision: import, extract, then ask or scan with evidence."
         align="center"
       />
       <div className="relative mt-14 grid gap-6 lg:grid-cols-3">
@@ -686,88 +603,12 @@ function ProcessSection() {
   )
 }
 
-function AudienceSection() {
-  const [activeAudience, setActiveAudience] = useState<keyof typeof audienceTabs>("Authors")
-  const items = audienceTabs[activeAudience]
-
-  return (
-    <Section id="audiences">
-      <div className="grid gap-10 lg:grid-cols-[0.8fr_1.2fr] lg:items-start">
-        <Reveal>
-          <div>
-            <SectionHeader
-              title="Built for the way different story people work."
-              body="Authors, screenwriters, and serious readers need different memory boundaries. The same story engine can serve each without making the interface feel generic."
-            />
-            <div className="mt-8 inline-flex rounded-md border border-white/10 bg-white/[0.04] p-1">
-              {(Object.keys(audienceTabs) as Array<keyof typeof audienceTabs>).map((tab) => (
-                <button
-                  key={tab}
-                  type="button"
-                  onClick={() => setActiveAudience(tab)}
-                  className={`rounded px-4 py-2 text-sm font-semibold transition ${
-                    activeAudience === tab ? "bg-white text-slate-950" : "text-slate-400 hover:text-white"
-                  }`}
-                >
-                  {tab}
-                </button>
-              ))}
-            </div>
-          </div>
-        </Reveal>
-
-        <Reveal delay={100}>
-          <div className="relative isolate overflow-hidden rounded-2xl border border-white/10 bg-[#080d18] p-6 md:p-8">
-            <div className="pointer-events-none absolute inset-y-0 right-0 z-0 hidden w-[46%] bg-[radial-gradient(circle_at_center,rgba(125,211,252,0.12),transparent_55%)] lg:block" />
-            <div className="relative z-10 grid gap-10 lg:grid-cols-[1fr_0.85fr] lg:gap-8">
-              <div>
-                <p className="text-sm font-semibold uppercase tracking-[0.2em] text-cyan-300">{activeAudience}</p>
-                <h3 className="mt-4 text-3xl font-semibold text-white">Concrete tools, not vague writing magic.</h3>
-                <div className="mt-7 space-y-4">
-                  {items.map((item) => (
-                    <div key={item} className="flex gap-4 rounded-xl border border-white/10 bg-white/[0.03] p-4">
-                      <span className="mt-1 h-2 w-2 rounded-full bg-cyan-300" />
-                      <p className="text-sm leading-6 text-slate-200">{item}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="relative mx-auto min-h-[220px] w-full max-w-[280px] overflow-hidden rounded-2xl bg-[linear-gradient(180deg,rgba(125,211,252,0.04),transparent)] lg:min-h-[320px] lg:max-w-none lg:bg-transparent">
-                <svg viewBox="0 0 320 320" className="h-full w-full text-cyan-200/70" aria-hidden>
-                  <path d="M82 90 C140 34 223 52 250 112" stroke="currentColor" strokeWidth="1.4" fill="none" opacity="0.5" />
-                  <path d="M77 96 C100 185 170 235 242 222" stroke="currentColor" strokeWidth="1.4" fill="none" opacity="0.35" />
-                  <path d="M251 119 C213 152 201 188 241 219" stroke="currentColor" strokeWidth="1.4" fill="none" opacity="0.5" />
-                  {[
-                    [78, 94, "Mira"],
-                    [252, 116, "Vael"],
-                    [242, 224, "Joren"],
-                    [118, 212, "Amulet"],
-                    [178, 68, "Bridge"],
-                  ].map(([cx, cy, label]) => (
-                    <g key={label as string}>
-                      <circle cx={cx as number} cy={cy as number} r="26" fill="#0f172a" stroke="rgba(125,211,252,0.45)" />
-                      <text x={cx as number} y={(cy as number) + 4} textAnchor="middle" fill="#f8fafc" fontSize="12">
-                        {label}
-                      </text>
-                    </g>
-                  ))}
-                </svg>
-              </div>
-            </div>
-          </div>
-        </Reveal>
-      </div>
-    </Section>
-  )
-}
-
 function ComparisonSection() {
   return (
     <Section id="comparison">
       <SectionHeader
         title="Where traditional writing tools stop."
-        body="Traditional writing tools help organize stories. LoreVia actively understands them."
+        body="Traditional writing tools help organize stories. LoreVia gives authors searchable story memory and continuity intelligence."
       />
       <Reveal>
         <div className="mt-10 overflow-hidden rounded-2xl border border-white/10 bg-[#080d18]">
@@ -813,69 +654,10 @@ function ComparisonSection() {
   )
 }
 
-function PricingSection({ ctaHref }: { ctaHref: Route }) {
-  return (
-    <Section id="pricing">
-      <SectionHeader
-        title="Choose the workspace that fits your writing."
-        body="From casual reading to full manuscript management."
-        align="center"
-      />
-      <div className="mt-12 grid gap-5 md:grid-cols-2 lg:grid-cols-4">
-        {pricingTiers.map((tier, index) => (
-          <Reveal key={tier.name} delay={index * 70} className="h-full">
-            <article
-              className={`relative flex h-full flex-col rounded-2xl p-6 transition hover:-translate-y-1 ${
-                tier.highlighted
-                  ? "border border-cyan-300/50 bg-[#121b30] shadow-[0_24px_70px_-45px_rgba(125,211,252,0.8)]"
-                  : "border border-white/10 bg-[#080d18]"
-              }`}
-            >
-              {tier.highlighted ? (
-                <div className="absolute -top-3 left-6 rounded-md bg-cyan-300 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-slate-950">
-                  Best value
-                </div>
-              ) : null}
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <h3 className="text-xl font-semibold text-white">{tier.name}</h3>
-                  <p className="mt-2 text-sm leading-6 text-slate-400">{tier.subtitle}</p>
-                </div>
-              </div>
-              <div className="mt-8 flex items-baseline gap-1">
-                <span className="text-5xl font-semibold tracking-tight text-white">${tier.price}</span>
-                {tier.price > 0 ? <span className="text-sm text-slate-500">/mo</span> : null}
-              </div>
-              <ul className="mt-8 space-y-4">
-                {tier.bullets.map((bullet) => (
-                  <li key={bullet} className="flex gap-3 text-sm leading-6 text-slate-300">
-                    <span className={tier.highlighted ? "text-cyan-200" : "text-slate-500"}>+</span>
-                    <span>{bullet}</span>
-                  </li>
-                ))}
-              </ul>
-              <Link
-                href={ctaHref}
-                className={`mt-auto inline-flex w-full items-center justify-center rounded-md px-4 py-3.5 text-sm font-semibold transition ${
-                  tier.highlighted
-                    ? "bg-white text-slate-950 hover:bg-slate-200"
-                    : "border border-white/10 text-white hover:border-white/25 hover:bg-white/8"
-                }`}
-              >
-                {tier.cta}
-              </Link>
-            </article>
-          </Reveal>
-        ))}
-      </div>
-    </Section>
-  )
-}
-
 function FAQSection() {
   return (
     <Section id="faq">
-      <SectionHeader title="Questions authors ask before uploading." align="center" />
+      <SectionHeader title="Questions authors ask before trusting a manuscript workspace." align="center" />
       <div className="mt-12 grid gap-px overflow-hidden rounded-2xl border border-white/10 bg-white/10 md:grid-cols-2">
         {faqItems.map((item) => (
           <Reveal key={item.q}>
@@ -891,11 +673,55 @@ function FAQSection() {
 }
 
 export default function HomePage() {
-  const { user, hydrated } = useAuthStore()
-  const ctaHref: Route = hydrated && user ? "/library" : "/login"
+  const ctaHref: Route = "/register"
+  const faqJsonLd = buildFaqPageJsonLd(
+    faqItems.map((item) => ({
+      question: item.q,
+      answer: item.a,
+    })),
+  )
+  const softwareJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    name: SITE_NAME,
+    applicationCategory: "BusinessApplication",
+    operatingSystem: "Web",
+    url: toAbsoluteUrl("/"),
+    keywords: [
+      "fiction writing software",
+      "manuscript analysis",
+      "continuity checker",
+      "story bible",
+    ],
+    description:
+      "LoreVia helps fiction authors analyze manuscripts, track characters, manage continuity, and build a searchable story workspace.",
+    offers: billingPricingTiers
+      .filter((tier) => tier.priceMonthly >= 0)
+      .map((tier) => ({
+        "@type": "Offer",
+        price: tier.priceMonthly.toString(),
+        priceCurrency: "USD",
+        name: tier.name,
+        url: toAbsoluteUrl("/pricing"),
+      })),
+    featureList: [
+      "Character tracking",
+      "Continuity scans",
+      "Timeline review",
+      "Story bible generation",
+      "Chapter-grounded story questions",
+      "Beta-reader collaboration",
+    ],
+  }
 
   return (
     <main className="min-h-screen overflow-hidden bg-[#050814] text-white">
+      <Script id="home-faq-jsonld" type="application/ld+json" strategy="beforeInteractive">
+        {JSON.stringify(faqJsonLd).replace(/</g, "\\u003c")}
+      </Script>
+      <Script id="home-software-jsonld" type="application/ld+json" strategy="beforeInteractive">
+        {JSON.stringify(softwareJsonLd).replace(/</g, "\\u003c")}
+      </Script>
       <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(circle_at_20%_0%,rgba(125,211,252,0.09),transparent_28%),radial-gradient(circle_at_80%_12%,rgba(196,181,253,0.08),transparent_24%),linear-gradient(180deg,#050814_0%,#070b14_42%,#0b1020_100%)]" />
 
       <header className="sticky top-0 z-50 border-b border-white/10 bg-[#050814]/88 backdrop-blur-xl">
@@ -916,6 +742,12 @@ export default function HomePage() {
           </nav>
           <div className="flex items-center gap-3">
             <Link
+              href="/blog"
+              className="hidden px-4 py-2 text-[14px] font-medium tracking-[0.01em] text-white/70 transition hover:text-white sm:inline-flex"
+            >
+              Blog
+            </Link>
+            <Link
               href="/login"
               className="hidden px-4 py-2 text-[14px] font-medium tracking-[0.01em] text-white/70 transition hover:text-white sm:inline-flex"
             >
@@ -935,16 +767,16 @@ export default function HomePage() {
         <Reveal>
           <div>
             <p className="inline-flex rounded-full border border-white/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-300">
-              For fiction authors and serious readers
+              Fiction authors only
             </p>
             <h1
-              className="mt-7 text-5xl font-[650] leading-[0.98] tracking-[-0.04em] text-white md:text-7xl xl:text-[5.15rem]"
+              className="mt-7 text-5xl font-[600] leading-[0.98] tracking-[-0.04em] text-white md:text-7xl xl:text-[4.15rem]"
               style={{ fontFamily: '"Inter", "Geist", "Satoshi", var(--font-ui), sans-serif' }}
             >
-              Never lose track of your story again.
+              LoreVia for authors who need story memory, sharper revisions, and continuity control.
             </h1>
             <p className="mt-6 max-w-2xl text-lg leading-9 text-slate-300 md:text-xl">
-              LoreVia tracks your characters, relationships, timelines, and continuity issues directly from your manuscript, so you can revise complex stories without losing the thread.
+              LoreVia turns your manuscript into an author workspace with character tracking, manuscript intelligence, relationship memory, grounded story questions, and continuity scans that stay tied to the draft.
             </p>
             <div className="mt-8 flex flex-col gap-4 xl:flex-row">
               <Link
@@ -985,7 +817,7 @@ export default function HomePage() {
       <ProcessSection />
       <AudienceSection />
       <ComparisonSection />
-      <PricingSection ctaHref={ctaHref} />
+      <HomePricingSection ctaHref={ctaHref} />
       <FAQSection />
 
       <section className="border-t border-white/10 bg-[#030711]">
@@ -995,7 +827,7 @@ export default function HomePage() {
               Start with one chapter. See what LoreVia remembers.
             </h2>
             <p className="mt-5 max-w-2xl text-lg leading-8 text-slate-400">
-              Upload a manuscript and get your first continuity scan, character map, and grounded story memory.
+              Upload a manuscript and get your first author-facing continuity scan, character map, and grounded story memory.
             </p>
           </div>
           <div className="flex flex-col gap-4 sm:flex-row lg:justify-end">

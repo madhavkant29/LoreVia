@@ -1,7 +1,11 @@
 const PUBLIC_PAGE_ROUTES = new Set([
   "/",
+  "/blog",
+  "/answers",
   "/compliance",
   "/contact",
+  "/checkout",
+  "/demo",
   "/eula",
   "/pricing",
   "/privacy",
@@ -12,7 +16,11 @@ const PUBLIC_PAGE_ROUTES = new Set([
 
 const AUTH_BOOTSTRAP_EXCLUDED_PREFIXES = [
   "/auth/callback",
+  "/answers",
+  "/blog",
+  "/checkout",
   "/complete-username",
+  "/demo",
   "/forgot-password",
   "/login",
   "/public",

@@ -91,19 +91,17 @@ class Settings(BaseSettings):
     PADDLE_WEBHOOK_SECRET: str | None = None
     PADDLE_WEBHOOK_TOLERANCE_SECONDS: int = 300
     PADDLE_DEFAULT_CHECKOUT_URL: str | None = None
-    PADDLE_READER_MONTHLY_PRICE_ID: str | None = None
-    PADDLE_READER_ANNUAL_PRICE_ID: str | None = None
     PADDLE_AUTHOR_MONTHLY_PRICE_ID: str | None = None
     PADDLE_AUTHOR_ANNUAL_PRICE_ID: str | None = None
     PADDLE_ARCHITECT_MONTHLY_PRICE_ID: str | None = None
     PADDLE_ARCHITECT_ANNUAL_PRICE_ID: str | None = None
-    # Legacy names kept so existing environments do not break while the new
-    # Reader/Author/Architect catalog is being rolled out.
+    # Legacy names kept so existing Pro/Power environments still resolve into
+    # the current Author/Architect three-tier catalog.
     PADDLE_PRO_MONTHLY_PRICE_ID: str | None = None
     PADDLE_PRO_ANNUAL_PRICE_ID: str | None = None
     PADDLE_POWER_MONTHLY_PRICE_ID: str | None = None
     PADDLE_POWER_ANNUAL_PRICE_ID: str | None = None
-    APP_URL: str = "http://localhost:3000"
+    APP_URL: str = "https://getlorevia.com"
 
     # Email
     RESEND_API_KEY: str
@@ -112,14 +110,19 @@ class Settings(BaseSettings):
     LEGAL_EMAIL: str = "legal@getlorevia.com"
     INTERNAL_JOB_SECRET: str | None = None
 
-    # Rewarded ads
-    REWARDED_ADS_ENABLED: bool = False
-    REWARDED_AD_GPT_UNIT_PATH: str | None = None
-    REWARDED_AD_REWARD_POINTS: int = 3
-    REWARDED_AD_DAILY_CAP: int = 1
-    REWARDED_AD_SESSION_TTL_SECONDS: int = 900
-    REWARDED_AD_MIN_GRANT_SECONDS: int = 5
+    # Public demo / sharing
+    PUBLIC_MODE_ENABLED: bool = True
+    PUBLIC_FORUM_STATUS: str = "public"
 
+    # Beta reads
+    BETA_READ_MIN_WINDOW_DAYS: int = 3
+    BETA_READ_MAX_WINDOW_DAYS: int = 7
+    BETA_READ_KEEP_READ_ONLY_AFTER_EXPIRY: bool = False
+    BETA_READ_ALLOW_LATE_FEEDBACK: bool = False
+    BETA_READ_MISSED_PENALTY_THRESHOLD: int = 3
+    BETA_READ_PENALTY_ENABLED: bool = True
+    BETA_READ_PENALTY_TYPE: str = "warning"
+    BETA_READ_PENALTY_AMOUNT: int = 0
     # Monitoring
     SENTRY_DSN: str | None = None
 
@@ -145,45 +148,43 @@ class Settings(BaseSettings):
     SEARCH_SIMILARITY_THRESHOLD: float = 0.65
     SEARCH_MAX_CONTEXT_CHUNKS: int = 3
     PASSWORD_RESET_TOKEN_TTL_SECONDS: int = 1800
+    PASSWORD_RESET_REQUEST_COOLDOWN_SECONDS: int = 120
     EMAIL_VERIFICATION_TOKEN_TTL_SECONDS: int = 86400
     # Tier limits
-    FREE_MAX_BOOKS: int = 2
-    FREE_TOTAL_TOKEN_BUDGET: int = 250000
-    FREE_SEARCH_PER_DAY: int = 5
+    FREE_MAX_BOOKS: int = 1
+    AUTHOR_MAX_UPLOADS: int = 15
+    BOOK_UPLOAD_MAX_BYTES: int = 100 * 1024 * 1024
+    COVER_UPLOAD_MAX_BYTES: int = 5 * 1024 * 1024
+    MANUSCRIPT_IMPORT_MAX_BYTES: int = 20 * 1024 * 1024
+    WORLD_BUILDING_UPLOAD_MAX_BYTES: int = 20 * 1024 * 1024
+    OBSIDIAN_IMPORT_MAX_BYTES: int = 25 * 1024 * 1024
+    UPLOAD_ARCHIVE_MAX_ENTRIES: int = 500
+    UPLOAD_ARCHIVE_MAX_UNCOMPRESSED_BYTES: int = 100 * 1024 * 1024
+    UPLOAD_ARCHIVE_MAX_COMPRESSION_RATIO: int = 100
+    FREE_TOTAL_TOKEN_BUDGET: int = 150000
+    FREE_SEARCH_PER_DAY: int = 3
     FREE_SUMMARY_PER_HOUR: int = 30
-    FREE_PREDICTION_PER_DAY: int = 3
-    READER_PREDICTION_PER_DAY: int = 10
+    FREE_PREDICTION_PER_DAY: int = 1
+    FREE_RECALL_PER_DAY: int = 2
     AUTHOR_PREDICTION_PER_DAY: int = 30
     ARCHITECT_PREDICTION_PER_DAY: int = 60
     TRIAL_HIGH_COST_TURNS_PER_DAY: int = 20
     AUTHOR_HIGH_COST_TURNS_PER_DAY: int = 30
     ARCHITECT_HIGH_COST_TURNS_PER_DAY: int = 60
-    FREE_ADVISOR_PER_DAY: int = 0
-    FREE_ADVISOR_PER_WEEK: int = 0
-    FREE_ADVISOR_PER_MONTH: int = 0
+    FREE_ADVISOR_PER_DAY: int = 1
+    FREE_ADVISOR_PER_WEEK: int = 7
+    FREE_ADVISOR_PER_MONTH: int = 30
     TRIAL_AUTHOR_ADVISOR_PER_DAY: int = 20
-    READER_ADVISOR_PER_DAY: int = 0
-    READER_ADVISOR_PER_WEEK: int = 0
-    READER_ADVISOR_PER_MONTH: int = 0
     AUTHOR_ADVISOR_PER_DAY: int = 30
     AUTHOR_ADVISOR_PER_WEEK: int = 210
     AUTHOR_ADVISOR_PER_MONTH: int = 900
     ARCHITECT_ADVISOR_PER_DAY: int = 60
     ARCHITECT_ADVISOR_PER_WEEK: int = 420
     ARCHITECT_ADVISOR_PER_MONTH: int = 1800
-    FREE_CONTINUITY_PER_MINUTE: int = 6
-    READER_CONTINUITY_PER_MINUTE: int = 0
+    FREE_CONTINUITY_PER_DAY: int = 1
+    FREE_CONTINUITY_PER_MINUTE: int = 1
     AUTHOR_CONTINUITY_PER_MINUTE: int = 20
     ARCHITECT_CONTINUITY_PER_MINUTE: int = 40
-    PRO_CHAT_PER_DAY: int = 30
-    PRO_ADVISOR_PER_DAY: int = 30
-    PRO_ADVISOR_PER_WEEK: int = 210
-    PRO_ADVISOR_PER_MONTH: int = 900
-    POWER_ADVISOR_PER_DAY: int = 60
-    POWER_ADVISOR_PER_WEEK: int = 420
-    POWER_ADVISOR_PER_MONTH: int = 1800
-    PRO_CONTINUITY_PER_MINUTE: int = 20
-    POWER_CONTINUITY_PER_MINUTE: int = 40
     DEVICE_TRIAL_ENFORCEMENT_ENABLED: bool = True
     DEVICE_TRIAL_MAX_ACCOUNTS: int = 2
 
@@ -228,4 +229,9 @@ def effective_tier(tier: str) -> str:
     if settings.DEBUG:
         return "architect"
     normalized = (tier or "free").strip().lower()
-    return {"pro": "author", "power": "architect"}.get(normalized, normalized)
+    return {
+        "reader": "free",
+        "collaborator": "free",
+        "pro": "author",
+        "power": "architect",
+    }.get(normalized, normalized)

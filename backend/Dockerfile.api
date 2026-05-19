@@ -8,13 +8,16 @@ RUN apt-get update && apt-get install -y curl && \
     chmod +x /usr/local/bin/cloudflared && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
+COPY backend/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Pre-download tiktoken encoding to avoid runtime network issues
 RUN python -c "import tiktoken; tiktoken.encoding_for_model('gpt-4o-mini')"
+RUN python -m spacy download en_core_web_sm
 
-COPY . .
+COPY backend/ .
+RUN mkdir -p /frontend/src/lib/billing
+COPY frontend/src/lib/billing/pricing-catalog.json /frontend/src/lib/billing/pricing-catalog.json
 RUN chmod +x start.sh
 
 EXPOSE 8000

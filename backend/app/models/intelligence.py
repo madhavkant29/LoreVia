@@ -66,11 +66,14 @@ class PlotThread(Base):
     title: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[str | None] = mapped_column(String)
     thread_type: Mapped[str | None] = mapped_column(String)
-    # main | sub | mystery | romance | political
+    # promise | mystery | conflict | prophecy | goal | object | clue |
+    # relationship_tension | open_question | subplot | political | romance | main
     status: Mapped[str] = mapped_column(String, default="introduced")
-    # introduced | ongoing | resolved | abandoned | unknown
+    # introduced | developing | paused | resolved | contradicted | abandoned | unknown
     introduced_at: Mapped[int | None] = mapped_column(Integer)
+    last_mentioned_at: Mapped[int | None] = mapped_column(Integer)
     resolved_at: Mapped[int | None] = mapped_column(Integer)
+    mention_count: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     note: Mapped[str | None] = mapped_column(Text)
     character_ids: Mapped[list[str] | None] = mapped_column(ARRAY(String))
     importance: Mapped[int] = mapped_column(Integer, default=5)  # 1–10
@@ -136,6 +139,7 @@ class Notification(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     book_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), index=True)
     kind: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String, unique=True, index=True)
     title: Mapped[str] = mapped_column(String, nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
     data: Mapped[dict | None] = mapped_column(JSONB)

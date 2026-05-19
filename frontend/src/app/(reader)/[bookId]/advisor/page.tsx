@@ -1,12 +1,14 @@
 "use client"
 
+import { useQuery } from "@tanstack/react-query"
 import { Fragment, useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useParams } from "next/navigation"
 import { booksApi } from "@/lib/api/books"
 import { intelligenceApi } from "@/lib/api/intelligence"
 import { canUseAuthorFeatures } from "@/lib/billing/plans"
-import { buildDailyCapEventDetail } from "@/lib/monetization/limitRecovery"
+import { buildDailyCapEventDetail } from "@/lib/limits/dailyCap"
+import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { capture } from "@/lib/analytics/posthog"
@@ -14,6 +16,7 @@ import { saveContextualVaultNote } from "@/lib/utils/notes"
 import type {
   AdvisorMessage,
   AdvisorPassage,
+  AdvisorScanMeta,
   AdvisorSuggestion,
   AdvisorGreeting,
   AdvisorWorldAnalysis,
@@ -24,6 +27,25 @@ import type {
 // ─── Response type visual config (4 variants) ────────────────────────────────
 type ResponseType = "standard" | "warning" | "opportunity" | "tradeoff"
 type AdvisorPanel = "checker" | "suggestions"
+
+const defaultScanMeta: AdvisorScanMeta = {
+  character_count: 0,
+  state_count: 0,
+  open_thread_count: 0,
+  clue_count: 0,
+  relationship_count: 0,
+  world_element_count: 0,
+  heuristic_count: 0,
+  fallback_applied: false,
+  proactive_audit_applied: false,
+  scan_basis: [],
+  data_gaps: [],
+  audit_summary: null,
+}
+
+function scanStorageKey(bookId: string) {
+  return `lorevia-advisor-scan:${bookId}`
+}
 
 function responseTypeStyle(type: ResponseType, isDark: boolean) {
   switch (type) {
@@ -285,6 +307,11 @@ function SuggestionGroup({
                     <span className={`text-[10px] font-semibold uppercase tracking-[0.22em] px-2 py-0.5 rounded-full ${cfg.badge}`}>
                       {s.type.replace(/_/g, " ")}
                     </span>
+                    {s.source ? (
+                      <span className={`text-[10px] ${isDark ? "text-slate-500" : "text-stone-400"}`}>
+                        {s.source === "proactive_audit" ? "Audit" : s.source === "fallback" ? "Fallback" : "Heuristic"}
+                      </span>
+                    ) : null}
                     {s.chapter_ref && (
                       <span className={`text-[10px] ${isDark ? "text-slate-500" : "text-stone-400"}`}>
                         Ch. {s.chapter_ref}
@@ -353,8 +380,27 @@ export default function AdvisorPage() {
   const canUseAuthorMode = canUseAuthorFeatures(userTier)
   const isDark = theme === "dark"
 
+  const { data: bookData = null } = useQuery({
+    queryKey: asQueryKey(bookCacheKey(bookId, "detail")),
+    queryFn: () => booksApi.get(bookId),
+  })
+  const { data: greeting = null } = useQuery<AdvisorGreeting | null>({
+    queryKey: [`advisor:${bookId}:greeting`],
+    queryFn: () => intelligenceApi.advisorGreeting(bookId),
+  })
+  const {
+    data: suggestionsPayload = null,
+    isLoading: suggestionsLoading,
+    refetch: refetchSuggestions,
+  } = useQuery<{ suggestions: AdvisorSuggestion[]; meta: AdvisorScanMeta }>({
+    queryKey: [`advisor:${bookId}:suggestions`],
+    queryFn: () => intelligenceApi.advisorSuggestions(bookId),
+  })
+  const suggestions = suggestionsPayload?.suggestions ?? []
+  const suggestionsMeta = suggestionsPayload?.meta ?? defaultScanMeta
+
   const [tab, setTab] = useState<AdvisorPanel>("checker")
-  const [greeting, setGreeting] = useState<AdvisorGreeting | null>(null)
+  const [autoOpenedScan, setAutoOpenedScan] = useState(false)
   const [messages, setMessages] = useState<AdvisorMessage[]>([])
   const [passages, setPassages] = useState<AdvisorPassage[]>([])
   const [worldAnalysis, setWorldAnalysis] = useState<AdvisorWorldAnalysis | null>(null)
@@ -364,12 +410,8 @@ export default function AdvisorPage() {
   const [bookMode, setBookMode] = useState<"reader" | "author">("author")
   const [responseTypes, setResponseTypes] = useState<ResponseType[]>([]) // per-assistant message
 
-  const [suggestions, setSuggestions] = useState<AdvisorSuggestion[]>([])
-  const [suggestionsLoading, setSuggestionsLoading] = useState(false)
-  const [suggestionsLoaded, setSuggestionsLoaded] = useState(false)
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set())
   const [intentionalIds, setIntentionalIds] = useState<Set<string>>(new Set())
-
   const [sugTab, setSugTab] = useState<"scan" | "editorial">("scan")
   const [editText, setEditText] = useState("")
   const [editChapter, setEditChapter] = useState<string>("")
@@ -388,30 +430,48 @@ export default function AdvisorPage() {
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
-  // Fetch greeting + suggestions on mount (badge needs count before tab opens)
   useEffect(() => {
     capture("author_advisor_opened", { book_id: bookId })
-    booksApi.get(bookId).then((book) => setBookMode(book.mode ?? "author")).catch(() => {})
-    intelligenceApi.advisorGreeting(bookId).then(setGreeting).catch(() => {})
-    intelligenceApi.advisorSuggestions(bookId)
-      .then(r => { setSuggestions(r.suggestions); setSuggestionsLoaded(true) })
-      .catch(() => { setSuggestionsLoaded(true) })
   }, [bookId])
+
+  useEffect(() => {
+    if (autoOpenedScan || tab !== "checker" || !suggestionsPayload || suggestionsPayload.suggestions.length === 0) return
+    setTab("suggestions")
+    setAutoOpenedScan(true)
+  }, [autoOpenedScan, suggestionsPayload, tab])
+
+  useEffect(() => {
+    if (!bookData) return
+    setBookMode(bookData.mode ?? "author")
+  }, [bookData])
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(scanStorageKey(bookId))
+      if (!raw) return
+      const parsed = JSON.parse(raw) as { dismissed?: string[]; intentional?: string[] }
+      setDismissedIds(new Set(parsed.dismissed ?? []))
+      setIntentionalIds(new Set(parsed.intentional ?? []))
+    } catch {
+      setDismissedIds(new Set())
+      setIntentionalIds(new Set())
+    }
+  }, [bookId])
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      scanStorageKey(bookId),
+      JSON.stringify({
+        dismissed: [...dismissedIds],
+        intentional: [...intentionalIds],
+      })
+    )
+  }, [bookId, dismissedIds, intentionalIds])
 
   // Auto-scroll chat
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages, loading])
-
-  // Lazy-load suggestions when continuity scan opens if not loaded yet
-  useEffect(() => {
-    if (tab !== "suggestions" || suggestionsLoaded) return
-    setSuggestionsLoading(true)
-    intelligenceApi.advisorSuggestions(bookId)
-      .then(r => setSuggestions(r.suggestions))
-      .catch(() => setSuggestions([]))
-      .finally(() => { setSuggestionsLoading(false); setSuggestionsLoaded(true) })
-  }, [tab, bookId, suggestionsLoaded])
 
   const sendMessage = useCallback(async (text: string) => {
     if (!text.trim() || loading) return
@@ -435,7 +495,7 @@ export default function AdvisorPage() {
       const dailyCap = buildDailyCapEventDetail(err)
       const msg = err instanceof Error ? err.message : ""
       if (dailyCap) {
-        setError("You reached today's Story Advisor limit. Use the upgrade or points options to keep going.")
+        setError("You reached today's Story Advisor limit. Upgrade for more daily capacity or continue tomorrow.")
       } else if (msg.includes("429")) {
         setError("Too many Story Advisor requests right now. Please try again in a bit.")
       } else {
@@ -461,14 +521,8 @@ export default function AdvisorPage() {
   }
 
   const refreshSuggestions = useCallback(() => {
-    setSuggestions([])
-    setSuggestionsLoaded(false)
-    setSuggestionsLoading(true)
-    intelligenceApi.advisorSuggestions(bookId)
-      .then(r => setSuggestions(r.suggestions))
-      .catch(() => setSuggestions([]))
-      .finally(() => { setSuggestionsLoading(false); setSuggestionsLoaded(true) })
-  }, [bookId])
+    void refetchSuggestions()
+  }, [refetchSuggestions])
 
   const dismissSuggestion = (id: string) => setDismissedIds(prev => new Set([...prev, id]))
   const markIntentional = (id: string) => {
@@ -495,6 +549,7 @@ export default function AdvisorPage() {
 
   const visibleSuggestions = suggestions.filter(s => !dismissedIds.has(s.id))
   const warnCount = visibleSuggestions.filter(s => s.severity === "warning").length
+  const allSuggestionsDismissed = suggestions.length > 0 && visibleSuggestions.length === 0
 
   // Group suggestions for display
   const grouped = {
@@ -583,6 +638,7 @@ export default function AdvisorPage() {
           {/* ── Tab switcher ──────────────────────────────────────────────────── */}
           <div className={`mb-6 inline-flex overflow-hidden rounded-[1rem] border ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white"}`}>
             <button
+              type="button"
               id="advisor-tab-chat"
               onClick={() => setTab("checker")}
               className={`px-5 py-2.5 text-sm font-medium transition ${tab === "checker" ? isDark ? "bg-white text-slate-950" : "bg-stone-900 text-white" : isDark ? "text-slate-300 hover:bg-white/8" : "text-stone-600 hover:bg-stone-50"}`}
@@ -590,9 +646,10 @@ export default function AdvisorPage() {
               Continuity Checker
             </button>
             <button
+              type="button"
               id="advisor-tab-scan"
-              onClick={() => { setTab("suggestions"); setSugTab("scan") }}
-              className={`relative px-5 py-2.5 text-sm font-medium transition ${tab === "suggestions" && sugTab === "scan" ? isDark ? "bg-white text-slate-950" : "bg-stone-900 text-white" : isDark ? "text-slate-300 hover:bg-white/8" : "text-stone-600 hover:bg-stone-50"}`}
+              onClick={() => setTab("suggestions")}
+              className={`relative px-5 py-2.5 text-sm font-medium transition ${tab === "suggestions" ? isDark ? "bg-white text-slate-950" : "bg-stone-900 text-white" : isDark ? "text-slate-300 hover:bg-white/8" : "text-stone-600 hover:bg-stone-50"}`}
             >
               Continuity Scan
               {warnCount > 0 && (
@@ -600,13 +657,6 @@ export default function AdvisorPage() {
                   {warnCount}
                 </span>
               )}
-            </button>
-            <button
-              id="advisor-tab-editorial"
-              onClick={() => { setTab("suggestions"); setSugTab("editorial") }}
-              className={`px-5 py-2.5 text-sm font-medium transition ${tab === "suggestions" && sugTab === "editorial" ? isDark ? "bg-white text-slate-950" : "bg-stone-900 text-white" : isDark ? "text-slate-300 hover:bg-white/8" : "text-stone-600 hover:bg-stone-50"}`}
-            >
-              Editorial Review
             </button>
           </div>
 
@@ -868,6 +918,7 @@ export default function AdvisorPage() {
               {/* Sub-tab switcher */}
               <div className="hidden">
                 <button
+                  type="button"
                   id="suggestions-tab-scan"
                   onClick={() => setSugTab("scan")}
                   className={`px-5 py-2.5 text-sm font-medium transition ${sugTab === "scan" ? isDark ? "bg-white text-slate-950" : "bg-stone-900 text-white" : isDark ? "text-slate-300 hover:bg-white/8" : "text-stone-600 hover:bg-stone-50"}`}
@@ -875,6 +926,7 @@ export default function AdvisorPage() {
                   Continuity Scan
                 </button>
                 <button
+                  type="button"
                   id="suggestions-tab-editorial"
                   onClick={() => setSugTab("editorial")}
                   className={`px-5 py-2.5 text-sm font-medium transition ${sugTab === "editorial" ? isDark ? "bg-white text-slate-950" : "bg-stone-900 text-white" : isDark ? "text-slate-300 hover:bg-white/8" : "text-stone-600 hover:bg-stone-50"}`}
@@ -899,18 +951,72 @@ export default function AdvisorPage() {
                     </button>
                   </div>
 
+                  <div className={`mb-5 rounded-[1.4rem] border p-4 ${isDark ? "border-white/8 bg-white/4" : "border-stone-200 bg-white"}`}>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] ${isDark ? "bg-white/8 text-slate-300" : "bg-stone-100 text-stone-700"}`}>
+                        {suggestionsMeta.heuristic_count} heuristic card{suggestionsMeta.heuristic_count === 1 ? "" : "s"}
+                      </span>
+                      {suggestionsMeta.proactive_audit_applied ? (
+                        <span className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] ${isDark ? "bg-teal-500/15 text-teal-200" : "bg-teal-100 text-teal-700"}`}>
+                          Proactive audit added
+                        </span>
+                      ) : null}
+                      {suggestionsMeta.fallback_applied ? (
+                        <span className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] ${isDark ? "bg-amber-500/15 text-amber-200" : "bg-amber-100 text-amber-700"}`}>
+                          Fallback cards
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="mt-3 grid gap-2 sm:grid-cols-3 lg:grid-cols-6">
+                      {[
+                        { label: "Characters", value: suggestionsMeta.character_count },
+                        { label: "States", value: suggestionsMeta.state_count },
+                        { label: "Open threads", value: suggestionsMeta.open_thread_count },
+                        { label: "Clues", value: suggestionsMeta.clue_count },
+                        { label: "Relationships", value: suggestionsMeta.relationship_count },
+                        { label: "World elements", value: suggestionsMeta.world_element_count },
+                      ].map((item) => (
+                        <div key={item.label} className={`rounded-[1rem] border px-3 py-2 ${isDark ? "border-white/8 bg-black/20" : "border-stone-100 bg-stone-50"}`}>
+                          <p className={`text-[10px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{item.label}</p>
+                          <p className={`mt-1 text-sm font-semibold ${isDark ? "text-slate-100" : "text-stone-900"}`}>{item.value}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <p className={`mt-3 text-xs leading-5 ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+                      Data sources: {suggestionsMeta.scan_basis.length > 0 ? suggestionsMeta.scan_basis.join(", ") : "none yet"}.
+                      {suggestionsMeta.data_gaps.length > 0 ? ` Missing: ${suggestionsMeta.data_gaps.join(", ")}.` : ""}
+                    </p>
+                    {suggestionsMeta.audit_summary ? (
+                      <p className={`mt-2 text-xs leading-5 ${isDark ? "text-teal-200" : "text-teal-800"}`}>{suggestionsMeta.audit_summary}</p>
+                    ) : null}
+                  </div>
+
                   {suggestionsLoading ? (
                     <div className="space-y-3">
                       {[1, 2, 3].map(i => (
                         <div key={i} className={`h-28 animate-pulse rounded-[1.5rem] border ${isDark ? "border-white/8 bg-white/4" : "border-stone-100 bg-stone-50"}`} />
                       ))}
                     </div>
+                  ) : suggestionsPayload === null ? (
+                    <div className={`rounded-[1.8rem] border p-10 text-center ${isDark ? "border-red-500/20 bg-red-500/8" : "border-red-200 bg-red-50"}`}>
+                      <p className="text-sm font-semibold uppercase tracking-[0.24em] mb-3">Unavailable</p>
+                      <p className={`font-semibold text-lg ${isDark ? "text-red-100" : "text-red-800"}`}>Scan could not load</p>
+                      <p className={`mt-2 text-sm ${isDark ? "text-red-200/80" : "text-red-700"}`}>The continuity scan could not be loaded right now.</p>
+                    </div>
+                  ) : allSuggestionsDismissed ? (
+                    <div className={`rounded-[1.8rem] border p-10 text-center ${isDark ? "border-white/10 bg-white/4" : "border-stone-200 bg-white"}`}>
+                      <p className="text-sm font-semibold uppercase tracking-[0.24em] mb-3">Cleared</p>
+                      <p className={`font-semibold text-lg ${isDark ? "text-white" : "text-stone-900"}`}>All current scan cards are dismissed</p>
+                      <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+                        Refresh after your next extraction pass to pull a new scan.
+                      </p>
+                    </div>
                   ) : visibleSuggestions.length === 0 ? (
                     <div className={`rounded-[1.8rem] border p-10 text-center ${isDark ? "border-white/10 bg-white/4" : "border-stone-200 bg-white"}`}>
                       <p className="text-sm font-semibold uppercase tracking-[0.24em] mb-3">Ready</p>
-                      <p className={`font-semibold text-lg ${isDark ? "text-white" : "text-stone-900"}`}>Scan warming up</p>
+                      <p className={`font-semibold text-lg ${isDark ? "text-white" : "text-stone-900"}`}>No active scan findings</p>
                       <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-                        No scan cards are available yet. Refresh after your next extraction pass or ask the continuity checker for a proactive story audit.
+                        The scan did not surface active cards from the current manuscript data. Refresh after your next extraction pass or run a proactive story audit from the checker.
                       </p>
                     </div>
                   ) : (

@@ -2,7 +2,7 @@ import type { Metadata } from "next"
 
 export const metadata: Metadata = {
   title: "Create Account",
-  description: "Create your free LoreVia account and start understanding your manuscript like never before.",
+  description: "Create your free LoreVia for authors account and start building a manuscript workspace with continuity, character, and revision tools.",
   robots: { index: false, follow: false },
 }
 

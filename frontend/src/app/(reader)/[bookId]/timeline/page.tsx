@@ -1,12 +1,14 @@
 "use client"
 
 import type { ReactNode } from "react"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo } from "react"
+import { useQuery } from "@tanstack/react-query"
 import { useParams, useRouter } from "next/navigation"
 
 import { booksApi } from "@/lib/api/books"
 import { readerApi } from "@/lib/api/reader"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
+import { asQueryKey, bookCacheKey, readerCacheKey } from "@/lib/query/cacheKeys"
 import type { Book } from "@/types/book"
 import type { CharacterTimelineTrack, PlotThreadTimelineTrack, RelationshipTimelineMarker, TimelineChapter, TimelineResponse } from "@/types/reader"
 import { capture } from "@/lib/analytics/posthog"
@@ -19,20 +21,24 @@ export default function TimelinePage() {
   const { theme, timelineCollapsedSections, setTimelineCollapsedSection, setTimelineAllCollapsed } = usePreferencesStore()
   const isDark = theme === "dark"
 
-  const [book, setBook] = useState<Book | null>(null)
-  const [timeline, setTimeline] = useState<TimelineResponse | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
-
   useEffect(() => {
     capture("major_events_opened", { book_id: bookId })
-    booksApi.get(bookId).then(setBook).catch(() => {})
-    setLoading(true)
-    readerApi.getTimeline(bookId)
-      .then(setTimeline)
-      .catch(() => setError("Major events unavailable"))
-      .finally(() => setLoading(false))
   }, [bookId])
+  const { data: book = null } = useQuery<Book>({
+    queryKey: asQueryKey(bookCacheKey(bookId, "detail")),
+    queryFn: () => booksApi.get(bookId),
+    staleTime: 20_000,
+  })
+  const {
+    data: timeline = null,
+    isLoading: loading,
+    isError,
+  } = useQuery<TimelineResponse>({
+    queryKey: asQueryKey(readerCacheKey(bookId, "timeline")),
+    queryFn: () => readerApi.getTimeline(bookId),
+    staleTime: 45_000,
+  })
+  const error = isError ? "Major events unavailable" : null
 
   const chapters = timeline?.chapters ?? []
   const chapterCount = chapters.length

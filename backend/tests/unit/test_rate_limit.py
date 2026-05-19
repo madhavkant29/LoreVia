@@ -4,11 +4,14 @@ from types import SimpleNamespace
 import pytest
 from starlette.requests import Request
 
+from app.api.deps import rate_limit as rate_limit_module
 from app.api.deps.rate_limit import (
     _bump_daily_bucket,
     _client_identifier,
     rate_limit_advisor,
+    rate_limit_continuity_checker,
     rate_limit_manuscript_import,
+    rate_limit_recall,
     rate_limit_upload,
     rate_limit_world_building_ai,
     rate_limit_world_building_upload,
@@ -67,56 +70,17 @@ async def test_daily_bucket_blocks_after_limit(monkeypatch):
     async def _fake_get_redis():
         return fake_redis
 
-    async def _fake_overflow_units(user_id, action, now=None):
-        return 0
-
     monkeypatch.setattr("app.api.deps.rate_limit.get_redis", _fake_get_redis)
-    monkeypatch.setattr(
-        "app.api.deps.rate_limit.purchased_overflow_units_for_action_via_session",
-        _fake_overflow_units,
-    )
     monkeypatch.setattr(
         "app.api.deps.rate_limit._current_utc",
         lambda now=None: datetime(2026, 5, 7, 10, 0, tzinfo=UTC),
     )
 
-    await _bump_daily_bucket("user-1", "search", 2)
-    await _bump_daily_bucket("user-1", "search", 2)
+    await _bump_daily_bucket(None, "user-1", "search", 2)
+    await _bump_daily_bucket(None, "user-1", "search", 2)
 
     with pytest.raises(Exception) as exc_info:
-        await _bump_daily_bucket("user-1", "search", 2)
-
-    assert getattr(exc_info.value, "status_code", None) == 429
-
-
-@pytest.mark.asyncio
-async def test_daily_bucket_allows_purchased_overflow_units(monkeypatch):
-    fake_redis = _FakeRedis()
-
-    async def _fake_get_redis():
-        return fake_redis
-
-    async def _fake_overflow_units(user_id, action, now=None):
-        assert user_id == "user-overflow"
-        assert action == "prediction"
-        return 1
-
-    monkeypatch.setattr("app.api.deps.rate_limit.get_redis", _fake_get_redis)
-    monkeypatch.setattr(
-        "app.api.deps.rate_limit.purchased_overflow_units_for_action_via_session",
-        _fake_overflow_units,
-    )
-    monkeypatch.setattr(
-        "app.api.deps.rate_limit._current_utc",
-        lambda now=None: datetime(2026, 5, 7, 10, 0, tzinfo=UTC),
-    )
-
-    await _bump_daily_bucket("user-overflow", "prediction", 2)
-    await _bump_daily_bucket("user-overflow", "prediction", 2)
-    await _bump_daily_bucket("user-overflow", "prediction", 2)
-
-    with pytest.raises(Exception) as exc_info:
-        await _bump_daily_bucket("user-overflow", "prediction", 2)
+        await _bump_daily_bucket(None, "user-1", "search", 2)
 
     assert getattr(exc_info.value, "status_code", None) == 429
 
@@ -128,31 +92,72 @@ async def test_trial_authoring_surfaces_share_one_daily_bucket(monkeypatch):
     async def _fake_get_redis():
         return fake_redis
 
-    async def _fake_limit_for_user(user_id, field, default):
+    async def _fake_limit_for_user(_db, user_id, field, default):
+        assert _db is None
         return default
-
-    async def _fake_overflow_units(user_id, action, now=None):
-        return 0
 
     monkeypatch.setattr("app.api.deps.rate_limit.get_redis", _fake_get_redis)
     monkeypatch.setattr("app.api.deps.rate_limit._limit_for_user", _fake_limit_for_user)
-    monkeypatch.setattr(
-        "app.api.deps.rate_limit.purchased_overflow_units_for_action_via_session",
-        _fake_overflow_units,
-    )
-    monkeypatch.setattr("app.api.deps.rate_limit.settings.TRIAL_HIGH_COST_TURNS_PER_DAY", 2, raising=False)
-    monkeypatch.setattr("app.api.deps.rate_limit.settings.DEBUG", False, raising=False)
+    monkeypatch.setattr("app.core.config.settings.TRIAL_HIGH_COST_TURNS_PER_DAY", 2, raising=False)
+    monkeypatch.setattr("app.core.config.settings.DEBUG", False, raising=False)
     user = SimpleNamespace(
         id="user-2",
         tier="free",
-        created_at=datetime(2026, 5, 6, 10, 0, tzinfo=UTC),
+        created_at=datetime(2026, 5, 16, 10, 0, tzinfo=UTC),
     )
 
-    await rate_limit_advisor(user)
-    await rate_limit_advisor(user)
+    await rate_limit_advisor(user, db=None)
+    await rate_limit_advisor(user, db=None)
 
     with pytest.raises(Exception) as exc_info:
-        await rate_limit_advisor(user)
+        await rate_limit_advisor(user, db=None)
+
+    assert getattr(exc_info.value, "status_code", None) == 429
+
+
+@pytest.mark.asyncio
+async def test_free_recall_limit_blocks_after_two_uses(monkeypatch):
+    fake_redis = _FakeRedis()
+
+    async def _fake_get_redis():
+        return fake_redis
+
+    monkeypatch.setattr("app.api.deps.rate_limit.get_redis", _fake_get_redis)
+
+    user = SimpleNamespace(
+        id="user-recall",
+        tier="free",
+        created_at=datetime(2026, 4, 1, 10, 0, tzinfo=UTC),
+    )
+
+    await rate_limit_recall(user, db=None)
+    await rate_limit_recall(user, db=None)
+
+    with pytest.raises(Exception) as exc_info:
+        await rate_limit_recall(user, db=None)
+
+    assert getattr(exc_info.value, "status_code", None) == 429
+
+
+@pytest.mark.asyncio
+async def test_free_continuity_limit_blocks_after_one_use(monkeypatch):
+    fake_redis = _FakeRedis()
+
+    async def _fake_get_redis():
+        return fake_redis
+
+    monkeypatch.setattr("app.api.deps.rate_limit.get_redis", _fake_get_redis)
+
+    user = SimpleNamespace(
+        id="user-continuity",
+        tier="free",
+        created_at=datetime(2026, 4, 1, 10, 0, tzinfo=UTC),
+    )
+
+    await rate_limit_continuity_checker(user, db=None)
+
+    with pytest.raises(Exception) as exc_info:
+        await rate_limit_continuity_checker(user, db=None)
 
     assert getattr(exc_info.value, "status_code", None) == 429
 
@@ -223,7 +228,8 @@ async def test_window_rate_limits_block_after_threshold(monkeypatch, limiter, fi
     async def _fake_get_redis():
         return fake_redis
 
-    async def _fake_limit_for_user(user_id, field_name, default):
+    async def _fake_limit_for_user(_db, user_id, field_name, default):
+        assert _db is None
         assert user_id == "user-3"
         assert field_name == field
         return 2
@@ -233,11 +239,11 @@ async def test_window_rate_limits_block_after_threshold(monkeypatch, limiter, fi
 
     user = SimpleNamespace(id="user-3")
 
-    await limiter(user)
-    await limiter(user)
+    await limiter(user, db=None)
+    await limiter(user, db=None)
 
     with pytest.raises(Exception) as exc_info:
-        await limiter(user)
+        await limiter(user, db=None)
 
     assert getattr(exc_info.value, "status_code", None) == 429
     assert expected_message in str(exc_info.value.detail)

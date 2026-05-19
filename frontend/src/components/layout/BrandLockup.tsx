@@ -9,42 +9,32 @@ type BrandLockupProps = {
 
 const sizeClasses = {
   sm: {
-    wrapper: "gap-3",
-    icon: "h-8 w-8 rounded-lg",
-    text: "text-sm",
+    wrapper: "",
+    image: "h-8",
   },
   md: {
-    wrapper: "gap-3",
-    icon: "h-10 w-10 rounded-xl",
-    text: "text-sm",
+    wrapper: "",
+    image: "h-10",
   },
   lg: {
-    wrapper: "gap-3.5",
-    icon: "h-12 w-12 rounded-2xl",
-    text: "text-base",
+    wrapper: "",
+    image: "h-12",
   },
 } as const
 
 export function BrandLockup({
   size = "md",
   className = "",
-  textClassName = "",
-  iconClassName = "",
 }: BrandLockupProps) {
   const classes = sizeClasses[size]
 
   return (
     <div className={`flex items-center ${classes.wrapper} ${className}`.trim()}>
       <img
-        src="/image.png"
+        src="/logoandtext.png"
         alt="LoreVia"
-        className={`${classes.icon} object-cover ${iconClassName}`.trim()}
+        className={`${classes.image} w-auto object-contain`.trim()}
       />
-      <span
-        className={`${classes.text} font-semibold uppercase tracking-[0.34em] text-white ${textClassName}`.trim()}
-      >
-        LOREVIA
-      </span>
     </div>
   )
 }

@@ -275,6 +275,11 @@ def test_extract_worldbuilding_labeled_sections_for_core_lore_types():
     Races: sunborn, Moon Kin
     Areas: The Ashen Wastes, Northreach Province
     Magic System: Aetherbinding converts memory into fire.
+    Political Systems: Imperial Senate elects the emperor.
+    Laws: Blood Tithe: illegal outside temple sanction.
+    Currency: Sun Marks: used for border tolls.
+    Travel Constraints: River Crossing: takes three days in winter.
+    Power Limits: Embercasting: only once per day.
     """
 
     items = extract_world_elements_from_text(text)
@@ -288,6 +293,30 @@ def test_extract_worldbuilding_labeled_sections_for_core_lore_types():
     assert by_name["Northreach Province"]["element_type"] == "region"
     assert by_name["Aetherbinding"]["element_type"] == "magic_system"
     assert by_name["Aetherbinding"]["provenance"]["narrative_mode"] == "worldbuilding_note"
+    assert by_name["Imperial Senate"]["element_type"] == "politics"
+    assert by_name["Blood Tithe"]["element_type"] == "law"
+    assert by_name["Sun Marks"]["element_type"] == "currency"
+    assert by_name["River Crossing"]["element_type"] == "travel_rule"
+    assert by_name["Embercasting"]["element_type"] == "power_limit"
+
+
+def test_extract_world_elements_builds_rule_claims_for_magic_and_geography():
+    text = (
+        "Magic requires blood sacrifice. "
+        "Vael is north of the river. "
+        "The journey to Vael takes three days."
+    )
+
+    items = extract_world_elements_from_text(text)
+    by_name = {item["name"]: item for item in items}
+
+    magic_claims = {claim["attribute"]: claim for claim in by_name["Magic System"]["claims"]}
+    vael_claims = {claim["attribute"]: claim for claim in by_name["Vael"]["claims"]}
+    travel_claims = {claim["attribute"]: claim for claim in by_name["Travel Constraints"]["claims"]}
+
+    assert magic_claims["requirement"]["value"] == "blood sacrifice"
+    assert vael_claims["relative_position"]["value"] == "north of the river"
+    assert travel_claims["travel_time"]["value"] == "3 days"
 
 
 def test_claim_contradiction_detects_negation_flip():
@@ -356,6 +385,96 @@ async def test_detect_world_gaps_matches_transliteration_variants_without_false_
 
     assert not any(item["title"].startswith("Dunya is missing") for item in missing_in_story)
     assert not any(item["title"].startswith("Dounia appears") for item in missing_in_world)
+
+
+@pytest.mark.asyncio
+async def test_detect_world_gaps_surfaces_internal_magic_rule_conflicts(db, monkeypatch):
+    stored: dict[str, bytes] = {}
+
+    def fake_download_book(key: str) -> bytes:
+        return stored[key]
+
+    monkeypatch.setattr("app.core.storage.download_book", fake_download_book)
+    monkeypatch.setattr("app.utils.world_building_utils.download_book", fake_download_book)
+
+    user = User(email="world-magic-conflict@lorevia.app", username="worldmagicconflict", password_hash="hash")
+    db.add(user)
+    await db.flush()
+    book = Book(user_id=user.id, title="Magic Conflict", format="pdf", s3_key="story/magic.pdf", status="ready")
+    db.add(book)
+    await db.flush()
+
+    chapter_two_key = f"chapters/{book.id}/2.txt"
+    chapter_fifteen_key = f"chapters/{book.id}/15.txt"
+    stored[chapter_two_key] = serialize_manuscript_content(
+        "Magic requires blood sacrifice.",
+        "<p>Magic requires blood sacrifice.</p>",
+    ).encode("utf-8")
+    stored[chapter_fifteen_key] = serialize_manuscript_content(
+        "Mira casts magic without blood sacrifice.",
+        "<p>Mira casts magic without blood sacrifice.</p>",
+    ).encode("utf-8")
+    db.add_all(
+        [
+            Chapter(book_id=book.id, number=2, title="The Price", s3_key=chapter_two_key, word_count=4, processed=True),
+            Chapter(book_id=book.id, number=15, title="The Shortcut", s3_key=chapter_fifteen_key, word_count=6, processed=True),
+        ]
+    )
+    await db.commit()
+
+    payload = await detect_world_gaps(db, book)
+    story_conflicts = next(group for group in payload["gap_groups"] if group["key"] == "story_conflicts")
+    magic_conflict = next(item for item in story_conflicts["items"] if item["canonical_name"] == "Magic System")
+
+    assert "requires blood sacrifice" in magic_conflict["description"]
+    assert "without blood sacrifice" in magic_conflict["description"]
+    assert "Chapter 2" in magic_conflict["description"]
+    assert "Chapter 15" in magic_conflict["description"]
+
+
+@pytest.mark.asyncio
+async def test_detect_world_gaps_surfaces_internal_geography_conflicts(db, monkeypatch):
+    stored: dict[str, bytes] = {}
+
+    def fake_download_book(key: str) -> bytes:
+        return stored[key]
+
+    monkeypatch.setattr("app.core.storage.download_book", fake_download_book)
+    monkeypatch.setattr("app.utils.world_building_utils.download_book", fake_download_book)
+
+    user = User(email="world-geo-conflict@lorevia.app", username="worldgeoconflict", password_hash="hash")
+    db.add(user)
+    await db.flush()
+    book = Book(user_id=user.id, title="Geography Conflict", format="pdf", s3_key="story/geo.pdf", status="ready")
+    db.add(book)
+    await db.flush()
+
+    chapter_six_key = f"chapters/{book.id}/6.txt"
+    chapter_twenty_one_key = f"chapters/{book.id}/21.txt"
+    stored[chapter_six_key] = serialize_manuscript_content(
+        "Vael is north of the river.",
+        "<p>Vael is north of the river.</p>",
+    ).encode("utf-8")
+    stored[chapter_twenty_one_key] = serialize_manuscript_content(
+        "Vael is south of the river.",
+        "<p>Vael is south of the river.</p>",
+    ).encode("utf-8")
+    db.add_all(
+        [
+            Chapter(book_id=book.id, number=6, title="North Bank", s3_key=chapter_six_key, word_count=6, processed=True),
+            Chapter(book_id=book.id, number=21, title="South Bank", s3_key=chapter_twenty_one_key, word_count=6, processed=True),
+        ]
+    )
+    await db.commit()
+
+    payload = await detect_world_gaps(db, book)
+    story_conflicts = next(group for group in payload["gap_groups"] if group["key"] == "story_conflicts")
+    vael_conflict = next(item for item in story_conflicts["items"] if item["canonical_name"] == "Vael")
+
+    assert "north of the river" in vael_conflict["description"]
+    assert "south of the river" in vael_conflict["description"]
+    assert "Chapter 6" in vael_conflict["description"]
+    assert "Chapter 21" in vael_conflict["description"]
 
 
 @pytest.mark.asyncio
@@ -454,3 +573,74 @@ async def test_save_canon_override_persists_alias_merges(db):
     assert "Sonia" in (stored_identity.aliases or [])
     assert "Sonya" in (stored_identity.aliases or [])
     assert stored_identity.source == "author_override"
+
+
+@pytest.mark.asyncio
+async def test_detect_world_gaps_adds_coverage_watchlist_when_no_hard_conflicts_exist(db, monkeypatch):
+    stored: dict[str, bytes] = {}
+
+    def fake_upload_binary(key: str, raw: bytes, content_type: str | None = None) -> str:
+        stored[key] = raw
+        return key
+
+    def fake_download_book(key: str) -> bytes:
+        return stored[key]
+
+    monkeypatch.setattr("app.core.storage.upload_binary", fake_upload_binary)
+    monkeypatch.setattr("app.core.storage.download_book", fake_download_book)
+    monkeypatch.setattr("app.utils.world_building_utils.upload_binary", fake_upload_binary)
+    monkeypatch.setattr("app.utils.world_building_utils.download_book", fake_download_book)
+
+    user = User(email="world-watchlist@lorevia.app", username="worldwatchlist", password_hash="hash")
+    db.add(user)
+    await db.flush()
+    book = Book(user_id=user.id, title="Coverage Watchlist", format="pdf", s3_key="story/watchlist.pdf", status="ready")
+    db.add(book)
+    await db.flush()
+
+    chapter_key = f"chapters/{book.id}/1.txt"
+    stored[chapter_key] = serialize_manuscript_content(
+        "Northreach is a desert capital. Travelers cross the Glass Road using Salt Marks.",
+        "<p>Northreach is a desert capital. Travelers cross the Glass Road using Salt Marks.</p>",
+    ).encode("utf-8")
+    db.add(
+        Chapter(
+            book_id=book.id,
+            number=1,
+            title="Road Toll",
+            s3_key=chapter_key,
+            word_count=12,
+            processed=True,
+        )
+    )
+
+    await create_world_building_documents(
+        db,
+        book=book,
+        user_id=user.id,
+        documents=[
+            {
+                "title": "Lean World Notes",
+                "source_name": "lean-world-notes.txt",
+                "text": (
+                    "Countries: Northreach: desert capital.\n"
+                    "Travel Constraints: Glass Road: three-day caravan route.\n"
+                    "Currency: Salt Marks: market scrip."
+                ),
+                "html": None,
+            }
+        ],
+    )
+    await db.commit()
+
+    payload = await detect_world_gaps(db, book)
+    total_review_targets = len(payload["priority_gaps"]) + len(payload["consistency_flags"])
+    coverage_group = next((group for group in payload["gap_groups"] if group["key"] == "coverage_watchlist"), None)
+
+    assert total_review_targets >= 3
+    if coverage_group is not None:
+        assert coverage_group["items"]
+        assert any(
+            "needs a clearer canon note" in item["title"] or "needs one more story anchor" in item["title"]
+            for item in coverage_group["items"]
+        )

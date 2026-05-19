@@ -1,12 +1,24 @@
 "use client"
 
+import { useQuery } from "@tanstack/react-query"
 import { useEffect, useMemo, useState, type DragEvent as ReactDragEvent } from "react"
+import type { Route } from "next"
 import Link from "next/link"
 import { useParams } from "next/navigation"
 
+import { EditorToolbar, RichTextEditor } from "@/components/editor/SharedRichTextEditor"
+import { WhatsTheWordPanel } from "@/components/intelligence/WhatsTheWordPanel"
 import { AuthorToolsNav } from "@/components/layout/AuthorToolsNav"
 import { booksApi } from "@/lib/api/books"
+import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
+import { countWords, estimateReadingTimeMinutes, formatReadingTimeLabel } from "@/lib/utils/manuscriptEditor"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
+import {
+  buildSceneChapterOptions,
+  extractChapterNumberFromSceneFolder,
+  parseStoredSceneFolders,
+  SCENE_FOLDER_STORAGE_KEY_PREFIX,
+} from "@/lib/utils/sceneWorkspace"
 import {
   buildUniqueWorkspacePathFromCandidate,
   buildWorkspaceFolderTree,
@@ -15,9 +27,7 @@ import {
   workspaceFolderFromPath,
   type WorkspaceFolderNode,
 } from "@/lib/utils/workspacePaths"
-import type { Book, ManuscriptWorkspaceTree, NovelScene } from "@/types/book"
-
-const SCENE_FOLDER_STORAGE_KEY_PREFIX = "scene-workspace-folders:v1:"
+import type { Book, ManuscriptWorkspaceTree, NovelScene, SceneMetadata } from "@/types/book"
 
 type FolderNode = WorkspaceFolderNode
 type SceneDragItem = { kind: "scene"; id: string }
@@ -45,13 +55,7 @@ function defaultSceneFolder(chapterNumber: number | null) {
 
 function loadSceneFolders(bookId: string) {
   if (typeof window === "undefined") return [] as string[]
-  try {
-    const raw = window.localStorage.getItem(`${SCENE_FOLDER_STORAGE_KEY_PREFIX}${bookId}`)
-    const parsed = raw ? JSON.parse(raw) : []
-    return Array.isArray(parsed) ? parsed.map((value) => normalizeWorkspaceFolderPath(String(value))).filter(Boolean) : []
-  } catch {
-    return []
-  }
+  return parseStoredSceneFolders(window.localStorage.getItem(`${SCENE_FOLDER_STORAGE_KEY_PREFIX}${bookId}`))
 }
 
 function parseSceneDragItem(event: Pick<DragEvent, "dataTransfer"> | Pick<ReactDragEvent, "dataTransfer">) {
@@ -65,25 +69,57 @@ function parseSceneDragItem(event: Pick<DragEvent, "dataTransfer"> | Pick<ReactD
   }
 }
 
+function emptySceneMetadata(): SceneMetadata {
+  return {
+    pov: null,
+    timeline: null,
+    location: null,
+    tags: [],
+    mood: [],
+    status_note: null,
+    anchors: [],
+    bookmarks: [],
+  }
+}
+
+function metadataTextToList(value: string) {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
 export default function ScenesPage() {
   const { bookId } = useParams<{ bookId: string }>()
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
-  const [book, setBook] = useState<Book | null>(null)
-  const [tree, setTree] = useState<ManuscriptWorkspaceTree | null>(null)
   const [selectedSceneId, setSelectedSceneId] = useState<string | null>(null)
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null)
-  const [customFolders, setCustomFolders] = useState<string[]>(() => loadSceneFolders(bookId))
+  const [customFolders, setCustomFolders] = useState<string[]>([])
   const [dropTargetFolder, setDropTargetFolder] = useState<string | null>(null)
   const [search, setSearch] = useState("")
   const [title, setTitle] = useState("")
   const [description, setDescription] = useState("")
   const [body, setBody] = useState("")
+  const [htmlBody, setHtmlBody] = useState("<p></p>")
   const [chapterNumber, setChapterNumber] = useState<number | null>(null)
+  const [sceneMetadata, setSceneMetadata] = useState<SceneMetadata>(emptySceneMetadata())
   const [sceneFolderDraft, setSceneFolderDraft] = useState(defaultSceneFolder(null))
   const [saving, setSaving] = useState(false)
   const [status, setStatus] = useState<string | null>(null)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
+
+  const { data: book = null } = useQuery<Book | null>({
+    queryKey: asQueryKey(bookCacheKey(bookId, "detail")),
+    queryFn: () => booksApi.get(bookId),
+  })
+  const {
+    data: tree = null,
+    refetch: refetchTree,
+  } = useQuery<ManuscriptWorkspaceTree | null>({
+    queryKey: asQueryKey(bookCacheKey(bookId, "workspace-tree")),
+    queryFn: () => booksApi.getWorkspaceTree(bookId),
+  })
 
   const scenes = useMemo(
     () => (tree?.scene_groups ?? []).flatMap((group) => group.scenes).sort((a, b) => a.path.localeCompare(b.path)),
@@ -96,6 +132,10 @@ export default function ScenesPage() {
     const chapterFolders = (tree?.chapters ?? []).map((chapter) => defaultSceneFolder(chapter.chapter_number))
     return [...new Set([...chapterFolders, ...customFolders])]
   }, [customFolders, tree])
+  const chapterOptions = useMemo(
+    () => buildSceneChapterOptions(tree?.chapters ?? [], [...sceneFolders, ...scenes.map((scene) => scene.path)]),
+    [sceneFolders, scenes, tree]
+  )
   const folderTree = useMemo(
     () => buildWorkspaceFolderTree(scenes.map((scene) => scene.path), sceneFolders),
     [sceneFolders, scenes]
@@ -112,12 +152,14 @@ export default function ScenesPage() {
   }, [scenes, search, selectedFolder])
 
   const metadataRows = useMemo(() => {
-    const metadata = selectedScene?.metadata ?? {}
+    const metadata = selectedScene?.metadata ?? sceneMetadata ?? {}
     return Object.entries(metadata).filter(([, value]) => {
       if (Array.isArray(value)) return value.length > 0
       return value !== null && value !== undefined && String(value).trim() !== ""
     })
-  }, [selectedScene])
+  }, [sceneMetadata, selectedScene])
+  const sceneWordCount = useMemo(() => countWords(body), [body])
+  const sceneReadingTime = useMemo(() => formatReadingTimeLabel(estimateReadingTimeMinutes(sceneWordCount)), [sceneWordCount])
 
   const rememberFolder = (folderPath: string | null | undefined) => {
     const normalized = normalizeWorkspaceFolderPath(folderPath)
@@ -125,14 +167,8 @@ export default function ScenesPage() {
     setCustomFolders((current) => [...new Set([...current, normalized])].sort())
   }
 
-  const loadWorkspace = async (preferredSceneId?: string | null) => {
-    const [bookData, treeData] = await Promise.all([
-      booksApi.get(bookId).catch(() => null),
-      booksApi.getWorkspaceTree(bookId),
-    ])
-    setBook(bookData)
-    setTree(treeData)
-    const availableScenes = treeData.scene_groups.flatMap((group) => group.scenes)
+  const syncWorkspaceSelection = (treeData: ManuscriptWorkspaceTree | null, preferredSceneId?: string | null) => {
+    const availableScenes = treeData?.scene_groups.flatMap((group) => group.scenes) ?? []
     const nextSceneId = preferredSceneId ?? selectedSceneId
     const matchedScene = nextSceneId ? availableScenes.find((scene) => scene.id === nextSceneId) ?? null : null
     const fallbackScene = matchedScene ?? availableScenes[0] ?? null
@@ -156,30 +192,35 @@ export default function ScenesPage() {
   }, [bookId, customFolders])
 
   useEffect(() => {
-    void loadWorkspace().catch(() => {
-      setTree({ chapters: [], scene_groups: [], note_paths: [] })
-    })
-  }, [bookId])
+    syncWorkspaceSelection(tree)
+  }, [tree])
 
   function selectScene(scene: NovelScene) {
+    const inferredChapterNumber = scene.chapter_number ?? extractChapterNumberFromSceneFolder(scene.path)
+    const folderPath = sceneFolder(scene.path) || defaultSceneFolder(inferredChapterNumber)
     setSelectedSceneId(scene.id)
     setSelectedFolder(sceneFolder(scene.path) || null)
     setTitle(scene.title)
     setDescription(scene.description ?? "")
     setBody(scene.body)
-    setChapterNumber(scene.chapter_number ?? null)
-    setSceneFolderDraft(sceneFolder(scene.path) || defaultSceneFolder(scene.chapter_number ?? null))
+    setHtmlBody(scene.html_body ?? `<p>${scene.body.replace(/\n/g, "<br>")}</p>`)
+    setChapterNumber(inferredChapterNumber)
+    setSceneMetadata({ ...emptySceneMetadata(), ...(scene.metadata ?? {}) })
+    setSceneFolderDraft(folderPath)
     setStatus(null)
   }
 
   function newScene(folderOverride?: string | null) {
     const destinationFolder = normalizeWorkspaceFolderPath(folderOverride ?? selectedFolder) || defaultSceneFolder(chapterNumber)
+    const inferredChapterNumber = extractChapterNumberFromSceneFolder(destinationFolder)
     rememberFolder(destinationFolder)
     setSelectedSceneId(null)
     setTitle("")
     setDescription("")
     setBody("")
-    setChapterNumber(tree?.chapters[0]?.chapter_number ?? null)
+    setHtmlBody("<p></p>")
+    setChapterNumber(inferredChapterNumber ?? chapterOptions[0] ?? null)
+    setSceneMetadata(emptySceneMetadata())
     setSceneFolderDraft(destinationFolder)
     setStatus(null)
   }
@@ -196,6 +237,7 @@ export default function ScenesPage() {
     }
     rememberFolder(cleanFolder)
     setSelectedFolder(cleanFolder)
+    setChapterNumber((current) => extractChapterNumberFromSceneFolder(cleanFolder) ?? current)
     setSceneFolderDraft(cleanFolder)
     setCollapsed((current) => ({ ...current, [cleanFolder]: false }))
     setStatus(`Created folder ${cleanFolder}`)
@@ -212,13 +254,16 @@ export default function ScenesPage() {
         title: title.trim(),
         description: description.trim() || null,
         body,
+        html_body: htmlBody,
+        metadata: sceneMetadata,
         path: buildScenePath(destinationFolder, title.trim()),
         chapter_number: chapterNumber,
         status: chapterNumber ? "assigned" : "unassigned",
         sort_order: selectedScene?.sort_order ?? 1,
       })
       setStatus("Scene saved. Metadata refreshed from the scene text.")
-      await loadWorkspace(saved.id)
+      const { data: nextTree } = await refetchTree()
+      syncWorkspaceSelection(nextTree ?? null, saved.id)
     } finally {
       setSaving(false)
     }
@@ -246,13 +291,15 @@ export default function ScenesPage() {
         description: scene.description,
         body: scene.body,
         metadata: scene.metadata,
+        html_body: scene.html_body,
         path: nextPath,
         chapter_number: scene.chapter_number,
         status: scene.status,
         sort_order: scene.sort_order,
       })
       setStatus(`Moved scene to ${nextPath}`)
-      await loadWorkspace(scene.id)
+      const { data: nextTree } = await refetchTree()
+      syncWorkspaceSelection(nextTree ?? null, scene.id)
     } catch {
       setStatus("Could not move this scene")
     } finally {
@@ -266,7 +313,8 @@ export default function ScenesPage() {
     await booksApi.deleteScene(bookId, selectedScene.id)
     newScene(selectedFolder)
     setStatus("Scene deleted.")
-    await loadWorkspace()
+    const { data: nextTree } = await refetchTree()
+    syncWorkspaceSelection(nextTree ?? null)
   }
 
   return (
@@ -301,6 +349,9 @@ export default function ScenesPage() {
                     </button>
                     <Link href={`/${bookId}/notes`} className={`rounded-full px-4 py-2 text-sm font-semibold ${isDark ? "bg-white/10 text-slate-100" : "bg-white text-stone-800"}`}>
                       Open notes
+                    </Link>
+                    <Link href={`/${bookId}/voice` as Route} className={`rounded-full px-4 py-2 text-sm font-semibold ${isDark ? "bg-white/10 text-slate-100" : "bg-white text-stone-800"}`}>
+                      Open voice workspace
                     </Link>
                     <Link href={`/${bookId}/manuscript`} className={`rounded-full px-4 py-2 text-sm font-semibold ${isDark ? "bg-white/10 text-slate-100" : "bg-stone-900 text-white"}`}>
                       Open manuscript
@@ -420,8 +471,8 @@ export default function ScenesPage() {
                       <span className={labelClass(isDark)}>Chapter</span>
                       <select value={chapterNumber ?? ""} onChange={(event) => setChapterNumber(event.target.value ? Number(event.target.value) : null)} className={inputClass(isDark)}>
                         <option value="">Unassigned</option>
-                        {(tree?.chapters ?? []).map((chapter) => (
-                          <option key={chapter.chapter_number} value={chapter.chapter_number}>Chapter {chapter.chapter_number}</option>
+                        {chapterOptions.map((chapterNumberOption) => (
+                          <option key={chapterNumberOption} value={chapterNumberOption}>Chapter {chapterNumberOption}</option>
                         ))}
                       </select>
                     </label>
@@ -434,18 +485,51 @@ export default function ScenesPage() {
                     <span className={labelClass(isDark)}>Description</span>
                     <input value={description} onChange={(event) => setDescription(event.target.value)} className={inputClass(isDark)} placeholder="Optional scene summary" />
                   </label>
+                  <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                    <label className="text-sm">
+                      <span className={labelClass(isDark)}>POV character</span>
+                      <input value={sceneMetadata.pov ?? ""} onChange={(event) => setSceneMetadata((current) => ({ ...current, pov: event.target.value || null }))} className={inputClass(isDark)} placeholder="Whose eyes are we in?" />
+                    </label>
+                    <label className="text-sm">
+                      <span className={labelClass(isDark)}>Timeline / date</span>
+                      <input value={sceneMetadata.timeline ?? ""} onChange={(event) => setSceneMetadata((current) => ({ ...current, timeline: event.target.value || null }))} className={inputClass(isDark)} placeholder="Day 3, Winter court, 8:12 PM" />
+                    </label>
+                    <label className="text-sm">
+                      <span className={labelClass(isDark)}>Location</span>
+                      <input value={sceneMetadata.location ?? ""} onChange={(event) => setSceneMetadata((current) => ({ ...current, location: event.target.value || null }))} className={inputClass(isDark)} placeholder="Blackwater Station" />
+                    </label>
+                    <label className="text-sm">
+                      <span className={labelClass(isDark)}>Mood / tone</span>
+                      <input value={(sceneMetadata.mood ?? []).join(", ")} onChange={(event) => setSceneMetadata((current) => ({ ...current, mood: metadataTextToList(event.target.value) }))} className={inputClass(isDark)} placeholder="tense, intimate, foreboding" />
+                    </label>
+                    <label className="text-sm">
+                      <span className={labelClass(isDark)}>Tags</span>
+                      <input value={(sceneMetadata.tags ?? []).join(", ")} onChange={(event) => setSceneMetadata((current) => ({ ...current, tags: metadataTextToList(event.target.value) }))} className={inputClass(isDark)} placeholder="betrayal, dagger, reveal" />
+                    </label>
+                    <label className="text-sm">
+                      <span className={labelClass(isDark)}>Status note</span>
+                      <input value={sceneMetadata.status_note ?? ""} onChange={(event) => setSceneMetadata((current) => ({ ...current, status_note: event.target.value || null }))} className={inputClass(isDark)} placeholder="Draft, revised, final, waiting on continuity pass" />
+                    </label>
+                  </div>
+                  <WhatsTheWordPanel bookId={bookId} isDark={isDark} className="mt-4" />
                   <label className="mt-4 block text-sm">
                     <span className={labelClass(isDark)}>Scene text</span>
-                    <textarea
-                      value={body}
-                      onChange={(event) => setBody(event.target.value)}
-                      rows={24}
-                      placeholder={"POV: Elena\nLocation: Blackwater Station\nTime: 8:12 PM\n\nCharacters:\n- Elena\n\nRain hammered the platform..."}
-                      className={`w-full rounded-[1.2rem] border px-5 py-4 font-serif text-base leading-8 ${isDark ? "border-white/10 bg-black text-slate-100 placeholder:text-slate-600" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
-                    />
+                    <div className={`overflow-hidden rounded-[1.2rem] border ${isDark ? "border-white/10 bg-black" : "border-stone-200 bg-white"}`}>
+                      <EditorToolbar editorKey="scene-workspace-editor" isDark={isDark} compact />
+                      <RichTextEditor
+                        editorKey="scene-workspace-editor"
+                        html={htmlBody}
+                        onChange={(nextHtml, nextText) => {
+                          setHtmlBody(nextHtml)
+                          setBody(nextText)
+                        }}
+                        placeholder={"Rain hammered the platform while Elena counted the seconds until the train lights found her..."}
+                        className={`min-h-[32rem] px-5 py-4 font-serif text-base leading-8 outline-none ${isDark ? "text-slate-100" : "text-stone-900"}`}
+                      />
+                    </div>
                   </label>
                   <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
-                    <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>{status ?? "Drag scene cards onto folders to reorganize them."}</p>
+                    <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>{status ?? `Drag scene cards onto folders to reorganize them. ${sceneWordCount.toLocaleString()} words, ${sceneReadingTime}.`}</p>
                     <div className="flex flex-wrap gap-3">
                       {selectedScene ? (
                         <button onClick={() => void deleteScene()} className={`rounded-full px-4 py-2 text-sm ${isDark ? "bg-rose-500/10 text-rose-200" : "bg-rose-50 text-rose-700"}`}>Delete</button>
@@ -480,6 +564,16 @@ export default function ScenesPage() {
                       {title.trim() ? buildScenePath(sceneFolderDraft, title.trim()) : "Set a title to generate the scene filename."}
                     </p>
                   </div>
+                  {tree?.structure_tree?.length ? (
+                    <div className={`mt-4 rounded-[1rem] border px-4 py-4 text-sm leading-6 ${isDark ? "border-white/10 bg-white/[0.03] text-slate-300" : "border-stone-200 bg-white text-stone-700"}`}>
+                      <p className="font-semibold">Story hierarchy</p>
+                      <div className="mt-3 space-y-2">
+                        {tree.structure_tree.map((node) => (
+                          <StructureTreePreview key={node.id} node={node} isDark={isDark} depth={0} />
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
                 </aside>
               </div>
             </section>
@@ -622,4 +716,27 @@ function IconFolder() {
 
 function IconPlus() {
   return <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.9}><path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14M5 12h14" /></svg>
+}
+
+function StructureTreePreview({
+  node,
+  isDark,
+  depth,
+}: {
+  node: NonNullable<ManuscriptWorkspaceTree["structure_tree"]>[number]
+  isDark: boolean
+  depth: number
+}) {
+  return (
+    <div style={{ marginLeft: `${depth * 12}px` }}>
+      <p className={`text-sm ${isDark ? "text-slate-200" : "text-stone-700"}`}>{node.label}</p>
+      {node.children?.length ? (
+        <div className="mt-1 space-y-1">
+          {node.children.map((child) => (
+            <StructureTreePreview key={child.id} node={child} isDark={isDark} depth={depth + 1} />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
 }

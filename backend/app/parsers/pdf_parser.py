@@ -10,7 +10,14 @@ import fitz
 
 CHAPTER_RE = re.compile(
     r"^(?:(?:chapter|ch\.?|part|volume|vol\.?|book|act|episode|section|scene)\s+"
-    r"(?:\d+[a-z]?|[ivxlcdm]+|[a-z]{1,3}|[a-z]+(?:[-\s][a-z]+)*)"
+    r"(?:\d+[a-z]?|[ivxlcdm]+|[a-z]{1,3}|(?:first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|"
+    r"eleventh|twelfth|thirteenth|fourteenth|fifteenth|sixteenth|seventeenth|eighteenth|nineteenth|twentieth|"
+    r"thirtieth|fortieth|fiftieth|sixtieth|seventieth|eightieth|ninetieth)|(?:zero|one|two|three|four|five|six|"
+    r"seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|"
+    r"thirty|forty|fifty|sixty|seventy|eighty|ninety)(?:[-\s](?:first|second|third|fourth|fifth|sixth|seventh|"
+    r"eighth|ninth|tenth|eleventh|twelfth|thirteenth|fourteenth|fifteenth|sixteenth|seventeenth|eighteenth|"
+    r"nineteenth|twentieth|thirtieth|fortieth|fiftieth|sixtieth|seventieth|eightieth|ninetieth|one|two|three|"
+    r"four|five|six|seven|eight|nine))?)"
     r"(?:\s*[:.\-]\s*.+)?|prologue|epilogue|interlude|afterword|appendix(?:\s+[a-z0-9]+)?)$",
     re.IGNORECASE,
 )
@@ -30,7 +37,15 @@ HEADER_ZONE_RATIO = 0.12
 FOOTER_ZONE_RATIO = 0.10
 MIN_SUSPICIOUS_CHAPTER_WORDS = 14000
 HEADING_FALLBACK_RE = re.compile(
-    r"^(chapter|ch\.?|part|volume|vol\.?|book|act|episode|section|scene|prologue|epilogue|interlude|afterword|appendix)\b",
+    r"^(?:chapter|ch\.?|part|volume|vol\.?|book|act|episode|section|scene)\s+"
+    r"(?:\d+[a-z]?|[ivxlcdm]+|[a-z]{1,3}|(?:first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|"
+    r"eleventh|twelfth|thirteenth|fourteenth|fifteenth|sixteenth|seventeenth|eighteenth|nineteenth|twentieth|"
+    r"thirtieth|fortieth|fiftieth|sixtieth|seventieth|eightieth|ninetieth)|(?:zero|one|two|three|four|five|six|"
+    r"seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|"
+    r"thirty|forty|fifty|sixty|seventy|eighty|ninety)(?:[-\s](?:first|second|third|fourth|fifth|sixth|seventh|"
+    r"eighth|ninth|tenth|eleventh|twelfth|thirteenth|fourteenth|fifteenth|sixteenth|seventeenth|eighteenth|"
+    r"nineteenth|twentieth|thirtieth|fortieth|fiftieth|sixtieth|seventieth|eightieth|ninetieth|one|two|three|"
+    r"four|five|six|seven|eight|nine))?)\b|^(?:prologue|epilogue|interlude|afterword|appendix)\b",
     re.IGNORECASE,
 )
 NUMBER_WORDS = {
@@ -649,6 +664,8 @@ def _extract_heading(text: str, *, next_text: str | None = None, permissive: boo
     if heading_candidate and score >= threshold:
         return heading_candidate
     cleaned_line = re.sub(r"[^\w\s]", "", first_line).strip()
+    if re.match(r"^part\s+of\b", cleaned_line, flags=re.IGNORECASE):
+        return None
     if cleaned_line and HEADING_FALLBACK_RE.match(cleaned_line):
         return cleaned_line
     return None

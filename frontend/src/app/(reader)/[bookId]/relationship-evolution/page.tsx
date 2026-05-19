@@ -1,6 +1,8 @@
 "use client"
 import { useEffect, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
 import { useParams, useRouter } from "next/navigation"
+import { asQueryKey, readerCacheKey } from "@/lib/query/cacheKeys"
 import { readerApi } from "@/lib/api/reader"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import type { RelationshipEvolutionPair } from "@/types/reader"
@@ -8,21 +10,25 @@ import type { RelationshipEvolutionPair } from "@/types/reader"
 export default function RelationshipEvolutionPage() {
   const { bookId } = useParams<{ bookId: string }>()
   const router = useRouter()
-  const [pairs, setPairs] = useState<RelationshipEvolutionPair[]>([])
   const [chapter, setChapter] = useState(1)
-  const [error, setError] = useState<string | null>(null)
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
+  const { data: progress = null } = useQuery({
+    queryKey: asQueryKey(readerCacheKey(bookId, "progress")),
+    queryFn: () => readerApi.getProgress(bookId),
+  })
+  const { data: evolution = null } = useQuery({
+    queryKey: asQueryKey(`reader:${bookId}:relationship-evolution:${chapter}`),
+    queryFn: () => readerApi.getRelationshipEvolution(bookId, chapter),
+    enabled: chapter > 0,
+  })
 
   useEffect(() => {
-    readerApi.getProgress(bookId).then((progress) => {
-      const current = Math.max(1, progress?.current_chapter ?? 1)
-      setChapter(current)
-      return readerApi.getRelationshipEvolution(bookId, current)
-    }).then((res) => setPairs(res.pairs)).catch((e) => {
-      setError("Relationship evolution unavailable")
-    })
-  }, [bookId])
+    setChapter(Math.max(1, progress?.current_chapter ?? 1))
+  }, [progress])
+
+  const pairs: RelationshipEvolutionPair[] = evolution?.pairs ?? []
+  const error = !evolution ? "Relationship evolution unavailable" : null
 
   return (
     <div className={`min-h-screen px-4 py-8 transition-colors ${isDark ? "bg-[linear-gradient(180deg,#000000_0%,#060606_44%,#0d0d0d_100%)] text-slate-100" : "bg-[linear-gradient(180deg,#fcf7ef_0%,#f8f3ec_46%,#f5f0ea_100%)] text-stone-950"}`}>

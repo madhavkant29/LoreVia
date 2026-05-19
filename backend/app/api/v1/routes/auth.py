@@ -19,6 +19,7 @@ from app.api.deps.rate_limit import (
 from app.core.config import is_local_mode, settings
 from app.core.database import get_db
 from app.core.redis import (
+    begin_password_reset_cooldown,
     bump_token_version,
     consume_email_verification_token,
     consume_password_reset_token,
@@ -41,6 +42,7 @@ from app.schemas.auth import (
     DailyWordGoalBody,
     ForgotPasswordBody,
     LoginBody,
+    MessagingPermissionBody,
     RefreshBody,
     RegisterBody,
     RegisterOut,
@@ -61,11 +63,7 @@ from app.services.email_service import (
     deliver_verification_email,
     send_onboarding_email,
 )
-from app.services.monetization_service import (
-    create_referral_if_valid,
-    ensure_referral_code,
-    schedule_trial_email_events,
-)
+from app.services.trial_email_service import schedule_trial_email_events
 from app.utils.auth_cookies import (
     REFRESH_TOKEN_COOKIE_NAME,
     clear_auth_cookies,
@@ -135,8 +133,13 @@ def _build_user_out(user: User) -> UserOut:
         longest_login_streak_days=max(int(user.longest_login_streak_days or 0), 0),
         login_activity_dates=login_activity_dates(user),
         email_verified=bool(user.email_verified_at),
+        messaging_permission=(user.messaging_permission or "anyone"),
         created_at=created_at,
     )
+
+
+async def _record_login_activity(db: AsyncSession, user: User) -> None:
+    record_login_activity(user)
 
 
 async def _issue_email_verification(user: User) -> tuple[bool, str]:
@@ -184,8 +187,6 @@ async def register(
     try:
         db.add(user)
         await db.flush()
-        await ensure_referral_code(db, user)
-        await create_referral_if_valid(db, user, body.referral_code)
         await schedule_trial_email_events(db, user)
         db.add(build_device_trial(user.id, device_id))
         await db.commit()
@@ -222,7 +223,7 @@ async def login(
         raise HTTPException(401, "Invalid credentials")
     if not user.email_verified_at:
         raise HTTPException(403, "Please verify your email before signing in.")
-    record_login_activity(user)
+    await _record_login_activity(db, user)
     await db.commit()
     await db.refresh(user)
     user_out, access_token, refresh_token = await _mint_token_pair(str(user.id), user)
@@ -293,8 +294,6 @@ async def oauth_supabase(
             try:
                 db.add(existing)
                 await db.flush()
-                await ensure_referral_code(db, existing)
-                await create_referral_if_valid(db, existing, body.referral_code)
                 await schedule_trial_email_events(db, existing)
                 if not local_supabase_recovery:
                     db.add(build_device_trial(existing.id, device_id))
@@ -306,7 +305,6 @@ async def oauth_supabase(
             created = True
         elif not existing.email_verified_at:
             existing.email_verified_at = datetime.now(UTC)
-            await ensure_referral_code(db, existing)
             await schedule_trial_email_events(db, existing)
             await db.commit()
             await db.refresh(existing)
@@ -314,7 +312,7 @@ async def oauth_supabase(
         if created:
             await send_onboarding_email(existing.email)
 
-        record_login_activity(existing)
+        await _record_login_activity(db, existing)
         await db.commit()
         await db.refresh(existing)
         user_out, access_token, refresh_token = await _mint_token_pair(str(existing.id), existing)
@@ -338,6 +336,12 @@ async def forgot_password(
     email = normalize_email(body.email)
     user = (await db.execute(select(User).where(func.lower(User.email) == email))).scalar()
     if user:
+        cooldown_started = await begin_password_reset_cooldown(
+            str(user.id),
+            settings.PASSWORD_RESET_REQUEST_COOLDOWN_SECONDS,
+        )
+        if not cooldown_started:
+            return {"ok": True, "delivered": True}
         token = secrets.token_urlsafe(32)
         await store_password_reset_token(
             token,
@@ -407,7 +411,7 @@ async def refresh(
     if not user.email_verified_at:
         raise HTTPException(403, "Please verify your email before signing in.")
     await revoke_refresh_session(payload["sub"], session_id)
-    record_login_activity(user)
+    await _record_login_activity(db, user)
     await db.commit()
     await db.refresh(user)
     user_out, access_token, refresh_token = await _mint_token_pair(str(user.id), user)
@@ -438,7 +442,7 @@ async def verify_email(
         await db.commit()
         await send_onboarding_email(user.email)
 
-    record_login_activity(user)
+    await _record_login_activity(db, user)
     await db.commit()
     await db.refresh(user)
     user_out, access_token, refresh_token = await _mint_token_pair(str(user.id), user)
@@ -476,7 +480,7 @@ async def me(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    record_login_activity(current_user)
+    await _record_login_activity(db, current_user)
     await db.commit()
     await db.refresh(current_user)
     return _build_user_out(current_user)
@@ -507,16 +511,30 @@ async def set_daily_word_goal(
     return _build_user_out(current_user)
 
 
+@router.patch("/me/messaging-permission", response_model=UserOut)
+async def set_messaging_permission(
+    body: MessagingPermissionBody,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    current_user.messaging_permission = body.messaging_permission
+    await db.commit()
+    await db.refresh(current_user)
+    return _build_user_out(current_user)
+
+
 @router.get("/tier-limits", response_model=TierLimitsOut)
 async def get_tier_limits():
     """Return configured tier limits from backend config."""
     return TierLimitsOut(
         free_max_books=settings.FREE_MAX_BOOKS,
+        author_max_uploads=settings.AUTHOR_MAX_UPLOADS,
+        architect_uploads_unlimited=True,
         free_total_token_budget=settings.FREE_TOTAL_TOKEN_BUDGET,
         free_search_per_day=settings.FREE_SEARCH_PER_DAY,
         free_summary_per_hour=settings.FREE_SUMMARY_PER_HOUR,
         free_prediction_per_day=settings.FREE_PREDICTION_PER_DAY,
-        reader_prediction_per_day=settings.READER_PREDICTION_PER_DAY,
+        free_recall_per_day=settings.FREE_RECALL_PER_DAY,
         author_prediction_per_day=settings.AUTHOR_PREDICTION_PER_DAY,
         architect_prediction_per_day=settings.ARCHITECT_PREDICTION_PER_DAY,
         trial_high_cost_turns_per_day=settings.TRIAL_HIGH_COST_TURNS_PER_DAY,
@@ -525,9 +543,7 @@ async def get_tier_limits():
         free_advisor_per_day=settings.FREE_ADVISOR_PER_DAY,
         free_advisor_per_week=settings.FREE_ADVISOR_PER_WEEK,
         free_advisor_per_month=settings.FREE_ADVISOR_PER_MONTH,
-        reader_advisor_per_day=settings.READER_ADVISOR_PER_DAY,
-        reader_advisor_per_week=settings.READER_ADVISOR_PER_WEEK,
-        reader_advisor_per_month=settings.READER_ADVISOR_PER_MONTH,
+        free_continuity_per_day=settings.FREE_CONTINUITY_PER_DAY,
         author_advisor_per_day=settings.AUTHOR_ADVISOR_PER_DAY,
         author_advisor_per_week=settings.AUTHOR_ADVISOR_PER_WEEK,
         author_advisor_per_month=settings.AUTHOR_ADVISOR_PER_MONTH,
@@ -535,7 +551,6 @@ async def get_tier_limits():
         architect_advisor_per_week=settings.ARCHITECT_ADVISOR_PER_WEEK,
         architect_advisor_per_month=settings.ARCHITECT_ADVISOR_PER_MONTH,
         free_continuity_per_minute=settings.FREE_CONTINUITY_PER_MINUTE,
-        reader_continuity_per_minute=settings.READER_CONTINUITY_PER_MINUTE,
         author_continuity_per_minute=settings.AUTHOR_CONTINUITY_PER_MINUTE,
         architect_continuity_per_minute=settings.ARCHITECT_CONTINUITY_PER_MINUTE,
     )

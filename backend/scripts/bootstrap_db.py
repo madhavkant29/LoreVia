@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+FROZEN_SCHEMA_MANIFEST = ROOT / "scripts" / "frozen_schema_manifest_20260516.json"
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -42,7 +43,13 @@ def _run_alembic(*args: str) -> int:
 
 
 def main() -> int:
-    log.info("bootstrap_db_start", extra={"database": redact_database_target(settings.DATABASE_URL)})
+    log.info(
+        "bootstrap_db_start",
+        extra={
+            "database": redact_database_target(settings.DATABASE_URL),
+            "frozen_schema_manifest": str(FROZEN_SCHEMA_MANIFEST),
+        },
+    )
 
     existing_tables = _existing_tables()
     if should_reset_local_alembic_state(existing_tables):
@@ -57,7 +64,9 @@ def main() -> int:
         if stamp_exit != 0:
             return stamp_exit
 
-    upgrade_exit = _run_alembic("upgrade", "head")
+    # Local bootstrap needs to apply every reachable head because the repo
+    # keeps compatibility branches in migration history.
+    upgrade_exit = _run_alembic("upgrade", "heads")
     if upgrade_exit != 0:
         return upgrade_exit
 

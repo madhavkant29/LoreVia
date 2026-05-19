@@ -72,6 +72,19 @@ export interface AdvisorResponse {
   cached?: boolean
 }
 
+export interface AdvisorAsyncAccepted {
+  task_id: string
+  status: "queued"
+  cached?: boolean
+}
+
+export interface AdvisorTaskStatusResponse {
+  task_id: string
+  status: "queued" | "running" | "complete" | "failed"
+  result: AdvisorResponse | null
+  error?: string | null
+}
+
 export interface AdvisorGreeting {
   message: string
   book_title: string
@@ -93,6 +106,12 @@ export type SuggestionType =
   | "future_direction"
   | "manuscript_checkpoint"
   | "editorial_focus"
+  | "event_conflict"
+  | "relationship_flip"
+  | "location_conflict"
+  | "object_continuity"
+  | "world_rule_conflict"
+  | "role_drift"
 
 export interface AdvisorSuggestion {
   id: string
@@ -103,12 +122,29 @@ export interface AdvisorSuggestion {
   chapter_ref: number | null
   action_label: string
   ask_prompt: string
+  source?: "heuristic" | "proactive_audit" | "fallback" | string
+}
+
+export interface AdvisorScanMeta {
+  character_count: number
+  state_count: number
+  open_thread_count: number
+  clue_count: number
+  relationship_count: number
+  world_element_count: number
+  heuristic_count: number
+  fallback_applied: boolean
+  proactive_audit_applied: boolean
+  scan_basis: string[]
+  data_gaps: string[]
+  audit_summary?: string | null
 }
 
 export interface AdvisorSuggestionsResponse {
   suggestions: AdvisorSuggestion[]
   total: number
   book_title: string
+  meta: AdvisorScanMeta
 }
 
 // ─── Editorial Review types ───────────────────────────────────────────────────
@@ -229,6 +265,11 @@ export interface ProseTightenResponse {
   tightened_text: string
   rationale: string[]
   changed: boolean
+}
+
+export interface WhatsTheWordResponse {
+  word: string
+  gloss: string
 }
 
 export interface InlineContinuityIssue {

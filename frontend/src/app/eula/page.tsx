@@ -5,7 +5,7 @@ import { LEGAL_EMAIL, SUPPORT_EMAIL } from "@/lib/constants/contact"
 
 export const metadata: Metadata = {
   title: "End User License Agreement",
-  description: "Review the LoreVia software license covering permitted use, restrictions, ownership, updates, and termination.",
+  description: "Review the LoreVia for authors software license covering permitted use, restrictions, ownership, updates, and termination.",
   alternates: {
     canonical: "/eula",
   },

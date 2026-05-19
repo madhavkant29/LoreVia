@@ -29,13 +29,18 @@ SUBJECTIVE_TRANSLATIONS = {
 }
 GENERIC_SUMMARY_PHRASES = {
     "appearance not yet described",
+    "background character",
+    "is a character",
     "mysterious figure",
-    "tragic figure",
     "normal character",
+    "plain character",
+    "tragic figure",
     "supporting character",
+    "this character is a character",
     "protagonist",
     "antagonist",
     "puppet master",
+    "unknown character",
 }
 
 
@@ -198,6 +203,38 @@ def choose_richer_text(*values: str | None) -> str | None:
     return max(cleaned, key=len)
 
 
+def build_character_analysis_metadata(extracted: dict, *, persistence_reason: str | None = None) -> dict:
+    evidence = extracted.get("evidence") if isinstance(extracted.get("evidence"), dict) else {}
+    mention_count = int(evidence.get("mention_count") or 0)
+    strong_mentions = int(evidence.get("strong_mention_count") or 0)
+    grounding_passage_count = max(mention_count, strong_mentions)
+    quality_flags: list[str] = []
+    if not extracted.get("arc_summary") or str(extracted.get("arc_summary")).strip().casefold() in GENERIC_SUMMARY_PHRASES:
+        quality_flags.append("generic_summary")
+    if grounding_passage_count <= 1:
+        quality_flags.append("light_grounding")
+    if not evidence.get("has_dialogue_or_action"):
+        quality_flags.append("no_dialogue_or_action")
+    confidence = float(extracted.get("confidence") or 0.0)
+    if confidence >= 0.9 and grounding_passage_count >= 2:
+        confidence_band = "high"
+    elif confidence >= 0.65 or grounding_passage_count >= 1:
+        confidence_band = "medium"
+    else:
+        confidence_band = "low"
+    summary_quality = "generic" if "generic_summary" in quality_flags else ("grounded" if grounding_passage_count >= 2 else "thin")
+    return {
+        "persistence_reason": persistence_reason or "extracted_character",
+        "evidence_count": mention_count,
+        "summary_quality": summary_quality,
+        "needs_review": bool(quality_flags),
+        "rejected_duplicate_candidates": [],
+        "quality_flags": quality_flags,
+        "grounding_passage_count": grounding_passage_count,
+        "confidence_band": confidence_band,
+    }
+
+
 def build_character_profile(extracted: dict, book_id: uuid.UUID, first_chapter: int) -> dict:
     raw_traits = _normalize_trait_state(extracted.get("traits"))
     archetype = extracted.get("archetype")
@@ -218,11 +255,16 @@ def build_character_profile(extracted: dict, book_id: uuid.UUID, first_chapter: 
         "age_descriptor": flat(trait_state, "age"),
         "distinguishing": flat(trait_state, "distinguishing"),
         "personality_tags": extracted.get("personality_tags", []),
+        "goal": extracted.get("goal"),
         "motivations": extracted.get("motivations", []),
         "fears": extracted.get("fears", []),
+        "lie_they_believe": extracted.get("lie_they_believe"),
+        "backstory_wound": extracted.get("backstory_wound"),
+        "arc_type": extracted.get("arc_type"),
         "arc_summary": extracted.get("arc_summary"),
         "archetype": archetype,
         "growth_events": merge_growth_events(_growth_event_group(extracted.get("growth_event"))),
+        "analysis_metadata": build_character_analysis_metadata(extracted),
     }
 
 
@@ -241,8 +283,12 @@ def merge_profile_fields(existing, incoming) -> dict:
     incoming_role = incoming.get("role") if isinstance(incoming, dict) else incoming.role
     incoming_first_chapter = incoming.get("first_chapter", existing.first_chapter) if isinstance(incoming, dict) else incoming.first_chapter
     incoming_personality = incoming.get("personality_tags") if isinstance(incoming, dict) else incoming.personality_tags
+    incoming_goal = incoming.get("goal") if isinstance(incoming, dict) else getattr(incoming, "goal", None)
     incoming_motivations = incoming.get("motivations") if isinstance(incoming, dict) else incoming.motivations
     incoming_fears = incoming.get("fears") if isinstance(incoming, dict) else incoming.fears
+    incoming_lie = incoming.get("lie_they_believe") if isinstance(incoming, dict) else getattr(incoming, "lie_they_believe", None)
+    incoming_wound = incoming.get("backstory_wound") if isinstance(incoming, dict) else getattr(incoming, "backstory_wound", None)
+    incoming_arc_type = incoming.get("arc_type") if isinstance(incoming, dict) else getattr(incoming, "arc_type", None)
     incoming_arc = incoming.get("arc_summary") if isinstance(incoming, dict) else incoming.arc_summary
     incoming_archetype = incoming.get("archetype") if isinstance(incoming, dict) else incoming.archetype
     incoming_last_seen = incoming.get("last_seen_chapter") if isinstance(incoming, dict) else getattr(incoming, "last_seen_chapter", None)
@@ -268,11 +314,23 @@ def merge_profile_fields(existing, incoming) -> dict:
         "age_descriptor": flat(merged_traits, "age"),
         "distinguishing": flat(merged_traits, "distinguishing"),
         "personality_tags": merge_list_values(existing.personality_tags, incoming_personality),
+        "goal": choose_richer_text(getattr(existing, "goal", None), incoming_goal),
         "motivations": merge_list_values(existing.motivations, incoming_motivations),
         "fears": merge_list_values(existing.fears, incoming_fears),
+        "lie_they_believe": choose_richer_text(getattr(existing, "lie_they_believe", None), incoming_lie),
+        "backstory_wound": choose_richer_text(getattr(existing, "backstory_wound", None), incoming_wound),
+        "arc_type": choose_richer_text(getattr(existing, "arc_type", None), incoming_arc_type),
         "arc_summary": choose_richer_text(existing.arc_summary, incoming_arc),
         "archetype": choose_richer_text(existing.archetype, incoming_archetype),
         "growth_events": merge_growth_events(existing.growth_events, incoming_growth_events),
+        "analysis_metadata": {
+            **(existing.analysis_metadata or {}),
+            **build_character_analysis_metadata(
+                incoming if isinstance(incoming, dict) else {},
+                persistence_reason=str((existing.analysis_metadata or {}).get("persistence_reason") or "updated_character"),
+            ),
+            "rejected_duplicate_candidates": list((existing.analysis_metadata or {}).get("rejected_duplicate_candidates") or []),
+        },
     }
 
 def update_profile(existing, extracted: dict) -> dict:
@@ -285,8 +343,12 @@ def update_profile(existing, extracted: dict) -> dict:
         "last_seen_chapter": chapter,   # chapter currently being processed
         "trait_state": extracted.get("traits", {}),
         "personality_tags": extracted.get("personality_tags", []),
+        "goal": extracted.get("goal"),
         "motivations": extracted.get("motivations", []),
         "fears": extracted.get("fears", []),
+        "lie_they_believe": extracted.get("lie_they_believe"),
+        "backstory_wound": extracted.get("backstory_wound"),
+        "arc_type": extracted.get("arc_type"),
         "arc_summary": extracted.get("arc_summary"),
         "archetype": extracted.get("archetype"),
         "growth_events": merge_growth_events(_growth_event_group(extracted.get("growth_event"))),

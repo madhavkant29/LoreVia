@@ -1,8 +1,13 @@
 "use client"
-import { useCallback, useEffect, useState } from "react"
+import React, { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
+import { parsePublishedTextBlocks } from "@/lib/utils/publishedLayout"
+import { resolveReaderFontStack } from "@/lib/utils/readerTypography"
 import { renderRichTextHtml } from "@/lib/utils/richText"
-import type { ChapterCharacter, ChapterMedia } from "@/types/reader"
+import { PRIVATE_SHARE_COPY_NOTICE, preventProtectedManuscriptCopy } from "@/lib/utils/manuscriptCopyProtection"
+import type { ChapterCharacter, ChapterMedia, ReaderDisplayStyle } from "@/types/reader"
+import type { PublishedBlockType } from "@/lib/utils/publishedLayout"
+import type { ReaderFontFamily } from "@/lib/utils/readerTypography"
 
 interface Props {
   bookId: string
@@ -18,9 +23,11 @@ interface Props {
   onQuoteSelect: (text: string) => void
   theme: "light" | "dark"
   fontSize: number
-  fontFamily: "serif" | "sans" | "mono"
+  fontFamily: ReaderFontFamily
+  displayStyle: ReaderDisplayStyle
   quoteModeEnabled: boolean
   canUseQuoteMode: boolean
+  canCopyManuscript: boolean
 }
 
 export function ChapterText({
@@ -38,11 +45,26 @@ export function ChapterText({
   theme,
   fontSize,
   fontFamily,
+  displayStyle,
   quoteModeEnabled,
   canUseQuoteMode,
+  canCopyManuscript,
 }: Props) {
   const [text, setText] = useState("")
   const [selected, setSelected] = useState("")
+  const [copyNotice, setCopyNotice] = useState<string | null>(null)
+
+  const handleMentionClick = useCallback((event: React.MouseEvent<HTMLElement>) => {
+    const target = event.target
+    if (!(target instanceof Element)) return
+
+    const mentionElement = target.closest<HTMLElement>("[data-mention]")
+    const mention = mentionElement?.dataset.mention?.trim()
+    if (!mention) return
+
+    event.preventDefault()
+    onTap(mention)
+  }, [onTap])
 
   useEffect(() => {
     if (textContent) {
@@ -63,6 +85,18 @@ export function ChapterText({
     }
   }, [canUseQuoteMode, onQuoteSelect, quoteModeEnabled])
 
+  useEffect(() => {
+    if (canCopyManuscript) {
+      setCopyNotice(null)
+    }
+  }, [canCopyManuscript])
+
+  const handleProtectedCopy = useCallback((event: { preventDefault: () => void }) => {
+    if (preventProtectedManuscriptCopy(event, canCopyManuscript)) {
+      setCopyNotice(PRIVATE_SHARE_COPY_NOTICE)
+    }
+  }, [canCopyManuscript])
+
   if (!text && !htmlContent) {
     return (
       <div className="mx-auto max-w-2xl px-6 py-12">
@@ -75,7 +109,8 @@ export function ChapterText({
 
   const hasHtmlImages = Boolean(htmlContent && /<img\b/i.test(htmlContent))
   const shouldRenderHtml = Boolean(htmlContent && (hasHtmlImages || !text))
-  const blocks = annotateWithMedia(text, characters, media)
+  const isPublishedLayout = displayStyle === "published"
+  const blocks = annotateWithMedia(text, characters, media, isPublishedLayout)
   const mentionClass = theme === "dark"
     ? "cursor-pointer rounded border-b border-dashed border-indigo-200/45 px-0.5 text-stone-100 transition-colors hover:bg-indigo-200/10 hover:text-white"
     : "cursor-pointer rounded border-b border-dashed border-violet-500/55 px-0.5 text-stone-900 transition-colors hover:bg-violet-50"
@@ -104,39 +139,51 @@ export function ChapterText({
         divider: "bg-violet-400",
       }
 
-  const fontStack =
-    fontFamily === "serif"
-      ? '"Newsreader", "Merriweather", Georgia, serif'
-      : fontFamily === "mono"
-        ? '"SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace'
-        : '"Space Grotesk", "Avenir Next", "Segoe UI Variable Text", sans-serif'
+  const fontStack = resolveReaderFontStack(fontFamily, displayStyle)
 
   return (
-    <div className="mx-auto w-full px-4 pb-28 pt-8 sm:px-8 lg:px-10" onMouseUp={handleMouseUp} style={{ maxWidth: "1000px" }}>
+    <div
+      className={`mx-auto w-full px-4 pb-28 pt-8 sm:px-8 lg:px-10 ${isPublishedLayout ? "reader-display-published" : "reader-display-relaxed"}`}
+      onMouseUp={handleMouseUp}
+      onCopyCapture={handleProtectedCopy}
+      onCutCapture={handleProtectedCopy}
+      style={{ maxWidth: isPublishedLayout ? "920px" : "1000px" }}
+    >
       <div className="grid gap-8 xl:grid-cols-[minmax(0,1fr)] xl:items-start">
-        <section className={`overflow-hidden rounded-[2rem] border shadow-[0_28px_100px_-68px_rgba(79,70,229,0.38)] ${cardTone.shell}`}>
-          <div className="mx-auto max-w-[82ch] px-6 py-10 sm:px-10 sm:py-14">
-            <p className={`text-center text-[12px] italic tracking-[0.02em] ${cardTone.helper}`} style={{ fontFamily: "var(--reader-label)" }}>
+        <section className={`book-layout overflow-hidden rounded-[2rem] border shadow-[0_28px_100px_-68px_rgba(79,70,229,0.38)] ${cardTone.shell}`}>
+          <div className={isPublishedLayout ? "book-layout__page mx-auto px-6 py-10 sm:px-10 sm:py-14" : "mx-auto max-w-[82ch] px-6 py-10 sm:px-10 sm:py-14"}>
+            <p className={`reader-nonprint text-center text-[12px] italic tracking-[0.02em] ${cardTone.helper}`} style={{ fontFamily: "var(--reader-label)" }}>
               Tap any word or select text for instant context
             </p>
+            {!canCopyManuscript ? (
+              <p className={`reader-nonprint mt-3 text-center text-[11px] font-semibold uppercase tracking-[0.18em] ${theme === "dark" ? "text-amber-300" : "text-amber-700"}`} style={{ fontFamily: "var(--reader-label)" }}>
+                Private share: copying disabled
+              </p>
+            ) : null}
+            {copyNotice ? (
+              <p className={`reader-nonprint mt-2 text-center text-sm ${theme === "dark" ? "text-amber-200" : "text-amber-800"}`}>
+                {copyNotice}
+              </p>
+            ) : null}
 
-            <header className="mb-14 mt-8">
+            <header className={isPublishedLayout ? "book-layout__chapter-heading chapter-title" : "mb-14 mt-8"}>
               <p className="text-[11px] uppercase tracking-[0.36em] text-stone-400" style={{ fontFamily: "var(--reader-label)" }}>
                 Chapter {chapterNum}{totalChapters ? ` of ${totalChapters}` : ""}
               </p>
-              <h1 className={`mt-4 text-5xl font-light leading-tight sm:text-6xl ${cardTone.heading}`} style={{ fontFamily: "var(--reader-display)" }}>
+              <h1 className={`mt-4 text-5xl font-light leading-tight sm:text-6xl ${cardTone.heading}`} style={{ fontFamily: isPublishedLayout ? fontStack : "var(--reader-display)" }}>
                 {chapterTitle || `Chapter ${chapterNum}`}
               </h1>
-              <div className={`mt-6 h-[2px] w-16 ${cardTone.divider}`} />
+              <div className={`mt-6 h-[2px] w-16 ${isPublishedLayout ? "book-layout__title-rule" : cardTone.divider}`} />
             </header>
 
             {shouldRenderHtml ? (
               <div
-                className={`reader-text note-rich-content ${cardTone.prose}`}
+                className={`reader-text note-rich-content ${isPublishedLayout ? "book-layout__body" : ""} ${cardTone.prose}`}
+                onClick={handleMentionClick}
                 style={{
                   fontFamily: fontStack,
                   fontSize: `${fontSize}px`,
-                  lineHeight: fontFamily === "sans" ? "1.88" : "1.96",
+                  lineHeight: isPublishedLayout ? "1.68" : fontFamily === "sans" ? "1.88" : "1.96",
                   maxWidth: "100%",
                   wordBreak: "normal",
                   overflowWrap: "normal",
@@ -146,11 +193,11 @@ export function ChapterText({
               />
             ) : (
               <div
-                className={`reader-text whitespace-pre-wrap ${cardTone.prose}`}
+                className={`reader-text ${isPublishedLayout ? "book-layout__body" : "whitespace-pre-wrap"} ${cardTone.prose}`}
                 style={{
                   fontFamily: fontStack,
                   fontSize: `${fontSize}px`,
-                  lineHeight: fontFamily === "sans" ? "1.88" : "1.96",
+                  lineHeight: isPublishedLayout ? "1.68" : fontFamily === "sans" ? "1.88" : "1.96",
                   maxWidth: "100%",
                   wordBreak: "normal",
                   overflowWrap: "normal",
@@ -174,29 +221,16 @@ export function ChapterText({
                       </figure>
                     ) : null
                   ) : (
-                    <p key={`block-${index}`} className="mb-8">
-                      {block.segments.map((segment, segmentIndex) =>
-                        segment.type === "text" ? (
-                          <span key={`text-${index}-${segmentIndex}`}>{segment.content}</span>
-                        ) : (
-                          <span
-                            key={`mention-${index}-${segmentIndex}`}
-                            className={mentionClass}
-                            onClick={() => onTap(segment.content)}
-                            title={`Tap for context: ${segment.content}`}
-                          >
-                            {segment.content}
-                          </span>
-                        )
-                      )}
-                    </p>
+                    isPublishedLayout
+                      ? renderPublishedTextBlock(block, index, mentionClass, onTap)
+                      : renderRelaxedTextBlock(block, index, mentionClass, onTap)
                   )
                 )}
               </div>
             )}
 
             <footer
-              className={`mt-20 flex flex-col gap-3 border-t pt-8 text-sm italic sm:flex-row sm:items-center sm:justify-between ${theme === "dark" ? "border-white/10 text-stone-400" : "border-stone-200 text-stone-500"}`}
+              className={`reader-nonprint mt-20 flex flex-col gap-3 border-t pt-8 text-sm italic sm:flex-row sm:items-center sm:justify-between ${theme === "dark" ? "border-white/10 text-stone-400" : "border-stone-200 text-stone-500"}`}
               style={{ fontFamily: "var(--reader-label)" }}
             >
               <span>{chapterTitle || `Chapter ${chapterNum}`}</span>
@@ -205,7 +239,7 @@ export function ChapterText({
           </div>
         </section>
 
-        <div className="mx-auto mt-8 max-w-[72ch]">
+        <div className="reader-nonprint mx-auto mt-8 max-w-[72ch]">
           <div className={`rounded-[1.5rem] border p-4 ${cardTone.aside}`}>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
@@ -233,7 +267,7 @@ export function ChapterText({
           </div>
         </div>
 
-        <div className={`mx-auto mt-8 max-w-[72ch] rounded-[1.5rem] border p-4 xl:hidden ${cardTone.aside}`}>
+        <div className={`reader-nonprint mx-auto mt-8 max-w-[72ch] rounded-[1.5rem] border p-4 xl:hidden ${cardTone.aside}`}>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${cardTone.helper}`}>Chapter navigation</p>
@@ -261,7 +295,7 @@ export function ChapterText({
         </div>
       </div>
 
-      <div className={`mx-auto mt-8 max-w-[72ch] rounded-[1.5rem] border p-4 xl:hidden ${cardTone.aside}`}>
+      <div className={`reader-nonprint mx-auto mt-8 max-w-[72ch] rounded-[1.5rem] border p-4 xl:hidden ${cardTone.aside}`}>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${cardTone.helper}`}>Chapter navigation</p>
@@ -291,9 +325,11 @@ export function ChapterText({
 }
 
 type Segment = { type: "text" | "mention"; content: string }
-type RenderBlock = { type: "text"; segments: Segment[] } | { type: "media"; item: ChapterMedia }
+type RenderBlock =
+  | { type: "text"; semanticType: PublishedBlockType; segments: Segment[] }
+  | { type: "media"; item: ChapterMedia }
 
-function annotateWithMedia(text: string, characters: ChapterCharacter[], media: ChapterMedia[]): RenderBlock[] {
+function annotateWithMedia(text: string, characters: ChapterCharacter[], media: ChapterMedia[], published: boolean): RenderBlock[] {
   const mediaMap = new Map(media.map((item) => [item.marker, item]))
   const parts = text.split(/(\[\[IMAGE:[^\]]+\]\])/g)
   const blocks: RenderBlock[] = []
@@ -308,7 +344,17 @@ function annotateWithMedia(text: string, characters: ChapterCharacter[], media: 
       continue
     }
     if (/^\[\[IMAGE:[^\]]+\]\]$/.test(part)) continue
-    blocks.push({ type: "text", segments: annotate(part, characters) })
+    if (published) {
+      for (const parsedBlock of parsePublishedTextBlocks(part)) {
+        blocks.push({
+          type: "text",
+          semanticType: parsedBlock.type,
+          segments: annotate(parsedBlock.content, characters),
+        })
+      }
+    } else {
+      blocks.push({ type: "text", semanticType: "paragraph", segments: annotate(part, characters) })
+    }
   }
 
   for (const item of media) {
@@ -317,6 +363,89 @@ function annotateWithMedia(text: string, characters: ChapterCharacter[], media: 
   }
 
   return blocks
+}
+
+function renderRelaxedTextBlock(
+  block: Extract<RenderBlock, { type: "text" }>,
+  index: number,
+  mentionClass: string,
+  onTap: (word: string) => void,
+) {
+  return (
+    <p key={`block-${index}`} className="mb-8">
+      {renderSegments(block.segments, index, mentionClass, onTap)}
+    </p>
+  )
+}
+
+function renderPublishedTextBlock(
+  block: Extract<RenderBlock, { type: "text" }>,
+  index: number,
+  mentionClass: string,
+  onTap: (word: string) => void,
+) {
+  const blockClass = `book-block book-block--${block.semanticType}`
+
+  if (block.semanticType === "scene_break") {
+    return (
+      <div key={`block-${index}`} className={`${blockClass} scene-break`} aria-hidden="true">
+        {renderSegments(block.segments, index, mentionClass, onTap)}
+      </div>
+    )
+  }
+
+  if (block.semanticType === "quote") {
+    return (
+      <blockquote
+        key={`block-${index}`}
+        className={`${blockClass} book-special-block`}
+        style={{
+          marginLeft: "clamp(1rem, 5vw, 2.8rem)",
+          marginRight: "clamp(1rem, 5vw, 2.8rem)",
+          paddingLeft: "1.25rem",
+          paddingRight: "1.25rem",
+        }}
+      >
+        {renderSegments(block.segments, index, mentionClass, onTap)}
+      </blockquote>
+    )
+  }
+
+  if (block.semanticType !== "paragraph" && block.semanticType !== "chapter_title") {
+    return (
+      <div key={`block-${index}`} className={`${blockClass} book-special-block`}>
+        {renderSegments(block.segments, index, mentionClass, onTap)}
+      </div>
+    )
+  }
+
+  return (
+    <p key={`block-${index}`} className={blockClass}>
+      {renderSegments(block.segments, index, mentionClass, onTap)}
+    </p>
+  )
+}
+
+function renderSegments(
+  segments: Segment[],
+  blockIndex: number,
+  mentionClass: string,
+  onTap: (word: string) => void,
+) {
+  return segments.map((segment, segmentIndex) =>
+    segment.type === "text" ? (
+      <span key={`text-${blockIndex}-${segmentIndex}`}>{segment.content}</span>
+    ) : (
+      <span
+        key={`mention-${blockIndex}-${segmentIndex}`}
+        className={mentionClass}
+        onClick={() => onTap(segment.content)}
+        title={`Tap for context: ${segment.content}`}
+      >
+        {segment.content}
+      </span>
+    )
+  )
 }
 
 function annotate(text: string, characters: ChapterCharacter[]): Segment[] {

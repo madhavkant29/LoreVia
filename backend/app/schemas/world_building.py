@@ -63,6 +63,9 @@ class WorldElementOut(BaseModel):
     source_excerpt: str | None = None
     character_id: str | None = None
     author_override: bool = False
+    quality_flags: list[str] = Field(default_factory=list)
+    grounding_passage_count: int = 0
+    confidence_band: str | None = None
 
 
 class WorldGapItemOut(BaseModel):
@@ -190,6 +193,7 @@ class WorldNoteOut(BaseModel):
     linked_integration_id: str | None = None
     context_label: str | None = None
     suggested_fix: str | None = None
+    tags: list[str] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
     addressed_at: datetime | None = None

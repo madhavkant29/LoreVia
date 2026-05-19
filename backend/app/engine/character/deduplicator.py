@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.engine.embeddings.embedder import embed_character
 from app.models.character import Character
-from app.utils.character_utils import has_shared_surname, name_similarity
+from app.utils.character_utils import has_conflicting_title_identity, has_shared_surname, name_similarity
 
 ALIAS_STOPWORDS = {
     "after", "and", "are", "around", "association", "but", "considering", "creation",
@@ -32,6 +32,7 @@ ALIAS_SUFFIX_BLOCKLIST = (
     " Towers",
 )
 HONORIFIC_SUFFIXES = ("san", "kun", "chan", "sama", "sensei", "senpai", "dono", "tan", "nee", "nii")
+HONORIFIC_PREFIXES = ("mr", "mrs", "ms", "miss", "dr", "sir", "lady", "lord")
 
 
 async def embed_for_dedup(name: str, traits: dict) -> list[float]:
@@ -82,6 +83,30 @@ def _meaningful_tokens(name: str | None) -> list[str]:
     return [token for token in _strip_honorific_suffixes(name).split() if token and token not in stopwords]
 
 
+def _honorific_prefix(name: str | None) -> str:
+    normalized = normalize_character_name(name)
+    tokens = normalized.split()
+    if tokens and tokens[0] in HONORIFIC_PREFIXES:
+        return tokens[0]
+    return ""
+
+
+def _has_titled_bare_surname_mismatch(
+    left_name: str | None,
+    right_name: str | None,
+    *,
+    left_meaningful: list[str],
+    right_meaningful: list[str],
+    left_honorific: str,
+    right_honorific: str,
+) -> bool:
+    if not left_meaningful or not right_meaningful:
+        return False
+    if left_meaningful != right_meaningful:
+        return False
+    return bool(left_honorific) != bool(right_honorific)
+
+
 def character_name_keys(name: str | None, aliases: Iterable[str] | None = None) -> set[str]:
     keys: set[str] = set()
 
@@ -101,7 +126,7 @@ def character_name_keys(name: str | None, aliases: Iterable[str] | None = None) 
             keys.add(f"{tokens[0]} {tokens[-1]}")
         if len(tokens) >= 3:
             keys.add(" ".join(tokens[:3]))
-        if len(stripped_tokens) == 1:
+        if len(stripped_tokens) == 1 and not _honorific_prefix(candidate):
             keys.add(stripped_tokens[0])
 
     _add(name)
@@ -116,12 +141,12 @@ def names_equivalent(
     right_name: str | None,
     right_aliases: Iterable[str] | None,
 ) -> bool:
+    if has_conflicting_title_identity(left_name, right_name):
+        return False
+
     left_keys = character_name_keys(left_name, left_aliases)
     right_keys = character_name_keys(right_name, right_aliases)
     if left_keys & right_keys:
-        return True
-
-    if name_similarity(left_name, right_name) >= 0.85:
         return True
 
     left_norm = normalize_character_name(left_name)
@@ -137,12 +162,34 @@ def names_equivalent(
     right_meaningful = _meaningful_tokens(right_name)
     left_base_tokens = left_base.split() if left_base else []
     right_base_tokens = right_base.split() if right_base else []
+    left_honorific = _honorific_prefix(left_name)
+    right_honorific = _honorific_prefix(right_name)
 
     if len(left_tokens) == len(right_tokens) == 2:
         if left_tokens[0] == right_tokens[0] and left_tokens[1] != right_tokens[1]:
             return False
         if left_tokens[-1] == right_tokens[-1] and left_tokens[0] != right_tokens[0]:
             return False
+
+    if left_meaningful and right_meaningful and len(left_meaningful) == len(right_meaningful) == 1:
+        if left_meaningful[0] == right_meaningful[0]:
+            if left_honorific != right_honorific:
+                return False
+            if bool(left_honorific) != bool(right_honorific):
+                return False
+
+    if _has_titled_bare_surname_mismatch(
+        left_name,
+        right_name,
+        left_meaningful=left_meaningful,
+        right_meaningful=right_meaningful,
+        left_honorific=left_honorific,
+        right_honorific=right_honorific,
+    ):
+        return False
+
+    if name_similarity(left_name, right_name) >= 0.85:
+        return True
 
     if has_shared_surname(left_name, right_name):
         left_given = left_tokens[0] if left_tokens else ""
@@ -151,12 +198,39 @@ def names_equivalent(
             return False
 
     if left_base and right_base and left_base == right_base:
+        if _has_titled_bare_surname_mismatch(
+            left_name,
+            right_name,
+            left_meaningful=left_meaningful,
+            right_meaningful=right_meaningful,
+            left_honorific=left_honorific,
+            right_honorific=right_honorific,
+        ):
+            return False
         return True
 
     if left_base_tokens and right_base_tokens:
         if len(left_base_tokens) == 1 and left_base_tokens[0] in set(right_base_tokens):
+            if _has_titled_bare_surname_mismatch(
+                left_name,
+                right_name,
+                left_meaningful=left_meaningful,
+                right_meaningful=right_meaningful,
+                left_honorific=left_honorific,
+                right_honorific=right_honorific,
+            ):
+                return False
             return True
         if len(right_base_tokens) == 1 and right_base_tokens[0] in set(left_base_tokens):
+            if _has_titled_bare_surname_mismatch(
+                left_name,
+                right_name,
+                left_meaningful=left_meaningful,
+                right_meaningful=right_meaningful,
+                left_honorific=left_honorific,
+                right_honorific=right_honorific,
+            ):
+                return False
             return True
         if len(left_base_tokens) == len(right_base_tokens) == 2 and left_base_tokens == list(reversed(right_base_tokens)):
             return True

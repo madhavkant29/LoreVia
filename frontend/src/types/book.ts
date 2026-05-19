@@ -1,6 +1,7 @@
 export type BookStatus = "pending" | "processing" | "ready" | "failed"
 export type BookFormat = "pdf" | "epub" | "docx" | "doc" | "fountain" | "txt" | "md" | "manual"
 export type BookWorkType = "novel" | "screenplay" | "other"
+export type RevisionTagTarget = "chapter" | "scene" | "character" | "note" | "comment" | "plot_thread" | "world_note"
 
 export interface Book {
   id: string
@@ -23,7 +24,26 @@ export interface Book {
   series_name?: string | null
   series_order?: number | null
   is_public?: boolean
+  public_status?: "draft" | "pending_review" | "published" | "hidden" | "removed" | string | null
+  public_slug?: string | null
+  published_at?: string | null
+  public_visibility?: string | null
+  rights_confirmation?: boolean
+  rights_confirmation_at?: string | null
+  content_source_type?: "user_original" | "public_domain" | "licensed" | "admin_seeded" | string | null
+  moderation_status?: "clean" | "reported" | "under_review" | "hidden" | "removed" | string | null
+  moderation_reason?: string | null
+  takedown_reason?: string | null
+  takedown_at?: string | null
+  public_upload_counted_at?: string | null
+  source_title?: string | null
+  source_author?: string | null
+  source_public_domain_note?: string | null
+  source_url?: string | null
   public_description?: string | null
+  public_share_status?: "not_requested" | "pending" | "approved" | string | null
+  public_share_requested_at?: string | null
+  public_share_approved_at?: string | null
   copyright_warning?: boolean
   archived_at?: string | null
   hidden_at?: string | null
@@ -33,6 +53,49 @@ export interface Book {
   chapters_left?: number | null
   marked_complete_in_series?: boolean | null
   processing?: BookProcessing | null
+  collaboration_role?: CollaborationRole | null
+  collaboration_scope?: CollaborationScope | null
+  collaboration_permissions?: CollaborationPermissions | null
+}
+
+export type CollaborationRole =
+  | "viewer"
+  | "reader_only"
+  | "commenter"
+  | "editor"
+  | "beta_reader"
+  | "developmental_editor"
+  | "coauthor"
+  | "co_writer"
+
+export interface CollaborationScope {
+  chapter_start?: number | null
+  chapter_end?: number | null
+  character_bible: boolean
+  continuity_report: boolean
+  reader_confusion_report: boolean
+}
+
+export interface CollaborationPermissions {
+  can_edit_manuscript: boolean
+  can_view_story_bible: boolean
+  can_run_ai_scans: boolean
+  can_export: boolean
+  can_comment: boolean
+  can_view_selected_chapters_only: boolean
+}
+
+export interface BookCollaborator {
+  id: string
+  book_id: string
+  email: string
+  display_name?: string | null
+  role: CollaborationRole
+  scope: CollaborationScope
+  permissions: CollaborationPermissions
+  invite_status: "active" | "revoked" | string
+  invited_at: string
+  updated_at: string
 }
 
 export interface BookSeries {
@@ -111,21 +174,34 @@ export interface PublicChapterMeta {
 
 export interface PublicBook {
   id: string
+  public_kind?: "public_demo" | "user_public_share"
+  public_slug?: string | null
   title: string
   author: string | null
+  author_username: string | null
+  creator_display_name?: string | null
   genre: string | null
   description: string | null
   format: BookFormat
   work_type: BookWorkType
   status: BookStatus
+  public_status?: string
+  moderation_status?: string
+  content_source_type?: "user_original" | "public_domain" | "licensed" | "admin_seeded" | string
+  source_title?: string | null
+  source_author?: string | null
+  source_public_domain_note?: string | null
+  source_url?: string | null
   cover_url?: string | null
   total_chapters: number | null
   copyright_warning?: boolean
+  active_forum_post_id?: string | null
   created_at?: string
 }
 
 export interface PublicBookDetail extends PublicBook {
   chapters: PublicChapterMeta[]
+  visibility_notice?: string | null
 }
 
 export interface PublicChapter {
@@ -160,6 +236,46 @@ export interface BookNote {
   chapter_title: string | null
   title: string | null
   body: string
+  tags?: string[]
+  created_at: string
+  updated_at: string
+}
+
+export interface RevisionTagSet {
+  entity_type: RevisionTagTarget
+  entity_id: string
+  chapter_number?: number | null
+  tags: string[]
+}
+
+export type ManuscriptAnnotationCategory =
+  | "general"
+  | "continuity"
+  | "character"
+  | "worldbuilding"
+  | "pacing"
+  | "line_edit"
+  | "theme"
+
+export interface ManuscriptAnnotation {
+  id: string
+  book_id: string
+  book_title: string
+  chapter_number: number
+  chapter_title: string | null
+  category: ManuscriptAnnotationCategory | string
+  status: "open" | "resolved" | string
+  visibility: "shared" | "private" | string
+  quote: string
+  comment: string
+  anchor_context_before?: string | null
+  anchor_context_after?: string | null
+  start_offset?: number | null
+  end_offset?: number | null
+  created_by_user_id: string
+  created_by_label: string
+  can_edit: boolean
+  resolved_at?: string | null
   created_at: string
   updated_at: string
 }
@@ -260,10 +376,51 @@ export interface UserStats {
   }
   private: {
     total_uploads: number
+    manuscript_uploads?: number
+    worldbuilding_uploads?: number
+    upload_limit?: number | null
+    uploads_remaining?: number | null
+    upload_limit_unlimited?: boolean
     total_token_consumption: number
+    llm_request_count?: number
+    llm_prompt_tokens?: number
+    llm_completion_tokens?: number
+    llm_total_tokens?: number
     total_chapters_tracked: number
     saved_quotes: number
   }
+  writing: WritingDashboardStats
+}
+
+export interface WritingPeriodStat {
+  words: number
+  target_words?: number | null
+  progress_pct?: number | null
+}
+
+export interface WritingHeatmapDay {
+  date: string
+  words: number
+}
+
+export interface WritingEntry {
+  book_id?: string | null
+  chapter_number?: number | null
+  title: string
+  words: number
+}
+
+export interface WritingDashboardStats {
+  today: WritingPeriodStat
+  this_week: WritingPeriodStat
+  this_month: WritingPeriodStat
+  this_year: WritingPeriodStat
+  last_24_hours: WritingPeriodStat
+  last_7_days: WritingPeriodStat
+  last_30_days: WritingPeriodStat
+  last_year: WritingPeriodStat
+  heatmap: WritingHeatmapDay[]
+  entries_today: WritingEntry[]
 }
 
 export interface ChapterReportCharacter {
@@ -350,6 +507,24 @@ export interface ChapterVersionDetail extends ChapterVersion {
   html: string | null
 }
 
+export interface SceneVersion {
+  id: string
+  scene_id?: string | null
+  chapter_number?: number | null
+  scene_title: string
+  scene_path?: string | null
+  word_count?: number | null
+  note?: string | null
+  snapshot_kind?: string
+  created_at: string
+}
+
+export interface SceneVersionDetail extends SceneVersion {
+  description?: string | null
+  body: string
+  html_body?: string | null
+}
+
 export interface WordCountGoals {
   chapter_target?: number | null
   book_target?: number | null
@@ -381,6 +556,64 @@ export interface PublishingPreset {
   mirror_margins: boolean
 }
 
+export interface EditorPreferences {
+  font_family: string
+  font_size: number
+  line_height: number
+  manuscript_width: "narrow" | "standard" | "wide"
+  show_page_guides: boolean
+  focus_mode: boolean
+  default_scene_separator: "asterisks" | "hashes" | "divider"
+}
+
+export interface ReadingThemes {
+  active_theme: "light" | "dark" | "sepia" | "paper"
+  allow_dark_mode: boolean
+}
+
+export interface TypewriterModeSettings {
+  enabled: boolean
+  center_offset_px: number
+}
+
+export interface ManuscriptLayoutSettings {
+  margins: "standard" | "wide" | "custom"
+  page_size: string
+  orientation: "portrait" | "landscape"
+  show_headers: boolean
+  show_footers: boolean
+  page_numbering: boolean
+  different_first_page: boolean
+}
+
+export interface WorkspaceStructureNode {
+  id: string
+  label: string
+  kind: "book" | "part" | "arc" | "chapter" | "scene"
+  chapter_number?: number | null
+  scene_id?: string | null
+  children: WorkspaceStructureNode[]
+}
+
+export interface WorkspaceBreadcrumb {
+  id: string
+  label: string
+  kind: "book" | "part" | "arc" | "chapter" | "scene"
+}
+
+export interface SceneMetadata {
+  pov?: string | null
+  timeline?: string | null
+  location?: string | null
+  tags?: string[]
+  mood?: string[]
+  status_note?: string | null
+  anchors?: string[]
+  bookmarks?: string[]
+  summary?: string | null
+  [key: string]: unknown
+}
+
 export interface ManuscriptFrontMatter {
   author_name: string
   pen_name: string
@@ -402,6 +635,19 @@ export interface ManuscriptFrontMatter {
   include_prologue: boolean
 }
 
+export interface RevisionBoardItemState {
+  item_id: string
+  status: "pending" | "fixed" | "ignored" | "task_created" | string
+  assigned_version_id?: string | null
+  task_id?: string | null
+  updated_at?: string | null
+}
+
+export interface RevisionBoard {
+  items: RevisionBoardItemState[]
+  last_generated_at?: string | null
+}
+
 export interface GoalCalendarItem {
   id: string
   title: string
@@ -418,7 +664,92 @@ export interface WriterWorkspace {
   templates: WritingTemplate[]
   publishing: PublishingPreset
   manuscript_front_matter: ManuscriptFrontMatter
+  revision_board: RevisionBoard
+  editor_preferences?: EditorPreferences
+  reading_themes?: ReadingThemes
+  typewriter_mode?: TypewriterModeSettings
+  manuscript_layout?: ManuscriptLayoutSettings
+  structure_tree?: WorkspaceStructureNode[]
   processing?: BookProcessing | null
+}
+
+export interface RevisionActionItem {
+  id: string
+  category: string
+  title: string
+  description: string
+  severity: "high" | "medium" | "low" | string
+  chapter_ref?: number | null
+  source_label?: string | null
+  recommendation?: string | null
+  status: "pending" | "fixed" | "ignored" | "task_created" | string
+  assigned_version_id?: string | null
+  task_id?: string | null
+}
+
+export interface RevisionGenreCheck {
+  genre: string
+  label: string
+  checks: string[]
+  rationale: string
+}
+
+export interface RevisionPlanPass {
+  title: string
+  summary: string
+  items: RevisionActionItem[]
+}
+
+export interface CharacterKnowledgeEntry {
+  character_name: string
+  chapter_learned?: number | null
+  source: string
+}
+
+export interface CharacterKnowledgeFact {
+  fact: string
+  chapter_ref?: number | null
+  entries: CharacterKnowledgeEntry[]
+  warning?: string | null
+}
+
+export interface CharacterKnowledgeTimelineCell {
+  chapter_number: number
+  state: string
+}
+
+export interface CharacterKnowledgeTimelineRow {
+  character_name: string
+  chapter_learned?: number | null
+  source: string
+  cells: CharacterKnowledgeTimelineCell[]
+}
+
+export interface CharacterKnowledgeTimelineFact {
+  fact: string
+  rows: CharacterKnowledgeTimelineRow[]
+  warning?: string | null
+}
+
+export interface RevisionIntelligenceSummary {
+  hero_message: string
+  active_item_count: number
+  high_severity_count: number
+  task_ready_count: number
+  recent_edit_label?: string | null
+}
+
+export interface RevisionIntelligence {
+  tagline: string
+  summary: RevisionIntelligenceSummary
+  change_impacts: RevisionActionItem[]
+  genre_checks: RevisionGenreCheck[]
+  revision_plan: RevisionPlanPass[]
+  knowledge_matrix: CharacterKnowledgeFact[]
+  knowledge_timeline: CharacterKnowledgeTimelineFact[]
+  scene_advice: RevisionActionItem[]
+  confusion_map: RevisionActionItem[]
+  voice_alerts: RevisionActionItem[]
 }
 
 export interface NovelScene {
@@ -430,12 +761,13 @@ export interface NovelScene {
   description?: string | null
   body: string
   html_body?: string | null
-  metadata?: Record<string, unknown>
+  metadata?: SceneMetadata
   path: string
   status: string
   sort_order: number
   source: string
   origin_chapter_number?: number | null
+  tags?: string[]
   created_at: string
   updated_at: string
 }
@@ -444,12 +776,15 @@ export interface WorkspaceChapterNode {
   chapter_number: number
   title?: string | null
   scene_count: number
+  structure_version: number
+  tags?: string[]
 }
 
 export interface WorkspaceSceneGroup {
   id: string
   label: string
   chapter_number?: number | null
+  structure_version?: number | null
   collapsed_by_default: boolean
   scenes: NovelScene[]
 }
@@ -458,6 +793,37 @@ export interface ManuscriptWorkspaceTree {
   chapters: WorkspaceChapterNode[]
   scene_groups: WorkspaceSceneGroup[]
   note_paths: string[]
+  structure_tree?: WorkspaceStructureNode[]
+  scene_breadcrumbs?: Record<string, WorkspaceBreadcrumb[]>
+}
+
+export interface WorkspaceSearchFilters {
+  chapter_number?: number | null
+  scene_id?: string | null
+  pov?: string | null
+  location?: string | null
+  tags?: string[]
+}
+
+export interface WorkspaceSearchResult {
+  scope: "manuscript" | "scenes" | "notes"
+  id: string
+  title: string
+  excerpt: string
+  chapter_number?: number | null
+  scene_id?: string | null
+  note_path?: string | null
+  rank: number
+}
+
+export interface ChapterSceneOrder {
+  chapter_number: number
+  structure_version: number
+  scenes: Array<{
+    id: string
+    title: string
+    sort_order: number
+  }>
 }
 
 export interface BookProcessing {

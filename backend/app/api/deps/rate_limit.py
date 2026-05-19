@@ -1,21 +1,23 @@
+import ipaddress as _ipaddress
 import time
 import uuid
 from datetime import UTC, datetime
 
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps.auth import get_current_user
-from app.core.config import settings
-from app.core.database import AsyncSessionLocal
+from app.core.database import get_db
 from app.core.redis import get_redis, key_ratelimit
 from app.models.user import User, UserRateLimitOverride
-from app.services.monetization_service import purchased_overflow_units_for_action_via_session
 from app.utils.billing_utils import (
+    continuity_limit_per_day,
     DAILY_LIMIT_MESSAGE,
     free_search_limit_per_day,
     prediction_limit_per_day,
     protected_authoring_limit_per_day,
+    recall_limit_per_day,
 )
 
 
@@ -23,13 +25,21 @@ async def _window(key: str, limit: int, window: int = 60) -> bool:
     r = await get_redis()
     now = time.time()
     member = f"{int(now * 1000)}:{uuid.uuid4().hex}"
-    pipe = r.pipeline()
-    pipe.zremrangebyscore(key, 0, now - window)
-    pipe.zadd(key, {member: now})
-    pipe.zcard(key)
-    pipe.expire(key, window)
-    results = await pipe.execute()
-    return results[2] <= limit
+    if hasattr(r, "pipeline"):
+        pipe = r.pipeline()
+        pipe.zremrangebyscore(key, 0, now - window)
+        pipe.zadd(key, {member: now})
+        pipe.zcard(key)
+        pipe.expire(key, window)
+        results = await pipe.execute()
+        return results[2] <= limit
+
+    # Some lightweight test doubles only implement simple counter primitives.
+    # Fall back to a coarse per-window counter so routes remain testable without
+    # requiring full sorted-set pipeline semantics.
+    await r.set(key, "0", ex=window, nx=True)
+    count = int(await r.incr(key))
+    return count <= limit
 
 
 async def _require_window(key: str, limit: int, window: int, message: str) -> None:
@@ -50,62 +60,88 @@ def _utc_day_bucket(action: str, now: datetime | None = None) -> tuple[str, int]
     return current.strftime(f"{action}:%Y%m%d"), ttl_seconds
 
 
-async def _bump_daily_bucket(user_id: object, action: str, limit: int) -> None:
+async def _bump_daily_bucket(
+    db: AsyncSession,
+    user_id: object,
+    action: str,
+    limit: int,
+) -> None:
     if limit <= 0:
         raise HTTPException(403, DAILY_LIMIT_MESSAGE)
 
     bucket, ttl_seconds = _utc_day_bucket(action)
-    overflow_units = await purchased_overflow_units_for_action_via_session(user_id, action)
     key = key_ratelimit(str(user_id), bucket)
     r = await get_redis()
     await r.set(key, "0", ex=ttl_seconds, nx=True)
     count = int(await r.incr(key))
-    if count > (limit + overflow_units):
+    if count > limit:
         raise HTTPException(429, DAILY_LIMIT_MESSAGE)
 
 
-async def rate_limit_search(current_user: User = Depends(get_current_user)):
+async def rate_limit_search(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     limit = free_search_limit_per_day(current_user)
     if limit is None:
         return
-    limit = await _limit_for_user(current_user.id, "search_per_hour", limit)
-    await _bump_daily_bucket(current_user.id, "search", limit)
+    limit = await _limit_for_user(db, current_user.id, "search_per_hour", limit)
+    await _bump_daily_bucket(db, current_user.id, "search", limit)
 
 
 async def rate_limit_summary(current_user: User = Depends(get_current_user)):
     return None
 
 
-async def rate_limit_chat(current_user: User = Depends(get_current_user)):
+async def rate_limit_chat(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     daily_limit = prediction_limit_per_day(current_user)
-    daily_limit = await _limit_for_user(current_user.id, "chat_per_day", daily_limit)
-    await _bump_daily_bucket(current_user.id, "prediction", daily_limit)
+    daily_limit = await _limit_for_user(db, current_user.id, "chat_per_day", daily_limit)
+    await _bump_daily_bucket(db, current_user.id, "prediction", daily_limit)
 
 
-async def rate_limit_advisor(current_user: User = Depends(get_current_user)):
+async def rate_limit_advisor(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     daily_limit = protected_authoring_limit_per_day(current_user)
     if daily_limit <= 0:
         raise HTTPException(403, "Story Advisor is an authoring feature. Upgrade to Author for access.")
-    daily_limit = await _limit_for_user(current_user.id, "advisor_per_day", daily_limit)
-    await _bump_daily_bucket(current_user.id, "high_cost_authoring", daily_limit)
+    daily_limit = await _limit_for_user(db, current_user.id, "advisor_per_day", daily_limit)
+    await _bump_daily_bucket(db, current_user.id, "high_cost_authoring", daily_limit)
 
 
-async def rate_limit_continuity_checker(current_user: User = Depends(get_current_user)):
-    daily_limit = protected_authoring_limit_per_day(current_user)
+async def rate_limit_recall(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    daily_limit = recall_limit_per_day(current_user)
+    if daily_limit is None:
+        return
+    await _bump_daily_bucket(db, current_user.id, "recall", daily_limit)
+
+
+async def rate_limit_continuity_checker(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    daily_limit = continuity_limit_per_day(current_user)
     if daily_limit <= 0:
         raise HTTPException(403, "Continuity checks are authoring features. Upgrade to Author for access.")
-    daily_limit = await _limit_for_user(current_user.id, "advisor_per_day", daily_limit)
-    await _bump_daily_bucket(current_user.id, "high_cost_authoring", daily_limit)
+    await _bump_daily_bucket(db, current_user.id, "continuity", daily_limit)
 
 
-async def rate_limit_api(request: Request, current_user: User = Depends(get_current_user)):
-    limit = await _limit_for_user(current_user.id, "api_per_minute", 300)
+async def rate_limit_api(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    limit = await _limit_for_user(db, current_user.id, "api_per_minute", 300)
     ok = await _window(key_ratelimit(str(current_user.id), "api"), limit, 60)
     if not ok:
         raise HTTPException(429, "Rate limit exceeded")
-
-
-import ipaddress as _ipaddress
 
 # RFC-1918 + loopback ranges that may legitimately act as reverse proxies.
 # Forwarded-IP headers are only trusted when the *direct* TCP connection
@@ -199,6 +235,7 @@ async def rate_limit_public_asset(request: Request):
 
 
 async def _user_window_limit(
+    db: AsyncSession,
     user_id: object,
     action: str,
     *,
@@ -207,12 +244,16 @@ async def _user_window_limit(
     window: int,
     message: str,
 ) -> None:
-    limit = await _limit_for_user(user_id, field, default)
+    limit = await _limit_for_user(db, user_id, field, default)
     await _require_window(key_ratelimit(str(user_id), action), limit, window, message)
 
 
-async def rate_limit_upload(current_user: User = Depends(get_current_user)):
+async def rate_limit_upload(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     await _user_window_limit(
+        db,
         current_user.id,
         "upload",
         field="uploads_per_hour",
@@ -222,8 +263,49 @@ async def rate_limit_upload(current_user: User = Depends(get_current_user)):
     )
 
 
-async def rate_limit_manuscript_import(current_user: User = Depends(get_current_user)):
+async def rate_limit_public_publish(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     await _user_window_limit(
+        db,
+        current_user.id,
+        "public_publish",
+        field="public_publish_per_hour",
+        default=6,
+        window=3600,
+        message="Public publishing rate limit exceeded. Please wait before trying again.",
+    )
+
+
+async def rate_limit_public_unpublish(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await _user_window_limit(
+        db,
+        current_user.id,
+        "public_unpublish",
+        field="public_unpublish_per_hour",
+        default=12,
+        window=3600,
+        message="Public unpublish rate limit exceeded. Please wait before trying again.",
+    )
+
+
+async def rate_limit_public_report(request: Request):
+    identifier = _client_identifier(request)
+    ok = await _window(key_ratelimit(f"public-report:{identifier}", "report"), 8, 3600)
+    if not ok:
+        raise HTTPException(429, "Report rate limit exceeded. Please wait before sending another report.")
+
+
+async def rate_limit_manuscript_import(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await _user_window_limit(
+        db,
         current_user.id,
         "manuscript_import",
         field="manuscript_imports_per_hour",
@@ -233,8 +315,12 @@ async def rate_limit_manuscript_import(current_user: User = Depends(get_current_
     )
 
 
-async def rate_limit_world_building_upload(current_user: User = Depends(get_current_user)):
+async def rate_limit_world_building_upload(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     await _user_window_limit(
+        db,
         current_user.id,
         "world_building_upload",
         field="world_building_uploads_per_hour",
@@ -244,8 +330,12 @@ async def rate_limit_world_building_upload(current_user: User = Depends(get_curr
     )
 
 
-async def rate_limit_world_building_ai(current_user: User = Depends(get_current_user)):
+async def rate_limit_world_building_ai(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     await _user_window_limit(
+        db,
         current_user.id,
         "world_building_ai",
         field="world_building_ai_per_hour",
@@ -255,14 +345,18 @@ async def rate_limit_world_building_ai(current_user: User = Depends(get_current_
     )
 
 
-async def _limit_for_user(user_id, field: str, default: int) -> int:
-    async with AsyncSessionLocal() as db:
-        override = (
-            await db.execute(
-                select(UserRateLimitOverride).where(UserRateLimitOverride.user_id == user_id)
-            )
-        ).scalar()
-        if not override:
-            return default
-        value = getattr(override, field, None)
-        return int(value) if isinstance(value, int) and value > 0 else default
+async def _limit_for_user(
+    db: AsyncSession,
+    user_id: object,
+    field: str,
+    default: int,
+) -> int:
+    override = (
+        await db.execute(
+            select(UserRateLimitOverride).where(UserRateLimitOverride.user_id == user_id)
+        )
+    ).scalar()
+    if not override:
+        return default
+    value = getattr(override, field, None)
+    return int(value) if isinstance(value, int) and value > 0 else default

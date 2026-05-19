@@ -1,5 +1,7 @@
 "use client"
 
+import React from "react"
+
 const SOCIAL_LINKS = [
   {
     href: "https://x.com/getLoreVia",

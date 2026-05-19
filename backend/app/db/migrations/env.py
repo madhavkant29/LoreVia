@@ -4,9 +4,10 @@ import sys
 from pathlib import Path
 
 from alembic import context
-from sqlalchemy import pool
+import sqlalchemy as sa
+from sqlalchemy import create_engine, pool
 from sqlalchemy.engine import Connection
-from sqlalchemy.ext.asyncio import async_engine_from_config
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.core.config import settings
 from app.db.base import Base  # noqa
@@ -24,6 +25,7 @@ if sys.platform == "win32":
 
 config = context.config
 log = get_logger("alembic")
+versions_dir = Path(__file__).resolve().parent / "versions"
 db_url, _explicit_url = resolve_alembic_database_url(
     os.getenv("ALEMBIC_DATABASE_URL"),
     settings.DATABASE_URL,
@@ -35,17 +37,82 @@ if not is_local_database_url(db_url) and os.getenv("ALEMBIC_CONFIRM_REMOTE") != 
         "Set ALEMBIC_CONFIRM_REMOTE=YES_I_AM_SURE to continue."
     )
 
-offending_revisions = destructive_upgrade_revisions(Path(__file__).resolve().parent / "versions")
-if offending_revisions and os.getenv("ALEMBIC_ALLOW_DESTRUCTIVE_UPGRADES") != "1":
-    offending_paths = ", ".join(str(path.name) for path in offending_revisions)
-    raise RuntimeError(
-        "Refusing to run migrations because destructive operations were found in upgrade() blocks: "
-        f"{offending_paths}. Remove them or set ALEMBIC_ALLOW_DESTRUCTIVE_UPGRADES=1 only if you "
-        "explicitly intend to drop data."
+
+def _table_names(inspector: sa.Inspector) -> set[str]:
+    return set(inspector.get_table_names())
+
+
+def _column_names(inspector: sa.Inspector, table_name: str) -> set[str]:
+    return {column["name"] for column in inspector.get_columns(table_name)}
+
+
+def _index_names(inspector: sa.Inspector, table_name: str) -> set[str]:
+    return {
+        name
+        for index in inspector.get_indexes(table_name)
+        if isinstance(name := index.get("name"), str)
+    }
+
+
+def _destructive_upgrade_still_has_runtime_impact(path: Path) -> bool:
+    engine = create_engine(
+        db_url.replace("postgresql://", "postgresql+psycopg://"),
+        poolclass=pool.NullPool,
+        connect_args={"prepare_threshold": None},
     )
+    try:
+        with engine.connect() as connection:
+            inspector = sa.inspect(connection)
+            tables = _table_names(inspector)
+
+            if path.name == "20260517_finalize_subscription_events_and_remove_monetization.py":
+                if any(table_name in tables for table_name in ("rewarded_ad_sessions", "referrals", "point_ledger_entries")):
+                    return True
+
+                if "users" in tables and "referral_code" in _column_names(inspector, "users"):
+                    return True
+
+                if "beta_read_assignments" in tables:
+                    columns = _column_names(inspector, "beta_read_assignments")
+                    indexes = _index_names(inspector, "beta_read_assignments")
+                    if (
+                        "ix_beta_read_assignments_awarded_at" in indexes
+                        or "awarded_at" in columns
+                        or "awarded_points" in columns
+                        or "reward_points" in columns
+                    ):
+                        return True
+
+                return False
+
+            if path.name == "20260519_remove_beta_read_awarded_at_residue.py":
+                if "beta_read_assignments" not in tables:
+                    return False
+
+                columns = _column_names(inspector, "beta_read_assignments")
+                indexes = _index_names(inspector, "beta_read_assignments")
+                return "awarded_at" in columns or "ix_beta_read_assignments_awarded_at" in indexes
+
+            return True
+    finally:
+        engine.dispose()
+
+if any(arg == "upgrade" for arg in sys.argv[1:]):
+    offending_revisions = [
+        path
+        for path in destructive_upgrade_revisions(versions_dir)
+        if _destructive_upgrade_still_has_runtime_impact(path)
+    ]
+    if offending_revisions and os.getenv("ALEMBIC_ALLOW_DESTRUCTIVE_UPGRADES") != "1":
+        offending_paths = ", ".join(str(path.name) for path in offending_revisions)
+        raise RuntimeError(
+            "Refusing to run migrations because destructive operations were found in upgrade() blocks: "
+            f"{offending_paths}. Remove them or set ALEMBIC_ALLOW_DESTRUCTIVE_UPGRADES=1 only if you "
+            "explicitly intend to drop data."
+        )
 
 if any(arg == "downgrade" for arg in sys.argv[1:]):
-    destructive_downgrades = destructive_downgrade_revisions(Path(__file__).resolve().parent / "versions")
+    destructive_downgrades = destructive_downgrade_revisions(versions_dir)
     if destructive_downgrades and os.getenv("ALEMBIC_ALLOW_DESTRUCTIVE_DOWNGRADES") != "1":
         offending_paths = ", ".join(str(path.name) for path in destructive_downgrades)
         raise RuntimeError(
@@ -76,8 +143,11 @@ def do_run(connection: Connection) -> None:
 
 
 async def run_async() -> None:
-    cfg = config.get_section(config.config_ini_section, {})
-    connectable = async_engine_from_config(cfg, prefix="sqlalchemy.", poolclass=pool.NullPool)
+    connectable = create_async_engine(
+        config.get_main_option("sqlalchemy.url"),
+        poolclass=pool.NullPool,
+        connect_args={"prepare_threshold": None},
+    )
     async with connectable.connect() as connection:
         await connection.run_sync(do_run)
     await connectable.dispose()

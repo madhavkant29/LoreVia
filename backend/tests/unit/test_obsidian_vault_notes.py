@@ -5,6 +5,7 @@ import zipfile
 from io import BytesIO
 
 import pytest
+from fastapi import HTTPException
 
 from app.models.book import Book
 from app.models.user import User
@@ -218,3 +219,34 @@ async def test_import_and_export_obsidian_user_notes_zip(db):
     with zipfile.ZipFile(BytesIO(exported)) as archive:
         assert sorted(archive.namelist()) == ["Characters/Aria.md", "World/Capital.md"]
         assert archive.read("Characters/Aria.md").decode("utf-8").startswith("# Aria")
+
+
+@pytest.mark.asyncio
+async def test_import_obsidian_notes_zip_rejects_suspicious_compression(db, monkeypatch):
+    user = User(email="vault-note-zip-guard@lorevia.app", username="vault-note-zip-guard", password_hash="hash")
+    book = Book(
+        user=user,
+        title="Vault Story",
+        format="pdf",
+        s3_key="books/vault-story.pdf",
+        status="ready",
+    )
+    db.add_all([user, book])
+    await db.commit()
+
+    monkeypatch.setattr("app.core.config.settings.UPLOAD_ARCHIVE_MAX_COMPRESSION_RATIO", 2, raising=False)
+
+    archive_buffer = BytesIO()
+    with zipfile.ZipFile(archive_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("Characters/Aria.md", b"A" * 5000)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await import_obsidian_notes_zip(
+            db,
+            book=book,
+            user_id=user.id,
+            archive_bytes=archive_buffer.getvalue(),
+            source="user_notes",
+        )
+
+    assert "unsafe compressed file" in str(exc_info.value.detail)

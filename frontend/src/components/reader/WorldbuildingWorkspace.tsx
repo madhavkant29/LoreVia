@@ -1,10 +1,15 @@
 "use client"
 
+import axios from "axios"
+import { useQuery } from "@tanstack/react-query"
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import type { Route } from "next"
 
+import { booksApi } from "@/lib/api/books"
+import { asQueryKey, booksStatsCacheKey } from "@/lib/query/cacheKeys"
 import { worldBuildingApi } from "@/lib/api/worldBuilding"
+import type { UserStats } from "@/types/book"
 import type {
   WorldBuildingDocument,
   WorldGapItem,
@@ -19,6 +24,12 @@ import type {
 
 type WorkspaceFocus = "editor" | "gap"
 
+function getApiErrorDetail(error: unknown) {
+  if (!axios.isAxiosError(error)) return null
+  const detail = error.response?.data?.detail
+  return typeof detail === "string" ? detail : null
+}
+
 export function WorldbuildingWorkspace({
   bookId,
   isDark,
@@ -28,12 +39,9 @@ export function WorldbuildingWorkspace({
   isDark: boolean
   focus?: WorkspaceFocus
 }) {
-  const [documents, setDocuments] = useState<WorldBuildingDocument[]>([])
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null)
   const [draftTitle, setDraftTitle] = useState("")
   const [draftText, setDraftText] = useState("")
-  const [loadingDocuments, setLoadingDocuments] = useState(true)
-  const [loadingDocumentBody, setLoadingDocumentBody] = useState(false)
   const [savingDocument, setSavingDocument] = useState(false)
   const [deletingDocument, setDeletingDocument] = useState(false)
   const [uploadFiles, setUploadFiles] = useState<File[]>([])
@@ -42,25 +50,64 @@ export function WorldbuildingWorkspace({
   const [uploadingFiles, setUploadingFiles] = useState(false)
   const [analysis, setAnalysis] = useState<WorldGapResult | null>(null)
   const [integration, setIntegration] = useState<WorldIntegrationResult | null>(null)
-  const [loadingAnalysis, setLoadingAnalysis] = useState(false)
   const [loadingIntegration, setLoadingIntegration] = useState(false)
   const [notes, setNotes] = useState<WorldNote[]>([])
-  const [canonOverrides, setCanonOverrides] = useState<CanonOverride[]>([])
   const [canonName, setCanonName] = useState("")
   const [canonAliases, setCanonAliases] = useState("")
   const [savingCanon, setSavingCanon] = useState(false)
-  const [extractedElements, setExtractedElements] = useState<WorldElement[]>([])
-  const [loadingElements, setLoadingElements] = useState(false)
-  const [wikiEntries, setWikiEntries] = useState<WikiEntry[]>([])
-  const [wikiLoading, setWikiLoading] = useState(false)
   const [wikiGenerating, setWikiGenerating] = useState(false)
   const [logicQuery, setLogicQuery] = useState("")
   const [logicResult, setLogicResult] = useState<WorldQueryResponse | null>(null)
   const [logicLoading, setLogicLoading] = useState(false)
-  const [loadingNotes, setLoadingNotes] = useState(true)
   const [noteSavingId, setNoteSavingId] = useState<string | null>(null)
   const [noteStatusId, setNoteStatusId] = useState<string | null>(null)
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
+  const [documentDraftDirty, setDocumentDraftDirty] = useState(false)
+
+  const { data: documents = [], isLoading: loadingDocuments, refetch: refetchDocuments } = useQuery<WorldBuildingDocument[]>({
+    queryKey: [`worldbuilding:${bookId}:documents`],
+    queryFn: () => worldBuildingApi.listDocuments(bookId),
+  })
+
+  const { data: selectedDocumentData = null, isLoading: loadingDocumentBody, refetch: refetchSelectedDocument } = useQuery<(WorldBuildingDocument & { text: string }) | null>({
+    queryKey: selectedDocumentId ? [`worldbuilding:${bookId}:document:${selectedDocumentId}`] : [`worldbuilding:${bookId}:document:none`],
+    queryFn: async () => {
+      if (!selectedDocumentId) return null
+      return worldBuildingApi.getDocument(bookId, selectedDocumentId)
+    },
+    enabled: Boolean(selectedDocumentId),
+  })
+
+  const { data: notesData = [], isLoading: loadingNotes, refetch: refetchNotes } = useQuery<WorldNote[]>({
+    queryKey: [`worldbuilding:${bookId}:notes`],
+    queryFn: () => worldBuildingApi.listNotes(bookId),
+  })
+
+  const { data: canonOverrides = [], refetch: refetchCanonOverrides } = useQuery<CanonOverride[]>({
+    queryKey: [`worldbuilding:${bookId}:canon-overrides`],
+    queryFn: () => worldBuildingApi.listCanonOverrides(bookId),
+  })
+
+  const { data: extractedElements = [], isLoading: loadingElements, refetch: refetchElements } = useQuery<WorldElement[]>({
+    queryKey: [`worldbuilding:${bookId}:elements`],
+    queryFn: () => worldBuildingApi.listElements(bookId),
+  })
+
+  const { data: wikiEntries = [], isLoading: wikiLoading, refetch: refetchWiki } = useQuery<WikiEntry[]>({
+    queryKey: [`worldbuilding:${bookId}:wiki`],
+    queryFn: () => worldBuildingApi.listWiki(bookId),
+  })
+
+  const { data: uploadStats = null, refetch: refetchUploadStats } = useQuery<UserStats | null>({
+    queryKey: asQueryKey(booksStatsCacheKey()),
+    queryFn: () => booksApi.getStats(),
+  })
+
+  const { data: initialAnalysis = null, isLoading: loadingAnalysis, refetch: refetchAnalysis } = useQuery<WorldGapResult | null>({
+    queryKey: [`worldbuilding:${bookId}:analysis:${focus}`],
+    queryFn: () => worldBuildingApi.getGaps(bookId),
+    enabled: focus === "gap" && documents.length > 0,
+  })
 
   const selectedDocument = useMemo(
     () => documents.find((document) => document.id === selectedDocumentId) ?? null,
@@ -102,81 +149,17 @@ export function WorldbuildingWorkspace({
     }).slice(0, 18)
   }, [extractedElements])
 
-  const loadElements = async () => {
-    setLoadingElements(true)
-    try {
-      const payload = await worldBuildingApi.listElements(bookId)
-      setExtractedElements(payload)
-    } finally {
-      setLoadingElements(false)
-    }
-  }
-
-  const loadWiki = async () => {
-    setWikiLoading(true)
-    try {
-      const payload = await worldBuildingApi.listWiki(bookId)
-      setWikiEntries(payload)
-    } finally {
-      setWikiLoading(false)
-    }
-  }
-
-  const loadNotes = async () => {
-    setLoadingNotes(true)
-    try {
-      const payload = await worldBuildingApi.listNotes(bookId)
-      setNotes(payload)
-    } finally {
-      setLoadingNotes(false)
-    }
-  }
-
-  const loadCanonOverrides = async () => {
-    const payload = await worldBuildingApi.listCanonOverrides(bookId)
-    setCanonOverrides(payload)
-  }
-
-  const loadDocumentBody = async (documentId: string) => {
-    setLoadingDocumentBody(true)
-    try {
-      const payload = await worldBuildingApi.getDocument(bookId, documentId)
-      setSelectedDocumentId(payload.id)
-      setDraftTitle(payload.title)
-      setDraftText(payload.text)
-    } finally {
-      setLoadingDocumentBody(false)
-    }
-  }
-
-  const loadDocuments = async (preferredDocumentId?: string | null) => {
-    setLoadingDocuments(true)
-    try {
-      const payload = await worldBuildingApi.listDocuments(bookId)
-      setDocuments(payload)
-      const nextSelectedId = preferredDocumentId && payload.some((item) => item.id === preferredDocumentId)
-        ? preferredDocumentId
-        : payload[0]?.id ?? null
-      if (nextSelectedId) {
-        await loadDocumentBody(nextSelectedId)
-      } else {
-        setSelectedDocumentId(null)
-        setDraftTitle("")
-        setDraftText("")
-      }
-    } finally {
-      setLoadingDocuments(false)
-    }
-  }
-
   const runAnalysis = async () => {
-    setLoadingAnalysis(true)
     try {
-      const payload = await worldBuildingApi.getGaps(bookId)
+      const { data: payload } = await refetchAnalysis()
+      if (!payload) {
+        setAnalysis(null)
+        return
+      }
       setAnalysis(payload)
-      setExtractedElements(payload.world_elements)
-    } finally {
-      setLoadingAnalysis(false)
+      await refetchElements()
+    } catch {
+      setAnalysis(null)
     }
   }
 
@@ -185,34 +168,34 @@ export function WorldbuildingWorkspace({
     try {
       const payload = await worldBuildingApi.getIntegration(bookId)
       setIntegration(payload)
-      setExtractedElements(payload.world_elements)
+      await refetchElements()
     } finally {
       setLoadingIntegration(false)
     }
   }
 
   useEffect(() => {
-    loadDocuments().catch(() => {
-      setDocuments([])
+    setNotes(notesData)
+  }, [notesData])
+
+  useEffect(() => {
+    if (!documents.length) {
       setSelectedDocumentId(null)
-      setDraftTitle("")
-      setDraftText("")
-      setLoadingDocuments(false)
-    })
-    loadNotes().catch(() => {
-      setNotes([])
-      setLoadingNotes(false)
-    })
-    loadWiki().catch(() => {
-      setWikiEntries([])
-      setWikiLoading(false)
-    })
-    loadElements().catch(() => {
-      setExtractedElements([])
-      setLoadingElements(false)
-    })
-    loadCanonOverrides().catch(() => setCanonOverrides([]))
-  }, [bookId])
+      if (!documentDraftDirty) {
+        setDraftTitle("")
+        setDraftText("")
+      }
+      return
+    }
+    if (selectedDocumentId && documents.some((document) => document.id === selectedDocumentId)) return
+    setSelectedDocumentId(documents[0]?.id ?? null)
+  }, [documentDraftDirty, documents, selectedDocumentId])
+
+  useEffect(() => {
+    if (!selectedDocumentData || documentDraftDirty) return
+    setDraftTitle(selectedDocumentData.title)
+    setDraftText(selectedDocumentData.text)
+  }, [documentDraftDirty, selectedDocumentData])
 
   useEffect(() => {
     if (focus !== "gap") return
@@ -220,8 +203,10 @@ export function WorldbuildingWorkspace({
       setAnalysis(null)
       return
     }
-    runAnalysis().catch(() => setAnalysis(null))
-  }, [documents.length, focus])
+    if (initialAnalysis) {
+      setAnalysis(initialAnalysis)
+    }
+  }, [documents.length, focus, initialAnalysis])
 
   useEffect(() => {
     if (!statusMessage) return
@@ -240,7 +225,10 @@ export function WorldbuildingWorkspace({
         })
         setDraftTitle(updated.title)
         setDraftText(updated.text)
-        await loadDocuments(updated.id)
+        setDocumentDraftDirty(false)
+        await refetchDocuments()
+        setSelectedDocumentId(updated.id)
+        await refetchSelectedDocument()
         setStatusMessage(`Saved ${updated.title}.`)
       } else {
         const created = await worldBuildingApi.uploadDocuments(bookId, {
@@ -248,14 +236,19 @@ export function WorldbuildingWorkspace({
           text: draftText,
         })
         const nextSelected = created[0]?.id ?? null
-        await loadDocuments(nextSelected)
+        setDocumentDraftDirty(false)
+        await refetchDocuments()
+        setSelectedDocumentId(nextSelected)
         setStatusMessage(created.length ? `Created ${created[0].title}.` : "Created worldbuilding document.")
       }
       if (focus === "gap") {
         await runAnalysis()
       } else {
-        await loadElements()
+        await refetchElements()
       }
+      await refetchUploadStats()
+    } catch (error) {
+      setStatusMessage(getApiErrorDetail(error) ?? "Could not save the worldbuilding document.")
     } finally {
       setSavingDocument(false)
     }
@@ -273,17 +266,22 @@ export function WorldbuildingWorkspace({
       setUploadFiles([])
       setUploadTitle("")
       setReplaceCorpusOnUpload(false)
-      await loadDocuments(created[0]?.id ?? null)
+      await refetchDocuments()
+      setSelectedDocumentId(created[0]?.id ?? null)
+      setDocumentDraftDirty(false)
       if (focus === "gap") {
         await runAnalysis()
       } else {
-        await loadElements()
+        await refetchElements()
       }
       setStatusMessage(
         replaceCorpusOnUpload
           ? "Replaced the active world corpus and loaded the new documents."
           : `Added ${created.length} worldbuilding document${created.length === 1 ? "" : "s"} to the corpus.`
       )
+      await refetchUploadStats()
+    } catch (error) {
+      setStatusMessage(getApiErrorDetail(error) ?? "Could not import the worldbuilding files.")
     } finally {
       setUploadingFiles(false)
     }
@@ -294,13 +292,16 @@ export function WorldbuildingWorkspace({
     setDeletingDocument(true)
     try {
       await worldBuildingApi.deleteDocument(bookId, selectedDocumentId)
-      await loadDocuments()
+      setSelectedDocumentId(null)
+      setDocumentDraftDirty(false)
+      await refetchDocuments()
       if (focus === "gap") {
         await runAnalysis()
       } else {
-        await loadElements()
+        await refetchElements()
       }
       setStatusMessage("Removed that worldbuilding document from the active corpus.")
+      await refetchUploadStats()
     } finally {
       setDeletingDocument(false)
     }
@@ -309,7 +310,7 @@ export function WorldbuildingWorkspace({
   const saveGapAsNote = async (item: WorldGapItem) => {
     setNoteSavingId(item.id)
     try {
-      const created = await worldBuildingApi.createNote(bookId, {
+      await worldBuildingApi.createNote(bookId, {
         world_document_id: item.world_document_id,
         note_type: "world_gap",
         chapter_number: item.story_chapter_number ?? null,
@@ -321,7 +322,7 @@ export function WorldbuildingWorkspace({
         context_label: item.world_document_title ?? item.character_name ?? null,
         suggested_fix: item.suggested_fix,
       })
-      setNotes((current) => [created, ...current])
+      await refetchNotes()
     } finally {
       setNoteSavingId(null)
     }
@@ -330,8 +331,8 @@ export function WorldbuildingWorkspace({
   const setNoteStatus = async (noteId: string, status: string) => {
     setNoteStatusId(noteId)
     try {
-      const updated = await worldBuildingApi.updateNoteStatus(bookId, noteId, status)
-      setNotes((current) => current.map((note) => (note.id === updated.id ? updated : note)))
+      await worldBuildingApi.updateNoteStatus(bookId, noteId, status)
+      await refetchNotes()
     } finally {
       setNoteStatusId(null)
     }
@@ -340,7 +341,7 @@ export function WorldbuildingWorkspace({
   const saveIntegrationAsNote = async (item: WorldIntegrationResult["integration_opportunities"][number]) => {
     setNoteSavingId(item.id)
     try {
-      const created = await worldBuildingApi.createNote(bookId, {
+      await worldBuildingApi.createNote(bookId, {
         world_document_id: item.world_document_id,
         note_type: "world_integration",
         chapter_number: item.target_chapter ?? null,
@@ -352,7 +353,7 @@ export function WorldbuildingWorkspace({
         context_label: item.world_document_title ?? item.element_type,
         suggested_fix: item.suggestions.join(" "),
       })
-      setNotes((current) => [created, ...current])
+      await refetchNotes()
     } finally {
       setNoteSavingId(null)
     }
@@ -362,7 +363,7 @@ export function WorldbuildingWorkspace({
     setNoteStatusId(noteId)
     try {
       await worldBuildingApi.deleteNote(bookId, noteId)
-      setNotes((current) => current.filter((note) => note.id !== noteId))
+      await refetchNotes()
     } finally {
       setNoteStatusId(null)
     }
@@ -376,7 +377,7 @@ export function WorldbuildingWorkspace({
         canonical_name: canonName.trim(),
         aliases: canonAliases.split(",").map((item) => item.trim()).filter(Boolean),
       })
-      setCanonOverrides((current) => [saved, ...current])
+      await refetchCanonOverrides()
       setCanonName("")
       setCanonAliases("")
       setStatusMessage(`Saved canon override for ${saved.canonical_name}.`)
@@ -407,7 +408,7 @@ export function WorldbuildingWorkspace({
     setWikiGenerating(true)
     try {
       const payload = await worldBuildingApi.generateWiki(bookId)
-      setWikiEntries(payload.entries)
+      await refetchWiki()
       setStatusMessage(
         payload.updated_names.length
           ? `Generated or refreshed ${payload.generated_count} wiki entries from the manuscript, including ${payload.updated_names.slice(0, 3).join(", ")}.`
@@ -430,6 +431,14 @@ export function WorldbuildingWorkspace({
     }
   }
 
+  const uploadLimitNote = uploadStats
+    ? uploadStats.private.upload_limit_unlimited
+      ? "Worldbuilding manuscripts count as uploads on every tier. Architect remains unlimited, including for series-linked worldbuilding."
+      : typeof uploadStats.private.upload_limit === "number"
+        ? `${uploadStats.private.total_uploads}/${uploadStats.private.upload_limit} uploads used. ${uploadStats.private.uploads_remaining ?? 0} remaining. Worldbuilding manuscripts count as uploads on every tier, and series-linked worldbuilding counts once per book in the series.`
+        : null
+    : null
+
   const uploadPanel = (
     <section className={`rounded-[1.5rem] border p-4 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-white/82"}`}>
       <div className="flex items-center justify-between gap-3">
@@ -444,6 +453,11 @@ export function WorldbuildingWorkspace({
         ) : null}
       </div>
       <div className="mt-4 grid gap-3">
+        {uploadLimitNote ? (
+          <div className={`rounded-[1rem] border px-4 py-3 text-xs leading-5 ${isDark ? "border-white/10 bg-black/30 text-slate-300" : "border-stone-200 bg-stone-50 text-stone-600"}`}>
+            {uploadLimitNote}
+          </div>
+        ) : null}
         <input
           value={uploadTitle}
           onChange={(event) => setUploadTitle(event.target.value)}
@@ -492,13 +506,19 @@ export function WorldbuildingWorkspace({
       <div className="mt-5 grid gap-3">
         <input
           value={draftTitle}
-          onChange={(event) => setDraftTitle(event.target.value)}
+          onChange={(event) => {
+            setDraftTitle(event.target.value)
+            setDocumentDraftDirty(true)
+          }}
           placeholder="Document title"
           className={`rounded-[1rem] border px-4 py-3 text-sm outline-none ${isDark ? "border-white/10 bg-black/30 text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-stone-50 text-stone-900 placeholder:text-stone-400"}`}
         />
         <textarea
           value={draftText}
-          onChange={(event) => setDraftText(event.target.value)}
+          onChange={(event) => {
+            setDraftText(event.target.value)
+            setDocumentDraftDirty(true)
+          }}
           placeholder="Worldbuilding notes, lore rules, places, factions, timeline details, and reference canon live here."
           rows={18}
           className={`min-h-[28rem] rounded-[1.3rem] border px-4 py-4 text-sm leading-7 outline-none ${isDark ? "border-white/10 bg-black/30 text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-stone-50 text-stone-900 placeholder:text-stone-400"}`}
@@ -518,6 +538,7 @@ export function WorldbuildingWorkspace({
               setSelectedDocumentId(null)
               setDraftTitle("")
               setDraftText("")
+              setDocumentDraftDirty(false)
             }}
             className={`rounded-[1rem] border px-4 py-3 text-sm font-semibold ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-stone-50 text-stone-700"}`}
           >
@@ -555,7 +576,7 @@ export function WorldbuildingWorkspace({
         </div>
         <button
           type="button"
-          onClick={() => void loadElements()}
+          onClick={() => void refetchElements()}
           disabled={loadingElements}
           className={`rounded-full border px-3 py-2 text-xs font-semibold ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-stone-50 text-stone-700"}`}
         >
@@ -603,7 +624,7 @@ export function WorldbuildingWorkspace({
         <div className="flex gap-2">
           <button
             type="button"
-            onClick={() => void loadWiki()}
+            onClick={() => void refetchWiki()}
             className={`rounded-full border px-3 py-2 text-xs font-semibold ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-stone-50 text-stone-700"}`}
           >
             Refresh
@@ -745,9 +766,38 @@ export function WorldbuildingWorkspace({
         </div>
       ) : analysis ? (
         <div className="mt-5 space-y-5">
-          {analysis.gap_groups.length === 0 ? (
+          {analysis.consistency_flags.length > 0 ? (
+            <div className={`rounded-[1.4rem] border p-4 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50/80"}`}>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <h3 className={`text-lg font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>Consistency flags</h3>
+                  <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>These checks caught conflicting definitions inside the extracted canon, even before broader gap grouping is applied.</p>
+                </div>
+                <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>
+                  {analysis.consistency_flags.length} item{analysis.consistency_flags.length === 1 ? "" : "s"}
+                </p>
+              </div>
+              <div className="mt-4 grid gap-3">
+                {analysis.consistency_flags.map((flag, index) => (
+                  <article key={String(flag.id ?? `consistency-${index}`)} className={`rounded-[1.2rem] border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-white bg-white"}`}>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className={severityClass("high", isDark)}>high</span>
+                      {flag.type ? (
+                        <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${isDark ? "bg-white/6 text-slate-300" : "bg-stone-100 text-stone-600"}`}>
+                          {String(flag.type).replaceAll("_", " ")}
+                        </span>
+                      ) : null}
+                    </div>
+                    <h4 className={`mt-3 text-lg font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{String(flag.title ?? "Consistency flag")}</h4>
+                    <p className={`mt-2 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-700"}`}>{String(flag.description ?? "LoreVia found an extracted canon definition that needs a closer pass.")}</p>
+                  </article>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          {analysis.gap_groups.length === 0 && analysis.consistency_flags.length === 0 ? (
             <div className={`rounded-[1.3rem] border px-5 py-8 text-sm ${isDark ? "border-emerald-400/20 bg-emerald-500/10 text-emerald-100" : "border-emerald-200 bg-emerald-50 text-emerald-800"}`}>
-              No major world-to-story inconsistencies were surfaced on this pass.
+              No hard contradiction surfaced in this pass, but this world still benefits from another canon sweep for coverage, setup, and repeat exposure.
             </div>
           ) : (
             analysis.gap_groups.map((group) => (
@@ -913,7 +963,7 @@ export function WorldbuildingWorkspace({
         </div>
         <button
           type="button"
-          onClick={() => void loadCanonOverrides()}
+          onClick={() => void refetchCanonOverrides()}
           className={`rounded-full border px-3 py-2 text-xs font-semibold ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-stone-50 text-stone-700"}`}
         >
           Refresh
@@ -992,7 +1042,7 @@ export function WorldbuildingWorkspace({
         </div>
         <button
           type="button"
-          onClick={() => void loadNotes()}
+          onClick={() => void refetchNotes()}
           className={`rounded-full border px-3 py-2 text-xs font-semibold ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-stone-50 text-stone-700"}`}
         >
           Refresh notes
@@ -1120,7 +1170,10 @@ export function WorldbuildingWorkspace({
                 <button
                   key={document.id}
                   type="button"
-                  onClick={() => void loadDocumentBody(document.id)}
+                  onClick={() => {
+                    setSelectedDocumentId(document.id)
+                    setDocumentDraftDirty(false)
+                  }}
                   className={`w-full rounded-[1rem] border px-3 py-3 text-left text-sm transition ${active ? isDark ? "border-amber-300/30 bg-amber-400/15 text-white" : "border-amber-300 bg-amber-50 text-stone-900" : isDark ? "border-white/10 bg-white/[0.03] text-slate-300 hover:bg-white/8" : "border-stone-200 bg-stone-50 text-stone-700 hover:bg-white"}`}
                 >
                   <p className="font-semibold">{document.title}</p>

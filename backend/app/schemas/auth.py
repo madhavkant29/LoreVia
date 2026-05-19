@@ -12,7 +12,6 @@ class RegisterBody(BaseModel):
     password: str = Field(..., min_length=12, max_length=128)
     accepted_terms: bool
     device_id: str = Field(..., min_length=16, max_length=128)
-    referral_code: str | None = Field(None, max_length=64)
 
 
 class LoginBody(BaseModel):
@@ -39,11 +38,16 @@ class UserOut(BaseModel):
     longest_login_streak_days: int
     login_activity_dates: list[date] = Field(default_factory=list)
     email_verified: bool
+    messaging_permission: str
     created_at: datetime
 
 
 class DailyWordGoalBody(BaseModel):
     daily_word_goal: int = Field(..., ge=1, le=1000000)
+
+
+class MessagingPermissionBody(BaseModel):
+    messaging_permission: str = Field(..., pattern="^(anyone|friends_only)$")
 
 
 class RegisterOut(BaseModel):
@@ -67,7 +71,6 @@ class SupabaseOAuthBody(BaseModel):
     token: str
     accepted_terms: bool = False
     device_id: str = Field(..., min_length=16, max_length=128)
-    referral_code: str | None = Field(None, max_length=64)
 
 
 class ForgotPasswordBody(BaseModel):
@@ -75,7 +78,7 @@ class ForgotPasswordBody(BaseModel):
 
 
 class ResetPasswordBody(BaseModel):
-    token: str
+    token: str = Field(..., min_length=20, max_length=256)
     password: str = Field(..., min_length=12, max_length=128)
 
 
@@ -85,11 +88,13 @@ class RefreshBody(BaseModel):
 
 class TierLimitsOut(BaseModel):
     free_max_books: int
+    author_max_uploads: int
+    architect_uploads_unlimited: bool = True
     free_total_token_budget: int
     free_search_per_day: int
     free_summary_per_hour: int
     free_prediction_per_day: int
-    reader_prediction_per_day: int
+    free_recall_per_day: int
     author_prediction_per_day: int
     architect_prediction_per_day: int
     trial_high_cost_turns_per_day: int
@@ -98,9 +103,7 @@ class TierLimitsOut(BaseModel):
     free_advisor_per_day: int
     free_advisor_per_week: int
     free_advisor_per_month: int
-    reader_advisor_per_day: int
-    reader_advisor_per_week: int
-    reader_advisor_per_month: int
+    free_continuity_per_day: int
     author_advisor_per_day: int
     author_advisor_per_week: int
     author_advisor_per_month: int
@@ -108,6 +111,5 @@ class TierLimitsOut(BaseModel):
     architect_advisor_per_week: int
     architect_advisor_per_month: int
     free_continuity_per_minute: int
-    reader_continuity_per_minute: int
     author_continuity_per_minute: int
     architect_continuity_per_minute: int

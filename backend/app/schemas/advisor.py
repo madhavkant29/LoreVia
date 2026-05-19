@@ -1,14 +1,20 @@
 from __future__ import annotations
 
+import re
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 # Maximum characters accepted for any single LLM input field.
 # Prevents cost-amplification: a bad actor sending 100k-char messages
 # would otherwise burn ~$1 k/day in OpenAI credits per account.
 MAX_MESSAGE_CHARS = 8_000
 MAX_PASSAGE_CHARS = 12_000
+MIN_WHATS_THE_WORD_DESCRIPTION_WORDS = 5
+
+
+def _word_count(value: str) -> int:
+    return len(re.findall(r"[A-Za-z0-9']+", value))
 
 
 class AdvisorMessage(BaseModel):
@@ -21,9 +27,56 @@ class AdvisorRequest(BaseModel):
     total_chapters: int = Field(default=9999, ge=1, le=9999)
 
 
+class AdvisorAsyncAccepted(BaseModel):
+    task_id: str
+    status: Literal["queued"]
+    cached: bool = False
+
+
+class AdvisorTaskStatusResponse(BaseModel):
+    task_id: str
+    status: Literal["queued", "running", "complete", "failed"]
+    result: dict | None = None
+    error: str | None = None
+
+
 class SuggestionDismiss(BaseModel):
     suggestion_id: str
     intentional: bool = False
+
+
+class AdvisorSuggestionOut(BaseModel):
+    id: str
+    type: str
+    severity: str
+    title: str
+    description: str
+    chapter_ref: int | None = None
+    action_label: str
+    ask_prompt: str
+    source: str | None = None
+
+
+class AdvisorScanMeta(BaseModel):
+    character_count: int = 0
+    state_count: int = 0
+    open_thread_count: int = 0
+    clue_count: int = 0
+    relationship_count: int = 0
+    world_element_count: int = 0
+    heuristic_count: int = 0
+    fallback_applied: bool = False
+    proactive_audit_applied: bool = False
+    scan_basis: list[str] = Field(default_factory=list)
+    data_gaps: list[str] = Field(default_factory=list)
+    audit_summary: str | None = None
+
+
+class AdvisorSuggestionsResponse(BaseModel):
+    suggestions: list[AdvisorSuggestionOut] = Field(default_factory=list)
+    total: int
+    book_title: str
+    meta: AdvisorScanMeta
 
 
 class EditorialReviewRequest(BaseModel):
@@ -44,6 +97,32 @@ class ProseTightenRequest(BaseModel):
 class InlineContinuityRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=MAX_PASSAGE_CHARS)
     chapter_num: int | None = Field(default=None, ge=1)
+
+
+class WhatsTheWordRequest(BaseModel):
+    description: str = Field(..., min_length=1, max_length=600)
+    previous_word: str | None = Field(default=None, max_length=80)
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, value: str) -> str:
+        cleaned = " ".join(value.split()).strip()
+        if _word_count(cleaned) < MIN_WHATS_THE_WORD_DESCRIPTION_WORDS:
+            raise ValueError(f"Please describe it in at least {MIN_WHATS_THE_WORD_DESCRIPTION_WORDS} words.")
+        return cleaned
+
+    @field_validator("previous_word")
+    @classmethod
+    def validate_previous_word(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = " ".join(value.split()).strip()
+        return cleaned or None
+
+
+class WhatsTheWordResponse(BaseModel):
+    word: str
+    gloss: str
 
 
 class ProseTightenResponse(BaseModel):

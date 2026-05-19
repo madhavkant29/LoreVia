@@ -11,8 +11,12 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.models.book import Book
-from app.core.storage import upload_text
-from app.utils.book_utils import normalize_writer_workspace, serialize_manuscript_content
+from app.core.storage import download_book, upload_text
+from app.utils.book_utils import (
+    deserialize_manuscript_content,
+    normalize_writer_workspace,
+    serialize_manuscript_content,
+)
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,6 +24,9 @@ MEDIA_MARKER_RE = re.compile(r"\[\[IMAGE:[^\]]+\]\]")
 READING_CHAPTER_TARGET_WORDS = 7000
 READING_CHAPTER_MIN_WORDS = 1200
 READING_CHAPTER_MIN_TAIL_WORDS = 2000
+ANALYSIS_INFLIGHT_TTL_SECONDS = 15 * 60
+EXTRACTION_INFLIGHT_TTL_SECONDS = 20 * 60
+CHAPTER_RECOVERY_INFLIGHT_TTL_SECONDS = 15 * 60
 
 
 @dataclass(frozen=True)
@@ -80,6 +87,59 @@ async def persist_chapter_payloads(
     return dict(stored_pairs)
 
 
+async def load_staged_chapter_payload(
+    book_id: uuid.UUID,
+    chapter_number: int,
+    *,
+    chapter_s3_key: str | None = None,
+) -> dict[str, str | None] | None:
+    candidate_keys: list[str] = []
+    normalized_key = " ".join(str(chapter_s3_key or "").split()).strip()
+    if normalized_key:
+        candidate_keys.append(normalized_key)
+
+    fallback_key = build_chapter_storage_key(book_id, chapter_number)
+    if fallback_key not in candidate_keys:
+        candidate_keys.append(fallback_key)
+
+    for storage_key in candidate_keys:
+        try:
+            raw = await asyncio.to_thread(download_book, storage_key)
+        except Exception:
+            continue
+        return deserialize_manuscript_content(raw)
+
+    return None
+
+
+async def load_processing_chapter_payload(
+    book_id: uuid.UUID,
+    chapter_number: int,
+    *,
+    chapter_s3_key: str | None = None,
+    chapter_title: str | None = None,
+) -> dict[str, Any] | None:
+    """Load chapter processing input from chapter storage only."""
+    stored_payload = await load_staged_chapter_payload(
+        book_id,
+        chapter_number,
+        chapter_s3_key=chapter_s3_key,
+    )
+    if not stored_payload:
+        return None
+
+    chapter_text = str(stored_payload.get("text") or "").strip()
+    if not chapter_text:
+        return None
+
+    return {
+        "number": chapter_number,
+        "title": " ".join(str(chapter_title or "").split()).strip() or None,
+        "text": chapter_text,
+        "html": stored_payload.get("html"),
+    }
+
+
 def build_ingestion_progress_state(
     *,
     status: str,
@@ -123,6 +183,126 @@ def build_ingestion_progress_state(
         payload["last_error"] = " ".join(str(last_error).split()).strip()
     if parser_diagnostics:
         payload["parser_diagnostics"] = parser_diagnostics
+    return payload
+
+
+def _clean_pipeline_stage(raw: dict[str, Any] | None) -> dict[str, Any] | None:
+    source = raw if isinstance(raw, dict) else {}
+    payload: dict[str, Any] = {}
+    status = " ".join(str(source.get("status") or "").split()).strip()
+    if status:
+        payload["status"] = status
+    completed = source.get("completed_chapters")
+    if isinstance(completed, (int, float)) and int(completed) >= 0:
+        payload["completed_chapters"] = int(completed)
+    total = source.get("total_chapters")
+    if isinstance(total, (int, float)) and int(total) >= 0:
+        payload["total_chapters"] = int(total)
+    updated_at = source.get("updated_at")
+    if updated_at:
+        payload["updated_at"] = str(updated_at).strip()
+    eta_seconds = source.get("eta_seconds")
+    if isinstance(eta_seconds, (int, float)) and int(eta_seconds) >= 0:
+        payload["eta_seconds"] = int(eta_seconds)
+    last_error = " ".join(str(source.get("last_error") or "").split()).strip()
+    if last_error:
+        payload["last_error"] = last_error
+    failed_chapters = source.get("failed_chapters")
+    if isinstance(failed_chapters, Sequence) and not isinstance(failed_chapters, (str, bytes)):
+        payload["failed_chapters"] = [
+            int(item) for item in failed_chapters if isinstance(item, (int, float)) and int(item) > 0
+        ]
+    return payload or None
+
+
+def _derive_retry_actions(pipeline: dict[str, Any]) -> list[str]:
+    actions: list[str] = []
+    extraction = pipeline.get("extraction") if isinstance(pipeline.get("extraction"), dict) else {}
+    analysis = pipeline.get("analysis") if isinstance(pipeline.get("analysis"), dict) else {}
+    if extraction.get("status") == "failed":
+        actions.append("retry_extraction")
+    if analysis.get("status") == "failed":
+        actions.append("retry_analysis")
+    if analysis.get("status") in {"pending", "running", "queued"}:
+        actions.append("wait_for_analysis")
+    return actions
+
+
+def merge_processing_pipeline(
+    processing_state: dict[str, Any],
+    *,
+    extraction: dict[str, Any] | None = None,
+    analysis: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    next_processing = dict(processing_state)
+    current_pipeline = next_processing.get("pipeline") if isinstance(next_processing.get("pipeline"), dict) else {}
+    pipeline: dict[str, Any] = {}
+
+    current_extraction = _clean_pipeline_stage(current_pipeline.get("extraction"))
+    current_analysis = _clean_pipeline_stage(current_pipeline.get("analysis"))
+    next_extraction = _clean_pipeline_stage(extraction) if extraction is not None else current_extraction
+    next_analysis = _clean_pipeline_stage(analysis) if analysis is not None else current_analysis
+
+    if next_extraction:
+        pipeline["extraction"] = next_extraction
+    if next_analysis:
+        pipeline["analysis"] = next_analysis
+
+    extraction_status = ((next_extraction or {}).get("status") or "").strip().lower()
+    analysis_status = ((next_analysis or {}).get("status") or "").strip().lower()
+    next_processing["pipeline"] = pipeline or None
+    next_processing["is_fully_ready"] = extraction_status == "succeeded" and analysis_status == "succeeded"
+    next_processing["retry_actions"] = _derive_retry_actions(pipeline)
+    return next_processing
+
+
+def build_analysis_chapter_state(
+    existing: dict[str, Any] | None,
+    *,
+    status: str,
+    generated_modes: Sequence[str] | None = None,
+    last_error: str | None = None,
+    increment_attempt: bool = False,
+    source_integrity: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    current = dict(existing) if isinstance(existing, dict) else {}
+    attempts = int(current.get("attempt_count") or 0)
+    current_modes = [
+        str(mode).strip()
+        for mode in (current.get("generated_modes") or [])
+        if str(mode).strip()
+    ]
+    next_modes = list(dict.fromkeys([*current_modes, *[str(mode).strip() for mode in (generated_modes or []) if str(mode).strip()]]))
+    payload: dict[str, Any] = {
+        "status": " ".join(str(status or "").split()).strip() or "pending",
+        "generated_modes": next_modes,
+        "attempt_count": attempts + (1 if increment_attempt else 0),
+        "last_error": " ".join(str(last_error or "").split()).strip() or None,
+        "updated_at": datetime.now(UTC).isoformat(),
+    }
+    next_source_integrity = source_integrity if isinstance(source_integrity, dict) else current.get("source_integrity")
+    if isinstance(next_source_integrity, dict):
+        payload["source_integrity"] = next_source_integrity
+    return payload
+
+
+def build_source_integrity_state(
+    *,
+    text_present: bool,
+    media_marker_count: int,
+    stored_media_count: int,
+    recovery_status: str,
+    last_recovery_error: str | None = None,
+) -> dict[str, Any]:
+    payload = {
+        "text_present": bool(text_present),
+        "media_marker_count": max(0, int(media_marker_count or 0)),
+        "stored_media_count": max(0, int(stored_media_count or 0)),
+        "recovery_status": " ".join(str(recovery_status or "").split()).strip() or "ok",
+        "updated_at": datetime.now(UTC).isoformat(),
+    }
+    if last_recovery_error:
+        payload["last_recovery_error"] = " ".join(str(last_recovery_error).split()).strip()
     return payload
 
 
@@ -186,6 +366,24 @@ def update_book_processing_state(
         chapter_title=chapter_title,
         last_error=last_error,
         parser_diagnostics=effective_parser_diagnostics,
+    )
+    extraction_status = "running"
+    if status == "ready":
+        extraction_status = "succeeded"
+    elif status in {"failed", "error"}:
+        extraction_status = "failed"
+    elif stage == "queued":
+        extraction_status = "queued"
+    processing_state = merge_processing_pipeline(
+        processing_state,
+        extraction={
+            "status": extraction_status,
+            "completed_chapters": completed_chapters,
+            "total_chapters": total_chapters,
+            "updated_at": processing_state.get("updated_at"),
+            "eta_seconds": processing_state.get("eta_seconds"),
+            "last_error": processing_state.get("last_error"),
+        },
     )
     return build_writer_workspace_with_processing(book, processing_state)
 

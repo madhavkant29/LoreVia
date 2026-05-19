@@ -14,10 +14,13 @@ from app.utils.ingestion_utils import (
     extract_queue_wait_ms,
     is_book_hidden,
     is_retryable_processing_error,
+    load_processing_chapter_payload,
+    load_staged_chapter_payload,
     mark_book_processing_cancelled,
     regroup_prose_chapters_for_reading,
     update_book_processing_state,
 )
+from app.utils.book_utils import serialize_manuscript_content
 
 
 def test_build_chapter_dispatch_plan_staggers_non_eager_chapters():
@@ -182,6 +185,74 @@ def test_is_retryable_processing_error_distinguishes_transient_failures():
 
     assert is_retryable_processing_error(RetryableError("service unavailable"))
     assert not is_retryable_processing_error(PermanentError("parse failure"))
+
+
+@pytest.mark.asyncio
+async def test_load_staged_chapter_payload_uses_existing_chapter_key(monkeypatch):
+    book_id = uuid.uuid4()
+    calls: list[str] = []
+
+    def _fake_download(storage_key: str) -> bytes:
+        calls.append(storage_key)
+        return serialize_manuscript_content("Chapter body", "<p>Chapter body</p>").encode("utf-8")
+
+    monkeypatch.setattr("app.utils.ingestion_utils.download_book", _fake_download)
+
+    payload = await load_staged_chapter_payload(
+        book_id,
+        7,
+        chapter_s3_key="chapters/custom/chapter-7.txt",
+    )
+
+    assert payload == {"format": "rich_text_v1", "text": "Chapter body", "html": "<p>Chapter body</p>"}
+    assert calls == ["chapters/custom/chapter-7.txt"]
+
+
+@pytest.mark.asyncio
+async def test_load_staged_chapter_payload_falls_back_to_deterministic_key(monkeypatch):
+    book_id = uuid.uuid4()
+    calls: list[str] = []
+
+    def _fake_download(storage_key: str) -> bytes:
+        calls.append(storage_key)
+        if storage_key == "missing-key":
+            raise FileNotFoundError(storage_key)
+        return serialize_manuscript_content("Recovered chapter").encode("utf-8")
+
+    monkeypatch.setattr("app.utils.ingestion_utils.download_book", _fake_download)
+
+    payload = await load_staged_chapter_payload(
+        book_id,
+        3,
+        chapter_s3_key="missing-key",
+    )
+
+    assert payload == {"format": "rich_text_v1", "text": "Recovered chapter", "html": "<p>Recovered chapter</p>"}
+    assert calls == ["missing-key", f"chapters/{book_id}/3.txt"]
+
+
+@pytest.mark.asyncio
+async def test_load_processing_chapter_payload_returns_chapter_only_payload(monkeypatch):
+    book_id = uuid.uuid4()
+
+    async def _fake_load(*_args, **_kwargs):
+        return {"text": "Chapter body", "html": "<p>Chapter body</p>"}
+
+    monkeypatch.setattr("app.utils.ingestion_utils.load_staged_chapter_payload", _fake_load)
+
+    payload = await load_processing_chapter_payload(
+        book_id,
+        5,
+        chapter_s3_key="chapters/custom/5.txt",
+        chapter_title="Five",
+    )
+
+    assert payload == {
+        "number": 5,
+        "title": "Five",
+        "text": "Chapter body",
+        "html": "<p>Chapter body</p>",
+    }
 
 
 def test_derive_summary_modes_from_detailed_prefers_key_events():

@@ -1,4 +1,11 @@
-from app.engine.character.extractor import _allow_auto_augmentation, _apply_anti_merge_hints, _clean_character_entries
+from app.engine.character.extractor import (
+    _allow_auto_augmentation,
+    _apply_anti_merge_hints,
+    _candidate_names,
+    _clean_character_entries,
+    fallback_character_mentions,
+    _mention_has_person_context,
+)
 
 
 def test_clean_character_entries_strips_fragment_prefixes_and_keeps_supported_name():
@@ -63,10 +70,30 @@ def test_clean_character_entries_drops_low_confidence_generic_summary():
     assert cleaned == []
 
 
-def test_auto_augmentation_rejects_single_token_name():
-    source_text = "Kunagisa spoke to Aikawa Junya. Kunagisa looked away."
+def test_auto_augmentation_allows_strong_single_token_name_with_context():
+    source_text = "His sister Grete called to him twice."
 
-    assert _allow_auto_augmentation(source_text, "Kunagisa") is False
+    assert _allow_auto_augmentation(source_text, "Grete") is True
+
+
+def test_candidate_names_includes_supported_single_names():
+    source_text = "Gregor Samsa woke before dawn. Gregor paced the room while his sister Grete called to him twice."
+
+    candidates = _candidate_names(source_text)
+
+    assert "Gregor Samsa" in candidates
+    assert "Grete" in candidates
+
+
+def test_fallback_character_mentions_recovers_single_name_characters():
+    source_text = "Gregor Samsa woke before dawn. Gregor paced the room while his sister Grete called to him twice."
+
+    recovered = fallback_character_mentions(source_text)
+
+    recovered_names = [item["name"] for item in recovered["characters"]]
+
+    assert "Gregor" in recovered_names
+    assert "Grete" in recovered_names
 
 
 def test_apply_anti_merge_hints_marks_same_sentence_characters_as_distinct():
@@ -80,3 +107,36 @@ def test_apply_anti_merge_hints_marks_same_sentence_characters_as_distinct():
 
     assert "Saitou Masami" in hinted[0]["anti_merge_names"]
     assert "Saitou Kengo" in hinted[1]["anti_merge_names"]
+
+
+def test_clean_character_entries_keeps_titled_surname_only_names_distinct():
+    source_text = "Mr. Samsa spoke first. Mrs. Samsa answered him from the doorway."
+    characters = [
+        {
+            "name": "Mr. Samsa",
+            "entity_type": "person",
+            "is_character": True,
+            "confidence": 0.91,
+            "aliases": [],
+            "traits": {},
+            "arc_summary": "stern and worried",
+        },
+        {
+            "name": "Mrs. Samsa",
+            "entity_type": "person",
+            "is_character": True,
+            "confidence": 0.9,
+            "aliases": [],
+            "traits": {},
+            "arc_summary": "protective and anxious",
+        },
+    ]
+
+    cleaned = _clean_character_entries(characters, ["Mr. Samsa", "Mrs. Samsa"], source_text)
+
+    assert [item["name"] for item in cleaned] == ["Mr. Samsa", "Mrs. Samsa"]
+
+
+def test_mention_has_person_context_treats_narrative_action_as_character_evidence():
+    assert _mention_has_person_context("When ", "Gregor awoke from uneasy dreams.") is True
+    assert _mention_has_person_context("", "Gregor watched the door in silence.") is True

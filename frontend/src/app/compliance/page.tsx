@@ -5,7 +5,7 @@ import { LEGAL_EMAIL, SUPPORT_EMAIL } from "@/lib/constants/contact"
 
 export const metadata: Metadata = {
   title: "Security & Compliance",
-  description: "Read LoreVia's practical security posture, data-handling boundaries, vendor roles, and workload fit.",
+  description: "Read the LoreVia for authors security posture, manuscript data-handling boundaries, vendor roles, and workflow fit.",
   alternates: {
     canonical: "/compliance",
   },

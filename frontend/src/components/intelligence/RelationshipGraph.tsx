@@ -1,9 +1,11 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
 import cytoscape from "cytoscape"
 import { booksApi } from "@/lib/api/books"
 import { RELATIONSHIP_COLORS } from "@/lib/constants"
+import { asQueryKey, readerCacheKey } from "@/lib/query/cacheKeys"
 import type { RelationshipGraph as GraphData } from "@/types/character"
 import { readerApi } from "@/lib/api/reader"
 
@@ -11,10 +13,12 @@ interface Props {
   bookId: string
   upToChapter: number
   authorMode?: boolean
+  includeInactive?: boolean
   theme?: "light" | "dark"
   compact?: boolean
   focusCharacterId?: string | null
   onSelectCharacterId?: (characterId: string | null) => void
+  onGraphDataChange?: (graph: GraphData) => void
 }
 
 type Selection =
@@ -26,6 +30,7 @@ type GraphNode = GraphData["nodes"][number]
 type GraphEdge = GraphData["edges"][number]
 type GraphNodeView = GraphNode & { label: string; relationshipCount: number }
 type GraphEdgeView = GraphEdge & { id: string; relationshipId?: string | null; label: string }
+const RELATIONSHIP_TYPE_OPTIONS = ["ally", "enemy", "family", "mentor", "neutral", "political", "romantic", "rival"] as const
 
 function graphStorageKey(bookId: string, chapter: number) {
   return `lorevia:graph-layout:${bookId}:${chapter}`
@@ -52,24 +57,31 @@ export function RelationshipGraph({
   bookId,
   upToChapter,
   authorMode = false,
+  includeInactive = false,
   theme = "light",
   compact = false,
   focusCharacterId = null,
   onSelectCharacterId,
+  onGraphDataChange,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const cyRef = useRef<cytoscape.Core | null>(null)
   const selectCharacterRef = useRef(onSelectCharacterId)
   const [graphData, setGraphData] = useState<GraphData | null>(null)
-  const [loading, setLoading] = useState(true)
   const [selection, setSelection] = useState<Selection>(null)
   const [filterType, setFilterType] = useState<string | null>(null)
+  const [showIsolated, setShowIsolated] = useState(authorMode)
   const [labelOverrides, setLabelOverrides] = useState<Record<string, string>>({})
   const [interactionMode, setInteractionMode] = useState<"arrange" | "inspect">("arrange")
   const [zoomLevel, setZoomLevel] = useState(1)
   const [edgeDraft, setEdgeDraft] = useState({ relType: "", description: "", sentiment: "0", fromChapter: "", toChapter: "" })
   const [savingEdge, setSavingEdge] = useState(false)
   const [edgeMessage, setEdgeMessage] = useState<string | null>(null)
+
+  const { data: graphQueryData = null, isLoading: loading } = useQuery<GraphData | null>({
+    queryKey: asQueryKey(readerCacheKey(bookId, `relationships:${upToChapter}:${includeInactive ? "all" : "active"}`)),
+    queryFn: () => readerApi.getRelationships(bookId, upToChapter, { includeInactive }),
+  })
 
   useEffect(() => {
     selectCharacterRef.current = onSelectCharacterId
@@ -86,11 +98,15 @@ export function RelationshipGraph({
   }, [bookId])
 
   useEffect(() => {
-    setLoading(true)
-    readerApi.getRelationships(bookId, upToChapter)
-      .then(setGraphData)
-      .finally(() => setLoading(false))
-  }, [bookId, upToChapter])
+    setGraphData(graphQueryData)
+    if (graphQueryData) {
+      onGraphDataChange?.(graphQueryData)
+    }
+  }, [graphQueryData, onGraphDataChange])
+
+  useEffect(() => {
+    setShowIsolated(authorMode)
+  }, [authorMode])
 
   const relationshipTypes = useMemo(() => {
     if (!graphData) return []
@@ -100,6 +116,9 @@ export function RelationshipGraph({
   const filteredGraph = useMemo(() => {
     if (!graphData) return null
     const visibleEdges = graphData.edges.filter((edge) => !filterType || edge.type === filterType)
+    if (showIsolated) {
+      return { nodes: graphData.nodes, edges: visibleEdges }
+    }
     const connected = new Set<string>()
     visibleEdges.forEach((edge) => {
       connected.add(edge.source)
@@ -107,7 +126,7 @@ export function RelationshipGraph({
     })
     const visibleNodes = graphData.nodes.filter((node) => connected.size === 0 || connected.has(node.id))
     return { nodes: visibleNodes, edges: visibleEdges }
-  }, [graphData, filterType])
+  }, [graphData, filterType, showIsolated])
 
   const graphStats = useMemo(() => {
     if (!filteredGraph) return { nodeCount: 0, edgeCount: 0 }
@@ -188,7 +207,11 @@ export function RelationshipGraph({
             "background-color": theme === "dark" ? "#0a0a0a" : "#fffdf9",
             "background-opacity": 0.98,
             "border-width": 1.5,
-            "border-color": theme === "dark" ? "#334155" : "#d6d3d1",
+            "border-color": (ele: any) => {
+              if (ele.data("graph_visibility_override") === "include") return "#0f766e"
+              if (ele.data("is_manual")) return "#b45309"
+              return theme === "dark" ? "#334155" : "#d6d3d1"
+            },
             color: theme === "dark" ? "#e5e7eb" : "#1f2937",
             "font-size": 13,
             "font-weight": 600,
@@ -427,6 +450,7 @@ export function RelationshipGraph({
         <div className="mt-3 flex flex-wrap gap-2">
           <button onClick={() => cyRef.current?.fit(undefined, 72)} className={`rounded-full px-3 py-1.5 text-xs font-medium ${theme === "dark" ? "border border-white/10 text-slate-200 hover:bg-white/10" : "border border-slate-300 text-slate-700 hover:bg-slate-50"}`}>Fit</button>
           <button onClick={() => adjustZoom("out")} className={`rounded-full px-3 py-1.5 text-xs font-medium ${theme === "dark" ? "border border-white/10 text-slate-200 hover:bg-white/10" : "border border-slate-300 text-slate-700 hover:bg-slate-50"}`}>Zoom out</button>
+          <button onClick={() => setShowIsolated((current) => !current)} className={`rounded-full px-3 py-1.5 text-xs font-medium ${theme === "dark" ? "border border-white/10 text-slate-200 hover:bg-white/10" : "border border-slate-300 text-slate-700 hover:bg-slate-50"}`}>{showIsolated ? "Hide isolated" : "Show isolated"}</button>
           <button onClick={resetLayout} className={`rounded-full px-3 py-1.5 text-xs font-medium ${theme === "dark" ? "border border-white/10 text-slate-200 hover:bg-white/10" : "border border-slate-300 text-slate-700 hover:bg-slate-50"}`}>Reset</button>
         </div>
 
@@ -471,6 +495,9 @@ export function RelationshipGraph({
             >
               {interactionMode === "arrange" ? "Arrange mode" : "Inspect mode"}
             </button>
+            <button onClick={() => setShowIsolated((current) => !current)} className={`rounded-full px-3 py-2 text-xs font-medium ${theme === "dark" ? "border border-white/10 text-slate-200 hover:bg-white/10" : "border border-slate-300 text-slate-700 hover:bg-slate-50"}`}>
+              {showIsolated ? "Hide isolated" : "Show isolated"}
+            </button>
             <button onClick={() => adjustZoom("out")} className={`rounded-full px-3 py-2 text-xs font-medium ${theme === "dark" ? "border border-white/10 text-slate-200 hover:bg-white/10" : "border border-slate-300 text-slate-700 hover:bg-slate-50"}`}>Zoom out</button>
             <button onClick={() => adjustZoom("in")} className={`rounded-full px-3 py-2 text-xs font-medium ${theme === "dark" ? "border border-white/10 text-slate-200 hover:bg-white/10" : "border border-slate-300 text-slate-700 hover:bg-slate-50"}`}>Zoom in</button>
             <button onClick={resetZoom} className={`rounded-full px-3 py-2 text-xs font-medium ${theme === "dark" ? "border border-white/10 text-slate-200 hover:bg-white/10" : "border border-slate-300 text-slate-700 hover:bg-slate-50"}`}>Reset zoom</button>
@@ -484,6 +511,8 @@ export function RelationshipGraph({
           <span className="font-medium">{graphStats.nodeCount} characters</span>
           <span className="opacity-60">•</span>
           <span className="font-medium">{graphStats.edgeCount} connections</span>
+          <span className="opacity-60">•</span>
+          <span>{showIsolated ? "Isolated cast members stay visible." : "Only connected cast members are visible."}</span>
           <span className="opacity-60">•</span>
           <span>{interactionMode === "arrange" ? "Nodes are draggable right now." : "Nodes are locked so you can inspect without accidental movement."}</span>
         </div>
@@ -529,6 +558,11 @@ export function RelationshipGraph({
             <div>
               <p className={`text-xs uppercase tracking-[0.2em] ${theme === "dark" ? "text-slate-500" : "text-slate-500"}`}>Character</p>
               <h3 className="mt-2 text-2xl font-semibold">{selectedNode.name}</h3>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {selectedNode.is_manual ? <span className={`rounded-full px-3 py-1 text-[11px] ${theme === "dark" ? "bg-amber-500/12 text-amber-100" : "bg-amber-50 text-amber-700"}`}>manual</span> : null}
+                {selectedNode.graph_visibility_override === "include" ? <span className={`rounded-full px-3 py-1 text-[11px] ${theme === "dark" ? "bg-emerald-500/12 text-emerald-100" : "bg-emerald-50 text-emerald-700"}`}>forced visible</span> : null}
+                {typeof selectedNode.visibility_score === "number" ? <span className={`rounded-full px-3 py-1 text-[11px] ${theme === "dark" ? "bg-white/[0.05] text-slate-300" : "bg-slate-100 text-slate-700"}`}>score {selectedNode.visibility_score}</span> : null}
+              </div>
             </div>
 
             <div className={`rounded-[1.2rem] border p-4 ${theme === "dark" ? "border-white/10 bg-black/20" : "border-slate-200 bg-slate-50"}`}>
@@ -596,6 +630,7 @@ export function RelationshipGraph({
 
             {typeof selectedEdge.from_chapter === "number" ? <p className="text-sm"><span className="font-medium">First tracked:</span> Chapter {selectedEdge.from_chapter}</p> : null}
             {typeof selectedEdge.to_chapter === "number" ? <p className="text-sm"><span className="font-medium">Ended:</span> Chapter {selectedEdge.to_chapter}</p> : null}
+            {selectedEdge.status ? <p className="text-sm"><span className="font-medium">Status:</span> {selectedEdge.status}</p> : null}
 
             {sentimentLabel(selectedEdge.sentiment) ? (
               <div className={`rounded-[1.2rem] border p-4 text-sm ${theme === "dark" ? "border-white/10 bg-black/20 text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600"}`}>
@@ -617,11 +652,18 @@ export function RelationshipGraph({
                 <div className="space-y-3">
                   <label className="block">
                     <span className={`mb-1 block text-xs ${theme === "dark" ? "text-slate-400" : "text-slate-500"}`}>Type</span>
-                    <input
+                    <select
                       value={edgeDraft.relType}
                       onChange={(event) => setEdgeDraft((value) => ({ ...value, relType: event.target.value }))}
                       className={`w-full rounded-xl border px-3 py-2 text-sm ${theme === "dark" ? "border-white/10 bg-black/20 text-white" : "border-slate-300 bg-white text-slate-900"}`}
-                    />
+                    >
+                      {edgeDraft.relType && !RELATIONSHIP_TYPE_OPTIONS.includes(edgeDraft.relType as (typeof RELATIONSHIP_TYPE_OPTIONS)[number]) ? (
+                        <option value={edgeDraft.relType}>{relationshipLabel(edgeDraft.relType)}</option>
+                      ) : null}
+                      {RELATIONSHIP_TYPE_OPTIONS.map((type) => (
+                        <option key={type} value={type}>{relationshipLabel(type)}</option>
+                      ))}
+                    </select>
                   </label>
                   <label className="block">
                     <span className={`mb-1 block text-xs ${theme === "dark" ? "text-slate-400" : "text-slate-500"}`}>Relationship note</span>
@@ -667,7 +709,7 @@ export function RelationshipGraph({
                       />
                     </label>
                   </div>
-                  {edgeMessage ? <p className={`text-sm ${edgeMessage.includes("saved") ? "text-emerald-500" : "text-red-500"}`}>{edgeMessage}</p> : null}
+                  {edgeMessage ? <p className={`text-sm ${edgeMessage.includes("saved") || edgeMessage.includes("removed") ? "text-emerald-500" : "text-red-500"}`}>{edgeMessage}</p> : null}
                   <button
                     type="button"
                     disabled={savingEdge}
@@ -683,17 +725,23 @@ export function RelationshipGraph({
                           fromChapter: edgeDraft.fromChapter === "" ? null : Number(edgeDraft.fromChapter),
                           toChapter: edgeDraft.toChapter === "" ? null : Number(edgeDraft.toChapter),
                         })
-                        setGraphData((current) => current ? ({
-                          ...current,
-                          edges: current.edges.map((edge) => edge.id === selectedEdge.relationshipId ? {
-                            ...edge,
-                            type: updated.rel_type,
-                            description: updated.description,
-                            sentiment: updated.sentiment,
-                            from_chapter: updated.from_chapter,
-                            to_chapter: updated.to_chapter,
-                          } : edge),
-                        }) : current)
+                        setGraphData((current) => {
+                          if (!current) return current
+                          const nextGraph = {
+                            ...current,
+                            edges: current.edges.map((edge) => edge.id === selectedEdge.relationshipId ? {
+                              ...edge,
+                              type: updated.rel_type,
+                              description: updated.description,
+                              sentiment: updated.sentiment,
+                              from_chapter: updated.from_chapter,
+                              to_chapter: updated.to_chapter,
+                              status: (typeof updated.to_chapter === "number" && updated.to_chapter < upToChapter ? "ended" : "ongoing") as "ended" | "ongoing",
+                            } : edge),
+                          }
+                          onGraphDataChange?.(nextGraph)
+                          return nextGraph
+                        })
                         setSelection((current) => current?.type === "edge" ? {
                           type: "edge",
                           data: {
@@ -715,6 +763,36 @@ export function RelationshipGraph({
                     className="rounded-full bg-slate-900 px-4 py-2 text-xs font-semibold text-white disabled:opacity-60"
                   >
                     {savingEdge ? "Saving..." : "Save correction"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={savingEdge}
+                    onClick={async () => {
+                      if (!selectedEdge.relationshipId) return
+                      setSavingEdge(true)
+                      setEdgeMessage(null)
+                      try {
+                        await booksApi.deleteRelationship(bookId, selectedEdge.relationshipId)
+                        setGraphData((current) => {
+                          if (!current) return current
+                          const nextGraph = {
+                            ...current,
+                            edges: current.edges.filter((edge) => edge.id !== selectedEdge.relationshipId),
+                          }
+                          onGraphDataChange?.(nextGraph)
+                          return nextGraph
+                        })
+                        setSelection(null)
+                        setEdgeMessage("Relationship removed.")
+                      } catch {
+                        setEdgeMessage("Could not remove the relationship.")
+                      } finally {
+                        setSavingEdge(false)
+                      }
+                    }}
+                    className={`rounded-full px-4 py-2 text-xs font-semibold ${theme === "dark" ? "border border-rose-500/30 text-rose-200 hover:bg-rose-500/12" : "border border-rose-200 text-rose-700 hover:bg-rose-50"}`}
+                  >
+                    Delete relationship
                   </button>
                 </div>
               </div>

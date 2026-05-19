@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import time
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -11,9 +12,25 @@ from app.utils.billing_utils import (
     normalize_plan_code,
     paddle_plan_is_configured,
     price_id_for_plan,
+    recommended_paddle_default_checkout_url,
 )
 
 PADDLE_API_BASE = "https://api.paddle.com"
+
+
+@dataclass(frozen=True)
+class PaddleTransactionSummary:
+    transaction_id: str
+    status: str
+    plan: str
+    billing_interval: str
+    display_name: str
+    currency_code: str | None
+    total: str | None
+    invoice_number: str | None
+    invoice_pdf_url: str | None
+    subscription_id: str | None
+    customer_email: str | None
 
 
 def paddle_is_configured() -> bool:
@@ -53,7 +70,7 @@ async def create_checkout_url(
     email: str,
     plan: str,
     existing_customer_id: str | None = None,
-) -> tuple[str, str]:
+) -> tuple[str, str, str]:
     normalized_plan = normalize_plan_code(plan)
     if not paddle_plan_is_configured(normalized_plan):
         raise RuntimeError(f"Paddle is not configured for plan: {normalized_plan}")
@@ -68,11 +85,12 @@ async def create_checkout_url(
             "plan": normalized_plan,
         },
     }
-    if settings.PADDLE_DEFAULT_CHECKOUT_URL:
-        payload["checkout"] = {
-            # Let Paddle generate the payment link against your approved/default domain.
-            "url": settings.PADDLE_DEFAULT_CHECKOUT_URL,
-        }
+    payload["checkout"] = {
+        # Keep all generated checkout payment links pinned to LoreVia's public
+        # Paddle-enabled checkout page, while the Paddle dashboard default link
+        # remains the required fallback for emails and payment method updates.
+        "url": settings.PADDLE_DEFAULT_CHECKOUT_URL or recommended_paddle_default_checkout_url(),
+    }
 
     async with httpx.AsyncClient(timeout=20.0) as client:
         response = await client.post(
@@ -82,10 +100,11 @@ async def create_checkout_url(
         )
         response.raise_for_status()
         data = response.json()["data"]
+        transaction_id = str(data.get("id") or "")
         checkout_url = (data.get("checkout") or {}).get("url")
-        if not checkout_url:
+        if not checkout_url or not transaction_id:
             raise RuntimeError("Paddle did not return a checkout URL")
-        return checkout_url, customer_id
+        return checkout_url, customer_id, transaction_id
 
 
 async def create_portal_url(customer_id: str, subscription_ids: list[str] | None = None) -> str:
@@ -102,6 +121,68 @@ async def create_portal_url(customer_id: str, subscription_ids: list[str] | None
         response.raise_for_status()
         data = response.json()["data"]
         return data["urls"]["general"]["overview"]
+
+
+def _format_transaction_total(data: dict[str, Any]) -> str | None:
+    totals = data.get("details", {}).get("totals") or {}
+    total = totals.get("total")
+    currency_code = data.get("currency_code")
+    if total is None or not currency_code:
+        return None
+    try:
+        amount = float(total) / 100
+    except (TypeError, ValueError):
+        return None
+    return f"{currency_code} {amount:,.2f}"
+
+
+async def _get_invoice_pdf_url(transaction_id: str) -> str | None:
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        response = await client.get(
+            f"{PADDLE_API_BASE}/transactions/{transaction_id}/invoice",
+            headers=_headers(),
+            params={"disposition": "inline"},
+        )
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        return (response.json().get("data") or {}).get("url")
+
+
+async def get_transaction_summary(transaction_id: str) -> PaddleTransactionSummary:
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        response = await client.get(
+            f"{PADDLE_API_BASE}/transactions/{transaction_id}",
+            headers=_headers(),
+            params={"include": "customer"},
+        )
+        response.raise_for_status()
+        data = response.json()["data"]
+
+    invoice_pdf_url = None
+    if str(data.get("status") or "").lower() == "completed":
+        try:
+            invoice_pdf_url = await _get_invoice_pdf_url(transaction_id)
+        except httpx.HTTPStatusError:
+            invoice_pdf_url = None
+
+    plan = normalize_plan_code((data.get("custom_data") or {}).get("plan"))
+    interval = "annual" if plan.endswith("_annual") else "monthly"
+    display_name = "Architect" if plan.startswith("architect_") else "Author" if plan.startswith("author_") else plan.replace("_", " ").title()
+
+    return PaddleTransactionSummary(
+        transaction_id=str(data.get("id") or transaction_id),
+        status=str(data.get("status") or ""),
+        plan=plan,
+        billing_interval=interval,
+        display_name=display_name,
+        currency_code=data.get("currency_code"),
+        total=_format_transaction_total(data),
+        invoice_number=data.get("invoice_number"),
+        invoice_pdf_url=invoice_pdf_url,
+        subscription_id=data.get("subscription_id"),
+        customer_email=((data.get("customer") or {}).get("email") if isinstance(data.get("customer"), dict) else None),
+    )
 
 
 def verify_webhook_signature(raw_body: bytes, paddle_signature: str | None) -> bool:

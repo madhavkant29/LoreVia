@@ -4,6 +4,7 @@ Generated once, cached in Redis + stored in DB forever.
 """
 import json
 import re
+import uuid
 from typing import Any
 
 from openai import AsyncOpenAI
@@ -65,6 +66,8 @@ async def generate_summary(
     title: str = "",
     *,
     openai_client: AsyncOpenAI | None = None,
+    user_id: uuid.UUID | None = None,
+    book_id: uuid.UUID | None = None,
 ) -> dict:
     system = f"You are analysing chapter: {title}. " + PROMPTS[mode]
     content = await complete_with_fallback(
@@ -76,6 +79,10 @@ async def generate_summary(
         max_tokens=2200,
         response_format={"type": "json_object"} if mode == "detailed" else None,
         openai_client=openai_client,
+        usage_feature=f"chapter_summary_{mode}",
+        usage_user_id=user_id,
+        usage_book_id=book_id,
+        usage_metadata={"chapter_title": title[:160]},
     )
 
     if mode == "detailed":

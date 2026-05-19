@@ -1,12 +1,14 @@
 "use client"
 
 import Link from "next/link"
-import { useParams, useRouter } from "next/navigation"
-import { useEffect, useState } from "react"
+import { useParams, useRouter, useSearchParams } from "next/navigation"
+import { Suspense, useEffect, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
 
 import { booksApi } from "@/lib/api/books"
-import { buildDailyCapEventDetail } from "@/lib/monetization/limitRecovery"
+import { buildDailyCapEventDetail } from "@/lib/limits/dailyCap"
 import { readerApi } from "@/lib/api/reader"
+import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { capture } from "@/lib/analytics/posthog"
 import type { Book } from "@/types/book"
@@ -20,12 +22,20 @@ const AUTHOR_PROMPTS = [
 ]
 
 export default function SearchPage() {
+  return (
+    <Suspense fallback={null}>
+      <SearchPageInner />
+    </Suspense>
+  )
+}
+
+function SearchPageInner() {
   const { bookId } = useParams<{ bookId: string }>()
   const router = useRouter()
+  const searchParams = useSearchParams()
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
 
-  const [book, setBook] = useState<Book | null>(null)
   const [query, setQuery] = useState("")
   const [results, setResults] = useState<SearchResult[]>([])
   const [thematicResults, setThematicResults] = useState<ThematicSearchResult[]>([])
@@ -33,9 +43,17 @@ export default function SearchPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  const { data: book = null } = useQuery<Book>({
+    queryKey: asQueryKey(bookCacheKey(bookId, "detail")),
+    queryFn: () => booksApi.get(bookId),
+    staleTime: 20_000,
+  })
+
   useEffect(() => {
-    booksApi.get(bookId).then(setBook).catch(() => {})
-  }, [bookId])
+    const seededQuery = searchParams.get("q")?.trim()
+    if (!seededQuery || query || loading || results.length > 0 || thematicResults.length > 0) return
+    runSearch(seededQuery).catch(() => {})
+  }, [loading, query, results.length, searchParams, thematicResults.length])
 
   const runSearch = async (nextQuery = query) => {
     const trimmed = nextQuery.trim()
@@ -60,7 +78,7 @@ export default function SearchPage() {
       setResults([])
       setThematicResults([])
       const dailyCap = buildDailyCapEventDetail(err)
-      setError(dailyCap ? "You reached today's search limit. Use the upgrade or points options to keep going." : "Search failed. Please try again.")
+      setError(dailyCap ? "You reached today's search limit. Upgrade for more daily capacity or continue tomorrow." : "Search failed. Please try again.")
     } finally {
       setLoading(false)
     }

@@ -17,6 +17,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.redis import cache_del, cache_set_if_absent, key_analysis_inflight
 from app.core.security import create_asset_token
 from app.core.storage import download_book, get_presigned_url
 from app.engine.character.deduplicator import names_equivalent
@@ -24,12 +25,20 @@ from app.engine.character.entity_filters import (
     VISIBILITY_THRESHOLD,
     character_visibility_score,
 )
-from app.utils.billing_utils import user_access_tier
+from app.utils.plot_thread_utils import (
+    build_plot_thread_payload,
+    normalize_plot_thread_status,
+)
+from app.utils.tag_utils import ENTITY_TYPE_PLOT_THREAD, get_custom_tags_for_entity, list_custom_tags_for_entity_ids
+from app.utils.billing_utils import has_paid_reading_access
+from app.utils.character_utils import get_graph_visibility_override
 from app.utils.queue_utils import queue_for_user
 from app.engine.character.profile_builder import build_description
 from app.models.book import Book, Chapter, ChapterMedia
 from app.models.character import Character
 from app.models.intelligence import ChapterSummary, PlotThread
+from app.utils.book_utils import deserialize_manuscript_content
+from app.utils.ingestion_utils import ANALYSIS_INFLIGHT_TTL_SECONDS, build_analysis_chapter_state
 from app.utils.ingestion_utils import apply_chapter_number_strategy
 
 BLEACH_EMPTY_TAGS: Any = frozenset()
@@ -219,6 +228,107 @@ def relationship_node_description(
     return " ".join(segment.strip() for segment in segments if segment).strip() or "No narrative details discovered yet."
 
 
+def graph_character_visibility_analysis(char: Character, relationship_count: int = 0) -> dict[str, Any]:
+    name = " ".join((getattr(char, "name", "") or "").split())
+    override = get_graph_visibility_override(char)
+    reasons: list[str] = []
+
+    if not name:
+        return {
+            "visible": False,
+            "score": -99,
+            "override": override,
+            "reasons": ["missing_name"],
+        }
+
+    if getattr(char, "is_manual", False):
+        reasons.append("manual_character")
+    if relationship_count > 0:
+        reasons.append("relationship_evidence")
+    if (getattr(char, "mention_count", 0) or 0) > 1:
+        reasons.append("repeat_mentions")
+    if getattr(char, "aliases", None):
+        reasons.append("has_aliases")
+    if getattr(char, "arc_summary", None):
+        reasons.append("has_arc_summary")
+    if getattr(char, "personality_tags", None) or getattr(char, "motivations", None) or getattr(char, "fears", None):
+        reasons.append("profile_details")
+
+    # Possessive forms ("Author's note", "Narrator's voice") -> strip
+    if name.endswith("'s"):
+        reasons.append("possessive_name_shape")
+        return {
+            "visible": False if override != "include" else True,
+            "score": -8,
+            "override": override,
+            "reasons": (["author_override_include"] if override == "include" else ["author_override_exclude"] if override == "exclude" else []) + reasons,
+        }
+
+    words = re.findall(r"[A-Za-z][A-Za-z'-]*", name)
+    if not words:
+        reasons.append("no_name_tokens")
+        return {
+            "visible": False,
+            "score": -10,
+            "override": override,
+            "reasons": reasons,
+        }
+
+    if len(words) == 1 and words[0][0].islower():
+        reasons.append("lowercase_single_word")
+        return {
+            "visible": False if override != "include" else True,
+            "score": -7,
+            "override": override,
+            "reasons": (["author_override_include"] if override == "include" else ["author_override_exclude"] if override == "exclude" else []) + reasons,
+        }
+
+    score = character_visibility_score(
+        name,
+        role=getattr(char, "role", None),
+        aliases=getattr(char, "aliases", None) or [],
+        arc_summary=getattr(char, "arc_summary", None),
+        personality_tags=getattr(char, "personality_tags", None) or [],
+        motivations=getattr(char, "motivations", None) or [],
+        fears=getattr(char, "fears", None) or [],
+        archetype=getattr(char, "archetype", None),
+        trait_state=getattr(char, "trait_state", None),
+        relationship_count=relationship_count,
+        stopwords=frozenset(GRAPH_CHARACTER_STOPWORDS),
+        exact_blocklist=frozenset(TIMELINE_CHARACTER_EXACT_BLOCKLIST),
+        concept_suffixes=tuple(TIMELINE_CHARACTER_SUFFIXES),
+        use_ner=True,
+    )
+
+    if score >= VISIBILITY_THRESHOLD:
+        reasons.append("score_meets_threshold")
+    else:
+        reasons.append("score_below_threshold")
+
+    if override == "include":
+        reasons.insert(0, "author_override_include")
+        return {
+            "visible": True,
+            "score": score,
+            "override": override,
+            "reasons": reasons,
+        }
+    if override == "exclude":
+        reasons.insert(0, "author_override_exclude")
+        return {
+            "visible": False,
+            "score": score,
+            "override": override,
+            "reasons": reasons,
+        }
+    return {
+        "visible": score >= VISIBILITY_THRESHOLD or getattr(char, "is_manual", False),
+        "score": score,
+        "override": override,
+        "reasons": reasons,
+    }
+
+
 def is_graph_character_visible(char: Character) -> bool:
     """Determine whether a Character should appear in the relationship graph.
 
@@ -231,35 +341,7 @@ def is_graph_character_visible(char: Character) -> bool:
       - Possessive suffix ("'s")   → not a character label
       - Single all-lowercase word  → not a proper name
     """
-    name = " ".join((char.name or "").split())
-    if not name:
-        return False
-    # Possessive forms ("Author's note", "Narrator's voice") → strip
-    if name.endswith("'s"):
-        return False
-    words = re.findall(r"[A-Za-z][A-Za-z'-]*", name)
-    if not words:
-        return False
-    if len(words) == 1 and words[0][0].islower():
-        return False
-
-    score = character_visibility_score(
-        name,
-        role=char.role,
-        aliases=char.aliases or [],
-        arc_summary=char.arc_summary,
-        personality_tags=char.personality_tags or [],
-        motivations=char.motivations or [],
-        fears=char.fears or [],
-        archetype=char.archetype,
-        trait_state=char.trait_state,
-        relationship_count=0,
-        stopwords=frozenset(GRAPH_CHARACTER_STOPWORDS),
-        exact_blocklist=frozenset(TIMELINE_CHARACTER_EXACT_BLOCKLIST),
-        concept_suffixes=tuple(TIMELINE_CHARACTER_SUFFIXES),
-        use_ner=True,
-    )
-    return score >= VISIBILITY_THRESHOLD
+    return bool(graph_character_visibility_analysis(char, getattr(char, "_graph_relationship_count", 0)).get("visible"))
 
 
 def character_evidence_score(char: Character) -> tuple[int, int]:
@@ -381,7 +463,7 @@ def strip_json_fence(content: str) -> str:
 # ─── Chapter intelligence / access ───────────────────────────────────────────
 
 async def require_summary_access(db: AsyncSession, book: Book, current_user, chapter_num: int | None = None) -> None:
-    if user_access_tier(current_user) in ("reader", "author", "architect", "admin"):
+    if has_paid_reading_access(current_user):
         return
     if not book.is_truncated:
         return
@@ -457,11 +539,32 @@ async def timeline_visible_chapter_set(
 async def queue_analysis_if_missing(db: AsyncSession, chapter: Chapter, current_user=None) -> None:
     if await chapter_has_detailed_summary(db, chapter.id):
         return
+    analysis_state = chapter.analysis_state if isinstance(chapter.analysis_state, dict) else {}
+    if str(analysis_state.get("status") or "").strip() in {"queued", "running"}:
+        return
+    inflight_key = key_analysis_inflight(str(chapter.id))
+    if not await cache_set_if_absent(
+        inflight_key,
+        {"chapter_id": str(chapter.id)},
+        ANALYSIS_INFLIGHT_TTL_SECONDS,
+    ):
+        return
     from app.workers.tasks.analysis_tasks import analyse_chapter_task
     try:
-        chapter_text = download_book(chapter.s3_key).decode("utf-8", errors="ignore")
+        raw = download_book(chapter.s3_key)
+        chapter_text = str(deserialize_manuscript_content(raw).get("text") or "").strip()
     except Exception:
+        await cache_del(inflight_key)
         return
+    if not chapter_text:
+        await cache_del(inflight_key)
+        return
+    chapter.analysis_state = build_analysis_chapter_state(
+        analysis_state,
+        status="queued",
+        increment_attempt=True,
+    )
+    await db.commit()
     analyse_chapter_task.apply_async(
         args=[str(chapter.id), chapter_text, chapter.title or ""],
         queue=queue_for_user(current_user, "analysis") if current_user else "analysis",
@@ -485,9 +588,45 @@ async def chapter_intelligence_available(db: AsyncSession, book: Book, current_u
     return availability.get(chapter_num, False)
 
 
+def chapter_analysis_status(chapter: Chapter | None) -> dict[str, Any] | None:
+    if chapter is None or not isinstance(getattr(chapter, "analysis_state", None), dict):
+        return None
+    source = chapter.analysis_state
+    payload = {
+        "status": " ".join(str(source.get("status") or "").split()).strip() or "pending",
+        "generated_modes": [
+            str(mode).strip()
+            for mode in (source.get("generated_modes") or [])
+            if str(mode).strip()
+        ],
+        "attempt_count": int(source.get("attempt_count") or 0),
+        "last_error": " ".join(str(source.get("last_error") or "").split()).strip() or None,
+        "updated_at": source.get("updated_at"),
+    }
+    return payload
+
+
+def chapter_source_integrity(chapter: Chapter | None) -> dict[str, Any] | None:
+    source = (
+        chapter.analysis_state.get("source_integrity")
+        if chapter is not None and isinstance(getattr(chapter, "analysis_state", None), dict)
+        else None
+    )
+    if not isinstance(source, dict):
+        return None
+    return {
+        "text_present": bool(source.get("text_present")),
+        "media_marker_count": int(source.get("media_marker_count") or 0),
+        "stored_media_count": int(source.get("stored_media_count") or 0),
+        "recovery_status": " ".join(str(source.get("recovery_status") or "").split()).strip() or "ok",
+        "last_recovery_error": " ".join(str(source.get("last_recovery_error") or "").split()).strip() or None,
+        "updated_at": source.get("updated_at"),
+    }
+
+
 async def chapter_intelligence_map(db: AsyncSession, book: Book, current_user) -> dict[int, bool]:
     from app.models.book import Chapter as Ch
-    if user_access_tier(current_user) in ("reader", "author", "architect", "admin"):
+    if has_paid_reading_access(current_user):
         rows = (await db.execute(
             select(Ch.number).where(Ch.book_id == book.id).order_by(Ch.number)
         )).all()
@@ -630,19 +769,13 @@ def build_timeline_track_payload(
     }
 
 
-def serialize_plot_thread(thread: PlotThread) -> dict:
-    return {
-        "id": str(thread.id),
-        "title": thread.title,
-        "type": thread.thread_type,
-        "status": thread.status,
-        "description": thread.description,
-        "introduced_at": thread.introduced_at,
-        "resolved_at": thread.resolved_at,
-        "importance": thread.importance,
-        "note": thread.note,
-        "character_ids": thread.character_ids or [],
-    }
+def serialize_plot_thread(
+    thread: PlotThread,
+    *,
+    current_chapter: int | None,
+    tags: list[str] | None = None,
+) -> dict:
+    return build_plot_thread_payload(thread, current_chapter=current_chapter, tags=tags)
 
 
 async def list_plot_threads(
@@ -657,7 +790,19 @@ async def list_plot_threads(
         query.order_by(PlotThread.importance.desc(), desc(PlotThread.introduced_at), PlotThread.title)
     )
     threads = threads_result.scalars().all()
-    return [serialize_plot_thread(thread) for thread in threads]
+    current_chapter = chapter
+    if current_chapter is None:
+        current_chapter = await db.scalar(select(Book.total_chapters).where(Book.id == book_id))
+    tags_by_thread = await list_custom_tags_for_entity_ids(
+        db,
+        entity_type=ENTITY_TYPE_PLOT_THREAD,
+        entity_ids=[thread.id for thread in threads],
+        book_id=book_id,
+    )
+    return [
+        serialize_plot_thread(thread, current_chapter=current_chapter, tags=tags_by_thread.get(thread.id, []))
+        for thread in threads
+    ]
 
 
 async def update_plot_thread_note(
@@ -665,6 +810,7 @@ async def update_plot_thread_note(
     book_id: uuid.UUID,
     thread_id: uuid.UUID,
     note: str | None,
+    status: str | None = None,
 ) -> dict | None:
     thread = (
         await db.execute(
@@ -676,6 +822,23 @@ async def update_plot_thread_note(
 
     cleaned = str(bleach.clean(" ".join(str(note or "").split()).strip(), tags=BLEACH_EMPTY_TAGS, strip=True)) or None
     thread.note = cleaned
+    if status is not None:
+        normalized_status = normalize_plot_thread_status(status, default=thread.status)
+        thread.status = normalized_status
+        if normalized_status in {"resolved", "abandoned"} and thread.resolved_at is None:
+            thread.resolved_at = thread.last_mentioned_at or thread.introduced_at
+        elif normalized_status not in {"resolved", "abandoned"}:
+            thread.resolved_at = None
     await db.commit()
     await db.refresh(thread)
-    return serialize_plot_thread(thread)
+    current_chapter = await db.scalar(select(Book.total_chapters).where(Book.id == book_id))
+    return serialize_plot_thread(
+        thread,
+        current_chapter=current_chapter,
+        tags=await get_custom_tags_for_entity(
+            db,
+            entity_type=ENTITY_TYPE_PLOT_THREAD,
+            entity_id=thread.id,
+            book_id=book_id,
+        ),
+    )

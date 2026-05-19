@@ -4,6 +4,7 @@ builder, and continuity report renderers extracted from the advisor route.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import re
@@ -13,12 +14,17 @@ from collections import OrderedDict
 from typing import Any
 
 from openai import AsyncOpenAI
+from openai.types.chat import ChatCompletionMessageParam
 from sqlalchemy import select
+from sqlalchemy import text as sql_text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.book import Book, Chapter
+from app.core.config import settings
+from app.engine.embeddings.embedder import embed_text
+from app.models.book import Book, Chapter, SeriesBook
 from app.models.character import Character
 from app.models.intelligence import ChapterSummary, PlotThread, WorldElement
+from app.utils.llm_usage_utils import create_tracked_chat_completion
 from app.utils.world_building_utils import build_world_logic_response, classify_world_intent
 
 
@@ -54,8 +60,16 @@ class _TTLCache:
         while len(self._store) > self._maxsize:
             self._store.popitem(last=False)
 
+    def clear(self) -> None:
+        self._store.clear()
+
 
 advisor_response_cache = _TTLCache()
+
+
+def invalidate_advisor_caches() -> None:
+    """Drop cached advisor/editorial responses after manuscript content changes."""
+    advisor_response_cache.clear()
 
 
 def make_advisor_cache_key(book_id: str | uuid.UUID, last_user_message: str) -> str:
@@ -68,6 +82,10 @@ def make_editorial_cache_key(book_id: str | uuid.UUID, text: str, chapter_num: i
     """SHA-256 key for editorial review (book, text, chapter)."""
     payload = f"{book_id}||{text.strip()[:500]}||{chapter_num or 0}"
     return hashlib.sha256(payload.encode()).hexdigest()
+
+
+def safe_prompt_str(value: str | None) -> str:
+    return (value or "").replace("{", "{{").replace("}", "}}")
 
 # ─── System / prompt templates ────────────────────────────────────────────────
 
@@ -84,6 +102,7 @@ Core responsibilities:
 - Quote retrieved passages with chapter references when relevant.
 - When passages are sparse, reason from STORY KNOWLEDGE — you always have character names, roles, arcs, and plot threads.
 - NEVER say "I have no context" or "no passages found". You always know the characters and threads.
+- NEVER present the manuscript as issue-free or fully solved. If no hard contradiction is present, surface the most useful soft risk, missing setup, or unrealized opportunity instead.
 
 CRITICAL — INTERCEPT CONTRADICTIONS BEFORE ANYTHING ELSE:
 If the author's message describes a plan, idea, or event that conflicts with established story facts, you MUST lead with a ⚠️ block before giving any creative advice. Do not silently accept contradictions.
@@ -275,6 +294,94 @@ def build_advisor_world_context(world_analysis: dict[str, Any] | None) -> str:
     return "\n".join(lines)
 
 
+WHATS_THE_WORD_SYSTEM = """\
+You help fiction writers find one precise English word from a short description.
+
+Return JSON only with this exact shape:
+{
+  "word": "single-word answer",
+  "gloss": "brief explanation in under 16 words"
+}
+
+Rules:
+- Return exactly one English word.
+- Prefer precise, natural, contemporary vocabulary over obscure showboating.
+- If a previous suggestion is provided, do not repeat it.
+- Keep the gloss short, plain, and useful.
+- Do not ask follow-up questions.
+"""
+
+WHATS_THE_WORD_USER = """\
+Book: {title}
+Description: {description}
+Previous suggestion to avoid: {previous_word}
+"""
+
+_WHATS_THE_WORD_RE = re.compile(r"[A-Za-z][A-Za-z'-]*")
+
+
+def _normalize_single_word(value: object) -> str:
+    text = " ".join(str(value or "").split()).strip()
+    if not text:
+        return ""
+    if _WHATS_THE_WORD_RE.fullmatch(text):
+        return text.lower()
+    match = _WHATS_THE_WORD_RE.search(text)
+    return match.group(0).lower() if match else ""
+
+
+def normalize_whats_the_word_result(raw: str) -> dict[str, str]:
+    fallback_word = _normalize_single_word(raw)
+    fallback = {
+        "word": fallback_word or "word",
+        "gloss": "A close fit for the description.",
+    }
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return fallback
+
+    word = _normalize_single_word(parsed.get("word")) if isinstance(parsed, dict) else ""
+    if not word:
+        return fallback
+
+    gloss = " ".join(str((parsed or {}).get("gloss") or "").split()).strip()
+    if not gloss:
+        gloss = fallback["gloss"]
+    return {"word": word, "gloss": gloss[:120]}
+
+
+async def generate_whats_the_word_result(
+    *,
+    client: AsyncOpenAI,
+    model: str,
+    book_title: str,
+    description: str,
+    previous_word: str | None = None,
+) -> dict[str, str]:
+    response = await create_tracked_chat_completion(
+        client=client,
+        feature="advisor_whats_the_word",
+        model=model,
+        temperature=0.9,
+        max_tokens=120,
+        response_format={"type": "json_object"},
+        messages=[
+            {"role": "system", "content": WHATS_THE_WORD_SYSTEM},
+            {
+                "role": "user",
+                "content": WHATS_THE_WORD_USER.format(
+                    title=book_title.strip() or "Untitled book",
+                    description=description.strip(),
+                    previous_word=(previous_word or "None").strip() or "None",
+                ),
+            },
+        ],
+    )
+    raw = response.choices[0].message.content or "{}"
+    return normalize_whats_the_word_result(raw)
+
+
 async def build_advisor_world_analysis(
     db: AsyncSession,
     book: Book,
@@ -377,6 +484,67 @@ Retrieved manuscript context for cross-referencing:
 {passages}
 """
 
+PROACTIVE_SCAN_SYSTEM = """\
+You are performing a proactive continuity and editorial scan for the novel "{title}".
+
+You will receive:
+- STORY KNOWLEDGE summarizing the manuscript state
+- RECENT CHAPTER SUMMARIES
+- OPEN PLOT THREADS
+- RELATIONSHIP CHANGES
+- WORLD ELEMENT WATCHLIST
+
+Return JSON only with this exact shape:
+{{
+  "findings": [
+    {{
+      "severity": "warning" | "direction" | "opportunity" | "info",
+      "type": "event_conflict" | "relationship_flip" | "location_conflict" | "object_continuity" | "world_rule_conflict" | "role_drift" | "foreshadowing_opportunity" | "future_direction",
+      "title": "short label",
+      "description": "specific explanation grounded in the provided story context",
+      "chapter_ref": 0,
+      "action_label": "short CTA",
+      "ask_prompt": "follow-up prompt the author can send to the advisor"
+    }}
+  ],
+  "overall_note": "1-2 sentences explaining the highest-value proactive concern or opportunity."
+}}
+
+Rules:
+- Prefer high-confidence findings over speculative ones.
+- Do not repeat obvious duplicates from the same root issue.
+- Use "warning" only for likely contradictions or structural risks.
+- Use "direction" for unresolved arcs that need an ending decision soon.
+- Use "opportunity" for foreshadowing, setup, payoff, or underused narrative material.
+- Use "info" only for light watchlist items.
+- Keep findings to at most 4 items.
+- If there are no strong findings, return an empty findings array and a brief overall_note.
+
+--- STORY KNOWLEDGE ---
+{story_context}
+-----------------------
+"""
+
+PROACTIVE_SCAN_USER = """\
+Run a proactive continuity scan using the manuscript evidence below.
+
+--- RECENT CHAPTER SUMMARIES ---
+{recent_summaries}
+-------------------------------
+
+--- OPEN PLOT THREADS ---
+{open_threads}
+-------------------------
+
+--- RELATIONSHIP CHANGES ---
+{relationships}
+----------------------------
+
+--- WORLD ELEMENT WATCHLIST ---
+{world_watch}
+-------------------------------
+"""
+
 VOICE_CONSISTENCY_SYSTEM = """\
 You are a developmental editor reviewing dialogue and behaviour consistency for the novel "{title}".
 
@@ -407,7 +575,7 @@ Rules:
 - Compare against the CHARACTER BASELINES first, then use retrieved passages as supporting evidence.
 - Do not flag growth when it is plausibly earned; only flag it if the passage skips the transition.
 - Prefer fewer, high-confidence issues over speculative ones.
-- If nothing is off, return an empty issues array and say the voices feel consistent.
+- If nothing is clearly off, return an empty issues array but use overall_verdict to name the next-best refinement target or watchpoint. Never call the passage perfect.
 
 --- STORY KNOWLEDGE ---
 {story_context}
@@ -500,7 +668,9 @@ Tighten this selected passage from the manuscript.
 async def classify_intent(client: AsyncOpenAI, message: str) -> str:
     from app.core.config import settings
     try:
-        r = await client.chat.completions.create(
+        r = await create_tracked_chat_completion(
+            client=client,
+            feature="advisor_intent_classification",
             model=settings.OPENAI_INTEL_MODEL,
             max_tokens=10,
             temperature=0,
@@ -523,7 +693,9 @@ async def classify_response_type(client: AsyncOpenAI, reply: str) -> str:
     if "🔀 Option" in reply[:400]:
         return "tradeoff"
     try:
-        r = await client.chat.completions.create(
+        r = await create_tracked_chat_completion(
+            client=client,
+            feature="advisor_response_type_classification",
             model=settings.OPENAI_INTEL_MODEL,
             max_tokens=10,
             temperature=0,
@@ -719,23 +891,289 @@ async def build_story_context(db: AsyncSession, book_id: uuid.UUID, total_ch: in
     return "\n".join(lines)
 
 
+async def build_advisor_reply_payload(
+    *,
+    db: AsyncSession,
+    book: Book,
+    user_id: uuid.UUID,
+    messages: list[dict[str, str]],
+    total_chapters: int,
+) -> dict[str, Any]:
+    if not messages:
+        raise ValueError("messages list is empty")
+
+    last_user_msg = next(
+        (str(message.get("content") or "") for message in reversed(messages) if message.get("role") == "user"),
+        "",
+    ).strip()
+    if not last_user_msg:
+        raise ValueError("no user message found")
+
+    cache_key = make_advisor_cache_key(book.id, last_user_msg)
+    cached = advisor_response_cache.get(cache_key)
+    if cached is not None:
+        return {**cached, "cached": True}
+
+    history = messages[-20:]
+    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    try:
+        intent, story_context = await asyncio.gather(
+            classify_intent(client, last_user_msg),
+            build_story_context(db, book.id, book.total_chapters or 0),
+        )
+        world_mode = detect_advisor_world_mode(last_user_msg, intent)
+        world_analysis = (
+            await build_advisor_world_analysis(db, book, last_user_msg, world_mode)
+            if world_mode
+            else None
+        )
+        world_context = build_advisor_world_context(world_analysis)
+
+        chunk_limit = 10 if intent in ("consistency", "plothole") or world_mode else 5
+        threshold = 0.25 if intent in ("consistency", "plothole") or world_mode else 0.30
+        query_emb = await embed_text(
+            last_user_msg,
+            user_id=user_id,
+            book_id=book.id,
+            feature="advisor_message_query_embedding",
+        )
+        rows = await db.execute(
+            sql_text("""
+                SELECT bc.text, bc.chunk_index,
+                       ch.number AS chapter_num, ch.title AS chapter_title,
+                       1 - (bc.embedding <=> CAST(:emb AS vector)) AS relevance
+                FROM book_chunks bc
+                JOIN chapters ch ON ch.id = bc.chapter_id
+                WHERE bc.book_id = :bid
+                  AND ch.number <= :max_ch
+                  AND bc.embedding IS NOT NULL
+                  AND 1 - (bc.embedding <=> CAST(:emb AS vector)) > :threshold
+                ORDER BY relevance DESC
+                LIMIT :lim
+            """),
+            {
+                "emb": str(query_emb),
+                "bid": str(book.id),
+                "max_ch": total_chapters,
+                "threshold": threshold,
+                "lim": chunk_limit,
+            },
+        )
+        hits = [
+            {
+                "text": row.text,
+                "chapter_num": row.chapter_num,
+                "chapter_title": row.chapter_title,
+                "relevance": round(float(row.relevance), 3),
+            }
+            for row in rows.fetchall()
+        ]
+
+        passage_blocks: list[str] = []
+        for hit in hits:
+            chapter_ref = f"Chapter {hit['chapter_num']}"
+            if hit.get("chapter_title"):
+                chapter_ref += f" — {hit['chapter_title']}"
+            passage_blocks.append(f"[{chapter_ref}]\n{hit['text'][:380]}")
+
+        retrieved_context = (
+            "\n\n".join(passage_blocks)
+            if passage_blocks
+            else "No passage excerpts matched this query — reason from the STORY KNOWLEDGE above."
+        )
+
+        intent_hint = {
+            "consistency": "[AUTHOR INTENT DETECTED: check for contradictions and continuity violations]",
+            "plothole": "[AUTHOR INTENT DETECTED: look for logical gaps and unresolved inconsistencies]",
+            "direction": "[AUTHOR INTENT DETECTED: debate options and walk through narrative tradeoffs]",
+            "opportunity": "[AUTHOR INTENT DETECTED: surface foreshadowing and arc opportunities]",
+        }.get(intent, "")
+        if world_mode == "gap_detection":
+            intent_hint = "[AUTHOR INTENT DETECTED: check world-building, canon, lore coverage, and world-gap issues]"
+        elif world_mode == "story_integration":
+            intent_hint = "[AUTHOR INTENT DETECTED: use world-building lore to find story integration options]"
+
+        augmented_last = (
+            f"{last_user_msg}\n\n"
+            + (f"{intent_hint}\n\n" if intent_hint else "")
+            + f"--- Retrieved passages ---\n{retrieved_context}"
+            + (f"\n\n{world_context}" if world_context else "")
+        )
+
+        system_prompt = ADVISOR_SYSTEM.format(
+            title=safe_prompt_str(book.title),
+            story_context=safe_prompt_str(story_context),
+        )
+        llm_messages: list[ChatCompletionMessageParam] = [
+            {"role": "system", "content": system_prompt}
+        ]
+        for message in history[:-1]:
+            llm_messages.append(
+                {
+                    "role": str(message.get("role") or "user"),
+                    "content": str(message.get("content") or ""),
+                }
+            )
+        llm_messages.append({"role": "user", "content": augmented_last})
+
+        response = await create_tracked_chat_completion(
+            client=client,
+            feature="advisor_message",
+            model=settings.OPENAI_INTEL_MODEL,
+            db=db,
+            user_id=user_id,
+            book_id=book.id,
+            temperature=0.55,
+            max_tokens=800,
+            messages=llm_messages,
+        )
+        reply = (response.choices[0].message.content or "").strip()
+        response_type = await classify_response_type(client, reply)
+
+        result = {
+            "reply": reply,
+            "intent": intent,
+            "response_type": response_type,
+            "retrieved_passages": [
+                {
+                    "chapter_num": hit["chapter_num"],
+                    "chapter_title": hit.get("chapter_title"),
+                    "excerpt": hit["text"][:240],
+                    "relevance": hit["relevance"],
+                }
+                for hit in hits[:5]
+            ],
+            "world_analysis": world_analysis,
+            "cached": False,
+        }
+        advisor_response_cache.set(cache_key, result)
+        return result
+    finally:
+        await client.close()
+
+
+async def build_series_advisor_reply_payload(
+    *,
+    db: AsyncSession,
+    series: Any,
+    user_id: uuid.UUID,
+    messages: list[dict[str, str]],
+) -> dict[str, Any]:
+    if not messages:
+        raise ValueError("messages list is empty")
+
+    last_user_msg = next(
+        (str(message.get("content") or "") for message in reversed(messages) if message.get("role") == "user"),
+        "",
+    ).strip()
+    if not last_user_msg:
+        raise ValueError("no user message found")
+
+    cache_key = make_advisor_cache_key(f"series:{series.id}", last_user_msg)
+    cached = advisor_response_cache.get(cache_key)
+    if cached is not None:
+        return {**cached, "cached": True}
+
+    memberships = (
+        await db.execute(
+            select(SeriesBook.book_id, SeriesBook.position)
+            .where(SeriesBook.series_id == series.id)
+            .order_by(SeriesBook.position.asc().nulls_last())
+        )
+    ).all()
+    if not memberships:
+        raise ValueError("no_books_found_in_series")
+
+    book_ids = [row.book_id for row in memberships]
+    book_rows = (
+        await db.execute(
+            select(Book.id, Book.title).where(Book.id.in_(book_ids))
+        )
+    ).all()
+    book_titles = {row.id: row.title for row in book_rows}
+    story_context = await build_series_story_context(
+        db,
+        book_ids,
+        book_titles,
+        max_chars_per_book=6,
+        max_threads_per_book=4,
+    )
+
+    history = messages[-16:]
+    system_prompt = SERIES_ADVISOR_SYSTEM.format(
+        series_name=safe_prompt_str(series.name),
+        story_context=safe_prompt_str(story_context),
+    )
+    llm_messages: list[ChatCompletionMessageParam] = [
+        {"role": "system", "content": system_prompt}
+    ]
+    for message in history[:-1]:
+        llm_messages.append(
+            {
+                "role": str(message.get("role") or "user"),
+                "content": str(message.get("content") or ""),
+            }
+        )
+    llm_messages.append({"role": "user", "content": last_user_msg})
+
+    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    try:
+        response = await create_tracked_chat_completion(
+            client=client,
+            feature="series_advisor_message",
+            model=settings.OPENAI_INTEL_MODEL,
+            db=db,
+            user_id=user_id,
+            temperature=0.55,
+            max_tokens=900,
+            messages=llm_messages,
+        )
+        reply = (response.choices[0].message.content or "").strip()
+        response_type = await classify_response_type(client, reply)
+        intent = await classify_intent(client, last_user_msg)
+        result = {
+            "reply": reply,
+            "intent": intent,
+            "response_type": response_type,
+            "series_id": str(series.id),
+            "book_count": len(book_ids),
+            "retrieved_passages": [],
+            "cached": False,
+        }
+        advisor_response_cache.set(cache_key, result)
+        return result
+    finally:
+        await client.close()
+
+
 def identify_character_mentions(
     text: str,
     character_rows: list[dict],
     limit: int = 5,
 ) -> list[dict]:
-    stripped_text = re.sub(r'\\s+', ' ', text.casefold()).strip()
+    stripped_text = re.sub(r"\s+", " ", text.casefold()).strip()
     normalized_text = f" {stripped_text} "
     matches: list[tuple[int, dict]] = []
 
     for row in character_rows:
         score = 0
+        seen_candidates: set[str] = set()
         for candidate in [row.get("name"), *(row.get("aliases") or [])]:
             cleaned = " ".join(str(candidate or "").split()).strip()
             if not cleaned:
                 continue
-            if f" {cleaned.casefold()} " in normalized_text:
-                score += max(1, len(cleaned.split()))
+            folded = cleaned.casefold()
+            if folded in seen_candidates:
+                continue
+            seen_candidates.add(folded)
+            occurrences = len(
+                re.findall(
+                    f"(?<!\\w){re.escape(folded)}(?:['\\u2019]s)?(?!\\w)",
+                    normalized_text,
+                )
+            )
+            if occurrences > 0:
+                score += occurrences * max(1, len(cleaned.split()))
         if score > 0:
             matches.append((score, row))
 
@@ -941,6 +1379,42 @@ def normalize_prose_tighten_result(raw: str, original_text: str) -> dict:
         "rationale": rationale or ["Trimmed repetition and sharpened sentence flow."],
         "changed": tightened_text != original_text.strip(),
     }
+
+
+def normalize_proactive_scan_result(raw: str) -> dict:
+    fallback = {
+        "findings": [],
+        "overall_note": "Proactive continuity scan could not be parsed.",
+    }
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        fallback["overall_note"] = raw[:400] or fallback["overall_note"]
+        return fallback
+
+    findings: list[dict[str, Any]] = []
+    for item in parsed.get("findings") or []:
+        if not isinstance(item, dict):
+            continue
+        title = " ".join(str(item.get("title") or "").split()).strip()
+        description = " ".join(str(item.get("description") or "").split()).strip()
+        action_label = " ".join(str(item.get("action_label") or "").split()).strip()
+        ask_prompt = " ".join(str(item.get("ask_prompt") or "").split()).strip()
+        if not title or not description or not action_label or not ask_prompt:
+            continue
+        chapter_ref = item.get("chapter_ref")
+        findings.append({
+            "severity": str(item.get("severity") or "info"),
+            "type": str(item.get("type") or "future_direction"),
+            "title": title,
+            "description": description,
+            "chapter_ref": chapter_ref if isinstance(chapter_ref, int) and chapter_ref > 0 else None,
+            "action_label": action_label,
+            "ask_prompt": ask_prompt,
+        })
+
+    overall_note = " ".join(str(parsed.get("overall_note") or "").split()).strip() or fallback["overall_note"]
+    return {"findings": findings[:4], "overall_note": overall_note}
 
 
 def build_fallback_advisor_suggestions(

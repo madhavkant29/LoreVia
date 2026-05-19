@@ -140,7 +140,7 @@ async def test_get_current_user_rejects_inactive_refresh_sessions_without_resett
 @pytest.mark.asyncio
 async def test_get_admin_rejects_non_admin_users():
     with pytest.raises(HTTPException) as exc_info:
-        await get_admin(current_user=SimpleNamespace(tier="reader"))
+        await get_admin(current_user=SimpleNamespace(tier="free"))
 
     assert exc_info.value.status_code == 403
     assert exc_info.value.detail == "Admin only"

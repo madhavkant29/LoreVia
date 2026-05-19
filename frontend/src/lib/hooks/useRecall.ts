@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react"
+import { useEffect, useState } from "react"
+
 import { readerApi } from "@/lib/api/reader"
 
 export function useRecall(bookId: string) {
@@ -7,13 +8,18 @@ export function useRecall(bookId: string) {
   const [show, setShow] = useState(false)
 
   useEffect(() => {
+    let active = true
+
     readerApi.getRecall(bookId).then((data) => {
-      if (data.recall) {
-        setRecall(data.recall)
-        setLastChapter(data.last_chapter)
-        setShow(true)
-      }
+      if (!active || !data.recall) return
+      setRecall(data.recall)
+      setLastChapter(data.last_chapter ?? null)
+      setShow(true)
     }).catch(() => {})
+
+    return () => {
+      active = false
+    }
   }, [bookId])
 
   return { recall, lastChapter, show, dismiss: () => setShow(false) }

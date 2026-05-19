@@ -11,6 +11,7 @@ from app.api.deps.auth import get_current_user
 from app.core.database import get_db
 from app.models.intelligence import Notification
 from app.schemas.notifications import NotificationListOut, NotificationOut
+from app.utils.notification_utils import sync_revision_digest_notifications
 
 router = APIRouter()
 
@@ -21,6 +22,7 @@ async def list_notifications(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    await sync_revision_digest_notifications(db, current_user.id, limit=min(limit, 6))
     rows = (
         await db.execute(
             select(Notification)

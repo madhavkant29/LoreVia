@@ -42,12 +42,47 @@ def test_can_auto_save_character_allows_multi_mention_person():
     assert _can_auto_save_character(entity) is True
 
 
+def test_can_auto_save_character_allows_strong_single_mention_with_profile_signal():
+    entity = {
+        "name": "Gregor",
+        "entity_type": "person",
+        "confidence": 0.94,
+        "mention_count": 1,
+        "arc_summary": "Gregor wakes to a life-altering change and immediately spirals into anxious self-surveillance.",
+        "personality_tags": ["anxious"],
+        "motivations": ["protect his family"],
+        "evidence": {
+            "mention_count": 1,
+            "has_dialogue_or_action": False,
+            "has_physical_description": False,
+            "appears_multiple_times": False,
+        },
+    }
+
+    assert _can_auto_save_character(entity) is True
+
+
 def test_should_update_existing_character_allows_borderline_but_supported_updates():
     entity = {
         "name": "Houko-chan",
         "confidence": 0.60,
         "evidence": {
             "has_dialogue_or_action": True,
+            "has_physical_description": False,
+            "appears_multiple_times": False,
+        },
+    }
+
+    assert _should_update_existing_character(entity) is True
+
+
+def test_should_update_existing_character_allows_profile_only_enrichment():
+    entity = {
+        "name": "Gregor",
+        "confidence": 0.57,
+        "arc_summary": "His sense of duty keeps colliding with his new body.",
+        "evidence": {
+            "has_dialogue_or_action": False,
             "has_physical_description": False,
             "appears_multiple_times": False,
         },

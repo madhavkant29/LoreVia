@@ -27,6 +27,9 @@
   --panel-subtle-gradient: linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.6));
   --panel-shadow: 0 30px 80px -48px rgba(15, 23, 42, 0.28);
   --hairline: rgba(255, 255, 255, 0.66);
+  --font-ui: "Avenir Next";
+  --font-merriweather: Georgia;
+  --font-newsreader: "Times New Roman";
   
   --reader-font: var(--font-merriweather), Georgia, serif;
   --reader-line-height: 1.5;
@@ -371,6 +374,136 @@ body::before {
 }
 .reader-text mark { background: #fef08a; border-radius: 2px; padding: 0 1px; }
 
+.reader-display-published {
+  --book-page-bg: rgba(var(--card), 0.88);
+  --book-page-border: rgba(var(--border), 0.74);
+  --book-ink: rgb(var(--foreground));
+  --book-muted: rgb(var(--muted-foreground));
+  --book-inset-bg: rgba(var(--muted), 0.42);
+  --book-inset-border: rgba(var(--border), 0.78);
+  --book-accent: rgb(var(--accent));
+}
+
+.dark .reader-display-published {
+  --book-page-bg: rgba(8, 13, 24, 0.84);
+  --book-page-border: rgba(255, 255, 255, 0.1);
+  --book-inset-bg: rgba(255, 255, 255, 0.045);
+  --book-inset-border: rgba(255, 255, 255, 0.12);
+}
+
+.reader-display-published .book-layout {
+  background:
+    radial-gradient(circle at 50% 0%, rgba(var(--accent), 0.08), transparent 34%),
+    var(--book-page-bg);
+  border-color: var(--book-page-border);
+}
+
+.reader-display-published .book-layout__page {
+  width: 100%;
+  max-width: 720px;
+}
+
+.reader-display-published .book-layout__chapter-heading {
+  margin: clamp(3rem, 8vw, 5.5rem) auto 2.75rem;
+  max-width: 680px;
+  text-align: center;
+}
+
+.reader-display-published .book-layout__chapter-heading p {
+  color: var(--book-muted);
+  letter-spacing: 0.34em;
+}
+
+.reader-display-published .book-layout__chapter-heading h1 {
+  color: var(--book-ink);
+  font-size: clamp(2.3rem, 6vw, 4.2rem);
+  letter-spacing: -0.025em;
+}
+
+.reader-display-published .book-layout__title-rule {
+  margin-inline: auto;
+  width: 3.25rem;
+  background: var(--book-accent);
+  opacity: 0.55;
+}
+
+.reader-display-published .book-layout__body {
+  max-width: 680px;
+  margin-inline: auto;
+  color: var(--book-ink);
+  font-family: inherit;
+  line-height: 1.68;
+  text-align: justify;
+  text-wrap: pretty;
+  overflow-wrap: break-word;
+  hyphens: auto;
+}
+
+.reader-display-published .book-layout__body p,
+.reader-display-published .book-layout__body .book-block--paragraph {
+  margin: 0;
+  text-indent: 1.5em;
+}
+
+.reader-display-published .book-layout__chapter-heading + .book-layout__body > .book-block--paragraph:first-child,
+.reader-display-published .book-layout__body > .book-block--paragraph:first-child,
+.reader-display-published .book-layout__body.note-rich-content p:first-child,
+.reader-display-published .book-layout__body .scene-break + .book-block--paragraph {
+  text-indent: 0;
+}
+
+.reader-display-published .book-special-block,
+.reader-display-published .book-layout__body.note-rich-content blockquote {
+  margin: 1.45rem clamp(1rem, 5vw, 2.8rem);
+  margin-left: clamp(1rem, 5vw, 2.8rem);
+  margin-right: clamp(1rem, 5vw, 2.8rem);
+  border: 1px solid var(--book-inset-border);
+  border-left: 4px solid rgba(var(--accent), 0.55);
+  border-radius: 1rem;
+  background: var(--book-inset-bg);
+  padding: 1rem 1.25rem;
+  padding-left: 1.25rem;
+  padding-right: 1.25rem;
+  text-align: left;
+  text-indent: 0;
+  white-space: pre-line;
+}
+
+.reader-display-published .book-block--quote,
+.reader-display-published .book-block--letter,
+.reader-display-published .book-block--poem,
+.reader-display-published .book-layout__body.note-rich-content blockquote {
+  font-style: italic;
+}
+
+.reader-display-published .book-block--broadcast {
+  font-variant-numeric: tabular-nums;
+}
+
+.reader-display-published .book-block--artifact {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 0.92em;
+}
+
+.reader-display-published .book-block--poem {
+  margin-inline: clamp(1.4rem, 8vw, 4rem);
+}
+
+.reader-display-published .scene-break {
+  margin: 2.3rem auto;
+  text-align: center;
+  text-indent: 0;
+  letter-spacing: 0.38em;
+  color: var(--book-muted);
+  white-space: normal;
+}
+
+.reader-display-published .book-layout__body.note-rich-content p {
+  margin-top: 0;
+  margin-bottom: 0;
+  text-indent: 1.5em;
+}
+
 .reader-scrollbar {
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
@@ -396,6 +529,107 @@ body::before {
   :root {
     --reader-size: 19px;
     --reader-line-height: 1.95;
+  }
+
+  .reader-display-published .book-layout__page {
+    max-width: 100%;
+    padding-inline: 1.2rem;
+  }
+
+  .reader-display-published .book-layout__chapter-heading {
+    margin-top: 2.25rem;
+    margin-bottom: 2rem;
+  }
+
+  .reader-display-published .book-layout__body {
+    max-width: 100%;
+    line-height: 1.64;
+    text-align: left;
+    hyphens: manual;
+  }
+
+  .reader-display-published .book-layout__body p,
+  .reader-display-published .book-layout__body .book-block--paragraph,
+  .reader-display-published .book-layout__body.note-rich-content p {
+    text-indent: 1.1em;
+  }
+
+  .reader-display-published .book-special-block,
+  .reader-display-published .book-layout__body.note-rich-content blockquote {
+    margin-inline: 0;
+    padding: 0.95rem 1rem;
+  }
+}
+
+@media print {
+  @page {
+    margin: 0.75in 0.7in;
+  }
+
+  html,
+  body {
+    height: auto !important;
+    overflow: visible !important;
+    background: #fff !important;
+    color: #111 !important;
+  }
+
+  body::before,
+  .reader-app-chrome,
+  .reader-nonprint {
+    display: none !important;
+  }
+
+  .reader-display-shell,
+  .reader-scrollbar {
+    height: auto !important;
+    min-height: auto !important;
+    overflow: visible !important;
+    background: #fff !important;
+    color: #111 !important;
+  }
+
+  .reader-display-published {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+
+  .reader-display-published .book-layout {
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: #fff !important;
+    box-shadow: none !important;
+  }
+
+  .reader-display-published .book-layout__page {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+
+  .reader-display-published .book-layout__chapter-heading {
+    break-after: avoid;
+    page-break-after: avoid;
+    margin: 0.35in auto 0.28in;
+  }
+
+  .reader-display-published .book-layout__body {
+    max-width: none !important;
+    color: #111 !important;
+    font-size: 11.5pt !important;
+    line-height: 1.65 !important;
+    text-align: justify !important;
+  }
+
+  .reader-display-published .book-layout__body .book-block--paragraph {
+    orphans: 2;
+    widows: 2;
+  }
+
+  .reader-display-published .book-special-block,
+  .reader-display-published .book-layout__body.note-rich-content blockquote,
+  .reader-display-published .scene-break {
+    break-inside: avoid;
+    page-break-inside: avoid;
   }
 }
 
@@ -441,6 +675,99 @@ body::before {
   color: #0f766e;
   text-decoration: underline;
   text-underline-offset: 0.18em;
+}
+
+.manuscript-paged-preview-shell {
+  height: var(--manuscript-page-height);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x proximity;
+  padding: var(--manuscript-page-padding-top) 0 var(--manuscript-page-padding-bottom);
+  box-sizing: border-box;
+  background-image:
+    repeating-linear-gradient(
+      to right,
+      rgba(253, 252, 249, 0.98) 0,
+      rgba(253, 252, 249, 0.98) var(--manuscript-page-width),
+      transparent var(--manuscript-page-width),
+      transparent calc(var(--manuscript-page-width) + var(--manuscript-page-gap))
+    );
+}
+
+.dark .manuscript-paged-preview-shell {
+  background-image:
+    repeating-linear-gradient(
+      to right,
+      rgba(15, 17, 23, 0.96) 0,
+      rgba(15, 17, 23, 0.96) var(--manuscript-page-width),
+      transparent var(--manuscript-page-width),
+      transparent calc(var(--manuscript-page-width) + var(--manuscript-page-gap))
+    );
+}
+
+.manuscript-paged-preview {
+  height: 100%;
+  min-width: calc(var(--manuscript-page-content-width) + var(--manuscript-page-padding-left) + var(--manuscript-page-padding-right));
+  padding-left: var(--manuscript-page-padding-left);
+  padding-right: var(--manuscript-page-padding-right);
+  column-width: var(--manuscript-page-content-width);
+  column-gap: calc(var(--manuscript-page-gap) + var(--manuscript-page-padding-left) + var(--manuscript-page-padding-right));
+  column-fill: auto;
+  overflow: visible;
+}
+
+.manuscript-paged-preview__section {
+  break-inside: avoid;
+}
+
+.manuscript-paged-preview__section--chapter-break {
+  break-before: column;
+}
+
+.manuscript-paged-preview__eyebrow {
+  margin: 0;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: rgba(100, 116, 139, 0.9);
+}
+
+.manuscript-paged-preview__title {
+  margin: 0.9rem 0 0;
+  font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, serif;
+  font-size: 1.8rem;
+  line-height: 1.15;
+  color: rgb(28, 25, 23);
+}
+
+.dark .manuscript-paged-preview__title {
+  color: rgb(241, 245, 249);
+}
+
+.manuscript-paged-preview__body {
+  margin-top: 1.2rem;
+  color: rgb(41, 37, 36);
+}
+
+.dark .manuscript-paged-preview__body {
+  color: rgb(226, 232, 240);
+}
+
+.manuscript-paged-preview__body p {
+  margin: 0;
+}
+
+.manuscript-paged-preview__body p + p {
+  margin-top: 1em;
+}
+
+.manuscript-paged-preview[data-first-line-indent="true"] .manuscript-paged-preview__body p + p {
+  text-indent: 1.5em;
+}
+
+.manuscript-paged-preview__body img {
+  break-inside: avoid;
 }
 
 .dark .manuscript-editor a,

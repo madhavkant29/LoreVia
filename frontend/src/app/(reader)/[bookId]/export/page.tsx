@@ -1,12 +1,15 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import axios from "axios"
+import { useMemo, useRef, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
 import Link from "next/link"
 import { useParams } from "next/navigation"
 
 import { AuthorToolsNav } from "@/components/layout/AuthorToolsNav"
 import { ObsidianVaultPreview } from "@/components/reader/ObsidianVaultPreview"
 import { booksApi } from "@/lib/api/books"
+import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
 import { worldBuildingApi } from "@/lib/api/worldBuilding"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import type { Book, ObsidianPreview, ObsidianVaultNote } from "@/types/book"
@@ -29,12 +32,20 @@ function safeFileBase(value: string | undefined, fallback: string) {
   return (value || fallback).replace(/[^\w\s-]/g, "").trim().replace(/\s+/g, "-") || fallback
 }
 
+function getApiErrorDetail(error: unknown) {
+  if (!axios.isAxiosError(error)) return null
+  const detail = error.response?.data?.detail
+  return typeof detail === "string" ? detail : null
+}
+
 export default function ExportStudioPage() {
   const { bookId } = useParams<{ bookId: string }>()
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
-  const [book, setBook] = useState<Book | null>(null)
-  const [loading, setLoading] = useState(true)
+  const { data: book = null, isLoading: loading } = useQuery<Book | null>({
+    queryKey: asQueryKey(bookCacheKey(bookId, "detail")),
+    queryFn: () => booksApi.get(bookId),
+  })
   const [status, setStatus] = useState<string | null>(null)
   const [bibleFormat, setBibleFormat] = useState<ExportFormat>("obsidian_folder")
   const [manuscriptFormat, setManuscriptFormat] = useState<ManuscriptExportFormat>("docx")
@@ -50,22 +61,6 @@ export default function ExportStudioPage() {
   const manuscriptInputRef = useRef<HTMLInputElement | null>(null)
   const notesInputRef = useRef<HTMLInputElement | null>(null)
   const worldInputRef = useRef<HTMLInputElement | null>(null)
-
-  useEffect(() => {
-    let active = true
-    setLoading(true)
-    booksApi.get(bookId)
-      .then((value) => {
-        if (!active) return
-        setBook(value)
-      })
-      .finally(() => {
-        if (active) setLoading(false)
-      })
-    return () => {
-      active = false
-    }
-  }, [bookId])
 
   const formatCards = useMemo(
     () => [
@@ -185,8 +180,8 @@ export default function ExportStudioPage() {
       await worldBuildingApi.uploadDocuments(bookId, { files: worldFiles })
       setStatus(`Imported ${worldFiles.length} worldbuilding file${worldFiles.length === 1 ? "" : "s"}.`)
       setWorldFiles([])
-    } catch {
-      setStatus("Could not import the worldbuilding files.")
+    } catch (error) {
+      setStatus(getApiErrorDetail(error) ?? "Could not import the worldbuilding files.")
     } finally {
       setImporting(null)
     }

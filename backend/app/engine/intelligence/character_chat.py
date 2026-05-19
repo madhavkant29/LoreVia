@@ -1,6 +1,7 @@
 """
 Character chat: in-character responses grounded in story context.
 """
+import uuid
 from typing import Any, cast
 
 from app.core.config import settings
@@ -83,6 +84,8 @@ async def chat_as_character(
     context_summary: str,
     search_context: str,
     messages: list[dict],
+    *,
+    user_id: uuid.UUID | None = None,
 ) -> str:
     from app.engine.character.profile_builder import build_description
 
@@ -115,6 +118,10 @@ async def chat_as_character(
         gemini_model=None,
         temperature=0.7,
         max_tokens=220,
+        usage_feature="character_chat",
+        usage_user_id=user_id,
+        usage_book_id=character.book_id,
+        usage_metadata={"character_id": str(character.id), "current_chapter": current_chapter},
     )
     cleaned_reply = cast(str, reply).strip()
     if cleaned_reply:

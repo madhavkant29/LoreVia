@@ -1,7 +1,7 @@
 #!/bin/bash
-# Cloudflared tunnel startup is intentionally disabled for Render deployments.
-# Keep the block below commented for reference in case a non-Render deployment
-# needs to restore tunnel-based ingress later.
+# Cloudflared tunnel startup is intentionally disabled for the Hetzner/VPS
+# deployment. Keep the block below commented for reference in case a future
+# tunnel-based ingress setup needs to be restored later.
 
 set -e
 
@@ -17,10 +17,19 @@ if [ "${NORMALIZE_LOCAL_STORAGE_PERMISSIONS:-}" = "1" ] && [ "$(id -u)" = "0" ];
 fi
 
 WEB_CONCURRENCY="${WEB_CONCURRENCY:-1}"
+GUNICORN_TIMEOUT="${GUNICORN_TIMEOUT:-120}"
+GUNICORN_KEEPALIVE="${GUNICORN_KEEPALIVE:-5}"
 
 if [ "${RUN_MIGRATIONS:-}" = "1" ]; then
   echo "RUN_MIGRATIONS is no longer handled by the web startup path."
-  echo "Run Alembic from the deploy job or a dedicated migration step before starting uvicorn."
+  echo "Run Alembic from the deploy job or a dedicated migration step before starting gunicorn."
 fi
 
-exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers "$WEB_CONCURRENCY"
+exec gunicorn app.main:app \
+  --worker-class uvicorn.workers.UvicornWorker \
+  --workers "$WEB_CONCURRENCY" \
+  --bind 0.0.0.0:8000 \
+  --timeout "$GUNICORN_TIMEOUT" \
+  --keep-alive "$GUNICORN_KEEPALIVE" \
+  --access-logfile - \
+  --error-logfile -

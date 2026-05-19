@@ -63,6 +63,9 @@ logs/
 # Docker
 docker-compose.override.yml
 .envrc
+ops/env/backend.env
+ops/nginx/certs/*.pem
+ops/nginx/certs/*.key
 
 # Python packaging
 pip-wheel-metadata/
@@ -100,3 +103,10 @@ local_settings.py
 
 # Exclude generated files
 *.pb.go
+
+*.pem
+*.key
+
+.docker-config/
+.docker-config
+frontend\test-results

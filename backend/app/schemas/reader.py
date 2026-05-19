@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class SaveQuoteBody(BaseModel):
@@ -16,13 +16,21 @@ class PlotThreadOut(BaseModel):
     description: str | None = None
     introduced_at: int | None = None
     resolved_at: int | None = None
+    first_mentioned: int | None = None
+    last_mentioned: int | None = None
+    mention_count: int = 0
     importance: int
     note: str | None = None
     character_ids: list[str] = []
+    related_characters: list[str] = []
+    risk: str | None = None
+    suggested_action: str | None = None
+    tags: list[str] = Field(default_factory=list)
 
 
 class UpdatePlotThreadBody(BaseModel):
     note: str | None = None
+    status: str | None = None
 
 
 class TimelineEventOut(BaseModel):

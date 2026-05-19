@@ -47,12 +47,20 @@ async def semantic_search(
     query: str,
     max_chapter: int,
     limit: int = settings.SEARCH_MAX_CONTEXT_CHUNKS,
+    *,
+    usage_user_id: uuid.UUID | None = None,
+    usage_feature: str = "semantic_search_query",
 ) -> list[dict]:
     """
     Embed query → cosine similarity search over book_chunks.
     Returns ranked results with chapter reference, spoiler-gated.
     """
-    query_embedding = await embed_text(query)
+    query_embedding = await embed_text(
+        query,
+        user_id=usage_user_id,
+        book_id=book_id,
+        feature=usage_feature,
+    )
 
     rows = await db.execute(
         text("""

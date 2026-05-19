@@ -8,7 +8,7 @@ const SECURITY_HEADERS = {
   "Strict-Transport-Security": "max-age=31536000; includeSubDomains; preload",
   "Referrer-Policy": "strict-origin-when-cross-origin",
   "Permissions-Policy":
-    "accelerometer=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()",
+    "accelerometer=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=*, usb=()",
 }
 
 function getOrigin(value: string | undefined) {
@@ -54,6 +54,7 @@ export function buildContentSecurityPolicy(nonce: string) {
   const scriptSources = new Set([
     "'self'",
     `'nonce-${nonce}'`,
+    "https://cdn.paddle.com",
     "https://pagead2.googlesyndication.com",
     "https://securepubads.g.doubleclick.net",
     "https://eu.posthog.com",
@@ -74,6 +75,7 @@ export function buildContentSecurityPolicy(nonce: string) {
     "'self'",
     "https://getlorevia.com",
     "https://api.getlorevia.com",
+    "https://*.paddle.com",
     "https://googleads.g.doubleclick.net",
     "https://pagead2.googlesyndication.com",
     "https://securepubads.g.doubleclick.net",
@@ -102,10 +104,10 @@ export function buildContentSecurityPolicy(nonce: string) {
     `img-src ${Array.from(imageSources).join(" ")}`,
     "font-src 'self' data:",
     `connect-src ${Array.from(connectSources).join(" ")}`,
-    "frame-src 'self' https://googleads.g.doubleclick.net https://pagead2.googlesyndication.com https://securepubads.g.doubleclick.net https://tpc.googlesyndication.com",
+    "frame-src 'self' https://*.paddle.com https://googleads.g.doubleclick.net https://pagead2.googlesyndication.com https://securepubads.g.doubleclick.net https://tpc.googlesyndication.com",
     "frame-ancestors 'none'",
     "base-uri 'self'",
-    "form-action 'self'",
+    "form-action 'self' https://*.paddle.com",
     "object-src 'none'",
   ].join("; ")
 }

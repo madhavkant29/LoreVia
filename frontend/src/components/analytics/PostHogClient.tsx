@@ -1,7 +1,5 @@
 "use client"
 
-import posthog from "posthog-js"
-import { PostHogProvider } from "posthog-js/react"
 import { usePathname } from "next/navigation"
 import React from "react"
 import CookieConsent, { getCookieConsentValue } from "react-cookie-consent"
@@ -15,20 +13,26 @@ function isBrowserAnalyticsEnabled() {
   return typeof window !== "undefined" && Boolean(process.env.NEXT_PUBLIC_POSTHOG_KEY)
 }
 
-function initPostHog() {
+let posthogInitPromise: Promise<void> | null = null
+
+async function initPostHog() {
   if (!isBrowserAnalyticsEnabled()) return
-  posthog.init(process.env.NEXT_PUBLIC_POSTHOG_KEY as string, {
-    api_host: process.env.NEXT_PUBLIC_POSTHOG_HOST || "https://eu.posthog.com",
-    ip: false,
-    capture_pageview: true,
-    capture_pageleave: true,
-    persistence: "localStorage",
-    disable_session_recording: true,
-  })
+  if (!posthogInitPromise) {
+    posthogInitPromise = import("posthog-js").then(({ default: posthog }) => {
+      posthog.init(process.env.NEXT_PUBLIC_POSTHOG_KEY as string, {
+        api_host: process.env.NEXT_PUBLIC_POSTHOG_HOST || "https://eu.posthog.com",
+        ip: false,
+        capture_pageview: true,
+        capture_pageleave: true,
+        persistence: "localStorage",
+        disable_session_recording: true,
+      })
+    })
+  }
+  await posthogInitPromise
 }
 
 export function PostHogClientProvider({ children }: { children: React.ReactNode }) {
-  const [ready, setReady] = React.useState(false)
   const [hydrated, setHydrated] = React.useState(false)
   const [consentValue, setConsentValue] = React.useState<string | undefined>(undefined)
   const pathname = usePathname()
@@ -45,14 +49,12 @@ export function PostHogClientProvider({ children }: { children: React.ReactNode 
     setHydrated(true)
 
     if (hasAnalyticsConsent(consent)) {
-      initPostHog()
-      setReady(true)
+      void initPostHog()
     }
   }, [analyticsKey])
 
   const enable = () => {
-    initPostHog()
-    setReady(true)
+    void initPostHog()
     setConsentValue("true")
   }
 
@@ -69,7 +71,7 @@ export function PostHogClientProvider({ children }: { children: React.ReactNode 
 
   return (
     <>
-      {ready ? <PostHogProvider client={posthog}>{children}</PostHogProvider> : <>{children}</>}
+      {children}
       {showBanner ? (
         <CookieConsent
           visible={showBanner ? "show" : "hidden"}

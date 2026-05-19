@@ -8,6 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps.auth import get_current_user
 from app.api.deps.rate_limit import rate_limit_world_building_ai, rate_limit_world_building_upload
+from app.api.deps.subscription import check_upload_limit
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.storage import download_book
 from app.models.book import Book, Series
@@ -50,28 +52,14 @@ from app.utils.world_building_utils import (
     save_world_note,
     update_world_building_document,
 )
+from app.utils.tag_utils import ENTITY_TYPE_WORLD_NOTE, get_custom_tags_for_entity, list_custom_tags_for_entity_ids
+from app.utils.upload_security_utils import read_upload_bounded
+from app.utils.billing_utils import worldbuilding_upload_cost_for_book
 
 router = APIRouter()
 
-MAX_WORLD_UPLOAD_BYTES = 20 * 1024 * 1024
 
-
-async def _read_upload_bounded(upload: UploadFile, max_bytes: int, label: str) -> bytes:
-    parts: list[bytes] = []
-    total = 0
-    while True:
-        chunk = await upload.read(1024 * 1024)
-        if not chunk:
-            break
-        total += len(chunk)
-        if total > max_bytes:
-            raise HTTPException(413, f"{label} exceeds the maximum allowed size ({max_bytes // 1024 // 1024} MB).")
-        parts.append(chunk)
-    await upload.seek(0)
-    return b"".join(parts)
-
-
-def _serialize_note(note: WorldNote) -> WorldNoteOut:
+def _serialize_note(note: WorldNote, *, tags: list[str] | None = None) -> WorldNoteOut:
     return WorldNoteOut(
         id=str(note.id),
         book_id=str(note.book_id),
@@ -87,6 +75,7 @@ def _serialize_note(note: WorldNote) -> WorldNoteOut:
         linked_integration_id=note.linked_integration_id,
         context_label=note.context_label,
         suggested_fix=note.suggested_fix,
+        tags=tags or [],
         created_at=note.created_at,
         updated_at=note.updated_at,
         addressed_at=note.addressed_at,
@@ -166,10 +155,24 @@ async def upload_world_documents(
     for upload in files or []:
         if not upload.filename:
             continue
-        raw = await _read_upload_bounded(upload, MAX_WORLD_UPLOAD_BYTES, "World-building file")
+        raw = await read_upload_bounded(upload, settings.WORLD_BUILDING_UPLOAD_MAX_BYTES, "World-building file")
         if raw:
             raw_files.append((upload.filename, raw))
     prepared = await prepare_world_building_uploads(files=raw_files, text=text, html=html, title=title)
+    worldbuilding_upload_cost = await worldbuilding_upload_cost_for_book(db, book)
+    current_documents = await list_world_building_documents(db, book)
+    released_uploads = len(current_documents) * worldbuilding_upload_cost if (replace_existing or "").strip().lower() in {"1", "true", "yes", "on"} else 0
+    requested_uploads = len(prepared) * worldbuilding_upload_cost
+    await check_upload_limit(
+        db,
+        current_user,
+        requested_uploads=requested_uploads,
+        released_uploads=released_uploads,
+        context=(
+            f"This worldbuilding upload counts as {requested_uploads} upload"
+            f"{'' if requested_uploads == 1 else 's'} for this book."
+        ),
+    )
     documents = await create_world_building_documents(
         db,
         book=book,
@@ -493,7 +496,13 @@ async def list_world_notes(
             .order_by(WorldNote.created_at.desc())
         )
     ).scalars().all()
-    return [_serialize_note(note) for note in notes]
+    tags_by_note = await list_custom_tags_for_entity_ids(
+        db,
+        entity_type=ENTITY_TYPE_WORLD_NOTE,
+        entity_ids=[note.id for note in notes],
+        book_id=book.id,
+    )
+    return [_serialize_note(note, tags=tags_by_note.get(note.id, [])) for note in notes]
 
 
 @router.post("/{book_id}/world-building/notes", response_model=WorldNoteOut)
@@ -527,7 +536,15 @@ async def create_world_note(
     )
     await db.commit()
     await db.refresh(note)
-    return _serialize_note(note)
+    return _serialize_note(
+        note,
+        tags=await get_custom_tags_for_entity(
+            db,
+            entity_type=ENTITY_TYPE_WORLD_NOTE,
+            entity_id=note.id,
+            book_id=book.id,
+        ),
+    )
 
 
 @router.delete("/{book_id}/world-building/notes/{note_id}")
@@ -562,7 +579,15 @@ async def update_world_note_status(
     note.addressed_at = datetime.now(UTC) if body.status == "addressed" else None
     await db.commit()
     await db.refresh(note)
-    return _serialize_note(note)
+    return _serialize_note(
+        note,
+        tags=await get_custom_tags_for_entity(
+            db,
+            entity_type=ENTITY_TYPE_WORLD_NOTE,
+            entity_id=note.id,
+            book_id=book.id,
+        ),
+    )
 
 
 @router.get("/{book_id}/world-building/notes/by-chapter/{chapter_number}", response_model=list[WorldNoteOut])
@@ -584,4 +609,10 @@ async def get_world_notes_by_chapter(
             .order_by(WorldNote.created_at.desc())
         )
     ).scalars().all()
-    return [_serialize_note(note) for note in notes]
+    tags_by_note = await list_custom_tags_for_entity_ids(
+        db,
+        entity_type=ENTITY_TYPE_WORLD_NOTE,
+        entity_ids=[note.id for note in notes],
+        book_id=book.id,
+    )
+    return [_serialize_note(note, tags=tags_by_note.get(note.id, [])) for note in notes]

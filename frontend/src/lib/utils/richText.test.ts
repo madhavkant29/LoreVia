@@ -45,4 +45,24 @@ describe("richText utilities", () => {
 
     expect(plainText).toBe("Title\n\nLead\n\nPoint A\n\nPoint B")
   })
+
+  it("preserves scene breaks, page breaks, and inline styling metadata", () => {
+    const html = [
+      '<p style="color: rgb(29, 78, 216); font-size: 16px; font-family: Georgia;">Styled line</p>',
+      '<div data-scene-break="true">ignore me</div>',
+      '<div data-page-break="true">ignore me too</div>',
+      '<mark style="background-color: rgb(254, 240, 138);">Highlight</mark>',
+    ].join("")
+
+    const sanitized = sanitizeRichTextHtml(html)
+
+    expect(sanitized).toContain('data-scene-break="true"')
+    expect(sanitized).toContain('class="scene-break-node"')
+    expect(sanitized).toContain("***")
+    expect(sanitized).toContain('data-page-break="true"')
+    expect(sanitized).toContain("Page break")
+    expect(sanitized).toContain("font-size: 16px;")
+    expect(sanitized).toContain("font-family: Georgia;")
+    expect(sanitized).toContain("background-color: rgb(254, 240, 138);")
+  })
 })

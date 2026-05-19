@@ -1,12 +1,12 @@
 import type { Metadata } from "next"
 
 import { LegalPageShell, LegalRightRail } from "@/components/legal/LegalPageShell"
-import { SUPPORT_EMAIL } from "@/lib/constants/contact"
+import { COPYRIGHT_EMAIL, SUPPORT_EMAIL } from "@/lib/constants/contact"
 import { TRUST_EFFECTIVE_DATE } from "@/lib/constants/trust"
 
 export const metadata: Metadata = {
   title: "Privacy Policy",
-  description: "Learn how LoreVia handles account data, manuscript uploads, analytics preferences, and third-party processing.",
+  description: "Learn how LoreVia for authors handles account data, manuscript uploads, analytics preferences, and third-party processing.",
   alternates: {
     canonical: "/privacy",
   },
@@ -48,13 +48,26 @@ const sections = [
   {
     title: "Manuscript processing and AI features",
     paragraphs: [
-      "LoreVia processes your manuscripts using our systems and trusted AI models to provide features like analysis, tools, and content generation.",
+      "LoreVia processes manuscripts, notes, and related workspace content using our systems and trusted AI models to provide analysis, organization, and drafting features.",
     ],
     bullets: [
       "Manuscripts are processed only to deliver the functionality you request",
       "We do not use your manuscripts to train public AI models",
-      "Outputs are returned to you and are not used for other customers",
-      "You can delete manuscripts and outputs at any time",
+      "Outputs and derived metadata such as embeddings may be stored to support requested product features",
+      "Private manuscripts are not public books unless you explicitly publish them",
+      "You can request deletion of manuscripts and related outputs",
+    ],
+  },
+  {
+    title: "Public books versus private workspaces",
+    paragraphs: [
+      "LoreVia separates private author workspaces from public books. Uploading a manuscript does not by itself make it public.",
+      "If you choose to publish a public book, that book may be displayed to other users, indexed, and linked from public LoreVia pages while it remains published and in good standing.",
+    ],
+    bullets: [
+      "Private manuscripts remain accessible only through authenticated product workflows and authorized sharing features",
+      "Public-domain demo books may be surfaced by LoreVia for onboarding, search, and showcase purposes",
+      "Public books may be hidden, removed, or restricted if they are reported or violate policy",
     ],
   },
   {
@@ -87,8 +100,9 @@ const sections = [
     ],
     bullets: [
       "Account data is retained while your account is active",
-      "Manuscripts and outputs are retained until you delete them",
-      "You can export or delete data at any time from your account settings",
+      "Manuscripts, notes, and outputs are retained until you delete them or request deletion",
+      "Public books may remain visible until unpublished, removed, or deleted",
+      "You can contact LoreVia to request deletion of account data or public content",
       "After deletion, data is removed from active systems within 30 days and backups within 90 days",
     ],
   },
@@ -111,6 +125,7 @@ const sections = [
     ],
     bullets: [
       "Contact us for access, correction, or deletion requests",
+      `Use ${COPYRIGHT_EMAIL} for copyright or public-content complaints`,
       "We may update this policy from time to time",
       "Material changes will be communicated via email or in-product notice",
     ],

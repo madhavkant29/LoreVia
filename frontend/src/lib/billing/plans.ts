@@ -1,8 +1,6 @@
 import type { UserTier } from "@/types/user"
 
 export type PaidPlanCode =
-  | "reader_monthly"
-  | "reader_annual"
   | "author_monthly"
   | "author_annual"
   | "architect_monthly"
@@ -13,17 +11,18 @@ export function canUseAuthorFeatures(tier?: UserTier | null) {
 }
 
 export function isPaidTier(tier?: UserTier | null) {
-  return tier === "reader" || canUseAuthorFeatures(tier)
+  return canUseAuthorFeatures(tier)
 }
 
 export function tierLabel(tier?: UserTier | null) {
   switch (tier) {
+    case "collaborator":
     case "reader":
-      return "Reader"
+      return "Invited beta reader"
     case "author":
       return "Author"
     case "architect":
-      return "Lore Architect"
+      return "Architect"
     case "admin":
       return "Admin"
     case "free":

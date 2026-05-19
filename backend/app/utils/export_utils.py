@@ -34,6 +34,33 @@ def _safe_name(value: object | None) -> str:
     return "".join(ch for ch in cleaned if ch.isalnum() or ch in {" ", "-", "_", "(", ")"}).strip().replace(" ", "-")
 
 
+def export_filename_base(value: object | None, fallback: str = "lorevia") -> str:
+    return _safe_name(value) or _safe_name(fallback) or "lorevia"
+
+
+def _set_docx_core_properties(doc: Any, *, title: str, author: str = "LoreVia", subject: str | None = None) -> None:
+    core = doc.core_properties
+    core.title = _clean_line(title) or "LoreVia Export"
+    core.author = _clean_line(author) or "LoreVia"
+    if subject is not None:
+        core.subject = _clean_line(subject)
+    core.comments = EXPORT_ATTRIBUTION
+
+
+def _apply_pdf_metadata(canvas: Any, *, title: str, author: str = "LoreVia", subject: str | None = None) -> None:
+    safe_title = _clean_line(title) or "LoreVia Export"
+    safe_author = _clean_line(author) or "LoreVia"
+    safe_subject = _clean_line(subject)
+    if hasattr(canvas, "setTitle"):
+        canvas.setTitle(safe_title)
+    if hasattr(canvas, "setAuthor"):
+        canvas.setAuthor(safe_author)
+    if safe_subject and hasattr(canvas, "setSubject"):
+        canvas.setSubject(safe_subject)
+    if hasattr(canvas, "setCreator"):
+        canvas.setCreator("LoreVia")
+
+
 def _obsidian_note_title(value: object | None) -> str:
     cleaned = _clean_line(value)
     return cleaned or "Untitled"
@@ -126,6 +153,23 @@ def _major_event_path(root_folder: str, title: str) -> str:
 
 def _plot_thread_path(root_folder: str, title: str) -> str:
     return f"{root_folder}/Plot Threads/{_obsidian_safe_name(title)}.md"
+
+
+def _dedupe_obsidian_path(path: str, used_paths: set[str]) -> str:
+    if path not in used_paths:
+        used_paths.add(path)
+        return path
+
+    stem, dot, extension = path.rpartition(".")
+    base = stem if dot else path
+    suffix = f".{extension}" if dot else ""
+    counter = 2
+    candidate = f"{base} ({counter}){suffix}"
+    while candidate in used_paths:
+        counter += 1
+        candidate = f"{base} ({counter}){suffix}"
+    used_paths.add(candidate)
+    return candidate
 
 
 def _linkify_text(value: str | None, targets: dict[str, str], *, skip: str | None = None) -> str:
@@ -299,9 +343,10 @@ def _build_obsidian_manifest(
         return _linkify_text(text, link_targets, skip=skip)
 
     def add_file(path: str, content: str) -> None:
-        files.append({"path": path, "content": _append_export_attribution(content)})
+        files.append({"path": _dedupe_obsidian_path(path, used_paths), "content": _append_export_attribution(content)})
 
     files: list[dict[str, str]] = []
+    used_paths: set[str] = set()
     character_keys = {str(char.id): _character_reference_keys(char) for char in characters}
     character_note_paths = {char.name: f"{root_folder}/Characters/{_obsidian_safe_name(char.name)}.md" for char in characters if char.name}
     chapter_lookup = {int(row["number"]): row for row in chapter_rows if row.get("number") is not None}
@@ -751,10 +796,18 @@ def character_card_markdown(payload: dict) -> tuple[bytes, str]:
     ]
     if payload["personality_tags"]:
         lines.extend(["## Personality", "", *bullets(payload["personality_tags"]), ""])
+    if payload.get("goal"):
+        lines.extend(["## Goal", "", payload["goal"], ""])
     if payload["motivations"]:
         lines.extend(["## Motivations", "", *bullets(payload["motivations"]), ""])
     if payload["fears"]:
         lines.extend(["## Fears", "", *bullets(payload["fears"]), ""])
+    if payload.get("lie_they_believe"):
+        lines.extend(["## Lie They Believe", "", payload["lie_they_believe"], ""])
+    if payload.get("backstory_wound"):
+        lines.extend(["## Wound / Backstory", "", payload["backstory_wound"], ""])
+    if payload.get("arc_type"):
+        lines.extend(["## Arc Type", "", payload["arc_type"], ""])
     if payload["arc_summary"]:
         lines.extend(["## Arc Summary", "", payload["arc_summary"], ""])
     if payload["growth_events"]:
@@ -802,6 +855,11 @@ def character_card_pdf(payload: dict) -> bytes:
                             leftMargin=0.75 * inch, rightMargin=0.75 * inch,
                             topMargin=0.7 * inch, bottomMargin=0.7 * inch)
     styles = getSampleStyleSheet()
+    export_title = (
+        f"{payload['book_title']} - {payload['name']} Character Card"
+        if _clean_line(payload.get("book_title"))
+        else f"{payload['name']} - Character Card"
+    )
     story = [Paragraph(f"{payload['name']} - Character Card", styles["Heading1"]), Spacer(1, 0.14 * inch)]
 
     metadata = [
@@ -887,7 +945,10 @@ def character_card_pdf(payload: dict) -> bytes:
     else:
         story.append(Paragraph("No tracked relationships yet.", styles["BodyText"]))
 
-    doc.build(story)
+    def _decorate_pdf(canvas, _doc_obj) -> None:
+        _apply_pdf_metadata(canvas, title=export_title, subject="Character Card")
+
+    doc.build(story, onFirstPage=_decorate_pdf, onLaterPages=_decorate_pdf)
     return buffer.getvalue()
 
 
@@ -897,6 +958,12 @@ def character_card_docx(payload: dict) -> bytes:
     from docx import Document
 
     doc = Document()
+    export_title = (
+        f"{payload['book_title']} - {payload['name']} Character Card"
+        if _clean_line(payload.get("book_title"))
+        else f"{payload['name']} - Character Card"
+    )
+    _set_docx_core_properties(doc, title=export_title, subject="Character Card")
     doc.add_heading(f"{payload['name']} - Character Card", level=1)
     table = doc.add_table(rows=0, cols=2)
     table.style = "Table Grid"
@@ -924,6 +991,16 @@ def character_card_docx(payload: dict) -> bytes:
         doc.add_heading(heading, level=2)
         for item in items:
             doc.add_paragraph(item, style="List Bullet")
+    for heading, value in [
+        ("Goal", payload.get("goal")),
+        ("Lie They Believe", payload.get("lie_they_believe")),
+        ("Wound / Backstory", payload.get("backstory_wound")),
+        ("Arc Type", payload.get("arc_type")),
+    ]:
+        if not value:
+            continue
+        doc.add_heading(heading, level=2)
+        doc.add_paragraph(str(value))
     if payload["arc_summary"]:
         doc.add_heading("Arc Summary", level=2)
         doc.add_paragraph(payload["arc_summary"])
@@ -1023,6 +1100,10 @@ def character_bible_markdown(
             body.append("Personality")
             body.append(_bullets(tags[:10]))
             body.append("")
+        if _clean_line(getattr(char, "goal", None)):
+            body.append("Goal")
+            body.append(_bullets([_clean_line(getattr(char, "goal", None))]))
+            body.append("")
         if motivations:
             body.append("Motivations")
             body.append(_bullets(motivations[:8]))
@@ -1030,6 +1111,18 @@ def character_bible_markdown(
         if fears:
             body.append("Fears")
             body.append(_bullets(fears[:8]))
+            body.append("")
+        if _clean_line(getattr(char, "lie_they_believe", None)):
+            body.append("Lie they believe")
+            body.append(_bullets([_clean_line(getattr(char, "lie_they_believe", None))]))
+            body.append("")
+        if _clean_line(getattr(char, "backstory_wound", None)):
+            body.append("Wound / backstory")
+            body.append(_bullets([_clean_line(getattr(char, "backstory_wound", None))]))
+            body.append("")
+        if _clean_line(getattr(char, "arc_type", None)):
+            body.append("Arc type")
+            body.append(_bullets([_clean_line(getattr(char, "arc_type", None))]))
             body.append("")
         if _clean_line(char.arc_summary):
             body.append("Arc summary")
@@ -1056,8 +1149,7 @@ def character_bible_markdown(
         body.append("")
 
     markdown = _append_export_attribution("\n".join(header + body)).encode("utf-8")
-    safe_name = "".join(ch for ch in (book.title or "lorevia") if ch.isalnum() or ch in {" ", "-", "_"}).strip().replace(" ", "-")
-    return markdown, safe_name or "lorevia"
+    return markdown, export_filename_base(book.title)
 
 
 def character_bible_pdf(*, markdown: bytes, title: str) -> bytes:
@@ -1084,6 +1176,7 @@ def character_bible_pdf(*, markdown: bytes, title: str) -> bytes:
 
     def _draw_footer(canvas, doc_obj) -> None:
         canvas.saveState()
+        _apply_pdf_metadata(canvas, title=title, subject="Character Bible")
         canvas.setFont("Helvetica", 8)
         canvas.drawCentredString(doc_obj.pagesize[0] / 2, 0.45 * inch, EXPORT_ATTRIBUTION)
         canvas.restoreState()
@@ -1122,6 +1215,7 @@ def character_bible_docx(*, markdown: bytes, title: str) -> bytes:
     from docx import Document
 
     doc = Document()
+    _set_docx_core_properties(doc, title=title, subject="Character Bible")
     doc.add_heading(title, level=1)
     doc.add_paragraph("")
 
@@ -1329,19 +1423,33 @@ def _approx_word_count_label(count: int) -> str:
     return f"Approx. {max(100, int(round(count / 100.0) * 100)):,} words"
 
 
+SCENE_BREAK_PATTERN = re.compile(r"^(?:(?:\*\s*){3,}|#{1,3}|(?:-|\u2013|\u2014){3,}|[~]{3,})$")
+
+
+def _normalize_manuscript_block(block: str) -> str:
+    return "\n".join(line.rstrip() for line in block.replace("\r\n", "\n").replace("\r", "\n").split("\n")).strip()
+
+
+def _is_scene_break_block(block: str) -> bool:
+    normalized = _normalize_manuscript_block(block)
+    if not normalized:
+        return False
+    return bool(SCENE_BREAK_PATTERN.fullmatch(normalized.replace("\n", " ").replace("\t", " ").strip()))
+
+
 def _chapter_body_blocks(text: str) -> list[tuple[str, str]]:
     normalized = (text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
     if not normalized:
         return []
     blocks: list[tuple[str, str]] = []
-    for raw_block in normalized.split("\n\n"):
-        block = raw_block.strip()
+    for raw_block in re.split(r"\n{2,}", normalized):
+        block = _normalize_manuscript_block(raw_block)
         if not block:
             continue
-        if re.fullmatch(r"(?:#(?:\s*#)*|\*\s*\*\s*\*)", block):
+        if _is_scene_break_block(block):
             blocks.append(("scene_break", "***"))
         else:
-            blocks.append(("paragraph", " ".join(line.strip() for line in block.splitlines() if line.strip())))
+            blocks.append(("paragraph", block))
     return blocks
 
 
@@ -1391,6 +1499,12 @@ def manuscript_docx(
     export_preset = _manuscript_export_preset(preset)
     front = _manuscript_front_matter(title, chapters, front_matter)
     doc = Document()
+    _set_docx_core_properties(
+        doc,
+        title=front["title"],
+        author=front["display_author"] or "LoreVia",
+        subject="Manuscript",
+    )
     section = doc.sections[0]
     section.top_margin = Inches(1)
     section.bottom_margin = Inches(1)
@@ -1470,10 +1584,15 @@ def manuscript_docx(
                 paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 paragraph.paragraph_format.first_line_indent = Pt(0)
                 paragraph.add_run("***")
+                first_paragraph = True
                 continue
             paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
             paragraph.paragraph_format.first_line_indent = Inches(0) if first_paragraph else Inches(0.5)
-            paragraph.add_run(block)
+            lines = block.split("\n")
+            paragraph.add_run(lines[0] if lines else "")
+            for line in lines[1:]:
+                paragraph.add_run("\n")
+                paragraph.add_run(line)
             first_paragraph = False
 
     for chapter in chapters:
@@ -1589,6 +1708,7 @@ def manuscript_pdf(*, title: str, chapters: list[dict], preset: str = "standard_
 
     def _draw_footer(canvas, doc_obj) -> None:
         canvas.saveState()
+        _apply_pdf_metadata(canvas, title=title or "LoreVia Manuscript Export", subject="Manuscript")
         canvas.setFont("Helvetica", 8)
         canvas.drawCentredString(doc_obj.pagesize[0] / 2, 0.45 * inch, EXPORT_ATTRIBUTION)
         canvas.restoreState()
@@ -1725,12 +1845,11 @@ def manuscript_pdf_compiled(
         for kind, block in _chapter_body_blocks(body_text):
             story.append(
                 Paragraph(
-                    "***" if kind == "scene_break" else escaped(block),
+                    "***" if kind == "scene_break" else escaped(block).replace("\n", "<br/>"),
                     centered if kind == "scene_break" else (body_first if first_paragraph else body),
                 )
             )
-            if kind != "scene_break":
-                first_paragraph = False
+            first_paragraph = kind == "scene_break"
 
     for chapter in chapters:
         story.append(PageBreak())
@@ -1761,6 +1880,12 @@ def manuscript_pdf_compiled(
 
     def _draw_later_pages(canvas, doc_obj) -> None:
         canvas.saveState()
+        _apply_pdf_metadata(
+            canvas,
+            title=front["title"],
+            author=front["display_author"] or "LoreVia",
+            subject="Manuscript",
+        )
         canvas.setFont("Times-Roman", 10)
         canvas.drawRightString(
             doc_obj.pagesize[0] - doc.rightMargin,
@@ -1819,9 +1944,10 @@ def manuscript_epub_compiled(
         for kind, block in _chapter_body_blocks(text):
             if kind == "scene_break":
                 parts.append("<p class='scene-break'>***</p>")
+                first_paragraph = True
                 continue
             css_class = "first-paragraph" if first_paragraph else ""
-            safe_block = escape(block)
+            safe_block = escape(block).replace("\n", "<br/>")
             parts.append(f"<p class='{css_class}'>{safe_block}</p>" if css_class else f"<p>{safe_block}</p>")
             first_paragraph = False
         return "".join(parts) or "<p class='first-paragraph'></p>"
