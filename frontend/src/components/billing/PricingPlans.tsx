@@ -27,10 +27,11 @@ import {
 import { useAuthStore } from "@/lib/stores/authStore"
 
 type PricingPlansProps = {
+  nonce?: string
   surface?: "public" | "app"
 }
 
-export function PricingPlans({ surface = "public" }: PricingPlansProps) {
+export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
   const router = useRouter()
   const { user } = useAuthStore()
   const paddleToken = getPaddleClientToken()
@@ -139,6 +140,7 @@ export function PricingPlans({ surface = "public" }: PricingPlansProps) {
       <Script
         src={PADDLE_SCRIPT_SRC}
         strategy="afterInteractive"
+        nonce={nonce}
         onLoad={() => setPaddleReady(true)}
       />
       <section className={surface === "public" ? "border-t border-white/[0.08] py-8" : undefined}>

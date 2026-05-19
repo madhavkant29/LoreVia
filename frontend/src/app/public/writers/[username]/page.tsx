@@ -1,6 +1,6 @@
 import type { Metadata } from "next"
-import Script from "next/script"
 
+import { JsonLdScript } from "@/components/seo/JsonLdScript"
 import { PublicWriterProfilePageClient } from "@/components/public/PublicWriterProfilePageClient"
 import { getPublicUserProfileServer } from "@/lib/api/public.server"
 import {
@@ -55,11 +55,9 @@ export default async function PublicWriterProfilePage({ params }: { params: Prom
     : null
 
   return (
-    <>
+      <>
       {profile && profileJsonLd ? (
-        <Script id={`public-writer-jsonld-${profile.username}`} type="application/ld+json" strategy="beforeInteractive">
-          {JSON.stringify(profileJsonLd).replace(/</g, "\\u003c")}
-        </Script>
+        <JsonLdScript id={`public-writer-jsonld-${profile.username}`} data={profileJsonLd} />
       ) : null}
       <PublicWriterProfilePageClient username={profile?.username || username} initialProfile={profile} />
     </>

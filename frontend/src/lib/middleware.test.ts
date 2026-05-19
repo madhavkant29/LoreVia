@@ -18,7 +18,7 @@ describe("middleware CSP", () => {
     expect(first).toMatch(/^[A-Za-z0-9+/=]+$/)
   })
 
-  it("builds a CSP that includes nonce, api, analytics, and supabase origins", () => {
+  it("builds a CSP that includes nonce, strict-dynamic, api, analytics, and supabase origins", () => {
     Object.assign(process.env, {
       NEXT_PUBLIC_API_URL: "https://staging.getlorevia.com/api/v1",
       NEXT_PUBLIC_POSTHOG_HOST: "https://eu.i.posthog.com",
@@ -27,14 +27,14 @@ describe("middleware CSP", () => {
 
     const policy = buildContentSecurityPolicy("nonce-value")
 
-    expect(policy).toContain("script-src 'self' 'nonce-nonce-value'")
+    expect(policy).toContain("script-src 'self' 'nonce-nonce-value' 'strict-dynamic'")
     expect(policy).toContain("https://staging.getlorevia.com")
     expect(policy).toContain("https://eu.i.posthog.com")
     expect(policy).toContain("https://example-project.supabase.co")
-    expect(policy).toContain("https://securepubads.g.doubleclick.net")
-    expect(policy).toContain("https://googleads.g.doubleclick.net")
     expect(policy).toContain("wss://example-project.supabase.co")
     expect(policy).toContain("object-src 'none'")
+    expect(policy).not.toContain("https://securepubads.g.doubleclick.net")
+    expect(policy).not.toContain("https://googleads.g.doubleclick.net")
   })
 
   it("skips non-production requests", () => {

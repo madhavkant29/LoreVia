@@ -1,9 +1,9 @@
 import type { Metadata } from "next"
 import Link from "next/link"
-import Script from "next/script"
 
 import { PublicContentHeader, ContentArrowIcon } from "@/components/marketing/PublicContentHeader"
 import { Reveal } from "@/components/marketing/Reveal"
+import { JsonLdScript } from "@/components/seo/JsonLdScript"
 import { demoPages, getBlogArticleBySlug } from "@/lib/content"
 import { DEFAULT_OG_IMAGE, SITE_NAME, SITE_URL, buildCollectionPageJsonLd } from "@/lib/seo"
 
@@ -61,9 +61,7 @@ export default function DemoIndexPage() {
     <main className="app-shell overflow-hidden">
       <div className="app-shell__mesh" />
       <div className="absolute inset-x-0 top-0 -z-10 h-[30rem] bg-[radial-gradient(circle_at_top,rgba(15,118,110,0.14),transparent_36%),radial-gradient(circle_at_80%_10%,rgba(180,83,9,0.14),transparent_24%)]" />
-      <Script id="demo-collection-jsonld" type="application/ld+json" strategy="beforeInteractive">
-        {JSON.stringify(jsonLd).replace(/</g, "\\u003c")}
-      </Script>
+      <JsonLdScript id="demo-collection-jsonld" data={jsonLd} />
 
       <PublicContentHeader activeSection="demo" />
 

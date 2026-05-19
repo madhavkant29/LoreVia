@@ -1,6 +1,6 @@
 import type { Metadata } from "next"
-import Script from "next/script"
 
+import { JsonLdScript } from "@/components/seo/JsonLdScript"
 import { PublicForumPageClient } from "@/components/public/PublicForumPageClient"
 import { listPublicForumPostsServer } from "@/lib/api/public.server"
 import {
@@ -59,13 +59,9 @@ export default async function PublicForumPage() {
   })
 
   return (
-    <>
-      <Script id="public-forum-jsonld" type="application/ld+json" strategy="beforeInteractive">
-        {JSON.stringify(collectionJsonLd).replace(/</g, "\\u003c")}
-      </Script>
-      <Script id="public-forum-itemlist-jsonld" type="application/ld+json" strategy="beforeInteractive">
-        {JSON.stringify(itemListJsonLd).replace(/</g, "\\u003c")}
-      </Script>
+      <>
+      <JsonLdScript id="public-forum-jsonld" data={collectionJsonLd} />
+      <JsonLdScript id="public-forum-itemlist-jsonld" data={itemListJsonLd} />
       <PublicForumPageClient initialData={initialData} />
     </>
   )

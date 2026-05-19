@@ -1,6 +1,6 @@
 import type { Metadata } from "next"
-import Script from "next/script"
 
+import { JsonLdScript } from "@/components/seo/JsonLdScript"
 import { PublicBookPageClient } from "@/components/public/PublicBookPageClient"
 import { getPublicBookServer } from "@/lib/api/public.server"
 import {
@@ -61,16 +61,12 @@ export default async function PublicBookPage({ params }: { params: Promise<{ boo
   ]) : null
 
   return (
-    <>
+      <>
       {book && bookJsonLd ? (
-        <Script id={`public-book-jsonld-${routeId}`} type="application/ld+json" strategy="beforeInteractive">
-          {JSON.stringify(bookJsonLd).replace(/</g, "\\u003c")}
-        </Script>
+        <JsonLdScript id={`public-book-jsonld-${routeId}`} data={bookJsonLd} />
       ) : null}
       {book && breadcrumbJsonLd ? (
-        <Script id={`public-book-breadcrumbs-jsonld-${routeId}`} type="application/ld+json" strategy="beforeInteractive">
-          {JSON.stringify(breadcrumbJsonLd).replace(/</g, "\\u003c")}
-        </Script>
+        <JsonLdScript id={`public-book-breadcrumbs-jsonld-${routeId}`} data={breadcrumbJsonLd} />
       ) : null}
       <PublicBookPageClient bookId={book?.id || bookId} initialBook={book} />
     </>

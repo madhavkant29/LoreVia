@@ -14,7 +14,7 @@ import {
   PADDLE_SCRIPT_SRC,
 } from "@/lib/billing/paddle"
 
-export function PaddleCheckoutPage() {
+export function PaddleCheckoutPage({ nonce }: { nonce?: string }) {
   const searchParams = useSearchParams()
   const paddleToken = getPaddleClientToken()
   const paddleEnvironment = getPaddleEnvironment(paddleToken)
@@ -104,6 +104,7 @@ export function PaddleCheckoutPage() {
       <Script
         src={PADDLE_SCRIPT_SRC}
         strategy="afterInteractive"
+        nonce={nonce}
         onLoad={() => setScriptReady(true)}
         onError={() => setMessage("Paddle checkout could not be loaded. Refresh and try again.")}
       />

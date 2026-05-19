@@ -1,6 +1,6 @@
 import type { Metadata } from "next"
-import Script from "next/script"
 
+import { JsonLdScript } from "@/components/seo/JsonLdScript"
 import { PublicLibraryPageClient } from "@/components/public/PublicLibraryPageClient"
 import { listPublicBooksServer } from "@/lib/api/public.server"
 import {
@@ -61,12 +61,8 @@ export default async function PublicLibraryPage() {
 
   return (
     <>
-      <Script id="public-library-jsonld" type="application/ld+json" strategy="beforeInteractive">
-        {JSON.stringify(collectionJsonLd).replace(/</g, "\\u003c")}
-      </Script>
-      <Script id="public-library-itemlist-jsonld" type="application/ld+json" strategy="beforeInteractive">
-        {JSON.stringify(itemListJsonLd).replace(/</g, "\\u003c")}
-      </Script>
+      <JsonLdScript id="public-library-jsonld" data={collectionJsonLd} />
+      <JsonLdScript id="public-library-itemlist-jsonld" data={itemListJsonLd} />
       <div className="sr-only">
         LoreVia public library for fiction authors, beta readers, and readers exploring public-domain manuscript demos, author profiles, and surfaced public samples.
       </div>

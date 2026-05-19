@@ -1,4 +1,5 @@
 import type { Metadata } from "next"
+import { headers } from "next/headers"
 import { Suspense } from "react"
 
 import { PaddleCheckoutPage } from "@/components/billing/PaddleCheckoutPage"
@@ -12,10 +13,12 @@ export const metadata: Metadata = {
   },
 }
 
-export default function CheckoutPage() {
+export default async function CheckoutPage() {
+  const nonce = (await headers()).get("x-nonce") ?? undefined
+
   return (
     <Suspense fallback={null}>
-      <PaddleCheckoutPage />
+      <PaddleCheckoutPage nonce={nonce} />
     </Suspense>
   )
 }

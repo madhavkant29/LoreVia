@@ -1,9 +1,9 @@
 import type { Metadata, Viewport } from "next"
-import Script from "next/script"
 import "./globals.css"
 import { QueryProvider } from "@/components/app/QueryProvider"
 import { PostHogClientProvider } from "@/components/analytics/PostHogClient"
 import { SiteFooter } from "@/components/layout/SiteFooter"
+import { JsonLdScript } from "@/components/seo/JsonLdScript"
 import {
   DEFAULT_OG_IMAGE,
   SITE_DESCRIPTION,
@@ -110,12 +110,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       data-scroll-behavior="smooth"
     >
       <head>
-        <Script id="website-jsonld" type="application/ld+json" strategy="beforeInteractive">
-          {JSON.stringify(websiteJsonLd).replace(/</g, "\\u003c")}
-        </Script>
-        <Script id="organization-jsonld" type="application/ld+json" strategy="beforeInteractive">
-          {JSON.stringify(organizationJsonLd).replace(/</g, "\\u003c")}
-        </Script>
+        <JsonLdScript id="website-jsonld" data={websiteJsonLd} />
+        <JsonLdScript id="organization-jsonld" data={organizationJsonLd} />
       </head>
       <body className="antialiased">
         <QueryProvider>

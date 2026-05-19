@@ -1,10 +1,10 @@
 import type { Metadata } from "next"
 import Link from "next/link"
-import Script from "next/script"
 import { notFound } from "next/navigation"
 
 import { PublicContentHeader, ContentArrowIcon } from "@/components/marketing/PublicContentHeader"
 import { Reveal } from "@/components/marketing/Reveal"
+import { JsonLdScript } from "@/components/seo/JsonLdScript"
 import {
   blogArticles,
   getAnswerPagesBySlugs,
@@ -94,12 +94,8 @@ export default async function BlogArticlePage({ params }: { params: Promise<{ sl
     <main className="app-shell overflow-hidden">
       <div className="app-shell__mesh" />
       <div className="absolute inset-x-0 top-0 -z-10 h-[30rem] bg-[radial-gradient(circle_at_top,rgba(15,118,110,0.15),transparent_38%),radial-gradient(circle_at_80%_12%,rgba(180,83,9,0.14),transparent_24%)]" />
-      <Script id={`blog-jsonld-${article.slug}`} type="application/ld+json" strategy="beforeInteractive">
-        {JSON.stringify(jsonLd).replace(/</g, "\\u003c")}
-      </Script>
-      <Script id={`blog-breadcrumbs-jsonld-${article.slug}`} type="application/ld+json" strategy="beforeInteractive">
-        {JSON.stringify(breadcrumbJsonLd).replace(/</g, "\\u003c")}
-      </Script>
+      <JsonLdScript id={`blog-jsonld-${article.slug}`} data={jsonLd} />
+      <JsonLdScript id={`blog-breadcrumbs-jsonld-${article.slug}`} data={breadcrumbJsonLd} />
 
       <PublicContentHeader activeSection="blog" />
 

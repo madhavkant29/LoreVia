@@ -1,10 +1,10 @@
 import type { Metadata } from "next"
 import Link from "next/link"
-import Script from "next/script"
 import { notFound } from "next/navigation"
 
 import { PublicContentHeader, ContentArrowIcon } from "@/components/marketing/PublicContentHeader"
 import { Reveal } from "@/components/marketing/Reveal"
+import { JsonLdScript } from "@/components/seo/JsonLdScript"
 import {
   demoPages,
   getAnswerPagesBySlugs,
@@ -89,12 +89,8 @@ export default async function DemoPage({ params }: { params: Promise<{ slug: str
     <main className="app-shell overflow-hidden">
       <div className="app-shell__mesh" />
       <div className="absolute inset-x-0 top-0 -z-10 h-[28rem] bg-[radial-gradient(circle_at_top,rgba(15,118,110,0.14),transparent_36%),radial-gradient(circle_at_85%_10%,rgba(180,83,9,0.12),transparent_24%)]" />
-      <Script id={`demo-jsonld-${demo.slug}`} type="application/ld+json" strategy="beforeInteractive">
-        {JSON.stringify(jsonLd).replace(/</g, "\\u003c")}
-      </Script>
-      <Script id={`demo-breadcrumbs-jsonld-${demo.slug}`} type="application/ld+json" strategy="beforeInteractive">
-        {JSON.stringify(breadcrumbJsonLd).replace(/</g, "\\u003c")}
-      </Script>
+      <JsonLdScript id={`demo-jsonld-${demo.slug}`} data={jsonLd} />
+      <JsonLdScript id={`demo-breadcrumbs-jsonld-${demo.slug}`} data={breadcrumbJsonLd} />
 
       <PublicContentHeader activeSection="demo" />
 

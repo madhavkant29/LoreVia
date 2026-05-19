@@ -1,8 +1,9 @@
 import type { Metadata } from "next"
-import Script from "next/script"
+import { headers } from "next/headers"
 
 import { PricingPlans } from "@/components/billing/PricingPlans"
 import { LegalPageShell } from "@/components/legal/LegalPageShell"
+import { JsonLdScript } from "@/components/seo/JsonLdScript"
 import { DEFAULT_OG_IMAGE, SITE_NAME, SITE_URL, buildBreadcrumbJsonLd } from "@/lib/seo"
 
 export const metadata: Metadata = {
@@ -31,7 +32,8 @@ export const metadata: Metadata = {
   },
 }
 
-export default function PricingPage() {
+export default async function PricingPage() {
+  const nonce = (await headers()).get("x-nonce") ?? undefined
   const softwareJsonLd = {
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
@@ -70,12 +72,8 @@ export default function PricingPage() {
 
   return (
     <>
-      <Script id="pricing-software-jsonld" type="application/ld+json" strategy="beforeInteractive">
-        {JSON.stringify(softwareJsonLd).replace(/</g, "\\u003c")}
-      </Script>
-      <Script id="pricing-breadcrumbs-jsonld" type="application/ld+json" strategy="beforeInteractive">
-        {JSON.stringify(breadcrumbJsonLd).replace(/</g, "\\u003c")}
-      </Script>
+      <JsonLdScript id="pricing-software-jsonld" data={softwareJsonLd} />
+      <JsonLdScript id="pricing-breadcrumbs-jsonld" data={breadcrumbJsonLd} />
       <LegalPageShell
         eyebrow="Pricing"
         title="Pricing for fiction authors doing serious manuscript work"
@@ -84,7 +82,7 @@ export default function PricingPage() {
         notice="Every new signup gets 10 days of Author access with no credit card required, then falls back to Free unless you choose a paid plan."
         maxWidth="wide"
       >
-        <PricingPlans surface="public" />
+        <PricingPlans surface="public" nonce={nonce} />
       </LegalPageShell>
     </>
   )

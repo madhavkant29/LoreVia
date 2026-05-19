@@ -1,6 +1,6 @@
 import type { Metadata } from "next"
-import Script from "next/script"
 
+import { JsonLdScript } from "@/components/seo/JsonLdScript"
 import { PublicChapterPageClient } from "@/components/public/PublicChapterPageClient"
 import { getPublicBookServer, getPublicChapterServer } from "@/lib/api/public.server"
 import {
@@ -85,16 +85,12 @@ export default async function PublicChapterPage({
   ]) : null
 
   return (
-    <>
+      <>
       {chapter && articleJsonLd ? (
-        <Script id={`public-chapter-jsonld-${routeId}-${chapter.chapter_number}`} type="application/ld+json" strategy="beforeInteractive">
-          {JSON.stringify(articleJsonLd).replace(/</g, "\\u003c")}
-        </Script>
+        <JsonLdScript id={`public-chapter-jsonld-${routeId}-${chapter.chapter_number}`} data={articleJsonLd} />
       ) : null}
       {chapter && breadcrumbJsonLd ? (
-        <Script id={`public-chapter-breadcrumbs-jsonld-${routeId}-${chapter.chapter_number}`} type="application/ld+json" strategy="beforeInteractive">
-          {JSON.stringify(breadcrumbJsonLd).replace(/</g, "\\u003c")}
-        </Script>
+        <JsonLdScript id={`public-chapter-breadcrumbs-jsonld-${routeId}-${chapter.chapter_number}`} data={breadcrumbJsonLd} />
       ) : null}
       <PublicChapterPageClient bookId={routeId} chapterId={chapterId} initialChapter={chapter} />
     </>
