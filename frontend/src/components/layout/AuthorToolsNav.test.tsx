@@ -94,6 +94,7 @@ describe("AuthorToolsNav", () => {
         can_view_story_bible: false,
         can_comment: true,
         can_export: false,
+        can_view_selected_chapters_only: false,
       },
     })
 

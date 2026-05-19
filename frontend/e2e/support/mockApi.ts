@@ -1,5 +1,6 @@
 import type { Page, Route } from "@playwright/test"
 import type { Character } from "@/types/character"
+import type { PublicForumPost } from "@/types/public"
 
 type SessionMode = "authenticated" | "guest"
 type LoginMode = "success" | "unauthorized"
@@ -80,7 +81,7 @@ const book = {
   },
 }
 
-let publicForumPosts = [
+let publicForumPosts: PublicForumPost[] = [
   {
     id: "forum-post-1",
     thread_type: "novel",
@@ -2370,7 +2371,7 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
       if (threadType === "novel" && payload?.book_id === "book-1" && publicForumPosts.some((post) => post.thread_type === "novel" && post.book_id === "book-1" && post.status === "open")) {
         return route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ detail: "This manuscript already has a beta forum post. Update it instead." }) })
       }
-      const created = {
+      const created: PublicForumPost = {
         id: `forum-post-${publicForumPosts.length + 1}`,
         thread_type: threadType,
         book_id: threadType === "novel" ? (payload?.book_id ?? "book-1") : null,
