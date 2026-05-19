@@ -25,7 +25,7 @@ async def test_billing_status_reports_missing_configuration(auth_headers, client
     assert payload["payments_ready"] is False
     assert payload["paddle_api_key_present"] is False
     assert payload["webhook_secret_present"] is False
-    assert payload["recommended_default_checkout_url"] == "http://localhost:3000/checkout"
+    assert payload["recommended_default_checkout_url"] == "https://getlorevia.com/checkout"
     assert payload["resend_api_key_present"] is False
     assert payload["internal_job_secret_present"] is False
     assert "PADDLE_API_KEY" in payload["missing_configuration"]
@@ -75,7 +75,7 @@ async def test_billing_status_reports_fully_configured_catalog(auth_headers, cli
     payload = response.json()
     assert payload["billing_enabled"] is True
     assert payload["payments_ready"] is True
-    assert payload["recommended_default_checkout_url"] == "http://localhost:3000/checkout"
+    assert payload["recommended_default_checkout_url"] == "https://getlorevia.com/checkout"
     assert payload["resend_api_key_present"] is True
     assert payload["internal_job_secret_present"] is True
     assert payload["fully_configured_plan_count"] == 4
