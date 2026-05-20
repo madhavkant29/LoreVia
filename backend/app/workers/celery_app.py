@@ -8,7 +8,10 @@ from celery.schedules import crontab
 from sentry_sdk.integrations.celery import CeleryIntegration
 
 from app.core.config import settings
+from app.core.database import engine
+from app.core.redis import close_all_redis_clients
 from app.utils.request_context import get_request_id, set_request_id, set_request_user_id
+from app.utils.worker_async_utils import close_worker_loop, get_worker_loop, has_worker_loop
 from app.workers.queues.queues import TASK_QUEUES
 
 
@@ -167,3 +170,29 @@ def _task_postrun_clear_request_id(sender=None, headers=None, body=None, **kwarg
         set_request_user_id(None)
     except Exception:
         return
+
+
+@signals.worker_process_init.connect
+def _worker_process_init(**kwargs):
+    try:
+        get_worker_loop()
+    except Exception:
+        return
+
+
+@signals.worker_process_shutdown.connect
+def _worker_process_shutdown(**kwargs):
+    if not has_worker_loop():
+        return
+    try:
+        loop = get_worker_loop()
+        loop.run_until_complete(_shutdown_worker_async_resources())
+    except Exception:
+        return
+    finally:
+        close_worker_loop()
+
+
+async def _shutdown_worker_async_resources() -> None:
+    await close_all_redis_clients()
+    await engine.dispose()

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import uuid
 from datetime import datetime
 
@@ -41,7 +43,22 @@ class PublicBookOut(BaseModel):
     total_chapters: int | None = None
     copyright_warning: bool = False
     active_forum_post_id: str | None = None
+    analytics: "PublicBookAnalyticsOut" | None = None
     created_at: datetime | None = None
+    published_at: datetime | None = None
+
+
+class PublicBookAnalyticsOut(BaseModel):
+    book_view_count: int = 0
+    unique_reader_count_30d: int = 0
+    chapter_view_count: int = 0
+    published_at: datetime | None = None
+    chapter_count: int = 0
+    total_words: int = 0
+    has_open_discussion: bool = False
+    open_discussion_count: int = 0
+    discussion_comment_count: int = 0
+    discussion_interest_count: int = 0
 
 
 class PublicBookChapterMetaOut(BaseModel):
@@ -53,6 +70,7 @@ class PublicBookChapterMetaOut(BaseModel):
 class PublicBookDetailOut(PublicBookOut):
     chapters: list[PublicBookChapterMetaOut] = Field(default_factory=list)
     visibility_notice: str | None = None
+    analytics: PublicBookAnalyticsOut | None = None
 
 
 class PublicChapterOut(BaseModel):
@@ -118,6 +136,11 @@ class PublicChapterAppendOut(BaseModel):
     book_id: str
     chapter_number: int
     saved: bool
+
+
+class PublicBookAnalyticsViewBody(BaseModel):
+    event_type: str = Field(..., min_length=4, max_length=32)
+    chapter_number: int | None = Field(default=None, ge=1)
 
 
 class PublicForumRatingSummaryOut(BaseModel):
@@ -242,6 +265,34 @@ class PublicUserProjectOut(BaseModel):
     public_book_id: str | None = None
 
 
+class PublicAuthorAnalyticsOut(BaseModel):
+    total_book_views: int = 0
+    total_unique_readers_30d: int = 0
+    total_chapter_views: int = 0
+    total_public_books: int = 0
+    total_chapters: int = 0
+    total_words: int = 0
+    latest_published_at: datetime | None = None
+    open_forum_discussions_count: int = 0
+
+
+class PublicUploadsBreakdownEntryOut(BaseModel):
+    key: str
+    label: str
+    count: int = 0
+
+
+class PublicUploadsOverviewOut(BaseModel):
+    total_public_books: int = 0
+    total_authors: int = 0
+    total_visible_chapters: int = 0
+    total_visible_words: int = 0
+    uploads_last_30_days: int = 0
+    genre_breakdown: list[PublicUploadsBreakdownEntryOut] = Field(default_factory=list)
+    work_type_breakdown: list[PublicUploadsBreakdownEntryOut] = Field(default_factory=list)
+    recent_uploads: list[PublicBookOut] = Field(default_factory=list)
+
+
 class PublicUserActivityPostOut(BaseModel):
     id: str
     thread_type: str
@@ -285,6 +336,9 @@ class PublicUserProfileOut(BaseModel):
     forum_post_count: int = 0
     forum_comment_count: int = 0
     current_project: PublicUserProjectOut | None = None
+    public_books_count: int = 0
+    public_books: list[PublicBookOut] = Field(default_factory=list)
+    public_analytics: PublicAuthorAnalyticsOut = Field(default_factory=PublicAuthorAnalyticsOut)
     posts: list[PublicUserActivityPostOut] = Field(default_factory=list)
     comments: list[PublicUserActivityCommentOut] = Field(default_factory=list)
     created_at: datetime

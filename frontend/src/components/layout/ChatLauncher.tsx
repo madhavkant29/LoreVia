@@ -1,19 +1,31 @@
 "use client"
 
 import Link from "next/link"
+import dynamic from "next/dynamic"
 import React from "react"
 import { useState } from "react"
 
-import { ChatsPanel } from "@/components/layout/ChatsPanel"
 import { useChatUnreadCount } from "@/lib/hooks/useChatUnreadCount"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 
-export function ChatLauncher() {
+const ChatsPanel = dynamic(
+  () => import("@/components/layout/ChatsPanel").then((module) => module.ChatsPanel),
+  {
+    ssr: false,
+    loading: () => <PanelLoadingState label="Loading chats..." />,
+  }
+)
+
+export function ChatLauncher({ enabled = true }: { enabled?: boolean }) {
   const [open, setOpen] = useState(false)
   const { theme } = usePreferencesStore()
   const { user } = useAuthStore()
-  const { unreadCount } = useChatUnreadCount()
+  const { unreadCount } = useChatUnreadCount({
+    enabled: enabled || open,
+    pollMs: false,
+    refreshOnFocus: true,
+  })
   const isDark = theme === "dark"
   const hasUnread = unreadCount > 0
   const badgeLabel = hasUnread ? `${unreadCount > 9 ? "9+" : unreadCount}` : null
@@ -68,6 +80,14 @@ export function ChatLauncher() {
         </>
       ) : null}
     </>
+  )
+}
+
+function PanelLoadingState({ label }: { label: string }) {
+  return (
+    <div className="flex h-full items-center justify-center p-6 text-sm text-muted-foreground">
+      {label}
+    </div>
   )
 }
 

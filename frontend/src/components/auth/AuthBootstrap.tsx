@@ -12,15 +12,13 @@ export function AuthBootstrap() {
   const pathname = usePathname()
 
   useEffect(() => {
-    if (ran.current) return
-    ran.current = true
-
     if (shouldSkipAuthBootstrap(pathname)) {
       setHydrated()
       return
     }
 
-    if (user) return
+    if (ran.current) return
+    ran.current = true
 
     const restore = async () => {
       try {
@@ -39,7 +37,30 @@ export function AuthBootstrap() {
       }
     }
 
-    restore()
+    const validateExistingSession = async () => {
+      try {
+        let me = await authApi.me()
+        if (!me) {
+          await authApi.refresh()
+          me = await authApi.me()
+        }
+        if (me) {
+          setUser(me)
+          return
+        }
+        logout()
+      } catch {
+        logout()
+      }
+    }
+
+    if (user) {
+      setHydrated()
+      void validateExistingSession()
+      return
+    }
+
+    void restore()
   }, [pathname, user, setHydrated, setUser, logout])
 
   return null

@@ -110,6 +110,18 @@ async def test_get_public_user_profile_is_not_blocked_by_forum_status(monkeypatc
             "forum_post_count": 0,
             "forum_comment_count": 0,
             "current_project": None,
+            "public_books_count": 0,
+            "public_books": [],
+            "public_analytics": {
+                "total_book_views": 0,
+                "total_unique_readers_30d": 0,
+                "total_chapter_views": 0,
+                "total_public_books": 0,
+                "total_chapters": 0,
+                "total_words": 0,
+                "latest_published_at": None,
+                "open_forum_discussions_count": 0,
+            },
             "created_at": "2026-05-16T00:00:00Z",
         }
 
@@ -208,6 +220,30 @@ async def test_list_public_books_returns_cached_payload(monkeypatch):
     monkeypatch.setattr(public, "cache_get", _fake_cache_get)
     payload = await public.list_public_books(db=_FakeDB())
     assert payload == [{"id": "cached"}]
+
+
+@pytest.mark.asyncio
+async def test_list_creator_public_uploads_uses_creator_catalog(monkeypatch):
+    async def _fake_list_public_books(**kwargs):
+        return [{"id": "creator-book"}]
+
+    monkeypatch.setattr(public, "list_public_books", _fake_list_public_books)
+
+    payload = await public.list_creator_public_uploads(db=_FakeDB(), search="writer")
+
+    assert payload == [{"id": "creator-book"}]
+
+
+@pytest.mark.asyncio
+async def test_public_uploads_analytics_route_returns_overview(monkeypatch):
+    async def _fake_build_overview(_db):
+        return {"total_public_books": 2}
+
+    monkeypatch.setattr(public, "build_public_uploads_overview", _fake_build_overview)
+
+    payload = await public.get_public_uploads_analytics(db=_FakeDB())
+
+    assert payload["total_public_books"] == 2
 
 
 @pytest.mark.asyncio

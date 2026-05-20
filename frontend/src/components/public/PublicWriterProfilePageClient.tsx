@@ -9,7 +9,15 @@ import { publicApi } from "@/lib/api/public"
 import { asQueryKey } from "@/lib/query/cacheKeys"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { formatReputationScore, formatWordProgress } from "@/lib/utils/publicForum"
+import type { PublicBook } from "@/types/book"
 import type { PublicUserActivityComment, PublicUserActivityPost, PublicUserProfile } from "@/types/public"
+
+function formatCompactDate(value?: string | null) {
+  if (!value) return "Not yet dated"
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return "Not yet dated"
+  return parsed.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
+}
 
 export function PublicWriterProfilePageClient({
   username,
@@ -48,10 +56,10 @@ export function PublicWriterProfilePageClient({
         <section className={`mt-6 rounded-[2rem] border p-6 sm:p-8 ${isDark ? "border-white/10 bg-[#121821]" : "border-[#dfd3c2] bg-white/92"}`}>
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div className="max-w-3xl">
-              <p className={`text-xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-amber-300" : "text-amber-700"}`}>Public Author Profile</p>
+              <p className={`text-xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-amber-300" : "text-amber-700"}`}>Public Writer Profile</p>
               <h1 className="mt-3 font-serif text-4xl tracking-tight">@{profile.username}</h1>
               <p className={`mt-3 text-sm leading-7 ${isDark ? "text-slate-300" : "text-slate-600"}`}>
-                Activity-first public profile for visible discussion history, community trust, and surfaced writing context.
+                Visible public profile for reading activity, discussion history, and the public books this writer has chosen to share.
               </p>
               <p className={`mt-3 text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                 Public forum status: public
@@ -65,12 +73,48 @@ export function PublicWriterProfilePageClient({
             </Link>
           </div>
 
-          <div className="mt-6 grid gap-4 sm:grid-cols-4">
+          <div className="mt-6 grid gap-4 sm:grid-cols-3 xl:grid-cols-6">
             <ProfileStat isDark={isDark} label="Reputation" value={formatReputationScore(profile.reputation_score)} detail={profile.trust_level} />
             <ProfileStat isDark={isDark} label="Posts" value={String(profile.forum_post_count)} detail="Visible threads" />
             <ProfileStat isDark={isDark} label="Comments" value={String(profile.forum_comment_count)} detail="Visible replies" />
             <ProfileStat isDark={isDark} label="Votes" value={`${profile.reputation_likes_received}/${profile.reputation_dislikes_received}`} detail="likes / dislikes" />
+            <ProfileStat isDark={isDark} label="Views" value={profile.public_analytics.total_book_views.toLocaleString()} detail="Across public books" />
+            <ProfileStat isDark={isDark} label="Readers 30d" value={profile.public_analytics.total_unique_readers_30d.toLocaleString()} detail="Distinct recent visitors" />
           </div>
+        </section>
+
+        <section className={`mt-8 rounded-[2rem] border p-6 sm:p-8 ${isDark ? "border-white/10 bg-[#121821]" : "border-[#dfd3c2] bg-white/92"}`}>
+          <div className="flex flex-col gap-2">
+            <p className={`text-xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>Public upload analytics</p>
+            <h2 className="font-serif text-3xl tracking-tight">Visible public footprint</h2>
+          </div>
+          <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+            <ProfileStat isDark={isDark} label="Public books" value={String(profile.public_books_count)} detail="Visible creator-published books" />
+            <ProfileStat isDark={isDark} label="Chapters" value={String(profile.public_analytics.total_chapters)} detail="Visible public chapters" />
+            <ProfileStat isDark={isDark} label="Words" value={formatWordProgress(profile.public_analytics.total_words)} detail="Estimated readable words" />
+            <ProfileStat isDark={isDark} label="Latest published" value={formatCompactDate(profile.public_analytics.latest_published_at)} detail="Most recent dated upload" />
+            <ProfileStat isDark={isDark} label="Open discussions" value={String(profile.public_analytics.open_forum_discussions_count)} detail="Active public forum threads" />
+          </div>
+        </section>
+
+        <section className={`mt-8 rounded-[2rem] border p-6 sm:p-8 ${isDark ? "border-white/10 bg-[#121821]" : "border-[#dfd3c2] bg-white/92"}`}>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className={`text-xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>Public books</p>
+              <h2 className="font-serif text-3xl tracking-tight">Books published by @{profile.username}</h2>
+            </div>
+            <p className={`text-sm ${isDark ? "text-slate-400" : "text-slate-600"}`}>{profile.public_books_count} visible upload{profile.public_books_count === 1 ? "" : "s"}</p>
+          </div>
+
+          {profile.public_books.length > 0 ? (
+            <div className="mt-6 grid gap-5 lg:grid-cols-2">
+              {profile.public_books.map((book) => (
+                <PublicBookCard key={book.id} isDark={isDark} book={book} />
+              ))}
+            </div>
+          ) : (
+            <EmptyState isDark={isDark} text="This writer has not surfaced any visible creator-published public books yet." />
+          )}
         </section>
 
         <section className={`mt-8 rounded-[2rem] border ${isDark ? "border-white/10 bg-[#121821]" : "border-[#dfd3c2] bg-white/92"}`}>
@@ -120,7 +164,7 @@ export function PublicWriterProfilePageClient({
                   <span className={`rounded-full px-3 py-1 text-xs ${isDark ? "bg-white/6 text-slate-300" : "bg-white text-slate-600"}`}>{formatWordProgress(project.progress_words)}</span>
                 </div>
                 <p className={`mt-5 text-sm leading-7 ${isDark ? "text-slate-300" : "text-slate-700"}`}>{project.description || "This writer has not added a project description yet."}</p>
-                {publicSampleHref || forumDiscussionHref ? (
+                {forumDiscussionHref || publicSampleHref ? (
                   <div className="mt-5 flex flex-wrap gap-3">
                     {forumDiscussionHref ? (
                       <Link
@@ -142,10 +186,10 @@ export function PublicWriterProfilePageClient({
                 ) : null}
               </div>
               <div className={`rounded-3xl border px-5 py-5 ${isDark ? "border-white/10 bg-black/20" : "border-[#eadfce] bg-[#fbf7f0]"}`}>
-                <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>Trust snapshot</p>
-                <p className="mt-3 text-2xl font-semibold">{profile.trust_level}</p>
+                <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>Public reach</p>
+                <p className="mt-3 text-2xl font-semibold">{profile.public_analytics.total_chapter_views.toLocaleString()}</p>
                 <p className={`mt-3 text-sm leading-7 ${isDark ? "text-slate-400" : "text-slate-600"}`}>
-                  Public activity gives lightweight context around how this writer participates in the community.
+                  Chapter opens across this writer&apos;s visible public uploads.
                 </p>
               </div>
             </div>
@@ -177,6 +221,36 @@ function TabButton({ isDark, active, onClick, label }: { isDark: boolean, active
     >
       {label}
     </button>
+  )
+}
+
+function PublicBookCard({ isDark, book }: { isDark: boolean; book: PublicBook }) {
+  return (
+    <article className={`rounded-3xl border p-5 ${isDark ? "border-white/10 bg-black/20" : "border-[#eadfce] bg-[#fbf7f0]"}`}>
+      <div className="flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em]">
+        <span className={isDark ? "text-cyan-300" : "text-cyan-700"}>{book.genre || "Unspecified genre"}</span>
+        <span className={isDark ? "text-slate-500" : "text-slate-500"}>&bull;</span>
+        <span className={isDark ? "text-slate-400" : "text-slate-500"}>{formatCompactDate(book.published_at)}</span>
+      </div>
+      <Link href={`/public/${book.public_slug || book.id}` as Route} className="mt-3 block text-2xl font-semibold hover:underline">
+        {book.title}
+      </Link>
+      {book.description ? <p className={`mt-3 text-sm leading-7 ${isDark ? "text-slate-300" : "text-slate-700"}`}>{book.description}</p> : null}
+      <div className={`mt-4 flex flex-wrap gap-3 text-xs ${isDark ? "text-slate-400" : "text-slate-600"}`}>
+        <span>{book.total_chapters ?? 0} chapters</span>
+        <span>{book.analytics?.book_view_count?.toLocaleString?.() ?? 0} views</span>
+      </div>
+      <div className="mt-5 flex flex-wrap gap-3">
+        <Link href={`/public/${book.public_slug || book.id}` as Route} className={`inline-flex rounded-full px-4 py-2 text-sm font-semibold ${isDark ? "bg-white text-slate-950 hover:bg-slate-200" : "bg-slate-950 text-white hover:bg-slate-800"}`}>
+          Read public book
+        </Link>
+        {book.active_forum_post_id ? (
+          <Link href={`/public/forum/${book.active_forum_post_id}` as Route} className={`inline-flex rounded-full px-4 py-2 text-sm font-semibold ${isDark ? "border border-white/10 bg-white/[0.04] text-white hover:bg-white/[0.08]" : "border border-slate-200 bg-white text-slate-900 hover:bg-slate-50"}`}>
+            Open discussion
+          </Link>
+        ) : null}
+      </div>
+    </article>
   )
 }
 

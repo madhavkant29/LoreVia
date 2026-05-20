@@ -64,6 +64,8 @@ export function PublicLibraryPageClient({ initialBooks = [] }: { initialBooks?: 
                   <span>{book.total_chapters ?? "?"} chapters</span>
                   <span>-</span>
                   <span>{book.status}</span>
+                  <span>-</span>
+                  <span>{(book.analytics?.book_view_count ?? 0).toLocaleString()} views</span>
                 </div>
                 <div className="mt-6 flex flex-wrap gap-3">
                   <Link

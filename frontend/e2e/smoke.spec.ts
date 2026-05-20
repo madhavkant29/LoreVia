@@ -114,6 +114,31 @@ test("library renders a mocked project and opens the upload modal", async ({ pag
   await expect(page.getByRole("heading", { name: /upload book/i })).toBeVisible()
 })
 
+test("settings page updates the public username", async ({ page }) => {
+  await installMockApi(page)
+  await page.goto("/settings")
+
+  const usernameInput = page.locator('input[autocomplete="username"]')
+  await expect(usernameInput).toHaveValue("author")
+  await usernameInput.fill("storysmith")
+  await page.getByRole("button", { name: /change username/i }).click()
+
+  await expect(page.getByText("Public username updated.")).toBeVisible()
+  await expect(page.getByText("@storysmith")).toBeVisible()
+})
+
+test("author uploads default the manuscript byline from the public username", async ({ page }) => {
+  await installMockApi(page)
+  await page.goto("/library")
+  await page.getByRole("button", { name: /^new project$/i }).click()
+  await page.getByRole("button", { name: /^author mode$/i }).click()
+
+  const bylineInput = page.getByPlaceholder("Manuscript author or pen name")
+  await expect(bylineInput).toHaveValue("author")
+  await expect(page.getByText("This name appears on this manuscript only.")).toBeVisible()
+  await expect(page.getByText("different pen name or byline")).toBeVisible()
+})
+
 test("beta reads page shows active and missed assignments without reader analysis tools", async ({ page }) => {
   await installMockApi(page)
   await page.goto("/beta-reads")

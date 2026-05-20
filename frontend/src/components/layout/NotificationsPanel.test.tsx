@@ -2,7 +2,7 @@ import React, { act, type ReactNode } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 
-const useNotificationsMock = vi.hoisted(() => vi.fn())
+const useNotificationsStateMock = vi.hoisted(() => vi.fn())
 const usePreferencesStoreMock = vi.hoisted(() => vi.fn())
 const getRevisionIntelligenceMock = vi.hoisted(() => vi.fn())
 
@@ -15,7 +15,7 @@ vi.mock("next/link", () => ({
 }))
 
 vi.mock("@/lib/hooks/useNotifications", () => ({
-  useNotifications: useNotificationsMock,
+  useNotificationsState: useNotificationsStateMock,
 }))
 
 vi.mock("@/lib/stores/preferencesStore", () => ({
@@ -54,7 +54,7 @@ describe("NotificationsPanel", () => {
     if (container) {
       container.remove()
     }
-    useNotificationsMock.mockReset()
+    useNotificationsStateMock.mockReset()
     usePreferencesStoreMock.mockReset()
     getRevisionIntelligenceMock.mockReset()
     container = null
@@ -63,7 +63,7 @@ describe("NotificationsPanel", () => {
 
   it("loads revision details inline for revision digest notifications", async () => {
     usePreferencesStoreMock.mockReturnValue({ theme: "light" })
-    useNotificationsMock.mockReturnValue({
+    useNotificationsStateMock.mockReturnValue({
       items: [
         {
           id: "notification-1",

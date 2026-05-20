@@ -20,9 +20,8 @@ from app.core.storage import download_book, upload_binary
 from app.engine.character.consolidator import consolidate_characters
 from app.engine.character.deduplicator import (
     character_name_keys,
-    embed_for_dedup,
     find_similar,
-    merge_alias,
+    is_valid_alias,
     names_equivalent,
 )
 from app.engine.character.entity_filters import character_persistence_decision
@@ -37,7 +36,7 @@ from app.parsers.chunker import ChunkingConfig, chunk_text, count_tokens
 from app.services.email_service import send_processing_complete_with_stats
 from app.utils.billing_utils import has_paid_reading_access
 from app.utils.book_utils import parse_book_upload_for_ingestion, refresh_screenplay_scene_rows
-from app.utils.character_utils import find_earliest_character_mention_chapter
+from app.utils.character_utils import find_earliest_character_mention_chapters
 from app.utils.compliance.copyright_check import evaluate_document_copyright
 from app.utils.ingestion_utils import (
     apply_chapter_number_strategy,
@@ -480,6 +479,11 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                 select(Character).where(Character.book_id == book.id).order_by(Character.first_chapter, Character.created_at)
             )
         ).scalars().all()
+        character_key_cache: dict[uuid.UUID, set[str]] = {
+            char.id: character_name_keys(char.name, char.aliases or [])
+            for char in existing_characters
+            if char.id is not None
+        }
 
         llm_started = time.perf_counter()
         extraction_batches = _group_chunks_for_extraction(chunks)
@@ -499,6 +503,8 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
         extraction_fallback_batches = 0
         extraction_fallback_character_count = 0
         extraction_rejected_characters: list[dict[str, Any]] = []
+        pending_first_chapter_candidates: dict[uuid.UUID, list[str]] = {}
+        pending_first_chapter_updates: dict[uuid.UUID, Character] = {}
 
         for batch_index, (batch_text, result) in enumerate(zip(extraction_batch_texts, extraction_results), start=1):
             if isinstance(result, Exception):
@@ -521,13 +527,15 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                 for entity in result.get("characters", [])
                 if isinstance(entity, dict) and entity.get("name")
             ]
+            pending_new_entities: list[tuple[dict[str, Any], set[uuid.UUID]]] = []
             for entity in character_entities:
-                blocked_ids = _blocked_character_ids(existing_characters, entity)
+                blocked_ids = _blocked_character_ids(existing_characters, entity, key_cache=character_key_cache)
                 existing_id = _find_character_id_in_cache(
                     existing_characters,
                     entity["name"],
                     entity.get("aliases", []),
                     blocked_ids=blocked_ids,
+                    key_cache=character_key_cache,
                 )
                 decision = _character_save_decision(entity)
 
@@ -551,20 +559,17 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                             }],
                         )
                         continue
-                    char = await db.get(Character, existing_id)
+                    char = _find_character_by_id(existing_characters, existing_id)
                     if char:
                         updated = update_profile(char, {**entity, "first_chapter": chapter_number})
-                        earliest_chapter = await find_earliest_character_mention_chapter(
-                            db,
-                            book_id=book.id,
-                            name=char.name,
-                            aliases=updated.get("aliases") or char.aliases or [],
-                            upto_chapter=chapter_number,
-                        )
-                        if earliest_chapter is not None:
-                            updated["first_chapter"] = min(updated["first_chapter"], earliest_chapter)
                         changed = _changed(char.trait_state or {}, updated["trait_state"])
-                        await db.execute(sa_update(Character).where(Character.id == existing_id).values(**updated))
+                        _apply_character_update(char, updated)
+                        _refresh_character_key_cache(character_key_cache, char)
+                        pending_first_chapter_candidates[existing_id] = _first_chapter_lookup_candidates(
+                            char.name,
+                            updated.get("aliases") or char.aliases or [],
+                        )
+                        pending_first_chapter_updates[existing_id] = char
                         if changed:
                             growth_event = entity.get("growth_event")
                             if isinstance(growth_event, dict):
@@ -581,7 +586,7 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                                     growth_event=growth_event if isinstance(growth_event, dict) else None,
                                 )
                             )
-                    await merge_alias(db, existing_id, entity["name"])
+                    _merge_alias_in_memory(char, entity["name"] if char else None)
                 else:
                     if not decision.allowed:
                         log.info(
@@ -602,71 +607,74 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                             }],
                         )
                         continue
-                    emb = await embed_for_dedup(entity["name"], entity.get("traits", {}))
-                    if not emb:
-                        continue
-                    existing_id = await find_similar(
-                        db,
-                        book.id,
-                        emb,
-                        settings.DEDUP_SIMILARITY_THRESHOLD,
-                        excluded_ids=blocked_ids,
-                    )
-                    if existing_id:
-                        char = await db.get(Character, existing_id)
-                        if char and decision.allowed:
-                            updated = update_profile(char, {**entity, "first_chapter": chapter_number})
-                            earliest_chapter = await find_earliest_character_mention_chapter(
-                                db,
-                                book_id=book.id,
-                                name=char.name,
-                                aliases=updated.get("aliases") or char.aliases or [],
-                                upto_chapter=chapter_number,
-                            )
-                            if earliest_chapter is not None:
-                                updated["first_chapter"] = min(updated["first_chapter"], earliest_chapter)
-                            changed = _changed(char.trait_state or {}, updated["trait_state"])
-                            await db.execute(sa_update(Character).where(Character.id == existing_id).values(**updated))
-                            if changed:
-                                growth_event = entity.get("growth_event")
-                                if isinstance(growth_event, dict):
-                                    growth_event = {**growth_event, "chapter": chapter_number}
-                                db.add(
-                                    CharacterState(
-                                        character_id=existing_id,
-                                        at_chapter=chapter_number,
-                                        trait_snapshot=updated["trait_state"],
-                                        motivations_snapshot=updated.get("motivations") or [],
-                                        fears_snapshot=updated.get("fears") or [],
-                                        prompt_delta=_diff(char.trait_state or {}, updated["trait_state"]),
-                                        arc_note=entity.get("arc_summary"),
-                                        growth_event=growth_event if isinstance(growth_event, dict) else None,
-                                    )
+                    pending_new_entities.append((entity, blocked_ids))
+
+            new_entity_embeddings = await _embed_new_character_candidates(
+                pending_new_entities,
+                user_id=book.user_id,
+                book_id=book.id,
+            )
+            for (entity, blocked_ids), emb in zip(pending_new_entities, new_entity_embeddings):
+                if not emb:
+                    continue
+                existing_id = await find_similar(
+                    db,
+                    book.id,
+                    emb,
+                    settings.DEDUP_SIMILARITY_THRESHOLD,
+                    excluded_ids=blocked_ids,
+                )
+                if existing_id:
+                    char = _find_character_by_id(existing_characters, existing_id)
+                    if char:
+                        updated = update_profile(char, {**entity, "first_chapter": chapter_number})
+                        changed = _changed(char.trait_state or {}, updated["trait_state"])
+                        _apply_character_update(char, updated)
+                        _refresh_character_key_cache(character_key_cache, char)
+                        pending_first_chapter_candidates[existing_id] = _first_chapter_lookup_candidates(
+                            char.name,
+                            updated.get("aliases") or char.aliases or [],
+                        )
+                        pending_first_chapter_updates[existing_id] = char
+                        if changed:
+                            growth_event = entity.get("growth_event")
+                            if isinstance(growth_event, dict):
+                                growth_event = {**growth_event, "chapter": chapter_number}
+                            db.add(
+                                CharacterState(
+                                    character_id=existing_id,
+                                    at_chapter=chapter_number,
+                                    trait_snapshot=updated["trait_state"],
+                                    motivations_snapshot=updated.get("motivations") or [],
+                                    fears_snapshot=updated.get("fears") or [],
+                                    prompt_delta=_diff(char.trait_state or {}, updated["trait_state"]),
+                                    arc_note=entity.get("arc_summary"),
+                                    growth_event=growth_event if isinstance(growth_event, dict) else None,
                                 )
-                        await merge_alias(db, existing_id, entity["name"])
-                        continue
-                    profile = build_character_profile(entity, book.id, chapter_number)
-                    earliest_chapter = await find_earliest_character_mention_chapter(
-                        db,
-                        book_id=book.id,
-                        name=profile["name"],
-                        aliases=profile["aliases"],
-                        upto_chapter=chapter_number,
-                    )
-                    if earliest_chapter is not None:
-                        profile["first_chapter"] = min(profile["first_chapter"], earliest_chapter)
-                    char = Character(**profile, embedding=emb)
-                    db.add(char)
-                    await db.flush()
-                    existing_characters.append(char)
+                            )
+                    _merge_alias_in_memory(char, entity["name"] if char else None)
+                    if char:
+                        _refresh_character_key_cache(character_key_cache, char)
+                    continue
+                profile = build_character_profile(entity, book.id, chapter_number)
+                char = Character(**profile, embedding=emb)
+                db.add(char)
+                await db.flush()
+                existing_characters.append(char)
+                _refresh_character_key_cache(character_key_cache, char)
+                pending_first_chapter_candidates[char.id] = _first_chapter_lookup_candidates(
+                    profile["name"],
+                    profile["aliases"],
+                )
+                pending_first_chapter_updates[char.id] = char
 
             for rel in result.get("relationships", []):
                 if not isinstance(rel, dict):
                     continue
                 if not rel.get("character_a") or not rel.get("character_b"):
                     continue
-                char_a = _find_character_in_cache(existing_characters, rel["character_a"])
-                char_b = _find_character_in_cache(existing_characters, rel["character_b"])
+                char_a = _find_character_in_cache(existing_characters, rel["character_a"], key_cache=character_key_cache)
+                char_b = _find_character_in_cache(existing_characters, rel["character_b"], key_cache=character_key_cache)
                 if char_a and char_b:
                     db.add(
                         CharacterRelationship(
@@ -738,6 +746,29 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
             elapsed_ms(llm_started),
             len(extraction_batches),
         )
+        if pending_first_chapter_candidates:
+            earliest_started = time.perf_counter()
+            earliest_mentions = await find_earliest_character_mention_chapters(
+                db,
+                book_id=book.id,
+                candidates_by_key=pending_first_chapter_candidates,
+                upto_chapter=chapter_number,
+            )
+            for character_id, earliest_chapter in earliest_mentions.items():
+                char = pending_first_chapter_updates.get(character_id)
+                if char is None:
+                    continue
+                if earliest_chapter < int(char.first_chapter or chapter_number):
+                    char.first_chapter = earliest_chapter
+                current_last_seen = int(char.last_seen_chapter or char.first_chapter or earliest_chapter)
+                char.last_seen_chapter = max(current_last_seen, char.first_chapter or earliest_chapter)
+            log.info(
+                "ingestion_timing stage=first_chapter_backfill book_id=%s chapter=%s elapsed_ms=%s characters=%s",
+                book.id,
+                chapter_number,
+                elapsed_ms(earliest_started),
+                len(pending_first_chapter_candidates),
+            )
         extraction_diagnostics = dict(current_parser_diagnostics(book) or {})
         extraction_diagnostics["character_extraction"] = {
             "total_batches": len(extraction_batch_texts),
@@ -935,6 +966,7 @@ def _find_character_id_in_cache(
     name: str,
     aliases: list[str] | None,
     blocked_ids: set[uuid.UUID] | None = None,
+    key_cache: dict[uuid.UUID, set[str]] | None = None,
 ) -> uuid.UUID | None:
     candidate_keys = character_name_keys(name, aliases or [])
     if not candidate_keys:
@@ -943,18 +975,63 @@ def _find_character_id_in_cache(
     for char in chars:
         if blocked_ids and char.id in blocked_ids:
             continue
-        if candidate_keys & character_name_keys(char.name, char.aliases or []):
+        char_keys = _character_keys_for_cache(char, key_cache)
+        if candidate_keys & char_keys:
             return char.id
         if names_equivalent(name, aliases or [], char.name, char.aliases or []):
             return char.id
     return None
 
 
-def _find_character_in_cache(chars: list[Character], name: str) -> Character | None:
-    match_id = _find_character_id_in_cache(chars, name, [])
+def _find_character_in_cache(
+    chars: list[Character],
+    name: str,
+    *,
+    key_cache: dict[uuid.UUID, set[str]] | None = None,
+) -> Character | None:
+    match_id = _find_character_id_in_cache(chars, name, [], key_cache=key_cache)
     if not match_id:
         return None
     return next((char for char in chars if char.id == match_id), None)
+
+
+def _find_character_by_id(chars: list[Character], character_id: uuid.UUID) -> Character | None:
+    return next((char for char in chars if char.id == character_id), None)
+
+
+def _apply_character_update(char: Character, updated: dict[str, Any]) -> None:
+    for key, value in updated.items():
+        setattr(char, key, value)
+
+
+def _merge_alias_in_memory(char: Character | None, alias: str | None) -> None:
+    if char is None or not is_valid_alias(alias):
+        return
+    cleaned_alias = str(alias or "").strip()
+    if not cleaned_alias or cleaned_alias.casefold() == str(char.name or "").strip().casefold():
+        return
+    aliases = list(char.aliases or [])
+    if any(existing.casefold() == cleaned_alias.casefold() for existing in aliases):
+        return
+    char.aliases = [*aliases, cleaned_alias]
+
+
+def _character_keys_for_cache(
+    char: Character,
+    key_cache: dict[uuid.UUID, set[str]] | None = None,
+) -> set[str]:
+    if key_cache is not None and char.id in key_cache:
+        return key_cache[char.id]
+    keys = character_name_keys(char.name, char.aliases or [])
+    if key_cache is not None and char.id is not None:
+        key_cache[char.id] = keys
+    return keys
+
+
+def _refresh_character_key_cache(key_cache: dict[uuid.UUID, set[str]], char: Character) -> None:
+    if char.id is None:
+        return
+    key_cache[char.id] = character_name_keys(char.name, char.aliases or [])
 
 
 def _entity_evidence(entity: dict) -> dict:
@@ -962,7 +1039,12 @@ def _entity_evidence(entity: dict) -> dict:
     return evidence if isinstance(evidence, dict) else {}
 
 
-def _blocked_character_ids(chars: list[Character], entity: dict) -> set[uuid.UUID]:
+def _blocked_character_ids(
+    chars: list[Character],
+    entity: dict,
+    *,
+    key_cache: dict[uuid.UUID, set[str]] | None = None,
+) -> set[uuid.UUID]:
     blocked_ids: set[uuid.UUID] = set()
     blocked_names = [name for name in (entity.get("anti_merge_names") or []) if isinstance(name, str) and name.strip()]
     if not blocked_names:
@@ -971,7 +1053,8 @@ def _blocked_character_ids(chars: list[Character], entity: dict) -> set[uuid.UUI
     for blocked_name in blocked_names:
         blocked_keys = character_name_keys(blocked_name, [])
         for char in chars:
-            if blocked_keys & character_name_keys(char.name, char.aliases or []):
+            char_keys = _character_keys_for_cache(char, key_cache)
+            if blocked_keys & char_keys:
                 blocked_ids.add(char.id)
                 continue
             if names_equivalent(blocked_name, [], char.name, char.aliases or []):
@@ -1086,6 +1169,50 @@ def _summarize_rejected_character_reports(entries: list[dict[str, Any]]) -> list
     return entries[:40]
 
 
+def _first_chapter_lookup_candidates(name: str | None, aliases: list[str] | None) -> list[str]:
+    candidates = [str(name or "").strip(), *[str(alias).strip() for alias in aliases or []]]
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for candidate in candidates:
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        ordered.append(candidate)
+    return ordered
+
+
+def _character_dedup_embedding_text(name: str, traits: dict[str, Any] | None) -> str:
+    parts = [f"Character: {name}"]
+    for key in ["hair", "eyes", "build", "age", "face", "distinguishing"]:
+        trait_value = (traits or {}).get(key, {})
+        if isinstance(trait_value, dict) and trait_value.get("value"):
+            parts.append(f"{key}: {trait_value['value']}")
+        elif isinstance(trait_value, str) and trait_value:
+            parts.append(f"{key}: {trait_value}")
+    return ". ".join(parts)
+
+
+async def _embed_new_character_candidates(
+    pending_new_entities: list[tuple[dict[str, Any], set[uuid.UUID]]],
+    *,
+    user_id: uuid.UUID,
+    book_id: uuid.UUID,
+) -> list[list[float]]:
+    if not pending_new_entities:
+        return []
+
+    embedding_inputs = [
+        _character_dedup_embedding_text(str(entity.get("name") or ""), entity.get("traits") if isinstance(entity.get("traits"), dict) else {})
+        for entity, _blocked_ids in pending_new_entities
+    ]
+    return await embed_batch(
+        embedding_inputs,
+        user_id=user_id,
+        book_id=book_id,
+        feature="character_embedding",
+    )
+
+
 async def _book_processing_complete(db, book_id: uuid.UUID) -> bool:
     remaining_count: int | None = await db.scalar(
         select(func.count()).select_from(Chapter).where(Chapter.book_id == book_id, Chapter.processed.is_(False))
@@ -1094,7 +1221,7 @@ async def _book_processing_complete(db, book_id: uuid.UUID) -> bool:
 
 
 async def _should_consolidate_after_chapter(db, book: Book, chapter_number: int) -> bool:
-    if chapter_number <= settings.LAZY_PROCESS_INITIAL_CHAPTERS:
+    if settings.LAZY_PROCESS_INITIAL_CHAPTERS > 0 and chapter_number == settings.LAZY_PROCESS_INITIAL_CHAPTERS:
         return True
     return await _book_processing_complete(db, book.id)
 

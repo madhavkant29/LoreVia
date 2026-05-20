@@ -39,6 +39,7 @@ export function UploadModal({
 }) {
   const [title, setTitle] = useState("")
   const [author, setAuthor] = useState("")
+  const [authorManuallyEdited, setAuthorManuallyEdited] = useState(false)
   const [mode, setMode] = useState<BookMode>(initialMode)
   const [selectedTags, setSelectedTags] = useState<string[]>([])
   const [customTag, setCustomTag] = useState("")
@@ -120,6 +121,14 @@ export function UploadModal({
     .filter((tag) => (shouldShowTagSuggestions ? tagSimilarity(tag, trimmedCustomTag) >= 0.34 : false))
     .sort((a, b) => tagSimilarity(b, trimmedCustomTag) - tagSimilarity(a, trimmedCustomTag))
     .slice(0, TAG_SUGGESTION_LIMIT)
+  const existingAuthorBooks = books.filter((book) => book.mode === "author" && !book.hidden_at)
+  const selectedExistingBook = existingAuthorBooks.find((book) => book.id === existingBookId) ?? null
+  const isManagingExisting = mode === "author" && !!existingBookId
+  const effectiveWorkType = isManagingExisting ? (selectedExistingBook?.work_type ?? workType) : workType
+  const needsUsername = mode === "author" && !user?.username
+  const hasChapterText = chapterText.trim().length > 0
+  const hasChapterFiles = files.length > 0
+  const canSubmitExistingImport = chapterSource === "paste" ? hasChapterText : hasChapterFiles
 
   useEffect(() => {
     setMode(initialMode)
@@ -169,13 +178,13 @@ export function UploadModal({
     }
   }, [onClose, processingBook, processingBookId])
 
-  // Auto-set author to email when in author mode
+  // Default new author-mode uploads to the current public username.
   useEffect(() => {
-    if (mode === "author" && !author) {
-      const preferred = user?.username || user?.email
+    if (mode === "author" && !isManagingExisting && !authorManuallyEdited && !author) {
+      const preferred = user?.username
       if (preferred) setAuthor(preferred)
     }
-  }, [mode, user, author])
+  }, [author, authorManuallyEdited, isManagingExisting, mode, user?.username])
 
   async function handleSetUsername() {
     if (!usernameInput.trim()) return
@@ -213,15 +222,6 @@ export function UploadModal({
         : [...current, seriesId]
     )
   }
-
-  const existingAuthorBooks = books.filter((book) => book.mode === "author" && !book.hidden_at)
-  const selectedExistingBook = existingAuthorBooks.find((book) => book.id === existingBookId) ?? null
-  const isManagingExisting = mode === "author" && !!existingBookId
-  const effectiveWorkType = isManagingExisting ? (selectedExistingBook?.work_type ?? workType) : workType
-  const needsUsername = mode === "author" && !user?.username
-  const hasChapterText = chapterText.trim().length > 0
-  const hasChapterFiles = files.length > 0
-  const canSubmitExistingImport = chapterSource === "paste" ? hasChapterText : hasChapterFiles
 
   useEffect(() => {
     if (!isManagingExisting || replaceExisting || chapterNumberDirty) return
@@ -483,9 +483,16 @@ export function UploadModal({
             <div className="space-y-2">
               <input
                 type="text"
-                placeholder={willUseBlankCoverFallback ? "Author (shown on blank cover if no cover is found)" : "Author (optional)"}
+                placeholder={mode === "author"
+                  ? "Manuscript author or pen name"
+                  : willUseBlankCoverFallback
+                    ? "Author (shown on blank cover if no cover is found)"
+                    : "Author (optional)"}
                 value={author}
-                onChange={e => setAuthor(e.target.value)}
+                onChange={(e) => {
+                  setAuthor(e.target.value)
+                  setAuthorManuallyEdited(true)
+                }}
                 className={`w-full rounded-lg border px-3 py-2.5 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
                   isDark
                     ? "border-white/10 bg-white/5 text-slate-100 placeholder:text-slate-500"
@@ -495,6 +502,11 @@ export function UploadModal({
               {willUseBlankCoverFallback ? (
                 <p className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                   If LoreVia cannot find a cover, it will generate a blank cover page using the title and author.
+                </p>
+              ) : null}
+              {mode === "author" ? (
+                <p className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                  This name appears on this manuscript only. It defaults to your username, but you can change it here if this book should use a different pen name or byline.
                 </p>
               ) : null}
             </div>
@@ -593,7 +605,7 @@ export function UploadModal({
             ) : null}
             {mode === "author" && !user?.username ? (
               <div className={`mt-4 rounded-xl border p-4 ${isDark ? "border-amber-500/30 bg-amber-500/10" : "border-amber-300 bg-amber-50"}`}>
-                <p className={`text-sm font-medium mb-2 ${isDark ? "text-amber-200" : "text-amber-800"}`}>Set your username to use Author mode</p>
+                <p className={`text-sm font-medium mb-2 ${isDark ? "text-amber-200" : "text-amber-800"}`}>Select a username to use Author mode</p>
                 <div className="flex gap-2">
                   <input
                     type="text"
@@ -614,7 +626,9 @@ export function UploadModal({
                   </button>
                 </div>
                 {usernameError && <p className="mt-2 text-xs text-red-400">{usernameError}</p>}
-                <p className={`mt-2 text-xs ${isDark ? "text-amber-300/70" : "text-amber-600"}`}>Username can only be set once and cannot be changed later.</p>
+                <p className={`mt-2 text-xs ${isDark ? "text-amber-300/70" : "text-amber-600"}`}>
+                  Select the username you want to appear publicly on LoreVia. New author uploads default to this username, but each manuscript can still use a different author or pen name.
+                </p>
               </div>
             ) : null}
             {mode === "author" && existingAuthorBooks.length > 0 ? (

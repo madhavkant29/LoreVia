@@ -29,7 +29,12 @@ from app.utils.plot_thread_utils import (
     build_plot_thread_payload,
     normalize_plot_thread_status,
 )
-from app.utils.tag_utils import ENTITY_TYPE_PLOT_THREAD, get_custom_tags_for_entity, list_custom_tags_for_entity_ids
+from app.utils.tag_utils import (
+    ENTITY_TYPE_CHAPTER,
+    ENTITY_TYPE_PLOT_THREAD,
+    get_custom_tags_for_entity,
+    list_custom_tags_for_entity_ids,
+)
 from app.utils.billing_utils import has_paid_reading_access
 from app.utils.character_utils import get_graph_visibility_override
 from app.utils.queue_utils import queue_for_user
@@ -37,7 +42,13 @@ from app.engine.character.profile_builder import build_description
 from app.models.book import Book, Chapter, ChapterMedia
 from app.models.character import Character
 from app.models.intelligence import ChapterSummary, PlotThread
-from app.utils.book_utils import deserialize_manuscript_content
+from app.models.progress import ReadingProgress
+from app.services.summary_service import get_or_generate_summary
+from app.utils.book_utils import (
+    collaboration_allows_chapter,
+    deserialize_manuscript_content,
+    normalize_collaboration_scope,
+)
 from app.utils.ingestion_utils import ANALYSIS_INFLIGHT_TTL_SECONDS, build_analysis_chapter_state
 from app.utils.ingestion_utils import apply_chapter_number_strategy
 
@@ -534,6 +545,209 @@ async def timeline_visible_chapter_set(
     # Keep the timeline cumulative to the furthest visible chapter so
     # ongoing arcs still appear even when explicit read progress is sparse.
     return set(range(1, max(read_set) + 1))
+
+
+async def build_reading_progress_payload(
+    db: AsyncSession,
+    *,
+    book: Book,
+    current_user,
+    collaborator=None,
+) -> dict[str, Any]:
+    scope = normalize_collaboration_scope(collaborator.scope) if collaborator else None
+    progress = (
+        await db.execute(
+            select(ReadingProgress).where(
+                ReadingProgress.user_id == current_user.id,
+                ReadingProgress.book_id == book.id,
+            )
+        )
+    ).scalar()
+
+    total = book.total_chapters or 0
+    current_chapter = progress.current_chapter if progress else 1
+    if scope:
+        start = scope.get("chapter_start") or 1
+        end = scope.get("chapter_end") or total
+        total = max(0, min(end, total) - start + 1)
+        if not collaboration_allows_chapter(collaborator, current_chapter):
+            current_chapter = start
+
+    chapters_read = sorted(set((progress.chapters_read or []) if progress else []))
+    chapters_read = [chapter for chapter in chapters_read if collaboration_allows_chapter(collaborator, chapter)]
+    if not chapters_read and progress and progress.current_chapter:
+        chapters_read = [
+            chapter
+            for chapter in range(1, progress.current_chapter + 1)
+            if collaboration_allows_chapter(collaborator, chapter)
+        ]
+
+    chapters_read_count = len(chapters_read)
+    percent_complete = round((chapters_read_count / total) * 100, 1) if total else 0.0
+    return {
+        "current_chapter": current_chapter,
+        "scroll_pct": progress.scroll_pct if progress else 0.0,
+        "chapters_read_count": chapters_read_count,
+        "percent_complete": percent_complete,
+        "chapters_left": max(total - chapters_read_count, 0) if total else 0,
+    }
+
+
+async def build_chapter_list_payload(
+    db: AsyncSession,
+    *,
+    book: Book,
+    current_user,
+    collaborator=None,
+) -> dict[str, Any]:
+    collaboration_scope = normalize_collaboration_scope(collaborator.scope) if collaborator else None
+    progress = (
+        await db.execute(
+            select(ReadingProgress).where(
+                ReadingProgress.user_id == current_user.id,
+                ReadingProgress.book_id == book.id,
+            )
+        )
+    ).scalar()
+    read_upto = progress.current_chapter if progress else 0
+    read_set = set(progress.chapters_read or []) if progress else set()
+
+    chapters_result = await db.execute(
+        select(Chapter).where(Chapter.book_id == book.id).order_by(Chapter.number)
+    )
+    chapters = [
+        chapter for chapter in chapters_result.scalars().all()
+        if collaboration_allows_chapter(collaborator, chapter.number)
+    ]
+    chapter_start = collaboration_scope.get("chapter_start") if collaboration_scope else None
+    chapter_end = collaboration_scope.get("chapter_end") if collaboration_scope else None
+    if not chapters and book.total_chapters:
+        first = chapter_start or 1
+        last = chapter_end or book.total_chapters
+        return {
+            "read_upto": read_upto,
+            "current_chapter": read_upto,
+            "chapters": [
+                {
+                    "number": number,
+                    "title": f"Chapter {number}",
+                    "processed": False,
+                    "intelligence_available": True,
+                    "read": number in read_set,
+                    "analysis_status": None,
+                    "tags": [],
+                }
+                for number in range(first, min(last, book.total_chapters) + 1)
+            ],
+        }
+
+    intelligence_map = await chapter_intelligence_map(db, book, current_user)
+    if book.mode == "author":
+        author_visible = [chapter for chapter, available in intelligence_map.items() if available]
+        if author_visible:
+            read_upto = max(author_visible)
+
+    tags_by_chapter = await list_custom_tags_for_entity_ids(
+        db,
+        entity_type=ENTITY_TYPE_CHAPTER,
+        entity_ids=[chapter.id for chapter in chapters],
+        book_id=book.id,
+    )
+    return {
+        "read_upto": read_upto,
+        "current_chapter": read_upto,
+        "chapters": [
+            {
+                "number": chapter.number,
+                "title": chapter.title,
+                "processed": chapter.processed,
+                "intelligence_available": intelligence_map.get(chapter.number, True),
+                "read": book.mode == "author" or chapter.number in read_set,
+                "analysis_status": chapter_analysis_status(chapter),
+                "tags": tags_by_chapter.get(chapter.id, []),
+            }
+            for chapter in chapters
+        ],
+    }
+
+
+async def build_summary_collection_payload(
+    db: AsyncSession,
+    *,
+    book: Book,
+    current_user,
+    collaborator=None,
+) -> dict[str, Any]:
+    progress = (
+        await db.execute(
+            select(ReadingProgress).where(
+                ReadingProgress.user_id == current_user.id,
+                ReadingProgress.book_id == book.id,
+            )
+        )
+    ).scalar()
+    read_upto = progress.current_chapter if progress else 0
+    available_set = await summary_visible_chapter_set(db, book, current_user)
+    if collaborator is not None:
+        available_set = {chapter for chapter in available_set if collaboration_allows_chapter(collaborator, chapter)}
+
+    if not available_set:
+        return {"read_upto": 0, "summaries": []}
+
+    if book.mode == "author":
+        read_upto = max(available_set)
+
+    chapters = (
+        await db.execute(
+            select(Chapter)
+            .where(Chapter.book_id == book.id, Chapter.number.in_(sorted(available_set)))
+            .order_by(Chapter.number)
+        )
+    ).scalars().all()
+
+    summary_rows = (
+        await db.execute(
+            select(ChapterSummary.chapter_id, ChapterSummary.content, ChapterSummary.key_events)
+            .join(Chapter, Chapter.id == ChapterSummary.chapter_id)
+            .where(Chapter.book_id == book.id, Chapter.number.in_(sorted(available_set)), ChapterSummary.mode == "short")
+        )
+    ).all()
+    summary_by_chapter_id = {
+        str(row[0]): {"content": row[1], "key_events": row[2] or []}
+        for row in summary_rows
+    }
+
+    for chapter in chapters:
+        chapter_key = str(chapter.id)
+        if chapter_key in summary_by_chapter_id:
+            continue
+        await queue_analysis_if_missing(db, chapter, current_user)
+        summary_data = await get_or_generate_summary(db, book.id, chapter.number, "short")
+        if summary_data and summary_data.get("status") == "ready":
+            summary_by_chapter_id[chapter_key] = {
+                "content": summary_data["content"],
+                "key_events": summary_data.get("key_events") or [],
+            }
+
+    return {
+        "read_upto": read_upto,
+        "summaries": [
+            {
+                "chapter_number": chapter.number,
+                "chapter_title": chapter.title,
+                "read": book.mode == "author" or chapter.number <= read_upto,
+                "available": str(chapter.id) in summary_by_chapter_id,
+                "status": (
+                    "ready"
+                    if str(chapter.id) in summary_by_chapter_id
+                    else str((chapter_analysis_status(chapter) or {}).get("status") or "pending")
+                ),
+                "content": summary_by_chapter_id.get(str(chapter.id), {}).get("content"),
+                "key_events": summary_by_chapter_id.get(str(chapter.id), {}).get("key_events", []),
+            }
+            for chapter in chapters
+        ],
+    }
 
 
 async def queue_analysis_if_missing(db: AsyncSession, chapter: Chapter, current_user=None) -> None:

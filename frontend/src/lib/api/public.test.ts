@@ -46,7 +46,25 @@ describe("public api", () => {
   it("loads public books through the public client", async () => {
     await publicApi.listBooks()
 
-    expect(getMock).toHaveBeenCalledWith("/public/books")
+    expect(getMock).toHaveBeenCalledWith("/public/books", { params: {} })
+  })
+
+  it("passes creator-upload filters and search params for public books", async () => {
+    await publicApi.listBooks({ catalog: "creator_uploads", search: " moon harbor " })
+
+    expect(getMock).toHaveBeenCalledWith("/public/books", {
+      params: { catalog: "creator_uploads", search: "moon harbor" },
+    })
+  })
+
+  it("loads creator uploads and public upload analytics", async () => {
+    await publicApi.listCreatorUploads({ search: " ember " })
+    await publicApi.getUploadsAnalytics()
+
+    expect(getMock).toHaveBeenCalledWith("/public/uploads", {
+      params: { search: "ember" },
+    })
+    expect(getMock).toHaveBeenCalledWith("/public/analytics")
   })
 
   it("loads public book details and chapters", async () => {
@@ -55,6 +73,28 @@ describe("public api", () => {
 
     expect(getMock).toHaveBeenCalledWith("/public/books/book-1")
     expect(getMock).toHaveBeenCalledWith("/public/books/book-1/chapter/2")
+  })
+
+  it("tracks book analytics views", async () => {
+    await publicApi.trackView("book-1", { eventType: "chapter_view", chapterNumber: 2 })
+
+    expect(postMock).toHaveBeenCalledWith("/public/books/book-1/analytics/view", {
+      event_type: "chapter_view",
+      chapter_number: 2,
+    })
+  })
+
+  it("tracks public book and chapter views", async () => {
+    await publicApi.trackView("book-1", { eventType: "book_view" })
+    await publicApi.trackView("book-1", { eventType: "chapter_view", chapterNumber: 3 })
+
+    expect(postMock).toHaveBeenCalledWith("/public/books/book-1/analytics/view", {
+      event_type: "book_view",
+    })
+    expect(postMock).toHaveBeenCalledWith("/public/books/book-1/analytics/view", {
+      event_type: "chapter_view",
+      chapter_number: 3,
+    })
   })
 
   it("loads a forum post detail", async () => {

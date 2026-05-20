@@ -2,7 +2,7 @@ import asyncio
 import uuid
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,6 +25,8 @@ from app.models.book import Book, BookForumPost, Chapter
 from app.models.user import User
 from app.parsers.chunker import count_tokens
 from app.schemas.public import (
+    PublicBookAnalyticsOut,
+    PublicBookAnalyticsViewBody,
     PublicBookCreateOut,
     PublicBookDetailOut,
     PublicBookListOut,
@@ -45,6 +47,7 @@ from app.schemas.public import (
     PublicForumPostListOut,
     PublicForumPostOut,
     PublicForumPostUpdateBody,
+    PublicUploadsOverviewOut,
     PublicUserProfileOut,
 )
 from app.utils.book_utils import deserialize_manuscript_content
@@ -61,6 +64,10 @@ from app.utils.public_utils import (
     PUBLIC_SHARE_STATUS_APPROVED,
     PUBLIC_SHARE_STATUS_NOT_REQUESTED,
     PUBLIC_SHARE_STATUS_PENDING,
+    build_public_book_out,
+    build_public_book_analytics,
+    build_public_book_analytics_map,
+    build_public_uploads_overview,
     USER_PUBLIC_SHARE_SOURCE_KIND,
     can_owner_or_admin_view_hidden_book,
     can_view_public_book,
@@ -79,11 +86,13 @@ from app.utils.public_utils import (
     is_public_demo_book,
     is_user_public_share_book,
     list_author_public_forum_posts,
+    list_visible_creator_public_book_outs,
     list_public_forum_interests_for_author,
     list_public_forum_comments,
     list_public_forum_posts,
     normalize_public_slug,
     public_visibility_notice,
+    record_public_book_analytics_event,
     react_to_public_forum_comment,
     resolve_optional_user,
     update_public_forum_post,
@@ -95,33 +104,14 @@ def _public_book_payload(
     author_username: str | None,
     *,
     active_forum_post_id: str | None = None,
+    analytics: PublicBookAnalyticsOut | None = None,
 ) -> dict[str, object]:
-    creator_display_name = author_username or (book.author.strip() if isinstance(book.author, str) and book.author.strip() else None)
-    return {
-        "id": str(book.id),
-        "public_kind": PUBLIC_DEMO_SOURCE_KIND if is_public_demo_book(book) else USER_PUBLIC_SHARE_SOURCE_KIND,
-        "public_slug": getattr(book, "public_slug", None),
-        "title": book.title,
-        "author": book.author,
-        "author_username": author_username,
-        "creator_display_name": creator_display_name,
-        "genre": book.genre,
-        "description": book.public_description,
-        "format": book.format,
-        "work_type": book.work_type,
-        "status": book.status,
-        "public_status": getattr(book, "public_status", PUBLIC_STATUS_PUBLISHED),
-        "moderation_status": getattr(book, "moderation_status", "clean"),
-        "content_source_type": getattr(book, "content_source_type", "user_original"),
-        "source_title": getattr(book, "source_title", None),
-        "source_author": getattr(book, "source_author", None),
-        "source_public_domain_note": getattr(book, "source_public_domain_note", None),
-        "source_url": getattr(book, "source_url", None),
-        "total_chapters": book.total_chapters,
-        "copyright_warning": book.copyright_warning,
-        "active_forum_post_id": active_forum_post_id,
-        "created_at": book.created_at,
-    }
+    return build_public_book_out(
+        book,
+        author_username=author_username,
+        active_forum_post_id=active_forum_post_id,
+        analytics=analytics,
+    ).model_dump(mode="json")
 
 
 def _is_catalog_visible_public_book(book: Book | None) -> bool:
@@ -334,6 +324,7 @@ async def get_public_user_profile_endpoint(
 @router.get("/books", response_model=list[PublicBookOut])
 async def list_public_books(
     content_source_type: str | None = None,
+    catalog: str | None = None,
     search: str | None = None,
     page: int = 1,
     limit: int = 24,
@@ -341,29 +332,40 @@ async def list_public_books(
 ):
     ensure_public_mode_enabled()
     normalized_source = str(content_source_type or "").strip().lower()
+    normalized_catalog = str(catalog or "").strip().lower()
     normalized_search = " ".join((search or "").split()).strip().lower()
-    use_cache = not normalized_source and not normalized_search and page == 1 and limit == 24
+    creator_only = normalized_catalog in {"creator_uploads", "creator-only", "creator_only"}
+    use_cache = not creator_only and not normalized_source and not normalized_search and page == 1 and limit == 24
     if use_cache:
         cached = await cache_get(key_public_books())
         if cached:
             return cached
-    rows = (await db.execute(
-        select(Book, User.username)
-        .join(User, User.id == Book.user_id)
-        .where(
-            Book.is_public.is_(True),
-            Book.hidden_at.is_(None),
-            Book.archived_at.is_(None),
-            Book.status.in_(["ready", "processing", "pending"]),
-        )
-        .order_by(Book.created_at.desc())
-    )).all()
-    visible_rows = [(book, username) for book, username in rows if _is_catalog_visible_public_book(book)]
-    active_forum_post_ids = await _active_forum_post_map(db, book_ids=[book.id for book, _username in visible_rows])
-    items = [
-        _public_book_payload(book, username, active_forum_post_id=active_forum_post_ids.get(str(book.id)))
-        for book, username in visible_rows
-    ]
+    if creator_only:
+        items = [book.model_dump(mode="json") for book in await list_visible_creator_public_book_outs(db)]
+    else:
+        rows = (await db.execute(
+            select(Book, User.username)
+            .join(User, User.id == Book.user_id)
+            .where(
+                Book.is_public.is_(True),
+                Book.hidden_at.is_(None),
+                Book.archived_at.is_(None),
+                Book.status.in_(["ready", "processing", "pending"]),
+            )
+            .order_by(Book.created_at.desc())
+        )).all()
+        visible_rows = [(book, username) for book, username in rows if _is_catalog_visible_public_book(book)]
+        active_forum_post_ids = await _active_forum_post_map(db, book_ids=[book.id for book, _username in visible_rows])
+        analytics_map = await build_public_book_analytics_map(db, book_ids=[book.id for book, _username in visible_rows])
+        items = [
+            _public_book_payload(
+                book,
+                username,
+                active_forum_post_id=active_forum_post_ids.get(str(book.id)),
+                analytics=analytics_map.get(book.id),
+            )
+            for book, username in visible_rows
+        ]
     if normalized_source:
         items = [item for item in items if str(item.get("content_source_type") or "").strip().lower() == normalized_source]
     if normalized_search:
@@ -381,6 +383,30 @@ async def list_public_books(
     return payload
 
 
+@router.get("/uploads", response_model=list[PublicBookOut])
+async def list_creator_public_uploads(
+    search: str | None = None,
+    page: int = 1,
+    limit: int = 24,
+    db: AsyncSession = Depends(get_db),
+):
+    return await list_public_books(
+        catalog="creator_uploads",
+        search=search,
+        page=page,
+        limit=limit,
+        db=db,
+    )
+
+
+@router.get("/analytics", response_model=PublicUploadsOverviewOut)
+async def get_public_uploads_analytics(
+    db: AsyncSession = Depends(get_db),
+):
+    ensure_public_mode_enabled()
+    return await build_public_uploads_overview(db)
+
+
 @router.get("/books/{book_slug}", response_model=PublicBookDetailOut)
 async def get_public_book(
     book_slug: str,
@@ -393,10 +419,12 @@ async def get_public_book(
     if not can_view_public_book(book) and not can_owner_or_admin_view_hidden_book(viewer_user, book):
         raise HTTPException(404, "Public book not found")
     should_cache = is_public_demo_book(book)
+    analytics = await build_public_book_analytics(db, book=book)
 
     if should_cache and can_view_public_book(book):
         cached = await cache_get(key_public_book_detail(str(book.id)))
         if cached:
+            cached["analytics"] = analytics.model_dump(mode="json")
             return cached
 
     author_user = await db.get(User, book.user_id)
@@ -412,16 +440,39 @@ async def get_public_book(
             book,
             author_user.username if author_user else None,
             active_forum_post_id=(await _active_forum_post_map(db, book_ids=[book.id])).get(str(book.id)),
+            analytics=analytics,
         ),
         "chapters": [
             {"number": number, "title": title, "description": description}
             for number, title, description in chapters
         ],
         "visibility_notice": None if can_view_public_book(book) else public_visibility_notice(book),
+        "analytics": analytics.model_dump(mode="json"),
     }
     if should_cache and can_view_public_book(book):
         await cache_set(key_public_book_detail(str(book.id)), payload, 300)
     return payload
+
+
+@router.post("/books/{book_slug}/analytics/view", status_code=204)
+async def record_public_book_view(
+    book_slug: str,
+    body: PublicBookAnalyticsViewBody,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    ensure_public_mode_enabled()
+    book = await _get_public_book_by_slug_or_id(db, book_slug)
+    if not can_view_public_book(book):
+        raise HTTPException(404, "Public book not found")
+    await record_public_book_analytics_event(
+        db,
+        book=book,
+        request=request,
+        event_type=body.event_type,
+        chapter_number=body.chapter_number,
+    )
+    await db.commit()
 
 
 @router.get("/books/{book_slug}/chapter/{chapter_num}", response_model=PublicChapterOut)

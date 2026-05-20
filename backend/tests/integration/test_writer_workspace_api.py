@@ -4,6 +4,8 @@ import pytest
 from sqlalchemy import select
 
 from app.models.book import Book, BookCollaborator, Chapter, NovelScene
+from app.models.intelligence import ChapterSummary
+from app.models.progress import ReadingProgress
 from app.utils.book_utils import deserialize_manuscript_content
 from app.core.storage import download_book
 
@@ -61,6 +63,69 @@ async def test_writer_workspace_goal_calendar_round_trip(client, db):
     assert body["goal_calendar"][0]["quota_value"] == 2500
     assert body["goal_calendar"][0]["quota_unit"] == "words"
     assert body["goal_calendar"][0]["completed"] is False
+
+
+@pytest.mark.asyncio
+async def test_book_overview_returns_critical_reader_payload(client, db):
+    headers, user_id = await _register_user(client, f"overview-{uuid.uuid4().hex[:8]}@lorevia.app")
+    book = Book(
+        user_id=user_id,
+        title="Overview Book",
+        format="txt",
+        s3_key="overview.txt",
+        status="ready",
+        mode="reader",
+        total_chapters=2,
+    )
+    db.add(book)
+    await db.flush()
+
+    chapter_one = Chapter(
+        book_id=book.id,
+        number=1,
+        title="Arrival",
+        s3_key="chapters/overview-1.txt",
+        processed=True,
+    )
+    chapter_two = Chapter(
+        book_id=book.id,
+        number=2,
+        title="Aftermath",
+        s3_key="chapters/overview-2.txt",
+        processed=False,
+    )
+    db.add_all([chapter_one, chapter_two])
+    db.add(
+        ChapterSummary(
+            chapter_id=chapter_one.id,
+            mode="short",
+            content="Nora reaches the gate.",
+            key_events=[{"event": "Nora reaches the gate.", "importance": 1}],
+        )
+    )
+    db.add(
+        ReadingProgress(
+            user_id=user_id,
+            book_id=book.id,
+            current_chapter=1,
+            scroll_pct=0.5,
+            chapters_read=[1],
+        )
+    )
+    await db.commit()
+
+    response = await client.get(f"/api/v1/books/{book.id}/overview", headers=headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["book"]["id"] == str(book.id)
+    assert payload["progress"]["current_chapter"] == 1
+    assert payload["progress"]["chapters_read_count"] == 1
+    assert payload["chapter_list"]["current_chapter"] == 1
+    assert [chapter["number"] for chapter in payload["chapter_list"]["chapters"]] == [1, 2]
+    assert payload["summary_collection"]["read_upto"] == 1
+    assert payload["summary_collection"]["summaries"][0]["chapter_number"] == 1
+    assert payload["summary_collection"]["summaries"][0]["content"] == "Nora reaches the gate."
 
 
 @pytest.mark.asyncio

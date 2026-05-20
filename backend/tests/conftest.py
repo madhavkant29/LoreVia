@@ -1,6 +1,7 @@
 import asyncio
 import sys
 import warnings
+import weakref
 
 import pytest
 import pytest_asyncio
@@ -132,8 +133,11 @@ def mock_email_delivery(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def mock_celery_tasks(monkeypatch):
+def mock_celery_tasks(monkeypatch, request):
     """Mock Celery tasks to avoid worker dependency in all tests."""
+    if request.node.module.__name__.endswith("test_extraction_tasks"):
+        return
+
     class _FakeTask:
         @staticmethod
         def apply_async(*args, **kwargs):
@@ -148,9 +152,12 @@ def mock_celery_tasks(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def mock_redis(monkeypatch):
-    """Mock Redis to avoid event loop issues with global _redis connection."""
+def mock_redis(monkeypatch, request):
+    """Mock Redis by default while allowing focused runtime tests to opt out."""
     from app.core import redis as redis_module
+
+    if request.node.module.__name__.endswith("test_redis_runtime"):
+        return
 
     class FakeRedis:
         def __init__(self):
@@ -273,10 +280,11 @@ def mock_redis(monkeypatch):
         async def aclose(self):
             pass
 
-    monkeypatch.setattr(redis_module, "_redis", FakeRedis())
+    fake_redis = FakeRedis()
+    monkeypatch.setattr(redis_module, "_redis_clients", weakref.WeakKeyDictionary(), raising=False)
 
     async def fake_get_redis():
-        return redis_module._redis
+        return fake_redis
 
     monkeypatch.setattr(redis_module, "get_redis", fake_get_redis)
 

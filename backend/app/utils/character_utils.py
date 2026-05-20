@@ -9,6 +9,7 @@ import math
 import re
 import uuid
 from collections import Counter, defaultdict
+from collections.abc import Hashable, Mapping, Sequence
 from difflib import SequenceMatcher
 from typing import Any, cast
 
@@ -802,6 +803,50 @@ async def find_earliest_character_mention_chapter(
         if any(_find_name_occurrences(text or "", candidate) > 0 for candidate in candidates):
             return int(chapter_number)
     return None
+
+
+async def find_earliest_character_mention_chapters(
+    db: AsyncSession,
+    *,
+    book_id: uuid.UUID,
+    candidates_by_key: Mapping[Hashable, Sequence[str]],
+    upto_chapter: int | None = None,
+) -> dict[Hashable, int]:
+    normalized_candidates: dict[Hashable, list[str]] = {}
+    filters: list[Any] = []
+
+    for key, raw_candidates in candidates_by_key.items():
+        candidates = merge_list_values([], list(raw_candidates))
+        if not candidates:
+            continue
+        normalized_candidates[key] = candidates
+        filters.extend(BookChunk.text.ilike(f"%{candidate}%") for candidate in candidates if candidate)
+
+    if not normalized_candidates or not filters:
+        return {}
+
+    query = (
+        select(Chapter.number, BookChunk.text)
+        .join(BookChunk, BookChunk.chapter_id == Chapter.id)
+        .where(Chapter.book_id == book_id, or_(*filters))
+        .order_by(Chapter.number.asc(), BookChunk.chunk_index.asc())
+    )
+    if upto_chapter is not None:
+        query = query.where(Chapter.number <= upto_chapter)
+
+    rows = (await db.execute(query)).all()
+    resolved: dict[Hashable, int] = {}
+    unresolved = set(normalized_candidates)
+    for chapter_number, text in rows:
+        if not unresolved:
+            break
+        chapter_text = text or ""
+        for key in list(unresolved):
+            if any(_find_name_occurrences(chapter_text, candidate) > 0 for candidate in normalized_candidates[key]):
+                resolved[key] = int(chapter_number)
+                unresolved.remove(key)
+
+    return resolved
 
 
 async def backfill_character_first_chapters_for_chapter_text(

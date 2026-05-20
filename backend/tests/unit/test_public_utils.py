@@ -3,7 +3,7 @@ import uuid
 from types import SimpleNamespace
 
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 
 from app.utils.public_utils import (
     MAX_PUBLIC_FORUM_PAGE_SIZE,
@@ -13,6 +13,9 @@ from app.utils.public_utils import (
     PUBLIC_SHARE_STATUS_NOT_REQUESTED,
     PUBLIC_SHARE_STATUS_PENDING,
     _build_public_user_project_out,
+    build_public_author_analytics,
+    build_public_book_analytics_map,
+    build_public_visitor_fingerprint,
     create_public_forum_post,
     enforce_daily_general_forum_post_limit,
     ensure_public_authoring_access,
@@ -24,6 +27,7 @@ from app.utils.public_utils import (
     has_public_authoring_access,
     is_approved_user_public_share_book,
     get_public_forum_status,
+    record_public_book_analytics_event,
     update_public_forum_post,
     list_public_forum_comments,
     list_public_forum_posts,
@@ -33,6 +37,8 @@ from app.utils.public_utils import (
     reputation_trust_level,
 )
 from app.schemas.public import PublicForumPostCreateBody, PublicForumPostUpdateBody
+from app.models.book import Book, Chapter, PublicBookAnalyticsEvent
+from app.models.user import User
 
 
 class _Result:
@@ -166,6 +172,19 @@ def test_public_share_status_respects_pending_state():
     assert is_approved_user_public_share_book(book) is False
 
 
+def test_build_public_visitor_fingerprint_is_stable_for_same_request_inputs():
+    request = SimpleNamespace(
+        headers={"user-agent": "LoreViaBot/1.0", "x-forwarded-for": "203.0.113.10"},
+        client=SimpleNamespace(host="127.0.0.1"),
+    )
+
+    first = build_public_visitor_fingerprint(request)
+    second = build_public_visitor_fingerprint(request)
+
+    assert first is not None
+    assert first == second
+
+
 @pytest.mark.asyncio
 async def test_public_profile_activity_counts_only_reports_visible_public_presence():
     db = _FakeDB([
@@ -223,6 +242,191 @@ async def test_build_public_user_project_uses_true_public_book_when_no_visible_f
     assert project.source == "public_book"
     assert project.public_book_id == str(book.id)
     assert project.forum_post_id is None
+
+
+@pytest.mark.asyncio
+async def test_build_public_book_analytics_map_aggregates_counts_and_uniques(db):
+    author = User(email="analytics-author@lorevia.test", username="analytics-author", password_hash="hashed", tier="author")
+    db.add(author)
+    await db.flush()
+    book = Book(
+        user_id=author.id,
+        title="Analytics Book",
+        author="A. Writer",
+        genre="Fantasy",
+        format="manual",
+        work_type="novel",
+        s3_key="books/analytics-book.txt",
+        mode="author",
+        status="ready",
+        total_chapters=2,
+        is_public=True,
+        source_kind="user_public_share",
+        public_status="published",
+        public_visibility="public",
+        moderation_status="clean",
+        public_share_status="approved",
+    )
+    db.add(book)
+    await db.flush()
+    db.add_all([
+        PublicBookAnalyticsEvent(
+            book_id=book.id,
+            event_type="book_view",
+            visitor_fingerprint_hash="fp-1",
+            event_date=datetime.now(UTC).date(),
+        ),
+        PublicBookAnalyticsEvent(
+            book_id=book.id,
+            chapter_number=1,
+            event_type="chapter_view",
+            visitor_fingerprint_hash="fp-1",
+            event_date=datetime.now(UTC).date(),
+        ),
+        PublicBookAnalyticsEvent(
+            book_id=book.id,
+            chapter_number=2,
+            event_type="chapter_view",
+            visitor_fingerprint_hash="fp-2",
+            event_date=datetime.now(UTC).date(),
+        ),
+    ])
+    await db.commit()
+
+    analytics_map = await build_public_book_analytics_map(db, book_ids=[book.id])
+
+    assert analytics_map[book.id].book_view_count == 1
+    assert analytics_map[book.id].chapter_view_count == 2
+    assert analytics_map[book.id].unique_reader_count_30d == 2
+
+
+@pytest.mark.asyncio
+async def test_build_public_author_analytics_counts_only_visible_public_books(db):
+    author = User(email="writer-profile@lorevia.test", username="writer-profile", password_hash="hashed", tier="author")
+    db.add(author)
+    await db.flush()
+    visible_book = Book(
+        user_id=author.id,
+        title="Visible Sample",
+        author="Author",
+        genre="Fantasy",
+        format="manual",
+        work_type="novel",
+        s3_key="books/visible-sample.txt",
+        mode="author",
+        status="ready",
+        total_chapters=1,
+        is_public=True,
+        source_kind="user_public_share",
+        public_status="published",
+        public_visibility="public",
+        moderation_status="clean",
+        public_share_status="approved",
+    )
+    hidden_book = Book(
+        user_id=author.id,
+        title="Hidden Sample",
+        author="Author",
+        genre="Fantasy",
+        format="manual",
+        work_type="novel",
+        s3_key="books/hidden-sample.txt",
+        mode="author",
+        status="ready",
+        total_chapters=1,
+        is_public=True,
+        source_kind="user_public_share",
+        public_status="hidden",
+        public_visibility="private",
+        moderation_status="hidden",
+        public_share_status="approved",
+    )
+    db.add_all([visible_book, hidden_book])
+    await db.flush()
+    db.add(Chapter(book_id=visible_book.id, number=1, title="Start", s3_key="chapters/visible-1.txt", word_count=321, processed=True))
+    db.add_all([
+        PublicBookAnalyticsEvent(
+            book_id=visible_book.id,
+            event_type="book_view",
+            visitor_fingerprint_hash="fp-visible",
+            event_date=datetime.now(UTC).date(),
+        ),
+        PublicBookAnalyticsEvent(
+            book_id=hidden_book.id,
+            event_type="book_view",
+            visitor_fingerprint_hash="fp-hidden",
+            event_date=datetime.now(UTC).date(),
+        ),
+    ])
+    await db.commit()
+
+    public_books, analytics = await build_public_author_analytics(db, user_id=author.id)
+
+    assert len(public_books) == 1
+    assert public_books[0].id == str(visible_book.id)
+    assert analytics.total_public_books == 1
+    assert analytics.total_book_views == 1
+    assert analytics.total_unique_readers_30d == 1
+
+
+@pytest.mark.asyncio
+async def test_record_public_book_analytics_event_deduplicates_same_day_book_views(db):
+    author = User(email="analytics-dedupe@lorevia.test", username="analytics-dedupe", password_hash="hashed", tier="author")
+    db.add(author)
+    await db.flush()
+    book = Book(
+        user_id=author.id,
+        title="Deduped Analytics",
+        author="Author",
+        genre="Fantasy",
+        format="manual",
+        work_type="novel",
+        s3_key="books/deduped-analytics.txt",
+        mode="author",
+        status="ready",
+        total_chapters=1,
+        is_public=True,
+        source_kind="user_public_share",
+        public_status="published",
+        public_visibility="public",
+        moderation_status="clean",
+        public_share_status="approved",
+    )
+    db.add(book)
+    await db.flush()
+
+    request = Request(
+        {
+            "type": "http",
+            "headers": [
+                (b"user-agent", b"unit-test/1.0"),
+                (b"x-forwarded-for", b"203.0.113.20"),
+            ],
+            "client": ("127.0.0.1", 12345),
+        }
+    )
+
+    inserted_first = await record_public_book_analytics_event(
+        db,
+        book=book,
+        request=request,
+        event_type="book_view",
+    )
+    await db.commit()
+
+    inserted_second = await record_public_book_analytics_event(
+        db,
+        book=book,
+        request=request,
+        event_type="book_view",
+    )
+    await db.commit()
+
+    analytics_map = await build_public_book_analytics_map(db, book_ids=[book.id])
+
+    assert inserted_first is True
+    assert inserted_second is False
+    assert analytics_map[book.id].book_view_count == 1
 
 
 @pytest.mark.asyncio

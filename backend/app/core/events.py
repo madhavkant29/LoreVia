@@ -10,6 +10,8 @@ async def on_startup() -> None:
 
 async def on_shutdown() -> None:
     from app.core.database import engine
+    from app.core.redis import close_all_redis_clients
 
+    await close_all_redis_clients()
     await engine.dispose()
     log.info("LoreVia shut down")

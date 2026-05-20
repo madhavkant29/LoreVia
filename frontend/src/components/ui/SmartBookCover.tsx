@@ -35,6 +35,8 @@ export function SmartBookCover({
         <img
           src={imageSrc}
           alt={`${title} cover`}
+          loading="lazy"
+          decoding="async"
           className={cn("absolute inset-0 z-10 h-full w-full", imageClassName ?? "object-cover object-center")}
           onError={() => setFailed(true)}
         />

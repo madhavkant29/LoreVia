@@ -13,6 +13,7 @@ type Props = {
   isDark: boolean
   onRevisionChange: (revision: RevisionIntelligence) => void
   onWriterWorkspaceChange: (workspace: WriterWorkspace) => void
+  variant?: "full" | "preview" | "story-map"
 }
 
 function statusBadgeClass(status: string, isDark: boolean) {
@@ -132,6 +133,7 @@ export function RevisionIntelligencePanel({
   isDark,
   onRevisionChange,
   onWriterWorkspaceChange,
+  variant = "full",
 }: Props) {
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [busyItemId, setBusyItemId] = useState<string | null>(null)
@@ -269,6 +271,178 @@ export function RevisionIntelligencePanel({
           />
         ))}
       </div>
+    )
+  }
+
+  if (variant === "preview") {
+    return (
+      <section className={panelClass(isDark)}>
+        <div className="border-b px-5 py-5">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Revision hub</p>
+              <h2 className={`mt-2 text-xl font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>Revision pressure at a glance.</h2>
+              <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-slate-600"}`}>{revision.summary.hero_message}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void createChecklist()}
+              className={`rounded-full px-4 py-2 text-sm font-semibold transition ${isDark ? "bg-violet-500 text-white hover:bg-violet-400" : "bg-violet-600 text-white hover:bg-violet-500"}`}
+            >
+              Create checklist
+            </button>
+          </div>
+        </div>
+
+        <div className="px-5 py-5">
+          <div className="grid gap-3 sm:grid-cols-3">
+            {[
+              { label: "Active items", value: revision.summary.active_item_count },
+              { label: "High severity", value: revision.summary.high_severity_count },
+              { label: "Task-ready", value: revision.summary.task_ready_count },
+            ].map((stat) => (
+              <div key={stat.label} className={`rounded-md border p-4 ${isDark ? "border-white/[0.06] bg-[#101720]" : "border-slate-200 bg-slate-50"}`}>
+                <p className={isDark ? "text-xs uppercase tracking-[0.2em] text-slate-500" : "text-xs uppercase tracking-[0.2em] text-slate-400"}>{stat.label}</p>
+                <p className={`mt-2 text-2xl font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{stat.value}</p>
+              </div>
+            ))}
+          </div>
+
+          {statusMessage ? <p className={`mt-4 text-sm ${isDark ? "text-violet-300" : "text-violet-700"}`}>{statusMessage}</p> : null}
+
+          <div className="mt-5 space-y-3">
+            {(revision.change_impacts.length > 0 ? revision.change_impacts : revision.scene_advice).slice(0, 2).map((item) => (
+              <RevisionItemCard
+                key={item.id}
+                item={item}
+                isDark={isDark}
+                busy={busyItemId === item.id}
+                onMarkFixed={() => void updateItemState(item, { status: "fixed" }, undefined, `Marked "${item.title}" as fixed.`)}
+                onIgnore={() => void updateItemState(item, { status: "ignored" }, undefined, `Ignored "${item.title}".`)}
+                onConvertToTask={() => void convertItemToTask(item)}
+                onAssignVersion={() => void assignItemToLatestVersion(item)}
+              />
+            ))}
+            {revision.change_impacts.length === 0 && revision.scene_advice.length === 0 ? (
+              <p className={isDark ? "text-sm text-slate-500" : "text-sm text-slate-400"}>No active revision warnings are surfaced right now.</p>
+            ) : null}
+          </div>
+        </div>
+      </section>
+    )
+  }
+
+  if (variant === "story-map") {
+    return (
+      <section className={panelClass(isDark)}>
+        <div className="border-b px-5 py-5">
+          <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Story map details</p>
+          <h2 className={`mt-2 text-xl font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>Knowledge state, timeline clarity, and reader friction.</h2>
+        </div>
+
+        <div className="px-5 py-5">
+          <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+            <SectionFrame
+              title="Knowledge state"
+              body="What key story facts characters appear to know, including a chapter-by-chapter matrix across the current manuscript."
+              isDark={isDark}
+            >
+              <div className="space-y-4">
+                {revision.knowledge_matrix.map((fact) => (
+                  <div key={fact.fact} className={`rounded-md border p-4 ${isDark ? "border-white/[0.06] bg-[#101720]" : "border-slate-200 bg-white"}`}>
+                    <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{fact.fact}</p>
+                    <div className="mt-3 space-y-2">
+                      {fact.entries.map((entry) => (
+                        <div key={`${fact.fact}-${entry.character_name}`} className={`grid grid-cols-[minmax(0,1fr)_auto] gap-3 text-sm ${isDark ? "text-slate-300" : "text-slate-600"}`}>
+                          <div>
+                            <p className={isDark ? "text-slate-200" : "text-slate-800"}>{entry.character_name}</p>
+                            <p className={isDark ? "text-xs text-slate-500" : "text-xs text-slate-400"}>{entry.source}</p>
+                          </div>
+                          <span className={isDark ? "text-xs text-slate-500" : "text-xs text-slate-400"}>
+                            {entry.chapter_learned ? `Chapter ${entry.chapter_learned}` : "Unknown"}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                    {fact.warning ? <p className={`mt-3 text-xs leading-5 ${isDark ? "text-amber-300" : "text-amber-700"}`}>{fact.warning}</p> : null}
+                  </div>
+                ))}
+              </div>
+            </SectionFrame>
+
+            <SectionFrame
+              title="Timeline clarity"
+              body="A chapter-by-chapter view of when knowledge changes and where it may drift."
+              isDark={isDark}
+            >
+              <div className="space-y-4">
+                {revision.knowledge_timeline.map((fact) => (
+                  <div key={`timeline-${fact.fact}`} className={`overflow-x-auto rounded-md border p-4 ${isDark ? "border-white/[0.06] bg-black/20" : "border-slate-200 bg-slate-50"}`}>
+                    <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{fact.fact} timeline</p>
+                    <table className="mt-3 min-w-full border-separate border-spacing-2 text-xs">
+                      <thead>
+                        <tr>
+                          <th className={`text-left font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Character</th>
+                          {fact.rows[0]?.cells.map((cell) => (
+                            <th key={`${fact.fact}-chapter-${cell.chapter_number}`} className={`text-left font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Ch {cell.chapter_number}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {fact.rows.map((row) => (
+                          <tr key={`${fact.fact}-${row.character_name}`}>
+                            <td className={`pr-4 font-medium ${isDark ? "text-slate-200" : "text-slate-700"}`}>{row.character_name}</td>
+                            {row.cells.map((cell) => (
+                              <td key={`${fact.fact}-${row.character_name}-${cell.chapter_number}`}>
+                                <span
+                                  className={`inline-flex rounded-full px-2 py-1 font-semibold ${
+                                    cell.state === "learned"
+                                      ? isDark ? "bg-emerald-500/15 text-emerald-200" : "bg-emerald-50 text-emerald-700"
+                                      : cell.state === "known"
+                                        ? isDark ? "bg-sky-500/15 text-sky-200" : "bg-sky-50 text-sky-700"
+                                        : isDark ? "bg-white/8 text-slate-400" : "bg-white text-slate-500 border border-slate-200"
+                                  }`}
+                                >
+                                  {cell.state}
+                                </span>
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {fact.warning ? <p className={`mt-3 text-xs leading-5 ${isDark ? "text-amber-300" : "text-amber-700"}`}>{fact.warning}</p> : null}
+                  </div>
+                ))}
+              </div>
+            </SectionFrame>
+          </div>
+
+          <div className="mt-5 grid gap-5 xl:grid-cols-3">
+            <SectionFrame
+              title="Continuity findings"
+              body="Downstream logic LoreVia thinks is most exposed right now."
+              isDark={isDark}
+            >
+              {renderActionList(revision.change_impacts, "No active downstream impact warnings are surfaced right now.")}
+            </SectionFrame>
+            <SectionFrame
+              title="Reader confusion map"
+              body="Chapters where entity density, terminology, or anchoring may overwhelm the reader."
+              isDark={isDark}
+            >
+              {renderActionList(revision.confusion_map, "Reader confusion risk is currently low across the sampled chapters.")}
+            </SectionFrame>
+            <SectionFrame
+              title="Voice consistency checker"
+              body="Dialogue or setting-language drift that may be carrying too much exposition or tonal mismatch."
+              isDark={isDark}
+            >
+              {renderActionList(revision.voice_alerts, "No major voice drift is surfaced in the sampled chapters.")}
+            </SectionFrame>
+          </div>
+        </div>
+      </section>
     )
   }
 

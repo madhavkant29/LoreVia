@@ -3,6 +3,7 @@
 import Link from "next/link"
 import type { Route } from "next"
 import { useQuery } from "@tanstack/react-query"
+import { useEffect, useRef } from "react"
 
 import { publicApi } from "@/lib/api/public"
 import { asQueryKey } from "@/lib/query/cacheKeys"
@@ -23,6 +24,7 @@ export function PublicChapterPageClient({
   const isDark = theme === "dark"
   const chapterNum = Number.parseInt(chapterId, 10)
   const hasValidChapterNumber = Number.isFinite(chapterNum) && chapterNum > 0
+  const trackedChapterKeyRef = useRef<string | null>(null)
   const {
     data: chapter = initialChapter,
     isLoading,
@@ -43,6 +45,17 @@ export function PublicChapterPageClient({
     enabled: Boolean(chapter && (chapter.text_content || chapter.text_url)),
     initialData: initialChapter?.text_content || undefined,
   })
+
+  useEffect(() => {
+    if (!chapter || !hasValidChapterNumber) return
+    const nextKey = `${chapter.book_id}:${chapter.chapter_number}`
+    if (trackedChapterKeyRef.current === nextKey) return
+    trackedChapterKeyRef.current = nextKey
+    void publicApi.trackView(bookId, {
+      eventType: "chapter_view",
+      chapterNumber: chapter.chapter_number,
+    })
+  }, [bookId, chapter, hasValidChapterNumber])
 
   if (isLoading) {
     return <div className={`mx-auto max-w-4xl px-4 py-20 text-center ${isDark ? "text-slate-500" : "text-slate-400"}`}>Loading chapter...</div>

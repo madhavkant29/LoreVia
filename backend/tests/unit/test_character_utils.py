@@ -9,6 +9,7 @@ from app.models.user import User
 from app.utils.character_utils import (
     backfill_character_first_chapters_for_chapter_text,
     build_character_analysis_payload,
+    find_earliest_character_mention_chapters,
 )
 
 
@@ -116,3 +117,68 @@ async def test_backfill_character_first_chapters_repairs_stale_first_appearance(
     assert changed is True
     assert character.first_chapter == 1
     assert character.last_seen_chapter == 2
+
+
+@pytest.mark.asyncio
+async def test_find_earliest_character_mention_chapters_batches_lookups(db):
+    user = User(email="character-utils-batch@lorevia.app", username="character-utils-batch", password_hash="hash")
+    db.add(user)
+    await db.flush()
+
+    book = Book(
+        user_id=user.id,
+        title="Batch Lookup Test",
+        format="epub",
+        s3_key="books/batch-lookup.epub",
+        status="ready",
+        total_chapters=3,
+    )
+    db.add(book)
+    await db.flush()
+
+    chapter_one = Chapter(book_id=book.id, number=1, title="Chapter 1", s3_key="chapters/1.txt", processed=True)
+    chapter_two = Chapter(book_id=book.id, number=2, title="Chapter 2", s3_key="chapters/2.txt", processed=True)
+    chapter_three = Chapter(book_id=book.id, number=3, title="Chapter 3", s3_key="chapters/3.txt", processed=True)
+    db.add_all([chapter_one, chapter_two, chapter_three])
+    await db.flush()
+
+    db.add_all([
+        BookChunk(
+            book_id=book.id,
+            chapter_id=chapter_one.id,
+            chunk_index=0,
+            text="Captain Mira steps onto the deck before sunrise.",
+            embedding=[0.0] * 1536,
+            token_count=8,
+        ),
+        BookChunk(
+            book_id=book.id,
+            chapter_id=chapter_two.id,
+            chunk_index=0,
+            text="Jon Ember studies the storm map in silence.",
+            embedding=[0.0] * 1536,
+            token_count=8,
+        ),
+        BookChunk(
+            book_id=book.id,
+            chapter_id=chapter_three.id,
+            chunk_index=0,
+            text="Mira and Jon Ember argue over the route.",
+            embedding=[0.0] * 1536,
+            token_count=9,
+        ),
+    ])
+    await db.commit()
+
+    resolved = await find_earliest_character_mention_chapters(
+        db,
+        book_id=book.id,
+        candidates_by_key={
+            "mira": ["Captain Mira", "Mira"],
+            "jon": ["Jon Ember"],
+            "missing": ["Asha Vale"],
+        },
+        upto_chapter=3,
+    )
+
+    assert resolved == {"mira": 1, "jon": 2}

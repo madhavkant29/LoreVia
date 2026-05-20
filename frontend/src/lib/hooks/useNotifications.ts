@@ -9,22 +9,35 @@ import { useAuthStore } from "@/lib/stores/authStore"
 
 const NOTIFICATIONS_CHANGED_EVENT = "notifications:changed"
 
+type UseNotificationsOptions = {
+  enabled?: boolean
+  pollMs?: number | false
+  refreshOnFocus?: boolean
+}
+
 function emitNotificationsChanged() {
   if (typeof window === "undefined") return
   window.dispatchEvent(new Event(NOTIFICATIONS_CHANGED_EVENT))
 }
 
 export function useNotifications(limit = 40) {
+  return useNotificationsState(limit)
+}
+
+export function useNotificationsState(limit = 40, options: UseNotificationsOptions = {}) {
   const user = useAuthStore((state) => state.user)
   const [error, setError] = useState<string | null>(null)
   const queryClient = useQueryClient()
   const queryKey = useMemo(() => asQueryKey(notificationsCacheKey(limit)), [limit])
+  const enabled = options.enabled ?? true
+  const pollMs = options.pollMs ?? 30_000
+  const refreshOnFocus = options.refreshOnFocus ?? false
 
   const query = useQuery({
     queryKey,
     queryFn: () => notificationsApi.list(limit),
-    enabled: Boolean(user),
-    refetchInterval: user ? 30_000 : false,
+    enabled: Boolean(user) && enabled,
+    refetchInterval: user && enabled && pollMs ? pollMs : false,
     refetchIntervalInBackground: false,
   })
 
@@ -41,12 +54,21 @@ export function useNotifications(limit = 40) {
     if (typeof window === "undefined") return
 
     const handleNotificationsChanged = () => {
-      refresh()
+      void refresh()
+    }
+
+    const handleFocus = () => {
+      if (!refreshOnFocus) return
+      void refresh()
     }
 
     window.addEventListener(NOTIFICATIONS_CHANGED_EVENT, handleNotificationsChanged)
-    return () => window.removeEventListener(NOTIFICATIONS_CHANGED_EVENT, handleNotificationsChanged)
-  }, [refresh])
+    window.addEventListener("focus", handleFocus)
+    return () => {
+      window.removeEventListener(NOTIFICATIONS_CHANGED_EVENT, handleNotificationsChanged)
+      window.removeEventListener("focus", handleFocus)
+    }
+  }, [refresh, refreshOnFocus])
 
   const markReadMutation = useMutation({
     mutationFn: (id: string) => notificationsApi.markRead(id),

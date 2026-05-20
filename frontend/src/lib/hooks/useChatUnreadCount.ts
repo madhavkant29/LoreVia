@@ -6,16 +6,24 @@ import { socialApi } from "@/lib/api/social"
 import { useAuthStore } from "@/lib/stores/authStore"
 
 const CHATS_CHANGED_EVENT = "chats:changed"
-const CHAT_UNREAD_POLL_MS = 30000
+
+type UseChatUnreadCountOptions = {
+  enabled?: boolean
+  pollMs?: number | false
+  refreshOnFocus?: boolean
+}
 
 export function emitChatsChanged() {
   if (typeof window === "undefined") return
   window.dispatchEvent(new Event(CHATS_CHANGED_EVENT))
 }
 
-export function useChatUnreadCount() {
+export function useChatUnreadCount(options: UseChatUnreadCountOptions = {}) {
   const { user, hydrated } = useAuthStore()
   const [unreadCount, setUnreadCount] = useState(0)
+  const enabled = options.enabled ?? true
+  const pollMs = options.pollMs ?? 30_000
+  const refreshOnFocus = options.refreshOnFocus ?? true
 
   const refresh = useCallback(async () => {
     if (!user) {
@@ -31,19 +39,19 @@ export function useChatUnreadCount() {
   }, [user])
 
   useEffect(() => {
-    if (!hydrated) return
+    if (!hydrated || !enabled) return
     void refresh()
-  }, [hydrated, refresh])
+  }, [enabled, hydrated, refresh])
 
   useEffect(() => {
-    if (!user) return
+    if (!user || !enabled || !pollMs) return
 
     const intervalId = window.setInterval(() => {
       void refresh()
-    }, CHAT_UNREAD_POLL_MS)
+    }, pollMs)
 
     return () => window.clearInterval(intervalId)
-  }, [refresh, user])
+  }, [enabled, pollMs, refresh, user])
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -53,6 +61,7 @@ export function useChatUnreadCount() {
     }
 
     const handleFocus = () => {
+      if (!refreshOnFocus) return
       void refresh()
     }
 
@@ -62,7 +71,7 @@ export function useChatUnreadCount() {
       window.removeEventListener(CHATS_CHANGED_EVENT, handleChatsChanged)
       window.removeEventListener("focus", handleFocus)
     }
-  }, [refresh])
+  }, [refresh, refreshOnFocus])
 
   return { unreadCount, hydrated }
 }

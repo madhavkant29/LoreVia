@@ -1,8 +1,8 @@
 import enum
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -129,6 +129,34 @@ class Book(Base):
     forum_comments = relationship("BookForumComment", back_populates="book", cascade="all, delete-orphan")
     custom_tags = relationship("CustomTag", back_populates="book", cascade="all, delete-orphan")
     writing_activities = relationship("UserWritingActivity", back_populates="book")
+    public_analytics_events = relationship("PublicBookAnalyticsEvent", back_populates="book", cascade="all, delete-orphan")
+
+
+class PublicBookAnalyticsEvent(Base):
+    __tablename__ = "public_book_analytics_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "book_id",
+            "chapter_number",
+            "event_type",
+            "visitor_fingerprint_hash",
+            "event_date",
+            name="uq_public_book_analytics_events_daily_fingerprint",
+        ),
+        Index("ix_public_book_analytics_events_book_created_at", "book_id", "created_at"),
+        Index("ix_public_book_analytics_events_book_event_type", "book_id", "event_type"),
+        Index("ix_public_book_analytics_events_book_event_date", "book_id", "event_date"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    book_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
+    chapter_number: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0", index=True)
+    event_type: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    visitor_fingerprint_hash: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    event_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    book = relationship("Book", back_populates="public_analytics_events")
 
 
 class BookCollaborator(Base):

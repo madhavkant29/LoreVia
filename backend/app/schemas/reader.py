@@ -1,3 +1,5 @@
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -78,3 +80,55 @@ class TimelineResponseOut(BaseModel):
     character_tracks: list[CharacterTimelineTrackOut]
     thread_tracks: list[PlotThreadTimelineTrackOut]
     relationship_markers: list[RelationshipTimelineMarkerOut]
+
+
+class ChapterAnalysisStatusOut(BaseModel):
+    status: str
+    generated_modes: list[str] = Field(default_factory=list)
+    attempt_count: int = 0
+    last_error: str | None = None
+    updated_at: Any | None = None
+
+
+class ChapterListItemOut(BaseModel):
+    number: int
+    title: str | None = None
+    processed: bool
+    intelligence_available: bool = True
+    read: bool
+    analysis_status: ChapterAnalysisStatusOut | None = None
+    tags: list[str] = Field(default_factory=list)
+
+
+class ChapterListResponseOut(BaseModel):
+    read_upto: int
+    current_chapter: int
+    chapters: list[ChapterListItemOut] = Field(default_factory=list)
+
+
+class ReadingProgressOut(BaseModel):
+    current_chapter: int
+    scroll_pct: float
+    chapters_read_count: int
+    percent_complete: float
+    chapters_left: int
+
+
+class SummaryKeyEventOut(BaseModel):
+    event: str
+    importance: int = 0
+
+
+class SummaryCollectionItemOut(BaseModel):
+    chapter_number: int
+    chapter_title: str | None = None
+    read: bool
+    available: bool
+    status: str = "pending"
+    content: str | None = None
+    key_events: list[SummaryKeyEventOut] = Field(default_factory=list)
+
+
+class SummaryCollectionResponseOut(BaseModel):
+    read_upto: int
+    summaries: list[SummaryCollectionItemOut] = Field(default_factory=list)

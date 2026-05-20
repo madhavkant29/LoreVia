@@ -1,12 +1,14 @@
+import asyncio
 import hashlib
 import json
+import weakref
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import redis.asyncio as aioredis
 
 from app.core.config import settings
 
-_redis: aioredis.Redis | None = None
+_redis_clients: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, aioredis.Redis] = weakref.WeakKeyDictionary()
 
 
 def _hash_ephemeral_token(token: str) -> str:
@@ -25,11 +27,27 @@ def _normalize_redis_url(raw_url: str) -> tuple[str, dict]:
 
 
 async def get_redis() -> aioredis.Redis:
-    global _redis
-    if _redis is None:
+    loop = asyncio.get_running_loop()
+    client = _redis_clients.get(loop)
+    if client is None:
         redis_url, redis_kwargs = _normalize_redis_url(settings.REDIS_URL)
-        _redis = aioredis.from_url(redis_url, decode_responses=True, **redis_kwargs)
-    return _redis
+        client = aioredis.from_url(redis_url, decode_responses=True, **redis_kwargs)
+        _redis_clients[loop] = client
+    return client
+
+
+async def close_redis(loop: asyncio.AbstractEventLoop | None = None) -> None:
+    target_loop = loop or asyncio.get_running_loop()
+    client = _redis_clients.pop(target_loop, None)
+    if client is not None:
+        await client.aclose()
+
+
+async def close_all_redis_clients() -> None:
+    clients = list(_redis_clients.items())
+    _redis_clients.clear()
+    for _, client in clients:
+        await client.aclose()
 
 
 async def cache_set(key: str, value: object, ttl: int) -> None:

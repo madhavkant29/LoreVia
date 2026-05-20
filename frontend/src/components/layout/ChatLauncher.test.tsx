@@ -84,15 +84,63 @@ describe("ChatLauncher", () => {
       expect(element.querySelector("svg")?.getAttribute("class") ?? "").toContain("text-sky-500")
     }
   })
+
+  it("loads the chats sidebar only after the desktop launcher is opened", async () => {
+    useAuthStoreMock.mockReturnValue({ user: { id: "user-1" } })
+    usePreferencesStoreMock.mockReturnValue({ theme: "light" })
+    useChatUnreadCountMock.mockReturnValue({ unreadCount: 0, hydrated: true })
+
+    const view = renderChatLauncher()
+
+    expect(view.querySelector('[data-testid="chats-panel"]')).toBeNull()
+
+    const buttons = view.querySelectorAll("button")
+    const toggleButton = buttons[0]
+
+    await act(async () => {
+      toggleButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+      await Promise.resolve()
+    })
+
+    expect(view.querySelector('[data-testid="chats-panel"]')).not.toBeNull()
+  })
+
+  it("defers unread queries until the launcher is enabled or opened", async () => {
+    useAuthStoreMock.mockReturnValue({ user: { id: "user-1" } })
+    usePreferencesStoreMock.mockReturnValue({ theme: "light" })
+    useChatUnreadCountMock.mockReturnValue({ unreadCount: 0, hydrated: true })
+
+    const view = renderChatLauncher({ enabled: false })
+
+    expect(useChatUnreadCountMock).toHaveBeenCalledWith({
+      enabled: false,
+      pollMs: false,
+      refreshOnFocus: true,
+    })
+
+    const buttons = view.querySelectorAll("button")
+    const toggleButton = buttons[0]
+
+    await act(async () => {
+      toggleButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+      await Promise.resolve()
+    })
+
+    expect(useChatUnreadCountMock).toHaveBeenLastCalledWith({
+      enabled: true,
+      pollMs: false,
+      refreshOnFocus: true,
+    })
+  })
 })
 
-function renderChatLauncher() {
+function renderChatLauncher({ enabled }: { enabled?: boolean } = {}) {
   container = document.createElement("div")
   document.body.appendChild(container)
   root = createRoot(container)
 
   act(() => {
-    root?.render(<ChatLauncher />)
+    root?.render(<ChatLauncher enabled={enabled} />)
   })
 
   return container

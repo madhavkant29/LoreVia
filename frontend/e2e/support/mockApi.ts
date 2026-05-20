@@ -1762,6 +1762,15 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
       return json(route, { ok: true })
     }
 
+    if (path === "/api/v1/auth/me/username" && method === "PATCH") {
+      const nextUsername = url.searchParams.get("username")?.trim()
+      if (!nextUsername || nextUsername.length < 3) {
+        return json(route, { detail: "Username must be 3-32 characters" }, 400)
+      }
+      user.username = nextUsername
+      return json(route, user)
+    }
+
     if (path === "/api/v1/notifications" && method === "GET") {
       return json(route, mockNotifications)
     }

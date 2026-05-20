@@ -101,6 +101,7 @@ from app.models.character import Character, CharacterState, CharacterVoiceProfil
 from app.models.intelligence import ChapterSummary, CharacterRelationship, PlotThread, QuoteEntry
 from app.models.progress import ReadingProgress
 from app.schemas.books import (
+    BookOverviewOut,
     BookEventsOut,
     BookModeBody,
     BookNoteBody,
@@ -243,6 +244,11 @@ from app.utils.public_utils import (
     get_public_share_status,
     hash_text,
     normalize_public_slug,
+)
+from app.utils.reader_utils import (
+    build_chapter_list_payload,
+    build_reading_progress_payload,
+    build_summary_collection_payload,
 )
 from app.utils.export_utils import (
     build_character_bible_obsidian_context,
@@ -1229,6 +1235,40 @@ async def list_saved_notes(
 async def get_book(book_id: uuid.UUID, db: AsyncSession = Depends(get_db), current_user=Depends(get_current_user)):
     book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
     return await book_out(db, book, current_user.id, collaborator)
+
+
+@router.get("/{book_id}/overview", response_model=BookOverviewOut)
+async def get_book_overview(
+    book_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
+    book_payload = await book_out(db, book, current_user.id, collaborator)
+    progress_payload = await build_reading_progress_payload(
+        db,
+        book=book,
+        current_user=current_user,
+        collaborator=collaborator,
+    )
+    chapter_list_payload = await build_chapter_list_payload(
+        db,
+        book=book,
+        current_user=current_user,
+        collaborator=collaborator,
+    )
+    summary_collection_payload = await build_summary_collection_payload(
+        db,
+        book=book,
+        current_user=current_user,
+        collaborator=collaborator,
+    )
+    return BookOverviewOut(
+        book=book_payload,
+        progress=progress_payload,
+        chapter_list=chapter_list_payload,
+        summary_collection=summary_collection_payload,
+    )
 
 
 @router.get("/{book_id}/notes", response_model=list[BookNoteOut])

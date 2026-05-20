@@ -4,7 +4,7 @@ import { notFound } from "next/navigation"
 
 import { resolveApiOrigin } from "@/lib/constants"
 import type { PublicBook, PublicBookDetail, PublicChapter } from "@/types/book"
-import type { PublicForumPost, PublicForumPostListResponse, PublicUserProfile } from "@/types/public"
+import type { PublicForumPost, PublicForumPostListResponse, PublicUploadsOverview, PublicUserProfile } from "@/types/public"
 
 const PUBLIC_API_BASE = `${resolveApiOrigin()}/api/v1/public`
 
@@ -28,8 +28,21 @@ export function listPublicBooksServer(): Promise<PublicBook[]> {
   return fetchPublicJson<PublicBook[]>("/books")
 }
 
+export function listCreatorPublicUploadsServer(query?: string): Promise<PublicBook[]> {
+  const searchParams = new URLSearchParams()
+  if (query?.trim()) {
+    searchParams.set("search", query.trim())
+  }
+  const suffix = searchParams.toString()
+  return fetchPublicJson<PublicBook[]>(`/uploads${suffix ? `?${suffix}` : ""}`)
+}
+
 export function getPublicBookServer(bookId: string): Promise<PublicBookDetail> {
   return fetchPublicJson<PublicBookDetail>(`/books/${encodeURIComponent(bookId)}`)
+}
+
+export function getPublicUploadsAnalyticsServer(): Promise<PublicUploadsOverview> {
+  return fetchPublicJson<PublicUploadsOverview>("/analytics", 120)
 }
 
 export function getPublicChapterServer(bookId: string, chapterNumber: number): Promise<PublicChapter> {

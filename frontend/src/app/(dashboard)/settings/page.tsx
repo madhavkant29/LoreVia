@@ -29,6 +29,9 @@ export default function SettingsPage() {
   const [goalDraft, setGoalDraft] = useState("1000")
   const [goalSaving, setGoalSaving] = useState(false)
   const [goalMessage, setGoalMessage] = useState<string | null>(null)
+  const [usernameDraft, setUsernameDraft] = useState("")
+  const [usernameSaving, setUsernameSaving] = useState(false)
+  const [usernameMessage, setUsernameMessage] = useState<string | null>(null)
   const [permissionSaving, setPermissionSaving] = useState(false)
   const [permissionMessage, setPermissionMessage] = useState<string | null>(null)
   const router = useRouter()
@@ -41,6 +44,10 @@ export default function SettingsPage() {
   useEffect(() => {
     setGoalDraft(String(user?.daily_word_goal ?? 1000))
   }, [user?.daily_word_goal])
+
+  useEffect(() => {
+    setUsernameDraft(user?.username ?? "")
+  }, [user?.username])
 
   const changeMode = async (mode: string) => {
     await authApi.setReadingMode(mode)
@@ -93,6 +100,27 @@ export default function SettingsPage() {
       setGoalMessage("We could not save the daily goal right now.")
     } finally {
       setGoalSaving(false)
+    }
+  }
+
+  const saveUsername = async () => {
+    const trimmedUsername = usernameDraft.trim()
+    if (!trimmedUsername) {
+      setUsernameMessage("Enter a username to keep your public LoreVia identity active.")
+      return
+    }
+
+    setUsernameSaving(true)
+    setUsernameMessage(null)
+    try {
+      const updated = await authApi.setUsername(trimmedUsername)
+      setUser(updated)
+      setUsernameDraft(updated.username ?? "")
+      setUsernameMessage(user?.username ? "Public username updated." : "Public username saved.")
+    } catch {
+      setUsernameMessage("We could not save that username. Try a different handle with letters, numbers, hyphens, or underscores.")
+    } finally {
+      setUsernameSaving(false)
     }
   }
 
@@ -189,6 +217,51 @@ export default function SettingsPage() {
                 {billingMessage}
               </div>
             ) : null}
+          </WorkspacePanel>
+
+          <WorkspacePanel className="p-6">
+            <p className="app-eyebrow">Public identity</p>
+            <h2 className="mt-3 text-2xl font-semibold text-[rgb(var(--foreground))]">
+              Choose the username people see on LoreVia
+            </h2>
+            <p className="mt-2 text-sm leading-7 text-[rgb(var(--muted-foreground))]">
+              This is your public <span className="font-semibold">@username</span> for profiles, forum posts, and chats. It is separate from the author or pen name you put on each manuscript.
+            </p>
+            <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,16rem)_minmax(0,1fr)]">
+              <label className="app-stat">
+                <p className="app-stat__label">Public username</p>
+                <input
+                  type="text"
+                  minLength={3}
+                  maxLength={32}
+                  autoComplete="username"
+                  value={usernameDraft}
+                  onChange={(event) => setUsernameDraft(event.target.value)}
+                  className="mt-3 w-full rounded-[1rem] border border-[rgba(var(--border),0.8)] bg-[rgba(255,255,255,0.7)] px-4 py-3 text-base font-semibold text-[rgb(var(--foreground))] outline-none dark:bg-[rgba(255,255,255,0.04)]"
+                />
+              </label>
+              <div className="app-stat">
+                <p className="app-stat__label">Current public handle</p>
+                <p className="mt-3 text-base font-semibold text-[rgb(var(--foreground))]">
+                  {user?.username ? `@${user.username}` : "No username set yet"}
+                </p>
+                <p className="mt-2 text-sm leading-7 text-[rgb(var(--muted-foreground))]">
+                  New author uploads default to this username, but you can change the manuscript author or pen name for any individual book without changing your account handle.
+                </p>
+                <div className="mt-4 flex flex-wrap items-center gap-3">
+                  <button
+                    onClick={saveUsername}
+                    disabled={usernameSaving || usernameDraft.trim().length < 3}
+                    className="app-button-primary disabled:opacity-60"
+                  >
+                    {usernameSaving ? "Saving..." : user?.username ? "Change username" : "Save username"}
+                  </button>
+                  {usernameMessage ? (
+                    <span className="text-sm text-[rgb(var(--muted-foreground))]">{usernameMessage}</span>
+                  ) : null}
+                </div>
+              </div>
+            </div>
           </WorkspacePanel>
 
           <WorkspacePanel className="p-6">

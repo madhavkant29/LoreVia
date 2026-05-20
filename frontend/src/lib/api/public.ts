@@ -3,6 +3,7 @@ import type { PublicBook, PublicBookDetail, PublicChapter } from "@/types/book"
 import type {
   ContentReportPayload,
   ContentReportResponse,
+  PublicUploadsOverview,
   PublicForumComment,
   PublicForumCommentListResponse,
   PublicForumInterest,
@@ -13,11 +14,35 @@ import type {
 } from "@/types/public"
 
 export const publicApi = {
-  listBooks: () => apiClient.get<PublicBook[]>("/public/books").then((response) => response.data),
+  listBooks: (options?: { contentSourceType?: string; catalog?: string; search?: string; page?: number; limit?: number }) =>
+    apiClient.get<PublicBook[]>("/public/books", {
+      params: {
+        ...(options?.contentSourceType ? { content_source_type: options.contentSourceType } : {}),
+        ...(options?.catalog ? { catalog: options.catalog } : {}),
+        ...(options?.search?.trim() ? { search: options.search.trim() } : {}),
+        ...(options?.page ? { page: options.page } : {}),
+        ...(options?.limit ? { limit: options.limit } : {}),
+      },
+    }).then((response) => response.data),
+  listCreatorUploads: (options?: { search?: string; page?: number; limit?: number }) =>
+    apiClient.get<PublicBook[]>("/public/uploads", {
+      params: {
+        ...(options?.search?.trim() ? { search: options.search.trim() } : {}),
+        ...(options?.page ? { page: options.page } : {}),
+        ...(options?.limit ? { limit: options.limit } : {}),
+      },
+    }).then((response) => response.data),
   getBook: (bookId: string) =>
     apiClient.get<PublicBookDetail>(`/public/books/${bookId}`).then((response) => response.data),
+  getUploadsAnalytics: () =>
+    apiClient.get<PublicUploadsOverview>("/public/analytics").then((response) => response.data),
   getChapter: (bookId: string, chapter: number) =>
     apiClient.get<PublicChapter>(`/public/books/${bookId}/chapter/${chapter}`).then((response) => response.data),
+  trackView: (bookId: string, payload: { eventType: "book_view" | "chapter_view"; chapterNumber?: number }) =>
+    apiClient.post<void>(`/public/books/${bookId}/analytics/view`, {
+      event_type: payload.eventType,
+      ...(typeof payload.chapterNumber === "number" ? { chapter_number: payload.chapterNumber } : {}),
+    }).then(() => undefined),
   listForumPosts: (query?: string, page = 1, pageSize = 20) =>
     apiClient.get<PublicForumPostListResponse>("/public/forum/posts", {
       params: {

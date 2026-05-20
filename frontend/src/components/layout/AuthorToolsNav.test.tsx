@@ -5,7 +5,6 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import type { CollaborationPermissions } from "@/types/book"
 
 const useQueryMock = vi.hoisted(() => vi.fn())
-const useRouterMock = vi.hoisted(() => vi.fn())
 const useAuthStoreMock = vi.hoisted(() => vi.fn())
 const canUseAuthorFeaturesMock = vi.hoisted(() => vi.fn())
 
@@ -15,10 +14,6 @@ vi.mock("next/link", () => ({
       {children}
     </a>
   ),
-}))
-
-vi.mock("next/navigation", () => ({
-  useRouter: useRouterMock,
 }))
 
 vi.mock("@tanstack/react-query", () => ({
@@ -63,7 +58,6 @@ describe("AuthorToolsNav", () => {
       container.remove()
     }
     useQueryMock.mockReset()
-    useRouterMock.mockReset()
     useAuthStoreMock.mockReset()
     canUseAuthorFeaturesMock.mockReset()
     container = null
@@ -107,6 +101,18 @@ describe("AuthorToolsNav", () => {
     expect(view.querySelector('[data-testid="author-nav-item-export"]')).toBeNull()
     expect(view.querySelector('[data-testid="author-nav-helper-export"]')).toBeNull()
   })
+
+  it("does not eagerly prefetch every author route", () => {
+    mockBaseState()
+
+    renderAuthorToolsNav()
+
+    expect(useQueryMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        staleTime: 60_000,
+      })
+    )
+  })
 })
 
 function renderAuthorToolsNav() {
@@ -139,8 +145,6 @@ function mockBaseState({
   hasOwnAuthorAccess?: boolean
   collaborationPermissions?: CollaborationPermissions | null
 } = {}) {
-  const router = { prefetch: vi.fn() }
-  useRouterMock.mockReturnValue(router)
   useAuthStoreMock.mockImplementation((selector: (state: { user: { tier: string } | null }) => unknown) => selector({ user: tier ? { tier } : null }))
   canUseAuthorFeaturesMock.mockReturnValue(hasOwnAuthorAccess)
   useQueryMock.mockReturnValue({

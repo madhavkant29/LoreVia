@@ -1,16 +1,28 @@
 "use client"
 
 import Link from "next/link"
+import dynamic from "next/dynamic"
 import React from "react"
 import { useState } from "react"
-import { NotificationsPanel } from "@/components/layout/NotificationsPanel"
-import { useNotifications } from "@/lib/hooks/useNotifications"
+import { useNotificationsState } from "@/lib/hooks/useNotifications"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 
-export function NotificationBell() {
+const NotificationsPanel = dynamic(
+  () => import("@/components/layout/NotificationsPanel").then((module) => module.NotificationsPanel),
+  {
+    ssr: false,
+    loading: () => <PanelLoadingState label="Loading notifications..." />,
+  }
+)
+
+export function NotificationBell({ enabled = true }: { enabled?: boolean }) {
   const [open, setOpen] = useState(false)
   const { theme } = usePreferencesStore()
-  const { unreadCount } = useNotifications(10)
+  const { unreadCount } = useNotificationsState(10, {
+    enabled: enabled || open,
+    pollMs: false,
+    refreshOnFocus: true,
+  })
   const isDark = theme === "dark"
   const hasUnread = unreadCount > 0
   const badgeLabel = hasUnread ? `${unreadCount > 9 ? "9+" : unreadCount}` : null
@@ -62,6 +74,14 @@ export function NotificationBell() {
         </>
       ) : null}
     </>
+  )
+}
+
+function PanelLoadingState({ label }: { label: string }) {
+  return (
+    <div className="flex h-full items-center justify-center p-6 text-sm text-muted-foreground">
+      {label}
+    </div>
   )
 }
 

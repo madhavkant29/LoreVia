@@ -2,16 +2,16 @@
 
 import { useQuery } from "@tanstack/react-query"
 import React from "react"
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import type { Route } from "next"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
 
 import { AuthorFeatureComponent } from "@/components/billing/AuthorFeatureComponent"
 import { booksApi } from "@/lib/api/books"
 import { canUseAuthorFeatures } from "@/lib/billing/plans"
 import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
 import { useAuthStore } from "@/lib/stores/authStore"
+import type { Book } from "@/types/book"
 import type { CollaborationPermissions } from "@/types/book"
 
 type BookMode = "reader" | "author"
@@ -20,6 +20,7 @@ type AuthorToolsNavProps = {
   bookId: string
   active: string
   isDark: boolean
+  bookData?: Book | null
   title?: string
   description?: string
   currentChapter?: number
@@ -153,18 +154,21 @@ export function AuthorToolsNav({
   bookId,
   active,
   isDark,
+  bookData = null,
   title = "Author workspace",
   description = "Navigate drafting, continuity, and collaborator review without losing the manuscript thread.",
   currentChapter = 1,
   mode = "author",
   variant = "panel",
 }: AuthorToolsNavProps) {
-  const router = useRouter()
   const tier = useAuthStore((state) => state.user?.tier)
-  const { data: book = null } = useQuery({
+  const { data: queriedBook = null } = useQuery({
     queryKey: asQueryKey(bookCacheKey(bookId, "detail")),
     queryFn: () => booksApi.get(bookId),
+    enabled: !bookData,
+    staleTime: 60_000,
   })
+  const book = bookData ?? queriedBook
   const collaborationRole = book?.collaboration_role ?? null
   const collaborationPermissions = book?.collaboration_permissions ?? null
   const hasOwnAuthorAccess = canUseAuthorFeatures(tier)
@@ -194,14 +198,6 @@ export function AuthorToolsNav({
         .filter((section) => section.items.length > 0),
     [bookId, collaborationPermissions, collaborationRole, currentChapter, hasFreeSampleIntelligenceAccess, hasOwnAuthorAccess, showAuthorSections]
   )
-  const items = sections.flatMap((section) => section.items)
-
-  useEffect(() => {
-    for (const item of items) {
-      router.prefetch(item.href)
-    }
-  }, [items, router])
-
   const rail = variant === "rail"
   const containerClass = rail
     ? `group/rail sticky top-24 z-20 flex h-[calc(100vh-7.5rem)] w-[4.9rem] flex-col overflow-hidden rounded-[1.6rem] border p-3 shadow-[0_26px_80px_-52px_rgba(0,0,0,0.82)] backdrop-blur transition-[width,background-color,border-color,box-shadow] duration-300 hover:w-[18.5rem] focus-within:w-[18.5rem] ${

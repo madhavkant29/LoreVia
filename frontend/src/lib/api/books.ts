@@ -9,7 +9,7 @@ import {
 } from "@/lib/query/cacheKeys"
 import { invalidateQueryKeys } from "@/lib/query/queryClient"
 import { normalizeBookRouteId } from "@/lib/utils/bookRoutes"
-import type { Book, BookCollaborator, BookEvents, BookNote, BookSeries, BookWorkType, ChapterConsistencyReport, ChapterSceneOrder, ChapterVersion, ChapterVersionDetail, CollaborationPermissions, CollaborationRole, CollaborationScope, EmotionalArcOverview, ManuscriptAnnotation, ManuscriptWorkspaceTree, NovelScene, ObsidianGraph, ObsidianNoteRelations, ObsidianPreview, ObsidianVaultNote, ObsidianVaultNoteSaveResult, PreWritingCheck, ReadabilityMetrics, RevisionIntelligence, RevisionTagSet, RevisionTagTarget, SavedQuote, SceneMetadata, SceneVersion, SceneVersionDetail, SeriesBible, StoryHealth, UserStats, WorkspaceSearchFilters, WorkspaceSearchResult, WriterWorkspace } from "@/types/book"
+import type { Book, BookCollaborator, BookEvents, BookNote, BookOverviewPayload, BookSeries, BookWorkType, ChapterConsistencyReport, ChapterSceneOrder, ChapterVersion, ChapterVersionDetail, CollaborationPermissions, CollaborationRole, CollaborationScope, EmotionalArcOverview, ManuscriptAnnotation, ManuscriptWorkspaceTree, NovelScene, ObsidianGraph, ObsidianNoteRelations, ObsidianPreview, ObsidianVaultNote, ObsidianVaultNoteSaveResult, PreWritingCheck, ReadabilityMetrics, RevisionIntelligence, RevisionTagSet, RevisionTagTarget, SavedQuote, SceneMetadata, SceneVersion, SceneVersionDetail, SeriesBible, StoryHealth, UserStats, WorkspaceSearchFilters, WorkspaceSearchResult, WriterWorkspace } from "@/types/book"
 import type { Character, CharacterShareResponse, RelationshipGraph } from "@/types/character"
 import type { BetaReadAssignment, BetaReadAssignmentCreateInput, BetaReadAssignmentListResponse } from "@/types/reader"
 
@@ -45,6 +45,7 @@ export const booksApi = {
   listQuotes: () => apiClient.get<SavedQuote[]>("/books/quotes").then(r => r.data),
   listNotes: () => apiClient.get<BookNote[]>("/books/notes").then(r => r.data),
   get: (id: string) => apiClient.get<Book>(bookPath(id)).then(r => r.data),
+  getOverview: (id: string) => apiClient.get<BookOverviewPayload>(bookPath(id, "/overview")).then(r => r.data),
   listCollaborators: (id: string) =>
     apiClient.get<BookCollaborator[]>(bookPath(id, "/collaborators")).then(r => r.data),
   createCollaborator: (

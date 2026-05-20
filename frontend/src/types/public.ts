@@ -90,6 +90,47 @@ export interface PublicUserProject {
   public_book_id: string | null
 }
 
+export interface PublicBookAnalytics {
+  book_view_count: number
+  unique_reader_count_30d: number
+  chapter_view_count: number
+  published_at: string | null
+  chapter_count: number
+  total_words: number
+  has_open_discussion: boolean
+  open_discussion_count: number
+  discussion_comment_count: number
+  discussion_interest_count: number
+}
+
+export interface PublicAuthorAnalytics {
+  total_book_views: number
+  total_unique_readers_30d: number
+  total_chapter_views: number
+  total_public_books: number
+  total_chapters: number
+  total_words: number
+  latest_published_at: string | null
+  open_forum_discussions_count: number
+}
+
+export interface PublicUploadsBreakdownEntry {
+  key: string
+  label: string
+  count: number
+}
+
+export interface PublicUploadsOverview {
+  total_public_books: number
+  total_authors: number
+  total_visible_chapters: number
+  total_visible_words: number
+  uploads_last_30_days: number
+  genre_breakdown: PublicUploadsBreakdownEntry[]
+  work_type_breakdown: PublicUploadsBreakdownEntry[]
+  recent_uploads: import("./book").PublicBook[]
+}
+
 export interface PublicUserActivityPost {
   id: string
   thread_type: "novel" | "general" | string
@@ -133,6 +174,9 @@ export interface PublicUserProfile {
   forum_post_count: number
   forum_comment_count: number
   current_project: PublicUserProject | null
+  public_books_count: number
+  public_books: import("./book").PublicBook[]
+  public_analytics: PublicAuthorAnalytics
   posts: PublicUserActivityPost[]
   comments: PublicUserActivityComment[]
   created_at: string

@@ -56,7 +56,7 @@ services:
       dockerfile: backend/Dockerfile.worker
     env_file:
       - ./backend/.env
-    command: celery -A app.workers.celery_app worker -n worker-extraction@%h -Q extraction,extraction_priority --loglevel=info -c 1
+    command: celery -A app.workers.celery_app worker -n worker-extraction@%h -Q extraction,extraction_priority --loglevel=info -c 2
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "celery -A app.workers.celery_app inspect ping -d worker-extraction@$$HOSTNAME --timeout=5 | grep -q OK || exit 1"]
@@ -156,4 +156,3 @@ services:
 networks:
   edge:
   app:
-
