@@ -1,7 +1,9 @@
 import asyncio
+import os
 import sys
 import warnings
 import weakref
+from urllib.parse import urlsplit, urlunsplit
 
 import pytest
 import pytest_asyncio
@@ -294,7 +296,22 @@ def mock_redis(monkeypatch, request):
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-TEST_DB = settings.DATABASE_URL.replace("postgresql://", "postgresql+psycopg://")
+def _resolved_test_database_url() -> str:
+    explicit = os.getenv("TEST_DATABASE_URL")
+    raw_url = explicit or settings.DATABASE_URL
+
+    # When tests run on the host machine, the Docker-internal hostname `postgres`
+    # is not resolvable. Rewrite only that local-compose case to localhost.
+    if sys.platform == "win32":
+        parts = urlsplit(raw_url)
+        if parts.hostname == "postgres":
+            netloc = parts.netloc.replace("@postgres:", "@127.0.0.1:")
+            raw_url = urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+
+    return raw_url.replace("postgresql://", "postgresql+psycopg://", 1)
+
+
+TEST_DB = _resolved_test_database_url()
 engine_test = None
 TestSession = None
 
