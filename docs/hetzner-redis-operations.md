@@ -26,13 +26,12 @@ Set these values in `backend/.env`:
 
 ```env
 REDIS_PASSWORD=<generated secret>
-REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
-CELERY_BROKER_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
-CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD}@redis:6379/0
 CELERY_TASK_IGNORE_RESULT=false
 CELERY_RESULT_EXPIRES_SECONDS=3600
 CELERY_BROKER_VISIBILITY_TIMEOUT_SECONDS=7200
 ```
+
+Production Compose derives `REDIS_URL`, `CELERY_BROKER_URL`, and `CELERY_RESULT_BACKEND` from `REDIS_PASSWORD` and always resolves interpolation from `backend/.env` via `--env-file`.
 
 `CELERY_RESULT_BACKEND` stays enabled for now because the advisor async polling endpoints still read Celery task results. Most other tasks already ignore results.
 
@@ -53,7 +52,7 @@ Manual Docker Compose deployment:
 set -a
 source ./backend/.env
 set +a
-docker compose -f docker-compose.yml up -d --build redis nginx backend worker-extraction worker-analysis worker-intelligence celery-beat
+docker compose --env-file ./backend/.env -f docker-compose.yml up -d --build redis nginx backend worker-extraction worker-analysis worker-intelligence celery-beat
 ```
 
 ## Verification
@@ -61,21 +60,21 @@ docker compose -f docker-compose.yml up -d --build redis nginx backend worker-ex
 Redis container health:
 
 ```bash
-docker compose -f docker-compose.yml exec redis redis-cli -a "$REDIS_PASSWORD" ping
-docker compose -f docker-compose.yml logs redis
+docker compose --env-file ./backend/.env -f docker-compose.yml exec redis redis-cli -a "$REDIS_PASSWORD" ping
+docker compose --env-file ./backend/.env -f docker-compose.yml logs redis
 ```
 
 Confirm Redis is not bound on the host:
 
 ```bash
 ss -tulpen | grep 6379 || true
-docker compose -f docker-compose.yml ps
+docker compose --env-file ./backend/.env -f docker-compose.yml ps
 ```
 
 Restart async services after config changes:
 
 ```bash
-docker compose -f docker-compose.yml restart worker-extraction worker-analysis worker-intelligence celery-beat
+docker compose --env-file ./backend/.env -f docker-compose.yml restart worker-extraction worker-analysis worker-intelligence celery-beat
 ```
 
 Application checklist:
@@ -106,9 +105,9 @@ docker run --rm -v <redis_volume_name>:/data -v "$PWD:/backup" alpine sh -c 'tar
 Restore the volume:
 
 ```bash
-docker compose -f docker-compose.yml stop redis
+docker compose --env-file ./backend/.env -f docker-compose.yml stop redis
 docker run --rm -v <redis_volume_name>:/data -v "$PWD:/backup" alpine sh -c 'rm -rf /data/* && tar xzf /backup/redis-data-backup.tgz -C /data'
-docker compose -f docker-compose.yml up -d redis
+docker compose --env-file ./backend/.env -f docker-compose.yml up -d redis
 ```
 
 Redis should not be treated as the only copy of important application state. Backups are mainly for operational continuity, not canonical records.
@@ -124,13 +123,13 @@ Redis should not be treated as the only copy of important application state. Bac
 set -a
 source ./backend/.env
 set +a
-docker compose -f docker-compose.yml up -d backend worker-extraction worker-analysis worker-intelligence celery-beat
+docker compose --env-file ./backend/.env -f docker-compose.yml up -d backend worker-extraction worker-analysis worker-intelligence celery-beat
 ```
 
 5. After rollback is stable, optionally stop the internal Redis container:
 
 ```bash
-docker compose -f docker-compose.yml stop redis
+docker compose --env-file ./backend/.env -f docker-compose.yml stop redis
 ```
 
 Do not delete the Redis volume until the rollback has been verified.
