@@ -108,6 +108,46 @@ export interface CharacterRelationship {
   description: string | null
 }
 
+export interface CharacterCandidate {
+  id: string
+  book_id: string
+  chapter_number: number
+  raw_name: string
+  proposed_name: string
+  normalized_name: string
+  aliases: string[]
+  matched_character_id?: string | null
+  status: "pending" | "accepted" | "rejected" | "promoted" | "merged"
+  confidence: number
+  reason_codes: string[]
+  evidence: Record<string, unknown>
+  source_batch_key?: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface CharacterDuplicateSuggestion {
+  id: string
+  book_id: string
+  primary_character_id: string
+  secondary_character_id: string
+  confidence: number
+  reasons: string[]
+  shared_evidence: Record<string, unknown>
+  status: "pending" | "accepted" | "dismissed"
+  created_at: string
+  updated_at: string
+}
+
+export interface CharacterReviewResponse {
+  candidates: CharacterCandidate[]
+  duplicate_suggestions: CharacterDuplicateSuggestion[]
+  counts: {
+    pending_candidates: number
+    pending_duplicate_suggestions: number
+  }
+}
+
 export interface RelationshipGraph {
   nodes: Array<{ 
     id: string; 

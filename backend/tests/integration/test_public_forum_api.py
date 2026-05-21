@@ -121,6 +121,73 @@ async def test_private_book_forum_supports_interest_and_rating_rankings(client, 
     assert len(interest_items) == 1
     assert interest_items[0]["interested_email"] == seeker.email
 
+    first_post_reaction = await client.put(
+        f"/api/v1/public/forum/posts/{high_post_id}/reaction",
+        headers=_auth_headers(first_reader.id),
+        json={"reaction": "like"},
+    )
+    assert first_post_reaction.status_code == 200
+    assert first_post_reaction.json()["like_count"] == 1
+    assert first_post_reaction.json()["dislike_count"] == 0
+    assert first_post_reaction.json()["reaction"] == "like"
+    assert first_post_reaction.json()["author_reputation_score"] == 1
+
+    second_post_reaction = await client.put(
+        f"/api/v1/public/forum/posts/{high_post_id}/reaction",
+        headers=_auth_headers(second_reader.id),
+        json={"reaction": "dislike"},
+    )
+    assert second_post_reaction.status_code == 200
+    assert second_post_reaction.json()["like_count"] == 1
+    assert second_post_reaction.json()["dislike_count"] == 1
+    assert second_post_reaction.json()["reaction"] == "dislike"
+    assert second_post_reaction.json()["author_reputation_score"] == 0
+
+    second_post_reaction_switch = await client.put(
+        f"/api/v1/public/forum/posts/{high_post_id}/reaction",
+        headers=_auth_headers(second_reader.id),
+        json={"reaction": "like"},
+    )
+    assert second_post_reaction_switch.status_code == 200
+    assert second_post_reaction_switch.json()["like_count"] == 2
+    assert second_post_reaction_switch.json()["dislike_count"] == 0
+    assert second_post_reaction_switch.json()["reaction"] == "like"
+    assert second_post_reaction_switch.json()["author_reputation_score"] == 2
+
+    post_detail_with_reaction = await client.get(
+        f"/api/v1/public/forum/posts/{high_post_id}",
+        headers=_auth_headers(first_reader.id),
+    )
+    assert post_detail_with_reaction.status_code == 200
+    assert post_detail_with_reaction.json()["reaction"] == "like"
+    assert post_detail_with_reaction.json()["like_count"] == 2
+    assert post_detail_with_reaction.json()["dislike_count"] == 0
+
+    ranked_posts = await client.get(
+        "/api/v1/public/forum/posts",
+        headers=_auth_headers(first_reader.id),
+    )
+    assert ranked_posts.status_code == 200
+    assert ranked_posts.json()["items"][0]["reaction"] == "like"
+    assert ranked_posts.json()["items"][0]["like_count"] == 2
+
+    cleared_post_reaction = await client.put(
+        f"/api/v1/public/forum/posts/{high_post_id}/reaction",
+        headers=_auth_headers(first_reader.id),
+        json={"reaction": "clear"},
+    )
+    assert cleared_post_reaction.status_code == 200
+    assert cleared_post_reaction.json()["reaction"] is None
+    assert cleared_post_reaction.json()["like_count"] == 1
+    assert cleared_post_reaction.json()["dislike_count"] == 0
+
+    self_post_reaction = await client.put(
+        f"/api/v1/public/forum/posts/{high_post_id}/reaction",
+        headers=_auth_headers(author.id),
+        json={"reaction": "like"},
+    )
+    assert self_post_reaction.status_code == 409
+
     comment_response = await client.post(
         f"/api/v1/public/forum/posts/{high_post_id}/comments",
         headers=_auth_headers(seeker.id),

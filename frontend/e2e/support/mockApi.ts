@@ -37,6 +37,8 @@ const user = {
   created_at: "2026-04-01T09:00:00Z",
 }
 
+const defaultUsername = user.username
+
 const book = {
   id: "book-1",
   title: "Sky of Ash",
@@ -81,7 +83,7 @@ const book = {
   },
 }
 
-let publicForumPosts: PublicForumPost[] = [
+const initialPublicForumPosts: PublicForumPost[] = [
   {
     id: "forum-post-1",
     thread_type: "novel",
@@ -100,8 +102,11 @@ let publicForumPosts: PublicForumPost[] = [
     allow_contact_requests: true,
     status: "open",
     viewer_interest_status: null,
+    reaction: null,
     interest_count: 3,
     comment_count: 2,
+    like_count: 6,
+    dislike_count: 1,
     rating_summary: {
       average_rating: 4.6,
       rating_count: 5,
@@ -131,8 +136,11 @@ let publicForumPosts: PublicForumPost[] = [
     allow_contact_requests: false,
     status: "open",
     viewer_interest_status: null,
+    reaction: null,
     interest_count: 0,
     comment_count: 1,
+    like_count: 2,
+    dislike_count: 0,
     rating_summary: {
       average_rating: null,
       rating_count: 0,
@@ -146,7 +154,9 @@ let publicForumPosts: PublicForumPost[] = [
   },
 ]
 
-let publicForumComments: Array<{
+let publicForumPosts: PublicForumPost[] = JSON.parse(JSON.stringify(initialPublicForumPosts))
+
+const initialPublicForumComments: Array<{
   id: string
   post_id: string
   book_id: string | null
@@ -212,6 +222,23 @@ let publicForumComments: Array<{
   },
 ]
 
+let publicForumComments: Array<{
+  id: string
+  post_id: string
+  book_id: string | null
+  author_user_id: string
+  author_username: string | null
+  author_reputation_score: number
+  author_trust_level: string
+  body: string
+  like_count: number
+  dislike_count: number
+  reaction: "like" | "dislike" | null
+  can_edit: boolean
+  created_at: string
+  updated_at: string
+}> = JSON.parse(JSON.stringify(initialPublicForumComments))
+
 const publicWriterProfiles = {
   author: {
     user_id: "user-1",
@@ -231,6 +258,45 @@ const publicWriterProfiles = {
       source: "public_book",
       forum_post_id: "forum-post-1",
       public_book_id: "public-book-1",
+    },
+    public_books_count: 1,
+    public_books: [
+      {
+        id: "public-book-1",
+        title: "Ash Gate Sample",
+        author: "M. Vale",
+        author_username: "author",
+        genre: "Epic Fantasy",
+        description: "A safe public sample from the same ash-storm world, shared for readers who want a trust check before joining a beta read.",
+        format: "manual",
+        work_type: "novel",
+        status: "ready",
+        total_chapters: 1,
+        active_forum_post_id: "forum-post-1",
+        published_at: "2026-05-14T08:00:00Z",
+        analytics: {
+          book_view_count: 186,
+          unique_reader_count_30d: 71,
+          chapter_view_count: 244,
+          published_at: "2026-05-14T08:00:00Z",
+          chapter_count: 1,
+          total_words: 2450,
+          has_open_discussion: true,
+          open_discussion_count: 1,
+          discussion_comment_count: 2,
+          discussion_interest_count: 3,
+        },
+      },
+    ],
+    public_analytics: {
+      total_book_views: 186,
+      total_unique_readers_30d: 71,
+      total_chapter_views: 244,
+      total_public_books: 1,
+      total_chapters: 1,
+      total_words: 2450,
+      latest_published_at: "2026-05-14T08:00:00Z",
+      open_forum_discussions_count: 1,
     },
     posts: [
       {
@@ -1452,12 +1518,12 @@ const manuscriptAnnotations = [
   },
 ]
 
-const collaborators = [
+const initialCollaborators = [
   {
     id: "collab-1",
     book_id: "book-1",
     email: "beta@example.com",
-    display_name: "Beta Reader",
+    display_name: "Ari Reader",
     role: "beta_reader",
     scope: {
       chapter_start: 1,
@@ -1479,6 +1545,8 @@ const collaborators = [
     updated_at: "2026-05-08T10:00:00Z",
   },
 ]
+
+const collaborators = JSON.parse(JSON.stringify(initialCollaborators))
 
 const worldBuildingDocuments = [
   {
@@ -1714,6 +1782,10 @@ function notFound(route: Route) {
 export async function installMockApi(page: Page, options: MockOptions = {}) {
   const session = options.session ?? "authenticated"
   const login = options.login ?? "success"
+  user.username = defaultUsername
+  publicForumPosts = JSON.parse(JSON.stringify(initialPublicForumPosts))
+  publicForumComments = JSON.parse(JSON.stringify(initialPublicForumComments))
+  collaborators.splice(0, collaborators.length, ...JSON.parse(JSON.stringify(initialCollaborators)))
   let mockWriterWorkspace = JSON.parse(JSON.stringify(writerWorkspace))
   let mockNotifications = JSON.parse(JSON.stringify(notifications))
   let mockWorkspaceTree = JSON.parse(JSON.stringify(workspaceTree))
@@ -1811,6 +1883,49 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
 
     if (path === "/api/v1/books/book-1" && method === "GET") {
       return json(route, book)
+    }
+
+    if (path === "/api/v1/books/book-1/overview" && method === "GET") {
+      return json(route, {
+        book,
+        progress: {
+          current_chapter: 2,
+          scroll_pct: 35,
+          chapters_read_count: 2,
+          percent_complete: 64,
+          chapters_left: 1,
+        },
+        chapter_list: chapterList,
+        summary_collection: {
+          read_upto: 2,
+          summaries: [
+            {
+              chapter_number: 1,
+              chapter_title: "Ashfall",
+              read: true,
+              available: true,
+              content: "Nora leaves the ash road and reaches the city wall.",
+              key_events: [{ event: "Nora reaches the gate city.", importance: 0.88 }],
+            },
+            {
+              chapter_number: 2,
+              chapter_title: "The Ember Gate",
+              read: true,
+              available: true,
+              content: "The ember gate opens and Nora steps into the city under watch.",
+              key_events: [{ event: "The gate crossing changes the story stakes.", importance: 0.93 }],
+            },
+            {
+              chapter_number: 3,
+              chapter_title: "River of Glass",
+              read: false,
+              available: false,
+              content: null,
+              key_events: [],
+            },
+          ],
+        },
+      })
     }
 
     if (path === "/api/v1/books/book-1/collaborators" && method === "GET") {
@@ -2398,8 +2513,11 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
         allow_contact_requests: threadType === "novel" ? Boolean(payload?.allow_contact_requests ?? true) : false,
         status: "open",
         viewer_interest_status: null,
+        reaction: null,
         interest_count: 0,
         comment_count: 0,
+        like_count: 0,
+        dislike_count: 0,
         rating_summary: {
           average_rating: null,
           rating_count: 0,
@@ -2413,6 +2531,25 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
       }
       publicForumPosts = [created, ...publicForumPosts]
       return json(route, created, 201)
+    }
+
+    const publicForumPostReactionMatch = path.match(/^\/api\/v1\/public\/forum\/posts\/([^/]+)\/reaction$/)
+    if (publicForumPostReactionMatch && method === "PUT") {
+      const payload = route.request().postDataJSON() as { reaction?: "like" | "dislike" | "clear" } | null
+      const postId = publicForumPostReactionMatch[1]
+      publicForumPosts = publicForumPosts.map((post) => {
+        if (post.id !== postId) return post
+        const previous = post.reaction
+        const next = payload?.reaction === "clear" ? null : (payload?.reaction ?? null)
+        return {
+          ...post,
+          reaction: next,
+          like_count: previous === "like" && next !== "like" ? Math.max(0, post.like_count - 1) : previous !== "like" && next === "like" ? post.like_count + 1 : post.like_count,
+          dislike_count: previous === "dislike" && next !== "dislike" ? Math.max(0, post.dislike_count - 1) : previous !== "dislike" && next === "dislike" ? post.dislike_count + 1 : post.dislike_count,
+        }
+      })
+      const updated = publicForumPosts.find((post) => post.id === postId)
+      return updated ? json(route, updated) : notFound(route)
     }
 
     if (path === "/api/v1/public/books" && method === "GET") {

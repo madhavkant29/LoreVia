@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import React from "react"
 import { act } from "react"
 import type { ReactNode } from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
@@ -152,9 +153,28 @@ describe("public analytics surfaces", () => {
 
     expect(container.textContent).toContain("42")
     expect(container.textContent).toContain("9")
-    expect(container.textContent).toContain("84")
-    expect(container.textContent).toContain("Books published by @writer")
+    expect(container.textContent).toContain("1.2k words")
+    expect(container.textContent).toContain("Published books")
     expect(container.textContent).toContain("Public Sample")
+    unmount()
+  })
+
+  it("renders the writer layout with empty states when the profile has no public activity yet", async () => {
+    getUserProfileMock.mockRejectedValue(new Error("Not Found"))
+
+    const { container, unmount } = renderWithQuery(<PublicWriterProfilePageClient username="mell" initialProfile={null} />)
+    await act(async () => {
+      await Promise.resolve()
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(container.textContent).toContain("@mell")
+    expect(container.textContent).toContain("0 visible uploads")
+    expect(container.textContent).toContain("No public posts are visible for this writer yet.")
+    expect(container.textContent).toContain("This writer has not surfaced any visible creator-published public books yet.")
+    expect(container.textContent).not.toContain("Could not load this writer profile.")
     unmount()
   })
 })

@@ -202,7 +202,7 @@ export function AuthorWorkspaceDashboard({
                     aria-pressed={activeTab === tab}
                     className={`rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] transition ${
                       activeTab === tab
-                        ? isDark ? "bg-violet-500 text-white" : "bg-violet-600 text-white"
+                        ? isDark ? "bg-teal-800 text-white" : "bg-teal-800 text-white"
                         : isDark ? "bg-white/[0.04] text-slate-300 hover:bg-white/[0.08]" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                     }`}
                   >
@@ -311,7 +311,7 @@ function OverviewHeader({
     <section className={panelClass(isDark, "overflow-hidden p-4 sm:p-5")}>
       <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
         <div className="min-w-0">
-          <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-violet-300/80" : "text-violet-700"}`}>Author workspace</p>
+          <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-teal-200/80" : "text-teal-800"}`}>Author workspace</p>
           <h1 className={`mt-2 font-serif text-3xl leading-none sm:text-4xl ${isDark ? "text-white" : "text-slate-900"}`}>
             Welcome back, {greetingName}.
           </h1>
@@ -331,7 +331,7 @@ function OverviewHeader({
                   disabled={modeSaving}
                   className={`px-4 text-xs font-semibold uppercase tracking-[0.18em] transition ${
                     activeBookMode === mode
-                      ? isDark ? "bg-violet-500 text-white" : "bg-violet-600 text-white"
+                      ? isDark ? "bg-teal-800 text-white" : "bg-teal-800 text-white"
                       : isDark ? "text-slate-300 hover:bg-white/[0.08]" : "text-slate-600 hover:bg-white"
                   }`}
                 >
@@ -412,7 +412,7 @@ function CurrentProjectHero({
 
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <span className={`rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "bg-violet-500/12 text-violet-200" : "bg-violet-50 text-violet-700"}`}>
+              <span className={`rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "bg-teal-800/10 text-teal-100" : "bg-teal-50 text-teal-800"}`}>
                 Current project
               </span>
               <span className={isDark ? "text-xs text-slate-500" : "text-xs text-slate-400"}>
@@ -434,7 +434,7 @@ function CurrentProjectHero({
                 <button
                   type="button"
                   onClick={onOpenManuscript}
-                  className={`inline-flex min-h-12 items-center gap-2 rounded-2xl px-5 py-3 text-sm font-semibold transition ${isDark ? "bg-violet-500 text-white hover:bg-violet-400" : "bg-violet-600 text-white hover:bg-violet-500"}`}
+                  className={`inline-flex min-h-12 items-center gap-2 rounded-2xl px-5 py-3 text-sm font-semibold transition ${isDark ? "bg-teal-800 text-white hover:bg-teal-700" : "bg-teal-800 text-white hover:bg-teal-800"}`}
                 >
                   <Icon name="book" />
                   Open manuscript editor
@@ -490,7 +490,7 @@ function CurrentProjectHero({
               <p className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Recent chapters</p>
               <p className={`mt-1 text-sm ${isDark ? "text-slate-300" : "text-slate-600"}`}>Keep the current run of scenes in view.</p>
             </div>
-            <button type="button" onClick={() => onNavigate(`/${bookId}/manuscript`)} className="text-xs font-semibold text-violet-400">
+            <button type="button" onClick={() => onNavigate(`/${bookId}/manuscript`)} className="text-xs font-semibold text-teal-700">
               Open draft
             </button>
           </div>
@@ -571,7 +571,7 @@ function StoryPulseCard({
           <div key={metric.label} className={`rounded-2xl border px-4 py-3 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
             <div className="flex items-center justify-between gap-3">
               <span className={isDark ? "text-sm text-slate-200" : "text-sm text-slate-700"}>{metric.label}</span>
-              <span className="text-sm font-semibold text-violet-400">{metric.score}%</span>
+              <span className="text-sm font-semibold text-teal-700">{metric.score}%</span>
             </div>
           </div>
         ))}
@@ -580,7 +580,7 @@ function StoryPulseCard({
       <Link
         href={`/${bookId}/analysis` as Route}
         className={`mt-5 inline-flex w-full items-center justify-center rounded-2xl border px-4 py-3 text-sm font-semibold transition ${
-          isDark ? "border-white/10 bg-white/[0.04] text-violet-300 hover:bg-white/[0.08]" : "border-slate-200 bg-white text-violet-700 hover:bg-slate-50"
+          isDark ? "border-white/10 bg-white/[0.04] text-teal-200 hover:bg-white/[0.08]" : "border-slate-200 bg-white text-teal-800 hover:bg-slate-50"
         }`}
       >
         View full report
@@ -607,31 +607,43 @@ function ActiveIssuesCard({
   processingSummary: string | null
 }) {
   const issues = [
-    { title: "Character inconsistencies", rawCount: continuityIssueCount, severity: "High", icon: "users" as IconName, href: `/${bookId}/reports` },
-    { title: "World gaps", rawCount: worldGapCount, severity: "Medium", icon: "gap" as IconName, href: `/${bookId}/world-gap` },
-    { title: "Timeline conflicts", rawCount: timelineIssueCount, severity: "Low", icon: "timeline" as IconName, href: `/${bookId}/timeline` },
+    { title: "Character Inconsistencies", rawCount: continuityIssueCount, severity: "High", icon: "users" as IconName, href: `/${bookId}/reports` },
+    { title: "World Gaps", rawCount: worldGapCount, severity: "Medium", icon: "gap" as IconName, href: `/${bookId}/world-gap` },
+    { title: "Timeline Conflicts", rawCount: timelineIssueCount, severity: "Low", icon: "timeline" as IconName, href: `/${bookId}/timeline` },
   ].map((issue) => ({
     ...issue,
     ...buildIssueDisplay(issue.rawCount),
   }))
 
   return (
-    <section className={panelClass(isDark, "p-4 sm:p-5")}>
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Next actions</p>
-          <h2 className={`mt-2 text-xl font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>Keep the risky parts visible.</h2>
+      <section className={panelClass(isDark, "p-4 sm:p-5")}>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Next actions</p>
+            <h2 className={`mt-2 text-xl font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>Keep the risky parts visible.</h2>
+          </div>
+          <Icon name="spark" className="h-5 w-5 text-teal-700" />
         </div>
-        <Icon name="spark" className="h-5 w-5 text-violet-400" />
-      </div>
 
-      {processingSummary ? (
-        <p className={`mt-4 rounded-2xl border px-4 py-3 text-sm leading-6 ${isDark ? "border-white/[0.06] bg-white/[0.03] text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600"}`}>
-          {processingSummary}
+        <p className={`mt-4 text-sm leading-6 ${isDark ? "text-slate-300" : "text-slate-600"}`}>
+          Keep revision fallout visible before it reaches readers.
         </p>
-      ) : null}
 
-      <div className="mt-4 space-y-3">
+        {processingSummary ? (
+          <p className={`mt-4 rounded-2xl border px-4 py-3 text-sm leading-6 ${isDark ? "border-white/[0.06] bg-white/[0.03] text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600"}`}>
+            {processingSummary}
+          </p>
+        ) : null}
+
+        <button
+          type="button"
+          onClick={() => onNavigate(`/${bookId}/reports`)}
+          className={`mt-4 inline-flex items-center gap-2 rounded-2xl px-4 py-2 text-sm font-semibold transition ${isDark ? "bg-teal-800 text-white hover:bg-teal-700" : "bg-teal-800 text-white hover:bg-teal-700"}`}
+        >
+          Create revision checklist
+        </button>
+
+        <div className="mt-4 space-y-3">
         {issues.map((issue) => (
           <button
             key={issue.title}
@@ -639,7 +651,7 @@ function ActiveIssuesCard({
             onClick={() => onNavigate(issue.href)}
             className={`flex w-full items-center gap-3 rounded-2xl border px-4 py-3 text-left transition ${isDark ? "border-white/[0.06] bg-white/[0.03] hover:bg-white/[0.06]" : "border-slate-200 bg-white hover:bg-slate-50"}`}
           >
-            <Icon name={issue.icon} className="h-5 w-5 text-violet-400" />
+            <Icon name={issue.icon} className="h-5 w-5 text-teal-700" />
             <div className="min-w-0 flex-1">
               <p className={`truncate text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-800"}`}>{issue.title}</p>
               <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>{issue.label}</p>
@@ -672,7 +684,7 @@ function CompactQuickLinksCard({
             onClick={() => onNavigate(link.href)}
             className={`flex w-full items-start gap-3 rounded-2xl border px-4 py-3 text-left transition ${isDark ? "border-white/[0.06] bg-white/[0.03] hover:bg-white/[0.06]" : "border-slate-200 bg-white hover:bg-slate-50"}`}
           >
-            <Icon name={link.icon} className="mt-0.5 h-5 w-5 text-violet-400" />
+            <Icon name={link.icon} className="mt-0.5 h-5 w-5 text-teal-700" />
             <div className="min-w-0">
               <p className={`text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-800"}`}>{link.title}</p>
               <p className={`mt-1 text-xs leading-5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>{link.body}</p>
@@ -762,7 +774,7 @@ function StoryMapTab({
               <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Memory map</p>
               <h3 className={`mt-2 text-xl font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>Who is in play and what still needs closure.</h3>
             </div>
-            <button type="button" onClick={onOpenRelationships} className="text-sm font-semibold text-violet-400">
+            <button type="button" onClick={onOpenRelationships} className="text-sm font-semibold text-teal-700">
               Open graph
             </button>
           </div>
@@ -775,7 +787,7 @@ function StoryMapTab({
                   <div key={character.id}>
                     <p className={`text-sm font-medium ${isDark ? "text-slate-100" : "text-slate-800"}`}>{character.name}</p>
                     <p className={`mt-1 text-xs leading-5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                      {character.role || "Character"}{character.last_seen_chapter ? ` • last seen in Chapter ${character.last_seen_chapter}` : ""}
+                      {character.role || "Character"}{character.last_seen_chapter ? ` Ã¢â‚¬Â¢ last seen in Chapter ${character.last_seen_chapter}` : ""}
                     </p>
                   </div>
                 ))}
@@ -790,7 +802,7 @@ function StoryMapTab({
                   <div key={thread.id}>
                     <p className={`text-sm font-medium ${isDark ? "text-slate-100" : "text-slate-800"}`}>{thread.title}</p>
                     <p className={`mt-1 text-xs leading-5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                      {thread.status}{thread.introduced_at ? ` • introduced in Chapter ${thread.introduced_at}` : ""}
+                      {thread.status}{thread.introduced_at ? ` Ã¢â‚¬Â¢ introduced in Chapter ${thread.introduced_at}` : ""}
                     </p>
                   </div>
                 ))}
@@ -800,7 +812,7 @@ function StoryMapTab({
           </div>
 
           <div className="mt-5 flex flex-wrap gap-3">
-            <button type="button" onClick={() => onNavigate(`/${bookId}/timeline`)} className={`rounded-full px-4 py-2 text-sm font-semibold ${isDark ? "bg-violet-500/12 text-violet-200 hover:bg-violet-500/20" : "bg-violet-50 text-violet-700 hover:bg-violet-100"}`}>
+            <button type="button" onClick={() => onNavigate(`/${bookId}/timeline`)} className={`rounded-full px-4 py-2 text-sm font-semibold ${isDark ? "bg-teal-800/10 text-teal-100 hover:bg-teal-800/20" : "bg-teal-50 text-teal-800 hover:bg-teal-100"}`}>
               Open timeline
             </button>
             <button type="button" onClick={() => onNavigate(`/${bookId}/characters`)} className={`rounded-full px-4 py-2 text-sm font-semibold ${isDark ? "bg-white/[0.06] text-slate-200 hover:bg-white/[0.1]" : "bg-slate-100 text-slate-700 hover:bg-slate-200"}`}>
@@ -867,7 +879,7 @@ function ProjectOverviewCard({
       <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {stats.map((stat) => (
           <div key={stat.label} className={`rounded-2xl border p-4 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
-            <Icon name={stat.icon} className="h-5 w-5 text-violet-400" />
+            <Icon name={stat.icon} className="h-5 w-5 text-teal-700" />
             <p className={`mt-4 text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>{stat.label}</p>
             <p className={`mt-2 text-2xl font-semibold ${isDark ? "text-white" : "text-slate-950"}`}>{stat.value}</p>
           </div>
@@ -891,7 +903,7 @@ function WritingStreakCard({ isDark, streakDays, weekActivity }: { isDark: boole
       <div className="mt-6 grid grid-cols-7 gap-2">
         {["M", "T", "W", "T", "F", "S", "S"].map((day, index) => (
           <div key={`${day}-${index}`} className="text-center">
-            <div className={`mx-auto h-9 w-4 rounded-full ${weekActivity[index] ? "bg-violet-500" : isDark ? "bg-white/10" : "bg-slate-200"}`} />
+            <div className={`mx-auto h-9 w-4 rounded-full ${weekActivity[index] ? "bg-teal-800" : isDark ? "bg-white/10" : "bg-slate-200"}`} />
             <p className={`mt-2 text-[10px] font-semibold ${isDark ? "text-slate-500" : "text-slate-400"}`}>{day}</p>
           </div>
         ))}
@@ -1074,13 +1086,13 @@ function GoalCalendarCard({
                     onClick={() => setSelectedDate(day.value)}
                     className={`min-h-[5.8rem] rounded-2xl border p-2 text-left transition ${
                       selected
-                        ? isDark ? "border-violet-400/60 bg-violet-500/10" : "border-violet-300 bg-violet-50"
+                        ? isDark ? "border-teal-800/25 bg-teal-800/10" : "border-teal-300 bg-teal-50"
                         : isDark ? "border-white/[0.05] bg-[#101720] hover:bg-[#16202b]" : "border-slate-200 bg-white hover:bg-slate-50"
                     } ${!day.inMonth ? (isDark ? "text-slate-600" : "text-slate-300") : ""}`}
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <span className={`text-sm font-semibold ${selected ? "text-violet-400" : day.inMonth ? (isDark ? "text-slate-200" : "text-slate-700") : ""}`}>{day.label}</span>
-                      {isToday ? <span className="rounded-full bg-violet-500 px-1.5 py-0.5 text-[10px] font-semibold text-white">Today</span> : null}
+                      <span className={`text-sm font-semibold ${selected ? "text-teal-700" : day.inMonth ? (isDark ? "text-slate-200" : "text-slate-700") : ""}`}>{day.label}</span>
+                      {isToday ? <span className="rounded-full bg-teal-800 px-1.5 py-0.5 text-[10px] font-semibold text-white">Today</span> : null}
                     </div>
                     <div className="mt-3 space-y-1">
                       {dayItems.length > 0 ? (
@@ -1121,13 +1133,13 @@ function GoalCalendarCard({
                       checked={item.completed}
                       disabled={!editable || saveState === "saving"}
                       onChange={() => void toggleCalendarItem(item.id)}
-                      className="mt-1 h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
+                      className="mt-1 h-4 w-4 rounded border-slate-300 text-teal-800 focus:ring-teal-700"
                     />
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <p className={`text-sm font-semibold ${item.completed ? (isDark ? "text-slate-500 line-through" : "text-slate-400 line-through") : isDark ? "text-slate-200" : "text-slate-700"}`}>{item.title}</p>
                         {formatQuotaLabel(item.quota_value, item.quota_unit) ? (
-                          <span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${isDark ? "bg-violet-500/12 text-violet-300" : "bg-violet-50 text-violet-700"}`}>{formatQuotaLabel(item.quota_value, item.quota_unit)}</span>
+                          <span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${isDark ? "bg-teal-800/10 text-teal-200" : "bg-teal-50 text-teal-800"}`}>{formatQuotaLabel(item.quota_value, item.quota_unit)}</span>
                         ) : null}
                       </div>
                     </div>
@@ -1156,7 +1168,7 @@ function GoalCalendarCard({
                   onChange={(event) => setDraftTitle(event.target.value)}
                   disabled={!editable || saveState === "saving"}
                   placeholder={editable ? "Draft chapter, revise outline, finish scene..." : "Loading planner..."}
-                  className={`h-11 rounded-2xl border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 placeholder:text-slate-600 focus:border-violet-400" : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-violet-400"}`}
+                  className={`h-11 rounded-2xl border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 placeholder:text-slate-600 focus:border-teal-700" : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-teal-700"}`}
                 />
                 <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_9rem]">
                   <input
@@ -1167,13 +1179,13 @@ function GoalCalendarCard({
                     onChange={(event) => setDraftQuotaValue(event.target.value)}
                     disabled={!editable || saveState === "saving"}
                     placeholder="Quota"
-                    className={`h-11 rounded-2xl border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 placeholder:text-slate-600 focus:border-violet-400" : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-violet-400"}`}
+                    className={`h-11 rounded-2xl border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 placeholder:text-slate-600 focus:border-teal-700" : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-teal-700"}`}
                   />
                   <select
                     value={draftQuotaUnit}
                     onChange={(event) => setDraftQuotaUnit(event.target.value)}
                     disabled={!editable || saveState === "saving"}
-                    className={`h-11 rounded-2xl border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-violet-400" : "border-slate-200 bg-white text-slate-900 focus:border-violet-400"}`}
+                    className={`h-11 rounded-2xl border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-teal-700" : "border-slate-200 bg-white text-slate-900 focus:border-teal-700"}`}
                   >
                     {["words", "chapters", "scenes", "pages", "tasks"].map((unit) => (
                       <option key={unit} value={unit}>{unit}</option>
@@ -1186,13 +1198,13 @@ function GoalCalendarCard({
                     value={selectedDate}
                     onChange={(event) => setSelectedDate(event.target.value)}
                     disabled={!editable || saveState === "saving"}
-                    className={`h-11 rounded-2xl border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-violet-400" : "border-slate-200 bg-white text-slate-900 focus:border-violet-400"}`}
+                    className={`h-11 rounded-2xl border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-teal-700" : "border-slate-200 bg-white text-slate-900 focus:border-teal-700"}`}
                   />
                   <button
                     type="button"
                     onClick={() => void addCalendarItem()}
                     disabled={!editable || saveState === "saving" || !draftTitle.trim()}
-                    className={`inline-flex h-11 items-center justify-center rounded-2xl px-4 text-sm font-semibold transition ${isDark ? "bg-violet-500 text-white hover:bg-violet-400 disabled:bg-violet-500/40" : "bg-violet-600 text-white hover:bg-violet-500 disabled:bg-violet-300"}`}
+                    className={`inline-flex h-11 items-center justify-center rounded-2xl px-4 text-sm font-semibold transition ${isDark ? "bg-teal-800 text-white hover:bg-teal-700 disabled:bg-teal-800/35" : "bg-teal-800 text-white hover:bg-teal-800 disabled:bg-teal-300"}`}
                   >
                     Add item
                   </button>
@@ -1203,7 +1215,7 @@ function GoalCalendarCard({
                 <p className={`text-xs ${saveState === "error" ? "text-rose-400" : isDark ? "text-slate-500" : "text-slate-400"}`}>
                   {saveMessage || (editable ? "Changes save back into this book workspace." : "Loading planner...")}
                 </p>
-                <button type="button" onClick={onOpenManuscript} className="text-xs font-semibold text-violet-400">
+                <button type="button" onClick={onOpenManuscript} className="text-xs font-semibold text-teal-700">
                   Adjust word goals
                 </button>
               </div>
@@ -1250,7 +1262,7 @@ function StatusPill({
   tone: "violet" | "slate"
 }) {
   const toneClass = tone === "violet"
-    ? isDark ? "bg-violet-500/12 text-violet-200" : "bg-violet-50 text-violet-700"
+    ? isDark ? "bg-teal-800/10 text-teal-100" : "bg-teal-50 text-teal-800"
     : isDark ? "bg-white/[0.06] text-slate-300" : "bg-slate-100 text-slate-600"
 
   return <span className={`rounded-full px-3 py-1 text-[11px] font-semibold ${toneClass}`}>{label}</span>

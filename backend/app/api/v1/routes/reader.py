@@ -26,7 +26,6 @@ from app.core.redis import (
 from app.core.security import decode_token
 from app.core.storage import download_book
 from app.engine.analysis.recall import generate_recall
-from app.engine.character.consolidator import consolidate_characters
 from app.engine.search.semantic import build_search_result, find_context_for_tap, semantic_search
 from app.models.book import Book, Chapter, ChapterMedia
 from app.models.character import Character, CharacterState
@@ -55,7 +54,9 @@ from app.utils.book_utils import (
     get_book_with_collaboration_access,
 )
 from app.utils.character_utils import (
+    append_unique_summary,
     backfill_character_first_chapters_for_chapter_text,
+    relationship_summary_for_character,
     serialize_reader_character,
 )
 from app.utils.plot_thread_utils import derive_plot_thread_status
@@ -176,8 +177,6 @@ async def get_chapter(
     book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
     if not collaboration_allows_chapter(collaborator, chapter_num):
         raise HTTPException(403, "This share does not include that chapter.")
-    await consolidate_characters(db, book_id, up_to_chapter=chapter_num)
-
     chapter = (await db.execute(
         select(Chapter).where(Chapter.book_id == book_id, Chapter.number == chapter_num)
     )).scalar()
@@ -277,14 +276,37 @@ async def smart_tap(
         # Book still processing, return empty results
         return {"type": "search", "results": []}
     
-    await consolidate_characters(db, book_id, up_to_chapter=chapter)
-
-    char_result = await db.execute(
-        select(Character).where(Character.book_id == book_id, Character.name.ilike(f"%{q}%"), Character.first_chapter <= chapter)
+    char_rows = (
+        await db.execute(
+            select(Character)
+            .where(Character.book_id == book_id, Character.first_chapter <= chapter)
+            .order_by(Character.first_chapter, Character.name)
+        )
+    ).scalars().all()
+    needle = q.strip().casefold()
+    char = next(
+        (
+            item
+            for item in char_rows
+            if needle
+            and (
+                needle == str(item.name or "").casefold()
+                or needle in {str(alias or "").casefold() for alias in (item.aliases or [])}
+                or needle in str(item.name or "").casefold()
+                or any(needle in str(alias or "").casefold() for alias in (item.aliases or []))
+            )
+        ),
+        None,
     )
-    char = char_result.scalar()
 
     if char:
+        states = (
+            await db.execute(
+                select(CharacterState)
+                .where(CharacterState.character_id == char.id, CharacterState.at_chapter <= chapter)
+                .order_by(CharacterState.at_chapter)
+            )
+        ).scalars().all()
         char_state_result = await db.execute(
             select(CharacterState)
             .where(CharacterState.character_id == char.id, CharacterState.at_chapter <= chapter)
@@ -308,11 +330,40 @@ async def smart_tap(
             )
         )
         rels = rels_result.scalars().all()
+        counterpart_ids = {
+            rel.character_b_id if rel.character_a_id == char.id else rel.character_a_id
+            for rel in rels
+        }
+        counterparts = (
+            await db.execute(select(Character).where(Character.id.in_(counterpart_ids)))
+        ).scalars().all() if counterpart_ids else []
+        counterpart_names = {item.id: item.name for item in counterparts}
+        rel_summaries: dict[str, list[str]] = {}
+        rel_keys: dict[str, set[str]] = {}
+        for rel in rels:
+            counterpart_name = counterpart_names.get(
+                rel.character_b_id if rel.character_a_id == char.id else rel.character_a_id
+            )
+            if not counterpart_name:
+                continue
+            summary = relationship_summary_for_character(rel, char.name, counterpart_name, char.name)
+            if summary:
+                append_unique_summary(
+                    rel_summaries,
+                    rel_keys,
+                    str(char.id),
+                    f"{rel.rel_type}:{counterpart_name}".lower(),
+                    summary,
+                )
 
         return {
             "type": "character",
             "character": {
-                **serialize_reader_character(char, trait_snapshot=trait_snapshot),
+                **serialize_reader_character(
+                    char,
+                    trait_snapshot=trait_snapshot,
+                    relationship_summaries=rel_summaries.get(str(char.id), []),
+                ),
                 "arc_note": char_state.arc_note if char_state else None,
             },
             "relationships": [
@@ -323,6 +374,15 @@ async def smart_tap(
                     "description": r.description,
                 }
                 for r in rels
+            ],
+            "states": [
+                {
+                    "at_chapter": state.at_chapter,
+                    "trait_state": state.trait_snapshot,
+                    "arc_note": state.arc_note,
+                    "prompt_delta": state.prompt_delta,
+                }
+                for state in states
             ],
         }
 
@@ -444,8 +504,6 @@ async def get_relationships(
     book = await db.get(Book, book_id)
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
-    await consolidate_characters(db, book_id, up_to_chapter=chapter)
-
     cache_scope = "all" if include_inactive else "active"
     cache_key = f"{key_relationship_graph(str(book_id), chapter)}:v4:{cache_scope}"
     cached = await cache_get(cache_key)

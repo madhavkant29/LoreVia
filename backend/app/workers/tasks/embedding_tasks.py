@@ -3,7 +3,7 @@ from app.utils.worker_async_utils import run_worker_coro
 
 
 @celery_app.task(bind=True, name="embedding_tasks.update_character_embedding",
-                 queue="embedding", max_retries=3)
+                 queue="embedding", max_retries=3, ignore_result=True)
 def update_character_embedding_task(self, character_id: str):
     async def _run():
         import uuid

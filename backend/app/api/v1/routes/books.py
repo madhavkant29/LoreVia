@@ -87,7 +87,6 @@ from app.core import storage
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import create_asset_token, decode_token
-from app.engine.character.consolidator import consolidate_characters
 from app.models.book import (
     Book,
     BookCollaborator,
@@ -97,7 +96,13 @@ from app.models.book import (
     Series,
     SeriesBook,
 )
-from app.models.character import Character, CharacterState, CharacterVoiceProfile
+from app.models.character import (
+    Character,
+    CharacterCandidate,
+    CharacterDuplicateSuggestion,
+    CharacterState,
+    CharacterVoiceProfile,
+)
 from app.models.intelligence import ChapterSummary, CharacterRelationship, PlotThread, QuoteEntry
 from app.models.progress import ReadingProgress
 from app.schemas.books import (
@@ -110,6 +115,7 @@ from app.schemas.books import (
     ChapterConsistencyReport,
     ChapterVersionOut,
     CharacterCreateBody,
+    CharacterCandidateAttachBody,
     CharacterEventOut,
     CharacterMergeBody,
     CharacterPartitionBody,
@@ -147,6 +153,7 @@ from app.schemas.books import (
     WriterWorkspaceOut,
 )
 from app.schemas.public import PublicBookCreateOut, PublicBookShareBody
+from app.schemas.character import CharacterReviewOut
 from app.utils.advisor_utils import invalidate_advisor_caches
 from app.utils.billing_utils import calculate_upload_usage_summary, require_author_access
 from app.services.pipeline_state_service import (
@@ -213,16 +220,24 @@ from app.utils.book_utils import (
 
 # ── Utils imports ──────────────────────────────────────────────────────────────
 from app.utils.character_utils import (
+    CHARACTER_CANDIDATE_PENDING,
+    CHARACTER_DUPLICATE_PENDING,
     append_unique_summary,
     apply_graph_visibility_override,
     apply_manual_character_description,
+    attach_character_candidate,
     build_manual_character,
+    build_character_review_payload,
     clean_optional_text,
     clean_string_list,
     dedupe_preserve_order,
     is_displayable_character,
+    list_character_review_data,
+    mark_character_candidates_merged,
     merge_characters,
     partition_character,
+    promote_character_candidate,
+    refresh_character_duplicate_suggestions,
     relationship_summary_for_character,
     serialize_book_character,
 )
@@ -1940,7 +1955,6 @@ async def get_book_characters(book_id: uuid.UUID, db: AsyncSession = Depends(get
     book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
     if not collaboration_has_resource(collaborator, "character_bible"):
         raise HTTPException(403, "This share does not include the character bible.")
-    await consolidate_characters(db, book_id)
     result = await db.execute(select(Character).where(Character.book_id == book_id).order_by(Character.first_chapter, Character.name))
     all_characters = list(result.scalars().all())
     characters = all_characters if book.mode == "author" else [char for char in all_characters if is_displayable_character(char)]
@@ -2009,6 +2023,19 @@ async def get_book_characters(book_id: uuid.UUID, db: AsyncSession = Depends(get
     ]
 
 
+@router.get("/{book_id}/character-review", response_model=CharacterReviewOut)
+async def get_book_character_review(
+    book_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
+    if book.mode != "author":
+        raise HTTPException(400, "Character review is only available in author mode")
+    return await list_character_review_data(db, book_id=book.id)
+
+
 @router.post("/{book_id}/characters", status_code=201)
 async def create_book_character(
     book_id: uuid.UUID,
@@ -2046,6 +2073,8 @@ async def create_book_character(
         raise HTTPException(400, str(exc)) from exc
 
     db.add(character)
+    await db.flush()
+    await refresh_character_duplicate_suggestions(db, book_id=book.id)
     await db.commit()
     await db.refresh(character)
     return serialize_book_character(
@@ -2081,6 +2110,13 @@ async def merge_book_characters(
         return {"merged": str(primary.id)}
 
     merged = await merge_characters(db, primary.id, secondary.id, book.id)
+    await mark_character_candidates_merged(
+        db,
+        book_id=book.id,
+        primary_character_id=merged.id,
+        secondary_character_id=secondary.id,
+    )
+    await refresh_character_duplicate_suggestions(db, book_id=book.id)
     await db.commit()
     await db.refresh(merged)
     return {"merged": str(merged.id)}
@@ -2111,6 +2147,7 @@ async def partition_book_character(
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
+    await refresh_character_duplicate_suggestions(db, book_id=book.id)
     await db.commit()
     return {
         "replaced": str(character_id),
@@ -2169,6 +2206,7 @@ async def update_book_character(
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
 
+    await refresh_character_duplicate_suggestions(db, book_id=book.id)
     await db.commit()
     await db.refresh(character)
     states = (
@@ -2233,8 +2271,120 @@ async def delete_book_character(
         raise HTTPException(400, "Character correction is only available in author mode")
 
     await db.delete(character)
+    await refresh_character_duplicate_suggestions(db, book_id=book.id)
     await db.commit()
     return {"deleted": str(character_id)}
+
+
+@router.post("/{book_id}/character-review/{candidate_id}/promote")
+async def promote_book_character_candidate(
+    book_id: uuid.UUID,
+    candidate_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
+    candidate = await db.get(CharacterCandidate, candidate_id)
+    if not candidate or candidate.book_id != book.id:
+        raise HTTPException(404, "Candidate not found")
+    if candidate.status != CHARACTER_CANDIDATE_PENDING:
+        raise HTTPException(400, "Only pending candidates can be promoted")
+
+    character = await promote_character_candidate(db, candidate=candidate)
+    await refresh_character_duplicate_suggestions(db, book_id=book.id)
+    await db.commit()
+    return {"promoted": str(character.id), "candidate_id": str(candidate.id)}
+
+
+@router.post("/{book_id}/character-review/{candidate_id}/attach")
+async def attach_book_character_candidate(
+    book_id: uuid.UUID,
+    candidate_id: uuid.UUID,
+    body: CharacterCandidateAttachBody,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
+    candidate = await db.get(CharacterCandidate, candidate_id)
+    character = await db.get(Character, body.character_id)
+    if not candidate or candidate.book_id != book.id:
+        raise HTTPException(404, "Candidate not found")
+    if not character or character.book_id != book.id:
+        raise HTTPException(404, "Character not found")
+    if candidate.status != CHARACTER_CANDIDATE_PENDING:
+        raise HTTPException(400, "Only pending candidates can be attached")
+
+    await attach_character_candidate(db, candidate=candidate, character=character)
+    await refresh_character_duplicate_suggestions(db, book_id=book.id)
+    await db.commit()
+    return {"attached": str(character.id), "candidate_id": str(candidate.id)}
+
+
+@router.post("/{book_id}/character-review/{candidate_id}/reject")
+async def reject_book_character_candidate(
+    book_id: uuid.UUID,
+    candidate_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
+    candidate = await db.get(CharacterCandidate, candidate_id)
+    if not candidate or candidate.book_id != book.id:
+        raise HTTPException(404, "Candidate not found")
+    candidate.status = "rejected"
+    await db.commit()
+    return {"rejected": str(candidate.id)}
+
+
+@router.post("/{book_id}/duplicate-suggestions/{suggestion_id}/accept")
+async def accept_character_duplicate_suggestion(
+    book_id: uuid.UUID,
+    suggestion_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
+    suggestion = await db.get(CharacterDuplicateSuggestion, suggestion_id)
+    if not suggestion or suggestion.book_id != book.id:
+        raise HTTPException(404, "Duplicate suggestion not found")
+
+    primary = await db.get(Character, suggestion.primary_character_id)
+    secondary = await db.get(Character, suggestion.secondary_character_id)
+    if not primary or not secondary or primary.book_id != book.id or secondary.book_id != book.id:
+        raise HTTPException(404, "Character not found")
+
+    merged = await merge_characters(db, primary.id, secondary.id, book.id)
+    suggestion.status = "accepted"
+    await mark_character_candidates_merged(
+        db,
+        book_id=book.id,
+        primary_character_id=merged.id,
+        secondary_character_id=secondary.id,
+    )
+    await refresh_character_duplicate_suggestions(db, book_id=book.id)
+    await db.commit()
+    return {"merged": str(merged.id), "suggestion_id": str(suggestion.id)}
+
+
+@router.post("/{book_id}/duplicate-suggestions/{suggestion_id}/dismiss")
+async def dismiss_character_duplicate_suggestion(
+    book_id: uuid.UUID,
+    suggestion_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
+    suggestion = await db.get(CharacterDuplicateSuggestion, suggestion_id)
+    if not suggestion or suggestion.book_id != book.id:
+        raise HTTPException(404, "Duplicate suggestion not found")
+    suggestion.status = "dismissed"
+    await db.commit()
+    return {"dismissed": str(suggestion.id)}
 
 
 @router.post("/{book_id}/relationships", status_code=201)

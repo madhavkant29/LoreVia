@@ -6,7 +6,7 @@ from app.utils.worker_async_utils import run_worker_coro
 
 
 @celery_app.task(bind=True, name="intelligence_tasks.generate_wiki",
-                 queue="intelligence", max_retries=2)
+                 queue="intelligence", max_retries=2, ignore_result=True)
 def generate_wiki_task(self, book_id: str):
     """Generate auto-wiki for all chapters of a book. Phase 3."""
     # Placeholder — implemented in Phase 3

@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.redis import cache_del, cache_incr, key_public_books, key_public_forum_cache_version
 from app.models.beta_read import BetaReadAssignment
-from app.models.book import Book, BookForumComment, BookForumCommentReaction, BookForumInterest, BookForumPost, Chapter, PublicBookAnalyticsEvent
+from app.models.book import Book, BookForumComment, BookForumCommentReaction, BookForumInterest, BookForumPost, BookForumPostReaction, Chapter, PublicBookAnalyticsEvent
 from app.models.intelligence import Notification
 from app.models.moderation import ContentReport, CreatorStrike, ModerationAction
 from app.models.user import User
@@ -783,6 +783,19 @@ def _public_forum_interest_state_subquery(user_id: uuid.UUID | None):
     )
 
 
+def _public_forum_post_reaction_state_subquery(user_id: uuid.UUID | None):
+    if user_id is None:
+        return None
+    return (
+        select(
+            BookForumPostReaction.post_id.label("post_id"),
+            BookForumPostReaction.reaction.label("viewer_reaction"),
+        )
+        .where(BookForumPostReaction.user_id == user_id)
+        .subquery()
+    )
+
+
 def _public_forum_discoverability_expression(rating_subquery, interest_subquery):
     average_rating = func.coalesce(rating_subquery.c.average_rating, 0.0)
     rating_count = func.coalesce(rating_subquery.c.rating_count, 0)
@@ -809,6 +822,7 @@ def _public_forum_post_select_statement(
     comment_subquery = _public_forum_comment_count_subquery()
     interest_subquery = _public_forum_interest_count_subquery()
     viewer_interest_subquery = _public_forum_interest_state_subquery(viewer_user_id)
+    viewer_post_reaction_subquery = _public_forum_post_reaction_state_subquery(viewer_user_id)
     discoverability_score = _public_forum_discoverability_expression(rating_subquery, interest_subquery).label(
         "discoverability_score"
     )
@@ -829,6 +843,11 @@ def _public_forum_post_select_statement(
                 if viewer_interest_subquery is not None
                 else literal(None)
             ).label("viewer_interest_status"),
+            (
+                viewer_post_reaction_subquery.c.viewer_reaction
+                if viewer_post_reaction_subquery is not None
+                else literal(None)
+            ).label("viewer_reaction"),
             discoverability_score,
         )
         .outerjoin(Book, Book.id == BookForumPost.book_id)
@@ -839,6 +858,8 @@ def _public_forum_post_select_statement(
     )
     if viewer_interest_subquery is not None:
         statement = statement.outerjoin(viewer_interest_subquery, viewer_interest_subquery.c.post_id == BookForumPost.id)
+    if viewer_post_reaction_subquery is not None:
+        statement = statement.outerjoin(viewer_post_reaction_subquery, viewer_post_reaction_subquery.c.post_id == BookForumPost.id)
 
     statement = statement.where(*_public_forum_visibility_filters())
     search_clause = _public_forum_search_clause(q)
@@ -873,6 +894,7 @@ def _author_forum_post_select_statement(
             func.coalesce(rating_subquery.c.neutral_rating_count, 0).label("neutral_rating_count"),
             func.coalesce(rating_subquery.c.negative_rating_count, 0).label("negative_rating_count"),
             literal(None).label("viewer_interest_status"),
+            literal(None).label("viewer_reaction"),
             discoverability_score,
         )
         .outerjoin(Book, Book.id == BookForumPost.book_id)
@@ -924,6 +946,7 @@ async def list_author_public_forum_posts(
             interest_count=int(interest_count or 0),
             comment_count=int(comment_count or 0),
             viewer_interest_status=viewer_interest_status,
+            viewer_reaction=viewer_reaction,
             discoverability_score=float(discoverability_score or 0.0),
         )
         for (
@@ -938,6 +961,7 @@ async def list_author_public_forum_posts(
             neutral_rating_count,
             negative_rating_count,
             viewer_interest_status,
+            viewer_reaction,
             discoverability_score,
         ) in rows
     ]
@@ -1250,21 +1274,24 @@ async def record_public_book_analytics_event(
     if not visitor_fingerprint_hash:
         return False
 
-    result = await db.execute(
-        pg_insert(PublicBookAnalyticsEvent)
-        .values(
-            id=uuid.uuid4(),
-            book_id=book.id,
-            chapter_number=chapter_number,
-            event_type=normalized_event_type,
-            visitor_fingerprint_hash=visitor_fingerprint_hash,
-            event_date=datetime.now(UTC).date(),
+    inserted_event_id = (
+        await db.execute(
+            pg_insert(PublicBookAnalyticsEvent)
+            .values(
+                id=uuid.uuid4(),
+                book_id=book.id,
+                chapter_number=chapter_number,
+                event_type=normalized_event_type,
+                visitor_fingerprint_hash=visitor_fingerprint_hash,
+                event_date=datetime.now(UTC).date(),
+            )
+            .on_conflict_do_nothing(
+                constraint="uq_public_book_analytics_events_daily_fingerprint",
+            )
+            .returning(PublicBookAnalyticsEvent.id)
         )
-        .on_conflict_do_nothing(
-            constraint="uq_public_book_analytics_events_daily_fingerprint",
-        )
-    )
-    return bool((result.rowcount or 0) > 0)
+    ).scalar_one_or_none()
+    return inserted_event_id is not None
 
 
 async def build_public_uploads_overview(db: AsyncSession) -> PublicUploadsOverviewOut:
@@ -1542,6 +1569,7 @@ def build_public_forum_post_out(
     interest_count: int = 0,
     comment_count: int = 0,
     viewer_interest_status: str | None = None,
+    viewer_reaction: str | None = None,
     discoverability_score: float | None = None,
 ) -> PublicForumPostOut:
     thread_type = _forum_post_thread_type(post)
@@ -1573,8 +1601,11 @@ def build_public_forum_post_out(
         allow_contact_requests=bool(post.allow_contact_requests) if thread_type == FORUM_THREAD_TYPE_NOVEL else False,
         status=post.status,
         viewer_interest_status=viewer_interest_status if thread_type == FORUM_THREAD_TYPE_NOVEL else None,
+        reaction=viewer_reaction,
         interest_count=interest_count if thread_type == FORUM_THREAD_TYPE_NOVEL else 0,
         comment_count=comment_count,
+        like_count=int(post.like_count or 0),
+        dislike_count=int(post.dislike_count or 0),
         rating_summary=rating_payload if thread_type == FORUM_THREAD_TYPE_NOVEL else PublicForumRatingSummaryOut(),
         discoverability_score=float(resolved_discoverability_score),
         created_at=post.created_at,
@@ -1745,6 +1776,7 @@ async def list_public_forum_posts(
             interest_count=int(interest_count or 0),
             comment_count=int(comment_count or 0),
             viewer_interest_status=viewer_interest_status,
+            viewer_reaction=viewer_reaction,
             discoverability_score=float(discoverability_score or 0.0),
         )
         for (
@@ -1759,6 +1791,7 @@ async def list_public_forum_posts(
             neutral_rating_count,
             negative_rating_count,
             viewer_interest_status,
+            viewer_reaction,
             discoverability_score,
         ) in rows
     ]
@@ -1810,6 +1843,7 @@ async def get_public_forum_post_detail(
         neutral_rating_count,
         negative_rating_count,
         viewer_interest_status,
+        viewer_reaction,
         discoverability_score,
     ) = row
     return build_public_forum_post_out(
@@ -1826,6 +1860,7 @@ async def get_public_forum_post_detail(
         interest_count=int(interest_count or 0),
         comment_count=int(comment_count or 0),
         viewer_interest_status=viewer_interest_status,
+        viewer_reaction=viewer_reaction,
         discoverability_score=float(discoverability_score or 0.0),
     )
 
@@ -2124,6 +2159,62 @@ async def react_to_public_forum_comment(
         current_user=current_user,
         reaction_map=reaction_map,
     )
+
+
+async def react_to_public_forum_post(
+    db: AsyncSession,
+    *,
+    post_id: uuid.UUID,
+    current_user: User,
+    reaction: str,
+) -> PublicForumPostOut:
+    normalized_reaction = _normalize_forum_comment_reaction(reaction)
+    post, _book = await _get_visible_forum_post(db, post_id=post_id)
+    if post.author_user_id == current_user.id:
+        raise HTTPException(409, "You cannot react to your own forum post.")
+    author_user = await db.get(User, post.author_user_id)
+    if author_user is None:
+        raise HTTPException(404, "Forum post author not found.")
+
+    existing = (
+        await db.execute(
+            select(BookForumPostReaction).where(
+                BookForumPostReaction.post_id == post.id,
+                BookForumPostReaction.user_id == current_user.id,
+            )
+        )
+    ).scalar_one_or_none()
+    previous_reaction = existing.reaction if existing is not None else None
+    next_reaction = None if normalized_reaction == FORUM_COMMENT_REACTION_CLEAR else normalized_reaction
+    if previous_reaction == next_reaction:
+        return await get_public_forum_post_detail(db, post_id=post.id, current_user=current_user)
+
+    like_delta, dislike_delta, reputation_delta = _reaction_delta(previous_reaction, next_reaction)
+    post.like_count = max(int(post.like_count or 0) + like_delta, 0)
+    post.dislike_count = max(int(post.dislike_count or 0) + dislike_delta, 0)
+    author_user.reputation_likes_received = max(int(author_user.reputation_likes_received or 0) + like_delta, 0)
+    author_user.reputation_dislikes_received = max(int(author_user.reputation_dislikes_received or 0) + dislike_delta, 0)
+    author_user.reputation_score = int(author_user.reputation_score or 0) + reputation_delta
+
+    if next_reaction is None:
+        if existing is not None:
+            await db.delete(existing)
+    elif existing is None:
+        db.add(
+            BookForumPostReaction(
+                post_id=post.id,
+                user_id=current_user.id,
+                reaction=next_reaction,
+            )
+        )
+    else:
+        existing.reaction = next_reaction
+
+    await db.commit()
+    await db.refresh(post)
+    await db.refresh(author_user)
+    await _invalidate_public_forum_cache()
+    return await get_public_forum_post_detail(db, post_id=post.id, current_user=current_user)
 
 
 async def get_public_user_profile(

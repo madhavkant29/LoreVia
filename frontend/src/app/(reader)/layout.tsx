@@ -11,7 +11,10 @@ export const metadata: Metadata = {
 export default function ReaderLayout({ children }: { children: React.ReactNode }) {
   return (
     <AppRuntime>
-      <div className="min-h-screen bg-white">{children}</div>
+      <div className="app-shell min-h-screen">
+        <div className="app-shell__mesh" />
+        <div className="relative">{children}</div>
+      </div>
     </AppRuntime>
   )
 }

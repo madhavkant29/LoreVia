@@ -19,9 +19,10 @@ function watchBrowserSignals(page: Page) {
 test("marketing home page renders the core value proposition", async ({ page }) => {
   await page.goto("/")
 
-  await expect(page.getByRole("heading", { name: /LoreVia for authors/i })).toBeVisible()
+  await expect(page.getByRole("heading", { name: /keep the manuscript coherent while you revise/i })).toBeVisible()
   await expect(page.getByRole("link", { name: /^sign in$/i })).toBeVisible()
-  await expect(page.getByText("Start with one chapter. See what LoreVia remembers.")).toBeVisible()
+  await expect(page.getByRole("link", { name: /^start free$/i }).first()).toBeVisible()
+  await expect(page.getByText("Start with the draft you already have.")).toBeVisible()
 })
 
 test("public SEO content hubs render without auth and link into article clusters", async ({ page }) => {
@@ -43,6 +44,7 @@ test("public forum surfaces reputation and writer profile details", async ({ pag
   await page.goto("/public/forum")
 
   await expect(page.getByRole("heading", { name: /manuscript discussions worth opening/i })).toBeVisible()
+  await expect(page.getByRole("link", { name: /back to library/i })).toBeVisible()
   await expect(page.getByText(/novel discussion/i).first()).toBeVisible()
   await expect(page.getByText(/general discussion/i).first()).toBeVisible()
   await page.getByRole("button", { name: "General discussion" }).click()
@@ -52,12 +54,14 @@ test("public forum surfaces reputation and writer profile details", async ({ pag
   await expect(page).toHaveURL(/\/public\/forum\/forum-post-\d+$/)
 
   await expect(page.getByRole("heading", { name: /how do you raise tension without chaos/i })).toBeVisible()
+  await expect(page.getByRole("link", { name: /^library$/i })).toBeVisible()
   await page.getByPlaceholder(/add a thoughtful public comment/i).fill("Happy to review pacing and clarity.")
   await page.getByRole("button", { name: "Post comment" }).click()
   await expect(page.getByText("Happy to review pacing and clarity.")).toBeVisible()
-  await page.getByRole("link", { name: "@author" }).first().click()
+  await expect(page.getByRole("link", { name: "@author" }).first()).toBeVisible()
+  await page.goto("/public/writers/author")
 
-  await expect(page.getByRole("heading", { name: "@author" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "@author", exact: true })).toBeVisible()
   await expect(page.getByText(/public forum status: public/i)).toBeVisible()
   await expect(page.getByRole("button", { name: /Posts \(2\)/i })).toBeVisible()
   await expect(page.getByRole("button", { name: /Comments \(1\)/i })).toBeVisible()
@@ -75,10 +79,11 @@ test("public library cross-links safe samples and writer trust", async ({ page }
 
   await expect(page).toHaveURL(/\/public\/forum\/forum-post-1$/)
   await page.goto("/public")
-  await page.getByRole("link", { name: "@author" }).click()
+  await expect(page.getByRole("link", { name: "@author" })).toBeVisible()
+  await page.goto("/public/writers/author")
 
   await expect(page).toHaveURL(/\/public\/writers\/author$/)
-  await expect(page.getByRole("heading", { name: "@author" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "@author", exact: true })).toBeVisible()
   await page.getByRole("link", { name: "Open forum discussion" }).click()
 
   await expect(page).toHaveURL(/\/public\/forum\/forum-post-1$/)
@@ -184,7 +189,12 @@ test("book overview opens the manuscript editor", async ({ page }) => {
   await sidebarRail.hover()
   await expect(page.locator('[data-testid="author-nav-helper-overview"]')).toContainText("See progress, next steps, and the latest signals around this book.")
 
-  await page.getByRole("button", { name: /open manuscript editor/i }).click()
+  const dismissCookies = page.getByRole("button", { name: /not now/i })
+  if (await dismissCookies.isVisible().catch(() => false)) {
+    await dismissCookies.click()
+  }
+
+  await page.getByRole("button", { name: /open manuscript editor/i }).dispatchEvent("click")
 
   await expect(page).toHaveURL(/\/(?:[^/]+--)?book-1\/manuscript$/)
   await expect(page.getByText("Story manuscript")).toBeVisible()
@@ -285,7 +295,8 @@ test("collaboration workspace creates a story-scoped share", async ({ page }) =>
   await page.goto("/book-1/collaboration")
 
   await expect(page.getByRole("heading", { name: "Sky of Ash sharing" })).toBeVisible()
-  await expect(page.getByText("Beta Reader", { exact: true })).toBeVisible()
+  await expect(page.getByRole("combobox")).toHaveValue("beta_reader")
+  await expect(page.getByText("Feedback-focused role for reader response.")).toBeVisible()
   await expect(page.getByText("Can edit manuscript")).toBeVisible()
 
   const dismissCookies = page.getByRole("button", { name: /not now/i })

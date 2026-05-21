@@ -24,8 +24,11 @@ export interface PublicForumPost {
   allow_contact_requests: boolean
   status: string
   viewer_interest_status: string | null
+  reaction: "like" | "dislike" | null
   interest_count: number
   comment_count: number
+  like_count: number
+  dislike_count: number
   rating_summary: PublicForumRatingSummary
   discoverability_score: number
   created_at: string

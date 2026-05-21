@@ -60,6 +60,7 @@ export function UploadModal({
   const [preserveChapterNumbers, setPreserveChapterNumbers] = useState(false)
   const [preserveSourceChapters, setPreserveSourceChapters] = useState(false)
   const [coverFile, setCoverFile] = useState<File | null>(null)
+  const [advancedSettingsOpen, setAdvancedSettingsOpen] = useState(true)
   const [usernameInput, setUsernameInput] = useState("")
   const [usernameError, setUsernameError] = useState<string | null>(null)
   const [settingUsername, setSettingUsername] = useState(false)
@@ -213,6 +214,10 @@ export function UploadModal({
   const addCustomTag = () => {
     addTag(customTag)
     setCustomTag("")
+  }
+
+  const removeTag = (tagToRemove: string) => {
+    setSelectedTags((current) => current.filter((tag) => tag !== tagToRemove))
   }
 
   const toggleSeries = (seriesId: string) => {
@@ -381,9 +386,7 @@ export function UploadModal({
   const isScreenplayWorkspace = effectiveWorkType === "screenplay"
   const storyUnitLabel = isScreenplayWorkspace ? "scene" : "chapter"
   const storyUnitLabelTitle = isScreenplayWorkspace ? "Scene" : "Chapter"
-  const storyUnitCollectionLabel = isScreenplayWorkspace ? "scenes" : "chapters"
   const newUploadAccept = isScreenplayWorkspace ? ".pdf,.txt,.md" : ".pdf,.epub,.docx,.txt,.md"
-  const newUploadPrompt = "Upload"
   const primaryFile = files[0] ?? null
   const primaryFileIsPdf = Boolean(primaryFile?.name?.toLowerCase().endsWith(".pdf"))
   const willUseBlankCoverFallback = !coverFile && (!primaryFileIsPdf || !autoExtractCover)
@@ -410,29 +413,51 @@ export function UploadModal({
         ? `${uploadStats.private.total_uploads}/${uploadStats.private.upload_limit} uploads used. ${uploadStats.private.uploads_remaining ?? 0} remaining. Worldbuilding manuscripts count as uploads on every tier.`
         : null
     : null
-  const shellClassName = `flex ${isInline ? "min-h-0" : "max-h-[90vh]"} w-full ${postImportReview || isManagingExisting ? "max-w-5xl" : "max-w-md"} flex-col overflow-hidden rounded-2xl border p-6 shadow-2xl transition-colors ${
+  const primaryActionDisabled =
+    uploading ||
+    needsUsername ||
+    (isManagingExisting ? !canSubmitExistingImport : files.length === 0)
+  const primaryActionLabel = uploading
+    ? uploadStage === "uploading"
+      ? isManagingExisting && chapterSource === "paste"
+        ? "Saving chapter..."
+        : "Uploading..."
+      : "Starting processing..."
+    : needsUsername
+      ? "Set username to continue"
+      : isManagingExisting
+        ? replaceExisting
+          ? "Update Chapter & Process"
+          : "Add Chapter & Process"
+        : "Upload manuscript"
+  const shellClassName = `flex ${isInline ? "min-h-0" : "max-h-[92vh]"} w-full ${postImportReview || isManagingExisting ? "max-w-5xl" : "max-w-4xl"} flex-col overflow-hidden rounded-[28px] border shadow-2xl transition-colors ${
     isDark
       ? isInline
         ? "border-white/10 bg-[#0B0B0B] text-slate-100 shadow-[0_30px_80px_-35px_rgba(0,0,0,0.8)]"
-        : "border-white/10 bg-[#0B0B0B]/90 backdrop-blur-xl text-slate-100 shadow-[0_30px_80px_-35px_rgba(0,0,0,0.9)]"
+        : "border-white/10 bg-[#0B0B0B]/95 backdrop-blur-xl text-slate-100 shadow-[0_30px_80px_-35px_rgba(0,0,0,0.9)]"
       : "border-black/5 bg-white text-slate-950"
   }`
 
   const content = (
       <div className={shellClassName} onClick={(e) => e.stopPropagation()}>
-        <div className="mb-5 flex items-center justify-between">
+        <div className={`relative border-b px-6 py-5 ${isDark ? "border-white/10" : "border-slate-200/80"}`}>
           <div>
-            <h2 className="text-lg font-semibold">{isManagingExisting ? `Add New ${storyUnitLabelTitle}` : "Upload Book"}</h2>
+            <h2 className="text-xl font-semibold tracking-tight">{isManagingExisting ? `Add New ${storyUnitLabelTitle}` : "Upload manuscript"}</h2>
             <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
               {isManagingExisting
                 ? "Paste or upload one scene, chapter, or script segment, process it incrementally, and review what changed before moving on."
-                : "Add a new manuscript to your private workspace with processing status you can trust."}
+                : "Bring in one manuscript, choose how it should be processed, and keep setup lightweight."}
             </p>
           </div>
+          {!isManagingExisting ? (
+            <div className={`hidden rounded-full px-3 py-1 text-xs font-medium md:inline-flex ${isDark ? "bg-white/5 text-slate-300" : "bg-slate-100 text-slate-600"}`}>
+              Private workspace
+            </div>
+          ) : null}
           <button
             onClick={onClose}
-            className={`text-xl transition-colors ${
-              isDark ? "text-slate-400 hover:text-white" : "text-slate-400 hover:text-slate-700"
+            className={`absolute right-6 top-5 rounded-full p-2 text-xl leading-none transition-colors ${
+              isDark ? "text-slate-400 hover:bg-white/5 hover:text-white" : "text-slate-400 hover:bg-slate-100 hover:text-slate-700"
             }`}
             aria-label="Close upload modal"
           >
@@ -462,25 +487,76 @@ export function UploadModal({
           </div>
         ) : null}
 
-        <form onSubmit={submit} className="reader-scrollbar min-h-0 flex-1 overflow-y-auto pr-1">
+        <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
+          <div className="reader-scrollbar min-h-0 flex-1 overflow-y-auto px-6 py-5">
           <div className="flex flex-col gap-4">
           {!isManagingExisting ? (
-            <input
-              type="text"
-              placeholder="Title"
-              value={title}
-              onChange={e => setTitle(e.target.value)}
-              required
-              className={`rounded-lg border px-3 py-2.5 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
-                isDark
-                  ? "border-white/10 bg-white/5 text-slate-100 placeholder:text-slate-500"
-                  : "border-gray-300 bg-white text-slate-950 placeholder:text-slate-400"
-              }`}
-            />
+            <div className={`rounded-[24px] border p-5 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-slate-200 bg-slate-50/80"}`}>
+              <div className="mb-3">
+                <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>File upload</p>
+                <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                  Upload one manuscript file to start your import.
+                </p>
+              </div>
+              <div
+                onClick={() => inputRef.current?.click()}
+                className={`cursor-pointer rounded-[24px] border-2 border-dashed p-6 transition-colors ${
+                  isDark
+                    ? files.length > 0
+                      ? "border-indigo-400/50 bg-indigo-500/10"
+                      : "border-white/15 bg-black/20 hover:border-indigo-400"
+                    : files.length > 0
+                      ? "border-indigo-300 bg-indigo-50"
+                      : "border-slate-300 bg-white hover:border-indigo-400"
+                }`}
+              >
+                <input
+                  ref={inputRef}
+                  type="file"
+                  multiple={false}
+                  accept={newUploadAccept}
+                  className="hidden"
+                  onChange={e => setFiles(Array.from(e.target.files ?? []))}
+                />
+                <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <p className={`text-base font-semibold ${isDark ? "text-slate-100" : "text-slate-900"}`}>
+                      {files.length > 0 ? primaryFile?.name : "Drop a manuscript here or click to browse"}
+                    </p>
+                    <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                      {files.length > 0
+                        ? "Replace the selected file at any time before uploading."
+                        : `Supported formats: ${isScreenplayWorkspace ? "PDF, TXT, Markdown" : "DOCX, PDF, EPUB, TXT, Markdown"}.`}
+                    </p>
+                  </div>
+                  <div className={`inline-flex rounded-full px-4 py-2 text-sm font-medium ${isDark ? "bg-white text-slate-950" : "bg-slate-900 text-white"}`}>
+                    {files.length > 0 ? "Replace file" : "Choose file"}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : null}
+          {!isManagingExisting ? (
+            <div className="mb-1">
+              <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>Optional metadata</p>
+            </div>
           ) : null}
 
           {!isManagingExisting ? (
-            <div className="space-y-2">
+            <div className="grid gap-4 xl:grid-cols-2">
+              <input
+                type="text"
+                placeholder="Title"
+                value={title}
+                onChange={e => setTitle(e.target.value)}
+                required
+                className={`rounded-xl border px-3 py-2.5 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
+                  isDark
+                    ? "border-white/10 bg-white/5 text-slate-100 placeholder:text-slate-500"
+                    : "border-gray-300 bg-white text-slate-950 placeholder:text-slate-400"
+                }`}
+              />
+              <div className="space-y-2">
               <input
                 type="text"
                 placeholder={mode === "author"
@@ -493,7 +569,7 @@ export function UploadModal({
                   setAuthor(e.target.value)
                   setAuthorManuallyEdited(true)
                 }}
-                className={`w-full rounded-lg border px-3 py-2.5 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
+                className={`w-full rounded-xl border px-3 py-2.5 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
                   isDark
                     ? "border-white/10 bg-white/5 text-slate-100 placeholder:text-slate-500"
                     : "border-gray-300 bg-white text-slate-950 placeholder:text-slate-400"
@@ -510,12 +586,13 @@ export function UploadModal({
                 </p>
               ) : null}
             </div>
+            </div>
           ) : null}
 
           <div className={`rounded-xl border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-gray-200 bg-gray-50"}`}>
             <div className="flex items-start justify-between gap-3">
               <div>
-                <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>Work type</p>
+                <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>Manuscript type</p>
                 {isManagingExisting ? (
                   <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                     {selectedExistingBook
@@ -561,7 +638,7 @@ export function UploadModal({
           <div className={`rounded-xl border p-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-gray-200 bg-gray-50"}`}>
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>Mode</p>
+                <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>Workspace mode</p>
                 <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                   {mode === "reader"
                     ? "Spoiler-aware workspace aligned to reading progress."
@@ -653,7 +730,14 @@ export function UploadModal({
             ) : null}
           </div>
 
-          {/* 2. The Input & Dynamic Suggestion Area */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>Genres and moods</p>
+                <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>Optional tags help organize tone, genre, and mood.</p>
+              </div>
+              <span className={`text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>{selectedTags.length}/{MAX_TAGS}</span>
+            </div>
           <div className={`group relative rounded-xl border p-1 transition-all ${
             isDark ? "border-white/10 bg-white/5 focus-within:border-indigo-500/50" : "border-gray-300 bg-white"
           }`}>
@@ -707,11 +791,30 @@ export function UploadModal({
               </div>
             )}
           </div>
+          {selectedTags.length > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              {selectedTags.map((tag) => (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={() => removeTag(tag)}
+                  className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+                    isDark
+                      ? "border-white/10 bg-white/[0.04] text-slate-200 hover:bg-white/10"
+                      : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
+                  }`}
+                >
+                  {tag} ×
+                </button>
+              ))}
+            </div>
+          ) : null}
+          </div>
 
           <div className={`rounded-xl border px-4 py-3 text-sm ${isDark ? "border-white/10 bg-white/[0.03] text-slate-300" : "border-gray-200 bg-gray-50 text-slate-600"}`}>
             <p className="font-semibold">Private by default</p>
-            <p className="mt-1">LoreVia keeps this upload private in your workspace. Public sharing is not part of this step.</p>
-            <p className="mt-2 text-xs">Supported manuscript formats: DOCX, PDF, EPUB, TXT, and Markdown.</p>
+            <p className="mt-1">This upload stays in your workspace.</p>
+            <p className="mt-2 text-xs">Public sharing is not part of this step.</p>
           </div>
 
           {series.length > 0 ? (
@@ -958,36 +1061,24 @@ export function UploadModal({
           ) : null}
 
           {!isManagingExisting ? (
-            <div
-              onClick={() => inputRef.current?.click()}
-              className={`cursor-pointer rounded-lg border-2 border-dashed p-6 text-center transition-colors ${
-                isDark
-                  ? "border-white/15 bg-white/[0.03] hover:border-indigo-400"
-                  : "border-gray-300 bg-white hover:border-indigo-400"
-              }`}
-            >
-              <input
-                ref={inputRef}
-                type="file"
-                multiple={false}
-                accept={newUploadAccept}
-                className="hidden"
-                onChange={e => setFiles(Array.from(e.target.files ?? []))}
-              />
-              {files.length > 0 ? (
-                <p className={`text-sm ${isDark ? "text-slate-100" : "text-slate-700"}`}>
-                  {files[0].name}
-                </p>
-              ) : (
-                <p className="text-sm font-medium text-indigo-600">
-                  {newUploadPrompt}
-                </p>
-              )}
-            </div>
-          ) : null}
-
-          {!isManagingExisting ? (
           <div className={`rounded-xl border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-gray-200 bg-gray-50"}`}>
+            <button
+              type="button"
+              onClick={() => setAdvancedSettingsOpen((current) => !current)}
+              className="flex w-full items-center justify-between text-left"
+            >
+              <div>
+                <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>Advanced import settings</p>
+                <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                  Optional controls for structure, chapter preservation, and cover handling.
+                </p>
+              </div>
+              <span className={`rounded-full px-3 py-1 text-xs font-medium ${isDark ? "bg-white/10 text-slate-200" : "bg-white text-slate-700"}`}>
+                {advancedSettingsOpen ? "Hide" : "Show"}
+              </span>
+            </button>
+            {advancedSettingsOpen ? (
+            <div className="mt-4">
             <div className="mb-4">
               <label className="flex items-start gap-3">
                 <input
@@ -1072,6 +1163,8 @@ export function UploadModal({
                 <p className={`text-sm font-medium ${isDark ? "text-slate-100" : "text-slate-900"}`}>Use the first PDF page as the book cover</p>
               </div>
             </label>
+            </div>
+            ) : null}
           </div>
           ) : null}
 
@@ -1106,26 +1199,6 @@ export function UploadModal({
               </p>
             </div>
           ) : null}
-
-          <button
-            type="submit"
-            disabled={uploading || needsUsername || (isManagingExisting && !canSubmitExistingImport)}
-            className="rounded-lg bg-indigo-600 py-2.5 text-sm font-medium text-white transition-colors hover:bg-indigo-700 disabled:opacity-50"
-          >
-            {uploading
-              ? uploadStage === "uploading"
-                ? isManagingExisting && chapterSource === "paste"
-                  ? "Saving chapter..."
-                  : "Uploading..."
-                : "Starting processing..."
-              : needsUsername
-                ? "Set username to continue"
-                : isManagingExisting
-                  ? replaceExisting
-                    ? "Update Chapter & Process"
-                    : "Add Chapter & Process"
-                  : "Upload & Process"}
-          </button>
 
           {chapterReports.length > 0 ? (
             <div className={`mt-4 rounded-xl border p-4 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-stone-50"}`}>
@@ -1311,13 +1384,43 @@ export function UploadModal({
             </div>
           ) : null}
           </div>
+          </div>
+          <div className={`sticky bottom-0 border-t px-6 py-4 ${isDark ? "border-white/10 bg-[#0B0B0B]/95" : "border-slate-200 bg-white/95"} backdrop-blur`}>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                {isManagingExisting
+                  ? `LoreVia will process this ${storyUnitLabel} after upload.`
+                  : files.length > 0
+                    ? "Ready to upload your manuscript."
+                    : "Select a file to enable upload."}
+              </p>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className={`rounded-xl px-4 py-2.5 text-sm font-medium transition ${
+                    isDark ? "border border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                  }`}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={primaryActionDisabled}
+                  className="rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {primaryActionLabel}
+                </button>
+              </div>
+            </div>
+          </div>
         </form>
       </div>
   )
 
   return isInline ? content : (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-md p-4"
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/70 backdrop-blur-md p-4 pt-6 md:pt-10"
       onClick={onClose}
     >
       {content}

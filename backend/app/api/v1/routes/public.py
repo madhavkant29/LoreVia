@@ -42,6 +42,7 @@ from app.schemas.public import (
     PublicForumCommentCreateBody,
     PublicForumCommentListOut,
     PublicForumCommentOut,
+    PublicForumPostReactionBody,
     PublicForumCommentReactionBody,
     PublicForumPostCreateBody,
     PublicForumPostListOut,
@@ -93,6 +94,7 @@ from app.utils.public_utils import (
     normalize_public_slug,
     public_visibility_notice,
     record_public_book_analytics_event,
+    react_to_public_forum_post,
     react_to_public_forum_comment,
     resolve_optional_user,
     update_public_forum_post,
@@ -294,6 +296,22 @@ async def create_public_beta_forum_comment(
 ):
     ensure_public_forum_write_enabled()
     return await create_public_forum_comment(db, post_id=post_id, current_user=current_user, body=body)
+
+
+@router.put("/forum/posts/{post_id}/reaction", response_model=PublicForumPostOut)
+async def react_to_public_beta_forum_post(
+    post_id: uuid.UUID,
+    body: PublicForumPostReactionBody,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    ensure_public_forum_write_enabled()
+    return await react_to_public_forum_post(
+        db,
+        post_id=post_id,
+        current_user=current_user,
+        reaction=body.reaction,
+    )
 
 
 @router.put("/forum/comments/{comment_id}/reaction", response_model=PublicForumCommentOut)

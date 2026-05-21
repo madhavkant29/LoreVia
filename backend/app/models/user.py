@@ -53,6 +53,7 @@ class User(Base):
     writing_activities = relationship("UserWritingActivity", back_populates="user", cascade="all, delete-orphan")
     llm_usage_events = relationship("LlmUsageEvent", back_populates="user", cascade="all, delete-orphan")
     forum_comments = relationship("BookForumComment", back_populates="author", cascade="all, delete-orphan")
+    forum_post_reactions = relationship("BookForumPostReaction", back_populates="user", cascade="all, delete-orphan")
     forum_comment_reactions = relationship("BookForumCommentReaction", back_populates="user", cascade="all, delete-orphan")
     friend_requests_sent = relationship("FriendRequest", foreign_keys="FriendRequest.requester_user_id", back_populates="requester", cascade="all, delete-orphan")
     friend_requests_received = relationship("FriendRequest", foreign_keys="FriendRequest.addressee_user_id", back_populates="addressee", cascade="all, delete-orphan")

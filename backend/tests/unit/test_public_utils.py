@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException, Request
+from sqlalchemy import UniqueConstraint
 
 from app.utils.public_utils import (
     MAX_PUBLIC_FORUM_PAGE_SIZE,
@@ -101,6 +102,23 @@ class _FakeDB:
 
     async def refresh(self, value):
         self.refreshes.append(value)
+
+
+def test_public_book_analytics_event_declares_only_composite_indexes() -> None:
+    table = PublicBookAnalyticsEvent.__table__
+
+    assert {index.name for index in table.indexes} == {
+        "ix_public_book_analytics_events_book_created_at",
+        "ix_public_book_analytics_events_book_event_date",
+        "ix_public_book_analytics_events_book_event_type",
+    }
+
+    unique_constraints = {
+        constraint.name
+        for constraint in table.constraints
+        if isinstance(constraint, UniqueConstraint)
+    }
+    assert unique_constraints == {"uq_public_book_analytics_events_daily_fingerprint"}
 
 
 def test_public_forum_discoverability_score_rewards_stronger_ratings_and_interest():
@@ -440,6 +458,8 @@ async def test_list_public_forum_posts_uses_pagination_and_batched_aggregates():
         desired_beta_reader_count=5,
         allow_contact_requests=True,
         status="open",
+        like_count=0,
+        dislike_count=0,
         created_at="2026-05-16T00:00:00Z",
         updated_at="2026-05-16T00:00:00Z",
     )
@@ -469,6 +489,7 @@ async def test_list_public_forum_posts_uses_pagination_and_batched_aggregates():
             0,
             0,
             "pending",
+            None,
             488.0,
         )]),
     ])
@@ -734,6 +755,8 @@ async def test_list_author_public_forum_posts_returns_open_and_closed_threads():
         desired_beta_reader_count=3,
         allow_contact_requests=True,
         status="open",
+        like_count=0,
+        dislike_count=0,
         created_at="2026-05-16T00:00:00Z",
         updated_at="2026-05-16T00:00:00Z",
     )
@@ -746,6 +769,8 @@ async def test_list_author_public_forum_posts_returns_open_and_closed_threads():
         desired_beta_reader_count=4,
         allow_contact_requests=False,
         status="closed",
+        like_count=0,
+        dislike_count=0,
         created_at="2026-05-15T00:00:00Z",
         updated_at="2026-05-15T00:00:00Z",
     )
@@ -754,8 +779,8 @@ async def test_list_author_public_forum_posts_returns_open_and_closed_threads():
     user = SimpleNamespace(id=author_id, username="writer", reputation_score=12)
     db = _FakeDB([
         _Result(all_rows=[
-            (open_post, open_book, user, 2, 1, 4.0, 1, 1, 0, 0, None, 410.0),
-            (closed_post, closed_book, user, 5, 3, 4.5, 2, 2, 0, 0, None, 466.0),
+            (open_post, open_book, user, 2, 1, 4.0, 1, 1, 0, 0, None, None, 410.0),
+            (closed_post, closed_book, user, 5, 3, 4.5, 2, 2, 0, 0, None, None, 466.0),
         ]),
     ])
 
@@ -779,6 +804,8 @@ async def test_get_public_forum_post_detail_allows_author_to_view_closed_post():
         desired_beta_reader_count=2,
         allow_contact_requests=False,
         status="closed",
+        like_count=0,
+        dislike_count=0,
         created_at="2026-05-16T00:00:00Z",
         updated_at="2026-05-16T00:00:00Z",
     )
@@ -808,6 +835,7 @@ async def test_get_public_forum_post_detail_allows_author_to_view_closed_post():
                 2,
                 1,
                 0,
+                None,
                 None,
                 441.0,
             )),

@@ -462,7 +462,7 @@ export function RevisionIntelligencePanel({
           onClick={() => void createChecklist()}
           className={`rounded-full px-4 py-2 text-sm font-semibold transition ${isDark ? "bg-violet-500 text-white hover:bg-violet-400" : "bg-violet-600 text-white hover:bg-violet-500"}`}
         >
-          Create revision checklist
+          Open revision board
         </button>
       </div>
 

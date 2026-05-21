@@ -23,7 +23,12 @@ from app.models.book import (
     Series,
     SeriesBook,
 )
-from app.models.character import Character, CharacterState
+from app.models.character import (
+    Character,
+    CharacterCandidate,
+    CharacterDuplicateSuggestion,
+    CharacterState,
+)
 from app.models.intelligence import (
     BookChunk,
     ChapterSummary,

@@ -13,7 +13,12 @@ import { asQueryKey, bookCacheKey, readerCacheKey } from "@/lib/query/cacheKeys"
 import { readerApi } from "@/lib/api/reader"
 import { saveContextualVaultNote } from "@/lib/utils/notes"
 import type { Book } from "@/types/book"
-import type { Character, RelationshipGraph as RelationshipGraphData } from "@/types/character"
+import type {
+  Character,
+  CharacterCandidate,
+  CharacterReviewResponse,
+  RelationshipGraph as RelationshipGraphData,
+} from "@/types/character"
 import type { ChatMessage } from "@/types/intelligence"
 import type { ReadingProgress, SearchResult } from "@/types/reader"
 
@@ -52,6 +57,7 @@ type WorkspaceMode = "profile" | "duplicates"
 
 type MergeSuggestion = {
   key: string
+  suggestionId?: string
   primaryId: string
   secondaryId: string
   confidence: number
@@ -667,6 +673,21 @@ export default function CharactersPage() {
     queryKey: asQueryKey(bookCacheKey(bookId, "characters")),
     queryFn: () => booksApi.getCharacters(bookId),
   })
+  const emptyReview = useMemo<CharacterReviewResponse>(() => ({
+    candidates: [],
+    duplicate_suggestions: [],
+    counts: {
+      pending_candidates: 0,
+      pending_duplicate_suggestions: 0,
+    },
+  }), [])
+  const {
+    data: reviewData = emptyReview,
+    refetch: refetchCharacterReview,
+  } = useQuery<CharacterReviewResponse>({
+    queryKey: asQueryKey(bookCacheKey(bookId, "character-review")),
+    queryFn: () => booksApi.getCharacterReview(bookId).catch(() => emptyReview),
+  })
   const [book, setBook] = useState<Book | null>(null)
   const [progress, setProgress] = useState<ReadingProgress | null>(null)
   const [chars, setChars] = useState<Character[]>([])
@@ -712,6 +733,7 @@ export default function CharactersPage() {
   const [evidenceError, setEvidenceError] = useState<string | null>(null)
   const [pageMenuOpen, setPageMenuOpen] = useState(false)
   const [characterMenuOpen, setCharacterMenuOpen] = useState(false)
+  const [candidateActionId, setCandidateActionId] = useState<string | null>(null)
 
   useEffect(() => {
     setBook(bookData)
@@ -756,9 +778,23 @@ export default function CharactersPage() {
   const isAuthorMode = book?.mode === "author"
   const deferredSearch = useDeferredValue(search.trim().toLowerCase())
 
+  const pendingCandidates = useMemo(
+    () => (reviewData.candidates ?? []).filter((candidate) => candidate.status === "pending"),
+    [reviewData.candidates],
+  )
+
   const mergeSuggestions = useMemo(
-    () => buildMergeSuggestions(chars).filter((suggestion) => !dismissedMergeKeys.includes(suggestion.key)),
-    [chars, dismissedMergeKeys],
+    () => (reviewData.duplicate_suggestions ?? [])
+      .filter((suggestion) => suggestion.status === "pending" && !dismissedMergeKeys.includes(suggestion.id))
+      .map((suggestion) => ({
+        key: suggestion.id,
+        suggestionId: suggestion.id,
+        primaryId: suggestion.primary_character_id,
+        secondaryId: suggestion.secondary_character_id,
+        confidence: suggestion.confidence,
+        reasons: suggestion.reasons,
+      })),
+    [dismissedMergeKeys, reviewData.duplicate_suggestions],
   )
 
   const mergeSuggestionIds = useMemo(
@@ -868,6 +904,19 @@ export default function CharactersPage() {
       .toLowerCase()
       .includes(deferredSearch)
   }), [chars, deferredSearch, mergeSuggestions])
+
+  const filteredPendingCandidates = useMemo(() => pendingCandidates.filter((candidate) => {
+    if (!deferredSearch) return true
+    return [
+      candidate.proposed_name,
+      candidate.raw_name,
+      ...(candidate.aliases ?? []),
+      ...(candidate.reason_codes ?? []),
+    ]
+      .join(" ")
+      .toLowerCase()
+      .includes(deferredSearch)
+  }), [deferredSearch, pendingCandidates])
 
   useEffect(() => {
     if (filteredMergeSuggestions.length === 0) {
@@ -1004,6 +1053,7 @@ export default function CharactersPage() {
 
   async function refreshCharacters() {
     const { data: refreshed = [] } = await refetchCharacters()
+    await refetchCharacterReview()
     setChars(refreshed)
     return refreshed
   }
@@ -1020,7 +1070,7 @@ export default function CharactersPage() {
     }
   }
 
-  async function handleMergeCharacters(primaryId: string, secondaryId: string) {
+  async function handleMergeCharacters(primaryId: string, secondaryId: string, suggestionId?: string) {
     if (!primaryId || !secondaryId || primaryId === secondaryId) {
       setMergeError("Choose two different characters to merge.")
       return
@@ -1028,7 +1078,9 @@ export default function CharactersPage() {
     setMergeBusy(true)
     setMergeError(null)
     try {
-      const response = await booksApi.mergeCharacters(bookId, { primaryId, secondaryId })
+      const response = suggestionId
+        ? await booksApi.acceptDuplicateSuggestion(bookId, suggestionId)
+        : await booksApi.mergeCharacters(bookId, { primaryId, secondaryId })
       const refreshed = await refreshCharacters()
       await refreshGraph()
       setWorkspaceMode("profile")
@@ -1062,6 +1114,7 @@ export default function CharactersPage() {
       })
       setChars((current) => current.map((item) => item.id === updated.id ? updated : item))
       setSelectedId(updated.id)
+      await refetchCharacterReview()
       await refreshGraph()
       setEditing(false)
     } catch {
@@ -1080,6 +1133,7 @@ export default function CharactersPage() {
         graphVisibility: override,
       })
       setChars((current) => current.map((item) => item.id === updated.id ? updated : item))
+      await refetchCharacterReview()
       await refreshGraph()
     } catch {
       setActionError("Could not update graph visibility for this character.")
@@ -1109,6 +1163,7 @@ export default function CharactersPage() {
       })
       setChars((current) => [...current, created])
       setSelectedId(created.id)
+      await refetchCharacterReview()
       await refreshGraph()
       setCreating(false)
       setCastFilter("all")
@@ -1198,6 +1253,7 @@ export default function CharactersPage() {
       const remaining = chars.filter((char) => char.id !== selectedCharacter.id)
       setChars(remaining)
       setSelectedId(remaining[0]?.id || "")
+      await refetchCharacterReview()
       await refreshGraph()
       setEditing(false)
       setCharacterMenuOpen(false)
@@ -1232,6 +1288,7 @@ export default function CharactersPage() {
       const refreshed = await booksApi.getCharacters(bookId)
       setChars(refreshed)
       setSelectedId(response.created[0] ?? refreshed[0]?.id ?? "")
+      await refetchCharacterReview()
       setEditing(false)
       setWorkspaceMode("profile")
       setCharacterMenuOpen(false)
@@ -1353,6 +1410,71 @@ export default function CharactersPage() {
   function dismissMergeSuggestion(key: string) {
     setDismissedMergeKeys((current) => current.includes(key) ? current : [...current, key])
     setMergeError(null)
+  }
+
+  async function handlePromoteCandidate(candidate: CharacterCandidate) {
+    setCandidateActionId(candidate.id)
+    setActionError(null)
+    try {
+      const response = await booksApi.promoteCharacterCandidate(bookId, candidate.id)
+      const refreshed = await refreshCharacters()
+      setWorkspaceMode("profile")
+      setSelectedId(response.promoted || refreshed[0]?.id || "")
+      await refreshGraph()
+    } catch {
+      setActionError("Could not promote this candidate into the cast.")
+    } finally {
+      setCandidateActionId(null)
+    }
+  }
+
+  async function handleAttachCandidate(candidate: CharacterCandidate) {
+    if (!selectedCharacter) {
+      setActionError("Select a character profile first, then attach this candidate.")
+      return
+    }
+    setCandidateActionId(candidate.id)
+    setActionError(null)
+    try {
+      await booksApi.attachCharacterCandidate(bookId, candidate.id, selectedCharacter.id)
+      await refreshCharacters()
+      await refreshGraph()
+    } catch {
+      setActionError("Could not attach this candidate to the selected character.")
+    } finally {
+      setCandidateActionId(null)
+    }
+  }
+
+  async function handleRejectCandidate(candidate: CharacterCandidate) {
+    setCandidateActionId(candidate.id)
+    setActionError(null)
+    try {
+      await booksApi.rejectCharacterCandidate(bookId, candidate.id)
+      await refetchCharacterReview()
+    } catch {
+      setActionError("Could not reject this candidate.")
+    } finally {
+      setCandidateActionId(null)
+    }
+  }
+
+  async function dismissDuplicateSuggestion(suggestion: MergeSuggestion) {
+    if (!suggestion.suggestionId) {
+      dismissMergeSuggestion(suggestion.key)
+      return
+    }
+    setMergeBusy(true)
+    setMergeError(null)
+    try {
+      await booksApi.dismissDuplicateSuggestion(bookId, suggestion.suggestionId)
+      setDismissedMergeKeys((current) => current.includes(suggestion.key) ? current : [...current, suggestion.key])
+      await refetchCharacterReview()
+    } catch {
+      setMergeError("Could not dismiss this duplicate suggestion.")
+    } finally {
+      setMergeBusy(false)
+    }
   }
 
   const pageMenuActions: MenuAction[] = [
@@ -1673,6 +1795,48 @@ export default function CharactersPage() {
                     {filteredMergeSuggestions.length === 0 ? (
                       <div className="px-3 py-6">
                         <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No duplicate suggestions match the current search. Use the manual merge tools in the main panel to compare any two records directly.</p>
+                      </div>
+                    ) : null}
+
+                    {filteredPendingCandidates.length > 0 ? (
+                      <div className={`mt-5 border-t px-3 pt-4 ${isDark ? "border-white/8" : "border-stone-200"}`}>
+                        <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Quarantine queue</p>
+                        <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>{filteredPendingCandidates.length} candidates waiting for review</p>
+                        <div className="mt-3 space-y-3">
+                          {filteredPendingCandidates.slice(0, 8).map((candidate) => (
+                            <div key={candidate.id} className={`rounded-[1rem] border px-3 py-3 ${isDark ? "border-white/8 bg-white/[0.02]" : "border-stone-200 bg-white"}`}>
+                              <p className={`truncate text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{candidate.proposed_name}</p>
+                              <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>Chapter {candidate.chapter_number} • {candidate.confidence}%</p>
+                              <p className={`mt-2 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{candidate.reason_codes[0] ?? "Needs review"}</p>
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  disabled={candidateActionId === candidate.id}
+                                  onClick={() => void handlePromoteCandidate(candidate)}
+                                  className={actionButtonClasses(isDark)}
+                                >
+                                  {candidateActionId === candidate.id ? "Working..." : "Promote"}
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={candidateActionId === candidate.id || !selectedCharacter}
+                                  onClick={() => void handleAttachCandidate(candidate)}
+                                  className={actionButtonClasses(isDark)}
+                                >
+                                  Attach to selected
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={candidateActionId === candidate.id}
+                                  onClick={() => void handleRejectCandidate(candidate)}
+                                  className={actionButtonClasses(isDark)}
+                                >
+                                  Reject
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     ) : null}
                   </div>
@@ -2627,7 +2791,7 @@ export default function CharactersPage() {
                             </button>
                             <button
                               type="button"
-                              onClick={() => void handleMergeCharacters(selectedMergePrimary.id, selectedMergeSecondary.id)}
+                              onClick={() => void handleMergeCharacters(selectedMergePrimary.id, selectedMergeSecondary.id, selectedMergeSuggestion?.suggestionId)}
                               disabled={mergeBusy}
                               className="rounded-[1rem] bg-[linear-gradient(135deg,#8b5cf6,#6d28d9)] px-5 py-3 text-sm font-semibold text-white shadow-[0_15px_35px_rgba(109,40,217,0.22)] transition hover:translate-y-[-1px] disabled:opacity-60"
                             >
@@ -2637,14 +2801,14 @@ export default function CharactersPage() {
                               <>
                                 <button
                                   type="button"
-                                  onClick={() => dismissMergeSuggestion(selectedMergeSuggestion.key)}
+                                  onClick={() => void dismissDuplicateSuggestion(selectedMergeSuggestion)}
                                   className={actionButtonClasses(isDark)}
                                 >
                                   Keep separate
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => dismissMergeSuggestion(selectedMergeSuggestion.key)}
+                                  onClick={() => void dismissDuplicateSuggestion(selectedMergeSuggestion)}
                                   className={actionButtonClasses(isDark)}
                                 >
                                   Dismiss
@@ -2926,7 +3090,7 @@ export default function CharactersPage() {
                               isDark={isDark}
                               title={mergeBusy ? "Merging..." : "Merge records"}
                               description={`${selectedMergeSecondary.name} will merge into ${selectedMergePrimary.name}.`}
-                              onClick={() => void handleMergeCharacters(selectedMergePrimary.id, selectedMergeSecondary.id)}
+                              onClick={() => void handleMergeCharacters(selectedMergePrimary.id, selectedMergeSecondary.id, selectedMergeSuggestion?.suggestionId)}
                             />
                             <QuickActionTile
                               isDark={isDark}
@@ -2934,7 +3098,7 @@ export default function CharactersPage() {
                               description="Dismiss this suggestion and leave both records untouched."
                               onClick={() => {
                                 if (selectedMergeSuggestion && !isManualMerge) {
-                                  dismissMergeSuggestion(selectedMergeSuggestion.key)
+                                  void dismissDuplicateSuggestion(selectedMergeSuggestion)
                                   return
                                 }
                                 setManualMergePrimaryId("")

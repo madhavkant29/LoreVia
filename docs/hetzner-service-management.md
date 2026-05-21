@@ -56,7 +56,7 @@ Once the stack is up, use Docker for service-level logs:
 
 ## Worker tuning
 
-- Production worker concurrency is env-driven through `ops/env/backend.env`.
+- Production worker concurrency is env-driven through `backend/.env`.
 - Current recommended CCX13 baseline:
   - `EXTRACTION_CONCURRENCY=2`
   - `ANALYSIS_CONCURRENCY=1`

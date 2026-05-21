@@ -30,7 +30,14 @@ services:
       dockerfile: backend/Dockerfile.api
     env_file:
       - ./backend/.env
+    environment:
+      REDIS_URL: ${REDIS_URL:?REDIS_URL must be set}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:?CELERY_BROKER_URL must be set}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND-}
     restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
     expose:
       - "8000"
     healthcheck:
@@ -49,6 +56,29 @@ services:
         max-file: "5"
     networks:
       - app
+      - redis_internal
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
+    command:
+      [
+        "sh",
+        "-c",
+        "exec redis-server --appendonly yes --appendfsync everysec --requirepass \"$${REDIS_PASSWORD}\"",
+      ]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD}\" ping | grep -q PONG || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    volumes:
+      - redis_data:/data
+    networks:
+      - redis_internal
 
   worker-extraction:
     build:
@@ -56,8 +86,15 @@ services:
       dockerfile: backend/Dockerfile.worker
     env_file:
       - ./backend/.env
+    environment:
+      REDIS_URL: ${REDIS_URL:?REDIS_URL must be set}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:?CELERY_BROKER_URL must be set}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND-}
     command: celery -A app.workers.celery_app worker -n worker-extraction@%h -Q extraction,extraction_priority --loglevel=info -c 2
     restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "celery -A app.workers.celery_app inspect ping -d worker-extraction@$$HOSTNAME --timeout=5 | grep -q OK || exit 1"]
       interval: 60s
@@ -69,6 +106,7 @@ services:
         max-file: "5"
     networks:
       - app
+      - redis_internal
 
   worker-analysis:
     build:
@@ -76,8 +114,15 @@ services:
       dockerfile: backend/Dockerfile.worker
     env_file:
       - ./backend/.env
+    environment:
+      REDIS_URL: ${REDIS_URL:?REDIS_URL must be set}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:?CELERY_BROKER_URL must be set}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND-}
     command: celery -A app.workers.celery_app worker -n worker-analysis@%h -Q analysis,analysis_priority,embedding --loglevel=info -c 1
     restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "celery -A app.workers.celery_app inspect ping -d worker-analysis@$$HOSTNAME --timeout=5 | grep -q OK || exit 1"]
       interval: 60s
@@ -89,6 +134,7 @@ services:
         max-file: "5"
     networks:
       - app
+      - redis_internal
 
   worker-intelligence:
     build:
@@ -96,8 +142,15 @@ services:
       dockerfile: backend/Dockerfile.worker
     env_file:
       - ./backend/.env
+    environment:
+      REDIS_URL: ${REDIS_URL:?REDIS_URL must be set}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:?CELERY_BROKER_URL must be set}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND-}
     command: celery -A app.workers.celery_app worker -n worker-intelligence@%h -Q intelligence --loglevel=info -c 1
     restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "celery -A app.workers.celery_app inspect ping -d worker-intelligence@$$HOSTNAME --timeout=5 | grep -q OK || exit 1"]
       interval: 60s
@@ -109,6 +162,7 @@ services:
         max-file: "5"
     networks:
       - app
+      - redis_internal
 
   celery-beat:
     build:
@@ -116,8 +170,15 @@ services:
       dockerfile: backend/Dockerfile.worker
     env_file:
       - ./backend/.env
+    environment:
+      REDIS_URL: ${REDIS_URL:?REDIS_URL must be set}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:?CELERY_BROKER_URL must be set}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND-}
     command: celery -A app.workers.celery_app beat --loglevel=info --schedule /tmp/celerybeat-schedule
     restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
     healthcheck:
       test:
         [
@@ -134,6 +195,7 @@ services:
         max-file: "5"
     networks:
       - app
+      - redis_internal
 
   flower:
     profiles: ["ops"]
@@ -142,8 +204,15 @@ services:
       dockerfile: backend/Dockerfile.worker
     env_file:
       - ./backend/.env
+    environment:
+      REDIS_URL: ${REDIS_URL:?REDIS_URL must be set}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:?CELERY_BROKER_URL must be set}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND-}
     command: celery -A app.workers.celery_app flower --port=5555
     restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
     ports:
       - "127.0.0.1:5555:5555"
     logging:
@@ -152,7 +221,13 @@ services:
         max-file: "5"
     networks:
       - app
+      - redis_internal
 
 networks:
   edge:
   app:
+  redis_internal:
+    internal: true
+
+volumes:
+  redis_data:

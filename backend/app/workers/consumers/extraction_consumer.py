@@ -17,7 +17,6 @@ from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.core.redis import cache_del, cache_set_if_absent, key_extraction_inflight
 from app.core.storage import download_book, upload_binary
-from app.engine.character.consolidator import consolidate_characters
 from app.engine.character.deduplicator import (
     character_name_keys,
     find_similar,
@@ -36,7 +35,13 @@ from app.parsers.chunker import ChunkingConfig, chunk_text, count_tokens
 from app.services.email_service import send_processing_complete_with_stats
 from app.utils.billing_utils import has_paid_reading_access
 from app.utils.book_utils import parse_book_upload_for_ingestion, refresh_screenplay_scene_rows
-from app.utils.character_utils import find_earliest_character_mention_chapters
+from app.utils.character_utils import (
+    CHARACTER_CANDIDATE_PENDING,
+    build_character_roster_snapshot,
+    find_earliest_character_mention_chapters,
+    record_character_candidate,
+    refresh_character_duplicate_suggestions,
+)
 from app.utils.compliance.copyright_check import evaluate_document_copyright
 from app.utils.ingestion_utils import (
     apply_chapter_number_strategy,
@@ -484,6 +489,7 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
             for char in existing_characters
             if char.id is not None
         }
+        roster_snapshot = build_character_roster_snapshot(existing_characters)
 
         llm_started = time.perf_counter()
         extraction_batches = _group_chunks_for_extraction(chunks)
@@ -494,6 +500,7 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                     batch_text,
                     user_id=book.user_id,
                     book_id=book.id,
+                    known_characters=roster_snapshot,
                 )
                 for batch_text in extraction_batch_texts
             ),
@@ -503,10 +510,12 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
         extraction_fallback_batches = 0
         extraction_fallback_character_count = 0
         extraction_rejected_characters: list[dict[str, Any]] = []
+        unresolved_relationships: list[dict[str, Any]] = []
         pending_first_chapter_candidates: dict[uuid.UUID, list[str]] = {}
         pending_first_chapter_updates: dict[uuid.UUID, Character] = {}
 
         for batch_index, (batch_text, result) in enumerate(zip(extraction_batch_texts, extraction_results), start=1):
+            source_batch_key = f"{book.id}:{chapter_number}:{batch_index}"
             if isinstance(result, Exception):
                 extraction_failed_batches += 1
                 log.warning(
@@ -527,36 +536,58 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                 for entity in result.get("characters", [])
                 if isinstance(entity, dict) and entity.get("name")
             ]
-            pending_new_entities: list[tuple[dict[str, Any], set[uuid.UUID]]] = []
+            pending_new_entities: list[tuple[dict[str, Any], set[uuid.UUID], str]] = []
             for entity in character_entities:
                 blocked_ids = _blocked_character_ids(existing_characters, entity, key_cache=character_key_cache)
-                existing_id = _find_character_id_in_cache(
+                matching_ids = _find_character_ids_in_cache(
                     existing_characters,
                     entity["name"],
                     entity.get("aliases", []),
                     blocked_ids=blocked_ids,
                     key_cache=character_key_cache,
                 )
+                existing_id = matching_ids[0] if len(matching_ids) == 1 else None
                 decision = _character_save_decision(entity)
+                candidate_evidence = _candidate_record_evidence(entity)
+
+                if len(matching_ids) > 1:
+                    await record_character_candidate(
+                        db,
+                        book_id=book.id,
+                        chapter_number=chapter_number,
+                        raw_name=str(entity.get("name") or ""),
+                        proposed_name=str(entity.get("name") or ""),
+                        aliases=entity.get("aliases") if isinstance(entity.get("aliases"), list) else [],
+                        status=CHARACTER_CANDIDATE_PENDING,
+                        confidence=entity.get("confidence"),
+                        reason_codes=["ambiguous_roster_match"],
+                        evidence=candidate_evidence,
+                        source_batch_key=source_batch_key,
+                    )
+                    continue
 
                 if existing_id:
-                    if not decision.allowed:
+                    if not decision.allowed or not _should_update_existing_character(entity):
                         log.info(
-                            "Rejected existing character update '%s' at save gate: confidence=%s reasons=%s evidence=%s",
+                            "Quarantined existing character update '%s': confidence=%s reasons=%s evidence=%s",
                             entity.get("name"),
                             entity.get("confidence"),
                             decision.reasons,
                             entity.get("evidence"),
                         )
-                        _append_rejected_character_reports(
-                            extraction_rejected_characters,
-                            [{
-                                "name": entity.get("name"),
-                                "stage": "save_gate_update",
-                                "reason": ";".join(decision.reasons) if decision.reasons else "save_gate_rejected",
-                                "confidence": entity.get("confidence"),
-                                "evidence": entity.get("evidence") or {},
-                            }],
+                        await record_character_candidate(
+                            db,
+                            book_id=book.id,
+                            chapter_number=chapter_number,
+                            raw_name=str(entity.get("name") or ""),
+                            proposed_name=str(entity.get("name") or ""),
+                            aliases=entity.get("aliases") if isinstance(entity.get("aliases"), list) else [],
+                            matched_character_id=existing_id,
+                            status=CHARACTER_CANDIDATE_PENDING,
+                            confidence=entity.get("confidence"),
+                            reason_codes=decision.reasons or ["existing_match_needs_review"],
+                            evidence=candidate_evidence,
+                            source_batch_key=source_batch_key,
                         )
                         continue
                     char = _find_character_by_id(existing_characters, existing_id)
@@ -586,35 +617,52 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                                     growth_event=growth_event if isinstance(growth_event, dict) else None,
                                 )
                             )
+                        await record_character_candidate(
+                            db,
+                            book_id=book.id,
+                            chapter_number=chapter_number,
+                            raw_name=str(entity.get("name") or ""),
+                            proposed_name=str(entity.get("name") or ""),
+                            aliases=entity.get("aliases") if isinstance(entity.get("aliases"), list) else [],
+                            matched_character_id=existing_id,
+                            status="accepted",
+                            confidence=entity.get("confidence"),
+                            reason_codes=["matched_existing_character"],
+                            evidence=candidate_evidence,
+                            source_batch_key=source_batch_key,
+                        )
                     _merge_alias_in_memory(char, entity["name"] if char else None)
                 else:
                     if not decision.allowed:
                         log.info(
-                            "Rejected new character '%s' at save gate: confidence=%s reasons=%s evidence=%s",
+                            "Quarantined new character '%s': confidence=%s reasons=%s evidence=%s",
                             entity.get("name"),
                             entity.get("confidence"),
                             decision.reasons,
                             entity.get("evidence"),
                         )
-                        _append_rejected_character_reports(
-                            extraction_rejected_characters,
-                            [{
-                                "name": entity.get("name"),
-                                "stage": "save_gate_create",
-                                "reason": ";".join(decision.reasons) if decision.reasons else "save_gate_rejected",
-                                "confidence": entity.get("confidence"),
-                                "evidence": entity.get("evidence") or {},
-                            }],
+                        await record_character_candidate(
+                            db,
+                            book_id=book.id,
+                            chapter_number=chapter_number,
+                            raw_name=str(entity.get("name") or ""),
+                            proposed_name=str(entity.get("name") or ""),
+                            aliases=entity.get("aliases") if isinstance(entity.get("aliases"), list) else [],
+                            status=CHARACTER_CANDIDATE_PENDING,
+                            confidence=entity.get("confidence"),
+                            reason_codes=decision.reasons or ["save_gate_rejected"],
+                            evidence=candidate_evidence,
+                            source_batch_key=source_batch_key,
                         )
                         continue
-                    pending_new_entities.append((entity, blocked_ids))
+                    pending_new_entities.append((entity, blocked_ids, source_batch_key))
 
             new_entity_embeddings = await _embed_new_character_candidates(
-                pending_new_entities,
+                [(entity, blocked_ids) for entity, blocked_ids, _source_batch_key in pending_new_entities],
                 user_id=book.user_id,
                 book_id=book.id,
             )
-            for (entity, blocked_ids), emb in zip(pending_new_entities, new_entity_embeddings):
+            for (entity, blocked_ids, entity_source_batch_key), emb in zip(pending_new_entities, new_entity_embeddings):
                 if not emb:
                     continue
                 existing_id = await find_similar(
@@ -652,6 +700,20 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                                     growth_event=growth_event if isinstance(growth_event, dict) else None,
                                 )
                             )
+                        await record_character_candidate(
+                            db,
+                            book_id=book.id,
+                            chapter_number=chapter_number,
+                            raw_name=str(entity.get("name") or ""),
+                            proposed_name=str(entity.get("name") or ""),
+                            aliases=entity.get("aliases") if isinstance(entity.get("aliases"), list) else [],
+                            matched_character_id=existing_id,
+                            status="accepted",
+                            confidence=entity.get("confidence"),
+                            reason_codes=["embedding_matched_existing_character"],
+                            evidence=_candidate_record_evidence(entity),
+                            source_batch_key=entity_source_batch_key,
+                        )
                     _merge_alias_in_memory(char, entity["name"] if char else None)
                     if char:
                         _refresh_character_key_cache(character_key_cache, char)
@@ -662,6 +724,20 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                 await db.flush()
                 existing_characters.append(char)
                 _refresh_character_key_cache(character_key_cache, char)
+                await record_character_candidate(
+                    db,
+                    book_id=book.id,
+                    chapter_number=chapter_number,
+                    raw_name=str(entity.get("name") or ""),
+                    proposed_name=str(entity.get("name") or ""),
+                    aliases=entity.get("aliases") if isinstance(entity.get("aliases"), list) else [],
+                    matched_character_id=char.id,
+                    status="promoted",
+                    confidence=entity.get("confidence"),
+                    reason_codes=["new_character_promoted"],
+                    evidence=_candidate_record_evidence(entity),
+                    source_batch_key=entity_source_batch_key,
+                )
                 pending_first_chapter_candidates[char.id] = _first_chapter_lookup_candidates(
                     profile["name"],
                     profile["aliases"],
@@ -686,6 +762,16 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                             description=rel.get("description"),
                             from_chapter=chapter_number,
                         )
+                    )
+                else:
+                    unresolved_relationships.append(
+                        {
+                            "character_a": str(rel.get("character_a") or ""),
+                            "character_b": str(rel.get("character_b") or ""),
+                            "type": str(rel.get("type") or "neutral"),
+                            "description": str(rel.get("description") or ""),
+                            "source_batch_key": source_batch_key,
+                        }
                     )
 
         dialogue_samples = extract_dialogue_samples_by_character(
@@ -746,6 +832,7 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
             elapsed_ms(llm_started),
             len(extraction_batches),
         )
+        await refresh_character_duplicate_suggestions(db, book_id=book.id, characters=existing_characters)
         if pending_first_chapter_candidates:
             earliest_started = time.perf_counter()
             earliest_mentions = await find_earliest_character_mention_chapters(
@@ -780,6 +867,8 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
             extraction_diagnostics["character_extraction"]["rejected_characters"] = _summarize_rejected_character_reports(
                 extraction_rejected_characters
             )
+        if unresolved_relationships:
+            extraction_diagnostics["character_extraction"]["unresolved_relationships"] = unresolved_relationships[:20]
 
         if await is_book_hidden(db, book.id):
             await mark_book_processing_cancelled(
@@ -838,10 +927,6 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
             (processing_state or {}).get("eta_seconds") if isinstance(processing_state, dict) else None,
             queue_wait_ms,
         )
-
-        if await _should_consolidate_after_chapter(db, book, chapter.number):
-            await consolidate_characters(db, book.id, up_to_chapter=chapter_number)
-            await db.commit()
 
         if await _book_processing_complete(db, book.id):
             book.status = "ready"
@@ -983,6 +1068,30 @@ def _find_character_id_in_cache(
     return None
 
 
+def _find_character_ids_in_cache(
+    chars: list[Character],
+    name: str,
+    aliases: list[str] | None,
+    blocked_ids: set[uuid.UUID] | None = None,
+    key_cache: dict[uuid.UUID, set[str]] | None = None,
+) -> list[uuid.UUID]:
+    candidate_keys = character_name_keys(name, aliases or [])
+    if not candidate_keys:
+        return []
+
+    matches: list[uuid.UUID] = []
+    seen: set[uuid.UUID] = set()
+    for char in chars:
+        if blocked_ids and char.id in blocked_ids:
+            continue
+        char_keys = _character_keys_for_cache(char, key_cache)
+        if candidate_keys & char_keys or names_equivalent(name, aliases or [], char.name, char.aliases or []):
+            if char.id not in seen:
+                seen.add(char.id)
+                matches.append(char.id)
+    return matches
+
+
 def _find_character_in_cache(
     chars: list[Character],
     name: str,
@@ -1037,6 +1146,28 @@ def _refresh_character_key_cache(key_cache: dict[uuid.UUID, set[str]], char: Cha
 def _entity_evidence(entity: dict) -> dict:
     evidence = entity.get("evidence")
     return evidence if isinstance(evidence, dict) else {}
+
+
+def _candidate_record_evidence(entity: dict) -> dict[str, Any]:
+    evidence = dict(_entity_evidence(entity))
+    evidence["entity"] = {
+        "name": entity.get("name"),
+        "aliases": entity.get("aliases") if isinstance(entity.get("aliases"), list) else [],
+        "role": entity.get("role"),
+        "traits": entity.get("traits") if isinstance(entity.get("traits"), dict) else {},
+        "personality_tags": entity.get("personality_tags") if isinstance(entity.get("personality_tags"), list) else [],
+        "motivations": entity.get("motivations") if isinstance(entity.get("motivations"), list) else [],
+        "fears": entity.get("fears") if isinstance(entity.get("fears"), list) else [],
+        "goal": entity.get("goal"),
+        "lie_they_believe": entity.get("lie_they_believe"),
+        "backstory_wound": entity.get("backstory_wound"),
+        "arc_type": entity.get("arc_type"),
+        "arc_summary": entity.get("arc_summary"),
+        "archetype": entity.get("archetype"),
+        "growth_event": entity.get("growth_event") if isinstance(entity.get("growth_event"), dict) else None,
+        "confidence": entity.get("confidence"),
+    }
+    return evidence
 
 
 def _blocked_character_ids(
@@ -1218,12 +1349,6 @@ async def _book_processing_complete(db, book_id: uuid.UUID) -> bool:
         select(func.count()).select_from(Chapter).where(Chapter.book_id == book_id, Chapter.processed.is_(False))
     )
     return (remaining_count or 0) == 0
-
-
-async def _should_consolidate_after_chapter(db, book: Book, chapter_number: int) -> bool:
-    if settings.LAZY_PROCESS_INITIAL_CHAPTERS > 0 and chapter_number == settings.LAZY_PROCESS_INITIAL_CHAPTERS:
-        return True
-    return await _book_processing_complete(db, book.id)
 
 
 def _changed(old: dict, new: dict, delta: float = 0.15) -> bool:

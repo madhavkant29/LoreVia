@@ -1,7 +1,9 @@
 "use client"
 
+import { ThemeBrandImage } from "@/components/layout/ThemeBrandImage"
+
 type BrandLockupProps = {
-  size?: "sm" | "md" | "lg"
+  size?: "sm" | "md" | "lg" | "xl"
   className?: string
   textClassName?: string
   iconClassName?: string
@@ -20,6 +22,10 @@ const sizeClasses = {
     wrapper: "",
     image: "h-12",
   },
+  xl: {
+    wrapper: "",
+    image: "h-14",
+  },
 } as const
 
 export function BrandLockup({
@@ -30,8 +36,8 @@ export function BrandLockup({
 
   return (
     <div className={`flex items-center ${classes.wrapper} ${className}`.trim()}>
-      <img
-        src="/logoandtext.png"
+      <ThemeBrandImage
+        variant="lockup"
         alt="LoreVia"
         className={`${classes.image} w-auto object-contain`.trim()}
       />

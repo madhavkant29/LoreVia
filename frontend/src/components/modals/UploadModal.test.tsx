@@ -157,7 +157,7 @@ describe("UploadModal", () => {
     const titleInput = view.querySelector('input[placeholder="Title"]') as HTMLInputElement | null
     const authorInput = Array.from(view.querySelectorAll('input[type="text"]')).find((input) => (input as HTMLInputElement).placeholder === "Manuscript author or pen name") as HTMLInputElement | undefined
     const fileInput = view.querySelector('input[type="file"]') as HTMLInputElement | null
-    const submitButton = findButton(view, "Upload & Process")
+    const submitButton = findButton(view, "Upload manuscript")
 
     await act(async () => {
       if (titleInput) {

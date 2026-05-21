@@ -71,6 +71,23 @@ class Character(Base):
     relationships_as_a = relationship("CharacterRelationship", foreign_keys="CharacterRelationship.character_a_id", back_populates="character_a", cascade="all, delete-orphan")
     relationships_as_b = relationship("CharacterRelationship", foreign_keys="CharacterRelationship.character_b_id", back_populates="character_b", cascade="all, delete-orphan")
     voice_profile = relationship("CharacterVoiceProfile", back_populates="character", uselist=False, cascade="all, delete-orphan")
+    matched_candidates = relationship(
+        "CharacterCandidate",
+        foreign_keys="CharacterCandidate.matched_character_id",
+        back_populates="matched_character",
+    )
+    duplicate_suggestions_as_primary = relationship(
+        "CharacterDuplicateSuggestion",
+        foreign_keys="CharacterDuplicateSuggestion.primary_character_id",
+        back_populates="primary_character",
+        cascade="all, delete-orphan",
+    )
+    duplicate_suggestions_as_secondary = relationship(
+        "CharacterDuplicateSuggestion",
+        foreign_keys="CharacterDuplicateSuggestion.secondary_character_id",
+        back_populates="secondary_character",
+        cascade="all, delete-orphan",
+    )
 
 
 class CharacterState(Base):
@@ -119,3 +136,87 @@ class CharacterVoiceProfile(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), index=True)
 
     character = relationship("Character", back_populates="voice_profile")
+
+
+class CharacterCandidate(Base):
+    __tablename__ = "character_candidates"
+    __table_args__ = (
+        Index("ix_character_candidates_book_status", "book_id", "status"),
+        Index("ix_character_candidates_book_normalized_name", "book_id", "normalized_name"),
+        Index("ix_character_candidates_matched_character_id", "matched_character_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    book_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False)
+    chapter_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    raw_name: Mapped[str] = mapped_column(String, nullable=False)
+    proposed_name: Mapped[str] = mapped_column(String, nullable=False)
+    normalized_name: Mapped[str] = mapped_column(String, nullable=False)
+    aliases: Mapped[list[str] | None] = mapped_column(ARRAY(String))
+    matched_character_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("characters.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    status: Mapped[str] = mapped_column(String, nullable=False, default="pending", server_default="pending")
+    confidence: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    reason_codes: Mapped[list[str] | None] = mapped_column(ARRAY(String))
+    evidence: Mapped[dict | None] = mapped_column(JSONB, default=dict)
+    source_batch_key: Mapped[str | None] = mapped_column(String)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    matched_character = relationship("Character", back_populates="matched_candidates")
+
+
+class CharacterDuplicateSuggestion(Base):
+    __tablename__ = "character_duplicate_suggestions"
+    __table_args__ = (
+        UniqueConstraint(
+            "book_id",
+            "primary_character_id",
+            "secondary_character_id",
+            name="uq_character_duplicate_suggestions_pair",
+        ),
+        Index("ix_character_duplicate_suggestions_book_status", "book_id", "status"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    book_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False)
+    primary_character_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("characters.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    secondary_character_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("characters.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    confidence: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    reasons: Mapped[list[str] | None] = mapped_column(ARRAY(String))
+    shared_evidence: Mapped[dict | None] = mapped_column(JSONB, default=dict)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="pending", server_default="pending")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    primary_character = relationship(
+        "Character",
+        foreign_keys=[primary_character_id],
+        back_populates="duplicate_suggestions_as_primary",
+    )
+    secondary_character = relationship(
+        "Character",
+        foreign_keys=[secondary_character_id],
+        back_populates="duplicate_suggestions_as_secondary",
+    )

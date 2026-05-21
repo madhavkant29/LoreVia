@@ -299,6 +299,10 @@ class CharacterPartitionBody(BaseModel):
     partitions: list[CharacterPartitionTargetBody]
 
 
+class CharacterCandidateAttachBody(BaseModel):
+    character_id: uuid.UUID
+
+
 class ChapterReportCharacter(BaseModel):
     id: str
     name: str

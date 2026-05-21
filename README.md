@@ -106,7 +106,6 @@ This project is intended to run locally with Docker only. Production deployment 
 - Available ports:
   - `3000` for the frontend
   - `5432` for Postgres
-  - `6379` for Redis
   - `8000` for the API
   - `5555` for Flower
 
@@ -122,7 +121,7 @@ DEBUG=true
 API_V1_PREFIX=/api/v1
 
 DATABASE_URL=postgresql://postgres:postgres@postgres:5432/lorevia
-REDIS_URL=redis://redis:6379/0
+REDIS_PASSWORD=replace_local_redis_password
 
 OPENAI_API_KEY=your_openai_api_key_here
 OPENAI_EXTRACT_MODEL=gpt-4o-mini
@@ -156,12 +155,13 @@ Notes:
 
 - Do not paste any real secret values into this README.
 - Keep `backend/.env.local` out of version control.
+- Local Docker Compose injects `REDIS_URL`, `CELERY_BROKER_URL`, and `CELERY_RESULT_BACKEND` using the internal `redis` hostname and the `REDIS_PASSWORD` value above.
 - For local development, file storage is mounted to a Docker volume instead of cloud storage.
 - Paddle checkout requires the API key, webhook secret, and plan price IDs to be set together.
 - In Paddle Checkout settings, set the default payment link to your public HTTPS checkout page, such as `https://getlorevia.com/checkout` on the Hetzner deployment or `http://localhost:3000/checkout` in local sandbox testing.
 - Trial lifecycle emails can be run from a scheduler with `python backend/scripts/run_due_trial_emails.py --limit 100` or through the protected internal job endpoint.
 
-Production deployment notes for the Hetzner VPS live in [docs/hetzner-production-launch-checklist-2026-05-18.md](/C:/Users/madha/.vscode/prod/LoreVia2/docs/hetzner-production-launch-checklist-2026-05-18.md), and the systemd startup unit is documented in [docs/hetzner-service-management.md](/C:/Users/madha/.vscode/prod/LoreVia2/docs/hetzner-service-management.md).
+Production deployment notes for the Hetzner VPS live in [ops/production-firewall-and-monitoring.md](/C:/Users/madha/.vscode/prod/LoreVia2/ops/production-firewall-and-monitoring.md), [docs/hetzner-redis-operations.md](/C:/Users/madha/.vscode/prod/LoreVia2/docs/hetzner-redis-operations.md), and [docs/hetzner-service-management.md](/C:/Users/madha/.vscode/prod/LoreVia2/docs/hetzner-service-management.md). Production Compose now reads secrets from `backend/.env`.
 
 ### 2. Create frontend environment file
 

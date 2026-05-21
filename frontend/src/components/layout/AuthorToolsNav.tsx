@@ -156,7 +156,7 @@ export function AuthorToolsNav({
   isDark,
   bookData = null,
   title = "Author workspace",
-  description = "Navigate drafting, continuity, and collaborator review without losing the manuscript thread.",
+  description = "Move between drafting, review, and story memory without losing the thread.",
   currentChapter = 1,
   mode = "author",
   variant = "panel",
@@ -200,10 +200,10 @@ export function AuthorToolsNav({
   )
   const rail = variant === "rail"
   const containerClass = rail
-    ? `group/rail sticky top-24 z-20 flex h-[calc(100vh-7.5rem)] w-[4.9rem] flex-col overflow-hidden rounded-[1.6rem] border p-3 shadow-[0_26px_80px_-52px_rgba(0,0,0,0.82)] backdrop-blur transition-[width,background-color,border-color,box-shadow] duration-300 hover:w-[18.5rem] focus-within:w-[18.5rem] ${
-        isDark ? "border-white/10 bg-[#0a0d11]/92 text-white hover:border-white/14 hover:bg-[#0d1117]/96" : "border-stone-200/90 bg-white/95 text-stone-950 hover:border-stone-300 hover:bg-white"
+    ? `group/rail sticky top-24 z-20 flex h-[calc(100vh-7.5rem)] w-[4.9rem] flex-col overflow-hidden rounded-[1.6rem] border p-3 shadow-[0_22px_54px_-42px_rgba(58,49,37,0.24)] transition-[width,background-color,border-color,box-shadow] duration-300 hover:w-[18.5rem] focus-within:w-[18.5rem] ${
+        isDark ? "border-white/10 bg-[#1b2024]/96 text-white hover:border-white/14 hover:bg-[#1f2528]/96" : "border-[rgba(var(--border),0.9)] bg-[rgba(255,252,247,0.96)] text-stone-950 hover:border-stone-300 hover:bg-white"
       }`
-    : `rounded-2xl border p-4 ${isDark ? "border-white/10 bg-[#0d0f12]/90" : "border-stone-200 bg-white/92"}`
+    : `rounded-2xl border p-4 ${isDark ? "border-white/10 bg-[#1b2024]/96" : "border-[rgba(var(--border),0.9)] bg-[rgba(255,252,247,0.96)]"}`
   const labelVisibility = rail ? "opacity-0 group-hover/rail:opacity-100 group-focus-within/rail:opacity-100" : "opacity-100"
   const helperVisibility = rail
     ? "max-h-0 translate-y-1 opacity-0 group-hover/rail:max-h-20 group-hover/rail:translate-y-0 group-hover/rail:opacity-100 group-focus-within/rail:max-h-20 group-focus-within/rail:translate-y-0 group-focus-within/rail:opacity-100"
@@ -245,7 +245,7 @@ export function AuthorToolsNav({
                       selected
                         ? isDark
                           ? "bg-white text-stone-950 shadow-[0_18px_38px_-28px_rgba(255,255,255,0.45)]"
-                          : "bg-stone-950 text-white shadow-[0_18px_34px_-26px_rgba(28,25,23,0.45)]"
+                          : "bg-teal-800 text-white shadow-[0_18px_34px_-26px_rgba(58,49,37,0.22)]"
                         : isDark
                           ? "text-slate-300 hover:bg-white/[0.07] hover:text-white focus-visible:ring-white/25"
                           : "text-stone-600 hover:bg-stone-100 focus-visible:ring-stone-300 hover:text-stone-950"

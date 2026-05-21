@@ -5,7 +5,7 @@ from app.utils.worker_async_utils import run_worker_coro
 
 
 @celery_app.task(bind=True, name="analysis_tasks.analyse_chapter",
-                 queue="analysis", max_retries=3)
+                 queue="analysis", max_retries=3, ignore_result=True)
 def analyse_chapter_task(self, chapter_id: str, chapter_text: str, chapter_title: str = ""):
     try:
         queue_wait_ms = extract_queue_wait_ms(getattr(self.request, "headers", None))

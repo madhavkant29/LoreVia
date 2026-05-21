@@ -3,7 +3,7 @@
 import Link from "next/link"
 import type { Route } from "next"
 import { useQuery } from "@tanstack/react-query"
-import { useEffect, useRef, useState } from "react"
+import React, { useEffect, useRef, useState } from "react"
 
 import { publicApi } from "@/lib/api/public"
 import { asQueryKey } from "@/lib/query/cacheKeys"
@@ -94,8 +94,8 @@ export function PublicBookPageClient({
     <main className={`min-h-screen ${isDark ? "bg-black text-white" : "bg-stone-50 text-stone-950"}`}>
       <div className="mx-auto max-w-5xl px-4 py-10">
         <div className="flex flex-wrap items-center gap-3">
-          <Link href="/public" className={`text-sm ${isDark ? "text-slate-400 hover:text-white" : "text-stone-500 hover:text-stone-900"}`}>
-            {"<- Back to public library"}
+          <Link href="/library" className={`text-sm ${isDark ? "text-slate-400 hover:text-white" : "text-stone-500 hover:text-stone-900"}`}>
+            {"<- Back to library"}
           </Link>
         </div>
 

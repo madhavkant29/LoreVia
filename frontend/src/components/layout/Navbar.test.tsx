@@ -71,7 +71,7 @@ describe("Navbar", () => {
     root = null
   })
 
-  it("shows the public uploads quick link beside the notification cluster", () => {
+  it("shows a single public uploads link in the navigation", () => {
     useAuthStoreMock.mockReturnValue({
       user: {
         email: "writer@example.com",
@@ -86,7 +86,7 @@ describe("Navbar", () => {
     const view = renderNavbar()
     const uploadsLinks = Array.from(view.querySelectorAll("a")).filter((element) => element.textContent?.includes("Public Uploads"))
 
-    expect(uploadsLinks.length).toBeGreaterThan(0)
+    expect(uploadsLinks).toHaveLength(1)
     expect(uploadsLinks[0].getAttribute("href")).toBe("/public/uploads")
   })
 

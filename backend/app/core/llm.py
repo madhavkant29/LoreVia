@@ -34,7 +34,6 @@ async def complete_with_fallback(
             request_kwargs = cast(
                 dict[str, Any],
                 {
-                    "model": openai_model,
                     "messages": [
                         {"role": "system", "content": system},
                         {"role": "user", "content": user},

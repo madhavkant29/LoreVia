@@ -16,7 +16,7 @@ function formatMemberSince(value?: string | null) {
   if (!value) return "Unknown"
   const parsed = new Date(value)
   if (Number.isNaN(parsed.getTime())) return "Unknown"
-  return parsed.toLocaleDateString(undefined, { month: "short", year: "numeric" })
+  return parsed.toLocaleDateString("en-US", { month: "short", year: "numeric" })
 }
 
 export function Navbar() {
@@ -31,6 +31,7 @@ export function Navbar() {
   const pathname = usePathname()
 
   const isDark = theme === "dark"
+  const showUserChrome = authHydrated && !!user
 
   const handleLogout = async () => {
     try {
@@ -94,33 +95,21 @@ export function Navbar() {
   const publicProfileHref = user?.username ? (`/public/writers/${user.username}` as Route) : null
 
   return (
-    <nav className="sticky top-0 z-30 border-b border-border bg-background px-4 py-4 transition-colors duration-150">
+    <nav className="sticky top-0 z-30 border-b border-[rgba(var(--border),0.9)] bg-[rgba(243,244,246,0.95)] px-4 py-4 backdrop-blur-sm transition-colors duration-150 dark:bg-[rgba(20,24,27,0.95)]">
       <div className="mx-auto flex max-w-7xl flex-col gap-4">
         <div className="flex items-center justify-between gap-4">
           <Link href="/library" className="group flex items-center">
             <BrandLockup
-              size="sm"
+              size="xl"
               className="transition-transform group-hover:scale-[1.02]"
-              iconClassName="h-10 w-10 rounded-xl"
-              textClassName="text-slate-900 dark:text-white"
             />
           </Link>
 
           <div className="flex items-center gap-2">
-            <ChatLauncher enabled={badgeQueriesEnabled} />
+            {showUserChrome ? <ChatLauncher enabled={badgeQueriesEnabled} /> : null}
             <NotificationBell enabled={badgeQueriesEnabled} />
-            <Link
-              href="/public/uploads"
-              className={`hidden sm:inline-flex items-center rounded-lg border px-4 py-2 text-sm font-semibold transition-colors duration-150 ${
-                pathname === "/public/uploads" || pathname === "/public/analytics"
-                  ? "border-sky-400/40 bg-sky-500/10 text-sky-600 dark:text-sky-300"
-                  : "border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground"
-              }`}
-            >
-              Public Uploads
-            </Link>
 
-            {user ? (
+            {showUserChrome ? (
               <div className="relative" ref={profileMenuRef}>
                 <button
                   type="button"
@@ -128,16 +117,16 @@ export function Navbar() {
                   aria-label="Open profile menu"
                   className={`flex h-10 w-10 items-center justify-center rounded-full border text-sm font-semibold transition-colors duration-150 ${
                     profileMenuOpen
-                      ? "border-sky-400/40 bg-sky-500/10 text-sky-600 dark:text-sky-300"
-                      : "border-border bg-card text-foreground hover:bg-muted"
+                      ? "border-teal-700/20 bg-teal-700/10 text-teal-800 dark:text-teal-200"
+                      : "border-[rgba(var(--border),0.9)] bg-[rgba(255,252,247,0.85)] text-[rgb(var(--foreground))] hover:bg-[rgba(255,252,247,1)] dark:bg-white/[0.04]"
                   }`}
                 >
                   {profileInitial}
                 </button>
 
                 {profileMenuOpen ? (
-                  <div className={`absolute right-0 top-full z-40 mt-2 w-72 overflow-hidden rounded-2xl border shadow-[0_25px_80px_-40px_rgba(0,0,0,0.85)] ${isDark ? "border-white/10 bg-[#12121a]" : "border-stone-200 bg-white"}`}>
-                    <div className={`border-b px-4 py-4 ${isDark ? "border-white/10" : "border-stone-200"}`}>
+                  <div className={`absolute right-0 top-full z-40 mt-2 w-72 overflow-hidden rounded-[1.25rem] border shadow-[0_18px_40px_-26px_rgba(58,49,37,0.28)] ${isDark ? "border-white/10 bg-[#1f2528]" : "border-[rgba(var(--border),0.9)] bg-[rgba(255,252,247,0.98)]"}`}>
+                    <div className={`border-b px-4 py-4 ${isDark ? "border-white/10" : "border-[rgba(var(--border),0.9)]"}`}>
                       <p className="text-base font-semibold">{user.username ? `@${user.username}` : user.email}</p>
                       <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-stone-600"}`}>{user.email}</p>
                       <div className="mt-3 flex flex-wrap gap-2 text-xs">
@@ -169,7 +158,7 @@ export function Navbar() {
 
             <button
               onClick={toggleTheme}
-              className="group relative flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-card hover:bg-muted transition-colors duration-150"
+              className="group relative flex h-10 w-10 items-center justify-center rounded-xl border border-[rgba(var(--border),0.9)] bg-[rgba(255,252,247,0.82)] hover:bg-[rgba(255,252,247,1)] transition-colors duration-150 dark:bg-white/[0.04]"
               aria-label="Toggle theme"
             >
               {isDark ? (
@@ -177,7 +166,7 @@ export function Navbar() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707m12.728 0l-.707-.707M6.343 6.364l-.707-.707M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                 </svg>
               ) : (
-                <svg className="h-5 w-5 text-brand-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg className="h-5 w-5 text-teal-800" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
                 </svg>
               )}
@@ -185,7 +174,7 @@ export function Navbar() {
 
             <button
               onClick={() => setMobileMenuOpen((v) => !v)}
-              className="lg:hidden flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-card text-foreground"
+              className="lg:hidden flex h-10 w-10 items-center justify-center rounded-xl border border-[rgba(var(--border),0.9)] bg-[rgba(255,252,247,0.82)] text-[rgb(var(--foreground))] dark:bg-white/[0.04]"
             >
               <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={mobileMenuOpen ? "M6 18L18 6M6 6l12 12" : "M4 6h16M4 12h16M4 18h16"} />
@@ -199,10 +188,10 @@ export function Navbar() {
             <Link
               href="/public/uploads"
               onClick={() => setMobileMenuOpen(false)}
-              className={`relative px-4 py-2 text-sm font-semibold tracking-tight transition-colors duration-150 rounded-md ${
+              className={`relative rounded-xl px-4 py-2 text-sm font-semibold tracking-tight transition-colors duration-150 ${
                 pathname === "/public/uploads" || pathname === "/public/analytics"
-                  ? "text-slate-900 bg-slate-100 dark:text-white dark:bg-slate-800"
-                  : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                  ? "bg-teal-700/10 text-teal-800 dark:bg-teal-400/15 dark:text-teal-200"
+                  : "text-[rgb(var(--muted-foreground))] hover:bg-[rgba(var(--muted),0.85)] hover:text-[rgb(var(--foreground))]"
               }`}
             >
               Public Uploads
@@ -212,15 +201,15 @@ export function Navbar() {
                 key={item.href}
                 href={item.href}
                 onClick={() => setMobileMenuOpen(false)}
-                className={`relative px-4 py-2 text-sm font-semibold tracking-tight transition-colors duration-150 rounded-md ${
+                className={`relative rounded-xl px-4 py-2 text-sm font-semibold tracking-tight transition-colors duration-150 ${
                   pathname === item.href
-                    ? "text-slate-900 bg-slate-100 dark:text-white dark:bg-slate-800"
-                    : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                    ? "bg-teal-700/10 text-teal-800 dark:bg-teal-400/15 dark:text-teal-200"
+                    : "text-[rgb(var(--muted-foreground))] hover:bg-[rgba(var(--muted),0.85)] hover:text-[rgb(var(--foreground))]"
                 }`}
               >
                 {item.label}
                 {pathname === item.href && (
-                  <span className="absolute bottom-0 left-4 right-4 h-0.5 bg-slate-900 dark:bg-white rounded-full" />
+                  <span className="absolute bottom-0 left-4 right-4 h-0.5 rounded-full bg-teal-800 dark:bg-teal-300" />
                 )}
               </Link>
             ))}

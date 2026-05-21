@@ -1,5 +1,7 @@
 import type { Metadata } from "next"
 
+import { Navbar } from "@/components/layout/Navbar"
+
 export const metadata: Metadata = {
   robots: {
     index: true,
@@ -8,5 +10,11 @@ export const metadata: Metadata = {
 }
 
 export default function PublicContentLayout({ children }: { children: React.ReactNode }) {
-  return <>{children}</>
+  return (
+    <div className="app-shell min-h-screen">
+      <div className="app-shell__mesh" />
+      <Navbar />
+      {children}
+    </div>
+  )
 }

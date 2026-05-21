@@ -10,7 +10,12 @@ import {
 import { invalidateQueryKeys } from "@/lib/query/queryClient"
 import { normalizeBookRouteId } from "@/lib/utils/bookRoutes"
 import type { Book, BookCollaborator, BookEvents, BookNote, BookOverviewPayload, BookSeries, BookWorkType, ChapterConsistencyReport, ChapterSceneOrder, ChapterVersion, ChapterVersionDetail, CollaborationPermissions, CollaborationRole, CollaborationScope, EmotionalArcOverview, ManuscriptAnnotation, ManuscriptWorkspaceTree, NovelScene, ObsidianGraph, ObsidianNoteRelations, ObsidianPreview, ObsidianVaultNote, ObsidianVaultNoteSaveResult, PreWritingCheck, ReadabilityMetrics, RevisionIntelligence, RevisionTagSet, RevisionTagTarget, SavedQuote, SceneMetadata, SceneVersion, SceneVersionDetail, SeriesBible, StoryHealth, UserStats, WorkspaceSearchFilters, WorkspaceSearchResult, WriterWorkspace } from "@/types/book"
-import type { Character, CharacterShareResponse, RelationshipGraph } from "@/types/character"
+import type {
+  Character,
+  CharacterReviewResponse,
+  CharacterShareResponse,
+  RelationshipGraph,
+} from "@/types/character"
 import type { BetaReadAssignment, BetaReadAssignmentCreateInput, BetaReadAssignmentListResponse } from "@/types/reader"
 
 export interface ManuscriptImportResponse {
@@ -273,6 +278,8 @@ export const booksApi = {
     apiClient.get<BookEvents>(bookPath(id, "/events/reader"), { params: typeof chapter === "number" ? { chapter } : undefined }).then(r => r.data),
   getCharacters: (id: string) =>
     apiClient.get<Character[]>(bookPath(id, "/characters")).then(r => r.data),
+  getCharacterReview: (id: string) =>
+    apiClient.get<CharacterReviewResponse>(bookPath(id, "/character-review")).then(r => r.data),
   createCharacter: (
     bookId: string,
     payload: {
@@ -368,6 +375,33 @@ export const booksApi = {
   }),
   deleteCharacter: (bookId: string, characterId: string) =>
     apiClient.delete<{ deleted: string }>(bookPath(bookId, `/characters/${characterId}`)).then(r => {
+      invalidateBookCache(bookId)
+      return r.data
+    }),
+  promoteCharacterCandidate: (bookId: string, candidateId: string) =>
+    apiClient.post<{ promoted: string; candidate_id: string }>(bookPath(bookId, `/character-review/${candidateId}/promote`)).then(r => {
+      invalidateBookCache(bookId)
+      return r.data
+    }),
+  attachCharacterCandidate: (bookId: string, candidateId: string, characterId: string) =>
+    apiClient.post<{ attached: string; candidate_id: string }>(bookPath(bookId, `/character-review/${candidateId}/attach`), {
+      character_id: characterId,
+    }).then(r => {
+      invalidateBookCache(bookId)
+      return r.data
+    }),
+  rejectCharacterCandidate: (bookId: string, candidateId: string) =>
+    apiClient.post<{ rejected: string }>(bookPath(bookId, `/character-review/${candidateId}/reject`)).then(r => {
+      invalidateBookCache(bookId)
+      return r.data
+    }),
+  acceptDuplicateSuggestion: (bookId: string, suggestionId: string) =>
+    apiClient.post<{ merged: string; suggestion_id: string }>(bookPath(bookId, `/duplicate-suggestions/${suggestionId}/accept`)).then(r => {
+      invalidateBookCache(bookId)
+      return r.data
+    }),
+  dismissDuplicateSuggestion: (bookId: string, suggestionId: string) =>
+    apiClient.post<{ dismissed: string }>(bookPath(bookId, `/duplicate-suggestions/${suggestionId}/dismiss`)).then(r => {
       invalidateBookCache(bookId)
       return r.data
     }),

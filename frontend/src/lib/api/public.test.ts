@@ -211,6 +211,14 @@ describe("public api", () => {
     })
   })
 
+  it("reacts to a forum post", async () => {
+    await publicApi.reactToForumPost("post-2", "like")
+
+    expect(putMock).toHaveBeenCalledWith("/public/forum/posts/post-2/reaction", {
+      reaction: "like",
+    })
+  })
+
   it("reacts to a forum comment", async () => {
     await publicApi.reactToForumComment("comment-3", "dislike")
 

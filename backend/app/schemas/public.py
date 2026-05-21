@@ -43,7 +43,7 @@ class PublicBookOut(BaseModel):
     total_chapters: int | None = None
     copyright_warning: bool = False
     active_forum_post_id: str | None = None
-    analytics: "PublicBookAnalyticsOut" | None = None
+    analytics: PublicBookAnalyticsOut | None = None
     created_at: datetime | None = None
     published_at: datetime | None = None
 
@@ -187,8 +187,11 @@ class PublicForumPostOut(BaseModel):
     allow_contact_requests: bool
     status: str
     viewer_interest_status: str | None = None
+    reaction: str | None = None
     interest_count: int = 0
     comment_count: int = 0
+    like_count: int = 0
+    dislike_count: int = 0
     rating_summary: PublicForumRatingSummaryOut
     discoverability_score: float
     created_at: datetime
@@ -227,6 +230,10 @@ class PublicForumInterestListOut(BaseModel):
 
 class PublicForumCommentCreateBody(BaseModel):
     body: str = Field(..., min_length=2, max_length=5000)
+
+
+class PublicForumPostReactionBody(BaseModel):
+    reaction: str = Field(..., min_length=4, max_length=8)
 
 
 class PublicForumCommentReactionBody(BaseModel):
