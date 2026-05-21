@@ -155,6 +155,7 @@ def mock_celery_tasks(monkeypatch, request):
 def mock_redis(monkeypatch, request):
     """Mock Redis by default while allowing focused runtime tests to opt out."""
     from app.core import redis as redis_module
+    from app.api.deps import rate_limit as rate_limit_module
 
     if request.node.module.__name__.endswith("test_redis_runtime"):
         return
@@ -287,6 +288,7 @@ def mock_redis(monkeypatch, request):
         return fake_redis
 
     monkeypatch.setattr(redis_module, "get_redis", fake_get_redis)
+    monkeypatch.setattr(rate_limit_module, "get_redis", fake_get_redis)
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())

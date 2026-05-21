@@ -87,6 +87,7 @@ from app.core import storage
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import create_asset_token, decode_token
+from app.engine.character.consolidator import consolidate_characters
 from app.models.book import (
     Book,
     BookCollaborator,

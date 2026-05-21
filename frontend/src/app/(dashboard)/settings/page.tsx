@@ -205,7 +205,7 @@ export default function SettingsPage() {
                     </p>
                   ) : (
                     <p className={`max-w-2xl break-words text-sm leading-6 [overflow-wrap:anywhere] ${isDark ? "text-slate-300" : "text-stone-700"}`}>
-                      Purchased plan: {purchasedTier}. Canceling, payment method changes, and invoice access live in the billing portal.
+                      Purchased plan: {purchasedTier}. cancel renewal, payment method changes, and invoice access live in the billing portal.
                     </p>
                   )}
                   <p className={`mt-4 max-w-2xl break-words text-sm leading-6 [overflow-wrap:anywhere] ${isDark ? "text-slate-400" : "text-stone-600"}`}>
@@ -245,6 +245,7 @@ export default function SettingsPage() {
                         autoComplete="username"
                         value={usernameDraft}
                         onChange={(event) => setUsernameDraft(event.target.value)}
+                        onInput={(event) => setUsernameDraft((event.target as HTMLInputElement).value)}
                         className={`min-w-0 w-full bg-transparent text-base font-semibold outline-none ${isDark ? "text-white placeholder:text-slate-500" : "text-stone-900 placeholder:text-stone-400"}`}
                         placeholder="Choose a public username"
                       />

@@ -26,6 +26,7 @@ from app.core.redis import (
 from app.core.security import decode_token
 from app.core.storage import download_book
 from app.engine.analysis.recall import generate_recall
+from app.engine.character.consolidator import consolidate_characters
 from app.engine.search.semantic import build_search_result, find_context_for_tap, semantic_search
 from app.models.book import Book, Chapter, ChapterMedia
 from app.models.character import Character, CharacterState

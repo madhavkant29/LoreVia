@@ -109,7 +109,7 @@ local_settings.py
 *.swp
 *~
 *.swo
-
+frontend\test-results
 # Exclude generated files
 *.pb.go
 
