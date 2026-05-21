@@ -22,6 +22,8 @@ from app.engine.character.deduplicator import (
     find_similar,
     is_valid_alias,
     names_equivalent,
+    resolve_character_match_id,
+    resolve_character_match_ids,
 )
 from app.engine.character.entity_filters import character_persistence_decision
 from app.engine.character.extractor import extract_characters_and_relationships, fallback_character_mentions
@@ -70,6 +72,196 @@ log = logging.getLogger("lorevia.extraction")
 AUTO_SAVE_CONFIDENCE = 0.78
 SINGLE_MENTION_SAVE_CONFIDENCE = 0.90
 MIN_EXISTING_UPDATE_CONFIDENCE = 0.55
+
+
+def _relationship_signature(
+    character_a_id: uuid.UUID,
+    character_b_id: uuid.UUID,
+    rel_type: str,
+    from_chapter: int,
+    description: str | None,
+) -> tuple[str, str, str, int, str]:
+    left_id = str(character_a_id)
+    right_id = str(character_b_id)
+    ordered = tuple(sorted((left_id, right_id)))
+    normalized_type = " ".join(str(rel_type or "neutral").split()).strip().lower() or "neutral"
+    normalized_description = " ".join(str(description or "").split()).strip().casefold()
+    return ordered[0], ordered[1], normalized_type, int(from_chapter or 0), normalized_description
+
+
+def _relationship_resolution_candidates(
+    chars: list[Character],
+    name: str | None,
+    *,
+    key_cache: dict[uuid.UUID, set[str]] | None = None,
+) -> list[uuid.UUID]:
+    candidate = " ".join(str(name or "").split()).strip()
+    if not candidate:
+        return []
+    return _find_character_ids_in_cache(chars, candidate, [], key_cache=key_cache)
+
+
+def _relationship_evidence_payload(
+    rel: dict[str, Any],
+    *,
+    chapter_number: int,
+    counterpart_name: str | None,
+    counterpart_character_id: uuid.UUID | None,
+    unresolved_side: str,
+    resolution: str,
+) -> dict[str, Any]:
+    return {
+        "relationship": {
+            "character_a": " ".join(str(rel.get("character_a") or "").split()).strip(),
+            "character_b": " ".join(str(rel.get("character_b") or "").split()).strip(),
+            "type": " ".join(str(rel.get("type") or "neutral").split()).strip() or "neutral",
+            "description": " ".join(str(rel.get("description") or "").split()).strip(),
+            "chapter_number": int(chapter_number or 0),
+            "source_batch_key": rel.get("source_batch_key"),
+        },
+        "review_kind": "relationship_resolution",
+        "unresolved_side": unresolved_side,
+        "resolution": resolution,
+        "counterpart_name": counterpart_name,
+        "counterpart_character_id": str(counterpart_character_id) if counterpart_character_id else None,
+    }
+
+
+async def _record_relationship_review_candidates(
+    db,
+    *,
+    book_id: uuid.UUID,
+    chapter_number: int,
+    rel: dict[str, Any],
+    left_matches: list[uuid.UUID],
+    right_matches: list[uuid.UUID],
+) -> int:
+    created = 0
+    left_name = " ".join(str(rel.get("character_a") or "").split()).strip()
+    right_name = " ".join(str(rel.get("character_b") or "").split()).strip()
+    relationship_key = str(rel.get("source_batch_key") or f"{book_id}:{chapter_number}")
+
+    if left_name and len(left_matches) != 1:
+        resolution = "ambiguous" if len(left_matches) > 1 else "missing"
+        await record_character_candidate(
+            db,
+            book_id=book_id,
+            chapter_number=chapter_number,
+            raw_name=left_name,
+            proposed_name=left_name,
+            matched_character_id=left_matches[0] if len(left_matches) == 1 else None,
+            status=CHARACTER_CANDIDATE_PENDING,
+            confidence=0,
+            reason_codes=["relationship_unresolved", f"relationship_{resolution}_character"],
+            evidence=_relationship_evidence_payload(
+                rel,
+                chapter_number=chapter_number,
+                counterpart_name=right_name or None,
+                counterpart_character_id=right_matches[0] if len(right_matches) == 1 else None,
+                unresolved_side="character_a",
+                resolution=resolution,
+            ),
+            source_batch_key=f"{relationship_key}:character_a",
+        )
+        created += 1
+
+    if right_name and len(right_matches) != 1:
+        resolution = "ambiguous" if len(right_matches) > 1 else "missing"
+        await record_character_candidate(
+            db,
+            book_id=book_id,
+            chapter_number=chapter_number,
+            raw_name=right_name,
+            proposed_name=right_name,
+            matched_character_id=right_matches[0] if len(right_matches) == 1 else None,
+            status=CHARACTER_CANDIDATE_PENDING,
+            confidence=0,
+            reason_codes=["relationship_unresolved", f"relationship_{resolution}_character"],
+            evidence=_relationship_evidence_payload(
+                rel,
+                chapter_number=chapter_number,
+                counterpart_name=left_name or None,
+                counterpart_character_id=left_matches[0] if len(left_matches) == 1 else None,
+                unresolved_side="character_b",
+                resolution=resolution,
+            ),
+            source_batch_key=f"{relationship_key}:character_b",
+        )
+        created += 1
+
+    return created
+
+
+async def _persist_relationship_records(
+    db,
+    *,
+    book_id: uuid.UUID,
+    chapter_number: int,
+    existing_characters: list[Character],
+    relationships: list[dict[str, Any]],
+    key_cache: dict[uuid.UUID, set[str]],
+    persisted_signatures: set[tuple[str, str, str, int, str]],
+) -> tuple[int, list[dict[str, Any]], int]:
+    persisted = 0
+    unresolved: list[dict[str, Any]] = []
+    review_candidate_count = 0
+
+    for rel in relationships:
+        if not isinstance(rel, dict):
+            continue
+        left_name = " ".join(str(rel.get("character_a") or "").split()).strip()
+        right_name = " ".join(str(rel.get("character_b") or "").split()).strip()
+        if not left_name or not right_name:
+            continue
+
+        left_matches = _relationship_resolution_candidates(existing_characters, left_name, key_cache=key_cache)
+        right_matches = _relationship_resolution_candidates(existing_characters, right_name, key_cache=key_cache)
+        if len(left_matches) == 1 and len(right_matches) == 1 and left_matches[0] != right_matches[0]:
+            signature = _relationship_signature(
+                left_matches[0],
+                right_matches[0],
+                str(rel.get("type") or "neutral"),
+                chapter_number,
+                str(rel.get("description") or ""),
+            )
+            if signature in persisted_signatures:
+                continue
+            persisted_signatures.add(signature)
+            db.add(
+                CharacterRelationship(
+                    book_id=book_id,
+                    character_a_id=left_matches[0],
+                    character_b_id=right_matches[0],
+                    rel_type=str(rel.get("type") or "neutral"),
+                    sentiment=rel.get("sentiment"),
+                    description=rel.get("description"),
+                    from_chapter=chapter_number,
+                )
+            )
+            persisted += 1
+            continue
+
+        unresolved_entry = {
+            "character_a": left_name,
+            "character_b": right_name,
+            "type": str(rel.get("type") or "neutral"),
+            "description": " ".join(str(rel.get("description") or "").split()).strip(),
+            "source_batch_key": rel.get("source_batch_key"),
+            "chapter_number": chapter_number,
+            "character_a_matches": [str(item) for item in left_matches[:3]],
+            "character_b_matches": [str(item) for item in right_matches[:3]],
+        }
+        unresolved.append(unresolved_entry)
+        review_candidate_count += await _record_relationship_review_candidates(
+            db,
+            book_id=book_id,
+            chapter_number=chapter_number,
+            rel=unresolved_entry,
+            left_matches=left_matches,
+            right_matches=right_matches,
+        )
+
+    return persisted, unresolved, review_candidate_count
 
 
 async def process_book(book_id: str, queue_wait_ms: int | None = None) -> dict:
@@ -511,8 +703,38 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
         extraction_fallback_character_count = 0
         extraction_rejected_characters: list[dict[str, Any]] = []
         unresolved_relationships: list[dict[str, Any]] = []
+        pending_relationships: list[dict[str, Any]] = []
         pending_first_chapter_candidates: dict[uuid.UUID, list[str]] = {}
         pending_first_chapter_updates: dict[uuid.UUID, Character] = {}
+        saved_character_count = 0
+        quarantined_candidate_count = 0
+        relationship_review_candidate_count = 0
+        chapter_media_count = len(ch_data.get("images") or [])
+        media_marker_count = len(re.findall(r"\[\[IMAGE:[^\]]+\]\]", str(ch_data.get("text") or "")))
+        existing_relationship_rows = (
+            await db.execute(
+                select(
+                    CharacterRelationship.character_a_id,
+                    CharacterRelationship.character_b_id,
+                    CharacterRelationship.rel_type,
+                    CharacterRelationship.from_chapter,
+                    CharacterRelationship.description,
+                ).where(
+                    CharacterRelationship.book_id == book.id,
+                    CharacterRelationship.from_chapter == chapter_number,
+                )
+            )
+        ).all()
+        persisted_relationship_signatures: set[tuple[str, str, str, int, str]] = {
+            _relationship_signature(
+                row.character_a_id,
+                row.character_b_id,
+                row.rel_type,
+                row.from_chapter,
+                row.description,
+            )
+            for row in existing_relationship_rows
+        }
 
         for batch_index, (batch_text, result) in enumerate(zip(extraction_batch_texts, extraction_results), start=1):
             source_batch_key = f"{book.id}:{chapter_number}:{batch_index}"
@@ -551,6 +773,7 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                 candidate_evidence = _candidate_record_evidence(entity)
 
                 if len(matching_ids) > 1:
+                    quarantined_candidate_count += 1
                     await record_character_candidate(
                         db,
                         book_id=book.id,
@@ -575,6 +798,7 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                             decision.reasons,
                             entity.get("evidence"),
                         )
+                        quarantined_candidate_count += 1
                         await record_character_candidate(
                             db,
                             book_id=book.id,
@@ -631,6 +855,7 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                             evidence=candidate_evidence,
                             source_batch_key=source_batch_key,
                         )
+                        saved_character_count += 1
                     _merge_alias_in_memory(char, entity["name"] if char else None)
                 else:
                     if not decision.allowed:
@@ -641,6 +866,7 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                             decision.reasons,
                             entity.get("evidence"),
                         )
+                        quarantined_candidate_count += 1
                         await record_character_candidate(
                             db,
                             book_id=book.id,
@@ -714,6 +940,7 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                             evidence=_candidate_record_evidence(entity),
                             source_batch_key=entity_source_batch_key,
                         )
+                        saved_character_count += 1
                     _merge_alias_in_memory(char, entity["name"] if char else None)
                     if char:
                         _refresh_character_key_cache(character_key_cache, char)
@@ -738,6 +965,7 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                     evidence=_candidate_record_evidence(entity),
                     source_batch_key=entity_source_batch_key,
                 )
+                saved_character_count += 1
                 pending_first_chapter_candidates[char.id] = _first_chapter_lookup_candidates(
                     profile["name"],
                     profile["aliases"],
@@ -749,30 +977,12 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                     continue
                 if not rel.get("character_a") or not rel.get("character_b"):
                     continue
-                char_a = _find_character_in_cache(existing_characters, rel["character_a"], key_cache=character_key_cache)
-                char_b = _find_character_in_cache(existing_characters, rel["character_b"], key_cache=character_key_cache)
-                if char_a and char_b:
-                    db.add(
-                        CharacterRelationship(
-                            book_id=book.id,
-                            character_a_id=char_a.id,
-                            character_b_id=char_b.id,
-                            rel_type=rel.get("type", "neutral"),
-                            sentiment=rel.get("sentiment"),
-                            description=rel.get("description"),
-                            from_chapter=chapter_number,
-                        )
-                    )
-                else:
-                    unresolved_relationships.append(
-                        {
-                            "character_a": str(rel.get("character_a") or ""),
-                            "character_b": str(rel.get("character_b") or ""),
-                            "type": str(rel.get("type") or "neutral"),
-                            "description": str(rel.get("description") or ""),
-                            "source_batch_key": source_batch_key,
-                        }
-                    )
+                pending_relationships.append(
+                    {
+                        **rel,
+                        "source_batch_key": source_batch_key,
+                    }
+                )
 
         dialogue_samples = extract_dialogue_samples_by_character(
             str(ch_data.get("text") or ""),
@@ -832,7 +1042,16 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
             elapsed_ms(llm_started),
             len(extraction_batches),
         )
-        await refresh_character_duplicate_suggestions(db, book_id=book.id, characters=existing_characters)
+        persisted_relationship_count, unresolved_relationships, relationship_review_candidate_count = await _persist_relationship_records(
+            db,
+            book_id=book.id,
+            chapter_number=chapter_number,
+            existing_characters=existing_characters,
+            relationships=pending_relationships,
+            key_cache=character_key_cache,
+            persisted_signatures=persisted_relationship_signatures,
+        )
+        duplicate_suggestions = await refresh_character_duplicate_suggestions(db, book_id=book.id, characters=existing_characters)
         if pending_first_chapter_candidates:
             earliest_started = time.perf_counter()
             earliest_mentions = await find_earliest_character_mention_chapters(
@@ -857,18 +1076,49 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                 len(pending_first_chapter_candidates),
             )
         extraction_diagnostics = dict(current_parser_diagnostics(book) or {})
-        extraction_diagnostics["character_extraction"] = {
+        previous_character_diagnostics = (
+            extraction_diagnostics.get("character_extraction")
+            if isinstance(extraction_diagnostics.get("character_extraction"), dict)
+            else {}
+        )
+        previous_totals = (
+            previous_character_diagnostics.get("totals")
+            if isinstance(previous_character_diagnostics.get("totals"), dict)
+            else {}
+        )
+        chapter_character_diagnostics = {
             "total_batches": len(extraction_batch_texts),
             "failed_batches": extraction_failed_batches,
             "fallback_batches": extraction_fallback_batches,
             "fallback_character_count": extraction_fallback_character_count,
+            "saved_characters": saved_character_count,
+            "quarantined_candidates": quarantined_candidate_count,
+            "rejected_entities": len(extraction_rejected_characters),
+            "unresolved_relationships_count": len(unresolved_relationships),
+            "relationship_review_candidates": relationship_review_candidate_count,
+            "relationships_persisted": persisted_relationship_count,
+            "duplicate_suggestions": sum(1 for item in duplicate_suggestions if str(item.status or "") == "pending"),
+            "chapter_media_count": chapter_media_count,
+            "media_marker_count": media_marker_count,
+            "cover_available": bool(book.cover_s3_key),
         }
         if extraction_rejected_characters:
-            extraction_diagnostics["character_extraction"]["rejected_characters"] = _summarize_rejected_character_reports(
+            chapter_character_diagnostics["rejected_characters"] = _summarize_rejected_character_reports(
                 extraction_rejected_characters
             )
         if unresolved_relationships:
-            extraction_diagnostics["character_extraction"]["unresolved_relationships"] = unresolved_relationships[:20]
+            chapter_character_diagnostics["unresolved_relationships"] = unresolved_relationships[:20]
+        extraction_diagnostics["character_extraction"] = {
+            **chapter_character_diagnostics,
+            "totals": {
+                "saved_characters": int(previous_totals.get("saved_characters") or 0) + saved_character_count,
+                "quarantined_candidates": int(previous_totals.get("quarantined_candidates") or 0) + quarantined_candidate_count,
+                "rejected_entities": int(previous_totals.get("rejected_entities") or 0) + len(extraction_rejected_characters),
+                "relationships_persisted": int(previous_totals.get("relationships_persisted") or 0) + persisted_relationship_count,
+                "unresolved_relationships_count": int(previous_totals.get("unresolved_relationships_count") or 0) + len(unresolved_relationships),
+                "relationship_review_candidates": int(previous_totals.get("relationship_review_candidates") or 0) + relationship_review_candidate_count,
+            },
+        }
 
         if await is_book_hidden(db, book.id):
             await mark_book_processing_cancelled(
@@ -1053,19 +1303,12 @@ def _find_character_id_in_cache(
     blocked_ids: set[uuid.UUID] | None = None,
     key_cache: dict[uuid.UUID, set[str]] | None = None,
 ) -> uuid.UUID | None:
-    candidate_keys = character_name_keys(name, aliases or [])
-    if not candidate_keys:
-        return None
-
-    for char in chars:
-        if blocked_ids and char.id in blocked_ids:
-            continue
-        char_keys = _character_keys_for_cache(char, key_cache)
-        if candidate_keys & char_keys:
-            return char.id
-        if names_equivalent(name, aliases or [], char.name, char.aliases or []):
-            return char.id
-    return None
+    roster = [
+        (char.id, char.name, char.aliases or [])
+        for char in chars
+        if not blocked_ids or char.id not in blocked_ids
+    ]
+    return resolve_character_match_id(name, aliases or [], roster, blocked_ids=blocked_ids)
 
 
 def _find_character_ids_in_cache(
@@ -1075,21 +1318,12 @@ def _find_character_ids_in_cache(
     blocked_ids: set[uuid.UUID] | None = None,
     key_cache: dict[uuid.UUID, set[str]] | None = None,
 ) -> list[uuid.UUID]:
-    candidate_keys = character_name_keys(name, aliases or [])
-    if not candidate_keys:
-        return []
-
-    matches: list[uuid.UUID] = []
-    seen: set[uuid.UUID] = set()
-    for char in chars:
-        if blocked_ids and char.id in blocked_ids:
-            continue
-        char_keys = _character_keys_for_cache(char, key_cache)
-        if candidate_keys & char_keys or names_equivalent(name, aliases or [], char.name, char.aliases or []):
-            if char.id not in seen:
-                seen.add(char.id)
-                matches.append(char.id)
-    return matches
+    roster = [
+        (char.id, char.name, char.aliases or [])
+        for char in chars
+        if not blocked_ids or char.id not in blocked_ids
+    ]
+    return resolve_character_match_ids(name, aliases or [], roster, blocked_ids=blocked_ids)
 
 
 def _find_character_in_cache(

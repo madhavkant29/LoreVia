@@ -5,6 +5,7 @@ import type { Route } from "next"
 import Link from "next/link"
 
 import { RevisionIntelligencePanel } from "@/components/revision/RevisionIntelligencePanel"
+import { resolveAssetUrl } from "@/lib/utils/assetUrls"
 import { buildIssueDisplay } from "@/lib/utils/storyFeedback"
 import type { Book, GoalCalendarItem, PreWritingCheck, RevisionIntelligence, StoryHealth, WriterWorkspace } from "@/types/book"
 import type { ChapterListResponse } from "@/types/reader"
@@ -1291,7 +1292,7 @@ function EmptyTabState({ isDark, title, body }: { isDark: boolean; title: string
 
 function BookCover({ book, isDark }: { book: Book; isDark: boolean }) {
   const [failed, setFailed] = useState(false)
-  const src = !failed ? coverSrc(book.cover_url) : null
+  const src = !failed ? resolveAssetUrl(book.cover_url) : null
 
   if (!src) {
     return (
@@ -1334,19 +1335,6 @@ function clamp(value: number, min: number, max: number) {
 function formatNumber(value: number | null | undefined) {
   if (typeof value !== "number" || Number.isNaN(value)) return "Syncing"
   return value.toLocaleString()
-}
-
-function coverSrc(coverUrl: string | null | undefined) {
-  if (!coverUrl) return null
-  if (/^https?:\/\//i.test(coverUrl)) return coverUrl
-  try {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL
-    if (apiUrl) return new URL(coverUrl, apiUrl).toString()
-    if (typeof window !== "undefined") return new URL(coverUrl, window.location.origin).toString()
-    return coverUrl
-  } catch {
-    return coverUrl
-  }
 }
 
 function titleInitials(title: string) {

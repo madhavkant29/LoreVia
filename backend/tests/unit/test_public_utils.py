@@ -6,6 +6,7 @@ import pytest
 from fastapi import HTTPException, Request
 from sqlalchemy import UniqueConstraint
 
+from app.utils import public_utils as public_utils_module
 from app.utils.public_utils import (
     MAX_PUBLIC_FORUM_PAGE_SIZE,
     FORUM_THREAD_TYPE_GENERAL,
@@ -145,6 +146,26 @@ def test_reputation_trust_level_scales_from_low_to_high():
     assert reputation_trust_level(0) == "New member"
     assert reputation_trust_level(12) == "Trusted"
     assert reputation_trust_level(40) == "Highly trusted"
+
+
+@pytest.mark.asyncio
+async def test_invalidate_public_forum_cache_uses_version_marker(monkeypatch):
+    calls: list[tuple[str, str]] = []
+
+    async def _fake_set_version_marker(key):
+        calls.append(("version", key))
+        return 123456
+
+    async def _fake_cache_del(key):
+        calls.append(("delete", key))
+
+    monkeypatch.setattr("app.utils.public_utils.cache_set_version_marker", _fake_set_version_marker)
+    monkeypatch.setattr("app.utils.public_utils.cache_del", _fake_cache_del)
+
+    await public_utils_module._invalidate_public_forum_cache()
+
+    assert calls[0] == ("version", "public:forum:version")
+    assert calls[1] == ("delete", "public:books")
 
 
 def test_get_public_forum_status_rejects_invalid_settings(monkeypatch):

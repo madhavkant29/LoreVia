@@ -47,10 +47,10 @@ def _resolve_celery_redis_settings() -> tuple[str, dict, str | None, dict]:
     broker_url, broker_ssl_options = _normalize_celery_redis_url(broker_source)
 
     configured_backend = _coerce_optional_url(settings.CELERY_RESULT_BACKEND)
-    backend_source = broker_source if settings.CELERY_RESULT_BACKEND is None else configured_backend
-    if backend_source is None:
+    if configured_backend is None:
         return broker_url, broker_ssl_options, None, {}
 
+    backend_source = configured_backend
     backend_url, backend_ssl_options = _normalize_celery_redis_url(backend_source)
     return broker_url, broker_ssl_options, backend_url, backend_ssl_options
 

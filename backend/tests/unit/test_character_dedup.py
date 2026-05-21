@@ -67,6 +67,20 @@ def test_names_equivalent_matches_reversed_japanese_name_order():
     assert names_equivalent("Akira Kajou", [], "Kajou Akira", []) is True
 
 
+def test_resolve_character_match_ids_prefers_honorific_and_alias_variants():
+    from app.engine.character.deduplicator import resolve_character_match_ids
+
+    aikawa_id = uuid.uuid4()
+    houko_id = uuid.uuid4()
+    roster = [
+        (aikawa_id, "Aikawa Jun", ["Jun", "Aikawa"]),
+        (houko_id, "Yamiguchi Houko", ["Houko-chan"]),
+    ]
+
+    assert resolve_character_match_ids("Aikawa", [], roster) == [aikawa_id]
+    assert resolve_character_match_ids("Houko-chan", [], roster) == [houko_id]
+
+
 def test_description_similarity_prefers_related_text():
     related = description_similarity(
         "A quiet mentor who guides the main character through difficult choices.",

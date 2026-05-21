@@ -298,62 +298,6 @@ function growthChapter(event: NonNullable<Character["growth_events"]>[number]) {
   return event.chapter_number ?? event.chapter ?? null
 }
 
-function buildMergeSuggestions(chars: Character[]) {
-  const suggestions: MergeSuggestion[] = []
-
-  for (let index = 0; index < chars.length; index += 1) {
-    for (let inner = index + 1; inner < chars.length; inner += 1) {
-      const left = chars[index]
-      const right = chars[inner]
-      const leftName = normalizeText(left.name)
-      const rightName = normalizeText(right.name)
-      const leftAliases = (left.aliases ?? []).map((alias) => normalizeText(alias)).filter(Boolean)
-      const rightAliases = (right.aliases ?? []).map((alias) => normalizeText(alias)).filter(Boolean)
-      const reasons: string[] = []
-      let score = 0
-
-      if (leftName === rightName) {
-        reasons.push("Exact name match")
-        score += 0.48
-      }
-      if (leftAliases.includes(rightName) || rightAliases.includes(leftName)) {
-        reasons.push("Primary name appears in alias list")
-        score += 0.3
-      }
-      const sharedAliases = leftAliases.filter((alias) => rightAliases.includes(alias))
-      if (sharedAliases.length > 0) {
-        reasons.push("Shared aliases detected")
-        score += Math.min(0.22, sharedAliases.length * 0.08)
-      }
-      const leftTokens = new Set(leftName.split(/\s+/).filter(Boolean))
-      const rightTokens = new Set(rightName.split(/\s+/).filter(Boolean))
-      const sharedTokens = [...leftTokens].filter((token) => token.length > 3 && rightTokens.has(token))
-      if (sharedTokens.length > 0) {
-        reasons.push("Overlapping name tokens")
-        score += Math.min(0.16, sharedTokens.length * 0.06)
-      }
-      if (left.first_chapter === right.first_chapter) {
-        reasons.push("First seen in the same chapter")
-        score += 0.06
-      }
-
-      if (score < 0.34) continue
-
-      const primary = (left.mention_count ?? 0) >= (right.mention_count ?? 0) ? left : right
-      const secondary = primary.id === left.id ? right : left
-      suggestions.push({
-        key: `${primary.id}:${secondary.id}`,
-        primaryId: primary.id,
-        secondaryId: secondary.id,
-        confidence: Math.round(Math.min(0.96, score) * 100),
-        reasons,
-      })
-    }
-  }
-
-  return suggestions.sort((left, right) => right.confidence - left.confidence)
-}
-
 function qualityFlags(character: Character, mergeSuggestionIds: Set<string>, connections: ConnectedRelationship[]) {
   const flags: string[] = []
   const missingTraits = missingTraitLabels(character)

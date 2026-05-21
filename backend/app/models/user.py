@@ -39,6 +39,7 @@ class User(Base):
     reputation_likes_received: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     reputation_dislikes_received: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     messaging_permission: Mapped[str] = mapped_column(String, default="anyone", server_default="anyone")
+    token_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     books = relationship("Book", foreign_keys="Book.user_id", back_populates="user", cascade="all, delete-orphan")

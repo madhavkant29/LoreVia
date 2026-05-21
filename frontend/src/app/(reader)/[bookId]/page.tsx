@@ -16,6 +16,7 @@ import { asQueryKey, bookCacheKey, booksQuotesCacheKey, readerCacheKey } from "@
 import { useAuthStore } from "@/lib/stores/authStore"
 import { useBookModeStore } from "@/lib/stores/bookModeStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
+import { resolveAssetUrl } from "@/lib/utils/assetUrls"
 import { buildIssueDisplay } from "@/lib/utils/storyFeedback"
 import type { Book, BookNote, BookOverviewPayload, ChapterConsistencyReport, GoalCalendarItem, PreWritingCheck, RevisionIntelligence, SavedQuote, StoryHealth, WriterWorkspace } from "@/types/book"
 import type { Character } from "@/types/character"
@@ -71,19 +72,6 @@ function storyUnitTitle(workType?: Book["work_type"]) {
 
 function storyUnitPrefix(workType?: Book["work_type"]) {
   return workType === "screenplay" ? "Sc." : "Ch."
-}
-
-function coverSrc(coverUrl: string | null | undefined) {
-  if (!coverUrl) return null
-  if (/^https?:\/\//i.test(coverUrl)) return coverUrl
-  try {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL
-    if (apiUrl) return new URL(coverUrl, apiUrl).toString()
-    if (typeof window !== "undefined") return new URL(coverUrl, window.location.origin).toString()
-    return coverUrl
-  } catch {
-    return coverUrl
-  }
 }
 
 function formatEtaLabel(seconds?: number | null) {
@@ -1444,7 +1432,7 @@ function GoalCalendarCard({
 
 function BookCover({ book, isDark }: { book: Book; isDark: boolean }) {
   const [failed, setFailed] = useState(false)
-  const src = !failed ? coverSrc(book.cover_url) : null
+  const src = !failed ? resolveAssetUrl(book.cover_url) : null
 
   if (!src) {
     return (

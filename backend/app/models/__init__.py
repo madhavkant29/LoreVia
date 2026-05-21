@@ -30,6 +30,7 @@ from app.models.character import (
     CharacterState,
 )
 from app.models.intelligence import (
+    AdvisorJob,
     BookChunk,
     ChapterSummary,
     CharacterRelationship,

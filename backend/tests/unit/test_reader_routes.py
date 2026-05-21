@@ -41,6 +41,7 @@ class _FakeDB:
         self._scalar_values = list(scalar_values or [])
         self.added = []
         self.commits = 0
+        self.rollbacks = 0
         self.refreshed = []
 
     async def get(self, *_args, **_kwargs):
@@ -59,6 +60,9 @@ class _FakeDB:
 
     async def commit(self):
         self.commits += 1
+
+    async def rollback(self):
+        self.rollbacks += 1
 
     async def refresh(self, item):
         self.refreshed.append(item)
@@ -732,6 +736,8 @@ async def test_reader_crud_progress_and_recall_routes(monkeypatch):
 
     assert no_progress == {"recall": None}
     assert recall["recall"] == "Recall text"
+    assert db.rollbacks == 1
+    assert db.commits == 4
     assert progress_payload["chapters_read_count"] == 2
     assert updated == {"ok": True}
     assert marked["percent_complete"] == 100.0

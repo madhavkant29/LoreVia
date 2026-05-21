@@ -20,10 +20,8 @@ from app.core.config import is_local_mode, settings
 from app.core.database import get_db
 from app.core.redis import (
     begin_password_reset_cooldown,
-    bump_token_version,
     consume_email_verification_token,
     consume_password_reset_token,
-    get_token_version,
     refresh_session_active,
     revoke_refresh_session,
     store_email_verification_token,
@@ -70,7 +68,7 @@ from app.utils.auth_cookies import (
     get_auth_token,
     set_auth_cookies,
 )
-from app.utils.auth_utils import normalize_device_id, normalize_email, password_is_valid
+from app.utils.auth_utils import current_token_version, next_token_version, normalize_device_id, normalize_email, password_is_valid
 from app.utils.billing_utils import build_tier_presentation
 from app.utils.user_utils import (
     current_daily_word_count,
@@ -92,17 +90,17 @@ def _validate_password(password: str, email: str) -> None:
         )
 
 
-async def _mint_token_pair(user_id: str, user: User | None = None) -> tuple[UserOut | None, str, str]:
-    version = await get_token_version(user_id)
+async def _mint_token_pair(user: User) -> tuple[UserOut, str, str]:
+    user_id = str(user.id)
+    version = current_token_version(user)
     session_id = str(uuid.uuid4())
     await store_refresh_session(
         user_id,
         session_id,
         settings.JWT_REFRESH_EXPIRE_DAYS * 24 * 60 * 60,
     )
-    user_out = _build_user_out(user) if user else None
     return (
-        user_out,
+        _build_user_out(user),
         create_access_token(user_id, version),
         create_refresh_token(user_id, version, session_id),
     )
@@ -226,7 +224,7 @@ async def login(
     await _record_login_activity(db, user)
     await db.commit()
     await db.refresh(user)
-    user_out, access_token, refresh_token = await _mint_token_pair(str(user.id), user)
+    user_out, access_token, refresh_token = await _mint_token_pair(user)
     return _user_response_with_cookies(response, user_out, access_token, refresh_token)
 
 
@@ -315,7 +313,7 @@ async def oauth_supabase(
         await _record_login_activity(db, existing)
         await db.commit()
         await db.refresh(existing)
-        user_out, access_token, refresh_token = await _mint_token_pair(str(existing.id), existing)
+        user_out, access_token, refresh_token = await _mint_token_pair(existing)
         return _user_response_with_cookies(response, user_out, access_token, refresh_token)
     except HTTPException:
         raise
@@ -375,8 +373,8 @@ async def reset_password(
 
     _validate_password(body.password, user.email)
     user.password_hash = hash_password(body.password)
+    user.token_version = next_token_version(user)
     await db.commit()
-    await bump_token_version(str(user.id))
     return {"ok": True}
 
 
@@ -399,22 +397,21 @@ async def refresh(
     if claimed_version is None or not session_id:
         raise HTTPException(401, "Invalid refresh token")
 
-    current_version = await get_token_version(payload["sub"])
+    user = await db.get(User, uuid.UUID(payload["sub"]))
+    if not user:
+        raise HTTPException(401, "User not found")
+    current_version = current_token_version(user)
     if int(claimed_version) != current_version:
         raise HTTPException(401, "Refresh token expired")
     if not await refresh_session_active(payload["sub"], session_id):
         raise HTTPException(401, "Refresh token expired")
-
-    user = await db.get(User, uuid.UUID(payload["sub"]))
-    if not user:
-        raise HTTPException(401, "User not found")
     if not user.email_verified_at:
         raise HTTPException(403, "Please verify your email before signing in.")
     await revoke_refresh_session(payload["sub"], session_id)
     await _record_login_activity(db, user)
     await db.commit()
     await db.refresh(user)
-    user_out, access_token, refresh_token = await _mint_token_pair(str(user.id), user)
+    user_out, access_token, refresh_token = await _mint_token_pair(user)
     return _user_response_with_cookies(response, user_out, access_token, refresh_token)
 
 
@@ -445,7 +442,7 @@ async def verify_email(
     await _record_login_activity(db, user)
     await db.commit()
     await db.refresh(user)
-    user_out, access_token, refresh_token = await _mint_token_pair(str(user.id), user)
+    user_out, access_token, refresh_token = await _mint_token_pair(user)
     return _user_response_with_cookies(response, user_out, access_token, refresh_token)
 
 
@@ -469,8 +466,13 @@ async def resend_verification_email(
 
 
 @router.post("/logout")
-async def logout(response: Response, current_user: User = Depends(get_current_user)):
-    await bump_token_version(str(current_user.id))
+async def logout(
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    current_user.token_version = next_token_version(current_user)
+    await db.commit()
     clear_auth_cookies(response)
     return {"ok": True}
 

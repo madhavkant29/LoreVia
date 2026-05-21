@@ -1142,13 +1142,18 @@ async def memory_recall(
         ) not in {"resolved", "abandoned"}
     ][:3]
 
+    await db.rollback()
     recall_text = await generate_recall(
         title=book.title,
         last_chapter=last_chapter,
         recent_summary=recent_summary,
         active_characters=list(chars),
         open_threads=list(open_threads),
+        user_id=current_user.id,
+        book_id=book_id,
+        usage_db=db,
     )
+    await db.commit()
 
     await cache_set(cache_key, recall_text, settings.REDIS_TTL_RECALL)
     return {"recall": recall_text, "last_chapter": last_chapter}

@@ -29,6 +29,6 @@ def test_background_tasks_ignore_results_to_reduce_redis_pressure():
     assert process_beta_reads_task.ignore_result is True
 
 
-def test_advisor_tasks_keep_results_for_async_polling():
-    assert generate_advisor_reply_task.ignore_result is False
-    assert generate_series_advisor_reply_task.ignore_result is False
+def test_advisor_tasks_ignore_results_after_database_polling_migration():
+    assert generate_advisor_reply_task.ignore_result is True
+    assert generate_series_advisor_reply_task.ignore_result is True

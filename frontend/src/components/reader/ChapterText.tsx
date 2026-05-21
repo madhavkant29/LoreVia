@@ -6,6 +6,7 @@ import { resolveReaderFontStack } from "@/lib/utils/readerTypography"
 import { renderRichTextHtml } from "@/lib/utils/richText"
 import { PRIVATE_SHARE_COPY_NOTICE, preventProtectedManuscriptCopy } from "@/lib/utils/manuscriptCopyProtection"
 import type { ChapterCharacter, ChapterMedia, ReaderDisplayStyle } from "@/types/reader"
+import { resolveMediaAssetSrc } from "@/lib/utils/assetUrls"
 import type { PublishedBlockType } from "@/lib/utils/publishedLayout"
 import type { ReaderFontFamily } from "@/lib/utils/readerTypography"
 
@@ -487,9 +488,7 @@ function annotate(text: string, characters: ChapterCharacter[]): Segment[] {
 }
 
 function mediaSrc(item: ChapterMedia): string {
-  if (item.url) return item.url
-  if (item.content_base64 && item.content_type) return `data:${item.content_type};base64,${item.content_base64}`
-  return ""
+  return resolveMediaAssetSrc(item)
 }
 
 function countWords(text: string): number {

@@ -11,7 +11,7 @@ from sqlalchemy import Numeric, and_, case, cast, func, literal, literal_column,
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.redis import cache_del, cache_incr, key_public_books, key_public_forum_cache_version
+from app.core.redis import cache_del, cache_set_version_marker, key_public_books, key_public_forum_cache_version
 from app.models.beta_read import BetaReadAssignment
 from app.models.book import Book, BookForumComment, BookForumCommentReaction, BookForumInterest, BookForumPost, BookForumPostReaction, Chapter, PublicBookAnalyticsEvent
 from app.models.intelligence import Notification
@@ -648,7 +648,7 @@ async def enforce_daily_general_forum_post_limit(db: AsyncSession, *, user_id: u
 
 
 async def _invalidate_public_forum_cache() -> None:
-    await cache_incr(key_public_forum_cache_version(), default=1)
+    await cache_set_version_marker(key_public_forum_cache_version())
     await cache_del(key_public_books())
 
 

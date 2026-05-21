@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import json
+import time
 import weakref
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -83,6 +84,19 @@ async def cache_incr(key: str, default: int = 1) -> int:
         return int(await r.incr(key))
     await r.set(key, str(default))
     return default
+
+
+async def cache_set_version_marker(key: str) -> int:
+    r = await get_redis()
+    candidate = int(time.time() * 1000)
+    existing = await r.get(key)
+    if existing is not None:
+        try:
+            candidate = max(candidate, int(existing) + 1)
+        except ValueError:
+            pass
+    await r.set(key, str(candidate))
+    return candidate
 
 
 async def get_token_version(user_id: str) -> int:

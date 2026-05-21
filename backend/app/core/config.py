@@ -48,8 +48,11 @@ class Settings(BaseSettings):
 
     # Database
     DATABASE_URL: str
-    DATABASE_POOL_SIZE: int = 10
-    DATABASE_MAX_OVERFLOW: int = 20
+    # Keep defaults conservative so the API plus Celery worker processes stay
+    # under pooled Postgres session caps in production unless env vars
+    # intentionally raise them.
+    DATABASE_POOL_SIZE: int = 1
+    DATABASE_MAX_OVERFLOW: int = 0
     DATABASE_POOL_RECYCLE_SECONDS: int = 1800
     DATABASE_SQL_ECHO: bool = False
 

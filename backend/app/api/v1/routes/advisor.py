@@ -17,7 +17,6 @@ from typing import Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
-from celery.states import FAILURE, PENDING, RETRY, STARTED, SUCCESS
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
 from sqlalchemy import func, select
@@ -28,13 +27,19 @@ from app.api.deps.auth import get_current_user
 from app.api.deps.rate_limit import rate_limit_advisor, rate_limit_continuity_checker
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.redis import cache_del, cache_get, cache_set, key_advisor_task
 from app.core.storage import download_book
 from app.engine.embeddings.embedder import embed_text
 from app.engine.search.semantic import semantic_search
 from app.models.book import Book, Chapter, Series, SeriesBook
 from app.models.character import Character, CharacterState, CharacterVoiceProfile
-from app.models.intelligence import ChapterSummary, CharacterRelationship, PlotThread, WorldElement
+from app.models.intelligence import AdvisorJob, ChapterSummary, CharacterRelationship, PlotThread, WorldElement
+from app.services.advisor_jobs_service import (
+    ADVISOR_SCOPE_BOOK,
+    ADVISOR_SCOPE_SERIES,
+    create_advisor_job,
+    mark_advisor_job_failed,
+    serialize_advisor_job,
+)
 from app.utils.plot_thread_utils import derive_plot_thread_status, is_plot_thread_open
 from app.schemas.advisor import (
     AdvisorRequest,
@@ -121,8 +126,16 @@ def _best_issue_snippet(text: str, description: str) -> str:
     return ranked[0][:220]
 
 
+def _parse_advisor_job_id(task_id: str) -> uuid.UUID:
+    try:
+        return uuid.UUID(str(task_id))
+    except ValueError as exc:
+        raise HTTPException(404, detail="advisor task not found") from exc
+
+
 async def _enqueue_book_advisor_task(
     *,
+    db: AsyncSession,
     book: Book,
     body: AdvisorRequest,
     current_user_id: uuid.UUID,
@@ -139,25 +152,38 @@ async def _enqueue_book_advisor_task(
     if cached is not None:
         return {**cached, "cached": True}
 
-    task = generate_advisor_reply_task.apply_async(
-        kwargs={
-            "book_id": str(book.id),
-            "user_id": str(current_user_id),
-            "messages": [{"role": msg.role, "content": msg.content} for msg in body.messages],
-            "total_chapters": body.total_chapters,
-        }
+    job = await create_advisor_job(
+        db,
+        scope=ADVISOR_SCOPE_BOOK,
+        user_id=current_user_id,
+        book_id=book.id,
     )
-    await cache_set(
-        key_advisor_task(task.id),
-        {"scope": "book", "book_id": str(book.id), "user_id": str(current_user_id)},
-        3600,
-    )
+    try:
+        generate_advisor_reply_task.apply_async(
+            task_id=str(job.id),
+            kwargs={
+                "job_id": str(job.id),
+                "book_id": str(book.id),
+                "user_id": str(current_user_id),
+                "messages": [{"role": msg.role, "content": msg.content} for msg in body.messages],
+                "total_chapters": body.total_chapters,
+            },
+        )
+    except Exception as exc:
+        await mark_advisor_job_failed(
+            db,
+            job_id=job.id,
+            error_code="advisor_enqueue_failed",
+            error_detail=str(exc),
+        )
+        raise
     response.status_code = 202
-    return {"task_id": task.id, "status": "queued", "cached": False}
+    return {"task_id": str(job.id), "status": "queued", "cached": False}
 
 
 async def _enqueue_series_advisor_task(
     *,
+    db: AsyncSession,
     series: Series,
     body: AdvisorRequest,
     current_user_id: uuid.UUID,
@@ -174,20 +200,32 @@ async def _enqueue_series_advisor_task(
     if cached is not None:
         return {**cached, "cached": True}
 
-    task = generate_series_advisor_reply_task.apply_async(
-        kwargs={
-            "series_id": str(series.id),
-            "user_id": str(current_user_id),
-            "messages": [{"role": msg.role, "content": msg.content} for msg in body.messages],
-        }
+    job = await create_advisor_job(
+        db,
+        scope=ADVISOR_SCOPE_SERIES,
+        user_id=current_user_id,
+        series_id=series.id,
     )
-    await cache_set(
-        key_advisor_task(task.id),
-        {"scope": "series", "series_id": str(series.id), "user_id": str(current_user_id)},
-        3600,
-    )
+    try:
+        generate_series_advisor_reply_task.apply_async(
+            task_id=str(job.id),
+            kwargs={
+                "job_id": str(job.id),
+                "series_id": str(series.id),
+                "user_id": str(current_user_id),
+                "messages": [{"role": msg.role, "content": msg.content} for msg in body.messages],
+            },
+        )
+    except Exception as exc:
+        await mark_advisor_job_failed(
+            db,
+            job_id=job.id,
+            error_code="advisor_enqueue_failed",
+            error_detail=str(exc),
+        )
+        raise
     response.status_code = 202
-    return {"task_id": task.id, "status": "queued", "cached": False}
+    return {"task_id": str(job.id), "status": "queued", "cached": False}
 
 # ─── Main advisor conversation endpoint ──────────────────────────────────────
 
@@ -208,6 +246,7 @@ async def advisor_message(
         raise HTTPException(400, detail="messages list is empty")
 
     return await _enqueue_book_advisor_task(
+        db=db,
         book=book,
         body=body,
         current_user_id=current_user.id,
@@ -290,6 +329,7 @@ async def advisor_message_async(
         raise HTTPException(400, detail="messages list is empty")
 
     return await _enqueue_book_advisor_task(
+        db=db,
         book=book,
         body=body,
         current_user_id=current_user.id,
@@ -308,24 +348,12 @@ async def advisor_message_async_status(
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
 
-    task_meta = await cache_get(key_advisor_task(task_id))
-    if not isinstance(task_meta, dict):
+    job = await db.get(AdvisorJob, _parse_advisor_job_id(task_id))
+    if job is None:
         raise HTTPException(404, detail="advisor task not found")
-    if task_meta.get("book_id") != str(book.id) or task_meta.get("user_id") != str(current_user.id):
+    if job.user_id != current_user.id or job.scope != ADVISOR_SCOPE_BOOK or job.book_id != book.id:
         raise HTTPException(403, detail="advisor task does not belong to this book")
-
-    result = generate_advisor_reply_task.AsyncResult(task_id)
-    if result.state in {PENDING, RETRY}:
-        return {"task_id": task_id, "status": "queued", "result": None, "error": None}
-    if result.state == STARTED:
-        return {"task_id": task_id, "status": "running", "result": None, "error": None}
-    if result.state == SUCCESS:
-        await cache_del(key_advisor_task(task_id))
-        return {"task_id": task_id, "status": "complete", "result": result.result, "error": None}
-    if result.state == FAILURE:
-        await cache_del(key_advisor_task(task_id))
-        return {"task_id": task_id, "status": "failed", "result": None, "error": "advisor_generation_failed"}
-    return {"task_id": task_id, "status": "running", "result": None, "error": None}
+    return serialize_advisor_job(job)
 
 
 # ─── Proactive suggestions scan ──────────────────────────────────────────────
@@ -1567,6 +1595,7 @@ async def series_advisor_message(
         raise HTTPException(400, detail="messages list is empty")
 
     return await _enqueue_series_advisor_task(
+        db=db,
         series=series,
         body=body,
         current_user_id=current_user.id,
@@ -1585,24 +1614,12 @@ async def series_advisor_message_status(
     if not series or series.user_id != current_user.id:
         raise HTTPException(404)
 
-    task_meta = await cache_get(key_advisor_task(task_id))
-    if not isinstance(task_meta, dict):
+    job = await db.get(AdvisorJob, _parse_advisor_job_id(task_id))
+    if job is None:
         raise HTTPException(404, detail="advisor task not found")
-    if task_meta.get("scope") != "series" or task_meta.get("series_id") != str(series.id) or task_meta.get("user_id") != str(current_user.id):
+    if job.user_id != current_user.id or job.scope != ADVISOR_SCOPE_SERIES or job.series_id != series.id:
         raise HTTPException(403, detail="advisor task does not belong to this series")
-
-    result = generate_series_advisor_reply_task.AsyncResult(task_id)
-    if result.state in {PENDING, RETRY}:
-        return {"task_id": task_id, "status": "queued", "result": None, "error": None}
-    if result.state == STARTED:
-        return {"task_id": task_id, "status": "running", "result": None, "error": None}
-    if result.state == SUCCESS:
-        await cache_del(key_advisor_task(task_id))
-        return {"task_id": task_id, "status": "complete", "result": result.result, "error": None}
-    if result.state == FAILURE:
-        await cache_del(key_advisor_task(task_id))
-        return {"task_id": task_id, "status": "failed", "result": None, "error": "advisor_generation_failed"}
-    return {"task_id": task_id, "status": "running", "result": None, "error": None}
+    return serialize_advisor_job(job)
 
 
 class SeriesContinuityRequest(AdvisorRequest):

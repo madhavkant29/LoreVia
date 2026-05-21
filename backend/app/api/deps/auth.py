@@ -7,9 +7,10 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.redis import get_token_version, refresh_session_active
+from app.core.redis import refresh_session_active
 from app.core.security import create_access_token, decode_token
 from app.models.user import User
+from app.utils.auth_utils import current_token_version
 from app.utils.auth_cookies import (
     REFRESH_TOKEN_COOKIE_NAME,
     get_auth_token,
@@ -61,20 +62,21 @@ def _decode_refresh_payload(token: str | None) -> dict[str, Any] | None:
 
 async def _load_user_from_claims(user_id: str, claimed_version: int, db: AsyncSession) -> User:
     try:
-        current_version = await get_token_version(user_id)
+        user = await db.get(User, uuid.UUID(user_id))
     except Exception:
-        log.exception("redis_unavailable_during_auth", extra={"user_id": user_id})
+        log.exception("database_unavailable_during_auth", extra={"user_id": user_id})
         raise HTTPException(503, "Authentication service temporarily unavailable")
 
+    if not user:
+        raise HTTPException(401, "User not found")
+
+    current_version = current_token_version(user)
     if claimed_version != current_version:
         # Do NOT bump the version here — bumping on every mismatch causes the
         # stored version to drift away from valid tokens and can permanently
         # lock users out on retry.
         raise HTTPException(401, "Session expired. Please sign in again.")
 
-    user = await db.get(User, uuid.UUID(user_id))
-    if not user:
-        raise HTTPException(401, "User not found")
     set_request_user_id(user.id)
     return user
 

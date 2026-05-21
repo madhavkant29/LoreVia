@@ -887,7 +887,7 @@ async def serialize_chapter_media(db: AsyncSession, chapter_id: uuid.UUID) -> li
             try:
                 item["content_base64"] = base64.b64encode(download_book(row.storage_key)).decode("ascii")
             except Exception:
-                continue
+                item["content_base64"] = None
         items.append(item)
     return items
 
