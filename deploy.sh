@@ -3,7 +3,8 @@ set -Eeuo pipefail
 
 APP_DIR="${APP_DIR:-/opt/lorevia/current}"
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}"
-COMPOSE="docker compose -f ${COMPOSE_FILE}"
+COMPOSE_ENV_FILE="${COMPOSE_ENV_FILE:-./backend/.env}"
+COMPOSE="docker compose --env-file ${COMPOSE_ENV_FILE} -f ${COMPOSE_FILE}"
 BACKUP_DIR="${BACKUP_DIR:-/opt/lorevia/backups/supabase}"
 SYSTEMD_UNIT_SOURCE="${SYSTEMD_UNIT_SOURCE:-${APP_DIR}/ops/systemd/lorevia-compose.service}"
 SYSTEMD_UNIT_TARGET="${SYSTEMD_UNIT_TARGET:-/etc/systemd/system/lorevia-compose.service}"
@@ -56,6 +57,11 @@ fi
 
 if [[ ! -f "./backend/.env" ]]; then
   echo "Missing ./backend/.env"
+  exit 1
+fi
+
+if [[ ! -f "${COMPOSE_ENV_FILE}" ]]; then
+  echo "Missing Compose env file: ${COMPOSE_ENV_FILE}"
   exit 1
 fi
 

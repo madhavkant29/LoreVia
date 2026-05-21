@@ -31,9 +31,9 @@ services:
     env_file:
       - ./backend/.env
     environment:
-      REDIS_URL: ${REDIS_URL:?REDIS_URL must be set}
-      CELERY_BROKER_URL: ${CELERY_BROKER_URL:?CELERY_BROKER_URL must be set}
-      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND-}
+      REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379/0
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379/0
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379/0
     restart: unless-stopped
     depends_on:
       redis:
@@ -87,9 +87,9 @@ services:
     env_file:
       - ./backend/.env
     environment:
-      REDIS_URL: ${REDIS_URL:?REDIS_URL must be set}
-      CELERY_BROKER_URL: ${CELERY_BROKER_URL:?CELERY_BROKER_URL must be set}
-      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND-}
+      REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379/0
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379/0
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379/0
     command: celery -A app.workers.celery_app worker -n worker-extraction@%h -Q extraction,extraction_priority --loglevel=info -c 2
     restart: unless-stopped
     depends_on:
@@ -115,9 +115,9 @@ services:
     env_file:
       - ./backend/.env
     environment:
-      REDIS_URL: ${REDIS_URL:?REDIS_URL must be set}
-      CELERY_BROKER_URL: ${CELERY_BROKER_URL:?CELERY_BROKER_URL must be set}
-      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND-}
+      REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379/0
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379/0
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379/0
     command: celery -A app.workers.celery_app worker -n worker-analysis@%h -Q analysis,analysis_priority,embedding --loglevel=info -c 1
     restart: unless-stopped
     depends_on:
@@ -143,9 +143,9 @@ services:
     env_file:
       - ./backend/.env
     environment:
-      REDIS_URL: ${REDIS_URL:?REDIS_URL must be set}
-      CELERY_BROKER_URL: ${CELERY_BROKER_URL:?CELERY_BROKER_URL must be set}
-      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND-}
+      REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379/0
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379/0
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379/0
     command: celery -A app.workers.celery_app worker -n worker-intelligence@%h -Q intelligence --loglevel=info -c 1
     restart: unless-stopped
     depends_on:
@@ -171,9 +171,9 @@ services:
     env_file:
       - ./backend/.env
     environment:
-      REDIS_URL: ${REDIS_URL:?REDIS_URL must be set}
-      CELERY_BROKER_URL: ${CELERY_BROKER_URL:?CELERY_BROKER_URL must be set}
-      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND-}
+      REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379/0
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379/0
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379/0
     command: celery -A app.workers.celery_app beat --loglevel=info --schedule /tmp/celerybeat-schedule
     restart: unless-stopped
     depends_on:
@@ -205,9 +205,9 @@ services:
     env_file:
       - ./backend/.env
     environment:
-      REDIS_URL: ${REDIS_URL:?REDIS_URL must be set}
-      CELERY_BROKER_URL: ${CELERY_BROKER_URL:?CELERY_BROKER_URL must be set}
-      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND-}
+      REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379/0
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379/0
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379/0
     command: celery -A app.workers.celery_app flower --port=5555
     restart: unless-stopped
     depends_on:
