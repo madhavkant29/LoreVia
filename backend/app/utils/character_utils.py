@@ -9,6 +9,7 @@ import math
 import re
 import uuid
 from collections import Counter, defaultdict
+from collections.abc import Hashable, Mapping, Sequence
 from difflib import SequenceMatcher
 from typing import Any, cast
 
@@ -27,6 +28,7 @@ from app.engine.character.entity_filters import (
 )
 from app.engine.character.extractor import extract_characters_and_relationships
 from app.engine.character.profile_builder import (
+    build_character_profile,
     build_description,
     choose_richer_text,
     flat,
@@ -36,7 +38,13 @@ from app.engine.character.profile_builder import (
     merge_trait_states,
 )
 from app.models.book import Chapter
-from app.models.character import Character, CharacterState, CharacterVoiceProfile
+from app.models.character import (
+    Character,
+    CharacterCandidate,
+    CharacterDuplicateSuggestion,
+    CharacterState,
+    CharacterVoiceProfile,
+)
 from app.models.intelligence import (
     BookChunk,
     ChapterSummary,
@@ -47,6 +55,14 @@ from app.models.intelligence import (
 )
 
 BLEACH_EMPTY_TAGS: Any = frozenset()
+CHARACTER_CANDIDATE_PENDING = "pending"
+CHARACTER_CANDIDATE_ACCEPTED = "accepted"
+CHARACTER_CANDIDATE_REJECTED = "rejected"
+CHARACTER_CANDIDATE_PROMOTED = "promoted"
+CHARACTER_CANDIDATE_MERGED = "merged"
+CHARACTER_DUPLICATE_PENDING = "pending"
+CHARACTER_DUPLICATE_ACCEPTED = "accepted"
+CHARACTER_DUPLICATE_DISMISSED = "dismissed"
 
 # ─── Display filter ───────────────────────────────────────────────────────────
 
@@ -388,6 +404,7 @@ def serialize_reader_character(
     char: Character,
     *,
     trait_snapshot: dict[str, Any] | None = None,
+    relationship_summaries: list[str] | None = None,
 ) -> dict[str, Any]:
     resolved_traits = dict(cast(dict[str, Any], trait_snapshot or char.trait_state or {}))
     return {
@@ -396,12 +413,15 @@ def serialize_reader_character(
         "aliases": char.aliases or [],
         "role": char.role,
         "first_chapter": char.first_chapter,
+        "last_seen_chapter": char.last_seen_chapter,
+        "status": character_status(char),
         "description": compose_character_description(
             trait_state=resolved_traits,
             archetype=char.archetype,
             arc_summary=char.arc_summary,
             personality_tags=char.personality_tags or [],
             motivations=char.motivations or [],
+            relationship_summaries=relationship_summaries or [],
         ),
         "trait_state": resolved_traits,
         "personality_tags": char.personality_tags or [],
@@ -412,7 +432,421 @@ def serialize_reader_character(
         "mention_count": char.mention_count or 0,
         "is_manual": getattr(char, "is_manual", False),
         "analysis_metadata": build_character_analysis_payload(char),
+        "goal": char.goal,
+        "lie_they_believe": char.lie_they_believe,
+        "backstory_wound": char.backstory_wound,
+        "arc_type": char.arc_type,
+        "growth_events": char.growth_events or [],
+        "graph_visibility_override": get_graph_visibility_override(char),
+        "relationship_summaries": clean_string_list(relationship_summaries or []),
     }
+
+
+def build_character_roster_snapshot(characters: Sequence[Character]) -> list[dict[str, Any]]:
+    roster: list[dict[str, Any]] = []
+    for character in characters:
+        roster.append(
+            {
+                "id": str(character.id),
+                "name": character.name,
+                "aliases": clean_string_list(character.aliases or []),
+                "role": character.role,
+                "summary": clean_optional_text(
+                    compose_character_description(
+                        trait_state=character.trait_state or {},
+                        archetype=character.archetype,
+                        arc_summary=character.arc_summary,
+                        personality_tags=character.personality_tags or [],
+                        motivations=character.motivations or [],
+                    )
+                ),
+                "is_manual": bool(getattr(character, "is_manual", False)),
+            }
+        )
+    return roster
+
+
+def _character_candidate_identity_key(
+    *,
+    book_id: uuid.UUID,
+    chapter_number: int,
+    source_batch_key: str | None,
+    normalized_name: str,
+) -> tuple[str, int, str, str]:
+    return (str(book_id), chapter_number, str(source_batch_key or ""), normalized_name)
+
+
+def _clean_reason_codes(values: Sequence[object] | None) -> list[str]:
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for raw in values or []:
+        item = str(raw or "").strip()
+        key = item.casefold()
+        if not item or key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(item)
+    return cleaned
+
+
+def _clean_candidate_aliases(values: Sequence[object] | None, proposed_name: str) -> list[str]:
+    normalized_proposed = normalize_character_name(proposed_name)
+    aliases: list[str] = []
+    seen: set[str] = set()
+    for raw in values or []:
+        item = clean_optional_text(str(raw or ""))
+        if not item:
+            continue
+        normalized = normalize_character_name(item)
+        if not normalized or normalized == normalized_proposed or normalized in seen:
+            continue
+        seen.add(normalized)
+        aliases.append(item)
+    return aliases
+
+
+def _normalize_candidate_confidence(value: object | None) -> int:
+    try:
+        confidence = float(value or 0.0)
+    except (TypeError, ValueError):
+        confidence = 0.0
+    return max(0, min(100, int(round(confidence * 100 if confidence <= 1 else confidence))))
+
+
+def serialize_character_candidate(candidate: CharacterCandidate) -> dict[str, Any]:
+    return {
+        "id": str(candidate.id),
+        "book_id": str(candidate.book_id),
+        "chapter_number": int(candidate.chapter_number or 0),
+        "raw_name": candidate.raw_name,
+        "proposed_name": candidate.proposed_name,
+        "normalized_name": candidate.normalized_name,
+        "aliases": clean_string_list(candidate.aliases or []),
+        "matched_character_id": str(candidate.matched_character_id) if candidate.matched_character_id else None,
+        "status": candidate.status,
+        "confidence": int(candidate.confidence or 0),
+        "reason_codes": _clean_reason_codes(candidate.reason_codes or []),
+        "evidence": dict(candidate.evidence or {}),
+        "source_batch_key": candidate.source_batch_key,
+        "created_at": candidate.created_at,
+        "updated_at": candidate.updated_at,
+    }
+
+
+def serialize_character_duplicate_suggestion(
+    suggestion: CharacterDuplicateSuggestion,
+) -> dict[str, Any]:
+    return {
+        "id": str(suggestion.id),
+        "book_id": str(suggestion.book_id),
+        "primary_character_id": str(suggestion.primary_character_id),
+        "secondary_character_id": str(suggestion.secondary_character_id),
+        "confidence": int(suggestion.confidence or 0),
+        "reasons": _clean_reason_codes(suggestion.reasons or []),
+        "shared_evidence": dict(suggestion.shared_evidence or {}),
+        "status": suggestion.status,
+        "created_at": suggestion.created_at,
+        "updated_at": suggestion.updated_at,
+    }
+
+
+def build_character_review_payload(
+    candidates: Sequence[CharacterCandidate],
+    duplicate_suggestions: Sequence[CharacterDuplicateSuggestion],
+) -> dict[str, Any]:
+    serialized_candidates = [serialize_character_candidate(candidate) for candidate in candidates]
+    serialized_duplicates = [
+        serialize_character_duplicate_suggestion(suggestion)
+        for suggestion in duplicate_suggestions
+    ]
+    return {
+        "candidates": serialized_candidates,
+        "duplicate_suggestions": serialized_duplicates,
+        "counts": {
+            "pending_candidates": sum(
+                1 for item in candidates if str(item.status or "") == CHARACTER_CANDIDATE_PENDING
+            ),
+            "pending_duplicate_suggestions": sum(
+                1
+                for item in duplicate_suggestions
+                if str(item.status or "") == CHARACTER_DUPLICATE_PENDING
+            ),
+        },
+    }
+
+
+async def list_character_review_data(
+    db: AsyncSession,
+    *,
+    book_id: uuid.UUID,
+) -> dict[str, Any]:
+    candidates = (
+        await db.execute(
+            select(CharacterCandidate)
+            .where(
+                CharacterCandidate.book_id == book_id,
+                CharacterCandidate.status.in_(
+                    (
+                        CHARACTER_CANDIDATE_PENDING,
+                        CHARACTER_CANDIDATE_ACCEPTED,
+                        CHARACTER_CANDIDATE_PROMOTED,
+                    )
+                ),
+            )
+            .order_by(CharacterCandidate.chapter_number, CharacterCandidate.created_at)
+        )
+    ).scalars().all()
+    duplicate_suggestions = (
+        await db.execute(
+            select(CharacterDuplicateSuggestion)
+            .where(CharacterDuplicateSuggestion.book_id == book_id)
+            .order_by(CharacterDuplicateSuggestion.confidence.desc(), CharacterDuplicateSuggestion.created_at)
+        )
+    ).scalars().all()
+    return build_character_review_payload(candidates, duplicate_suggestions)
+
+
+async def record_character_candidate(
+    db: AsyncSession,
+    *,
+    book_id: uuid.UUID,
+    chapter_number: int,
+    raw_name: str,
+    proposed_name: str,
+    aliases: Sequence[object] | None = None,
+    matched_character_id: uuid.UUID | None = None,
+    status: str = CHARACTER_CANDIDATE_PENDING,
+    confidence: object | None = None,
+    reason_codes: Sequence[object] | None = None,
+    evidence: Mapping[str, Any] | None = None,
+    source_batch_key: str | None = None,
+) -> CharacterCandidate:
+    normalized_name = normalize_character_name(proposed_name)
+    stmt = select(CharacterCandidate).where(
+        CharacterCandidate.book_id == book_id,
+        CharacterCandidate.chapter_number == chapter_number,
+        CharacterCandidate.normalized_name == normalized_name,
+        CharacterCandidate.source_batch_key == source_batch_key,
+    )
+    existing = (await db.execute(stmt)).scalar_one_or_none()
+    candidate = existing or CharacterCandidate(
+        book_id=book_id,
+        chapter_number=chapter_number,
+        raw_name=raw_name,
+        proposed_name=proposed_name,
+        normalized_name=normalized_name,
+        source_batch_key=source_batch_key,
+    )
+    candidate.raw_name = clean_optional_text(raw_name) or raw_name
+    candidate.proposed_name = clean_optional_text(proposed_name) or proposed_name
+    candidate.normalized_name = normalized_name
+    candidate.aliases = _clean_candidate_aliases(aliases, candidate.proposed_name)
+    candidate.matched_character_id = matched_character_id
+    candidate.status = status
+    candidate.confidence = _normalize_candidate_confidence(confidence)
+    candidate.reason_codes = _clean_reason_codes(reason_codes)
+    merged_evidence = dict(candidate.evidence or {})
+    if evidence:
+        merged_evidence.update(dict(evidence))
+    candidate.evidence = merged_evidence
+    candidate.source_batch_key = source_batch_key
+    if existing is None:
+        db.add(candidate)
+    await db.flush()
+    return candidate
+
+
+async def mark_character_candidates_merged(
+    db: AsyncSession,
+    *,
+    book_id: uuid.UUID,
+    primary_character_id: uuid.UUID,
+    secondary_character_id: uuid.UUID,
+) -> None:
+    result = await db.execute(
+        select(CharacterCandidate).where(
+            CharacterCandidate.book_id == book_id,
+            CharacterCandidate.matched_character_id.in_((primary_character_id, secondary_character_id)),
+        )
+    )
+    candidates = result.scalars().all()
+    for candidate in candidates:
+        candidate.matched_character_id = primary_character_id
+        candidate.status = CHARACTER_CANDIDATE_MERGED
+
+
+def _candidate_entity_payload(candidate: CharacterCandidate) -> dict[str, Any]:
+    evidence = dict(candidate.evidence or {})
+    entity = evidence.get("entity") if isinstance(evidence.get("entity"), dict) else {}
+    payload = dict(entity)
+    payload["name"] = clean_optional_text(payload.get("name")) or candidate.proposed_name
+    payload["aliases"] = payload.get("aliases") if isinstance(payload.get("aliases"), list) else list(candidate.aliases or [])
+    payload["confidence"] = float(payload.get("confidence") or (candidate.confidence or 0) / 100)
+    payload["evidence"] = evidence
+    return payload
+
+
+async def promote_character_candidate(
+    db: AsyncSession,
+    *,
+    candidate: CharacterCandidate,
+) -> Character:
+    entity = _candidate_entity_payload(candidate)
+    character = Character(**build_character_profile(entity, candidate.book_id, int(candidate.chapter_number or 1)))
+    db.add(character)
+    await db.flush()
+    candidate.matched_character_id = character.id
+    candidate.status = CHARACTER_CANDIDATE_PROMOTED
+    return character
+
+
+async def attach_character_candidate(
+    db: AsyncSession,
+    *,
+    candidate: CharacterCandidate,
+    character: Character,
+) -> Character:
+    updated = merge_profile_fields(character, {
+        **_candidate_entity_payload(candidate),
+        "first_chapter": min(int(candidate.chapter_number or 1), int(character.first_chapter or 1)),
+        "last_seen_chapter": max(int(character.last_seen_chapter or character.first_chapter or 1), int(candidate.chapter_number or 1)),
+    })
+    for key, value in updated.items():
+        setattr(character, key, value)
+    candidate.matched_character_id = character.id
+    candidate.status = CHARACTER_CANDIDATE_ACCEPTED
+    return character
+
+
+def _normalize_merge_score_value(value: float) -> int:
+    return max(0, min(96, int(round(value * 100))))
+
+
+def score_duplicate_characters(left: Character, right: Character) -> dict[str, Any] | None:
+    if getattr(left, "is_manual", False) and getattr(right, "is_manual", False):
+        return None
+    left_name = normalize_character_name(left.name)
+    right_name = normalize_character_name(right.name)
+    if not left_name or not right_name:
+        return None
+    if has_conflicting_title_identity(left.name, right.name):
+        return None
+
+    left_aliases = [normalize_character_name(alias) for alias in (left.aliases or []) if normalize_character_name(alias)]
+    right_aliases = [normalize_character_name(alias) for alias in (right.aliases or []) if normalize_character_name(alias)]
+
+    reasons: list[str] = []
+    shared_tokens: list[str] = []
+    score = 0.0
+
+    if left_name == right_name:
+        reasons.append("Exact name match")
+        score += 0.48
+    if left_name in right_aliases or right_name in left_aliases:
+        reasons.append("Primary name appears in alias list")
+        score += 0.30
+
+    shared_aliases = [alias for alias in left_aliases if alias in right_aliases]
+    if shared_aliases:
+        reasons.append("Shared aliases detected")
+        score += min(0.22, len(shared_aliases) * 0.08)
+
+    left_tokens = {token for token in left_name.split() if token}
+    right_tokens = {token for token in right_name.split() if token}
+    shared_tokens = sorted(token for token in left_tokens & right_tokens if len(token) > 3)
+    if shared_tokens:
+        reasons.append("Overlapping name tokens")
+        score += min(0.16, len(shared_tokens) * 0.06)
+
+    if int(left.first_chapter or 0) == int(right.first_chapter or -1) and int(left.first_chapter or 0) > 0:
+        reasons.append("First seen in the same chapter")
+        score += 0.06
+
+    if name_similarity(left.name, right.name) >= 0.88:
+        reasons.append("High name similarity")
+        score += 0.10
+
+    if score < 0.34:
+        return None
+
+    primary = left if int(left.mention_count or 0) >= int(right.mention_count or 0) else right
+    secondary = right if primary.id == left.id else left
+    return {
+        "primary": primary,
+        "secondary": secondary,
+        "confidence": _normalize_merge_score_value(min(0.96, score)),
+        "reasons": reasons,
+        "shared_evidence": {
+            "shared_aliases": shared_aliases[:6],
+            "shared_tokens": shared_tokens[:6],
+            "first_chapter_pair": [int(left.first_chapter or 0), int(right.first_chapter or 0)],
+            "manual_anchor_present": bool(getattr(left, "is_manual", False) or getattr(right, "is_manual", False)),
+        },
+    }
+
+
+async def refresh_character_duplicate_suggestions(
+    db: AsyncSession,
+    *,
+    book_id: uuid.UUID,
+    characters: Sequence[Character] | None = None,
+) -> list[CharacterDuplicateSuggestion]:
+    if characters is None:
+        characters = (
+            await db.execute(
+                select(Character)
+                .where(Character.book_id == book_id)
+                .order_by(Character.first_chapter, Character.name)
+            )
+        ).scalars().all()
+
+    existing_suggestions = (
+        await db.execute(
+            select(CharacterDuplicateSuggestion).where(CharacterDuplicateSuggestion.book_id == book_id)
+        )
+    ).scalars().all()
+    existing_by_pair = {
+        (str(item.primary_character_id), str(item.secondary_character_id)): item
+        for item in existing_suggestions
+    }
+    active_pairs: set[tuple[str, str]] = set()
+
+    for index, left in enumerate(characters):
+        for right in characters[index + 1:]:
+            suggestion = score_duplicate_characters(left, right)
+            if suggestion is None:
+                continue
+            primary = cast(Character, suggestion["primary"])
+            secondary = cast(Character, suggestion["secondary"])
+            pair_key = (str(primary.id), str(secondary.id))
+            active_pairs.add(pair_key)
+            existing = existing_by_pair.get(pair_key)
+            if existing is None:
+                existing = CharacterDuplicateSuggestion(
+                    book_id=book_id,
+                    primary_character_id=primary.id,
+                    secondary_character_id=secondary.id,
+                )
+                db.add(existing)
+            if existing.status != CHARACTER_DUPLICATE_ACCEPTED:
+                existing.status = CHARACTER_DUPLICATE_PENDING
+            existing.confidence = int(suggestion["confidence"])
+            existing.reasons = _clean_reason_codes(cast(Sequence[object], suggestion["reasons"]))
+            existing.shared_evidence = dict(cast(dict[str, Any], suggestion["shared_evidence"]))
+
+    for pair_key, existing in existing_by_pair.items():
+        if pair_key in active_pairs or existing.status == CHARACTER_DUPLICATE_ACCEPTED:
+            continue
+        existing.status = CHARACTER_DUPLICATE_DISMISSED
+
+    await db.flush()
+    return (
+        await db.execute(
+            select(CharacterDuplicateSuggestion)
+            .where(CharacterDuplicateSuggestion.book_id == book_id)
+            .order_by(CharacterDuplicateSuggestion.confidence.desc(), CharacterDuplicateSuggestion.created_at)
+        )
+    ).scalars().all()
 
 
 # ─── Name / similarity helpers ───────────────────────────────────────────────
@@ -802,6 +1236,50 @@ async def find_earliest_character_mention_chapter(
         if any(_find_name_occurrences(text or "", candidate) > 0 for candidate in candidates):
             return int(chapter_number)
     return None
+
+
+async def find_earliest_character_mention_chapters(
+    db: AsyncSession,
+    *,
+    book_id: uuid.UUID,
+    candidates_by_key: Mapping[Hashable, Sequence[str]],
+    upto_chapter: int | None = None,
+) -> dict[Hashable, int]:
+    normalized_candidates: dict[Hashable, list[str]] = {}
+    filters: list[Any] = []
+
+    for key, raw_candidates in candidates_by_key.items():
+        candidates = merge_list_values([], list(raw_candidates))
+        if not candidates:
+            continue
+        normalized_candidates[key] = candidates
+        filters.extend(BookChunk.text.ilike(f"%{candidate}%") for candidate in candidates if candidate)
+
+    if not normalized_candidates or not filters:
+        return {}
+
+    query = (
+        select(Chapter.number, BookChunk.text)
+        .join(BookChunk, BookChunk.chapter_id == Chapter.id)
+        .where(Chapter.book_id == book_id, or_(*filters))
+        .order_by(Chapter.number.asc(), BookChunk.chunk_index.asc())
+    )
+    if upto_chapter is not None:
+        query = query.where(Chapter.number <= upto_chapter)
+
+    rows = (await db.execute(query)).all()
+    resolved: dict[Hashable, int] = {}
+    unresolved = set(normalized_candidates)
+    for chapter_number, text in rows:
+        if not unresolved:
+            break
+        chapter_text = text or ""
+        for key in list(unresolved):
+            if any(_find_name_occurrences(chapter_text, candidate) > 0 for candidate in normalized_candidates[key]):
+                resolved[key] = int(chapter_number)
+                unresolved.remove(key)
+
+    return resolved
 
 
 async def backfill_character_first_chapters_for_chapter_text(

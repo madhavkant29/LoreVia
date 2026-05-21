@@ -1,5 +1,3 @@
-import asyncio
-
 from app.workers.celery_app import celery_app
 from app.workers.consumers.extraction_consumer import _process_chapter, process_book
 from app.services.chapter_recovery_service import repair_chapter_payload_from_source
@@ -9,27 +7,15 @@ from app.utils.ingestion_utils import (
     is_retryable_processing_error,
     load_processing_chapter_payload,
 )
-
-
-def _run_coro(coro):
-    async def _wrapped():
-        from app.core.database import engine
-
-        await engine.dispose()
-        try:
-            return await coro
-        finally:
-            await engine.dispose()
-
-    return asyncio.run(_wrapped())
+from app.utils.worker_async_utils import run_worker_coro
 
 
 @celery_app.task(bind=True, name="extraction_tasks.process_book",
-                 queue="extraction", max_retries=3)
+                 queue="extraction", max_retries=3, ignore_result=True)
 def process_book_task(self, book_id: str):
     try:
         queue_wait_ms = extract_queue_wait_ms(getattr(self.request, "headers", None))
-        return _run_coro(process_book(book_id, queue_wait_ms=queue_wait_ms))
+        return run_worker_coro(process_book(book_id, queue_wait_ms=queue_wait_ms))
     except Exception as exc:
         if not is_retryable_processing_error(exc):
             raise
@@ -37,7 +23,7 @@ def process_book_task(self, book_id: str):
 
 
 @celery_app.task(bind=True, name="extraction_tasks.process_chapter",
-                 queue="extraction", max_retries=3)
+                 queue="extraction", max_retries=3, ignore_result=True)
 def process_chapter_task(self, book_id: str, chapter_num: int):
     async def _run():
         import uuid
@@ -77,7 +63,7 @@ def process_chapter_task(self, book_id: str, chapter_num: int):
                 queue_wait_ms=queue_wait_ms,
             )
     try:
-        _run_coro(_run())
+        run_worker_coro(_run())
     except Exception as exc:
         if not is_retryable_processing_error(exc):
             raise
@@ -85,7 +71,7 @@ def process_chapter_task(self, book_id: str, chapter_num: int):
 
 
 @celery_app.task(bind=True, name="extraction_tasks.repair_chapter_payload",
-                 queue="extraction", max_retries=3)
+                 queue="extraction", max_retries=3, ignore_result=True)
 def repair_chapter_payload_task(self, book_id: str, chapter_num: int):
     async def _run():
         import uuid
@@ -110,7 +96,7 @@ def repair_chapter_payload_task(self, book_id: str, chapter_num: int):
                 return
             await repair_chapter_payload_from_source(db, book=book, chapter=chapter)
     try:
-        _run_coro(_run())
+        run_worker_coro(_run())
     except Exception as exc:
         if not is_retryable_processing_error(exc):
             raise

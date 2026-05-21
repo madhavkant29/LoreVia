@@ -69,3 +69,45 @@ class RelationshipOut(BaseModel):
     description: str | None
     from_chapter: int
     to_chapter: int | None
+
+
+class CharacterCandidateOut(BaseModel):
+    id: uuid.UUID
+    book_id: uuid.UUID
+    chapter_number: int
+    raw_name: str
+    proposed_name: str
+    normalized_name: str
+    aliases: list[str] = Field(default_factory=list)
+    matched_character_id: uuid.UUID | None = None
+    status: str
+    confidence: int
+    reason_codes: list[str] = Field(default_factory=list)
+    evidence: dict = Field(default_factory=dict)
+    source_batch_key: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class CharacterDuplicateSuggestionOut(BaseModel):
+    id: uuid.UUID
+    book_id: uuid.UUID
+    primary_character_id: uuid.UUID
+    secondary_character_id: uuid.UUID
+    confidence: int
+    reasons: list[str] = Field(default_factory=list)
+    shared_evidence: dict = Field(default_factory=dict)
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class CharacterReviewCountsOut(BaseModel):
+    pending_candidates: int = 0
+    pending_duplicate_suggestions: int = 0
+
+
+class CharacterReviewOut(BaseModel):
+    candidates: list[CharacterCandidateOut] = Field(default_factory=list)
+    duplicate_suggestions: list[CharacterDuplicateSuggestionOut] = Field(default_factory=list)
+    counts: CharacterReviewCountsOut = Field(default_factory=CharacterReviewCountsOut)

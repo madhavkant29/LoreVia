@@ -5,15 +5,21 @@ services:
     env_file: ./backend/.env.local
     environment:
       NORMALIZE_LOCAL_STORAGE_PERMISSIONS: "1"
+      REDIS_URL: redis://:${REDIS_PASSWORD:-local-dev-redis-password}@redis:6379/0
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-local-dev-redis-password}@redis:6379/0
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-local-dev-redis-password}@redis:6379/0
     depends_on:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
       migrate:
         condition: service_completed_successfully
     volumes:
       - local_storage:/app/storage
+    networks:
+      - default
+      - redis_internal
 
   worker-extraction:
     build: { context: ., dockerfile: backend/Dockerfile.worker }
@@ -21,15 +27,21 @@ services:
     env_file: ./backend/.env.local
     environment:
       NORMALIZE_LOCAL_STORAGE_PERMISSIONS: "1"
+      REDIS_URL: redis://:${REDIS_PASSWORD:-local-dev-redis-password}@redis:6379/0
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-local-dev-redis-password}@redis:6379/0
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-local-dev-redis-password}@redis:6379/0
     depends_on:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
       migrate:
         condition: service_completed_successfully
     volumes:
       - local_storage:/app/storage
+    networks:
+      - default
+      - redis_internal
 
   worker-analysis:
     build: { context: ., dockerfile: backend/Dockerfile.worker }
@@ -37,15 +49,21 @@ services:
     env_file: ./backend/.env.local
     environment:
       NORMALIZE_LOCAL_STORAGE_PERMISSIONS: "1"
+      REDIS_URL: redis://:${REDIS_PASSWORD:-local-dev-redis-password}@redis:6379/0
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-local-dev-redis-password}@redis:6379/0
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-local-dev-redis-password}@redis:6379/0
     depends_on:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
       migrate:
         condition: service_completed_successfully
     volumes:
       - local_storage:/app/storage
+    networks:
+      - default
+      - redis_internal
 
   worker-intelligence:
     build: { context: ., dockerfile: backend/Dockerfile.worker }
@@ -53,25 +71,35 @@ services:
     env_file: ./backend/.env.local
     environment:
       NORMALIZE_LOCAL_STORAGE_PERMISSIONS: "1"
+      REDIS_URL: redis://:${REDIS_PASSWORD:-local-dev-redis-password}@redis:6379/0
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-local-dev-redis-password}@redis:6379/0
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-local-dev-redis-password}@redis:6379/0
     depends_on:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
       migrate:
         condition: service_completed_successfully
     volumes:
       - local_storage:/app/storage
+    networks:
+      - default
+      - redis_internal
 
   migrate:
     build: { context: ., dockerfile: backend/Dockerfile.api }
     env_file: ./backend/.env.local
     environment:
       ALEMBIC_ALLOW_DESTRUCTIVE_UPGRADES: "1"
+      REDIS_URL: redis://:${REDIS_PASSWORD:-local-dev-redis-password}@redis:6379/0
     depends_on:
       postgres:
         condition: service_healthy
     command: python scripts/bootstrap_db.py
+    networks:
+      - default
+      - redis_internal
 
   postgres:
     image: pgvector/pgvector:pg16
@@ -90,7 +118,25 @@ services:
 
   redis:
     image: redis:7-alpine
-    ports: ["6379:6379"]
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-local-dev-redis-password}
+    command:
+      [
+        "sh",
+        "-c",
+        "exec redis-server --appendonly yes --appendfsync everysec --requirepass \"$${REDIS_PASSWORD}\"",
+      ]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD}\" ping | grep -q PONG || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    volumes:
+      - redis_data:/data
+    networks:
+      - redis_internal
 
   flower:
     build: { context: ., dockerfile: backend/Dockerfile.worker }
@@ -98,17 +144,28 @@ services:
     env_file: ./backend/.env.local
     environment:
       NORMALIZE_LOCAL_STORAGE_PERMISSIONS: "1"
+      REDIS_URL: redis://:${REDIS_PASSWORD:-local-dev-redis-password}@redis:6379/0
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-local-dev-redis-password}@redis:6379/0
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-local-dev-redis-password}@redis:6379/0
     depends_on:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
       migrate:
         condition: service_completed_successfully
     ports: ["5555:5555"]
     volumes:
       - local_storage:/app/storage
+    networks:
+      - default
+      - redis_internal
 
 volumes:
   postgres_data:
   local_storage:
+  redis_data:
+
+networks:
+  redis_internal:
+    internal: true

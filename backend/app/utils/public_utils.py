@@ -5,18 +5,20 @@ import re
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy import Numeric, and_, case, cast, func, literal, literal_column, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.redis import cache_del, cache_incr, key_public_books, key_public_forum_cache_version
 from app.models.beta_read import BetaReadAssignment
-from app.models.book import Book, BookForumComment, BookForumCommentReaction, BookForumInterest, BookForumPost, Chapter
+from app.models.book import Book, BookForumComment, BookForumCommentReaction, BookForumInterest, BookForumPost, BookForumPostReaction, Chapter, PublicBookAnalyticsEvent
 from app.models.intelligence import Notification
 from app.models.moderation import ContentReport, CreatorStrike, ModerationAction
 from app.models.user import User
 from app.schemas.public import (
+    PublicAuthorAnalyticsOut,
     PublicForumCommentCreateBody,
     PublicForumCommentOut,
     PublicForumInterestCreateBody,
@@ -26,8 +28,12 @@ from app.schemas.public import (
     PublicForumPostOut,
     PublicForumPostUpdateBody,
     PublicForumRatingSummaryOut,
+    PublicUploadsBreakdownEntryOut,
+    PublicUploadsOverviewOut,
     PublicUserActivityCommentOut,
     PublicUserActivityPostOut,
+    PublicBookAnalyticsOut,
+    PublicBookOut,
     PublicUserProfileOut,
     PublicUserProjectOut,
 )
@@ -141,6 +147,12 @@ SERIOUS_STRIKE_SEVERITIES = {STRIKE_SEVERITY_HIGH, STRIKE_SEVERITY_CRITICAL}
 PUBLIC_PUBLISH_LIMIT_NEW_USER = 1
 PUBLIC_PUBLISH_LIMIT_STANDARD = 3
 PUBLIC_SLUG_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+PUBLIC_ANALYTICS_EVENT_BOOK_VIEW = "book_view"
+PUBLIC_ANALYTICS_EVENT_CHAPTER_VIEW = "chapter_view"
+VALID_PUBLIC_ANALYTICS_EVENT_TYPES = {
+    PUBLIC_ANALYTICS_EVENT_BOOK_VIEW,
+    PUBLIC_ANALYTICS_EVENT_CHAPTER_VIEW,
+}
 
 
 def is_admin_user(user: User | None) -> bool:
@@ -160,6 +172,23 @@ def hash_text(value: str | None) -> str | None:
     if not normalized:
         return None
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def build_public_visitor_fingerprint(request: Request | None) -> str | None:
+    if request is None:
+        return None
+    forwarded_for = str(request.headers.get("x-forwarded-for") or "").split(",", 1)[0].strip()
+    client_host = forwarded_for or (request.client.host if request.client is not None else "")
+    user_agent = " ".join(str(request.headers.get("user-agent") or "").split()).strip().lower()
+    fingerprint_source = "|".join(part for part in (client_host, user_agent) if part)
+    return hash_text(fingerprint_source)
+
+
+def normalize_public_analytics_event_type(event_type: str) -> str:
+    normalized = str(event_type or "").strip().lower()
+    if normalized not in VALID_PUBLIC_ANALYTICS_EVENT_TYPES:
+        raise HTTPException(400, "Invalid public analytics event type.")
+    return normalized
 
 
 def resolve_optional_user(user: User | None) -> User | None:
@@ -368,6 +397,47 @@ def is_approved_user_public_share_book(book: Book | None) -> bool:
         bool(getattr(book, "is_public", False))
         and str(getattr(book, "source_kind", "") or "").strip().lower() == USER_PUBLIC_SHARE_SOURCE_KIND
         and get_public_share_status(book) == PUBLIC_SHARE_STATUS_APPROVED
+    )
+
+
+def is_visible_creator_public_book(book: Book | None) -> bool:
+    return can_view_public_book(book) and is_approved_user_public_share_book(book)
+
+
+def build_public_book_out(
+    book: Book,
+    *,
+    author_username: str | None,
+    active_forum_post_id: str | None = None,
+    analytics: PublicBookAnalyticsOut | None = None,
+) -> PublicBookOut:
+    creator_display_name = author_username or (book.author.strip() if isinstance(book.author, str) and book.author.strip() else None)
+    return PublicBookOut(
+        id=str(book.id),
+        public_kind=PUBLIC_DEMO_SOURCE_KIND if is_public_demo_book(book) else USER_PUBLIC_SHARE_SOURCE_KIND,
+        public_slug=getattr(book, "public_slug", None),
+        title=book.title,
+        author=book.author,
+        author_username=author_username,
+        creator_display_name=creator_display_name,
+        genre=book.genre,
+        description=book.public_description,
+        format=book.format,
+        work_type=book.work_type,
+        status=book.status,
+        public_status=getattr(book, "public_status", PUBLIC_STATUS_PUBLISHED),
+        moderation_status=getattr(book, "moderation_status", MODERATION_STATUS_CLEAN),
+        content_source_type=getattr(book, "content_source_type", CONTENT_SOURCE_TYPE_USER_ORIGINAL),
+        source_title=getattr(book, "source_title", None),
+        source_author=getattr(book, "source_author", None),
+        source_public_domain_note=getattr(book, "source_public_domain_note", None),
+        source_url=getattr(book, "source_url", None),
+        total_chapters=book.total_chapters,
+        copyright_warning=bool(book.copyright_warning),
+        active_forum_post_id=active_forum_post_id,
+        analytics=analytics,
+        created_at=book.created_at,
+        published_at=getattr(book, "published_at", None),
     )
 
 
@@ -713,6 +783,19 @@ def _public_forum_interest_state_subquery(user_id: uuid.UUID | None):
     )
 
 
+def _public_forum_post_reaction_state_subquery(user_id: uuid.UUID | None):
+    if user_id is None:
+        return None
+    return (
+        select(
+            BookForumPostReaction.post_id.label("post_id"),
+            BookForumPostReaction.reaction.label("viewer_reaction"),
+        )
+        .where(BookForumPostReaction.user_id == user_id)
+        .subquery()
+    )
+
+
 def _public_forum_discoverability_expression(rating_subquery, interest_subquery):
     average_rating = func.coalesce(rating_subquery.c.average_rating, 0.0)
     rating_count = func.coalesce(rating_subquery.c.rating_count, 0)
@@ -739,6 +822,7 @@ def _public_forum_post_select_statement(
     comment_subquery = _public_forum_comment_count_subquery()
     interest_subquery = _public_forum_interest_count_subquery()
     viewer_interest_subquery = _public_forum_interest_state_subquery(viewer_user_id)
+    viewer_post_reaction_subquery = _public_forum_post_reaction_state_subquery(viewer_user_id)
     discoverability_score = _public_forum_discoverability_expression(rating_subquery, interest_subquery).label(
         "discoverability_score"
     )
@@ -759,6 +843,11 @@ def _public_forum_post_select_statement(
                 if viewer_interest_subquery is not None
                 else literal(None)
             ).label("viewer_interest_status"),
+            (
+                viewer_post_reaction_subquery.c.viewer_reaction
+                if viewer_post_reaction_subquery is not None
+                else literal(None)
+            ).label("viewer_reaction"),
             discoverability_score,
         )
         .outerjoin(Book, Book.id == BookForumPost.book_id)
@@ -769,6 +858,8 @@ def _public_forum_post_select_statement(
     )
     if viewer_interest_subquery is not None:
         statement = statement.outerjoin(viewer_interest_subquery, viewer_interest_subquery.c.post_id == BookForumPost.id)
+    if viewer_post_reaction_subquery is not None:
+        statement = statement.outerjoin(viewer_post_reaction_subquery, viewer_post_reaction_subquery.c.post_id == BookForumPost.id)
 
     statement = statement.where(*_public_forum_visibility_filters())
     search_clause = _public_forum_search_clause(q)
@@ -803,6 +894,7 @@ def _author_forum_post_select_statement(
             func.coalesce(rating_subquery.c.neutral_rating_count, 0).label("neutral_rating_count"),
             func.coalesce(rating_subquery.c.negative_rating_count, 0).label("negative_rating_count"),
             literal(None).label("viewer_interest_status"),
+            literal(None).label("viewer_reaction"),
             discoverability_score,
         )
         .outerjoin(Book, Book.id == BookForumPost.book_id)
@@ -854,6 +946,7 @@ async def list_author_public_forum_posts(
             interest_count=int(interest_count or 0),
             comment_count=int(comment_count or 0),
             viewer_interest_status=viewer_interest_status,
+            viewer_reaction=viewer_reaction,
             discoverability_score=float(discoverability_score or 0.0),
         )
         for (
@@ -868,6 +961,7 @@ async def list_author_public_forum_posts(
             neutral_rating_count,
             negative_rating_count,
             viewer_interest_status,
+            viewer_reaction,
             discoverability_score,
         ) in rows
     ]
@@ -891,6 +985,358 @@ async def _comment_reaction_map(
         )
     ).all()
     return {comment_id: reaction for comment_id, reaction in rows}
+
+
+async def _book_word_counts(db: AsyncSession, *, book_ids: list[uuid.UUID]) -> dict[uuid.UUID, int]:
+    if not book_ids:
+        return {}
+    rows = (
+        await db.execute(
+            select(Chapter.book_id, func.coalesce(func.sum(Chapter.word_count), 0))
+            .where(Chapter.book_id.in_(book_ids))
+            .group_by(Chapter.book_id)
+        )
+    ).all()
+    return {book_id: int(total_words or 0) for book_id, total_words in rows}
+
+
+async def _creator_public_book_forum_stats_map(
+    db: AsyncSession,
+    *,
+    book_ids: list[uuid.UUID],
+) -> dict[uuid.UUID, dict[str, int | bool | str | None]]:
+    if not book_ids:
+        return {}
+
+    comment_subquery = (
+        select(
+            BookForumComment.post_id.label("post_id"),
+            func.count(BookForumComment.id).label("comment_count"),
+            func.coalesce(func.sum(BookForumComment.like_count), 0).label("like_count"),
+            func.coalesce(func.sum(BookForumComment.dislike_count), 0).label("dislike_count"),
+        )
+        .group_by(BookForumComment.post_id)
+        .subquery()
+    )
+    interest_subquery = (
+        select(
+            BookForumInterest.post_id.label("post_id"),
+            func.count(BookForumInterest.id).label("interest_count"),
+        )
+        .group_by(BookForumInterest.post_id)
+        .subquery()
+    )
+
+    rows = (
+        await db.execute(
+            select(
+                BookForumPost.book_id,
+                BookForumPost.id,
+                BookForumPost.status,
+                func.coalesce(comment_subquery.c.comment_count, 0),
+                func.coalesce(interest_subquery.c.interest_count, 0),
+            )
+            .outerjoin(comment_subquery, comment_subquery.c.post_id == BookForumPost.id)
+            .outerjoin(interest_subquery, interest_subquery.c.post_id == BookForumPost.id)
+            .where(
+                BookForumPost.book_id.in_(book_ids),
+                BookForumPost.thread_type == FORUM_THREAD_TYPE_NOVEL,
+            )
+            .order_by(BookForumPost.updated_at.desc(), BookForumPost.created_at.desc())
+        )
+    ).all()
+
+    mapping: dict[uuid.UUID, dict[str, int | bool | str | None]] = {}
+    for book_id, post_id, status, comment_count, interest_count in rows:
+        existing = mapping.setdefault(
+            book_id,
+            {
+                "active_forum_post_id": None,
+                "open_discussion_count": 0,
+                "discussion_comment_count": 0,
+                "discussion_interest_count": 0,
+                "has_open_discussion": False,
+            },
+        )
+        if str(status or "").strip().lower() == FORUM_POST_OPEN:
+            existing["open_discussion_count"] = int(existing["open_discussion_count"] or 0) + 1
+            existing["has_open_discussion"] = True
+            if existing["active_forum_post_id"] is None:
+                existing["active_forum_post_id"] = str(post_id)
+        existing["discussion_comment_count"] = int(existing["discussion_comment_count"] or 0) + int(comment_count or 0)
+        existing["discussion_interest_count"] = int(existing["discussion_interest_count"] or 0) + int(interest_count or 0)
+    return mapping
+
+
+async def list_visible_creator_public_books(
+    db: AsyncSession,
+    *,
+    user_id: uuid.UUID | None = None,
+) -> list[tuple[Book, str | None]]:
+    statement = (
+        select(Book, User.username)
+        .join(User, User.id == Book.user_id)
+        .where(
+            Book.is_public.is_(True),
+            Book.hidden_at.is_(None),
+            Book.archived_at.is_(None),
+            Book.status.in_(["ready", "processing", "pending"]),
+        )
+        .order_by(Book.created_at.desc())
+    )
+    if user_id is not None:
+        statement = statement.where(Book.user_id == user_id)
+    rows = (await db.execute(statement)).all()
+    return [(book, username) for book, username in rows if is_visible_creator_public_book(book)]
+
+
+async def list_visible_creator_public_book_outs(
+    db: AsyncSession,
+    *,
+    user_id: uuid.UUID | None = None,
+) -> list[PublicBookOut]:
+    rows = await list_visible_creator_public_books(db, user_id=user_id)
+    book_ids = [book.id for book, _username in rows]
+    forum_stats = await _creator_public_book_forum_stats_map(db, book_ids=book_ids)
+    analytics_map = await build_public_book_analytics_map(db, book_ids=book_ids)
+    return [
+        build_public_book_out(
+            book,
+            author_username=username,
+            active_forum_post_id=forum_stats.get(book.id, {}).get("active_forum_post_id"),
+            analytics=analytics_map.get(book.id),
+        )
+        for book, username in rows
+    ]
+
+
+async def build_public_book_analytics_map(
+    db: AsyncSession,
+    *,
+    book_ids: list[uuid.UUID],
+) -> dict[uuid.UUID, PublicBookAnalyticsOut]:
+    if not book_ids:
+        return {}
+
+    base_map = {
+        book_id: PublicBookAnalyticsOut()
+        for book_id in book_ids
+    }
+    counts = (
+        await db.execute(
+            select(
+                PublicBookAnalyticsEvent.book_id,
+                func.sum(
+                    case(
+                        (PublicBookAnalyticsEvent.event_type == PUBLIC_ANALYTICS_EVENT_BOOK_VIEW, 1),
+                        else_=0,
+                    )
+                ).label("book_view_count"),
+                func.sum(
+                    case(
+                        (PublicBookAnalyticsEvent.event_type == PUBLIC_ANALYTICS_EVENT_CHAPTER_VIEW, 1),
+                        else_=0,
+                    )
+                ).label("chapter_view_count"),
+            )
+            .where(PublicBookAnalyticsEvent.book_id.in_(book_ids))
+            .group_by(PublicBookAnalyticsEvent.book_id)
+        )
+    ).all()
+    for book_id, book_view_count, chapter_view_count in counts:
+        payload = base_map.setdefault(book_id, PublicBookAnalyticsOut())
+        payload.book_view_count = int(book_view_count or 0)
+        payload.chapter_view_count = int(chapter_view_count or 0)
+
+    unique_since = datetime.now(UTC).date() - timedelta(days=29)
+    unique_counts = (
+        await db.execute(
+            select(
+                PublicBookAnalyticsEvent.book_id,
+                func.count(func.distinct(PublicBookAnalyticsEvent.visitor_fingerprint_hash)).label("unique_reader_count_30d"),
+            )
+            .where(
+                PublicBookAnalyticsEvent.book_id.in_(book_ids),
+                PublicBookAnalyticsEvent.event_date >= unique_since,
+            )
+            .group_by(PublicBookAnalyticsEvent.book_id)
+        )
+    ).all()
+    for book_id, unique_reader_count in unique_counts:
+        payload = base_map.setdefault(book_id, PublicBookAnalyticsOut())
+        payload.unique_reader_count_30d = int(unique_reader_count or 0)
+
+    return base_map
+
+
+async def build_public_book_analytics(
+    db: AsyncSession,
+    *,
+    book: Book,
+) -> PublicBookAnalyticsOut:
+    analytics_map = await build_public_book_analytics_map(db, book_ids=[book.id])
+    word_counts = await _book_word_counts(db, book_ids=[book.id])
+    forum_stats = await _creator_public_book_forum_stats_map(db, book_ids=[book.id])
+    book_forum_stats = forum_stats.get(book.id, {})
+    base = analytics_map.get(book.id, PublicBookAnalyticsOut())
+    return PublicBookAnalyticsOut(
+        book_view_count=base.book_view_count,
+        unique_reader_count_30d=base.unique_reader_count_30d,
+        chapter_view_count=base.chapter_view_count,
+        published_at=getattr(book, "published_at", None),
+        chapter_count=int(book.total_chapters or 0),
+        total_words=word_counts.get(book.id, 0),
+        has_open_discussion=bool(book_forum_stats.get("has_open_discussion", False)),
+        open_discussion_count=int(book_forum_stats.get("open_discussion_count", 0) or 0),
+        discussion_comment_count=int(book_forum_stats.get("discussion_comment_count", 0) or 0),
+        discussion_interest_count=int(book_forum_stats.get("discussion_interest_count", 0) or 0),
+    )
+
+
+async def build_public_author_analytics(
+    db: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+) -> tuple[list[PublicBookOut], PublicAuthorAnalyticsOut]:
+    rows = await list_visible_creator_public_books(db, user_id=user_id)
+    book_ids = [book.id for book, _username in rows]
+    forum_stats = await _creator_public_book_forum_stats_map(db, book_ids=book_ids)
+    word_counts = await _book_word_counts(db, book_ids=book_ids)
+    analytics_map = await build_public_book_analytics_map(db, book_ids=book_ids)
+    unique_since = datetime.now(UTC).date() - timedelta(days=29)
+    public_books = [
+        build_public_book_out(
+            book,
+            author_username=username,
+            active_forum_post_id=forum_stats.get(book.id, {}).get("active_forum_post_id"),
+            analytics=analytics_map.get(book.id),
+        )
+        for book, username in rows
+    ]
+    latest_published_at = max(
+        (getattr(book, "published_at", None) for book, _username in rows if getattr(book, "published_at", None) is not None),
+        default=None,
+    )
+    total_unique_readers_30d = 0
+    if book_ids:
+        total_unique_readers_30d = int(
+            (
+                await db.execute(
+                    select(func.count(func.distinct(PublicBookAnalyticsEvent.visitor_fingerprint_hash))).where(
+                        PublicBookAnalyticsEvent.book_id.in_(book_ids),
+                        PublicBookAnalyticsEvent.event_date >= unique_since,
+                    )
+                )
+            ).scalar_one()
+            or 0
+        )
+    analytics = PublicAuthorAnalyticsOut(
+        total_book_views=sum(int(analytics_map.get(book.id, PublicBookAnalyticsOut()).book_view_count or 0) for book, _username in rows),
+        total_unique_readers_30d=total_unique_readers_30d,
+        total_chapter_views=sum(int(analytics_map.get(book.id, PublicBookAnalyticsOut()).chapter_view_count or 0) for book, _username in rows),
+        total_public_books=len(rows),
+        total_chapters=sum(int(book.total_chapters or 0) for book, _username in rows),
+        total_words=sum(word_counts.get(book.id, 0) for book, _username in rows),
+        latest_published_at=latest_published_at,
+        open_forum_discussions_count=sum(int(forum_stats.get(book.id, {}).get("open_discussion_count", 0) or 0) for book, _username in rows),
+    )
+    return public_books, analytics
+
+
+async def record_public_book_analytics_event(
+    db: AsyncSession,
+    *,
+    book: Book,
+    request: Request,
+    event_type: str,
+    chapter_number: int | None = None,
+) -> bool:
+    if not can_view_public_book(book):
+        raise HTTPException(404, "Public book not found")
+    normalized_event_type = normalize_public_analytics_event_type(event_type)
+    if normalized_event_type == PUBLIC_ANALYTICS_EVENT_CHAPTER_VIEW:
+        if chapter_number is None:
+            raise HTTPException(400, "Chapter number is required for chapter analytics events.")
+        chapter_exists = (
+            await db.execute(
+                select(Chapter.id).where(
+                    Chapter.book_id == book.id,
+                    Chapter.number == chapter_number,
+                )
+            )
+        ).scalar_one_or_none()
+        if chapter_exists is None:
+            raise HTTPException(404, "Chapter not found")
+    else:
+        chapter_number = 0
+
+    visitor_fingerprint_hash = build_public_visitor_fingerprint(request)
+    if not visitor_fingerprint_hash:
+        return False
+
+    inserted_event_id = (
+        await db.execute(
+            pg_insert(PublicBookAnalyticsEvent)
+            .values(
+                id=uuid.uuid4(),
+                book_id=book.id,
+                chapter_number=chapter_number,
+                event_type=normalized_event_type,
+                visitor_fingerprint_hash=visitor_fingerprint_hash,
+                event_date=datetime.now(UTC).date(),
+            )
+            .on_conflict_do_nothing(
+                constraint="uq_public_book_analytics_events_daily_fingerprint",
+            )
+            .returning(PublicBookAnalyticsEvent.id)
+        )
+    ).scalar_one_or_none()
+    return inserted_event_id is not None
+
+
+async def build_public_uploads_overview(db: AsyncSession) -> PublicUploadsOverviewOut:
+    rows = await list_visible_creator_public_books(db)
+    public_books = []
+    book_ids = [book.id for book, _username in rows]
+    forum_stats = await _creator_public_book_forum_stats_map(db, book_ids=book_ids)
+    word_counts = await _book_word_counts(db, book_ids=book_ids)
+    now = datetime.now(UTC)
+    genre_counts: dict[str, int] = {}
+    work_type_counts: dict[str, int] = {}
+
+    for book, username in rows:
+        public_books.append(
+            build_public_book_out(
+                book,
+                author_username=username,
+                active_forum_post_id=forum_stats.get(book.id, {}).get("active_forum_post_id"),
+            )
+        )
+        genre_label = (book.genre or "Unspecified").strip() or "Unspecified"
+        work_type_label = (book.work_type or "other").strip() or "other"
+        genre_counts[genre_label] = genre_counts.get(genre_label, 0) + 1
+        work_type_counts[work_type_label] = work_type_counts.get(work_type_label, 0) + 1
+
+    return PublicUploadsOverviewOut(
+        total_public_books=len(rows),
+        total_authors=len({str(book.user_id) for book, _username in rows}),
+        total_visible_chapters=sum(int(book.total_chapters or 0) for book, _username in rows),
+        total_visible_words=sum(word_counts.get(book.id, 0) for book, _username in rows),
+        uploads_last_30_days=sum(
+            1
+            for book, _username in rows
+            if getattr(book, "published_at", None) is not None and getattr(book, "published_at") >= (now - timedelta(days=30))
+        ),
+        genre_breakdown=[
+            PublicUploadsBreakdownEntryOut(key=label.lower().replace(" ", "-"), label=label, count=count)
+            for label, count in sorted(genre_counts.items(), key=lambda item: (-item[1], item[0].lower()))
+        ],
+        work_type_breakdown=[
+            PublicUploadsBreakdownEntryOut(key=label.lower().replace(" ", "-"), label=label, count=count)
+            for label, count in sorted(work_type_counts.items(), key=lambda item: (-item[1], item[0].lower()))
+        ],
+        recent_uploads=public_books[:8],
+    )
 
 
 async def _project_progress_words(db: AsyncSession, *, book_id: uuid.UUID) -> int:
@@ -1092,6 +1538,7 @@ async def build_public_user_profile_out(
     user: User,
 ) -> PublicUserProfileOut:
     forum_post_count, forum_comment_count, _public_book_count = await public_profile_activity_counts(db, user_id=user.id)
+    public_books, public_analytics = await build_public_author_analytics(db, user_id=user.id)
     posts = await list_public_user_activity_posts(db, user_id=user.id)
     comments = await list_public_user_activity_comments(db, user_id=user.id)
     return PublicUserProfileOut(
@@ -1104,6 +1551,9 @@ async def build_public_user_profile_out(
         forum_post_count=forum_post_count,
         forum_comment_count=forum_comment_count,
         current_project=await _build_public_user_project_out(db, user_id=user.id),
+        public_books_count=len(public_books),
+        public_books=public_books,
+        public_analytics=public_analytics,
         posts=posts,
         comments=comments,
         created_at=user.created_at,
@@ -1119,6 +1569,7 @@ def build_public_forum_post_out(
     interest_count: int = 0,
     comment_count: int = 0,
     viewer_interest_status: str | None = None,
+    viewer_reaction: str | None = None,
     discoverability_score: float | None = None,
 ) -> PublicForumPostOut:
     thread_type = _forum_post_thread_type(post)
@@ -1150,8 +1601,11 @@ def build_public_forum_post_out(
         allow_contact_requests=bool(post.allow_contact_requests) if thread_type == FORUM_THREAD_TYPE_NOVEL else False,
         status=post.status,
         viewer_interest_status=viewer_interest_status if thread_type == FORUM_THREAD_TYPE_NOVEL else None,
+        reaction=viewer_reaction,
         interest_count=interest_count if thread_type == FORUM_THREAD_TYPE_NOVEL else 0,
         comment_count=comment_count,
+        like_count=int(post.like_count or 0),
+        dislike_count=int(post.dislike_count or 0),
         rating_summary=rating_payload if thread_type == FORUM_THREAD_TYPE_NOVEL else PublicForumRatingSummaryOut(),
         discoverability_score=float(resolved_discoverability_score),
         created_at=post.created_at,
@@ -1322,6 +1776,7 @@ async def list_public_forum_posts(
             interest_count=int(interest_count or 0),
             comment_count=int(comment_count or 0),
             viewer_interest_status=viewer_interest_status,
+            viewer_reaction=viewer_reaction,
             discoverability_score=float(discoverability_score or 0.0),
         )
         for (
@@ -1336,6 +1791,7 @@ async def list_public_forum_posts(
             neutral_rating_count,
             negative_rating_count,
             viewer_interest_status,
+            viewer_reaction,
             discoverability_score,
         ) in rows
     ]
@@ -1387,6 +1843,7 @@ async def get_public_forum_post_detail(
         neutral_rating_count,
         negative_rating_count,
         viewer_interest_status,
+        viewer_reaction,
         discoverability_score,
     ) = row
     return build_public_forum_post_out(
@@ -1403,6 +1860,7 @@ async def get_public_forum_post_detail(
         interest_count=int(interest_count or 0),
         comment_count=int(comment_count or 0),
         viewer_interest_status=viewer_interest_status,
+        viewer_reaction=viewer_reaction,
         discoverability_score=float(discoverability_score or 0.0),
     )
 
@@ -1701,6 +2159,62 @@ async def react_to_public_forum_comment(
         current_user=current_user,
         reaction_map=reaction_map,
     )
+
+
+async def react_to_public_forum_post(
+    db: AsyncSession,
+    *,
+    post_id: uuid.UUID,
+    current_user: User,
+    reaction: str,
+) -> PublicForumPostOut:
+    normalized_reaction = _normalize_forum_comment_reaction(reaction)
+    post, _book = await _get_visible_forum_post(db, post_id=post_id)
+    if post.author_user_id == current_user.id:
+        raise HTTPException(409, "You cannot react to your own forum post.")
+    author_user = await db.get(User, post.author_user_id)
+    if author_user is None:
+        raise HTTPException(404, "Forum post author not found.")
+
+    existing = (
+        await db.execute(
+            select(BookForumPostReaction).where(
+                BookForumPostReaction.post_id == post.id,
+                BookForumPostReaction.user_id == current_user.id,
+            )
+        )
+    ).scalar_one_or_none()
+    previous_reaction = existing.reaction if existing is not None else None
+    next_reaction = None if normalized_reaction == FORUM_COMMENT_REACTION_CLEAR else normalized_reaction
+    if previous_reaction == next_reaction:
+        return await get_public_forum_post_detail(db, post_id=post.id, current_user=current_user)
+
+    like_delta, dislike_delta, reputation_delta = _reaction_delta(previous_reaction, next_reaction)
+    post.like_count = max(int(post.like_count or 0) + like_delta, 0)
+    post.dislike_count = max(int(post.dislike_count or 0) + dislike_delta, 0)
+    author_user.reputation_likes_received = max(int(author_user.reputation_likes_received or 0) + like_delta, 0)
+    author_user.reputation_dislikes_received = max(int(author_user.reputation_dislikes_received or 0) + dislike_delta, 0)
+    author_user.reputation_score = int(author_user.reputation_score or 0) + reputation_delta
+
+    if next_reaction is None:
+        if existing is not None:
+            await db.delete(existing)
+    elif existing is None:
+        db.add(
+            BookForumPostReaction(
+                post_id=post.id,
+                user_id=current_user.id,
+                reaction=next_reaction,
+            )
+        )
+    else:
+        existing.reaction = next_reaction
+
+    await db.commit()
+    await db.refresh(post)
+    await db.refresh(author_user)
+    await _invalidate_public_forum_cache()
+    return await get_public_forum_post_detail(db, post_id=post.id, current_user=current_user)
 
 
 async def get_public_user_profile(

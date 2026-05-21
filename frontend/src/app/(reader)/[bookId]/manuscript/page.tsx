@@ -5,12 +5,11 @@ import type { Route } from "next"
 import axios from "axios"
 import { useQuery } from "@tanstack/react-query"
 import { Suspense, useEffect, useMemo, useRef, useState } from "react"
+import dynamic from "next/dynamic"
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 
-import { WhatsTheWordPanel } from "@/components/intelligence/WhatsTheWordPanel"
 import { EditorToolbar, RichTextEditor } from "@/components/editor/SharedRichTextEditor"
-import { ManuscriptPagedPreview } from "@/components/reader/ManuscriptPagedPreview"
 import { booksApi } from "@/lib/api/books"
 import { intelligenceApi } from "@/lib/api/intelligence"
 import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
@@ -44,6 +43,20 @@ import type { Book, BookNote, ChapterVersion, ChapterVersionDetail, CorkboardCar
 import type { Character } from "@/types/character"
 import type { AdvisorSuggestion, EditorialReview, EditorialReviewPassage, InlineContinuityResponse, ManuscriptSynopsis } from "@/types/intelligence"
 import type { ChapterListResponse, PlotThread, SearchResult } from "@/types/reader"
+
+const WhatsTheWordPanel = dynamic(
+  () => import("@/components/intelligence/WhatsTheWordPanel").then((module) => module.WhatsTheWordPanel),
+  {
+    loading: () => <DeferredPanelLoadingState label="Loading word finder..." />,
+  }
+)
+
+const ManuscriptPagedPreview = dynamic(
+  () => import("@/components/reader/ManuscriptPagedPreview").then((module) => module.ManuscriptPagedPreview),
+  {
+    loading: () => <DeferredPanelLoadingState label="Preparing preview..." />,
+  }
+)
 
 type EditorMode = "chapter" | "book"
 type DraftSurfaceMode = "edit" | "paged"
@@ -238,6 +251,19 @@ function ManuscriptPageInner() {
   const [newCorkboardTitle, setNewCorkboardTitle] = useState("")
   const [selectionMenu, setSelectionMenu] = useState<{ text: string; top: number; left: number } | null>(null)
 
+  useEffect(() => {
+    if (loading || manuscriptReadyCapturedRef.current) return
+    manuscriptReadyCapturedRef.current = true
+    capture("author_manuscript_ready", {
+      book_id: bookId,
+      optional_panels_deferred: true,
+      duration_ms:
+        typeof performance !== "undefined" && manuscriptLoadStartedAtRef.current !== null
+          ? Math.round(performance.now() - manuscriptLoadStartedAtRef.current)
+          : null,
+    })
+  }, [bookId, loading])
+
   const chapterRefs = useRef<Record<number, HTMLDivElement | null>>({})
   const searchInputRef = useRef<HTMLInputElement | null>(null)
   const manuscriptSectionRef = useRef<HTMLDivElement | null>(null)
@@ -246,6 +272,8 @@ function ManuscriptPageInner() {
   const annotationRangesRef = useRef<Map<string, Range>>(new Map())
   const pendingAnnotationJumpIdRef = useRef<string | null>(null)
   const selectionMenuAnchorRef = useRef<ManuscriptSelectionAnchor | null>(null)
+  const manuscriptReadyCapturedRef = useRef(false)
+  const manuscriptLoadStartedAtRef = useRef<number | null>(typeof performance !== "undefined" ? performance.now() : null)
 
   const { data: charactersData = EMPTY_CHARACTERS } = useQuery<Character[]>({
     queryKey: [`manuscript:${bookId}:characters`],
@@ -4550,6 +4578,15 @@ function ManuscriptPageInner() {
                   <span>Automatic manuscript word count: <strong>{fullBookWordCount.toLocaleString()}</strong></span>
                   <span>Preset: <strong>{writerWorkspace.publishing.active_preset}</strong></span>
                 </div>
+                <div className={`mt-4 rounded-[1rem] border px-4 py-3 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+                  <p>
+                    <span className="font-semibold">Author name</span> is the full or legal name you want on submission materials.
+                    <span className="font-semibold"> Pen name</span> is the public byline for this manuscript and export package.
+                  </p>
+                  <p className={`mt-2 text-xs leading-5 ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+                    These manuscript names are separate from your LoreVia account username.
+                  </p>
+                </div>
                 <label className={`mt-4 flex items-start gap-3 rounded-[1rem] border px-4 py-3 text-sm ${isDark ? "border-white/10 bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
                   <input
                     type="checkbox"
@@ -4708,6 +4745,14 @@ function MetricCard({
       <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{label}</p>
       <p className={`mt-3 text-2xl font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{value}</p>
       <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>{note}</p>
+    </div>
+  )
+}
+
+function DeferredPanelLoadingState({ label }: { label: string }) {
+  return (
+    <div className="flex min-h-[12rem] items-center justify-center rounded-[1.2rem] border border-border bg-card/60 p-6 text-sm text-muted-foreground">
+      {label}
     </div>
   )
 }

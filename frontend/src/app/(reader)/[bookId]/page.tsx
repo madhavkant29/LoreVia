@@ -1,25 +1,32 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { startTransition, useEffect, useMemo, useRef, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
+import dynamic from "next/dynamic"
 import type { Route } from "next"
 import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
 
 import { AuthorToolsNav } from "@/components/layout/AuthorToolsNav"
 import { ReaderOverview } from "@/components/reader/ReaderOverview"
-import { RevisionIntelligencePanel } from "@/components/revision/RevisionIntelligencePanel"
+import { capture } from "@/lib/analytics/posthog"
 import { booksApi } from "@/lib/api/books"
-import { readerApi } from "@/lib/api/reader"
 import { canUseAuthorFeatures } from "@/lib/billing/plans"
 import { asQueryKey, bookCacheKey, booksQuotesCacheKey, readerCacheKey } from "@/lib/query/cacheKeys"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { useBookModeStore } from "@/lib/stores/bookModeStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { buildIssueDisplay } from "@/lib/utils/storyFeedback"
-import type { Book, BookNote, ChapterConsistencyReport, GoalCalendarItem, PreWritingCheck, RevisionIntelligence, SavedQuote, StoryHealth, WriterWorkspace } from "@/types/book"
+import type { Book, BookNote, BookOverviewPayload, ChapterConsistencyReport, GoalCalendarItem, PreWritingCheck, RevisionIntelligence, SavedQuote, StoryHealth, WriterWorkspace } from "@/types/book"
 import type { Character } from "@/types/character"
 import type { ChapterListResponse, ReadingProgress, SummaryCollectionResponse } from "@/types/reader"
+
+const AuthorWorkspaceDashboard = dynamic(
+  () => import("@/components/reader/AuthorWorkspaceDashboard").then((module) => module.AuthorWorkspaceDashboard),
+  {
+    loading: () => <WorkspacePanelLoadingState />,
+  }
+)
 
 type IconName =
   | "analysis"
@@ -236,6 +243,7 @@ function formatQuotaLabel(value: number | null | undefined, unit: string | null 
 export default function BookOverviewPage() {
   const { bookId } = useParams<{ bookId: string }>()
   const [bookmark, setBookmark] = useState<ReaderBookmarkSnapshot | null>(null)
+  const [secondaryDataEnabled, setSecondaryDataEnabled] = useState(false)
   const [workspaceSaveState, setWorkspaceSaveState] = useState<WorkspaceSaveState>("idle")
   const [workspaceSaveMessage, setWorkspaceSaveMessage] = useState<string | null>(null)
   const [modeSaving, setModeSaving] = useState(false)
@@ -249,78 +257,82 @@ export default function BookOverviewPage() {
   const userTier = useAuthStore((state) => state.user?.tier)
   const isDark = theme === "dark"
   const overviewScrollKey = `reader-overview-scroll:${bookId}`
+  const overviewQueryKey = asQueryKey(bookCacheKey(bookId, "overview"))
   const bookQueryKey = asQueryKey(bookCacheKey(bookId, "detail"))
   const writerWorkspaceQueryKey = asQueryKey(bookCacheKey(bookId, "writer-workspace"))
+  const overviewLoadStartedAt = useRef<number | null>(typeof performance !== "undefined" ? performance.now() : null)
+  const overviewReadyCaptured = useRef(false)
 
-  const bookQuery = useQuery({
-    queryKey: bookQueryKey,
-    queryFn: () => booksApi.get(bookId),
+  const overviewQuery = useQuery({
+    queryKey: overviewQueryKey,
+    queryFn: async () => {
+      const payload = await booksApi.getOverview(bookId)
+      queryClient.setQueryData(bookQueryKey, payload.book)
+      queryClient.setQueryData(asQueryKey(readerCacheKey(bookId, "progress")), payload.progress)
+      queryClient.setQueryData(asQueryKey(readerCacheKey(bookId, "chapters")), payload.chapter_list)
+      queryClient.setQueryData(asQueryKey(readerCacheKey(bookId, "summary-collection")), payload.summary_collection)
+      return payload
+    },
     staleTime: 20_000,
     refetchInterval: (query) => {
-      const currentBook = query.state.data as Book | undefined
+      const currentBook = (query.state.data as BookOverviewPayload | undefined)?.book
       return currentBook && currentBook.status !== "ready" ? 3_000 : false
     },
   })
-  const progressQuery = useQuery({
-    queryKey: asQueryKey(readerCacheKey(bookId, "progress")),
-    queryFn: () => readerApi.getProgress(bookId),
-    staleTime: 12_000,
-  })
-  const chapterListQuery = useQuery({
-    queryKey: asQueryKey(readerCacheKey(bookId, "chapters")),
-    queryFn: () => readerApi.getChapterList(bookId),
-    staleTime: 30_000,
-  })
-  const summaryCollectionQuery = useQuery({
-    queryKey: asQueryKey(readerCacheKey(bookId, "summary-collection")),
-    queryFn: () => readerApi.getSummaryCollection(bookId),
-    staleTime: 45_000,
-  })
+  const resolvedBookMode = overviewQuery.data?.book.mode ?? bookMode
   const bookNotesQuery = useQuery({
     queryKey: asQueryKey(bookCacheKey(bookId, "notes")),
     queryFn: () => booksApi.getBookNotes(bookId),
     staleTime: 20_000,
+    enabled: secondaryDataEnabled && resolvedBookMode === "reader",
   })
   const savedQuotesQuery = useQuery({
     queryKey: asQueryKey(booksQuotesCacheKey()),
     queryFn: () => booksApi.listQuotes(),
     staleTime: 45_000,
+    enabled: secondaryDataEnabled && resolvedBookMode === "reader",
   })
   const charactersQuery = useQuery({
     queryKey: asQueryKey(bookCacheKey(bookId, "characters")),
     queryFn: () => booksApi.getCharacters(bookId),
     staleTime: 45_000,
+    enabled: secondaryDataEnabled && resolvedBookMode === "author",
   })
   const chapterReportsQuery = useQuery({
     queryKey: asQueryKey(bookCacheKey(bookId, "chapter-reports:6")),
     queryFn: () => booksApi.getChapterReports(bookId, 6),
     staleTime: 30_000,
+    enabled: secondaryDataEnabled && resolvedBookMode === "author",
   })
   const preWritingCheckQuery = useQuery({
     queryKey: asQueryKey(bookCacheKey(bookId, "pre-writing:auto")),
     queryFn: () => booksApi.getPreWritingCheck(bookId),
     staleTime: 30_000,
+    enabled: secondaryDataEnabled && resolvedBookMode === "author",
   })
   const storyHealthQuery = useQuery({
     queryKey: asQueryKey(bookCacheKey(bookId, "story-health")),
     queryFn: () => booksApi.getStoryHealth(bookId),
     staleTime: 30_000,
+    enabled: secondaryDataEnabled && resolvedBookMode === "author",
   })
   const writerWorkspaceQuery = useQuery({
     queryKey: writerWorkspaceQueryKey,
     queryFn: () => booksApi.getWriterWorkspace(bookId),
     staleTime: 10_000,
+    enabled: secondaryDataEnabled && resolvedBookMode === "author",
   })
   const revisionIntelligenceQuery = useQuery({
     queryKey: asQueryKey(bookCacheKey(bookId, "revision-intelligence")),
     queryFn: () => booksApi.getRevisionIntelligence(bookId),
     staleTime: 20_000,
+    enabled: secondaryDataEnabled && resolvedBookMode === "author",
   })
 
-  const book = bookQuery.data ?? null
-  const progress = progressQuery.data ?? null
-  const chapterList = chapterListQuery.data ?? null
-  const summaryCollection = summaryCollectionQuery.data ?? null
+  const book = overviewQuery.data?.book ?? null
+  const progress = overviewQuery.data?.progress ?? null
+  const chapterList = overviewQuery.data?.chapter_list ?? null
+  const summaryCollection = overviewQuery.data?.summary_collection ?? null
   const bookNotes = bookNotesQuery.data ?? []
   const savedQuotes = (savedQuotesQuery.data ?? []).filter((quote) => quote.book_id === bookId)
   const characters = charactersQuery.data ?? []
@@ -329,6 +341,26 @@ export default function BookOverviewPage() {
   const storyHealth = storyHealthQuery.data ?? null
   const writerWorkspace = writerWorkspaceQuery.data ?? null
   const revisionIntelligence = revisionIntelligenceQuery.data ?? null
+
+  useEffect(() => {
+    if (secondaryDataEnabled) return
+
+    const scheduleSecondaryData =
+      typeof window.requestIdleCallback === "function"
+        ? window.requestIdleCallback.bind(window)
+        : ((callback: IdleRequestCallback) =>
+            window.setTimeout(() => callback({ didTimeout: false, timeRemaining: () => 0 } as IdleDeadline), 120))
+    const cancelSecondaryData =
+      typeof window.cancelIdleCallback === "function"
+        ? window.cancelIdleCallback.bind(window)
+        : window.clearTimeout.bind(window)
+
+    const handle = scheduleSecondaryData(() => {
+      startTransition(() => setSecondaryDataEnabled(true))
+    })
+
+    return () => cancelSecondaryData(handle)
+  }, [secondaryDataEnabled])
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -358,6 +390,20 @@ export default function BookOverviewPage() {
       setBookMode(bookId, book.mode)
     }
   }, [book?.mode, bookId, setBookMode])
+
+  useEffect(() => {
+    if (!overviewQuery.isSuccess || !overviewQuery.data || overviewReadyCaptured.current) return
+    overviewReadyCaptured.current = true
+    capture("reader_overview_critical_ready", {
+      book_id: bookId,
+      active_mode: overviewQuery.data.book.mode,
+      critical_request_count: 1,
+      duration_ms:
+        typeof performance !== "undefined" && overviewLoadStartedAt.current !== null
+          ? Math.round(performance.now() - overviewLoadStartedAt.current)
+          : null,
+    })
+  }, [bookId, overviewQuery.data, overviewQuery.isSuccess])
 
   useEffect(() => {
     if (workspaceSaveState !== "saved") return
@@ -454,36 +500,6 @@ export default function BookOverviewPage() {
       }
     )
 
-  useEffect(() => {
-    const routes: Route[] = [
-      `/${bookId}` as Route,
-      "/quotes" as Route,
-      `/${bookId}/summaries` as Route,
-      `/${bookId}/analysis` as Route,
-      `/${bookId}/ask` as Route,
-      `/${bookId}/search` as Route,
-      `/${bookId}/timeline` as Route,
-      `/${bookId}/chapters` as Route,
-      `/${bookId}/chapter/${continueChapter}` as Route,
-    ]
-
-    if (activeBookMode === "author") {
-      routes.push(
-        `/${bookId}/manuscript` as Route,
-        `/${bookId}/notes` as Route,
-        `/${bookId}/collaboration` as Route,
-        `/${bookId}/export` as Route,
-        `/${bookId}/characters` as Route,
-        `/${bookId}/advisor` as Route,
-        `/${bookId}/graph` as Route,
-        `/${bookId}/plot-threads` as Route,
-        `/${bookId}/world-gap` as Route
-      )
-    }
-
-    for (const route of routes) router.prefetch(route)
-  }, [activeBookMode, bookId, continueChapter, router])
-
   const continueReading = () => {
     navigateWithMemory(`/${bookId}/chapter/${continueChapter}`)
   }
@@ -499,18 +515,27 @@ export default function BookOverviewPage() {
   const updateMode = async (nextMode: "reader" | "author") => {
     if (nextMode === "author" && !canUseAuthorWorkspace) return
     const previousBook = book
-    setBookMode(bookId, nextMode)
+    startTransition(() => setBookMode(bookId, nextMode))
     setModeSaving(true)
     if (previousBook) {
       queryClient.setQueryData(bookQueryKey, { ...previousBook, mode: nextMode })
+      queryClient.setQueryData(overviewQueryKey, (current: BookOverviewPayload | undefined) => (
+        current ? { ...current, book: { ...current.book, mode: nextMode } } : current
+      ))
     }
     try {
       const updated = await booksApi.setMode(bookId, nextMode)
       queryClient.setQueryData(bookQueryKey, updated)
+      queryClient.setQueryData(overviewQueryKey, (current: BookOverviewPayload | undefined) => (
+        current ? { ...current, book: updated } : current
+      ))
     } catch {
-      setBookMode(bookId, previousBook?.mode ?? "reader")
+      startTransition(() => setBookMode(bookId, previousBook?.mode ?? "reader"))
       if (previousBook) {
         queryClient.setQueryData(bookQueryKey, previousBook)
+        queryClient.setQueryData(overviewQueryKey, (current: BookOverviewPayload | undefined) => (
+          current ? { ...current, book: previousBook } : current
+        ))
       }
     } finally {
       setModeSaving(false)
@@ -519,20 +544,21 @@ export default function BookOverviewPage() {
 
   if (!book) {
     return (
-      <div className={`min-h-screen ${isDark ? "bg-[#070b10] text-slate-400" : "bg-[#f7f7fb] text-slate-500"}`}>
+      <div className={`min-h-screen ${isDark ? "bg-[#171b1d] text-slate-400" : "bg-[#f8f4ee] text-slate-500"}`}>
         <div className="flex min-h-screen items-center justify-center text-sm font-medium">Loading...</div>
       </div>
     )
   }
 
   return (
-    <div className={`min-h-screen ${isDark ? "bg-[#070b10] text-slate-100" : "bg-[#f7f7fb] text-slate-950"}`}>
-      <div className="mx-auto grid max-w-[94rem] gap-5 px-4 pb-28 pt-5 sm:px-6 lg:grid-cols-[18rem_minmax(0,1fr)] lg:px-8">
+    <div className={`min-h-screen ${isDark ? "bg-[#171b1d] text-slate-100" : "bg-[#f8f4ee] text-slate-950"}`}>
+      <div className="mx-auto grid max-w-[100rem] gap-6 px-4 pb-28 pt-5 sm:px-6 lg:grid-cols-[18rem_minmax(0,1fr)] lg:px-8">
         <div className="hidden lg:block lg:sticky lg:top-5 lg:self-start">
           <AuthorToolsNav
             bookId={bookId}
             active="overview"
             isDark={isDark}
+            bookData={book}
             title={activeBookMode === "author" ? "Author workspace" : "Reader workspace"}
             description={activeBookMode === "author" ? "Drafting and intelligence stay nearby without crowding the book." : "Reading, chapters, and quiet tools stay one hover away."}
             currentChapter={continueChapter}
@@ -562,92 +588,51 @@ export default function BookOverviewPage() {
               onContinueReading={continueReading}
             />
           ) : (
-            <>
-              <OverviewHeader
-                isDark={isDark}
-                activeBookMode={activeBookMode}
-                canUseAuthorMode={canUseAuthorWorkspace}
-                modeSaving={modeSaving}
-                greetingName={greetingName}
-                onModeChange={updateMode}
-                onToggleTheme={toggleTheme}
-              />
-
-              <div className="grid gap-5 xl:grid-cols-[minmax(0,1.62fr)_minmax(20rem,0.72fr)]">
-                <CurrentProjectCard
-                  book={book}
-                  isDark={isDark}
-                  canOpenManuscript={canEditSharedManuscript}
-                  currentWords={currentWords}
-                  targetWords={targetWords}
-                  percentComplete={percentComplete}
-                  chapters={chapters}
-                  unitTitle={unitTitle}
-                  unitPrefix={unitPrefix}
-                  onOpenManuscript={() => navigateWithMemory(`/${bookId}/manuscript`)}
-                />
-                <StoryHealthCard
-                  bookId={bookId}
-                  isDark={isDark}
-                  storyHealth={storyHealth}
-                />
-              </div>
-
-              <div className="grid gap-5 xl:grid-cols-[minmax(16rem,0.9fr)_minmax(0,1.05fr)_minmax(18rem,0.95fr)]">
-                <ActiveIssuesCard
-                  isDark={isDark}
-                  continuityIssueCount={continuityIssueCount}
-                  worldGapCount={worldGapCount}
-                  timelineIssueCount={timelineIssueCount}
-                  onNavigate={navigateWithMemory}
-                  bookId={bookId}
-                />
-                <QuickToolsCard isDark={isDark} bookId={bookId} onNavigate={navigateWithMemory} />
-                <RecentActivityCard
-                  isDark={isDark}
-                  book={book}
-                  unitTitle={unitTitle}
-                  continueChapter={continueChapter}
-                  processingSummary={processingSummary}
-                />
-              </div>
-
-              <div className="grid gap-5 xl:grid-cols-[minmax(0,1.44fr)_minmax(15rem,0.56fr)_minmax(15rem,0.58fr)]">
-                <ProjectOverviewCard
-                  isDark={isDark}
-                  currentWords={currentWords}
-                  chapterCount={chapterCount}
-                  characterCount={characters.length}
-                  worldArticleCount={(writerWorkspace?.templates.length ?? 0) + (writerWorkspace?.corkboard_cards.length ?? 0)}
-                />
-                <WritingStreakCard isDark={isDark} streakDays={loginStreakDays} weekActivity={weeklyLoginActivity} />
-                <DailyGoalCard isDark={isDark} dailyWords={dailyWords} dailyTarget={dailyTarget} />
-              </div>
-
-              {revisionIntelligence ? (
-                <RevisionIntelligencePanel
-                  bookId={bookId}
-                  revision={revisionIntelligence}
-                  writerWorkspace={writerWorkspace}
-                  isDark={isDark}
-                  onRevisionChange={(nextRevision) => {
-                    queryClient.setQueryData(asQueryKey(bookCacheKey(bookId, "revision-intelligence")), nextRevision)
-                  }}
-                  onWriterWorkspaceChange={(nextWorkspace) => {
-                    queryClient.setQueryData(writerWorkspaceQueryKey, nextWorkspace)
-                  }}
-                />
-              ) : null}
-
-              <GoalCalendarCard
-                isDark={isDark}
-                writerWorkspace={writerWorkspace}
-                saveState={workspaceSaveState}
-                saveMessage={workspaceSaveMessage}
-                onSaveGoalCalendar={saveGoalCalendar}
-                onOpenManuscript={() => navigateWithMemory(`/${bookId}/manuscript`)}
-              />
-            </>
+            <AuthorWorkspaceDashboard
+              bookId={bookId}
+              book={book}
+              isDark={isDark}
+              activeBookMode={activeBookMode}
+              canUseAuthorMode={canUseAuthorWorkspace}
+              modeSaving={modeSaving}
+              greetingName={greetingName}
+              canOpenManuscript={canEditSharedManuscript}
+              currentWords={currentWords}
+              targetWords={targetWords}
+              percentComplete={percentComplete}
+              chapters={chapters}
+              unitTitle={unitTitle}
+              unitPrefix={unitPrefix}
+              storyHealth={storyHealth}
+              preWritingCheck={preWritingCheck}
+              revisionIntelligence={revisionIntelligence}
+              writerWorkspace={writerWorkspace}
+              continuityIssueCount={continuityIssueCount}
+              worldGapCount={worldGapCount}
+              timelineIssueCount={timelineIssueCount}
+              processingSummary={processingSummary}
+              chapterCount={chapterCount}
+              characterCount={characters.length}
+              worldArticleCount={(writerWorkspace?.templates.length ?? 0) + (writerWorkspace?.corkboard_cards.length ?? 0)}
+              loginStreakDays={loginStreakDays}
+              weeklyLoginActivity={weeklyLoginActivity}
+              dailyWords={dailyWords}
+              dailyTarget={dailyTarget}
+              saveState={workspaceSaveState}
+              saveMessage={workspaceSaveMessage}
+              onModeChange={updateMode}
+              onToggleTheme={toggleTheme}
+              onNavigate={navigateWithMemory}
+              onOpenManuscript={() => navigateWithMemory(`/${bookId}/manuscript`)}
+              onOpenRelationships={openRelationships}
+              onSaveGoalCalendar={saveGoalCalendar}
+              onRevisionChange={(nextRevision) => {
+                queryClient.setQueryData(asQueryKey(bookCacheKey(bookId, "revision-intelligence")), nextRevision)
+              }}
+              onWriterWorkspaceChange={(nextWorkspace) => {
+                queryClient.setQueryData(writerWorkspaceQueryKey, nextWorkspace)
+              }}
+            />
           )}
         </main>
       </div>
@@ -656,9 +641,9 @@ export default function BookOverviewPage() {
         <CreateFab bookId={bookId} isDark={isDark} onAddScene={openAddSceneFlow} onNavigate={navigateWithMemory} />
       ) : null}
 
-      <nav className={`fixed inset-x-0 bottom-0 z-30 border-t px-4 py-3 backdrop-blur lg:hidden ${isDark ? "border-white/10 bg-[#070b10]/95" : "border-slate-200 bg-white/95"}`}>
+      <nav className={`fixed inset-x-0 bottom-0 z-30 border-t px-4 py-3 backdrop-blur lg:hidden ${isDark ? "border-white/10 bg-[#171b1d]/95" : "border-slate-200 bg-white/95"}`}>
         <div className={`mx-auto grid max-w-xl grid-cols-6 gap-2 text-center text-[11px] font-medium ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-          <Link href={`/${bookId}`} className="rounded-xl px-2 py-2 text-violet-500">Overview</Link>
+          <Link href={`/${bookId}`} className="rounded-xl px-2 py-2 text-teal-800">Overview</Link>
           <button onClick={continueReading} className="rounded-xl px-2 py-2">Read</button>
           <Link href={`/${bookId}/chapters`} className="rounded-xl px-2 py-2">Chapters</Link>
           <Link href={`/${bookId}/summaries`} className="rounded-xl px-2 py-2">Summary</Link>
@@ -705,7 +690,7 @@ function OverviewHeader({
               disabled={modeSaving || locked}
               className={`px-3 text-xs font-semibold capitalize transition ${
                 activeBookMode === mode
-                  ? isDark ? "bg-violet-500 text-white" : "bg-violet-600 text-white"
+                  ? isDark ? "bg-teal-800 text-white" : "bg-teal-800 text-white"
                   : locked
                     ? isDark ? "text-slate-600" : "text-slate-400"
                     : isDark ? "text-slate-400 hover:bg-white/[0.06]" : "text-slate-500 hover:bg-slate-50"
@@ -716,7 +701,7 @@ function OverviewHeader({
               )
             })}
         </div>
-        <Link href="/library" className={`inline-flex h-10 items-center gap-2 rounded-md px-4 text-sm font-semibold shadow-[0_14px_28px_-18px_rgba(124,58,237,0.85)] ${isDark ? "bg-violet-600/90 text-white hover:bg-violet-500" : "bg-violet-600 text-white hover:bg-violet-500"}`}>
+        <Link href="/library" className={`inline-flex h-10 items-center gap-2 rounded-md px-4 text-sm font-semibold shadow-[0_14px_28px_-18px_rgba(124,58,237,0.85)] ${isDark ? "bg-teal-800/90 text-white hover:bg-teal-800" : "bg-teal-800 text-white hover:bg-teal-800"}`}>
           <Icon name="plus" />
           New Project
         </Link>
@@ -771,7 +756,7 @@ function CurrentProjectCard({
             <h2 className={`truncate text-2xl font-semibold tracking-tight ${isDark ? "text-white" : "text-slate-950"}`}>{book.title}</h2>
             <Icon name="edit" className={isDark ? "mt-1 h-4 w-4 text-slate-500" : "mt-1 h-4 w-4 text-slate-400"} />
           </div>
-          <p className="mt-2 text-sm font-semibold text-violet-500">{book.genre || (book.work_type === "screenplay" ? "Screenplay" : "Manuscript")}</p>
+          <p className="mt-2 text-sm font-semibold text-teal-800">{book.genre || (book.work_type === "screenplay" ? "Screenplay" : "Manuscript")}</p>
 
           <div className="mt-7">
             <div className={`flex items-end justify-between text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
@@ -812,7 +797,7 @@ function CurrentProjectCard({
             <button
               type="button"
               onClick={onOpenManuscript}
-              className={`mt-auto inline-flex h-10 items-center justify-center gap-2 rounded-md px-4 text-xs font-semibold transition ${isDark ? "bg-violet-500/12 text-violet-300 hover:bg-violet-500/18" : "bg-violet-50 text-violet-700 hover:bg-violet-100"}`}
+              className={`mt-auto inline-flex h-10 items-center justify-center gap-2 rounded-md px-4 text-xs font-semibold transition ${isDark ? "bg-teal-800/10 text-teal-200 hover:bg-teal-800/18" : "bg-teal-50 text-teal-800 hover:bg-teal-100"}`}
             >
               Open Manuscript Editor
               <Icon name="chevron" className="h-3.5 w-3.5" />
@@ -840,7 +825,7 @@ function StoryHealthCard({
   const metricColors: Record<string, { text: string; bar: string }> = {
     Continuity: { text: "text-emerald-400", bar: "bg-emerald-400" },
     "Character consistency": { text: "text-sky-400", bar: "bg-sky-400" },
-    "Timeline clarity": { text: "text-violet-400", bar: "bg-violet-400" },
+    "Timeline clarity": { text: "text-teal-700", bar: "bg-teal-600" },
     "Plot thread closure": { text: "text-amber-400", bar: "bg-amber-400" },
     "Worldbuilding consistency": { text: "text-cyan-400", bar: "bg-cyan-400" },
     Pacing: { text: "text-rose-400", bar: "bg-rose-400" },
@@ -870,7 +855,7 @@ function StoryHealthCard({
 
         <div className="space-y-3">
           {metrics.map((metric) => {
-            const colors = metricColors[metric.label] ?? { text: "text-violet-400", bar: "bg-violet-400" }
+            const colors = metricColors[metric.label] ?? { text: "text-teal-700", bar: "bg-teal-600" }
             return (
               <div key={metric.label} className={`rounded-md border p-3 ${isDark ? "border-white/[0.06] bg-white/[0.025]" : "border-slate-200/70 bg-slate-50/70"}`}>
                 <div className="flex items-center justify-between gap-3 text-xs">
@@ -891,7 +876,7 @@ function StoryHealthCard({
       </div>
 
       <p className={`mt-5 text-sm leading-6 ${isDark ? "text-slate-300" : "text-slate-600"}`}>{summary}</p>
-      <Link href={`/${bookId}/analysis`} className={`mt-4 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md text-xs font-semibold transition ${isDark ? "bg-violet-500/12 text-violet-300 hover:bg-violet-500/18" : "bg-violet-50 text-violet-700 hover:bg-violet-100"}`}>
+      <Link href={`/${bookId}/analysis`} className={`mt-4 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md text-xs font-semibold transition ${isDark ? "bg-teal-800/10 text-teal-200 hover:bg-teal-800/18" : "bg-teal-50 text-teal-800 hover:bg-teal-100"}`}>
         <Icon name="analysis" className="h-4 w-4" />
         View Full Analysis
       </Link>
@@ -917,7 +902,7 @@ function ActiveIssuesCard({
   const issues = [
     { title: "Character Inconsistencies", rawCount: continuityIssueCount, severity: "High", icon: "users" as IconName, color: "text-rose-400", href: `/${bookId}/reports` },
     { title: "World Gaps", rawCount: worldGapCount, severity: "Medium", icon: "gap" as IconName, color: "text-amber-400", href: `/${bookId}/world-gap` },
-    { title: "Timeline Conflicts", rawCount: timelineIssueCount, severity: "Low", icon: "timeline" as IconName, color: "text-violet-400", href: `/${bookId}/timeline` },
+    { title: "Timeline Conflicts", rawCount: timelineIssueCount, severity: "Low", icon: "timeline" as IconName, color: "text-teal-700", href: `/${bookId}/timeline` },
   ].map((issue) => ({
     ...issue,
     ...buildIssueDisplay(issue.rawCount),
@@ -949,7 +934,7 @@ function ActiveIssuesCard({
         ))}
       </div>
 
-      <button onClick={() => onNavigate(`/${bookId}/analysis`)} className="mt-5 inline-flex w-full items-center justify-end gap-2 text-xs font-semibold text-violet-500">
+      <button onClick={() => onNavigate(`/${bookId}/analysis`)} className="mt-5 inline-flex w-full items-center justify-end gap-2 text-xs font-semibold text-teal-800">
         Go to Insights
         <Icon name="chevron" className="h-3.5 w-3.5" />
       </button>
@@ -959,12 +944,12 @@ function ActiveIssuesCard({
 
 function QuickToolsCard({ isDark, bookId, onNavigate }: { isDark: boolean; bookId: string; onNavigate: (href: string) => void }) {
   const tools = [
-    { title: "Story Advisor", body: "Get AI feedback on your story", href: `/${bookId}/advisor`, icon: "graph" as IconName, color: "text-violet-400" },
+    { title: "Story Advisor", body: "Get AI feedback on your story", href: `/${bookId}/advisor`, icon: "graph" as IconName, color: "text-teal-700" },
     { title: "Ask LoreVia", body: "Ask anything about your story", href: `/${bookId}/ask`, icon: "chat" as IconName, color: "text-blue-400" },
     { title: "World Gap Detection", body: "Find missing or inconsistent details", href: `/${bookId}/world-gap`, icon: "gap" as IconName, color: "text-amber-400" },
     { title: "Character Bible", body: "Manage your characters", href: `/${bookId}/characters`, icon: "file" as IconName, color: "text-emerald-400" },
     { title: "Voice Inconsistency", body: "Detect character voice drift", href: `/${bookId}/voice`, icon: "voice" as IconName, color: "text-rose-400" },
-    { title: "Manuscript Editor", body: "Write and edit your manuscript", href: `/${bookId}/manuscript`, icon: "book" as IconName, color: "text-violet-400" },
+    { title: "Manuscript Editor", body: "Write and edit your manuscript", href: `/${bookId}/manuscript`, icon: "book" as IconName, color: "text-teal-700" },
   ]
 
   return (
@@ -1005,7 +990,7 @@ function RecentActivityCard({
     { icon: "spark" as IconName, title: processingSummary || "LoreVia checked story intelligence", time: "Today", color: "text-rose-400" },
     { icon: "users" as IconName, title: `You updated ${book.title}`, time: formatDate(book.created_at), color: "text-blue-400" },
     { icon: "calendar" as IconName, title: "World setting updated", time: "Recently", color: "text-slate-400" },
-    { icon: "voice" as IconName, title: "Voice consistency check completed", time: "Recently", color: "text-violet-400" },
+    { icon: "voice" as IconName, title: "Voice consistency check completed", time: "Recently", color: "text-teal-700" },
   ]
 
   return (
@@ -1022,7 +1007,7 @@ function RecentActivityCard({
           </div>
         ))}
       </div>
-      <Link href="/notifications" className="mt-5 inline-flex w-full items-center justify-end gap-2 text-xs font-semibold text-violet-500">
+      <Link href="/notifications" className="mt-5 inline-flex w-full items-center justify-end gap-2 text-xs font-semibold text-teal-800">
         View All Activity
         <Icon name="chevron" className="h-3.5 w-3.5" />
       </Link>
@@ -1044,7 +1029,7 @@ function ProjectOverviewCard({
   worldArticleCount: number
 }) {
   const stats = [
-    { label: "Total Words", value: formatNumber(currentWords), icon: "spark" as IconName, color: "text-violet-400", path: "M2 17c2-5 4-2 6-5s4 1 6-3 4 0 6-4" },
+    { label: "Total Words", value: formatNumber(currentWords), icon: "spark" as IconName, color: "text-teal-700", path: "M2 17c2-5 4-2 6-5s4 1 6-3 4 0 6-4" },
     { label: "Chapters", value: formatNumber(chapterCount), icon: "book" as IconName, color: "text-blue-400", path: "M2 15c2-1 3-6 5-4s2 6 5 3 4-6 8-4" },
     { label: "Characters", value: formatNumber(characterCount), icon: "users" as IconName, color: "text-emerald-400", path: "M2 16c3-3 4 1 7-2s5-7 11-5" },
     { label: "World Articles", value: formatNumber(worldArticleCount), icon: "file" as IconName, color: "text-amber-400", path: "M2 17c4-1 4-8 7-5s3 6 6 2 4-4 5-3" },
@@ -1085,7 +1070,7 @@ function WritingStreakCard({ isDark, streakDays, weekActivity }: { isDark: boole
       <div className="mt-7 grid grid-cols-7 gap-2">
         {["M", "T", "W", "T", "F", "S", "S"].map((day, index) => (
           <div key={`${day}-${index}`} className="text-center">
-            <div className={`mx-auto h-9 w-4 rounded-full ${weekActivity[index] ? "bg-violet-500" : isDark ? "bg-white/10" : "bg-slate-200"}`} />
+            <div className={`mx-auto h-9 w-4 rounded-full ${weekActivity[index] ? "bg-teal-800" : isDark ? "bg-white/10" : "bg-slate-200"}`} />
             <p className={`mt-2 text-[10px] font-semibold ${isDark ? "text-slate-500" : "text-slate-400"}`}>{day}</p>
           </div>
         ))}
@@ -1119,7 +1104,7 @@ function DailyGoalCard({ isDark, dailyWords, dailyTarget }: { isDark: boolean; d
       </div>
       <div className="mt-5 flex items-center justify-between gap-3">
         <p className={`text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>{progressLabel}</p>
-        <Link href="/settings" className={`rounded-md px-3 py-2 text-xs font-semibold ${isDark ? "bg-violet-500/12 text-violet-300" : "bg-violet-50 text-violet-700"}`}>Update Goal</Link>
+        <Link href="/settings" className={`rounded-md px-3 py-2 text-xs font-semibold ${isDark ? "bg-teal-800/10 text-teal-200" : "bg-teal-50 text-teal-800"}`}>Update Goal</Link>
       </div>
     </section>
   )
@@ -1285,23 +1270,23 @@ function GoalCalendarCard({
                   className={`min-h-[5.7rem] rounded-md border p-2 text-left transition ${
                     selected
                       ? isDark
-                        ? "border-violet-400/60 bg-violet-500/10"
-                        : "border-violet-300 bg-violet-50"
+                        ? "border-teal-800/25 bg-teal-800/10"
+                        : "border-teal-300 bg-teal-50"
                       : isDark
                         ? "border-white/[0.05] bg-[#101720] hover:bg-[#16202b]"
                         : "border-slate-200 bg-white hover:bg-slate-50"
                   } ${!day.inMonth ? (isDark ? "text-slate-600" : "text-slate-300") : ""}`}
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <span className={`text-sm font-semibold ${selected ? "text-violet-500" : day.inMonth ? (isDark ? "text-slate-200" : "text-slate-700") : ""}`}>{day.label}</span>
-                    {isToday ? <span className="rounded-full bg-violet-500 px-1.5 py-0.5 text-[10px] font-semibold text-white">Today</span> : null}
+                    <span className={`text-sm font-semibold ${selected ? "text-teal-800" : day.inMonth ? (isDark ? "text-slate-200" : "text-slate-700") : ""}`}>{day.label}</span>
+                    {isToday ? <span className="rounded-full bg-teal-800 px-1.5 py-0.5 text-[10px] font-semibold text-white">Today</span> : null}
                   </div>
                   <div className="mt-3 space-y-1">
                     {dayItems.length > 0 ? (
                       <>
                         <p className={`text-[11px] font-medium ${isDark ? "text-slate-300" : "text-slate-600"}`}>{dayItems.length} item{dayItems.length === 1 ? "" : "s"}</p>
                         <p className={`text-[10px] ${isDark ? "text-slate-500" : "text-slate-400"}`}>{completedCount}/{dayItems.length} complete</p>
-                        {quotaTotal > 0 ? <p className="text-[10px] font-semibold text-violet-500">{quotaTotal.toLocaleString()} quota</p> : null}
+                        {quotaTotal > 0 ? <p className="text-[10px] font-semibold text-teal-800">{quotaTotal.toLocaleString()} quota</p> : null}
                       </>
                     ) : (
                       <p className={`text-[10px] ${isDark ? "text-slate-600" : "text-slate-300"}`}>Open</p>
@@ -1339,14 +1324,14 @@ function GoalCalendarCard({
                       checked={item.completed}
                       disabled={!editable || saveState === "saving"}
                       onChange={() => void toggleCalendarItem(item.id)}
-                      className="mt-1 h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
+                      className="mt-1 h-4 w-4 rounded border-slate-300 text-teal-800 focus:ring-teal-700"
                     />
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <p className={`text-sm font-semibold ${item.completed ? (isDark ? "text-slate-500 line-through" : "text-slate-400 line-through") : isDark ? "text-slate-200" : "text-slate-700"}`}>
                           {item.title}
                         </p>
-                        {quotaLabel ? <span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${isDark ? "bg-violet-500/12 text-violet-300" : "bg-violet-50 text-violet-700"}`}>{quotaLabel}</span> : null}
+                        {quotaLabel ? <span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${isDark ? "bg-teal-800/10 text-teal-200" : "bg-teal-50 text-teal-800"}`}>{quotaLabel}</span> : null}
                         {overdue ? <span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${isDark ? "bg-amber-500/12 text-amber-300" : "bg-amber-50 text-amber-700"}`}>Overdue</span> : null}
                       </div>
                       <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>{item.completed ? "Completed" : "Planned"} for {formatPlannerDate(item.due_date)}</p>
@@ -1376,7 +1361,7 @@ function GoalCalendarCard({
                   setSelectedDate(today)
                   setVisibleMonth(monthValueFromDate(today))
                 }}
-                className={`text-xs font-semibold ${isDark ? "text-violet-300" : "text-violet-700"}`}
+                className={`text-xs font-semibold ${isDark ? "text-teal-200" : "text-teal-800"}`}
               >
                 Jump to today
               </button>
@@ -1388,14 +1373,14 @@ function GoalCalendarCard({
                 onChange={(event) => setDraftTitle(event.target.value)}
                 disabled={!editable || saveState === "saving"}
                 placeholder={editable ? "Draft chapter, revise outline, finish scene..." : "Loading planner..."}
-                className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 placeholder:text-slate-600 focus:border-violet-400" : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-violet-400"}`}
+                className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 placeholder:text-slate-600 focus:border-teal-700" : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-teal-700"}`}
               />
               <input
                 type="date"
                 value={selectedDate}
                 onChange={(event) => setSelectedDate(event.target.value)}
                 disabled={!editable || saveState === "saving"}
-                className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-violet-400" : "border-slate-200 bg-white text-slate-900 focus:border-violet-400"}`}
+                className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-teal-700" : "border-slate-200 bg-white text-slate-900 focus:border-teal-700"}`}
               />
             </div>
 
@@ -1408,13 +1393,13 @@ function GoalCalendarCard({
                 onChange={(event) => setDraftQuotaValue(event.target.value)}
                 disabled={!editable || saveState === "saving"}
                 placeholder="Quota"
-                className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 placeholder:text-slate-600 focus:border-violet-400" : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-violet-400"}`}
+                className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 placeholder:text-slate-600 focus:border-teal-700" : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-teal-700"}`}
               />
               <select
                 value={draftQuotaUnit}
                 onChange={(event) => setDraftQuotaUnit(event.target.value)}
                 disabled={!editable || saveState === "saving"}
-                className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-violet-400" : "border-slate-200 bg-white text-slate-900 focus:border-violet-400"}`}
+                className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-teal-700" : "border-slate-200 bg-white text-slate-900 focus:border-teal-700"}`}
               >
                 {["words", "chapters", "scenes", "pages", "tasks"].map((unit) => (
                   <option key={unit} value={unit}>{unit}</option>
@@ -1423,7 +1408,7 @@ function GoalCalendarCard({
               <button
                 onClick={() => void addCalendarItem()}
                 disabled={!editable || saveState === "saving" || !draftTitle.trim()}
-                className={`inline-flex h-11 items-center justify-center rounded-md px-4 text-sm font-semibold transition ${isDark ? "bg-violet-500 text-white hover:bg-violet-400 disabled:bg-violet-500/40" : "bg-violet-600 text-white hover:bg-violet-500 disabled:bg-violet-300"}`}
+                className={`inline-flex h-11 items-center justify-center rounded-md px-4 text-sm font-semibold transition ${isDark ? "bg-teal-800 text-white hover:bg-teal-700 disabled:bg-teal-800/35" : "bg-teal-800 text-white hover:bg-teal-800 disabled:bg-teal-300"}`}
               >
                 Add item
               </button>
@@ -1446,7 +1431,7 @@ function GoalCalendarCard({
                   {saveMessage || (editable ? "Changes save back into this book workspace." : "Loading planner...")}
                 </p>
               </div>
-              <button type="button" onClick={onOpenManuscript} className="text-xs font-semibold text-violet-500">
+              <button type="button" onClick={onOpenManuscript} className="text-xs font-semibold text-teal-800">
                 Adjust word goals
               </button>
             </div>
@@ -1471,7 +1456,14 @@ function BookCover({ book, isDark }: { book: Book; isDark: boolean }) {
 
   return (
     <div className="aspect-[0.72] min-h-48 overflow-hidden rounded-md">
-      <img src={src} alt={`${book.title} cover`} onError={() => setFailed(true)} className="h-full w-full object-cover object-center" />
+      <img
+        src={src}
+        alt={`${book.title} cover`}
+        loading="lazy"
+        decoding="async"
+        onError={() => setFailed(true)}
+        className="h-full w-full object-cover object-center"
+      />
     </div>
   )
 }
@@ -1498,7 +1490,7 @@ function CreateFab({
         <button onClick={() => onNavigate(`/${bookId}/notes`)} className={itemClass}>Add Note</button>
         <button onClick={() => onNavigate(`/${bookId}/characters`)} className={itemClass}>Add Character</button>
       </div>
-      <button className={`rounded-full px-5 py-3 text-sm font-semibold shadow-[0_18px_55px_-28px_rgba(0,0,0,0.9)] transition ${isDark ? "bg-violet-500 text-white hover:bg-violet-400" : "bg-violet-600 text-white hover:bg-violet-500"}`}>
+      <button className={`rounded-full px-5 py-3 text-sm font-semibold shadow-[0_18px_55px_-28px_rgba(0,0,0,0.9)] transition ${isDark ? "bg-teal-800 text-white hover:bg-teal-700" : "bg-teal-800 text-white hover:bg-teal-800"}`}>
         + Create
       </button>
     </div>
@@ -1603,4 +1595,12 @@ function Icon({ name, className = "h-4 w-4" }: { name: IconName; className?: str
     default:
       return null
   }
+}
+
+function WorkspacePanelLoadingState() {
+  return (
+    <div className="rounded-md border border-border bg-card/60 p-6 text-sm text-muted-foreground">
+      Loading workspace tools...
+    </div>
+  )
 }

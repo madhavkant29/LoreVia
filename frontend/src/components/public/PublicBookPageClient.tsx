@@ -3,7 +3,7 @@
 import Link from "next/link"
 import type { Route } from "next"
 import { useQuery } from "@tanstack/react-query"
-import { useState } from "react"
+import React, { useEffect, useRef, useState } from "react"
 
 import { publicApi } from "@/lib/api/public"
 import { asQueryKey } from "@/lib/query/cacheKeys"
@@ -39,6 +39,7 @@ export function PublicBookPageClient({
   const [copyrightDescription, setCopyrightDescription] = useState("")
   const [copyrightUrl, setCopyrightUrl] = useState("")
   const [confirmed, setConfirmed] = useState(false)
+  const trackedBookIdRef = useRef<string | null>(null)
 
   const { data: book = initialBook, isLoading: loading } = useQuery<PublicBookDetail | null>({
     queryKey: asQueryKey(`public:book:${bookId}`),
@@ -69,6 +70,15 @@ export function PublicBookPageClient({
     }
   }
 
+  const routeId = book?.public_slug || book?.id || bookId
+
+  useEffect(() => {
+    if (!book) return
+    if (trackedBookIdRef.current === book.id) return
+    trackedBookIdRef.current = book.id
+    void publicApi.trackView(routeId, { eventType: "book_view" })
+  }, [book, routeId])
+
   if (loading) {
     return <div className={`mx-auto max-w-5xl px-4 py-20 text-center ${isDark ? "text-slate-400" : "text-stone-500"}`}>Loading public book...</div>
   }
@@ -77,15 +87,15 @@ export function PublicBookPageClient({
     return <div className={`mx-auto max-w-5xl px-4 py-20 text-center ${isDark ? "text-slate-400" : "text-stone-500"}`}>Public book not found.</div>
   }
 
-  const routeId = book.public_slug || book.id
   const isCopyrightReport = reportType === "copyright"
+  const analytics = book.analytics
 
   return (
     <main className={`min-h-screen ${isDark ? "bg-black text-white" : "bg-stone-50 text-stone-950"}`}>
       <div className="mx-auto max-w-5xl px-4 py-10">
         <div className="flex flex-wrap items-center gap-3">
-          <Link href="/public" className={`text-sm ${isDark ? "text-slate-400 hover:text-white" : "text-stone-500 hover:text-stone-900"}`}>
-            {"<- Back to public library"}
+          <Link href="/library" className={`text-sm ${isDark ? "text-slate-400 hover:text-white" : "text-stone-500 hover:text-stone-900"}`}>
+            {"<- Back to library"}
           </Link>
         </div>
 
@@ -134,7 +144,45 @@ export function PublicBookPageClient({
               Copyright policy
             </Link>
           </div>
+          {analytics ? (
+            <div className={`mt-6 grid gap-3 sm:grid-cols-3 xl:grid-cols-4`}>
+              <div className={`rounded-2xl border px-4 py-4 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-white"}`}>
+                <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Views</p>
+                <p className="mt-2 text-2xl font-semibold">{analytics.book_view_count.toLocaleString()}</p>
+              </div>
+              <div className={`rounded-2xl border px-4 py-4 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-white"}`}>
+                <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Readers 30d</p>
+                <p className="mt-2 text-2xl font-semibold">{analytics.unique_reader_count_30d.toLocaleString()}</p>
+              </div>
+              <div className={`rounded-2xl border px-4 py-4 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-white"}`}>
+                <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Chapter opens</p>
+                <p className="mt-2 text-2xl font-semibold">{analytics.chapter_view_count.toLocaleString()}</p>
+              </div>
+              <div className={`rounded-2xl border px-4 py-4 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-white"}`}>
+                <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Published</p>
+                <p className="mt-2 text-base font-semibold">{analytics.published_at ? new Date(analytics.published_at).toLocaleDateString() : "Not dated"}</p>
+              </div>
+            </div>
+          ) : null}
         </div>
+
+        {analytics ? (
+          <section className="mt-10">
+            <div className={`rounded-2xl border p-6 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-white"}`}>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h2 className="text-2xl font-semibold">Public book analytics</h2>
+                <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>Catalog and discussion metrics anyone can see</p>
+              </div>
+              <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+                <AnalyticsMetricCard isDark={isDark} label="Chapter count" value={String(analytics.chapter_count)} note="Visible public chapters." />
+                <AnalyticsMetricCard isDark={isDark} label="Visible words" value={analytics.total_words.toLocaleString()} note="Estimated readable words." />
+                <AnalyticsMetricCard isDark={isDark} label="Open discussions" value={String(analytics.open_discussion_count)} note={analytics.has_open_discussion ? "This book has an active public discussion." : "No active public discussion right now."} />
+                <AnalyticsMetricCard isDark={isDark} label="Comments" value={analytics.discussion_comment_count.toLocaleString()} note="Public discussion comments tied to this book." />
+                <AnalyticsMetricCard isDark={isDark} label="Reader interests" value={analytics.discussion_interest_count.toLocaleString()} note="Public collaboration interest messages." />
+              </div>
+            </div>
+          </section>
+        ) : null}
 
         <section className="mt-10">
           <div className={`rounded-2xl border p-6 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-white"}`}>
@@ -232,5 +280,15 @@ export function PublicBookPageClient({
         </div>
       ) : null}
     </main>
+  )
+}
+
+function AnalyticsMetricCard({ isDark, label, value, note }: { isDark: boolean; label: string; value: string; note: string }) {
+  return (
+    <article className={`rounded-2xl border p-4 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50"}`}>
+      <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>{label}</p>
+      <p className="mt-3 text-2xl font-semibold">{value}</p>
+      <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-400" : "text-stone-600"}`}>{note}</p>
+    </article>
   )
 }

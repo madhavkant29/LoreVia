@@ -24,7 +24,7 @@ const PINNED_STORAGE_KEY = "library-pinned-projects:v1"
 const NUMBER_FORMAT = new Intl.NumberFormat("en-US")
 const GLYPHS: GlyphName[] = ["moon", "spark", "leaf", "crown", "wave", "diamond", "orbit", "star"]
 const ACCENT_CLASSES = [
-  "text-violet-300 border-violet-400/18 bg-violet-500/[0.06]",
+  "text-teal-700 border-teal-800/18 bg-teal-800/[0.06]",
   "text-blue-300 border-blue-400/18 bg-blue-500/[0.06]",
   "text-cyan-300 border-cyan-400/18 bg-cyan-500/[0.06]",
   "text-amber-200 border-amber-300/18 bg-amber-400/[0.06]",
@@ -330,168 +330,54 @@ export default function LibraryPage() {
     }
   }
 
-  const pageBackground = isDark
-    ? "bg-[radial-gradient(circle_at_top,rgba(122,92,255,0.1),transparent_24%),linear-gradient(180deg,#09090e_0%,#0c0c12_55%,#0a0a10_100%)] text-[#f4f1ea]"
-    : "bg-[radial-gradient(circle_at_top,rgba(236,228,255,0.38),transparent_24%),linear-gradient(180deg,#faf7f1_0%,#f5f1ea_100%)] text-stone-950"
-  const surfaceClass = isDark
-    ? "border-white/[0.08] bg-[#111119]"
-    : "border-stone-200/80 bg-white/80"
-  const mutedText = isDark ? "text-[#9f9ca8]" : "text-stone-500"
-  const headingText = isDark ? "text-[#f7f3ed]" : "text-stone-950"
-  const controlClass = isDark
-    ? "border-white/[0.08] bg-[#111118] text-[#ebe7df] shadow-[0_18px_40px_-34px_rgba(0,0,0,0.92)]"
-    : "border-stone-200 bg-white text-stone-800"
+  const pageBackground = isDark ? "bg-[#171b1e] text-[#efe9df]" : "bg-[#f3f4f6] text-stone-950"
+  const surfaceClass = isDark ? "border-white/[0.08] bg-[#1f2427]" : "border-stone-200 bg-white"
+  const mutedText = isDark ? "text-[#a6a39b]" : "text-stone-600"
+  const headingText = isDark ? "text-[#f5f0e8]" : "text-stone-950"
+  const controlClass = isDark ? "border-white/[0.08] bg-[#1f2427] text-[#ebe7df]" : "border-stone-200 bg-white text-stone-800"
+  const secondaryButtonClass = isDark
+    ? "border-white/[0.08] bg-[#1f2427] text-[#ebe7df] hover:bg-[#252b2f]"
+    : "border-stone-200 bg-white text-stone-800 hover:bg-stone-50"
+  const primaryButtonClass = isDark
+    ? "bg-[#215f5c] text-white hover:bg-[#1d5552]"
+    : "bg-[#1f615d] text-white hover:bg-[#194f4c]"
+  const hasAnyProjects = visibleBooks.length > 0
+  const [interactiveReady, setInteractiveReady] = useState(false)
+
+  useEffect(() => {
+    setInteractiveReady(true)
+  }, [])
 
   return (
     <div className={`relative left-1/2 min-h-screen w-screen -translate-x-1/2 transition-colors duration-300 ${pageBackground}`}>
-      <div className="mx-auto w-full max-w-[1520px] px-4 pb-20 pt-8 sm:px-8 lg:px-16">
-        <section className="space-y-10">
-          <div className="flex flex-col gap-8 xl:flex-row xl:items-end xl:justify-between">
-            <div className="space-y-3 pt-1">
-              <h1 className={`font-serif text-[3.25rem] leading-[0.94] tracking-[-0.04em] sm:text-[3.5rem] ${headingText}`}>Library</h1>
-              <p className={`max-w-xl text-lg leading-8 ${mutedText}`}>Understand, revise, and maintain continuity across every manuscript.</p>
+      <div className="mx-auto w-full max-w-[1280px] px-4 pb-20 pt-10 sm:px-6 lg:px-10">
+        <section className="space-y-8">
+          <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+            <div className="space-y-4">
+              <h1 className={`font-display text-[3rem] leading-[0.94] tracking-[-0.04em] sm:text-[3.5rem] ${headingText}`}>Library</h1>
+              <p className={`max-w-2xl text-base leading-8 sm:text-[1.1rem] ${mutedText}`}>
+                Organize your writing projects. Stay focused, maintain continuity, and keep everything in one place.
+              </p>
             </div>
 
-            <div className="flex w-full flex-col gap-3 xl:w-auto xl:flex-row xl:items-center xl:justify-end">
-              <label className={`flex min-h-[3.35rem] flex-1 items-center gap-3 rounded-xl border px-4 xl:min-w-[18.5rem] ${controlClass}`}>
-                <SearchIcon className={isDark ? "text-[#7c7a87]" : "text-stone-400"} />
-                <input
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                  placeholder="Search projects..."
-                  className={`w-full bg-transparent text-[0.95rem] outline-none ${isDark ? "placeholder:text-[#66636f]" : "placeholder:text-stone-400"}`}
-                />
-              </label>
-
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => setFilterOpen((current) => !current)}
-                  className={`inline-flex min-h-[3.35rem] items-center gap-3 rounded-xl border px-5 text-sm font-medium ${controlClass}`}
-                >
-                  <FilterIcon className={isDark ? "text-[#c8c4bd]" : "text-stone-600"} />
-                  {filterSummary}
-                </button>
-
-                {filterOpen ? (
-                  <div className={`absolute right-0 z-30 mt-3 w-[18rem] rounded-2xl border p-4 shadow-[0_24px_80px_-40px_rgba(0,0,0,0.75)] ${surfaceClass}`}>
-                    <div className="space-y-4">
-                      <div>
-                        <p className={`text-[0.68rem] font-semibold uppercase tracking-[0.28em] ${mutedText}`}>Project mode</p>
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          {[
-                            ["all", "All"],
-                            ["author", "Author Workspace"],
-                            ["reader", "Collaborator Preview"],
-                          ].map(([value, label]) => (
-                            <button
-                              key={value}
-                              type="button"
-                              onClick={() => setModeFilter(value as ModeFilter)}
-                              className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
-                                modeFilter === value
-                                  ? "border-violet-400/50 bg-violet-500/15 text-violet-200"
-                                  : isDark
-                                    ? "border-white/[0.08] bg-white/[0.03] text-[#b1afba]"
-                                    : "border-stone-200 bg-stone-50 text-stone-600"
-                              }`}
-                            >
-                              {label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div>
-                        <p className={`text-[0.68rem] font-semibold uppercase tracking-[0.28em] ${mutedText}`}>Status</p>
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          {[
-                            ["all", "Any"],
-                            ["ready", "Ready"],
-                            ["processing", "Processing"],
-                            ["pending", "Queued"],
-                            ["failed", "Needs review"],
-                          ].map(([value, label]) => (
-                            <button
-                              key={value}
-                              type="button"
-                              onClick={() => setStatusFilter(value as StatusFilter)}
-                              className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
-                                statusFilter === value
-                                  ? "border-violet-400/50 bg-violet-500/15 text-violet-200"
-                                  : isDark
-                                    ? "border-white/[0.08] bg-white/[0.03] text-[#b1afba]"
-                                    : "border-stone-200 bg-stone-50 text-stone-600"
-                              }`}
-                            >
-                              {label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-
-                      <label className="flex items-center justify-between gap-3">
-                        <span className={`text-sm ${headingText}`}>Show archived projects</span>
-                        <button
-                          type="button"
-                          onClick={() => setShowArchived((current) => !current)}
-                          className={`relative h-7 w-12 rounded-full transition ${showArchived ? "bg-violet-500" : isDark ? "bg-white/[0.1]" : "bg-stone-200"}`}
-                        >
-                          <span className={`absolute top-1 h-5 w-5 rounded-full bg-white transition ${showArchived ? "left-6" : "left-1"}`} />
-                        </button>
-                      </label>
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-
-              <div className={`flex min-h-[3.35rem] items-center rounded-xl border px-4 ${controlClass}`}>
-                <select
-                  value={sortBy}
-                  onChange={(event) => setSortBy(event.target.value as SortOption)}
-                  className="min-w-[10.8rem] bg-transparent pr-6 text-sm outline-none [color-scheme:dark] cursor-pointer"
-                >
-                  <option value="recent" className="bg-[#121212] text-white">Recently Updated</option>
-                  <option value="progress" className="bg-[#121212] text-white">Most Progress</option>
-                  <option value="title" className="bg-[#121212] text-white">Title A-Z</option>
-                </select>
-              </div>
-
-              <div className={`inline-flex min-h-[3.35rem] items-center overflow-hidden rounded-xl border ${controlClass}`}>
-                <button
-                  type="button"
-                  onClick={() => setViewMode("grid")}
-                  className={`inline-flex h-full items-center justify-center px-4 transition ${viewMode === "grid" ? "bg-violet-500/16 text-violet-200" : mutedText}`}
-                  aria-label="Grid view"
-                >
-                  <GridIcon />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setViewMode("list")}
-                  className={`inline-flex h-full items-center justify-center px-4 transition ${viewMode === "list" ? "bg-violet-500/16 text-violet-200" : mutedText}`}
-                  aria-label="List view"
-                >
-                  <ListIcon />
-                </button>
-              </div>
-
+            <div className="flex flex-col gap-3 sm:flex-row lg:pt-6">
               <button
                 type="button"
                 onClick={() => router.push("/public/forum" as Route)}
-                className={`inline-flex min-h-[3.35rem] items-center justify-center gap-3 rounded-xl border px-5 text-sm font-medium transition ${controlClass}`}
+                className={`inline-flex min-h-11 items-center justify-center gap-2.5 rounded-xl border px-5 text-sm font-medium transition ${secondaryButtonClass}`}
               >
-                <ForumIcon className={isDark ? "text-[#c8c4bd]" : "text-stone-600"} />
+                <ForumIcon className={isDark ? "text-[#d2cdc3]" : "text-stone-600"} />
                 Beta Forum
               </button>
 
               <button
                 type="button"
+                disabled={!interactiveReady}
                 onClick={() => {
                   setUploadPreset({})
                   setShowUpload(true)
                 }}
-                className="inline-flex min-h-[3.35rem] items-center justify-center gap-3 rounded-xl bg-[#33206f] px-6 text-sm font-semibold text-white shadow-[0_22px_44px_-28px_rgba(109,40,217,0.78)] transition hover:translate-y-[-1px] hover:bg-[#3d2782]"
+                className={`inline-flex min-h-11 items-center justify-center gap-2.5 rounded-xl px-5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${primaryButtonClass}`}
               >
                 <PlusIcon />
                 New Project
@@ -499,14 +385,168 @@ export default function LibraryPage() {
             </div>
           </div>
 
+          <section className={`rounded-[1.5rem] border p-4 sm:p-5 ${surfaceClass}`}>
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex flex-1 flex-col gap-3 md:flex-row md:flex-wrap md:items-center">
+                <label className={`flex min-h-12 flex-1 items-center gap-3 rounded-xl border px-4 ${controlClass}`}>
+                  <SearchIcon className={isDark ? "text-[#7e7b74]" : "text-stone-400"} />
+                  <input
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                    placeholder="Search projects..."
+                    className={`w-full bg-transparent text-[0.95rem] outline-none ${isDark ? "placeholder:text-[#6a675f]" : "placeholder:text-stone-400"}`}
+                  />
+                  <span
+                    className={`hidden items-center rounded-md border px-2 py-1 text-[11px] font-medium sm:inline-flex ${
+                      isDark ? "border-white/[0.08] bg-white/[0.03] text-[#9f9b94]" : "border-stone-200 bg-stone-50 text-stone-500"
+                    }`}
+                  >
+                    K
+                  </span>
+                </label>
+
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setFilterOpen((current) => !current)}
+                    className={`inline-flex min-h-12 items-center gap-3 rounded-xl border px-4 text-sm font-medium transition ${controlClass}`}
+                  >
+                    <FilterIcon className={isDark ? "text-[#d2cdc3]" : "text-stone-600"} />
+                    {filterSummary}
+                  </button>
+
+                  {filterOpen ? (
+                    <div className={`absolute left-0 top-full z-30 mt-3 w-[18rem] rounded-[1.25rem] border p-4 shadow-[0_20px_50px_-30px_rgba(0,0,0,0.35)] ${surfaceClass}`}>
+                      <div className="space-y-4">
+                        <div>
+                          <p className={`text-[0.68rem] font-semibold uppercase tracking-[0.24em] ${mutedText}`}>Project mode</p>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {[
+                              ["all", "All"],
+                              ["author", "Author Workspace"],
+                              ["reader", "Collaborator Preview"],
+                            ].map(([value, label]) => (
+                              <button
+                                key={value}
+                                type="button"
+                                onClick={() => setModeFilter(value as ModeFilter)}
+                                className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+                                  modeFilter === value
+                                    ? isDark
+                                      ? "border-[#3d7a75] bg-[#234947] text-[#d7f0ed]"
+                                      : "border-teal-700/20 bg-teal-50 text-teal-800"
+                                    : isDark
+                                      ? "border-white/[0.08] bg-white/[0.03] text-[#b7b2aa]"
+                                      : "border-stone-200 bg-stone-50 text-stone-600"
+                                }`}
+                              >
+                                {label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div>
+                          <p className={`text-[0.68rem] font-semibold uppercase tracking-[0.24em] ${mutedText}`}>Status</p>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {[
+                              ["all", "Any"],
+                              ["ready", "Ready"],
+                              ["processing", "Processing"],
+                              ["pending", "Queued"],
+                              ["failed", "Needs review"],
+                            ].map(([value, label]) => (
+                              <button
+                                key={value}
+                                type="button"
+                                onClick={() => setStatusFilter(value as StatusFilter)}
+                                className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+                                  statusFilter === value
+                                    ? isDark
+                                      ? "border-[#3d7a75] bg-[#234947] text-[#d7f0ed]"
+                                      : "border-teal-700/20 bg-teal-50 text-teal-800"
+                                    : isDark
+                                      ? "border-white/[0.08] bg-white/[0.03] text-[#b7b2aa]"
+                                      : "border-stone-200 bg-stone-50 text-stone-600"
+                                }`}
+                              >
+                                {label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <label className="flex items-center justify-between gap-3">
+                          <span className={`text-sm ${headingText}`}>Show archived projects</span>
+                          <button
+                            type="button"
+                            onClick={() => setShowArchived((current) => !current)}
+                            className={`relative h-7 w-12 rounded-full transition ${showArchived ? "bg-[#1f615d]" : isDark ? "bg-white/[0.12]" : "bg-stone-200"}`}
+                          >
+                            <span className={`absolute top-1 h-5 w-5 rounded-full bg-white transition ${showArchived ? "left-6" : "left-1"}`} />
+                          </button>
+                        </label>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+
+                <label className={`flex min-h-12 items-center gap-2 rounded-xl border px-4 text-sm ${controlClass}`}>
+                  <span className={mutedText}>Sort:</span>
+                  <select
+                    value={sortBy}
+                    onChange={(event) => setSortBy(event.target.value as SortOption)}
+                    className={`min-w-[11rem] cursor-pointer bg-transparent outline-none ${isDark ? "[color-scheme:dark]" : "[color-scheme:light]"}`}
+                  >
+                    <option value="recent">Recently updated</option>
+                    <option value="progress">Most progress</option>
+                    <option value="title">Title A-Z</option>
+                  </select>
+                </label>
+              </div>
+
+              <div className={`inline-flex min-h-12 items-center rounded-xl border p-1 ${controlClass}`}>
+                <button
+                  type="button"
+                  onClick={() => setViewMode("grid")}
+                  className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition ${
+                    viewMode === "grid"
+                      ? isDark
+                        ? "bg-white/[0.08] text-[#f5f0e8]"
+                        : "bg-[#eff4ef] text-[#1f615d]"
+                      : mutedText
+                  }`}
+                  aria-label="Grid view"
+                >
+                  <GridIcon />
+                  Grid
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode("list")}
+                  className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition ${
+                    viewMode === "list"
+                      ? isDark
+                        ? "bg-white/[0.08] text-[#f5f0e8]"
+                        : "bg-[#eff4ef] text-[#1f615d]"
+                      : mutedText
+                  }`}
+                  aria-label="List view"
+                >
+                  <ListIcon />
+                  List
+                </button>
+              </div>
+            </div>
+          </section>
+
           <UpcomingBetaReadsCard isDark={isDark} />
 
-          <section className="space-y-5">
+          <section className="space-y-4">
             <SectionHeading
-              icon={<PinIcon className={isDark ? "text-violet-300" : "text-violet-600"} />}
-              title="Pinned Projects"
-              actionLabel={pinnedBooks.length > 0 ? "View All" : undefined}
-              actionHandler={() => setShowArchived(false)}
+              icon={<PinIcon className={isDark ? "text-[#d7d0c6]" : "text-stone-700"} />}
+              title="Pinned projects"
+              helperText={pinnedBooks.length > 0 ? "Manage pins from each project menu." : undefined}
               isDark={isDark}
             />
 
@@ -516,7 +556,12 @@ export default function LibraryPage() {
               <EmptyPanel
                 isDark={isDark}
                 title="Nothing pinned yet"
-                body="Use the project menu to pin the stories you want on top."
+                body="Use a project menu to keep your current manuscripts close at hand."
+                actionLabel="New Project"
+                actionHandler={() => {
+                  setUploadPreset({})
+                  setShowUpload(true)
+                }}
               />
             ) : viewMode === "grid" ? (
               <div className="grid gap-4 xl:grid-cols-3">
@@ -575,17 +620,10 @@ export default function LibraryPage() {
             )}
           </section>
 
-          <section className="space-y-5">
+          <section className="space-y-4">
             <SectionHeading
-              icon={<PinIcon className={isDark ? "text-violet-300" : "text-violet-600"} />}
-              title="All Projects"
-              actionLabel={filteredBooks.length > 0 ? "View All" : undefined}
-              actionHandler={() => {
-                setSearch("")
-                setModeFilter("all")
-                setStatusFilter("all")
-                setShowArchived(false)
-              }}
+              icon={<FolderIcon className={isDark ? "text-[#d7d0c6]" : "text-stone-700"} />}
+              title="All projects"
               isDark={isDark}
             />
 
@@ -594,8 +632,24 @@ export default function LibraryPage() {
             ) : allProjectBooks.length === 0 && filteredBooks.length === 0 ? (
               <EmptyPanel
                 isDark={isDark}
-                title="No projects match this view"
-                body="Try a different filter, or start a new project from the button above."
+                title={hasAnyProjects ? "No projects match this view" : "No projects yet"}
+                body={
+                  hasAnyProjects
+                    ? "Try a different search or filter to bring projects back into view."
+                    : "Start a new project to keep your ideas organized."
+                }
+                actionLabel={hasAnyProjects ? "Reset filters" : "New Project"}
+                actionHandler={() => {
+                  if (hasAnyProjects) {
+                    setSearch("")
+                    setModeFilter("all")
+                    setStatusFilter("all")
+                    setShowArchived(false)
+                    return
+                  }
+                  setUploadPreset({})
+                  setShowUpload(true)
+                }}
               />
             ) : viewMode === "grid" ? (
               <div className="grid gap-4 xl:grid-cols-3">
@@ -686,9 +740,9 @@ export default function LibraryPage() {
 
       {publishBook ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 py-8">
-          <div className={`w-full max-w-2xl rounded-[1.5rem] border p-6 ${surfaceClass}`}>
-            <p className={`text-[0.68rem] font-semibold uppercase tracking-[0.28em] ${mutedText}`}>Public book</p>
-            <h2 className={`mt-3 font-serif text-[2rem] tracking-[-0.03em] ${headingText}`}>Publish your own original work</h2>
+          <div className={`w-full max-w-2xl rounded-[1.35rem] border p-6 sm:p-7 ${surfaceClass}`}>
+            <p className={`text-[0.68rem] font-semibold uppercase tracking-[0.24em] ${mutedText}`}>Public book</p>
+            <h2 className={`mt-3 font-display text-[2rem] tracking-[-0.03em] ${headingText}`}>Publish your own original work</h2>
             <p className={`mt-3 text-sm leading-7 ${mutedText}`}>
               Private Workspace and Public Book are different states. Do not publish books, chapters, EPUBs, web novels, paid content, or third-party works unless you own the rights or have explicit permission.
             </p>
@@ -707,8 +761,19 @@ export default function LibraryPage() {
               </label>
             </div>
             <div className="mt-6 flex justify-end gap-3">
-              <button type="button" onClick={() => setPublishBook(null)} className={`rounded-full px-4 py-2 text-sm ${controlClass}`}>Cancel</button>
-              <button type="button" disabled={!publishConfirmed || !publishSlug.trim() || busyBookId === publishBook.id} onClick={() => void handlePublish(publishBook)} className="rounded-full bg-[#33206f] px-5 py-2 text-sm font-semibold text-white disabled:opacity-50">
+              <button
+                type="button"
+                onClick={() => setPublishBook(null)}
+                className={`rounded-xl border px-4 py-2 text-sm font-medium transition ${isDark ? "border-white/[0.08] bg-[#1f2427] text-[#ebe7df] hover:bg-[#252b2f]" : "border-stone-200 bg-white text-stone-800 hover:bg-stone-50"}`}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={!publishConfirmed || !publishSlug.trim() || busyBookId === publishBook.id}
+                onClick={() => void handlePublish(publishBook)}
+                className="rounded-xl bg-[#1f615d] px-5 py-2 text-sm font-semibold text-white transition hover:bg-[#194f4c] disabled:opacity-50"
+              >
                 Publish publicly
               </button>
             </div>
@@ -722,50 +787,71 @@ export default function LibraryPage() {
 function SectionHeading({
   icon,
   title,
-  actionLabel,
-  actionHandler,
+  helperText,
   isDark,
 }: {
   icon: ReactNode
   title: string
-  actionLabel?: string
-  actionHandler?: () => void
+  helperText?: string
   isDark: boolean
 }) {
   return (
-    <div className="flex items-center justify-between gap-4">
+    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex items-center gap-2.5">
         {icon}
-        <h2 className={`text-[1.05rem] font-medium tracking-[-0.01em] ${isDark ? "text-[#f5f0e8]" : "text-stone-900"}`}>{title}</h2>
+        <h2 className={`text-[1.08rem] font-semibold tracking-[-0.01em] ${isDark ? "text-[#f5f0e8]" : "text-stone-900"}`}>{title}</h2>
       </div>
 
-      {actionLabel && actionHandler ? (
-        <button
-          type="button"
-          onClick={actionHandler}
-          className={`inline-flex items-center gap-2 text-sm transition ${isDark ? "text-violet-300 hover:text-violet-200" : "text-violet-600 hover:text-violet-700"}`}
-        >
-          {actionLabel}
-          <ChevronRightIcon />
-        </button>
-      ) : null}
+      {helperText ? <p className={`text-sm ${isDark ? "text-[#9e998f]" : "text-stone-600"}`}>{helperText}</p> : null}
     </div>
   )
 }
 
 function LoadingPanel({ isDark, label }: { isDark: boolean; label: string }) {
   return (
-    <div className={`rounded-[1.35rem] border border-dashed px-6 py-16 text-center ${isDark ? "border-white/[0.08] bg-[#0d0d14] text-[#9f9da7]" : "border-stone-300 bg-white/60 text-stone-500"}`}>
-      {label}
+    <div className={`rounded-[1.35rem] border border-dashed px-6 py-16 text-center ${isDark ? "border-white/[0.08] bg-[#191d20] text-[#9f9b94]" : "border-stone-300 bg-[#fbfaf7] text-stone-500"}`}>
+      <div className="mx-auto flex max-w-sm flex-col items-center gap-3">
+        <div className={`h-10 w-10 animate-pulse rounded-full ${isDark ? "bg-white/[0.08]" : "bg-stone-200"}`} />
+        <p className="text-sm">{label}</p>
+      </div>
     </div>
   )
 }
 
-function EmptyPanel({ isDark, title, body }: { isDark: boolean; title: string; body: string }) {
+function EmptyPanel({
+  isDark,
+  title,
+  body,
+  actionLabel,
+  actionHandler,
+}: {
+  isDark: boolean
+  title: string
+  body: string
+  actionLabel?: string
+  actionHandler?: () => void
+}) {
   return (
-    <div className={`rounded-[1.35rem] border border-dashed px-6 py-16 text-center ${isDark ? "border-white/[0.08] bg-[#0d0d14]" : "border-stone-300 bg-white/60"}`}>
-      <p className={`text-xl font-medium ${isDark ? "text-[#f5f0e8]" : "text-stone-900"}`}>{title}</p>
-      <p className={`mx-auto mt-3 max-w-lg text-sm ${isDark ? "text-[#9f9da7]" : "text-stone-500"}`}>{body}</p>
+    <div className={`rounded-[1.35rem] border border-dashed px-6 py-16 text-center ${isDark ? "border-white/[0.08] bg-[#191d20]" : "border-stone-300 bg-[#fbfaf7]"}`}>
+      <div className="mx-auto flex max-w-xl flex-col items-center">
+        <div className={`flex h-14 w-14 items-center justify-center rounded-full ${isDark ? "bg-[#22272a] text-[#d0c8bc]" : "bg-[#eef3ef] text-[#1f615d]"}`}>
+          <FolderIcon className="h-6 w-6" />
+        </div>
+        <p className={`mt-5 text-[1.75rem] font-semibold tracking-[-0.02em] ${isDark ? "text-[#f5f0e8]" : "text-stone-900"}`}>{title}</p>
+        <p className={`mx-auto mt-3 max-w-lg text-sm leading-7 ${isDark ? "text-[#9f9b94]" : "text-stone-500"}`}>{body}</p>
+        {actionLabel && actionHandler ? (
+          <button
+            type="button"
+            onClick={actionHandler}
+            className={`mt-6 inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border px-5 text-sm font-medium transition ${
+              isDark ? "border-[#417672] bg-[#1f2427] text-[#efe9df] hover:bg-[#252b2f]" : "border-[#9fc1be] bg-white text-[#1f615d] hover:bg-[#f4f8f7]"
+            }`}
+          >
+            <PlusIcon />
+            {actionLabel}
+          </button>
+        ) : null}
+      </div>
     </div>
   )
 }
@@ -808,6 +894,10 @@ function ProjectCard({
   const warningCount = countWarnings(book)
   const isArchived = !!book.archived_at
   const publicSampleStatus = getPublicSampleStatus(book)
+  const unitLabel = storyUnitLabel(book.work_type, true)
+  const toneClass = isDark ? "text-[#f5f0e8]" : "text-stone-950"
+  const subtextClass = isDark ? "text-[#b8b2a8]" : "text-stone-600"
+  const metaClass = isDark ? "text-[#9f9b94]" : "text-stone-500"
 
   return (
     <article
@@ -820,27 +910,29 @@ function ProjectCard({
           onOpen()
         }
       }}
-      className={`group relative cursor-pointer rounded-[1.35rem] border p-6 transition duration-300 hover:-translate-y-0.5 hover:border-violet-400/20 hover:shadow-[0_24px_60px_-44px_rgba(109,40,217,0.72)] focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/45 ${
-        isDark ? "border-white/[0.06] bg-[#101018]" : "border-stone-200/80 bg-white/82"
+      className={`group relative cursor-pointer rounded-[1.35rem] border p-5 transition duration-200 hover:border-[#9fc1be] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#1f615d]/30 ${
+        isDark ? "border-white/[0.08] bg-[#1f2427] hover:bg-[#23292c]" : "border-stone-200 bg-white hover:bg-[#fcfbf8]"
       }`}
     >
       <div className="flex h-full flex-col">
         <div className="flex items-start justify-between gap-4">
           <div className="flex min-w-0 items-start gap-4">
-            <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-full border shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] ${accentClass}`}>
+            <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border ${accentClass}`}>
               <ProjectGlyph glyph={getProjectGlyph(book)} />
             </div>
 
             <div className="min-w-0">
-              <div className="flex items-center gap-3">
-                <h3 className={`truncate font-serif text-[2rem] leading-tight tracking-[-0.03em] ${isDark ? "text-[#f7f3ed]" : "text-stone-950"}`}>
+              <div className="flex items-center gap-2.5">
+                <h3 className={`truncate text-lg font-semibold tracking-[-0.02em] ${toneClass}`}>
                   {book.title}
                 </h3>
-                <span className={`h-2.5 w-2.5 rounded-full ${DOT_CLASSES[book.status]}`} />
+                <span className={`h-2 w-2 rounded-full ${DOT_CLASSES[book.status]}`} />
               </div>
-              <p className={`truncate text-[0.95rem] ${isDark ? "text-[#b7b4bd]" : "text-stone-600"}`}>{getGenreLabel(book)}</p>
+              <p className={`mt-1 truncate text-sm ${subtextClass}`}>
+                {getGenreLabel(book)} <span className={metaClass}>·</span> {book.work_type === "screenplay" ? "Screenplay" : "Novel"}
+              </p>
               {publicSampleStatus ? (
-                <p className={`mt-2 inline-flex rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${isDark ? "bg-cyan-400/12 text-cyan-200" : "bg-cyan-100 text-cyan-800"}`}>
+                <p className={`mt-2 inline-flex rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${isDark ? "bg-cyan-400/12 text-cyan-200" : "bg-cyan-100 text-cyan-800"}`}>
                   {publicSampleStatus}
                 </p>
               ) : null}
@@ -854,7 +946,7 @@ function ProjectCard({
                 event.stopPropagation()
                 onMenuToggle()
               }}
-              className={`relative z-20 rounded-full p-2 transition ${isDark ? "text-[#8c8994] hover:bg-white/[0.06] hover:text-white" : "text-stone-500 hover:bg-stone-100 hover:text-stone-900"}`}
+              className={`relative z-20 rounded-lg p-2 transition ${isDark ? "text-[#8c8994] hover:bg-white/[0.06] hover:text-white" : "text-stone-500 hover:bg-stone-100 hover:text-stone-900"}`}
               aria-label={`Open actions for ${book.title}`}
             >
               <DotsIcon />
@@ -881,25 +973,25 @@ function ProjectCard({
           </div>
         </div>
 
-        <p className={`mt-7 text-[1.05rem] ${isDark ? "text-[#d8d3cb]" : "text-stone-700"}`}>{getProgressLine(book)}</p>
+        <p className={`mt-5 text-sm leading-6 ${subtextClass}`}>{getProgressLine(book)}</p>
 
-        <div className="mt-5">
+        <div className="mt-5 space-y-3">
           <div className={`h-1.5 overflow-hidden rounded-full ${isDark ? "bg-white/[0.08]" : "bg-stone-200"}`}>
-            <div className="h-full rounded-full bg-[linear-gradient(90deg,#8b5cf6,#a78bfa)]" style={{ width: `${progress}%` }} />
+            <div className="h-full rounded-full bg-[#1f615d]" style={{ width: `${progress}%` }} />
           </div>
 
-          <div className={`mt-4 flex items-center justify-between gap-4 text-[0.95rem] ${isDark ? "text-[#c8c4bd]" : "text-stone-700"}`}>
+          <div className={`flex items-center justify-between gap-4 text-sm ${subtextClass}`}>
             <span>{formatNumber(currentWords)} / {formatNumber(targetWords)} words</span>
-            <span>{progress}%</span>
+            <span>{progress}% complete</span>
           </div>
 
-          <p className={`mt-1.5 text-[0.95rem] ${isDark ? "text-[#8c8994]" : "text-stone-500"}`}>{formatRelativeTime(getBookUpdatedAt(book))}</p>
+          <p className={`text-sm ${metaClass}`}>{formatRelativeTime(getBookUpdatedAt(book))}</p>
         </div>
 
-        <div className={`mt-auto flex items-center gap-10 pt-8 text-[0.95rem] ${isDark ? "text-[#b7b4bd]" : "text-stone-600"}`}>
-          <MetaBadge icon={<GroupIcon />} value={String(book.total_chapters ?? 0)} />
-          <MetaBadge icon={<PageIcon />} value={String(Math.max(1, Math.round(currentWords / 1000)))} />
-          <MetaBadge icon={<AlertIcon />} value={String(warningCount)} />
+        <div className={`mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 border-t pt-4 text-sm ${isDark ? "border-white/[0.08] text-[#b7b2aa]" : "border-stone-200 text-stone-600"}`}>
+          <MetaBadge icon={<GroupIcon />} value={`${book.total_chapters ?? 0} ${unitLabel}`} />
+          <MetaBadge icon={<PageIcon />} value={`${Math.max(1, Math.round(currentWords / 1000))}k words`} />
+          <MetaBadge icon={<AlertIcon />} value={`${warningCount} warnings`} />
         </div>
       </div>
     </article>
@@ -943,6 +1035,8 @@ function ProjectRow({
   const targetWords = estimateTargetWordCount(book, currentWords)
   const isArchived = !!book.archived_at
   const publicSampleStatus = getPublicSampleStatus(book)
+  const subtextClass = isDark ? "text-[#b8b2a8]" : "text-stone-600"
+  const metaClass = isDark ? "text-[#9f9b94]" : "text-stone-500"
 
   return (
     <article
@@ -955,34 +1049,36 @@ function ProjectRow({
           onOpen()
         }
       }}
-      className={`relative cursor-pointer rounded-[1.35rem] border px-6 py-5 transition hover:border-violet-400/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/45 ${isDark ? "border-white/[0.06] bg-[#101018]" : "border-stone-200/80 bg-white/82"}`}
+      className={`relative cursor-pointer rounded-[1.35rem] border px-5 py-5 transition hover:border-[#9fc1be] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#1f615d]/30 ${isDark ? "border-white/[0.08] bg-[#1f2427] hover:bg-[#23292c]" : "border-stone-200 bg-white hover:bg-[#fcfbf8]"}`}
     >
       <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
         <div className="flex min-w-0 items-center gap-4">
-          <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-full border shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] ${accentClass}`}>
+          <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border ${accentClass}`}>
             <ProjectGlyph glyph={getProjectGlyph(book)} />
           </div>
 
           <div className="min-w-0">
-            <div className="flex items-center gap-3">
-              <h3 className={`truncate font-serif text-[2rem] tracking-[-0.03em] ${isDark ? "text-[#f7f3ed]" : "text-stone-950"}`}>{book.title}</h3>
-              <span className={`h-2.5 w-2.5 rounded-full ${DOT_CLASSES[book.status]}`} />
+            <div className="flex items-center gap-2.5">
+              <h3 className={`truncate text-lg font-semibold tracking-[-0.02em] ${isDark ? "text-[#f5f0e8]" : "text-stone-950"}`}>{book.title}</h3>
+              <span className={`h-2 w-2 rounded-full ${DOT_CLASSES[book.status]}`} />
             </div>
-            <p className={`mt-1 truncate text-[0.95rem] ${isDark ? "text-[#b7b4bd]" : "text-stone-600"}`}>{getGenreLabel(book)}</p>
+            <p className={`mt-1 truncate text-sm ${subtextClass}`}>
+              {getGenreLabel(book)} <span className={metaClass}>·</span> {book.work_type === "screenplay" ? "Screenplay" : "Novel"}
+            </p>
             {publicSampleStatus ? (
-              <p className={`mt-2 inline-flex rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${isDark ? "bg-cyan-400/12 text-cyan-200" : "bg-cyan-100 text-cyan-800"}`}>
+              <p className={`mt-2 inline-flex rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${isDark ? "bg-cyan-400/12 text-cyan-200" : "bg-cyan-100 text-cyan-800"}`}>
                 {publicSampleStatus}
               </p>
             ) : null}
-            <p className={`mt-1.5 text-[0.95rem] ${isDark ? "text-[#8c8994]" : "text-stone-500"}`}>{getProgressLine(book)}</p>
+            <p className={`mt-1.5 text-sm ${metaClass}`}>{getProgressLine(book)}</p>
           </div>
         </div>
 
-        <div className="flex flex-1 flex-col gap-3 xl:max-w-[34rem]">
+        <div className="flex flex-1 flex-col gap-3 xl:max-w-[32rem]">
           <div className={`h-1.5 overflow-hidden rounded-full ${isDark ? "bg-white/[0.08]" : "bg-stone-200"}`}>
-            <div className="h-full rounded-full bg-[linear-gradient(90deg,#8b5cf6,#a78bfa)]" style={{ width: `${progress}%` }} />
+            <div className="h-full rounded-full bg-[#1f615d]" style={{ width: `${progress}%` }} />
           </div>
-          <div className={`flex flex-wrap items-center gap-x-5 gap-y-2 text-[0.95rem] ${isDark ? "text-[#b7b4bd]" : "text-stone-600"}`}>
+          <div className={`flex flex-wrap items-center gap-x-5 gap-y-2 text-sm ${subtextClass}`}>
             <span>{formatNumber(currentWords)} / {formatNumber(targetWords)} words</span>
             <span>{progress}% complete</span>
             <span>{formatRelativeTime(getBookUpdatedAt(book))}</span>
@@ -1012,7 +1108,7 @@ function ProjectRow({
                 event.stopPropagation()
                 onMenuToggle()
               }}
-              className={`relative z-20 rounded-full p-2 transition ${isDark ? "text-[#8c8994] hover:bg-white/[0.06] hover:text-white" : "text-stone-500 hover:bg-stone-100 hover:text-stone-900"}`}
+              className={`relative z-20 rounded-lg p-2 transition ${isDark ? "text-[#8c8994] hover:bg-white/[0.06] hover:text-white" : "text-stone-500 hover:bg-stone-100 hover:text-stone-900"}`}
               aria-label={`Open actions for ${book.title}`}
             >
               <DotsIcon />
@@ -1077,7 +1173,7 @@ function ProjectMenu({
   return (
     <div
       onClick={(event) => event.stopPropagation()}
-      className={`absolute right-0 top-full z-30 mt-2 w-48 overflow-hidden rounded-[1.15rem] border py-2 shadow-[0_30px_90px_-40px_rgba(0,0,0,0.85)] ${isDark ? "border-white/[0.08] bg-[#12121a]" : "border-stone-200 bg-white"}`}
+      className={`absolute right-0 top-full z-30 mt-2 w-48 overflow-hidden rounded-[1rem] border py-2 shadow-[0_20px_50px_-30px_rgba(0,0,0,0.35)] ${isDark ? "border-white/[0.08] bg-[#1b2023]" : "border-stone-200 bg-white"}`}
     >
       <MenuButton isDark={isDark} onClick={onTogglePinned} label={isPinned ? "Unpin project" : "Pin project"} />
       {isAuthor ? <MenuButton isDark={isDark} onClick={onAddChapter} label={`Add ${storyUnitLabel(workType)}`} /> : null}
@@ -1142,17 +1238,17 @@ function CreateProjectCard({ isDark, onCreate }: { isDark: boolean; onCreate: ()
     <button
       type="button"
       onClick={onCreate}
-      className={`flex min-h-[18.25rem] flex-col items-center justify-center rounded-[1.35rem] border border-dashed p-8 text-center transition hover:-translate-y-0.5 ${
+      className={`flex min-h-[18.25rem] flex-col items-center justify-center rounded-[1.35rem] border border-dashed p-8 text-center transition ${
         isDark
-          ? "border-white/[0.08] bg-[#0d0d14] hover:border-violet-400/30 hover:bg-[#11111a]"
-          : "border-stone-300 bg-white/65 hover:border-violet-300 hover:bg-white"
+          ? "border-white/[0.08] bg-[#191d20] hover:border-[#3d7a75] hover:bg-[#1f2427]"
+          : "border-stone-300 bg-[#fbfaf7] hover:border-[#9fc1be] hover:bg-white"
       }`}
     >
-      <div className={`flex h-20 w-20 items-center justify-center rounded-full border ${isDark ? "border-white/[0.1] text-[#b7b4bd]" : "border-stone-300 text-stone-500"}`}>
+      <div className={`flex h-16 w-16 items-center justify-center rounded-2xl border ${isDark ? "border-white/[0.08] bg-[#202528] text-[#d0c8bc]" : "border-stone-200 bg-white text-[#1f615d]"}`}>
         <PlusLargeIcon />
       </div>
-      <h3 className={`mt-8 font-serif text-[2rem] tracking-[-0.03em] ${isDark ? "text-[#f7f3ed]" : "text-stone-900"}`}>Create New Project</h3>
-      <p className={`mt-3 text-lg ${isDark ? "text-[#9f9da7]" : "text-stone-500"}`}>Start a new story</p>
+      <h3 className={`mt-6 text-xl font-semibold tracking-[-0.02em] ${isDark ? "text-[#f7f3ed]" : "text-stone-900"}`}>Create New Project</h3>
+      <p className={`mt-2 text-sm leading-7 ${isDark ? "text-[#9f9b94]" : "text-stone-500"}`}>Start a new story</p>
     </button>
   )
 }
@@ -1164,15 +1260,15 @@ function CreateProjectRow({ isDark, onCreate }: { isDark: boolean; onCreate: () 
       onClick={onCreate}
       className={`flex items-center justify-between rounded-[1.35rem] border border-dashed px-5 py-5 text-left transition ${
         isDark
-          ? "border-white/[0.08] bg-[#0d0d14] hover:border-violet-400/30 hover:bg-[#11111a]"
-          : "border-stone-300 bg-white/65 hover:border-violet-300 hover:bg-white"
+          ? "border-white/[0.08] bg-[#191d20] hover:border-[#3d7a75] hover:bg-[#1f2427]"
+          : "border-stone-300 bg-[#fbfaf7] hover:border-[#9fc1be] hover:bg-white"
       }`}
     >
       <div>
-        <h3 className={`font-serif text-[2rem] tracking-[-0.03em] ${isDark ? "text-[#f7f3ed]" : "text-stone-900"}`}>Create New Project</h3>
-        <p className={`mt-2 ${isDark ? "text-[#9f9da7]" : "text-stone-500"}`}>Start a new story</p>
+        <h3 className={`text-lg font-semibold tracking-[-0.02em] ${isDark ? "text-[#f7f3ed]" : "text-stone-900"}`}>Create New Project</h3>
+        <p className={`mt-1 text-sm ${isDark ? "text-[#9f9b94]" : "text-stone-500"}`}>Start a new story</p>
       </div>
-      <div className={`flex h-14 w-14 items-center justify-center rounded-full border ${isDark ? "border-white/[0.08] text-[#b7b4bd]" : "border-stone-300 text-stone-500"}`}>
+      <div className={`flex h-12 w-12 items-center justify-center rounded-xl border ${isDark ? "border-white/[0.08] bg-[#202528] text-[#d0c8bc]" : "border-stone-200 bg-white text-[#1f615d]"}`}>
         <PlusLargeIcon />
       </div>
     </button>
@@ -1231,6 +1327,14 @@ function PinIcon({ className }: { className?: string }) {
   )
 }
 
+function FolderIcon({ className }: { className?: string }) {
+  return (
+    <svg className={`h-4 w-4 ${className ?? ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3.5 7.5A2.5 2.5 0 016 5h4l2 2H18a2.5 2.5 0 012.5 2.5v7A2.5 2.5 0 0118 19H6a2.5 2.5 0 01-2.5-2.5v-9z" />
+    </svg>
+  )
+}
+
 function PlusIcon() {
   return (
     <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1277,14 +1381,6 @@ function AlertIcon() {
     <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.7}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M12 4l8 14H4l8-14z" />
       <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v4M12 17h.01" />
-    </svg>
-  )
-}
-
-function ChevronRightIcon() {
-  return (
-    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9 6l6 6-6 6" />
     </svg>
   )
 }

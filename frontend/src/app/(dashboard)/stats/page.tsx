@@ -5,10 +5,7 @@ import { useQuery } from "@tanstack/react-query"
 
 import {
   WorkspaceEmptyState,
-  WorkspaceHeader,
-  WorkspaceMetric,
   WorkspacePage,
-  WorkspacePanel,
 } from "@/components/ui/Workspace"
 import { booksApi } from "@/lib/api/books"
 import { asQueryKey, booksStatsCacheKey } from "@/lib/query/cacheKeys"
@@ -36,18 +33,37 @@ export default function StatsPage() {
   return (
     <WorkspacePage className="min-h-0 bg-transparent">
       <div className="space-y-8 pb-12">
-        <WorkspacePanel tone="strong" className="p-6 sm:p-8">
-          <WorkspaceHeader
-            eyebrow="Dashboard"
-            title="Writing momentum, not just account totals."
-            description="This dashboard now tracks live writing output across the windows authors usually care about most: today, this week, longer rolling streaks, and the recent heatmap of saved work."
-            meta={
-              <div className="app-chip">
-                {stats ? `${formatWordCount(stats.writing.today.words)} today` : "Syncing writing stats"}
+        <section className="overflow-hidden rounded-[1.9rem] border-2 border-slate-200 bg-white p-6 shadow-[0_24px_64px_-50px_rgba(15,23,42,0.18)] dark:border-slate-700/70 dark:bg-[#10171d] sm:p-8 lg:p-10">
+          <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_240px] lg:items-center">
+            <div className="min-w-0">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-[#1f615d] dark:text-[#69c6b1]">Stats dashboard</p>
+              <h1 className="mt-4 max-w-[700px] font-display text-[3rem] leading-[0.94] tracking-[-0.06em] text-stone-950 dark:text-[#f3ede4] sm:text-[4rem]">
+                Writing momentum,
+                <br className="hidden sm:block" />
+                not just account totals.
+              </h1>
+              <p className="mt-5 max-w-[620px] text-[1.02rem] leading-8 text-stone-600 dark:text-slate-300">
+                Track your writing output across time, see how your habits compound, and stay aligned with your goals.
+              </p>
+            </div>
+
+            <div className="flex justify-start lg:justify-end">
+              <div className="min-w-0 rounded-[1.3rem] border-2 border-slate-200 bg-[#fcfcfb] px-5 py-5 dark:border-slate-700/70 dark:bg-[#131c23]">
+                <div className="flex items-center gap-4">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-2 border-slate-200 bg-emerald-50 text-[#1f615d] dark:border-slate-700/70 dark:bg-[#18242a] dark:text-[#69c6b1]">
+                    <LeafIcon />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-[2.2rem] font-semibold tracking-[-0.05em] text-[#1f615d] dark:text-[#f3ede4]">
+                      {stats ? stats.writing.today.words.toLocaleString() : "0"}
+                    </p>
+                    <p className="text-base text-stone-600 dark:text-slate-300">words today</p>
+                  </div>
+                </div>
               </div>
-            }
-          />
-        </WorkspacePanel>
+            </div>
+          </div>
+        </section>
 
         {loading ? (
           <WorkspaceEmptyState
@@ -61,22 +77,22 @@ export default function StatsPage() {
           />
         ) : (
           <>
-            <section className="grid gap-6 xl:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.75fr)]">
-              <WorkspacePanel className="overflow-hidden p-0">
-                <div className="rounded-[1.9rem] border border-[#3e352d] bg-[#1f1a16] p-5 text-[#f3eadc] shadow-[0_32px_90px_-55px_rgba(0,0,0,0.78)] sm:p-6">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-                    <div>
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-[#b7a995]">Writing dashboard</p>
-                      <h2 className="mt-3 text-2xl font-semibold tracking-[-0.03em] text-[#fff6ea] sm:text-[2rem]">
-                        See the pace of the work, not only the scale of the library.
-                      </h2>
+            <section className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.55fr)_320px]">
+              <div className="min-w-0 space-y-6">
+                <section className="overflow-hidden rounded-[1.7rem] border-2 border-slate-200 bg-white p-5 shadow-[0_24px_64px_-50px_rgba(15,23,42,0.18)] dark:border-slate-700/70 dark:bg-[#10171d] sm:p-6">
+                  <div className="flex items-start gap-3">
+                    <span className="mt-1 text-stone-500 dark:text-slate-400">
+                      <TrendIcon />
+                    </span>
+                    <div className="min-w-0">
+                      <h2 className="text-[1.9rem] font-semibold tracking-[-0.035em] text-stone-950 dark:text-[#f3ede4]">Writing momentum overview</h2>
+                      <p className="mt-2 text-sm leading-7 text-stone-600 dark:text-slate-300">
+                        Your writing output across key time windows.
+                      </p>
                     </div>
-                    <p className="max-w-sm text-sm leading-7 text-[#c8bba9]">
-                      Each save now feeds a history view with calendar windows, rolling totals, a contribution heatmap, and today&apos;s chapter-by-chapter gains.
-                    </p>
                   </div>
 
-                  <div className="mt-6 grid gap-4 sm:grid-cols-2">
+                  <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
                     {writingCards.map((card) => (
                       <WritingStatCard
                         key={card.key}
@@ -86,73 +102,76 @@ export default function StatsPage() {
                       />
                     ))}
                   </div>
+                </section>
 
-                  <div className="mt-6 rounded-[1.55rem] border border-[#3a3129] bg-[#25201b] p-4 sm:p-5">
-                    <WritingHeatmapPanel
-                      heatmap={heatmap}
-                      entriesTodayCount={stats.writing.entries_today.length}
-                    />
+                <section className="overflow-hidden rounded-[1.7rem] border-2 border-slate-200 bg-white p-5 shadow-[0_24px_64px_-50px_rgba(15,23,42,0.18)] dark:border-slate-700/70 dark:bg-[#10171d] sm:p-6">
+                  <WritingHeatmapPanel
+                    heatmap={heatmap}
+                    entriesTodayCount={stats.writing.entries_today.length}
+                  />
+                </section>
+              </div>
+
+              <div className="min-w-0 space-y-6">
+                <section className="overflow-hidden rounded-[1.7rem] border-2 border-slate-200 bg-white p-5 shadow-[0_24px_64px_-50px_rgba(15,23,42,0.18)] dark:border-slate-700/70 dark:bg-[#10171d] sm:p-6">
+                  <EntriesTodayPanel entries={stats.writing.entries_today} />
+                </section>
+
+                <section className="overflow-hidden rounded-[1.7rem] border-2 border-slate-200 bg-white p-5 shadow-[0_24px_64px_-50px_rgba(15,23,42,0.18)] dark:border-slate-700/70 dark:bg-[#10171d] sm:p-6">
+                  <div className="flex items-start gap-3">
+                    <span className="mt-1 text-stone-500 dark:text-slate-400">
+                      <TargetIcon />
+                    </span>
+                    <div className="min-w-0">
+                      <h2 className="text-[1.9rem] font-semibold tracking-[-0.035em] text-stone-950 dark:text-[#f3ede4]">Targets</h2>
+                      <p className="mt-2 text-sm leading-7 text-stone-600 dark:text-slate-300">
+                        Stay on track with your daily goal.
+                      </p>
+                    </div>
                   </div>
-                </div>
-              </WorkspacePanel>
 
-              <div className="space-y-6">
-                <WorkspacePanel className="overflow-hidden p-0">
-                  <div className="rounded-[1.9rem] border border-[#3e352d] bg-[#1f1a16] p-5 text-[#f3eadc] shadow-[0_32px_90px_-55px_rgba(0,0,0,0.78)] sm:p-6">
-                    <EntriesTodayPanel entries={stats.writing.entries_today} />
+                  <div className="mt-5 min-w-0 overflow-hidden rounded-[1.35rem] border-2 border-slate-200 bg-[#fcfcfb] p-4 dark:border-slate-700/70 dark:bg-[#121920]">
+                    <div className="grid gap-4">
+                      <ProgressSummary
+                        label="Today"
+                        current={stats.writing.today.words}
+                        target={stats.writing.today.target_words ?? 0}
+                      />
+                      <ProgressSummary
+                        label="This Week"
+                        current={stats.writing.this_week.words}
+                        target={stats.writing.this_week.target_words ?? 0}
+                      />
+                    </div>
                   </div>
-                </WorkspacePanel>
-
-                <WorkspacePanel className="p-6">
-                  <p className="app-eyebrow">Targets</p>
-                  <h2 className="mt-3 text-2xl font-semibold text-[rgb(var(--foreground))]">
-                    The progress bars stay anchored to your daily goal.
-                  </h2>
-                  <p className="mt-2 text-sm leading-7 text-[rgb(var(--muted-foreground))]">
-                    Today tracks against one daily target. This week tracks against seven daily targets, so the dashboard still reads clearly even when you write in bursts.
-                  </p>
-
-                  <div className="mt-5 grid gap-4">
-                    <ProgressSummary
-                      label="Today"
-                      current={stats.writing.today.words}
-                      target={stats.writing.today.target_words ?? 0}
-                    />
-                    <ProgressSummary
-                      label="This Week"
-                      current={stats.writing.this_week.words}
-                      target={stats.writing.this_week.target_words ?? 0}
-                    />
-                  </div>
-                </WorkspacePanel>
+                </section>
               </div>
             </section>
 
-            <WorkspacePanel className="p-6">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-                <div>
-                  <p className="app-eyebrow">Workspace totals</p>
-                  <h2 className="mt-3 text-2xl font-semibold text-[rgb(var(--foreground))]">
-                    The broader account picture is still here.
-                  </h2>
+            <section className="overflow-hidden rounded-[1.7rem] border-2 border-slate-200 bg-white p-5 shadow-[0_24px_64px_-50px_rgba(15,23,42,0.18)] dark:border-slate-700/70 dark:bg-[#10171d] sm:p-6">
+              <div className="flex items-start gap-3">
+                <span className="mt-1 text-stone-500 dark:text-slate-400">
+                  <StackIcon />
+                </span>
+                <div className="min-w-0">
+                  <h2 className="text-[1.9rem] font-semibold tracking-[-0.035em] text-stone-950 dark:text-[#f3ede4]">Workspace totals</h2>
+                  <p className="mt-2 break-words text-sm leading-7 text-stone-600 dark:text-slate-300">
+                    Key totals and usage across your LoreVia workspace.
+                  </p>
                 </div>
-                <p className="max-w-2xl text-sm leading-7 text-[rgb(var(--muted-foreground))]">
-                  Writing momentum now leads the page, but public reading milestones and private workspace load remain useful context for everything LoreVia is carrying for you.
-                </p>
               </div>
 
-              <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
                 {secondaryStats.map((item) => (
-                  <WorkspaceMetric
+                  <WorkspaceTotalsCard
                     key={item.label}
                     label={item.label}
                     value={item.value}
                     note={item.note}
-                    accent={item.label === "Words read" ? "accent" : item.label === "Uploads tracked" ? "success" : "default"}
                   />
                 ))}
               </div>
-            </WorkspacePanel>
+            </section>
           </>
         )}
       </div>
@@ -170,32 +189,41 @@ function WritingStatCard({
   showProgress: boolean
 }) {
   const progressWidth = Math.max(0, Math.min(100, stat.progress_pct ?? 0))
+  const description = showProgress
+    ? `${stat.words.toLocaleString()} / ${stat.target_words?.toLocaleString() ?? "0"} words`
+    : label.startsWith("Last")
+      ? "Rolling window"
+      : "Calendar window"
 
   return (
-    <article className="rounded-[1.45rem] border border-[#3a3129] bg-[#28221d] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
-      <p className="text-[0.95rem] font-medium text-[#b8ac9a]">{label}</p>
-      <p className="mt-2 text-[1.95rem] font-semibold tracking-[-0.04em] text-[#fff6ea]">
-        {stat.words.toLocaleString()}
-        <span className="ml-2 text-base font-medium text-[#d6c8b7]">words</span>
+    <article className="min-w-0 overflow-hidden rounded-[1.35rem] border-2 border-slate-200 bg-[#fcfcfb] p-4 dark:border-slate-700/70 dark:bg-[#121920]">
+      <div className="flex items-center gap-2 text-stone-600 dark:text-slate-400">
+        <CalendarIcon />
+        <p className="text-[0.95rem] font-medium">{label}</p>
+      </div>
+      <p className="mt-3 break-words text-[1.95rem] font-semibold tracking-[-0.04em] text-stone-950 dark:text-[#fff6ea]">
+        {stat.words.toLocaleString()}{" "}
+        <span className="text-base font-medium text-stone-500 dark:text-slate-400">words</span>
       </p>
 
       {showProgress && stat.target_words ? (
         <div className="mt-4">
-          <div className="flex items-center justify-between gap-3 text-xs text-[#b6a896]">
-            <span>{stat.words.toLocaleString()} / {stat.target_words.toLocaleString()} words</span>
+          <div className="flex items-center justify-between gap-3 text-xs text-stone-500 dark:text-slate-400">
+            <span>{description}</span>
             <span>{progressWidth}%</span>
           </div>
-          <div className="mt-2 h-2 rounded-full bg-[#4a4036]">
+          <div className="mt-3 h-2 rounded-full bg-stone-200 dark:bg-[#2a343d]">
             <div
-              className="h-full rounded-full bg-[#49d75f] shadow-[0_0_12px_rgba(73,215,95,0.45)]"
+              className="h-full rounded-full bg-emerald-500"
               style={{ width: `${progressWidth}%` }}
             />
           </div>
         </div>
       ) : (
-        <p className="mt-4 text-xs text-[#9d907f]">
-          {label.startsWith("Last") ? "Rolling time window" : "Calendar time window"}
-        </p>
+        <div className="mt-5">
+          <p className="text-xs text-stone-500 dark:text-slate-400">{description}</p>
+          <div className="mt-3 h-2 rounded-full bg-stone-200 dark:bg-[#2a343d]" />
+        </div>
       )}
     </article>
   )
@@ -211,13 +239,35 @@ function WritingHeatmapPanel({
   return (
     <div>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-[#b8aa99]">Recent cadence</p>
-          <h3 className="mt-2 text-lg font-semibold text-[#fff6ea]">Heatmap of saved writing</h3>
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-stone-500 dark:text-slate-400">
+            <DropletIcon />
+            <h3 className="text-[1.9rem] font-semibold tracking-[-0.035em] text-stone-950 dark:text-[#f3ede4]">Heatmap of saved writing</h3>
+          </div>
+          <p className="mt-2 text-sm leading-7 text-stone-600 dark:text-slate-300">
+            Daily writing activity over the past year.
+          </p>
         </div>
-        <p className="text-xs text-[#a99c8b]">
-          {entriesTodayCount} {entriesTodayCount === 1 ? "entry" : "entries"} logged today
-        </p>
+        <div className="flex items-center gap-2 text-xs text-stone-500 dark:text-slate-400">
+          <span>Less</span>
+          <div className="flex items-center gap-1">
+            {[0, 1, 2, 3, 4, 5].map((index) => (
+              <span
+                key={index}
+                className={cn(
+                  "h-3 w-3 rounded-[4px] border border-slate-200 dark:border-slate-700/70",
+                  index === 0 && "bg-stone-100 dark:bg-[#232a31]",
+                  index === 1 && "bg-emerald-100 dark:bg-[#24483f]",
+                  index === 2 && "bg-emerald-200 dark:bg-[#2c6a5a]",
+                  index === 3 && "bg-emerald-300 dark:bg-[#3b8e78]",
+                  index === 4 && "bg-emerald-400 dark:bg-[#59c3ad]",
+                  index === 5 && "bg-emerald-500 dark:bg-[#76d4c0]"
+                )}
+              />
+            ))}
+          </div>
+          <span>More</span>
+        </div>
       </div>
 
       <div className="mt-4 overflow-x-auto">
@@ -229,7 +279,7 @@ function WritingHeatmapPanel({
             {heatmap.months.map((month) => (
               <div
                 key={`${month.label}-${month.column}`}
-                className="text-[10px] font-medium text-[#978b7c]"
+                className="text-[10px] font-medium text-stone-500 dark:text-slate-400"
                 style={{ gridColumnStart: month.column + 1 }}
               >
                 {month.label}
@@ -240,7 +290,7 @@ function WritingHeatmapPanel({
           <div className="mt-2 flex gap-2">
             <div className="grid gap-1">
               {HEATMAP_WEEKDAY_LABELS.map((label) => (
-                <div key={label} className="flex h-[0.9rem] items-center text-[10px] text-[#978b7c]">
+                <div key={label} className="flex h-[0.9rem] items-center text-[10px] text-stone-500 dark:text-slate-400">
                   {label}
                 </div>
               ))}
@@ -261,6 +311,13 @@ function WritingHeatmapPanel({
           </div>
         </div>
       </div>
+
+      <div className="mt-5 flex items-center justify-between gap-4 text-sm text-stone-500 dark:text-slate-400">
+        <p className="break-words">Each square represents one day. Darker shades indicate more words written.</p>
+        <p className="shrink-0 text-[#1f615d] dark:text-[#69c6b1]">
+          {entriesTodayCount} {entriesTodayCount === 1 ? "active day" : "active days"}
+        </p>
+      </div>
     </div>
   )
 }
@@ -269,12 +326,12 @@ function HeatmapCell({ day }: { day: WritingHeatmapCell }) {
   return (
     <div
       className={cn(
-        "h-[0.9rem] w-[0.9rem] rounded-full border border-[#3b322a]",
-        day.level === 0 && "bg-[#332b24]",
-        day.level === 1 && "bg-[#44692f]",
-        day.level === 2 && "bg-[#4e9135]",
-        day.level === 3 && "bg-[#58c944]",
-        day.level === 4 && "bg-[#76f05d]"
+        "h-[0.9rem] w-[0.9rem] rounded-[4px] border border-slate-200 dark:border-slate-700/70",
+        day.level === 0 && "bg-stone-100 dark:bg-[#232a31]",
+        day.level === 1 && "bg-emerald-100 dark:bg-[#24483f]",
+        day.level === 2 && "bg-emerald-200 dark:bg-[#2c6a5a]",
+        day.level === 3 && "bg-emerald-300 dark:bg-[#3b8e78]",
+        day.level === 4 && "bg-emerald-400 dark:bg-[#59c3ad]"
       )}
       title={`${day.date}: ${formatWordCount(day.words)}`}
     />
@@ -284,32 +341,42 @@ function HeatmapCell({ day }: { day: WritingHeatmapCell }) {
 function EntriesTodayPanel({ entries }: { entries: WritingEntry[] }) {
   return (
     <div>
-      <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-[#b8aa99]">Entries today</p>
-      <h2 className="mt-3 text-2xl font-semibold tracking-[-0.03em] text-[#fff6ea]">
-        The chapters and sections that moved today.
-      </h2>
-      <p className="mt-2 text-sm leading-7 text-[#c8bba9]">
-        Every positive save is grouped here so the dashboard feels like a real daily ledger, not a single number with no story behind it.
-      </p>
+      <div className="flex items-start gap-3">
+        <span className="mt-1 text-stone-500 dark:text-slate-400">
+          <DocumentIcon />
+        </span>
+        <div className="min-w-0">
+          <h2 className="text-[1.9rem] font-semibold tracking-[-0.035em] text-stone-950 dark:text-[#f3ede4]">Entries today</h2>
+          <p className="mt-2 break-words text-sm leading-7 text-stone-600 dark:text-slate-300">
+            The chapters and sections that moved today.
+          </p>
+        </div>
+      </div>
 
       <div className="mt-5 space-y-3">
         {entries.length === 0 ? (
-          <div className="rounded-[1.35rem] border border-dashed border-[#4a4036] bg-[#28221d] p-4 text-sm text-[#b8ac9a]">
-            No entries yet today. The next saved chapter will appear here automatically.
+          <div className="flex min-h-[320px] flex-col items-center justify-center rounded-[1.35rem] border-2 border-slate-200 bg-[#fcfcfb] px-6 py-8 text-center dark:border-slate-700/70 dark:bg-[#121920]">
+            <div className="flex h-24 w-24 items-center justify-center rounded-full border-2 border-slate-200 bg-[#f4f7f6] text-stone-700 dark:border-slate-700/70 dark:bg-[#182028] dark:text-slate-300">
+              <DocumentIcon large />
+            </div>
+            <p className="mt-6 text-[1.9rem] font-semibold tracking-[-0.035em] text-stone-950 dark:text-[#f3ede4]">No entries saved today</p>
+            <p className="mt-3 max-w-[280px] text-sm leading-7 text-stone-600 dark:text-slate-300">
+              Your saved chapters and sections will appear here.
+            </p>
           </div>
         ) : (
           entries.map((entry) => (
             <div
               key={`${entry.book_id ?? "book"}-${entry.chapter_number ?? "chapter"}-${entry.title}`}
-              className="flex items-center justify-between gap-4 rounded-[1.35rem] border border-[#3a3129] bg-[#28221d] px-4 py-3"
+              className="flex min-w-0 items-center justify-between gap-4 overflow-hidden rounded-[1.35rem] border-2 border-slate-200 bg-[#fcfcfb] px-4 py-3 dark:border-slate-700/70 dark:bg-[#121920]"
             >
               <div className="min-w-0">
-                <p className="truncate text-lg font-medium text-[#fff6ea]">{entry.title}</p>
-                <p className="mt-1 text-xs text-[#9d907f]">
+                <p className="truncate text-lg font-medium text-stone-950 dark:text-[#fff6ea]">{entry.title}</p>
+                <p className="mt-1 text-xs text-stone-500 dark:text-[#9d907f]">
                   {entry.chapter_number ? `Chapter ${entry.chapter_number}` : "Section save"}
                 </p>
               </div>
-              <p className="shrink-0 text-lg font-semibold text-[#d7c8b8]">+{entry.words.toLocaleString()} words</p>
+              <p className="shrink-0 text-lg font-semibold text-stone-700 dark:text-[#d7c8b8]">+{entry.words.toLocaleString()} words</p>
             </div>
           ))
         )}
@@ -330,7 +397,7 @@ function ProgressSummary({
   const progressPct = target > 0 ? Math.max(0, Math.min(100, Math.round((current / target) * 100))) : 0
 
   return (
-    <div className="rounded-[1.35rem] border border-[rgba(var(--border),0.72)] bg-[rgba(255,255,255,0.44)] p-4 dark:bg-[rgba(255,255,255,0.03)]">
+    <div className="min-w-0 overflow-hidden rounded-[1.35rem] border-2 border-slate-200 bg-[rgba(255,255,255,0.44)] p-4 dark:border-slate-700/70 dark:bg-[rgba(255,255,255,0.03)]">
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm font-semibold text-[rgb(var(--foreground))]">{label}</p>
         <p className="text-xs text-[rgb(var(--muted-foreground))]">{progressPct}%</p>
@@ -345,5 +412,92 @@ function ProgressSummary({
         />
       </div>
     </div>
+  )
+}
+
+function WorkspaceTotalsCard({ label, value, note }: { label: string; value: string; note: string }) {
+  return (
+    <article className="min-w-0 overflow-hidden rounded-[1.25rem] border-2 border-slate-200 bg-[#fcfcfb] p-5 dark:border-slate-700/70 dark:bg-[#121920]">
+      <div className="flex items-start gap-3">
+        <div className="mt-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-2 border-slate-200 bg-[#f4f7f6] text-[#1f615d] dark:border-slate-700/70 dark:bg-[#182028] dark:text-[#69c6b1]">
+          <TotalsIcon />
+        </div>
+        <div className="min-w-0">
+          <p className="text-[2rem] font-semibold tracking-[-0.04em] text-stone-950 dark:text-[#f3ede4]">{value}</p>
+          <p className="text-sm font-semibold text-stone-950 dark:text-[#f3ede4]">{label}</p>
+          <p className="mt-2 break-words text-sm leading-6 text-stone-600 dark:text-slate-300">{note}</p>
+        </div>
+      </div>
+    </article>
+  )
+}
+
+function LeafIcon() {
+  return (
+    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18c5-1 9-5 10-10-4 1-8 5-10 10z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M8 16c2-4 5-7 9-9" />
+    </svg>
+  )
+}
+
+function TrendIcon() {
+  return (
+    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l5-5 4 4 7-8" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M14 7h6v6" />
+    </svg>
+  )
+}
+
+function CalendarIcon() {
+  return (
+    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <rect x="4.5" y="6" width="15" height="13.5" rx="2.2" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M8 4.5v3M16 4.5v3M4.5 10h15" />
+    </svg>
+  )
+}
+
+function DropletIcon() {
+  return (
+    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 3.5c3 4 5.5 7 5.5 10A5.5 5.5 0 016.5 13.5c0-3 2.5-6 5.5-10z" />
+    </svg>
+  )
+}
+
+function TargetIcon() {
+  return (
+    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <circle cx="12" cy="12" r="7.5" />
+      <circle cx="12" cy="12" r="3" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 12l6-6" />
+    </svg>
+  )
+}
+
+function StackIcon() {
+  return (
+    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4l8 4-8 4-8-4 8-4zM4 12l8 4 8-4M4 16l8 4 8-4" />
+    </svg>
+  )
+}
+
+function DocumentIcon({ large = false }: { large?: boolean }) {
+  return (
+    <svg className={large ? "h-10 w-10" : "h-5 w-5"} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M7 3.5h7l5 5V19a1.5 1.5 0 01-1.5 1.5h-10A1.5 1.5 0 016 19V5A1.5 1.5 0 017.5 3.5z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M14 3.5V9h5M9 13h6M9 17h6" />
+    </svg>
+  )
+}
+
+function TotalsIcon() {
+  return (
+    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M5 18V10M12 18V6M19 18v-8" />
+    </svg>
   )
 }

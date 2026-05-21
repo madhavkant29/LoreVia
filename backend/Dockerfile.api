@@ -1,19 +1,29 @@
 FROM python:3.12-slim
 WORKDIR /app
 
-# Install cloudflared for Cloudflare Tunnel (Option 1 security)
-RUN apt-get update && apt-get install -y curl && \
-    curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 \
-    -o /usr/local/bin/cloudflared && \
-    chmod +x /usr/local/bin/cloudflared && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
+# Cloudflare tunnel enforcement is header-based and does not require the
+# cloudflared binary in local compose or standard deployments. Keep the
+# download opt-in for environments that still want the executable bundled.
+ARG INSTALL_CLOUDFLARED=0
+RUN if [ "$INSTALL_CLOUDFLARED" = "1" ]; then \
+        apt-get update && apt-get install -y curl && \
+        curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 \
+        -o /usr/local/bin/cloudflared && \
+        chmod +x /usr/local/bin/cloudflared && \
+        apt-get clean && rm -rf /var/lib/apt/lists/*; \
+    fi
 
 COPY backend/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Pre-download tiktoken encoding to avoid runtime network issues
-RUN python -c "import tiktoken; tiktoken.encoding_for_model('gpt-4o-mini')"
-RUN python -m spacy download en_core_web_sm
+# Optional asset prefetch for network-permitted environments. Local compose
+# and restricted builders can skip these without breaking startup because the
+# application already degrades gracefully when the spaCy model is absent.
+ARG PREFETCH_MODEL_ASSETS=0
+RUN if [ "$PREFETCH_MODEL_ASSETS" = "1" ]; then \
+        python -c "import tiktoken; tiktoken.encoding_for_model('gpt-4o-mini')" && \
+        python -m spacy download en_core_web_sm; \
+    fi
 
 COPY backend/ .
 RUN mkdir -p /frontend/src/lib/billing

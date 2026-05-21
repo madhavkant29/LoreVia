@@ -6,6 +6,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.reader import ChapterListResponseOut, ReadingProgressOut, SummaryCollectionResponseOut
+
 
 class CollaborationScope(BaseModel):
     chapter_start: int | None = Field(None, ge=1)
@@ -100,6 +102,13 @@ class BookOut(BaseModel):
     collaboration_role: str | None = None
     collaboration_scope: CollaborationScope | None = None
     collaboration_permissions: CollaborationPermissions | None = None
+
+
+class BookOverviewOut(BaseModel):
+    book: BookOut
+    progress: ReadingProgressOut
+    chapter_list: ChapterListResponseOut
+    summary_collection: SummaryCollectionResponseOut
 
 
 class SeriesOut(BaseModel):
@@ -288,6 +297,10 @@ class CharacterPartitionTargetBody(BaseModel):
 
 class CharacterPartitionBody(BaseModel):
     partitions: list[CharacterPartitionTargetBody]
+
+
+class CharacterCandidateAttachBody(BaseModel):
+    character_id: uuid.UUID
 
 
 class ChapterReportCharacter(BaseModel):

@@ -11,6 +11,9 @@ from PIL import Image
 from app.models.book import Book, Chapter, ManuscriptAnnotation
 from app.models.user import User
 from app.utils.book_utils import (
+    _detect_continuity_flags_from_rows,
+    _latest_state_before_chapter,
+    _map_chapter_consistency_state_history,
     list_manuscript_annotations,
     _build_knowledge_timeline,
     _build_narration_signature,
@@ -46,7 +49,7 @@ from app.utils.book_utils import (
     story_unit_label,
     story_unit_name,
 )
-from app.models.character import Character
+from app.models.character import Character, CharacterState
 
 
 class _ScalarResult:
@@ -568,6 +571,61 @@ def test_story_unit_helpers_switch_to_scene_language_for_screenplays():
     assert story_unit_name(screenplay_book, plural=True, lowercase=True) == "scenes"
     assert story_unit_label(screenplay_book, 3) == "Scene 3"
     assert story_unit_label(screenplay_book, 3, short=True) == "Sc. 3"
+
+
+def test_latest_state_before_chapter_returns_closest_prior_snapshot():
+    earlier = CharacterState(character_id=uuid.uuid4(), at_chapter=2, trait_snapshot={})
+    later = CharacterState(character_id=earlier.character_id, at_chapter=5, trait_snapshot={})
+
+    chapter_numbers, states = _map_chapter_consistency_state_history([earlier, later])
+
+    assert _latest_state_before_chapter(chapter_numbers, states, 5) is earlier
+    assert _latest_state_before_chapter(chapter_numbers, states, 6) is later
+    assert _latest_state_before_chapter(chapter_numbers, states, 2) is None
+
+
+def test_detect_continuity_flags_from_rows_uses_prefetched_prior_states():
+    character_id = uuid.uuid4()
+    previous = CharacterState(
+        character_id=character_id,
+        at_chapter=2,
+        trait_snapshot={"hair": {"value": "black"}},
+    )
+    current = CharacterState(
+        character_id=character_id,
+        at_chapter=4,
+        trait_snapshot={"hair": {"value": "silver"}},
+    )
+
+    flags = _detect_continuity_flags_from_rows(
+        work_type="novel",
+        chapter_number=4,
+        rows=[(current, "Mira")],
+        prior_states_by_character={
+            character_id: _map_chapter_consistency_state_history([previous]),
+        },
+    )
+
+    assert flags == [
+        "Mira: hair description changed from 'black' to 'silver' since chapter 2."
+    ]
+
+
+def test_detect_continuity_flags_from_rows_ignores_characters_without_prior_state():
+    current = CharacterState(
+        character_id=uuid.uuid4(),
+        at_chapter=4,
+        trait_snapshot={"hair": {"value": "silver"}},
+    )
+
+    flags = _detect_continuity_flags_from_rows(
+        work_type="novel",
+        chapter_number=4,
+        rows=[(current, "Mira")],
+        prior_states_by_character={},
+    )
+
+    assert flags == []
 
 
 def test_normalize_chapter_title_accepts_one_to_four_words():

@@ -2,16 +2,16 @@
 
 import { useQuery } from "@tanstack/react-query"
 import React from "react"
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import type { Route } from "next"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
 
 import { AuthorFeatureComponent } from "@/components/billing/AuthorFeatureComponent"
 import { booksApi } from "@/lib/api/books"
 import { canUseAuthorFeatures } from "@/lib/billing/plans"
 import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
 import { useAuthStore } from "@/lib/stores/authStore"
+import type { Book } from "@/types/book"
 import type { CollaborationPermissions } from "@/types/book"
 
 type BookMode = "reader" | "author"
@@ -20,6 +20,7 @@ type AuthorToolsNavProps = {
   bookId: string
   active: string
   isDark: boolean
+  bookData?: Book | null
   title?: string
   description?: string
   currentChapter?: number
@@ -153,18 +154,21 @@ export function AuthorToolsNav({
   bookId,
   active,
   isDark,
+  bookData = null,
   title = "Author workspace",
-  description = "Navigate drafting, continuity, and collaborator review without losing the manuscript thread.",
+  description = "Move between drafting, review, and story memory without losing the thread.",
   currentChapter = 1,
   mode = "author",
   variant = "panel",
 }: AuthorToolsNavProps) {
-  const router = useRouter()
   const tier = useAuthStore((state) => state.user?.tier)
-  const { data: book = null } = useQuery({
+  const { data: queriedBook = null } = useQuery({
     queryKey: asQueryKey(bookCacheKey(bookId, "detail")),
     queryFn: () => booksApi.get(bookId),
+    enabled: !bookData,
+    staleTime: 60_000,
   })
+  const book = bookData ?? queriedBook
   const collaborationRole = book?.collaboration_role ?? null
   const collaborationPermissions = book?.collaboration_permissions ?? null
   const hasOwnAuthorAccess = canUseAuthorFeatures(tier)
@@ -194,20 +198,12 @@ export function AuthorToolsNav({
         .filter((section) => section.items.length > 0),
     [bookId, collaborationPermissions, collaborationRole, currentChapter, hasFreeSampleIntelligenceAccess, hasOwnAuthorAccess, showAuthorSections]
   )
-  const items = sections.flatMap((section) => section.items)
-
-  useEffect(() => {
-    for (const item of items) {
-      router.prefetch(item.href)
-    }
-  }, [items, router])
-
   const rail = variant === "rail"
   const containerClass = rail
-    ? `group/rail sticky top-24 z-20 flex h-[calc(100vh-7.5rem)] w-[4.9rem] flex-col overflow-hidden rounded-[1.6rem] border p-3 shadow-[0_26px_80px_-52px_rgba(0,0,0,0.82)] backdrop-blur transition-[width,background-color,border-color,box-shadow] duration-300 hover:w-[18.5rem] focus-within:w-[18.5rem] ${
-        isDark ? "border-white/10 bg-[#0a0d11]/92 text-white hover:border-white/14 hover:bg-[#0d1117]/96" : "border-stone-200/90 bg-white/95 text-stone-950 hover:border-stone-300 hover:bg-white"
+    ? `group/rail sticky top-24 z-20 flex h-[calc(100vh-7.5rem)] w-[4.9rem] flex-col overflow-hidden rounded-[1.6rem] border p-3 shadow-[0_22px_54px_-42px_rgba(58,49,37,0.24)] transition-[width,background-color,border-color,box-shadow] duration-300 hover:w-[18.5rem] focus-within:w-[18.5rem] ${
+        isDark ? "border-white/10 bg-[#1b2024]/96 text-white hover:border-white/14 hover:bg-[#1f2528]/96" : "border-[rgba(var(--border),0.9)] bg-[rgba(255,252,247,0.96)] text-stone-950 hover:border-stone-300 hover:bg-white"
       }`
-    : `rounded-2xl border p-4 ${isDark ? "border-white/10 bg-[#0d0f12]/90" : "border-stone-200 bg-white/92"}`
+    : `rounded-2xl border p-4 ${isDark ? "border-white/10 bg-[#1b2024]/96" : "border-[rgba(var(--border),0.9)] bg-[rgba(255,252,247,0.96)]"}`
   const labelVisibility = rail ? "opacity-0 group-hover/rail:opacity-100 group-focus-within/rail:opacity-100" : "opacity-100"
   const helperVisibility = rail
     ? "max-h-0 translate-y-1 opacity-0 group-hover/rail:max-h-20 group-hover/rail:translate-y-0 group-hover/rail:opacity-100 group-focus-within/rail:max-h-20 group-focus-within/rail:translate-y-0 group-focus-within/rail:opacity-100"
@@ -249,7 +245,7 @@ export function AuthorToolsNav({
                       selected
                         ? isDark
                           ? "bg-white text-stone-950 shadow-[0_18px_38px_-28px_rgba(255,255,255,0.45)]"
-                          : "bg-stone-950 text-white shadow-[0_18px_34px_-26px_rgba(28,25,23,0.45)]"
+                          : "bg-teal-800 text-white shadow-[0_18px_34px_-26px_rgba(58,49,37,0.22)]"
                         : isDark
                           ? "text-slate-300 hover:bg-white/[0.07] hover:text-white focus-visible:ring-white/25"
                           : "text-stone-600 hover:bg-stone-100 focus-visible:ring-stone-300 hover:text-stone-950"

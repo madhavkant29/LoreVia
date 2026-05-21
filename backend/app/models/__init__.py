@@ -2,6 +2,7 @@ from app.models.beta_read import BetaReadAssignment, BetaReadFeedbackItem, BetaR
 from app.models.book import (
     Book,
     BookCollaborator,
+    PublicBookAnalyticsEvent,
     BookForumComment,
     BookForumCommentReaction,
     BookForumInterest,
@@ -22,7 +23,12 @@ from app.models.book import (
     Series,
     SeriesBook,
 )
-from app.models.character import Character, CharacterState
+from app.models.character import (
+    Character,
+    CharacterCandidate,
+    CharacterDuplicateSuggestion,
+    CharacterState,
+)
 from app.models.intelligence import (
     BookChunk,
     ChapterSummary,

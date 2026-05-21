@@ -54,10 +54,14 @@ if [[ "${RUN_TESTS:-0}" == "1" ]]; then
   docker compose -f docker-compose-local.yml exec -T api pytest tests/integration/test_beta_reads_api.py tests/unit/test_trial_email_service.py -v
 fi
 
-if [[ ! -f "./ops/env/backend.env" ]]; then
-  echo "Missing ./ops/env/backend.env"
+if [[ ! -f "./backend/.env" ]]; then
+  echo "Missing ./backend/.env"
   exit 1
 fi
+
+set -a
+source ./backend/.env
+set +a
 
 if [[ -z "${ALEMBIC_DATABASE_URL:-}" ]]; then
   echo "ALEMBIC_DATABASE_URL must be exported before deploy."
@@ -110,7 +114,7 @@ fi
 
 enable_systemd_unit
 
-${COMPOSE} up -d nginx backend worker-extraction worker-analysis worker-intelligence celery-beat
+${COMPOSE} up -d redis nginx backend worker-extraction worker-analysis worker-intelligence celery-beat
 
 for attempt in $(seq 1 20); do
   if ${COMPOSE} exec -T nginx wget -qO- http://127.0.0.1/nginx-health >/dev/null 2>&1 && \

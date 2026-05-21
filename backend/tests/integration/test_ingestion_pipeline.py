@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy import select
 
 from app.models.book import Book, Chapter
-from app.models.character import Character
+from app.models.character import Character, CharacterCandidate
 from app.models.intelligence import Notification
 from app.workers.consumers.extraction_consumer import _process_chapter, process_book
 
@@ -354,7 +354,24 @@ async def test_upload_pipeline_rejects_noise_characters_and_records_diagnostics(
     processing = (book.writer_workspace or {}).get("processing", {})
     extraction_diagnostics = (processing.get("parser_diagnostics") or {}).get("character_extraction") or {}
     rejected = extraction_diagnostics.get("rejected_characters") or []
-    assert any(item["name"] == "Well" and item["stage"] == "save_gate_create" for item in rejected)
+    rejected_reported = any(
+        item["name"] == "Well"
+        and item["stage"] in {"candidate_augmentation", "llm_clean"}
+        and any(
+            reason in str(item.get("reason") or "")
+            for reason in {"save_gate", "visibility_score_below_threshold", "single_token_lacks_profile_evidence"}
+        )
+        for item in rejected
+    )
+    candidate_rows = (
+        await db.execute(
+            select(CharacterCandidate).where(
+                CharacterCandidate.book_id == book_id,
+                CharacterCandidate.raw_name == "Well",
+            )
+        )
+    ).scalars().all()
+    assert rejected_reported or candidate_rows
     assert persisted_characters[0].analysis_metadata["confidence_band"] in {"high", "medium"}
 
 

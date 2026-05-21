@@ -3,43 +3,11 @@ import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { authApi } from "@/lib/api/auth"
+import { validateRegisterPassword, validateRegisterUsername } from "@/lib/auth/registerValidation"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { supabase } from "@/lib/supabase"
 import { getOrCreateDeviceId } from "@/lib/utils/device"
-
-function evaluatePassword(password: string, email: string) {
-  const lengthScore = password.length >= 16 ? 3 : password.length >= 12 ? 2 : password.length >= 8 ? 1 : 0
-  const hasLower = /[a-z]/.test(password)
-  const hasUpper = /[A-Z]/.test(password)
-  const hasDigit = /\d/.test(password)
-  const hasSymbol = /[^A-Za-z0-9]/.test(password)
-  const varietyScore = [hasLower, hasUpper, hasDigit, hasSymbol].filter(Boolean).length
-  const emailLocal = email.split("@")[0]?.toLowerCase()
-  const usesEmail = !!emailLocal && emailLocal.length >= 3 && password.toLowerCase().includes(emailLocal)
-  const repeatedPattern = /(.)\1{2,}/.test(password)
-
-  let score = lengthScore + varietyScore
-  if (usesEmail) score -= 2
-  if (repeatedPattern) score -= 1
-  score = Math.max(0, Math.min(score, 7))
-
-  const label = score >= 6 ? "Strong" : score >= 4 ? "Good" : score >= 2 ? "Weak" : "Very weak"
-  const color = score >= 6 ? "bg-emerald-500" : score >= 4 ? "bg-amber-500" : "bg-rose-500"
-
-  return {
-    score,
-    label,
-    color,
-    checks: [
-      { label: "12+ characters", passed: password.length >= 12 },
-      { label: "Upper + lower case", passed: hasLower && hasUpper },
-      { label: "Number included", passed: hasDigit },
-      { label: "Symbol included", passed: hasSymbol },
-      { label: "Does not use your email", passed: !usesEmail },
-    ],
-  }
-}
 
 function generateStrongPassword() {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*()-_=+?"
@@ -63,6 +31,7 @@ export default function RegisterPage() {
   const [email, setEmail] = useState("")
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
+  const [showPassword, setShowPassword] = useState(false)
   const [acceptedTerms, setAcceptedTerms] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -70,7 +39,6 @@ export default function RegisterPage() {
   const user = useAuthStore(s => s.user)
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
-  const passwordState = evaluatePassword(password, email)
 
   useEffect(() => {
     if (user) router.replace("/library")
@@ -78,14 +46,30 @@ export default function RegisterPage() {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
+
+    const trimmedEmail = email.trim()
+    const trimmedUsername = username.trim()
+    const usernameError = validateRegisterUsername(trimmedUsername)
+    if (usernameError) {
+      setError(usernameError)
+      return
+    }
+
+    const passwordValidation = validateRegisterPassword(password, trimmedEmail)
+    if (!passwordValidation.isValid) {
+      setError(passwordValidation.message)
+      return
+    }
+
     if (!acceptedTerms) {
       setError("Please accept the Terms, Compliance notice, and EULA before creating your account.")
       return
     }
+
     setLoading(true)
     setError(null)
     try {
-      const result = await authApi.register(email, username, password, acceptedTerms, getOrCreateDeviceId())
+      const result = await authApi.register(trimmedEmail, trimmedUsername, password, acceptedTerms, getOrCreateDeviceId())
       if (!result?.email) {
         setError("Could not create your account. Please try again.")
         return
@@ -167,6 +151,7 @@ export default function RegisterPage() {
             isDark ? "border-white/10 bg-white/5 text-slate-100 placeholder:text-slate-500" : "border-stone-300 bg-white text-stone-900 placeholder:text-stone-400"
           }`}
           required
+          autoComplete="email"
         />
         <input
           type="text"
@@ -179,58 +164,43 @@ export default function RegisterPage() {
           required
           minLength={3}
           maxLength={32}
+          autoComplete="username"
         />
         <div className="space-y-3">
-          <input
-            type="password"
-            placeholder="Password"
-            value={password}
-            onChange={e => setPassword(e.target.value)}
-            className={`w-full rounded-xl border px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
-              isDark ? "border-white/10 bg-white/5 text-slate-100 placeholder:text-slate-500" : "border-stone-300 bg-white text-stone-900 placeholder:text-stone-400"
-            }`}
-            required
-            minLength={12}
-          />
-          <div className={`rounded-xl border p-4 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-stone-50"}`}>
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className={`text-sm font-medium ${isDark ? "text-white" : "text-stone-900"}`}>Password quality</p>
-                <p className={`text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>Use a long, unique password you do not reuse anywhere else.</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setPassword(generateStrongPassword())}
-                className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
-                  isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-stone-300 text-stone-700 hover:bg-white"
-                }`}
-              >
-                Generate strong password
-              </button>
-            </div>
-            <div className="mt-4">
-              <div className={`h-2 overflow-hidden rounded-full ${isDark ? "bg-white/10" : "bg-stone-200"}`}>
-                <div
-                  className={`${passwordState.color} h-full transition-all`}
-                  style={{ width: `${Math.max((passwordState.score / 7) * 100, password ? 12 : 0)}%` }}
-                />
-              </div>
-              <p className={`mt-2 text-xs font-medium ${isDark ? "text-slate-300" : "text-stone-700"}`}>{password ? passwordState.label : "Add a password to see a recommendation"}</p>
-            </div>
-            <div className="mt-3 grid gap-2 sm:grid-cols-2">
-              {passwordState.checks.map((check) => (
-                <div
-                  key={check.label}
-                  className={`rounded-lg px-3 py-2 text-xs ${
-                    check.passed
-                      ? isDark ? "bg-emerald-500/15 text-emerald-200 border border-emerald-500/20" : "bg-emerald-50 text-emerald-700"
-                      : isDark ? "border border-white/10 bg-white/5 text-slate-400" : "border border-stone-200 bg-white text-stone-500"
-                  }`}
-                >
-                  {check.label}
-                </div>
-              ))}
-            </div>
+          <div className="relative">
+            <input
+              type={showPassword ? "text" : "password"}
+              placeholder="Password"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              className={`w-full rounded-xl border px-3 py-3 pr-20 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
+                isDark ? "border-white/10 bg-white/5 text-slate-100 placeholder:text-slate-500" : "border-stone-300 bg-white text-stone-900 placeholder:text-stone-400"
+              }`}
+              required
+              minLength={12}
+              autoComplete="new-password"
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword((current) => !current)}
+              className={`absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium transition ${
+                isDark ? "text-slate-300 hover:text-white" : "text-stone-500 hover:text-stone-900"
+              }`}
+              aria-label={showPassword ? "Hide password" : "Show password"}
+            >
+              {showPassword ? "Hide" : "Show"}
+            </button>
+          </div>
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setPassword(generateStrongPassword())}
+              className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+                isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-stone-300 bg-white text-stone-700 hover:bg-stone-50"
+              }`}
+            >
+              Generate strong password
+            </button>
           </div>
         </div>
         {error && (

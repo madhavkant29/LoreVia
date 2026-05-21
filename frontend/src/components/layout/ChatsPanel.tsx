@@ -15,8 +15,10 @@ import type {
   SocialUserSummary,
 } from "@/types/social"
 
-const CONVERSATION_POLL_MS = 25000
-const MESSAGE_POLL_MS = 8000
+const SIDEBAR_CONVERSATION_POLL_MS = 45_000
+const PAGE_CONVERSATION_POLL_MS = 30_000
+const SIDEBAR_MESSAGE_POLL_MS = 15_000
+const PAGE_MESSAGE_POLL_MS = 8_000
 
 export function ChatsPanel({ mode = "sidebar" }: { mode?: "sidebar" | "page" }) {
   const { user, hydrated } = useAuthStore()
@@ -40,15 +42,19 @@ export function ChatsPanel({ mode = "sidebar" }: { mode?: "sidebar" | "page" }) 
   const [refreshTick, setRefreshTick] = useState(0)
   const listIntervalRef = useRef<number | null>(null)
   const messageIntervalRef = useRef<number | null>(null)
+  const conversationPollMs = mode === "sidebar" ? SIDEBAR_CONVERSATION_POLL_MS : PAGE_CONVERSATION_POLL_MS
+  const messagePollMs = mode === "sidebar" ? SIDEBAR_MESSAGE_POLL_MS : PAGE_MESSAGE_POLL_MS
 
   const selectedConversation = useMemo(
     () => conversations.find((item) => item.id === selectedConversationId) ?? null,
     [conversations, selectedConversationId],
   )
 
-  const hydrate = async (options?: { keepSelection?: boolean }) => {
+  const hydrate = async (options?: { keepSelection?: boolean; silent?: boolean }) => {
     if (!user) return
-    setLoading(true)
+    if (!options?.silent) {
+      setLoading(true)
+    }
     try {
       const [conversationPayload, relationshipPayload] = await Promise.all([
         socialApi.listConversations(),
@@ -64,17 +70,21 @@ export function ChatsPanel({ mode = "sidebar" }: { mode?: "sidebar" | "page" }) 
     } catch {
       setStatus("Could not load chats right now.")
     } finally {
-      setLoading(false)
+      if (!options?.silent) {
+        setLoading(false)
+      }
     }
   }
 
-  const loadMessages = async (conversationId: string) => {
+  const loadMessages = async (conversationId: string, options?: { markRead?: boolean }) => {
     try {
       const payload = await socialApi.listMessages(conversationId)
       setMessages(payload.items)
-      await socialApi.markConversationRead(conversationId)
-      emitChatsChanged()
-      setConversations((current) => current.map((item) => item.id === conversationId ? { ...item, unread_count: 0 } : item))
+      if (options?.markRead !== false) {
+        await socialApi.markConversationRead(conversationId)
+        emitChatsChanged()
+        setConversations((current) => current.map((item) => item.id === conversationId ? { ...item, unread_count: 0 } : item))
+      }
       setStatus(null)
     } catch {
       setStatus("Could not load messages for this conversation.")
@@ -126,22 +136,24 @@ export function ChatsPanel({ mode = "sidebar" }: { mode?: "sidebar" | "page" }) 
   useEffect(() => {
     if (!user) return
     listIntervalRef.current = window.setInterval(() => {
-      void hydrate({ keepSelection: true })
-    }, CONVERSATION_POLL_MS)
+      if (document.visibilityState !== "visible") return
+      void hydrate({ keepSelection: true, silent: true })
+    }, conversationPollMs)
     return () => {
       if (listIntervalRef.current) window.clearInterval(listIntervalRef.current)
     }
-  }, [user])
+  }, [conversationPollMs, user])
 
   useEffect(() => {
     if (!selectedConversationId) return
     messageIntervalRef.current = window.setInterval(() => {
-      void loadMessages(selectedConversationId)
-    }, MESSAGE_POLL_MS)
+      if (document.visibilityState !== "visible") return
+      void loadMessages(selectedConversationId, { markRead: (selectedConversation?.unread_count ?? 0) > 0 })
+    }, messagePollMs)
     return () => {
       if (messageIntervalRef.current) window.clearInterval(messageIntervalRef.current)
     }
-  }, [selectedConversationId])
+  }, [messagePollMs, selectedConversation, selectedConversationId])
 
   const handleOpenConversation = async (targetUserId: string) => {
     try {

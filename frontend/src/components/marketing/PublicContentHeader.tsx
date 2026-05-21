@@ -1,5 +1,5 @@
-import Image from "next/image"
 import Link from "next/link"
+import { ThemeBrandImage } from "@/components/layout/ThemeBrandImage"
 
 function ArrowIcon() {
   return (
@@ -35,7 +35,7 @@ export function PublicContentHeader({
     <header className="border-b border-[rgba(var(--border),0.76)] bg-[rgba(248,244,236,0.84)] backdrop-blur-xl dark:bg-[rgba(3,7,18,0.82)]">
       <div className="app-container flex h-[78px] items-center justify-between gap-4">
         <Link href="/" aria-label="LoreVia home" className="transition hover:opacity-90">
-          <Image src="/logoandtext.png" alt="LoreVia" width={232} height={52} className="h-10 w-auto" priority />
+          <ThemeBrandImage variant="lockup" alt="LoreVia" className="h-10 w-auto" priority />
         </Link>
 
         <nav className="hidden items-center gap-3 md:flex">

@@ -222,7 +222,7 @@ export function ChapterText({
                     ) : null
                   ) : (
                     isPublishedLayout
-                      ? renderPublishedTextBlock(block, index, mentionClass, onTap)
+                      ? renderPublishedTextBlock(block, index, mentionClass, onTap, fontStack)
                       : renderRelaxedTextBlock(block, index, mentionClass, onTap)
                   )
                 )}
@@ -383,12 +383,14 @@ function renderPublishedTextBlock(
   index: number,
   mentionClass: string,
   onTap: (word: string) => void,
+  fontStack: string,
 ) {
   const blockClass = `book-block book-block--${block.semanticType}`
+  const blockStyle = block.semanticType === "artifact" ? undefined : { fontFamily: fontStack }
 
   if (block.semanticType === "scene_break") {
     return (
-      <div key={`block-${index}`} className={`${blockClass} scene-break`} aria-hidden="true">
+      <div key={`block-${index}`} className={`${blockClass} scene-break`} style={blockStyle} aria-hidden="true">
         {renderSegments(block.segments, index, mentionClass, onTap)}
       </div>
     )
@@ -400,6 +402,7 @@ function renderPublishedTextBlock(
         key={`block-${index}`}
         className={`${blockClass} book-special-block`}
         style={{
+          ...blockStyle,
           marginLeft: "clamp(1rem, 5vw, 2.8rem)",
           marginRight: "clamp(1rem, 5vw, 2.8rem)",
           paddingLeft: "1.25rem",
@@ -413,14 +416,14 @@ function renderPublishedTextBlock(
 
   if (block.semanticType !== "paragraph" && block.semanticType !== "chapter_title") {
     return (
-      <div key={`block-${index}`} className={`${blockClass} book-special-block`}>
+      <div key={`block-${index}`} className={`${blockClass} book-special-block`} style={blockStyle}>
         {renderSegments(block.segments, index, mentionClass, onTap)}
       </div>
     )
   }
 
   return (
-    <p key={`block-${index}`} className={blockClass}>
+    <p key={`block-${index}`} className={blockClass} style={blockStyle}>
       {renderSegments(block.segments, index, mentionClass, onTap)}
     </p>
   )

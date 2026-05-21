@@ -57,7 +57,13 @@ def test_process_chapter_task_fails_cleanly_when_payload_missing(monkeypatch):
     book = SimpleNamespace(id=book_id, hidden_at=None)
     chapter = SimpleNamespace(title="Chapter 4", s3_key=f"chapters/{book_id}/4.txt")
 
-    monkeypatch.setattr(extraction_tasks, "_run_coro", lambda coro: asyncio.run(coro))
+    async def _run_awaitable(coro):
+        return await coro
+
+    def _fake_run_worker_coro(coro):
+        return asyncio.run(_run_awaitable(coro))
+
+    monkeypatch.setattr(extraction_tasks, "run_worker_coro", _fake_run_worker_coro)
     async def _visible(*_args, **_kwargs):
         return False
 
@@ -81,3 +87,25 @@ def test_process_chapter_task_fails_cleanly_when_payload_missing(monkeypatch):
 
     with pytest.raises(ValueError, match="missing_chapter_payload"):
         extraction_tasks.process_chapter_task.run(str(book_id), 4)
+
+
+def test_process_book_task_uses_shared_worker_runner(monkeypatch):
+    calls: list[object] = []
+
+    async def _fake_process_book(book_id: str, queue_wait_ms: int | None = None):
+        calls.append((book_id, queue_wait_ms))
+        return {"book_id": book_id}
+
+    def _fake_run_worker_coro(coro):
+        calls.append(type(coro).__name__)
+        coro.close()
+        return {"ran": True}
+
+    monkeypatch.setattr(extraction_tasks, "process_book", _fake_process_book)
+    monkeypatch.setattr(extraction_tasks, "run_worker_coro", _fake_run_worker_coro)
+    monkeypatch.setattr(extraction_tasks, "extract_queue_wait_ms", lambda _headers: 12)
+
+    result = extraction_tasks.process_book_task.run("book-123")
+
+    assert result == {"ran": True}
+    assert calls == ["coroutine"]

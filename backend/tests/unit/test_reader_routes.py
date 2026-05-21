@@ -77,6 +77,8 @@ def _book(*, user_id: uuid.UUID, total_chapters: int = 6, mode: str = "reader", 
         mode=mode,
         format=fmt,
         is_public=False,
+        is_truncated=False,
+        total_tokens=0,
     )
 
 
@@ -217,7 +219,7 @@ async def test_get_chapter_supports_fallback_and_stored_content(monkeypatch):
     monkeypatch.setattr(
         reader,
         "serialize_reader_character",
-        lambda char, trait_snapshot=None: {
+        lambda char, trait_snapshot=None, **_kwargs: {
             "id": str(char.id),
             "name": char.name,
             "aliases": [],
@@ -366,17 +368,17 @@ async def test_smart_tap_handles_processing_character_and_search_paths(monkeypat
         arc_summary="steady",
         first_chapter=1,
     )
-    state = SimpleNamespace(trait_snapshot={"eyes": "green"}, arc_note="Recovering")
+    state = SimpleNamespace(at_chapter=2, trait_snapshot={"eyes": "green"}, arc_note="Recovering", prompt_delta=None)
     rel = SimpleNamespace(character_a_id=char.id, character_b_id=uuid.uuid4(), rel_type="ally", sentiment=0.8, description="Trusted")
     db = _FakeDB(
         get_values=[book],
         scalar_values=[1],
-        execute_values=[_Result(scalar=char), _Result(scalar=state), _Result(scalars=[rel])],
+        execute_values=[_Result(scalars=[char]), _Result(scalars=[state]), _Result(scalar=state), _Result(scalars=[rel]), _Result(scalars=[])],
     )
     monkeypatch.setattr(
         reader,
         "serialize_reader_character",
-        lambda char, trait_snapshot=None: {
+        lambda char, trait_snapshot=None, **_kwargs: {
             "id": str(char.id),
             "name": char.name,
             "aliases": [],
@@ -506,16 +508,21 @@ async def test_reader_collection_routes_cover_events_relationships_search_and_ch
     async def _fake_int_map(*_args, **_kwargs):
         return {1: True}
     monkeypatch.setattr(reader, "chapter_intelligence_map", _fake_int_map)
+    monkeypatch.setattr("app.utils.reader_utils.chapter_intelligence_map", _fake_int_map)
     async def _fake_summary_visible(*_args, **_kwargs):
         return {1}
     monkeypatch.setattr(reader, "summary_visible_chapter_set", _fake_summary_visible)
+    monkeypatch.setattr("app.utils.reader_utils.summary_visible_chapter_set", _fake_summary_visible)
     monkeypatch.setattr(reader, "list_custom_tags_for_entity_ids", _async_value({}))
+    monkeypatch.setattr("app.utils.reader_utils.list_custom_tags_for_entity_ids", _async_value({}))
     async def _fake_queue(*_args, **_kwargs):
         return None
     monkeypatch.setattr(reader, "queue_analysis_if_missing", _fake_queue)
+    monkeypatch.setattr("app.utils.reader_utils.queue_analysis_if_missing", _fake_queue)
     async def _fake_short_summary(*_args, **_kwargs):
         return {"status": "ready", "content": "Generated", "key_events": [], "diagnostics": {}}
     monkeypatch.setattr(reader, "get_or_generate_summary", _fake_short_summary)
+    monkeypatch.setattr("app.utils.reader_utils.get_or_generate_summary", _fake_short_summary)
 
     db = _FakeDB(
         get_values=[book, book, book, book, book],

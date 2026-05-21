@@ -377,6 +377,86 @@ async def test_username_update_falls_back_from_stale_access_cookie(client, db):
 
 
 @pytest.mark.asyncio
+async def test_username_update_allows_existing_user_to_rename_and_me_returns_updated_username(client):
+    register_response = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "rename-me@lorevia.app",
+            "username": "rename_me",
+            "password": "SafePass123!@#",
+            "accepted_terms": True,
+            "device_id": "rename-device-trial01",
+        },
+    )
+    assert register_response.status_code == 201
+
+    user_id = str(register_response.json()["id"])
+    access_token = create_access_token(user_id)
+    headers = {"Cookie": f"lorevia_access_token={access_token}"}
+
+    rename_response = await client.patch("/api/v1/auth/me/username?username=renamed_writer", headers=headers)
+    assert rename_response.status_code == 200
+    assert rename_response.json()["username"] == "renamed_writer"
+
+    me_response = await client.get("/api/v1/auth/me", headers=headers)
+    assert me_response.status_code == 200
+    assert me_response.json()["username"] == "renamed_writer"
+
+
+@pytest.mark.asyncio
+async def test_username_update_rejects_duplicate_username_for_existing_user(client, db):
+    first = User(
+        email="first-rename@lorevia.app",
+        username="first_writer",
+        password_hash=hash_password("SafePass123!@#"),
+        legal_accepted_at=datetime.now(UTC),
+        legal_version="2026-04",
+    )
+    second = User(
+        email="second-rename@lorevia.app",
+        username="second_writer",
+        password_hash=hash_password("SafePass123!@#"),
+        legal_accepted_at=datetime.now(UTC),
+        legal_version="2026-04",
+    )
+    db.add_all([first, second])
+    await db.commit()
+    await db.refresh(second)
+
+    access_token = create_access_token(str(second.id))
+    response = await client.patch(
+        "/api/v1/auth/me/username?username=first_writer",
+        headers={"Cookie": f"lorevia_access_token={access_token}"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Username already taken"
+
+
+@pytest.mark.asyncio
+async def test_username_update_rejects_invalid_username_for_existing_user(client, db):
+    user = User(
+        email="invalid-rename@lorevia.app",
+        username="valid_writer",
+        password_hash=hash_password("SafePass123!@#"),
+        legal_accepted_at=datetime.now(UTC),
+        legal_version="2026-04",
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+
+    access_token = create_access_token(str(user.id))
+    response = await client.patch(
+        "/api/v1/auth/me/username?username=bad name",
+        headers={"Cookie": f"lorevia_access_token={access_token}"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Username can only contain letters, numbers, underscores, and hyphens"
+
+
+@pytest.mark.asyncio
 async def test_register_blocks_third_trial_from_same_device(client):
     first = await client.post(
         "/api/v1/auth/register",

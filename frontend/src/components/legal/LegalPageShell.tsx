@@ -38,9 +38,9 @@ type LegalPageShellProps = {
   children?: ReactNode
 }
 
-const legalAccent = "text-[#C9A86A]"
+const legalAccent = "text-teal-800"
 const legalLink =
-  "text-[#D2B47A] underline-offset-4 transition hover:text-[#E5CA91] hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#C9A86A]/70"
+  "text-teal-800 underline-offset-4 transition hover:text-teal-700 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-teal-800/40"
 
 function sectionId(section: LegalSectionContent, index: number) {
   return section.id ?? `section-${index + 1}`
@@ -51,25 +51,25 @@ export function LegalTopBar() {
   const isLoggedIn = hydrated && Boolean(user)
 
   return (
-    <header className="border-b border-white/[0.08] bg-[#05070A]">
+    <header className="border-b border-[rgba(var(--border),0.9)] bg-[#f8f4ee]">
       <nav className="mx-auto flex h-16 max-w-7xl items-center justify-between px-5 sm:px-8 lg:px-10">
         <Link
           href={(isLoggedIn ? "/library" : "/") as Route}
-          className="transition hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white/40"
+          className="transition hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-teal-800/30"
         >
           <BrandLockup size="sm" iconClassName="h-9 w-9 rounded-xl" />
         </Link>
 
         {isLoggedIn ? (
-          <Link href="/library" className="text-sm text-[#A8B0BA] transition hover:text-[#F2F4F7]">
+          <Link href="/library" className="text-sm text-stone-600 transition hover:text-stone-950">
             Return to library
           </Link>
         ) : (
-          <div className="flex items-center gap-6 text-sm text-[#A8B0BA]">
-            <Link href="/login" className="transition hover:text-[#F2F4F7]">
+          <div className="flex items-center gap-6 text-sm text-stone-600">
+            <Link href="/login" className="transition hover:text-stone-950">
               Login
             </Link>
-            <Link href="/" className="transition hover:text-[#F2F4F7]">
+            <Link href="/" className="transition hover:text-stone-950">
               Home
             </Link>
           </div>
@@ -87,15 +87,15 @@ export function LegalHero({
   notice,
 }: Pick<LegalPageShellProps, "eyebrow" | "title" | "description" | "effectiveDate" | "notice">) {
   return (
-    <section className="py-14 sm:py-20">
+    <section className="py-14 sm:py-18">
       <p className={`text-[11px] font-semibold uppercase tracking-[0.32em] ${legalAccent}`}>{eyebrow}</p>
-      <h1 className="mt-5 max-w-4xl text-[2.55rem] font-semibold leading-[1.02] tracking-[-0.045em] text-[#F2F4F7] sm:text-[3.45rem] lg:text-[3.75rem]">
+      <h1 className="mt-5 max-w-4xl text-[2.55rem] font-semibold leading-[1.02] tracking-[-0.045em] text-stone-950 sm:text-[3.45rem] lg:text-[3.75rem]">
         {title}
       </h1>
       {effectiveDate ? (
-        <p className="mt-6 text-sm leading-7 text-[#7F8994]">Effective date: {effectiveDate}</p>
+        <p className="mt-6 text-sm leading-7 text-stone-500">Effective date: {effectiveDate}</p>
       ) : null}
-      <p className="mt-6 max-w-3xl text-[1.02rem] leading-8 text-[#A8B0BA]">{description}</p>
+      <p className="mt-6 max-w-3xl text-[1.02rem] leading-8 text-stone-600">{description}</p>
       {notice ? <LegalNotice>{notice}</LegalNotice> : null}
     </section>
   )
@@ -103,7 +103,7 @@ export function LegalHero({
 
 export function LegalNotice({ children }: { children: ReactNode }) {
   return (
-    <div className="mt-8 max-w-3xl rounded-xl border border-white/[0.08] bg-[#0B0F14] px-5 py-4 text-sm leading-7 text-[#C7CED6]">
+    <div className="mt-8 max-w-3xl rounded-xl border border-[rgba(var(--border),0.9)] bg-[rgba(255,252,247,0.94)] px-5 py-4 text-sm leading-7 text-stone-700">
       {children}
     </div>
   )
@@ -111,8 +111,8 @@ export function LegalNotice({ children }: { children: ReactNode }) {
 
 export function LegalTableOfContents({ sections }: { sections: ReadonlyArray<LegalSectionContent> }) {
   return (
-    <nav aria-labelledby="legal-toc" className="border-t border-white/[0.08] py-8">
-      <h2 id="legal-toc" className="text-[11px] font-semibold uppercase tracking-[0.32em] text-[#7F8994]">
+    <nav aria-labelledby="legal-toc" className="border-t border-[rgba(var(--border),0.9)] py-8">
+      <h2 id="legal-toc" className="text-[11px] font-semibold uppercase tracking-[0.32em] text-stone-500">
         Table of contents
       </h2>
       <ol className="mt-6 grid gap-x-12 gap-y-4 md:grid-cols-2">
@@ -124,7 +124,7 @@ export function LegalTableOfContents({ sections }: { sections: ReadonlyArray<Leg
             <li key={`toc-${id}`}>
               <a
                 href={`#${id}`}
-                className="group grid grid-cols-[2.5rem_1fr] gap-4 text-[15px] leading-7 text-[#A8B0BA] transition hover:text-[#F2F4F7]"
+                className="group grid grid-cols-[2.5rem_1fr] gap-4 text-[15px] leading-7 text-stone-600 transition hover:text-stone-950"
               >
                 <span className={legalAccent}>{number}</span>
                 <span>{section.title}</span>
@@ -142,20 +142,20 @@ export function LegalSection({ section, index }: { section: LegalSectionContent;
   const paragraphs = section.paragraphs ?? (section.body ? [section.body] : [])
 
   return (
-    <section id={sectionId(section, index)} className="scroll-mt-20 border-t border-white/[0.08] py-10">
+    <section id={sectionId(section, index)} className="scroll-mt-20 border-t border-[rgba(var(--border),0.9)] py-10">
       <div className="grid gap-4 md:grid-cols-[56px_1fr]">
         <div className={`text-sm md:text-xl ${legalAccent}`}>{number}</div>
         <div>
-          <h2 className="text-2xl font-semibold leading-tight tracking-[-0.02em] text-[#F2F4F7] sm:text-[1.7rem]">
+          <h2 className="text-2xl font-semibold leading-tight tracking-[-0.02em] text-stone-950 sm:text-[1.7rem]">
             {section.title}
           </h2>
-          <div className="mt-5 space-y-4 text-[15.5px] leading-8 text-[#A8B0BA]">
+          <div className="mt-5 space-y-4 text-[15.5px] leading-8 text-stone-600">
             {paragraphs.map((paragraph, paragraphIndex) => (
               <p key={`paragraph-${index}-${paragraphIndex}`}>{paragraph}</p>
             ))}
           </div>
           {section.bullets?.length ? (
-            <ul className="mt-6 space-y-3 text-[15.5px] leading-8 text-[#A8B0BA]">
+            <ul className="mt-6 space-y-3 text-[15.5px] leading-8 text-stone-600">
               {section.bullets.map((bullet, bulletIndex) => (
                 <li key={`bullet-${index}-${bulletIndex}`} className="flex gap-3">
                   <span className={`mt-0.5 ${legalAccent}`} aria-hidden="true">
@@ -174,20 +174,20 @@ export function LegalSection({ section, index }: { section: LegalSectionContent;
 
 export function LegalRightRail({ items }: { items: ReadonlyArray<LegalRailItem> }) {
   return (
-    <aside className="rounded-xl border border-white/[0.08] bg-[#0B0F14] px-5 py-2 lg:sticky lg:top-6">
+    <aside className="rounded-xl border border-[rgba(var(--border),0.9)] bg-[rgba(255,252,247,0.94)] px-5 py-2 lg:sticky lg:top-6">
       {items.map((item, index) => {
         const content = (
           <>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-[#7F8994]">{item.label}</p>
-            <p className="mt-3 break-words text-base font-medium text-[#F2F4F7]">{item.value}</p>
-            {item.detail ? <p className="mt-2 text-sm leading-6 text-[#A8B0BA]">{item.detail}</p> : null}
+            <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-stone-500">{item.label}</p>
+            <p className="mt-3 break-words text-base font-medium text-stone-950">{item.value}</p>
+            {item.detail ? <p className="mt-2 text-sm leading-6 text-stone-600">{item.detail}</p> : null}
           </>
         )
 
         return (
-          <div key={`rail-item-${index}-${item.label}`} className="border-b border-white/[0.08] py-5 last:border-b-0">
+          <div key={`rail-item-${index}-${item.label}`} className="border-b border-[rgba(var(--border),0.9)] py-5 last:border-b-0">
             {item.href ? (
-              <a href={item.href} className="block rounded-md outline-none transition hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#C9A86A]/70">
+              <a href={item.href} className="block rounded-md outline-none transition hover:text-stone-950 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-teal-800/40">
                 {content}
               </a>
             ) : (
@@ -212,10 +212,10 @@ export function LegalContactBlock({
   legalEmail?: string
 }) {
   return (
-    <section className="mt-4 border-t border-white/[0.08] py-10">
-      <div className="rounded-xl border border-white/[0.08] bg-[#0B0F14] px-5 py-6 sm:px-6">
-        <h2 className="text-xl font-semibold text-[#F2F4F7]">{title}</h2>
-        <p className="mt-3 max-w-2xl text-[15.5px] leading-8 text-[#A8B0BA]">{description}</p>
+    <section className="mt-4 border-t border-[rgba(var(--border),0.9)] py-10">
+      <div className="rounded-xl border border-[rgba(var(--border),0.9)] bg-[rgba(255,252,247,0.94)] px-5 py-6 sm:px-6">
+        <h2 className="text-xl font-semibold text-stone-950">{title}</h2>
+        <p className="mt-3 max-w-2xl text-[15.5px] leading-8 text-stone-600">{description}</p>
         <div className="mt-5 flex flex-wrap gap-x-6 gap-y-3 text-sm">
           <a href={`mailto:${supportEmail}`} className={legalLink}>
             {supportEmail}
@@ -249,7 +249,7 @@ export function LegalPageShell({
   const widthClassName = maxWidth === "wide" || hasRail ? "max-w-6xl" : "max-w-[900px]"
 
   return (
-    <main className="min-h-screen bg-[#05070A] text-[#F2F4F7]">
+    <main className="min-h-screen bg-[#f8f4ee] text-stone-950">
       <LegalTopBar />
       <div className={`mx-auto ${widthClassName} px-5 pb-16 sm:px-8 lg:px-10`}>
         <LegalHero

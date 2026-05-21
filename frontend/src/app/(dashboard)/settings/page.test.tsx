@@ -7,6 +7,21 @@ const setUserMock = vi.hoisted(() => vi.fn())
 const logoutMock = vi.hoisted(() => vi.fn())
 const setThemeMock = vi.hoisted(() => vi.fn())
 const portalMock = vi.hoisted(() => vi.fn())
+const setUsernameMock = vi.hoisted(() => vi.fn())
+const authState = vi.hoisted(() => ({
+  user: {
+    email: "author@example.com",
+    username: "author",
+    tier: "author",
+    tier_label: "Author",
+    plan_tier: "author_monthly",
+    trial_active: false,
+    reading_mode: "casual",
+    daily_word_goal: 1000,
+    today_word_count: 250,
+    messaging_permission: "anyone",
+  },
+}))
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({
@@ -39,6 +54,7 @@ vi.mock("@/lib/api/auth", () => ({
     setReadingMode: vi.fn(),
     setDailyWordGoal: vi.fn(),
     setMessagingPermission: vi.fn(),
+    setUsername: setUsernameMock,
   },
 }))
 
@@ -50,17 +66,7 @@ vi.mock("@/lib/api/billing", () => ({
 
 vi.mock("@/lib/stores/authStore", () => ({
   useAuthStore: () => ({
-    user: {
-      email: "author@example.com",
-      tier: "author",
-      tier_label: "Author",
-      plan_tier: "author_monthly",
-      trial_active: false,
-      reading_mode: "casual",
-      daily_word_goal: 1000,
-      today_word_count: 250,
-      messaging_permission: "anyone",
-    },
+    user: authState.user,
     setUser: setUserMock,
     logout: logoutMock,
   }),
@@ -95,6 +101,19 @@ describe("SettingsPage billing actions", () => {
     logoutMock.mockReset()
     setThemeMock.mockReset()
     portalMock.mockReset()
+    setUsernameMock.mockReset()
+    authState.user = {
+      email: "author@example.com",
+      username: "author",
+      tier: "author",
+      tier_label: "Author",
+      plan_tier: "author_monthly",
+      trial_active: false,
+      reading_mode: "casual",
+      daily_word_goal: 1000,
+      today_word_count: 250,
+      messaging_permission: "anyone",
+    }
   })
 
   afterAll(() => {
@@ -141,6 +160,37 @@ describe("SettingsPage billing actions", () => {
 
     expect(portalMock).toHaveBeenCalledTimes(1)
     expect(window.location.href).toBe("https://billing.example.test/session")
+  })
+
+  it("shows the account username editor and saves an updated public handle", async () => {
+    setUsernameMock.mockResolvedValue({
+      ...authState.user,
+      username: "new-handle",
+    })
+
+    const view = renderSettingsPage()
+    expect(view.textContent).toContain("This is your public")
+    expect(view.textContent).toContain("separate from the author or pen name")
+
+    const usernameInput = view.querySelector('input[autocomplete="username"]') as HTMLInputElement | null
+    const saveButton = findButton(view, "Change username")
+    expect(usernameInput?.value).toBe("author")
+
+    await act(async () => {
+      if (usernameInput) {
+        usernameInput.value = "new-handle"
+        usernameInput.dispatchEvent(new Event("input", { bubbles: true }))
+      }
+    })
+
+    await act(async () => {
+      saveButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+      await Promise.resolve()
+    })
+
+    expect(setUsernameMock).toHaveBeenCalledWith("new-handle")
+    expect(setUserMock).toHaveBeenCalledWith(expect.objectContaining({ username: "new-handle" }))
+    expect(view.textContent).toContain("Public username updated.")
   })
 })
 

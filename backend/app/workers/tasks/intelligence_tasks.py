@@ -1,25 +1,12 @@
 """Phase 3 intelligence tasks."""
-import asyncio
 import uuid
 
 from app.workers.celery_app import celery_app
-
-
-def _run_coro(coro):
-    async def _wrapped():
-        from app.core.database import engine
-
-        await engine.dispose()
-        try:
-            return await coro
-        finally:
-            await engine.dispose()
-
-    return asyncio.run(_wrapped())
+from app.utils.worker_async_utils import run_worker_coro
 
 
 @celery_app.task(bind=True, name="intelligence_tasks.generate_wiki",
-                 queue="intelligence", max_retries=2)
+                 queue="intelligence", max_retries=2, ignore_result=True)
 def generate_wiki_task(self, book_id: str):
     """Generate auto-wiki for all chapters of a book. Phase 3."""
     # Placeholder — implemented in Phase 3
@@ -54,7 +41,7 @@ def generate_advisor_reply_task(
             )
 
     try:
-        return _run_coro(_run())
+        return run_worker_coro(_run())
     except ValueError:
         raise
     except Exception as exc:
@@ -87,7 +74,7 @@ def generate_series_advisor_reply_task(
             )
 
     try:
-        return _run_coro(_run())
+        return run_worker_coro(_run())
     except ValueError:
         raise
     except Exception as exc:

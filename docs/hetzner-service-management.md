@@ -54,6 +54,31 @@ Once the stack is up, use Docker for service-level logs:
 - `docker compose -f docker-compose.yml logs -f worker-intelligence`
 - `docker compose -f docker-compose.yml logs -f celery-beat`
 
+## Worker tuning
+
+- Production worker concurrency is env-driven through `backend/.env`.
+- Current recommended CCX13 baseline:
+  - `EXTRACTION_CONCURRENCY=2`
+  - `ANALYSIS_CONCURRENCY=1`
+  - `INTELLIGENCE_CONCURRENCY=1`
+- Extraction is the main throughput lever for manuscript ingest because each extraction task performs chapter chunking, embeddings, LLM extraction, deduplication, and chapter persistence in one worker slot.
+- Keep analysis at `1` for the first rollout so extraction gets the speedup without oversubscribing a 2 vCPU VPS.
+
+## Throughput benchmarking
+
+- Capture a baseline on one representative manuscript before changing worker settings.
+- After changing concurrency, re-run the same manuscript and compare these log markers:
+  - `ingestion_timing stage=process_book_total`
+  - `ingestion_timing stage=chapter_queue_wait`
+  - `ingestion_timing stage=embed`
+  - `ingestion_timing stage=llm_extract`
+  - `ingestion_timing stage=chapter_total`
+  - `analysis_timing stage=llm`
+- Example filters:
+  - `docker compose -f docker-compose.yml logs worker-extraction | grep "ingestion_timing stage="`
+  - `docker compose -f docker-compose.yml logs worker-analysis | grep "analysis_timing stage="`
+- Treat the rollout as successful only if the same manuscript finishes materially faster without worker restart loops, OOMs, or extraction-quality regressions.
+
 ## Notes
 
 - Keep `restart: unless-stopped` on the Compose services.

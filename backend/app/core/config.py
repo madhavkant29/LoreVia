@@ -55,6 +55,11 @@ class Settings(BaseSettings):
 
     # Redis
     REDIS_URL: str
+    CELERY_BROKER_URL: str | None = None
+    CELERY_RESULT_BACKEND: str | None = None
+    CELERY_TASK_IGNORE_RESULT: bool = False
+    CELERY_RESULT_EXPIRES_SECONDS: int = 3600
+    CELERY_BROKER_VISIBILITY_TIMEOUT_SECONDS: int = 7200
     REDIS_TTL_CHARACTER_PROFILE: int = 3600      # 1 hr
     REDIS_TTL_SUMMARY: int = 604800              # 7 days
     REDIS_TTL_GRAPH: int = 3600                  # 1 hr

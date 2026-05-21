@@ -108,6 +108,7 @@ async def extract_characters_and_relationships(
     *,
     user_id: uuid.UUID | None = None,
     book_id: uuid.UUID | None = None,
+    known_characters: list[dict] | None = None,
 ) -> dict:
     candidate_names = _candidate_names(chunk_text)
     candidate_hint = (
@@ -116,9 +117,10 @@ async def extract_characters_and_relationships(
         + "\nUse them only if they are actually people in the passage."
         if candidate_names else ""
     )
+    roster_hint = _known_character_prompt_block(known_characters)
     raw = await complete_with_fallback(
         system=CHARACTER_SYSTEM,
-        user=f"{chunk_text[:12000]}{candidate_hint}",
+        user=f"{chunk_text[:12000]}{candidate_hint}{roster_hint}",
         openai_model=settings.OPENAI_EXTRACT_MODEL,
         gemini_model=settings.GEMINI_EXTRACT_MODEL,
         temperature=0.1,
@@ -179,6 +181,34 @@ def fallback_character_mentions(chunk_text: str) -> dict:
         "relationships": [],
         "rejected_characters": rejected_characters,
     }
+
+
+def _known_character_prompt_block(known_characters: list[dict] | None) -> str:
+    lines: list[str] = []
+    for item in known_characters or []:
+        if not isinstance(item, dict):
+            continue
+        name = " ".join(str(item.get("name") or "").split()).strip()
+        if not name:
+            continue
+        aliases = [str(alias).strip() for alias in (item.get("aliases") or []) if str(alias).strip()]
+        role = " ".join(str(item.get("role") or "").split()).strip()
+        summary = " ".join(str(item.get("summary") or "").split()).strip()
+        marker = "manual anchor" if item.get("is_manual") else "known character"
+        parts = [f"{name} [{marker}]"]
+        if aliases:
+            parts.append(f"aliases: {', '.join(aliases[:6])}")
+        if role:
+            parts.append(f"role: {role}")
+        if summary:
+            parts.append(f"summary: {summary[:180]}")
+        lines.append(" | ".join(parts))
+    if not lines:
+        return ""
+    return (
+        "\n\nKnown story roster. Prefer resolving mentions to these existing characters when the passage supports it. "
+        "Do not invent canon names beyond the passage.\n- " + "\n- ".join(lines[:24])
+    )
 
 
 HONORIFIC_RE = re.compile(r"\b(?:Mr|Mrs|Ms|Miss|Dr|Lady|Lord|Sir)\.?\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?\b")
@@ -506,10 +536,12 @@ def _mention_support_score(source_text: str, name: str) -> tuple[int, int]:
 def _build_evidence(source_text: str, name: str, traits: dict, aliases: list[str]) -> dict:
     mention_count, strong_mentions = _mention_support_score(source_text, name)
     alias_mentions = 0
+    mention_snippets = _evidence_snippets(source_text, name)
     for alias in aliases:
         alias_count, alias_strong = _mention_support_score(source_text, alias)
         alias_mentions += alias_count
         strong_mentions += alias_strong
+        mention_snippets.extend(_evidence_snippets(source_text, alias))
     total_mentions = mention_count + alias_mentions
     has_description = any(isinstance(value, dict) and value.get("value") for value in traits.values())
     return {
@@ -518,7 +550,24 @@ def _build_evidence(source_text: str, name: str, traits: dict, aliases: list[str
         "has_dialogue_or_action": strong_mentions >= 1,
         "has_physical_description": has_description,
         "appears_multiple_times": total_mentions >= 2,
+        "snippets": mention_snippets[:3],
     }
+
+
+def _evidence_snippets(source_text: str, name: str) -> list[str]:
+    snippets: list[str] = []
+    seen: set[str] = set()
+    for start, end in _find_name_mentions(source_text, name):
+        excerpt = " ".join(source_text[max(0, start - 90): min(len(source_text), end + 90)].split()).strip()
+        if not excerpt:
+            continue
+        if excerpt in seen:
+            continue
+        seen.add(excerpt)
+        snippets.append(excerpt)
+        if len(snippets) >= 3:
+            break
+    return snippets
 
 
 def _split_sentences(text: str) -> list[str]:

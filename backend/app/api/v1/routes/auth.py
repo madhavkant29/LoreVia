@@ -562,9 +562,7 @@ async def set_username(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Set username for existing users. Username cannot be changed once set."""
-    if current_user.username:
-        raise HTTPException(400, "Username already set")
+    """Create or update the current user's public username."""
 
     username = (username or "").strip().lower()
     if not username or len(username) < 3 or len(username) > 32:
@@ -576,7 +574,7 @@ async def set_username(
 
     # Check uniqueness
     existing = (await db.execute(select(User).where(func.lower(User.username) == username.lower()))).scalar()
-    if existing:
+    if existing and existing.id != current_user.id:
         raise HTTPException(400, "Username already taken")
 
     current_user.username = username

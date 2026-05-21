@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
@@ -69,6 +70,14 @@ class _FakeDB:
         self.refreshes.append(value)
 
 
+async def _async_empty_analytics_map(*_args, **_kwargs):
+    return {}
+
+
+async def _async_empty_book_analytics(*_args, **_kwargs):
+    return public.PublicBookAnalyticsOut()
+
+
 @pytest.fixture(autouse=True)
 def _enable_public_mode(monkeypatch):
     monkeypatch.setattr("app.core.config.settings.PUBLIC_MODE_ENABLED", True, raising=False)
@@ -110,6 +119,18 @@ async def test_get_public_user_profile_is_not_blocked_by_forum_status(monkeypatc
             "forum_post_count": 0,
             "forum_comment_count": 0,
             "current_project": None,
+            "public_books_count": 0,
+            "public_books": [],
+            "public_analytics": {
+                "total_book_views": 0,
+                "total_unique_readers_30d": 0,
+                "total_chapter_views": 0,
+                "total_public_books": 0,
+                "total_chapters": 0,
+                "total_words": 0,
+                "latest_published_at": None,
+                "open_forum_discussions_count": 0,
+            },
             "created_at": "2026-05-16T00:00:00Z",
         }
 
@@ -202,12 +223,40 @@ async def test_list_public_beta_forum_posts_caches_anonymous_page(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_list_public_books_returns_cached_payload(monkeypatch):
+    monkeypatch.setattr(public, "build_public_book_analytics_map", _async_empty_analytics_map)
+
     async def _fake_cache_get(_key):
         return [{"id": "cached"}]
 
     monkeypatch.setattr(public, "cache_get", _fake_cache_get)
     payload = await public.list_public_books(db=_FakeDB())
     assert payload == [{"id": "cached"}]
+
+
+@pytest.mark.asyncio
+async def test_list_creator_public_uploads_uses_creator_catalog(monkeypatch):
+    monkeypatch.setattr(public, "build_public_book_analytics_map", _async_empty_analytics_map)
+
+    async def _fake_list_public_books(**kwargs):
+        return [{"id": "creator-book"}]
+
+    monkeypatch.setattr(public, "list_public_books", _fake_list_public_books)
+
+    payload = await public.list_creator_public_uploads(db=_FakeDB(), search="writer")
+
+    assert payload == [{"id": "creator-book"}]
+
+
+@pytest.mark.asyncio
+async def test_public_uploads_analytics_route_returns_overview(monkeypatch):
+    async def _fake_build_overview(_db):
+        return {"total_public_books": 2}
+
+    monkeypatch.setattr(public, "build_public_uploads_overview", _fake_build_overview)
+
+    payload = await public.get_public_uploads_analytics(db=_FakeDB())
+
+    assert payload["total_public_books"] == 2
 
 
 @pytest.mark.asyncio
@@ -226,6 +275,7 @@ async def test_list_public_books_builds_and_caches_rows(monkeypatch):
     monkeypatch.setattr(public, "cache_get", _fake_cache_get)
     monkeypatch.setattr(public, "cache_set", _fake_cache_set)
     monkeypatch.setattr(public, "_active_forum_post_map", _fake_active_forum_post_map)
+    monkeypatch.setattr(public, "build_public_book_analytics_map", _async_empty_analytics_map)
     book = SimpleNamespace(
         id=uuid.uuid4(),
         is_public=True,
@@ -240,7 +290,7 @@ async def test_list_public_books_builds_and_caches_rows(monkeypatch):
         status="ready",
         total_chapters=3,
         copyright_warning=False,
-        created_at="now",
+        created_at=datetime.now(UTC),
         archived_at=None,
     )
     db = _FakeDB(execute_values=[_Result(all_rows=[(book, "public_author")])])
@@ -267,6 +317,7 @@ async def test_list_public_books_includes_approved_user_shared_books(monkeypatch
     monkeypatch.setattr(public, "cache_get", _fake_cache_get)
     monkeypatch.setattr(public, "cache_set", _fake_cache_set)
     monkeypatch.setattr(public, "_active_forum_post_map", _fake_active_forum_post_map)
+    monkeypatch.setattr(public, "build_public_book_analytics_map", _async_empty_analytics_map)
     demo_book = SimpleNamespace(
         id=uuid.uuid4(),
         is_public=True,
@@ -282,7 +333,7 @@ async def test_list_public_books_includes_approved_user_shared_books(monkeypatch
         status="ready",
         total_chapters=2,
         copyright_warning=False,
-        created_at="now",
+        created_at=datetime.now(UTC),
     )
     shared_book = SimpleNamespace(
         id=uuid.uuid4(),
@@ -299,7 +350,7 @@ async def test_list_public_books_includes_approved_user_shared_books(monkeypatch
         status="ready",
         total_chapters=5,
         copyright_warning=False,
-        created_at="now",
+        created_at=datetime.now(UTC),
         public_share_status="approved",
     )
     db = _FakeDB(execute_values=[_Result(all_rows=[(demo_book, "demo_user"), (shared_book, "shared_user")])])
@@ -311,6 +362,8 @@ async def test_list_public_books_includes_approved_user_shared_books(monkeypatch
 
 @pytest.mark.asyncio
 async def test_get_public_book_returns_cached_payload(monkeypatch):
+    monkeypatch.setattr(public, "build_public_book_analytics", _async_empty_book_analytics)
+
     async def _fake_cache_get(_key):
         return {"id": "cached"}
 
@@ -318,7 +371,8 @@ async def test_get_public_book_returns_cached_payload(monkeypatch):
     book_id = uuid.uuid4()
     book = SimpleNamespace(id=book_id, is_public=True, source_kind="public_demo", hidden_at=None, archived_at=None)
     payload = await public.get_public_book(book_id, db=_FakeDB(get_values=[book]))
-    assert payload == {"id": "cached"}
+    assert payload["id"] == "cached"
+    assert payload["analytics"]["book_view_count"] == 0
 
 
 @pytest.mark.asyncio
@@ -339,6 +393,7 @@ async def test_get_public_book_skips_cache_for_user_shared_samples(monkeypatch):
     monkeypatch.setattr(public, "cache_get", _fake_cache_get)
     monkeypatch.setattr(public, "cache_set", _fake_cache_set)
     monkeypatch.setattr(public, "_active_forum_post_map", _fake_active_forum_post_map)
+    monkeypatch.setattr(public, "build_public_book_analytics", _async_empty_book_analytics)
     book_id = uuid.uuid4()
     book = SimpleNamespace(
         id=book_id,
@@ -357,7 +412,7 @@ async def test_get_public_book_skips_cache_for_user_shared_samples(monkeypatch):
         total_chapters=1,
         copyright_warning=False,
         user_id=uuid.uuid4(),
-        created_at="now",
+        created_at=datetime.now(UTC),
     )
     author_user = SimpleNamespace(username="shared_writer")
     db = _FakeDB(
@@ -374,6 +429,8 @@ async def test_get_public_book_skips_cache_for_user_shared_samples(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_get_public_book_ignores_cached_payload_when_book_is_no_longer_visible(monkeypatch):
+    monkeypatch.setattr(public, "build_public_book_analytics", _async_empty_book_analytics)
+
     async def _fake_cache_get(_key):
         return {"id": "cached"}
 
@@ -394,6 +451,8 @@ async def test_get_public_book_ignores_cached_payload_when_book_is_no_longer_vis
 
 @pytest.mark.asyncio
 async def test_get_public_book_raises_for_missing_or_hidden_book(monkeypatch):
+    monkeypatch.setattr(public, "build_public_book_analytics", _async_empty_book_analytics)
+
     async def _fake_cache_get(_key):
         return None
 
@@ -406,6 +465,8 @@ async def test_get_public_book_raises_for_missing_or_hidden_book(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_get_public_book_builds_payload(monkeypatch):
+    monkeypatch.setattr(public, "build_public_book_analytics", _async_empty_book_analytics)
+
     async def _fake_cache_get(_key):
         return None
 
@@ -437,7 +498,7 @@ async def test_get_public_book_builds_payload(monkeypatch):
         total_chapters=2,
         copyright_warning=False,
         user_id=uuid.uuid4(),
-        created_at="now",
+        created_at=datetime.now(UTC),
     )
     author_user = SimpleNamespace(username="public_author")
     db = _FakeDB(
@@ -454,6 +515,8 @@ async def test_get_public_book_builds_payload(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_get_public_chapter_returns_cached_payload(monkeypatch):
+    monkeypatch.setattr(public, "build_public_book_analytics", _async_empty_book_analytics)
+
     async def _fake_cache_get(_key):
         return {"chapter_number": 1}
 
@@ -465,6 +528,8 @@ async def test_get_public_chapter_returns_cached_payload(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_get_public_chapter_skips_cache_for_user_shared_samples(monkeypatch):
+    monkeypatch.setattr(public, "build_public_book_analytics", _async_empty_book_analytics)
+
     cache_get_calls = []
     cache_set_calls = []
 
@@ -505,6 +570,8 @@ async def test_get_public_chapter_skips_cache_for_user_shared_samples(monkeypatc
 
 @pytest.mark.asyncio
 async def test_get_public_chapter_ignores_cached_payload_when_book_is_no_longer_visible(monkeypatch):
+    monkeypatch.setattr(public, "build_public_book_analytics", _async_empty_book_analytics)
+
     async def _fake_cache_get(_key):
         return {"chapter_number": 1}
 
@@ -526,6 +593,8 @@ async def test_get_public_chapter_ignores_cached_payload_when_book_is_no_longer_
 
 @pytest.mark.asyncio
 async def test_get_public_chapter_raises_for_missing_book_or_chapter(monkeypatch):
+    monkeypatch.setattr(public, "build_public_book_analytics", _async_empty_book_analytics)
+
     async def _fake_cache_get(_key):
         return None
 

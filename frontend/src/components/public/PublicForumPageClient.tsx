@@ -158,6 +158,7 @@ export function PublicForumPageClient({
     <div className={`min-h-screen ${isDark ? "bg-[#0a0f14] text-slate-100" : "bg-[#edf1f5] text-slate-950"}`}>
       <div className={`border-b backdrop-blur ${isDark ? "border-white/10 bg-[#0f141b]/95" : "border-slate-200 bg-white/95"}`}>
         <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-4 sm:px-6 lg:px-8">
+          <Link href="/library" className={`text-sm ${isDark ? "text-slate-400 hover:text-white" : "text-slate-500 hover:text-slate-900"}`}>{"<- Back to library"}</Link>
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em]">
@@ -340,12 +341,14 @@ export function PublicForumPageClient({
                 <input
                   value={headline}
                   onChange={(event) => setHeadline(event.target.value)}
+                  onInput={(event) => setHeadline((event.target as HTMLInputElement).value)}
                   placeholder={composerThreadType === "novel" ? "Discussion headline" : "General discussion headline"}
                   className={`w-full rounded-2xl border px-4 py-3 text-sm outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 placeholder:text-slate-600 focus:border-amber-400" : "border-slate-200 bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:border-orange-500"}`}
                 />
                 <textarea
                   value={body}
                   onChange={(event) => setBody(event.target.value)}
+                  onInput={(event) => setBody((event.target as HTMLTextAreaElement).value)}
                   placeholder={composerThreadType === "novel" ? "What should readers focus on? Hook, pacing, emotional clarity, worldbuilding..." : "What do you want advice or discussion on?"}
                   className={`min-h-[8rem] w-full rounded-2xl border px-4 py-3 text-sm leading-6 outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 placeholder:text-slate-600 focus:border-amber-400" : "border-slate-200 bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:border-orange-500"}`}
                 />
@@ -445,6 +448,12 @@ function ForumFeedCard({ isDark, post }: { isDark: boolean, post: PublicForumPos
           <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
             <ActionPill isDark={isDark} icon={<CommentBubbleIcon className="h-3.5 w-3.5" />}>
               {post.comment_count} comments
+            </ActionPill>
+            <ActionPill isDark={isDark} icon={<VoteArrowIcon className="h-3.5 w-3.5" />}>
+              {post.like_count} likes
+            </ActionPill>
+            <ActionPill isDark={isDark} icon={<DownVoteIcon className="h-3.5 w-3.5" />}>
+              {post.dislike_count} dislikes
             </ActionPill>
             {isNovelThread ? (
               <ActionPill isDark={isDark} icon={<InboxIcon className="h-3.5 w-3.5" />}>
@@ -585,6 +594,14 @@ function SearchIcon({ className }: { className?: string }) {
 function VoteArrowIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 20 20" fill="currentColor" className={`h-5 w-5 ${className || ""}`} aria-hidden="true">
+      <path d="M10 3.5 16 10h-3.75v6.5h-4.5V10H4z" />
+    </svg>
+  )
+}
+
+function DownVoteIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 20 20" fill="currentColor" className={`${className || "h-5 w-5"} rotate-180`} aria-hidden="true">
       <path d="M10 3.5 16 10h-3.75v6.5h-4.5V10H4z" />
     </svg>
   )

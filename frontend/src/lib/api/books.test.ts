@@ -82,6 +82,12 @@ describe("books api", () => {
     expect(getMock).toHaveBeenCalledWith("/books/book-1")
   })
 
+  it("loads the aggregated reader overview payload", async () => {
+    await booksApi.getOverview("book-1")
+
+    expect(getMock).toHaveBeenCalledWith("/books/book-1/overview")
+  })
+
   it("loads manuscript annotations", async () => {
     await booksApi.getManuscriptAnnotations("book-1", 2)
 

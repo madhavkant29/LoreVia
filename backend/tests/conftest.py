@@ -1,6 +1,9 @@
 import asyncio
+import os
 import sys
 import warnings
+import weakref
+from urllib.parse import urlsplit, urlunsplit
 
 import pytest
 import pytest_asyncio
@@ -132,8 +135,11 @@ def mock_email_delivery(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def mock_celery_tasks(monkeypatch):
+def mock_celery_tasks(monkeypatch, request):
     """Mock Celery tasks to avoid worker dependency in all tests."""
+    if request.node.module.__name__.endswith("test_extraction_tasks"):
+        return
+
     class _FakeTask:
         @staticmethod
         def apply_async(*args, **kwargs):
@@ -148,9 +154,13 @@ def mock_celery_tasks(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def mock_redis(monkeypatch):
-    """Mock Redis to avoid event loop issues with global _redis connection."""
+def mock_redis(monkeypatch, request):
+    """Mock Redis by default while allowing focused runtime tests to opt out."""
     from app.core import redis as redis_module
+    from app.api.deps import rate_limit as rate_limit_module
+
+    if request.node.module.__name__.endswith("test_redis_runtime"):
+        return
 
     class FakeRedis:
         def __init__(self):
@@ -273,17 +283,35 @@ def mock_redis(monkeypatch):
         async def aclose(self):
             pass
 
-    monkeypatch.setattr(redis_module, "_redis", FakeRedis())
+    fake_redis = FakeRedis()
+    monkeypatch.setattr(redis_module, "_redis_clients", weakref.WeakKeyDictionary(), raising=False)
+    monkeypatch.setattr(redis_module.aioredis, "from_url", lambda *args, **kwargs: fake_redis, raising=False)
 
     async def fake_get_redis():
-        return redis_module._redis
+        return fake_redis
 
     monkeypatch.setattr(redis_module, "get_redis", fake_get_redis)
+    monkeypatch.setattr(rate_limit_module, "get_redis", fake_get_redis)
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-TEST_DB = settings.DATABASE_URL.replace("postgresql://", "postgresql+psycopg://")
+def _resolved_test_database_url() -> str:
+    explicit = os.getenv("TEST_DATABASE_URL")
+    raw_url = explicit or settings.DATABASE_URL
+
+    # When tests run on the host machine, the Docker-internal hostname `postgres`
+    # is not resolvable. Rewrite only that local-compose case to localhost.
+    if sys.platform == "win32":
+        parts = urlsplit(raw_url)
+        if parts.hostname == "postgres":
+            netloc = parts.netloc.replace("@postgres:", "@127.0.0.1:")
+            raw_url = urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+
+    return raw_url.replace("postgresql://", "postgresql+psycopg://", 1)
+
+
+TEST_DB = _resolved_test_database_url()
 engine_test = None
 TestSession = None
 

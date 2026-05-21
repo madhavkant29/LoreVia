@@ -64,8 +64,12 @@ logs/
 docker-compose.override.yml
 .envrc
 ops/env/backend.env
+ops/env/*.env
+ops/env/*.local
 ops/nginx/certs/*.pem
 ops/nginx/certs/*.key
+docker-secrets/
+secrets/
 
 # Python packaging
 pip-wheel-metadata/
@@ -92,6 +96,11 @@ celerybeat-schedule
 *.seed
 *.sql
 *.sqlite
+dump.rdb
+*.rdb
+appendonly.aof
+appendonly.aof.*
+redis_data/
 
 # Local development artifacts
 local_settings.py
@@ -100,7 +109,7 @@ local_settings.py
 *.swp
 *~
 *.swo
-
+frontend\test-results
 # Exclude generated files
 *.pb.go
 

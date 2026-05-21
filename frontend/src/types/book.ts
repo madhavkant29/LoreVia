@@ -3,6 +3,8 @@ export type BookFormat = "pdf" | "epub" | "docx" | "doc" | "fountain" | "txt" | 
 export type BookWorkType = "novel" | "screenplay" | "other"
 export type RevisionTagTarget = "chapter" | "scene" | "character" | "note" | "comment" | "plot_thread" | "world_note"
 
+import type { ChapterListResponse, ReadingProgress, SummaryCollectionResponse } from "./reader"
+
 export interface Book {
   id: string
   title: string
@@ -56,6 +58,13 @@ export interface Book {
   collaboration_role?: CollaborationRole | null
   collaboration_scope?: CollaborationScope | null
   collaboration_permissions?: CollaborationPermissions | null
+}
+
+export interface BookOverviewPayload {
+  book: Book
+  progress: ReadingProgress
+  chapter_list: ChapterListResponse
+  summary_collection: SummaryCollectionResponse
 }
 
 export type CollaborationRole =
@@ -196,12 +205,15 @@ export interface PublicBook {
   total_chapters: number | null
   copyright_warning?: boolean
   active_forum_post_id?: string | null
+  analytics?: import("./public").PublicBookAnalytics | null
   created_at?: string
+  published_at?: string | null
 }
 
 export interface PublicBookDetail extends PublicBook {
   chapters: PublicChapterMeta[]
   visibility_notice?: string | null
+  analytics?: import("./public").PublicBookAnalytics | null
 }
 
 export interface PublicChapter {

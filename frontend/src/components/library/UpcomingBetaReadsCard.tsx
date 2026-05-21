@@ -35,83 +35,71 @@ export function UpcomingBetaReadsCard({ isDark }: { isDark: boolean }) {
     }
   }
 
-  const panelClass = isDark
-    ? "border-white/[0.08] bg-[#111119]"
-    : "border-stone-200/80 bg-white/88"
-  const copyClass = isDark ? "text-[#f7f3ed]" : "text-stone-950"
-  const mutedClass = isDark ? "text-[#9f9ca8]" : "text-stone-500"
-  const subtleClass = isDark ? "text-[#c8c4bd]" : "text-stone-700"
+  const panelClass = isDark ? "border-white/[0.08] bg-[#1f2427]" : "border-stone-200 bg-white"
+  const copyClass = isDark ? "text-[#f5f0e8]" : "text-stone-950"
+  const mutedClass = isDark ? "text-[#9f9b94]" : "text-stone-500"
+  const nextAssignment = items[0]
+  const bodyText = isLoading
+    ? "Loading beta reads..."
+    : items.length === 0
+      ? "No beta reads are assigned to you right now."
+      : nextAssignment
+        ? `${items.length === 1 ? "One review needs attention." : `${items.length} reviews need attention.`} ${
+            betaReadIsUrgent(nextAssignment.expires_at)
+              ? betaReadDeadlineLabel(nextAssignment.expires_at)
+              : betaReadProgressLabel(nextAssignment)
+          }`
+        : "No beta reads are assigned to you right now."
 
   return (
-    <section className={`rounded-[1.5rem] border p-6 shadow-[0_22px_70px_-48px_rgba(15,23,42,0.5)] ${panelClass}`}>
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <p className={`text-[0.7rem] font-semibold uppercase tracking-[0.28em] ${isDark ? "text-amber-300" : "text-amber-700"}`}>Upcoming Beta Reads</p>
-          <h2 className={`mt-2 font-serif text-[2rem] tracking-[-0.03em] ${copyClass}`}>Complete reviews before the deadline.</h2>
+    <section className={`rounded-[1.5rem] border p-6 ${panelClass}`}>
+      <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex items-start gap-4">
+          <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl ${isDark ? "bg-[#292f33] text-[#d9b88a]" : "bg-[#f7efe5] text-[#b86a1b]"}`}>
+            <CalendarIcon />
+          </div>
+          <div>
+            <p className={`text-[0.68rem] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-[#d9b88a]" : "text-[#b86a1b]"}`}>Upcoming beta reads</p>
+            <h2 className={`mt-2 font-display text-[2rem] tracking-[-0.03em] ${copyClass}`}>Complete reviews before the deadline.</h2>
+            <p className={`mt-2 max-w-2xl text-sm leading-7 ${mutedClass}`}>{bodyText}</p>
+            {nextAssignment ? (
+              <p className={`mt-1 text-sm font-medium ${copyClass}`}>
+                {nextAssignment.task_label} - {nextAssignment.author_name}
+              </p>
+            ) : null}
+          </div>
         </div>
-        <button
-          type="button"
-          onClick={() => router.push("/beta-reads" as Route)}
-          className={`inline-flex h-11 items-center justify-center rounded-full px-5 text-sm font-semibold transition ${
-            isDark ? "bg-white/[0.05] text-[#f4efe7] hover:bg-white/[0.08]" : "bg-stone-100 text-stone-900 hover:bg-stone-200"
-          }`}
-        >
-          View all beta reads
-        </button>
+        <div className="flex flex-col gap-3 sm:flex-row">
+          {nextAssignment ? (
+            <button
+              type="button"
+              onClick={() => void handlePrimaryAction(nextAssignment)}
+              disabled={pendingId === nextAssignment.id}
+              className="inline-flex min-h-11 items-center justify-center rounded-xl bg-[#1f615d] px-5 text-sm font-semibold text-white transition hover:bg-[#194f4c] disabled:opacity-60"
+            >
+              {pendingId === nextAssignment.id ? "Working..." : nextAssignment.primary_action}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => router.push("/beta-reads" as Route)}
+            className={`inline-flex min-h-11 items-center justify-center rounded-xl border px-5 text-sm font-medium transition ${
+              isDark ? "border-white/[0.08] bg-[#1f2427] text-[#ebe7df] hover:bg-[#252b2f]" : "border-stone-200 bg-white text-stone-800 hover:bg-stone-50"
+            }`}
+          >
+            View all beta reads
+          </button>
+        </div>
       </div>
-
-      {isLoading ? (
-        <div className={`mt-6 rounded-[1.2rem] border border-dashed px-5 py-6 text-sm ${isDark ? "border-white/[0.08] text-[#8c8994]" : "border-stone-200 text-stone-500"}`}>
-          Loading beta reads...
-        </div>
-      ) : items.length === 0 ? (
-        <div className={`mt-6 rounded-[1.2rem] border border-dashed px-5 py-6 text-sm ${isDark ? "border-white/[0.08] text-[#8c8994]" : "border-stone-200 text-stone-500"}`}>
-          No beta reads are assigned to you right now.
-        </div>
-      ) : (
-        <div className="mt-6 grid gap-4 xl:grid-cols-3">
-          {items.slice(0, 3).map((assignment) => {
-            const urgent = betaReadIsUrgent(assignment.expires_at)
-            return (
-              <article
-                key={assignment.id}
-                className={`rounded-[1.25rem] border p-5 ${isDark ? "border-white/[0.06] bg-[#0d0d14]" : "border-stone-200 bg-stone-50/70"}`}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <h3 className={`truncate font-serif text-[1.65rem] tracking-[-0.03em] ${copyClass}`}>{assignment.book_title}</h3>
-                    <p className={`mt-1 text-sm ${mutedClass}`}>{assignment.task_label} - {assignment.author_name}</p>
-                  </div>
-                  <span className={`rounded-full px-3 py-1 text-[11px] font-semibold ${urgent ? "bg-rose-500/12 text-rose-300" : isDark ? "bg-white/[0.05] text-[#d6d0c7]" : "bg-stone-200 text-stone-700"}`}>
-                    {assignment.status_label}
-                  </span>
-                </div>
-
-                <div className={`mt-5 flex items-center justify-between text-sm ${subtleClass}`}>
-                  <span className={urgent ? "text-rose-300" : undefined}>{betaReadDeadlineLabel(assignment.expires_at)}</span>
-                  <span>{Math.round(assignment.progress_pct)}% complete</span>
-                </div>
-
-                <div className="mt-4">
-                  <div className={`h-2 overflow-hidden rounded-full ${isDark ? "bg-white/[0.08]" : "bg-stone-200"}`}>
-                    <div className={`h-full rounded-full ${urgent ? "bg-[linear-gradient(90deg,#fb7185,#f97316)]" : "bg-[linear-gradient(90deg,#f59e0b,#f97316)]"}`} style={{ width: `${Math.max(4, Math.round(assignment.progress_pct))}%` }} />
-                  </div>
-                  <p className={`mt-2 text-sm ${mutedClass}`}>{betaReadProgressLabel(assignment)}</p>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => void handlePrimaryAction(assignment)}
-                  disabled={pendingId === assignment.id}
-                  className="mt-5 inline-flex h-11 w-full items-center justify-center rounded-full bg-[#9a3412] px-4 text-sm font-semibold text-white transition hover:bg-[#b45309] disabled:opacity-60"
-                >
-                  {pendingId === assignment.id ? "Working..." : assignment.primary_action}
-                </button>
-              </article>
-            )
-          })}
-        </div>
-      )}
     </section>
+  )
+}
+
+function CalendarIcon() {
+  return (
+    <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M7 3.5v3M17 3.5v3M4.5 8.5h15" />
+      <rect x="4.5" y="5.5" width="15" height="14" rx="2.5" />
+    </svg>
   )
 }

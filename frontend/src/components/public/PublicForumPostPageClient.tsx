@@ -35,10 +35,16 @@ export function PublicForumPostPageClient({
   const [interestLoadFailed, setInterestLoadFailed] = useState(false)
   const [editing, setEditing] = useState(false)
   const [savingEdit, setSavingEdit] = useState(false)
+  const [postReacting, setPostReacting] = useState(false)
   const [reactingId, setReactingId] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
+  const [interactiveReady, setInteractiveReady] = useState(false)
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
+
+  useEffect(() => {
+    setInteractiveReady(true)
+  }, [])
 
   const resetEditorFromPost = (source: PublicForumPost) => {
     setEditHeadline(source.headline)
@@ -234,6 +240,29 @@ export function PublicForumPostPageClient({
     }
   }
 
+  const reactToPost = async (reaction: "like" | "dislike") => {
+    if (!post) return
+    if (!viewer) {
+      setStatus("Sign in to react to discussions.")
+      return
+    }
+    setPostReacting(true)
+    setStatus(null)
+    try {
+      const nextReaction = post.reaction === reaction ? "clear" : reaction
+      const updated = await publicApi.reactToForumPost(post.id, nextReaction)
+      setPost(updated)
+    } catch {
+      setStatus("Could not update that discussion reaction.")
+      const refreshed = await publicApi.getForumPost(post.id).catch(() => null)
+      if (refreshed) {
+        setPost(refreshed)
+      }
+    } finally {
+      setPostReacting(false)
+    }
+  }
+
   if (loading) {
     return <div className={`mx-auto max-w-4xl px-4 py-20 text-center ${isDark ? "text-slate-500" : "text-slate-400"}`}>Loading discussion...</div>
   }
@@ -247,6 +276,8 @@ export function PublicForumPostPageClient({
       <div className={`border-b backdrop-blur ${isDark ? "border-white/10 bg-[#0f141b]/95" : "border-slate-200 bg-white/95"}`}>
         <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
           <div className="flex flex-wrap items-center gap-3 text-sm">
+            <Link href="/library" className={`${isDark ? "text-slate-400 hover:text-white" : "text-slate-500 hover:text-slate-900"}`}>Back to library</Link>
+            <MetaDivider isDark={isDark} />
             <Link href="/public/forum" className={`${isDark ? "text-slate-400 hover:text-white" : "text-slate-500 hover:text-slate-900"}`}>Forum</Link>
             <MetaDivider isDark={isDark} />
             {post.author_username ? (
@@ -305,6 +336,12 @@ export function PublicForumPostPageClient({
                   <ActionPill isDark={isDark} icon={<CommentBubbleIcon className="h-3.5 w-3.5" />}>
                     {post.comment_count} comments
                   </ActionPill>
+                  <ActionPill isDark={isDark} icon={<VoteArrowIcon className="h-3.5 w-3.5" />}>
+                    {post.like_count} likes
+                  </ActionPill>
+                  <ActionPill isDark={isDark} icon={<DownVoteIcon className="h-3.5 w-3.5" />}>
+                    {post.dislike_count} dislikes
+                  </ActionPill>
                   {isNovelThread ? (
                     <ActionPill isDark={isDark} icon={<InboxIcon className="h-3.5 w-3.5" />}>
                       {post.interest_count} reader notes
@@ -316,6 +353,30 @@ export function PublicForumPostPageClient({
                     </ActionPill>
                   ) : null}
                 </div>
+
+                {!isAuthorViewer ? (
+                  <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
+                    <button
+                      type="button"
+                      disabled={!isPubliclyInteractive || postReacting}
+                      onClick={() => void reactToPost("like")}
+                      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 font-semibold transition disabled:cursor-not-allowed disabled:opacity-80 ${post.reaction === "like" ? (isDark ? "border-emerald-400/60 bg-emerald-400/15 text-emerald-200" : "border-emerald-300 bg-emerald-50 text-emerald-700") : (isDark ? "border-white/10 bg-white/5 text-slate-300 hover:bg-white/10" : "border-slate-200 bg-white text-slate-600 hover:border-slate-300")}`}
+                    >
+                      <VoteArrowIcon className="h-4 w-4" />
+                      {post.like_count}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!isPubliclyInteractive || postReacting}
+                      onClick={() => void reactToPost("dislike")}
+                      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 font-semibold transition disabled:cursor-not-allowed disabled:opacity-80 ${post.reaction === "dislike" ? (isDark ? "border-rose-400/60 bg-rose-400/15 text-rose-200" : "border-rose-300 bg-rose-50 text-rose-700") : (isDark ? "border-white/10 bg-white/5 text-slate-300 hover:bg-white/10" : "border-slate-200 bg-white text-slate-600 hover:border-slate-300")}`}
+                    >
+                      <DownVoteIcon className="h-4 w-4" />
+                      {post.dislike_count}
+                    </button>
+                    {!isPubliclyInteractive ? <MetaText isDark={isDark}>Reactions paused</MetaText> : null}
+                  </div>
+                ) : null}
 
                 {isAuthorViewer ? (
                   <div className="mt-5 flex flex-wrap gap-3">
@@ -439,6 +500,8 @@ export function PublicForumPostPageClient({
                     <textarea
                       value={draft}
                       onChange={(event) => setDraft(event.target.value)}
+                      onInput={(event) => setDraft((event.target as HTMLTextAreaElement).value)}
+                      disabled={!interactiveReady}
                       placeholder="Add a thoughtful public comment about pacing, clarity, emotional payoff, or what you'd want to review."
                       className={`min-h-[8.5rem] w-full rounded-2xl border px-4 py-3 text-sm leading-6 outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 placeholder:text-slate-600 focus:border-amber-400" : "border-slate-200 bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:border-orange-500"}`}
                     />
@@ -446,7 +509,7 @@ export function PublicForumPostPageClient({
                   <div className="mt-3 flex flex-wrap items-center gap-3">
                     <button
                       type="button"
-                      disabled={submitting || !draft.trim()}
+                      disabled={!interactiveReady || submitting || !draft.trim()}
                       onClick={() => void submitComment()}
                       className={`inline-flex h-10 items-center justify-center rounded-full px-4 text-sm font-semibold transition ${isDark ? "bg-amber-400 text-slate-950 hover:bg-amber-300 disabled:bg-amber-400/40" : "bg-[#ff6a1a] text-white hover:bg-[#f05a09] disabled:bg-slate-300"}`}
                     >
@@ -525,13 +588,15 @@ export function PublicForumPostPageClient({
                   <textarea
                     value={interestDraft}
                     onChange={(event) => setInterestDraft(event.target.value)}
+                    onInput={(event) => setInterestDraft((event.target as HTMLTextAreaElement).value)}
+                    disabled={!interactiveReady}
                     placeholder="Tell the author what genres you read well, what feedback you can provide, and why you'd be a useful beta reader."
                     className={`min-h-[8rem] w-full rounded-2xl border px-4 py-3 text-sm leading-6 outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 placeholder:text-slate-600 focus:border-amber-400" : "border-slate-200 bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:border-orange-500"}`}
                   />
                   <div className="mt-3 flex flex-wrap items-center gap-3">
                     <button
                       type="button"
-                      disabled={interestSubmitting || !interestDraft.trim()}
+                      disabled={!interactiveReady || interestSubmitting || !interestDraft.trim()}
                       onClick={() => void submitInterest()}
                       className={`inline-flex h-10 w-full items-center justify-center rounded-full px-4 text-sm font-semibold transition ${isDark ? "bg-amber-400 text-slate-950 hover:bg-amber-300 disabled:bg-amber-400/40" : "bg-[#ff6a1a] text-white hover:bg-[#f05a09] disabled:bg-slate-300"}`}
                     >

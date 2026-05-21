@@ -1068,6 +1068,8 @@ async def test_character_routes_cover_crud_and_exports(monkeypatch):
     monkeypatch.setattr(books, "decode_token", lambda _token: {"type": "asset", "sub": str(user.id), "res": f"character-card:{book.id}:{character.id}"})
     monkeypatch.setattr(books, "list_custom_tags_for_entity_ids", _async_value({}))
     monkeypatch.setattr(books, "get_custom_tags_for_entity", _async_value([]))
+    monkeypatch.setattr(books, "refresh_character_duplicate_suggestions", _async_value(None))
+    monkeypatch.setattr(books, "mark_character_candidates_merged", _async_value(None))
 
     context = {
         "book": book,

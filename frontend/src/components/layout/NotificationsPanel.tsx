@@ -6,7 +6,7 @@ import { useState } from "react"
 
 import { booksApi } from "@/lib/api/books"
 import { socialApi } from "@/lib/api/social"
-import { useNotifications } from "@/lib/hooks/useNotifications"
+import { useNotificationsState } from "@/lib/hooks/useNotifications"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import type { RevisionActionItem, RevisionIntelligence } from "@/types/book"
 import type { NotificationItem } from "@/types/notifications"
@@ -36,7 +36,10 @@ function RevisionDetailCard({ item, isDark }: { item: RevisionActionItem; isDark
 export function NotificationsPanel({ mode = "sidebar" }: { mode?: "sidebar" | "page" }) {
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
-  const { items, unreadCount, loading, error, markRead, markAllRead, refresh } = useNotifications()
+  const { items, unreadCount, loading, error, markRead, markAllRead, refresh } = useNotificationsState(40, {
+    pollMs: 60_000,
+    refreshOnFocus: true,
+  })
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [loadingDetailsId, setLoadingDetailsId] = useState<string | null>(null)
   const [detailsErrorId, setDetailsErrorId] = useState<string | null>(null)

@@ -18,7 +18,7 @@ const ROLE_OPTIONS: Array<{ value: CollaborationRole; label: string; detail: str
   { value: "viewer", label: "Viewer", detail: "Read-only access to the shared draft." },
   { value: "reader_only", label: "Reader-only", detail: "A lighter studio role for pure read access." },
   { value: "commenter", label: "Commenter", detail: "Can read and leave feedback without editing." },
-  { value: "beta_reader", label: "Beta reader", detail: "Feedback-focused role for reader response." },
+  { value: "beta_reader", label: "Beta Reader", detail: "Feedback-focused role for reader response." },
   { value: "editor", label: "Editor", detail: "Hands-on manuscript editing access." },
   { value: "developmental_editor", label: "Developmental editor", detail: "Structure, continuity, and arc partner." },
   { value: "coauthor", label: "Coauthor", detail: "Full creative collaborator across the manuscript." },
@@ -342,6 +342,9 @@ export default function CollaborationPage() {
                     <option key={option.value} value={option.value}>{option.label}</option>
                   ))}
                 </select>
+                <p className={`text-sm font-semibold ${isDark ? "text-slate-200" : "text-slate-800"}`}>
+                  {roleMeta(role)?.label}
+                </p>
                 <p className={`text-xs leading-5 ${isDark ? "text-slate-500" : "text-slate-500"}`}>{activeRoleDetail}</p>
               </div>
 
@@ -445,7 +448,7 @@ export default function CollaborationPage() {
                       </span>
                     </div>
                     <div className="mt-4 grid gap-2 text-sm">
-                      <p className={isDark ? "text-slate-300" : "text-slate-700"}>{roleLabel(collaborator.role)}</p>
+                      <p className={isDark ? "text-slate-300" : "text-slate-700"}>Role · {roleLabel(collaborator.role)}</p>
                       <p className={isDark ? "text-slate-400" : "text-slate-600"}>{permissionSummary(collaborator.permissions)}</p>
                       <p className={isDark ? "text-slate-500" : "text-slate-500"}>{scopeSummary(collaborator.scope, collaborator.permissions)}</p>
                     </div>

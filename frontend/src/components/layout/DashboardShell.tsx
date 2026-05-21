@@ -12,9 +12,10 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   }, [theme])
 
   return (
-    <div className="min-h-screen bg-background text-foreground transition-colors duration-300">
+    <div className="app-shell min-h-screen transition-colors duration-300">
+      <div className="app-shell__mesh" />
       <Navbar />
-      <main className="mx-auto max-w-7xl px-4 py-8 md:px-8 lg:px-10">
+      <main className="relative mx-auto max-w-7xl px-4 py-8 md:px-8 lg:px-10">
         {children}
       </main>
     </div>

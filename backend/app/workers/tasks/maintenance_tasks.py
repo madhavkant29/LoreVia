@@ -1,24 +1,10 @@
 from __future__ import annotations
 
-import asyncio
-
 from app.workers.celery_app import celery_app
+from app.utils.worker_async_utils import run_worker_coro
 
 
-def _run_coro(coro):
-    async def _wrapped():
-        from app.core.database import engine
-
-        await engine.dispose()
-        try:
-            return await coro
-        finally:
-            await engine.dispose()
-
-    return asyncio.run(_wrapped())
-
-
-@celery_app.task(bind=True, name="maintenance_tasks.send_due_trial_emails", queue="intelligence", max_retries=2)
+@celery_app.task(bind=True, name="maintenance_tasks.send_due_trial_emails", queue="intelligence", max_retries=2, ignore_result=True)
 def send_due_trial_emails_task(self, *, limit: int = 100):
     async def _run():
         from app.core.database import AsyncSessionLocal
@@ -30,12 +16,12 @@ def send_due_trial_emails_task(self, *, limit: int = 100):
             return result
 
     try:
-        return _run_coro(_run())
+        return run_worker_coro(_run())
     except Exception as exc:
         raise self.retry(exc=exc)
 
 
-@celery_app.task(bind=True, name="maintenance_tasks.process_beta_reads", queue="intelligence", max_retries=2)
+@celery_app.task(bind=True, name="maintenance_tasks.process_beta_reads", queue="intelligence", max_retries=2, ignore_result=True)
 def process_beta_reads_task(self, *, limit: int = 100):
     async def _run():
         from app.core.database import AsyncSessionLocal
@@ -47,6 +33,6 @@ def process_beta_reads_task(self, *, limit: int = 100):
             return result.model_dump()
 
     try:
-        return _run_coro(_run())
+        return run_worker_coro(_run())
     except Exception as exc:
         raise self.retry(exc=exc)

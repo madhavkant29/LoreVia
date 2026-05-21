@@ -10,9 +10,11 @@ import { usePreferencesStore } from "./preferencesStore"
 
 describe("zustand stores", () => {
   const storage = new Map<string, string>()
+  const sessionStorageData = new Map<string, string>()
 
   beforeEach(() => {
     storage.clear()
+    sessionStorageData.clear()
     const storageApi = {
       getItem: (key: string) => storage.get(key) ?? null,
       setItem: (key: string, value: string) => {
@@ -29,6 +31,23 @@ describe("zustand stores", () => {
     Object.defineProperty(window, "localStorage", {
       configurable: true,
       value: storageApi,
+    })
+    const sessionStorageApi = {
+      getItem: (key: string) => sessionStorageData.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        sessionStorageData.set(key, value)
+      },
+      removeItem: (key: string) => {
+        sessionStorageData.delete(key)
+      },
+      clear: () => {
+        sessionStorageData.clear()
+      },
+    }
+    vi.stubGlobal("sessionStorage", sessionStorageApi)
+    Object.defineProperty(window, "sessionStorage", {
+      configurable: true,
+      value: sessionStorageApi,
     })
     document.documentElement.className = ""
     document.documentElement.dataset.theme = ""
@@ -54,6 +73,7 @@ describe("zustand stores", () => {
 
     expect(useAuthStore.getState().user?.username).toBe("reader")
     expect(useAuthStore.getState().hydrated).toBe(true)
+    expect(sessionStorageData.get("lorevia-auth-user")).toContain("\"username\":\"reader\"")
   })
 
   it("marks the auth store hydrated without a user", () => {
@@ -65,10 +85,12 @@ describe("zustand stores", () => {
 
   it("logs out by clearing the user and keeping hydration", () => {
     useAuthStore.setState({ user: { id: "2" } as never, hydrated: true })
+    sessionStorageData.set("lorevia-auth-user", "{\"id\":\"2\"}")
     useAuthStore.getState().logout()
 
     expect(useAuthStore.getState().user).toBeNull()
     expect(useAuthStore.getState().hydrated).toBe(true)
+    expect(sessionStorageData.has("lorevia-auth-user")).toBe(false)
   })
 
   it("returns reader as the default book mode", () => {

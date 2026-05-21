@@ -95,17 +95,17 @@ module.exports = {
         },
       },
       fontFamily: {
-        sans: ["var(--font-inter)", "ui-sans-serif", "system-ui", "-apple-system", "BlinkMacSystemFont", "Segoe UI", "Roboto", "Helvetica Neue", "Arial", "sans-serif"],
-        reading: ["var(--font-merriweather)", "Georgia", "serif"],
-        display: ["var(--font-newsreader)", "Times New Roman", "serif"],
+        sans: ["var(--font-ui)", "Avenir Next", "Segoe UI Variable Text", "Inter", "ui-sans-serif", "system-ui", "sans-serif"],
+        reading: ["var(--font-merriweather)", "Iowan Old Style", "Georgia", "serif"],
+        display: ["var(--font-newsreader)", "Iowan Old Style", "Georgia", "serif"],
       },
       borderRadius: {
         sm: "4px",
         DEFAULT: "6px",
         md: "8px",
-        lg: "10px",
-        xl: "12px",
-        "2xl": "16px",
+        lg: "12px",
+        xl: "14px",
+        "2xl": "18px",
       },
       boxShadow: {
         sm: "0 1px 2px 0 rgb(0 0 0 / 0.05)",

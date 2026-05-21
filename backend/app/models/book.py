@@ -1,8 +1,8 @@
 import enum
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -129,6 +129,34 @@ class Book(Base):
     forum_comments = relationship("BookForumComment", back_populates="book", cascade="all, delete-orphan")
     custom_tags = relationship("CustomTag", back_populates="book", cascade="all, delete-orphan")
     writing_activities = relationship("UserWritingActivity", back_populates="book")
+    public_analytics_events = relationship("PublicBookAnalyticsEvent", back_populates="book", cascade="all, delete-orphan")
+
+
+class PublicBookAnalyticsEvent(Base):
+    __tablename__ = "public_book_analytics_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "book_id",
+            "chapter_number",
+            "event_type",
+            "visitor_fingerprint_hash",
+            "event_date",
+            name="uq_public_book_analytics_events_daily_fingerprint",
+        ),
+        Index("ix_public_book_analytics_events_book_created_at", "book_id", "created_at"),
+        Index("ix_public_book_analytics_events_book_event_type", "book_id", "event_type"),
+        Index("ix_public_book_analytics_events_book_event_date", "book_id", "event_date"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    book_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False)
+    chapter_number: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    event_type: Mapped[str] = mapped_column(String, nullable=False)
+    visitor_fingerprint_hash: Mapped[str] = mapped_column(String, nullable=False)
+    event_date: Mapped[date] = mapped_column(Date, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    book = relationship("Book", back_populates="public_analytics_events")
 
 
 class BookCollaborator(Base):
@@ -180,6 +208,8 @@ class BookForumPost(Base):
     desired_beta_reader_count: Mapped[int | None] = mapped_column(Integer)
     allow_contact_requests: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     status: Mapped[str] = mapped_column(String, nullable=False, default="open", server_default="open", index=True)
+    like_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    dislike_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     last_activity_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), index=True)
@@ -187,6 +217,7 @@ class BookForumPost(Base):
     book = relationship("Book", back_populates="forum_posts")
     interests = relationship("BookForumInterest", back_populates="post", cascade="all, delete-orphan")
     comments = relationship("BookForumComment", back_populates="post", cascade="all, delete-orphan")
+    reactions = relationship("BookForumPostReaction", back_populates="post", cascade="all, delete-orphan")
 
 
 class BookForumInterest(Base):
@@ -250,6 +281,23 @@ class BookForumCommentReaction(Base):
 
     comment = relationship("BookForumComment", back_populates="reactions")
     user = relationship("User", back_populates="forum_comment_reactions")
+
+
+class BookForumPostReaction(Base):
+    __tablename__ = "book_forum_post_reactions"
+    __table_args__ = (
+        UniqueConstraint("post_id", "user_id", name="uq_book_forum_post_reactions_post_user"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    post_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("book_forum_posts.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    reaction: Mapped[str] = mapped_column(String, nullable=False, default="like", server_default="like")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), index=True)
+
+    post = relationship("BookForumPost", back_populates="reactions")
+    user = relationship("User", back_populates="forum_post_reactions")
 
 
 class Chapter(Base):
