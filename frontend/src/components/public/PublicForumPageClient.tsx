@@ -341,12 +341,14 @@ export function PublicForumPageClient({
                 <input
                   value={headline}
                   onChange={(event) => setHeadline(event.target.value)}
+                  onInput={(event) => setHeadline((event.target as HTMLInputElement).value)}
                   placeholder={composerThreadType === "novel" ? "Discussion headline" : "General discussion headline"}
                   className={`w-full rounded-2xl border px-4 py-3 text-sm outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 placeholder:text-slate-600 focus:border-amber-400" : "border-slate-200 bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:border-orange-500"}`}
                 />
                 <textarea
                   value={body}
                   onChange={(event) => setBody(event.target.value)}
+                  onInput={(event) => setBody((event.target as HTMLTextAreaElement).value)}
                   placeholder={composerThreadType === "novel" ? "What should readers focus on? Hook, pacing, emotional clarity, worldbuilding..." : "What do you want advice or discussion on?"}
                   className={`min-h-[8rem] w-full rounded-2xl border px-4 py-3 text-sm leading-6 outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 placeholder:text-slate-600 focus:border-amber-400" : "border-slate-200 bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:border-orange-500"}`}
                 />

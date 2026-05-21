@@ -202,8 +202,8 @@ function WritingStatCard({
         <p className="text-[0.95rem] font-medium">{label}</p>
       </div>
       <p className="mt-3 break-words text-[1.95rem] font-semibold tracking-[-0.04em] text-stone-950 dark:text-[#fff6ea]">
-        {stat.words.toLocaleString()}
-        <span className="ml-2 text-base font-medium text-stone-500 dark:text-slate-400">words</span>
+        {stat.words.toLocaleString()}{" "}
+        <span className="text-base font-medium text-stone-500 dark:text-slate-400">words</span>
       </p>
 
       {showProgress && stat.target_words ? (
@@ -242,7 +242,7 @@ function WritingHeatmapPanel({
         <div className="min-w-0">
           <div className="flex items-center gap-2 text-stone-500 dark:text-slate-400">
             <DropletIcon />
-            <h3 className="text-[1.9rem] font-semibold tracking-[-0.035em] text-stone-950 dark:text-[#f3ede4]">Writing activity heatmap</h3>
+            <h3 className="text-[1.9rem] font-semibold tracking-[-0.035em] text-stone-950 dark:text-[#f3ede4]">Heatmap of saved writing</h3>
           </div>
           <p className="mt-2 text-sm leading-7 text-stone-600 dark:text-slate-300">
             Daily writing activity over the past year.

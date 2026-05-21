@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
@@ -289,7 +290,7 @@ async def test_list_public_books_builds_and_caches_rows(monkeypatch):
         status="ready",
         total_chapters=3,
         copyright_warning=False,
-        created_at="now",
+        created_at=datetime.now(UTC),
         archived_at=None,
     )
     db = _FakeDB(execute_values=[_Result(all_rows=[(book, "public_author")])])
@@ -332,7 +333,7 @@ async def test_list_public_books_includes_approved_user_shared_books(monkeypatch
         status="ready",
         total_chapters=2,
         copyright_warning=False,
-        created_at="now",
+        created_at=datetime.now(UTC),
     )
     shared_book = SimpleNamespace(
         id=uuid.uuid4(),
@@ -349,7 +350,7 @@ async def test_list_public_books_includes_approved_user_shared_books(monkeypatch
         status="ready",
         total_chapters=5,
         copyright_warning=False,
-        created_at="now",
+        created_at=datetime.now(UTC),
         public_share_status="approved",
     )
     db = _FakeDB(execute_values=[_Result(all_rows=[(demo_book, "demo_user"), (shared_book, "shared_user")])])
@@ -370,7 +371,8 @@ async def test_get_public_book_returns_cached_payload(monkeypatch):
     book_id = uuid.uuid4()
     book = SimpleNamespace(id=book_id, is_public=True, source_kind="public_demo", hidden_at=None, archived_at=None)
     payload = await public.get_public_book(book_id, db=_FakeDB(get_values=[book]))
-    assert payload == {"id": "cached"}
+    assert payload["id"] == "cached"
+    assert payload["analytics"]["book_view_count"] == 0
 
 
 @pytest.mark.asyncio
@@ -410,7 +412,7 @@ async def test_get_public_book_skips_cache_for_user_shared_samples(monkeypatch):
         total_chapters=1,
         copyright_warning=False,
         user_id=uuid.uuid4(),
-        created_at="now",
+        created_at=datetime.now(UTC),
     )
     author_user = SimpleNamespace(username="shared_writer")
     db = _FakeDB(
@@ -496,7 +498,7 @@ async def test_get_public_book_builds_payload(monkeypatch):
         total_chapters=2,
         copyright_warning=False,
         user_id=uuid.uuid4(),
-        created_at="now",
+        created_at=datetime.now(UTC),
     )
     author_user = SimpleNamespace(username="public_author")
     db = _FakeDB(

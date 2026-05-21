@@ -442,7 +442,7 @@ export function UploadModal({
       <div className={shellClassName} onClick={(e) => e.stopPropagation()}>
         <div className={`relative border-b px-6 py-5 ${isDark ? "border-white/10" : "border-slate-200/80"}`}>
           <div>
-            <h2 className="text-xl font-semibold tracking-tight">{isManagingExisting ? `Add New ${storyUnitLabelTitle}` : "Upload manuscript"}</h2>
+            <h2 className="text-xl font-semibold tracking-tight">{isManagingExisting ? `Add New ${storyUnitLabelTitle}` : "Upload book"}</h2>
             <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
               {isManagingExisting
                 ? "Paste or upload one scene, chapter, or script segment, process it incrementally, and review what changed before moving on."

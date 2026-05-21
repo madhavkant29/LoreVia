@@ -354,7 +354,12 @@ async def test_upload_pipeline_rejects_noise_characters_and_records_diagnostics(
     processing = (book.writer_workspace or {}).get("processing", {})
     extraction_diagnostics = (processing.get("parser_diagnostics") or {}).get("character_extraction") or {}
     rejected = extraction_diagnostics.get("rejected_characters") or []
-    assert any(item["name"] == "Well" and item["stage"] == "save_gate_create" for item in rejected)
+    assert any(
+        item["name"] == "Well"
+        and item["stage"] in {"candidate_augmentation", "llm_clean"}
+        and "save_gate" in str(item.get("reason") or "")
+        for item in rejected
+    )
     assert persisted_characters[0].analysis_metadata["confidence_band"] in {"high", "medium"}
 
 

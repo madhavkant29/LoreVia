@@ -95,6 +95,7 @@ async def test_book_overview_returns_critical_reader_payload(client, db):
         processed=False,
     )
     db.add_all([chapter_one, chapter_two])
+    await db.flush()
     db.add(
         ChapterSummary(
             chapter_id=chapter_one.id,

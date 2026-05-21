@@ -92,7 +92,7 @@ from app.utils.reader_utils import (
     timeline_visible_chapter_set,
     update_plot_thread_note,
 )
-from app.utils.tag_utils import ENTITY_TYPE_CHAPTER, get_custom_tags_for_entity
+from app.utils.tag_utils import ENTITY_TYPE_CHAPTER, get_custom_tags_for_entity, list_custom_tags_for_entity_ids
 
 router = APIRouter()
 

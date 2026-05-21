@@ -38,8 +38,13 @@ export function PublicForumPostPageClient({
   const [postReacting, setPostReacting] = useState(false)
   const [reactingId, setReactingId] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
+  const [interactiveReady, setInteractiveReady] = useState(false)
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
+
+  useEffect(() => {
+    setInteractiveReady(true)
+  }, [])
 
   const resetEditorFromPost = (source: PublicForumPost) => {
     setEditHeadline(source.headline)
@@ -271,7 +276,7 @@ export function PublicForumPostPageClient({
       <div className={`border-b backdrop-blur ${isDark ? "border-white/10 bg-[#0f141b]/95" : "border-slate-200 bg-white/95"}`}>
         <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
           <div className="flex flex-wrap items-center gap-3 text-sm">
-            <Link href="/library" className={`${isDark ? "text-slate-400 hover:text-white" : "text-slate-500 hover:text-slate-900"}`}>Library</Link>
+            <Link href="/library" className={`${isDark ? "text-slate-400 hover:text-white" : "text-slate-500 hover:text-slate-900"}`}>Back to library</Link>
             <MetaDivider isDark={isDark} />
             <Link href="/public/forum" className={`${isDark ? "text-slate-400 hover:text-white" : "text-slate-500 hover:text-slate-900"}`}>Forum</Link>
             <MetaDivider isDark={isDark} />
@@ -495,6 +500,8 @@ export function PublicForumPostPageClient({
                     <textarea
                       value={draft}
                       onChange={(event) => setDraft(event.target.value)}
+                      onInput={(event) => setDraft((event.target as HTMLTextAreaElement).value)}
+                      disabled={!interactiveReady}
                       placeholder="Add a thoughtful public comment about pacing, clarity, emotional payoff, or what you'd want to review."
                       className={`min-h-[8.5rem] w-full rounded-2xl border px-4 py-3 text-sm leading-6 outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 placeholder:text-slate-600 focus:border-amber-400" : "border-slate-200 bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:border-orange-500"}`}
                     />
@@ -502,7 +509,7 @@ export function PublicForumPostPageClient({
                   <div className="mt-3 flex flex-wrap items-center gap-3">
                     <button
                       type="button"
-                      disabled={submitting || !draft.trim()}
+                      disabled={!interactiveReady || submitting || !draft.trim()}
                       onClick={() => void submitComment()}
                       className={`inline-flex h-10 items-center justify-center rounded-full px-4 text-sm font-semibold transition ${isDark ? "bg-amber-400 text-slate-950 hover:bg-amber-300 disabled:bg-amber-400/40" : "bg-[#ff6a1a] text-white hover:bg-[#f05a09] disabled:bg-slate-300"}`}
                     >
@@ -581,13 +588,15 @@ export function PublicForumPostPageClient({
                   <textarea
                     value={interestDraft}
                     onChange={(event) => setInterestDraft(event.target.value)}
+                    onInput={(event) => setInterestDraft((event.target as HTMLTextAreaElement).value)}
+                    disabled={!interactiveReady}
                     placeholder="Tell the author what genres you read well, what feedback you can provide, and why you'd be a useful beta reader."
                     className={`min-h-[8rem] w-full rounded-2xl border px-4 py-3 text-sm leading-6 outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 placeholder:text-slate-600 focus:border-amber-400" : "border-slate-200 bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:border-orange-500"}`}
                   />
                   <div className="mt-3 flex flex-wrap items-center gap-3">
                     <button
                       type="button"
-                      disabled={interestSubmitting || !interestDraft.trim()}
+                      disabled={!interactiveReady || interestSubmitting || !interestDraft.trim()}
                       onClick={() => void submitInterest()}
                       className={`inline-flex h-10 w-full items-center justify-center rounded-full px-4 text-sm font-semibold transition ${isDark ? "bg-amber-400 text-slate-950 hover:bg-amber-300 disabled:bg-amber-400/40" : "bg-[#ff6a1a] text-white hover:bg-[#f05a09] disabled:bg-slate-300"}`}
                     >

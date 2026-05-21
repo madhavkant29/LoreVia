@@ -283,6 +283,7 @@ def mock_redis(monkeypatch, request):
 
     fake_redis = FakeRedis()
     monkeypatch.setattr(redis_module, "_redis_clients", weakref.WeakKeyDictionary(), raising=False)
+    monkeypatch.setattr(redis_module.aioredis, "from_url", lambda *args, **kwargs: fake_redis, raising=False)
 
     async def fake_get_redis():
         return fake_redis

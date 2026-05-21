@@ -62,6 +62,11 @@ export function UpcomingBetaReadsCard({ isDark }: { isDark: boolean }) {
             <p className={`text-[0.68rem] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-[#d9b88a]" : "text-[#b86a1b]"}`}>Upcoming beta reads</p>
             <h2 className={`mt-2 font-display text-[2rem] tracking-[-0.03em] ${copyClass}`}>Complete reviews before the deadline.</h2>
             <p className={`mt-2 max-w-2xl text-sm leading-7 ${mutedClass}`}>{bodyText}</p>
+            {nextAssignment ? (
+              <p className={`mt-1 text-sm font-medium ${copyClass}`}>
+                {nextAssignment.task_label} - {nextAssignment.author_name}
+              </p>
+            ) : null}
           </div>
         </div>
         <div className="flex flex-col gap-3 sm:flex-row">

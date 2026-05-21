@@ -342,6 +342,11 @@ export default function LibraryPage() {
     ? "bg-[#215f5c] text-white hover:bg-[#1d5552]"
     : "bg-[#1f615d] text-white hover:bg-[#194f4c]"
   const hasAnyProjects = visibleBooks.length > 0
+  const [interactiveReady, setInteractiveReady] = useState(false)
+
+  useEffect(() => {
+    setInteractiveReady(true)
+  }, [])
 
   return (
     <div className={`relative left-1/2 min-h-screen w-screen -translate-x-1/2 transition-colors duration-300 ${pageBackground}`}>
@@ -367,11 +372,12 @@ export default function LibraryPage() {
 
               <button
                 type="button"
+                disabled={!interactiveReady}
                 onClick={() => {
                   setUploadPreset({})
                   setShowUpload(true)
                 }}
-                className={`inline-flex min-h-11 items-center justify-center gap-2.5 rounded-xl px-5 text-sm font-semibold transition ${primaryButtonClass}`}
+                className={`inline-flex min-h-11 items-center justify-center gap-2.5 rounded-xl px-5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${primaryButtonClass}`}
               >
                 <PlusIcon />
                 New Project

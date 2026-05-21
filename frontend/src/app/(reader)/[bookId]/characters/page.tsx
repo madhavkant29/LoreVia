@@ -3117,7 +3117,7 @@ export default function CharactersPage() {
                             onClick={() => openManualMerge()}
                             className="w-full rounded-[1rem] bg-[linear-gradient(135deg,#8b5cf6,#6d28d9)] px-5 py-3 text-sm font-semibold text-white shadow-[0_15px_35px_rgba(109,40,217,0.22)] transition hover:translate-y-[-1px]"
                           >
-                            Start manual merge
+                            Begin manual merge
                           </button>
                         ) : null}
                       </div>

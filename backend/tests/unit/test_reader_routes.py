@@ -371,7 +371,7 @@ async def test_smart_tap_handles_processing_character_and_search_paths(monkeypat
     db = _FakeDB(
         get_values=[book],
         scalar_values=[1],
-        execute_values=[_Result(scalar=char), _Result(scalar=state), _Result(scalars=[rel])],
+        execute_values=[_Result(scalars=[char]), _Result(scalar=state), _Result(scalars=[rel])],
     )
     monkeypatch.setattr(
         reader,

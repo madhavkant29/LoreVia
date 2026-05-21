@@ -260,7 +260,7 @@ export default function SettingsPage() {
                 <div className={`min-w-0 overflow-hidden rounded-[1rem] border-2 p-4 ${isDark ? "border-slate-700/70 bg-[#121921]" : "border-slate-200 bg-[#fbfcfd]"}`}>
                   <p className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>Current public handle</p>
                   <p className={`mt-4 truncate text-lg font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>
-                    {stableUser?.username ? stableUser.username : "No username set yet"}
+                    {stableUser?.username ? `@${stableUser.username}` : "No username set yet"}
                   </p>
                   <p className={`mt-3 break-words text-sm leading-6 [overflow-wrap:anywhere] ${isDark ? "text-slate-400" : "text-stone-600"}`}>
                     New author uploads default to this username, but you can change the manuscript author or pen name for any individual book without changing your account handle.
