@@ -312,6 +312,12 @@ def build_writer_workspace_with_processing(book: Book, processing_state: dict[st
     return normalize_writer_workspace(workspace)
 
 
+def processing_state_for_completed_extraction(*, analysis_complete: bool) -> tuple[str, str]:
+    if analysis_complete:
+        return "ready", "complete"
+    return "processing", "analysis"
+
+
 def _current_processing_progress(book: Book) -> tuple[int, int | None]:
     workspace = normalize_writer_workspace(book.writer_workspace if isinstance(book.writer_workspace, dict) else None)
     processing = workspace.get("processing") if isinstance(workspace, dict) else None

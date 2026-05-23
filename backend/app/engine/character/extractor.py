@@ -871,7 +871,9 @@ def _allow_auto_augmentation(text: str, name: str) -> bool:
         if _mention_has_person_context(context_before, context_after):
             strong_mentions += 1
     if len(words) == 1:
-        return strong_mentions >= 2 or (strong_mentions >= 1 and len(mentions) >= 3 and non_sentence_start_mentions >= 1)
+        # Single-token names are noisy, but named mid-sentence with grounded
+        # person context ("his sister Grete called") should still recover.
+        return strong_mentions >= 2 or (strong_mentions >= 1 and non_sentence_start_mentions >= 1)
     return strong_mentions >= 1 and (non_sentence_start_mentions >= 1 or len(mentions) >= 2)
 
 

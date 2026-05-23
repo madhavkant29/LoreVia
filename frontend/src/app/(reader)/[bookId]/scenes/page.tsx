@@ -2,14 +2,13 @@
 
 import { useQuery } from "@tanstack/react-query"
 import { useEffect, useMemo, useState, type DragEvent as ReactDragEvent } from "react"
+import dynamic from "next/dynamic"
 import type { Route } from "next"
 import Link from "next/link"
 import { useParams } from "next/navigation"
 
-import { EditorToolbar, RichTextEditor } from "@/components/editor/SharedRichTextEditor"
-import { WhatsTheWordPanel } from "@/components/intelligence/WhatsTheWordPanel"
-import { AuthorToolsNav } from "@/components/layout/AuthorToolsNav"
 import { booksApi } from "@/lib/api/books"
+import { useBookDetail } from "@/lib/hooks/useBookDetail"
 import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
 import { countWords, estimateReadingTimeMinutes, formatReadingTimeLabel } from "@/lib/utils/manuscriptEditor"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
@@ -31,6 +30,32 @@ import type { Book, ManuscriptWorkspaceTree, NovelScene, SceneMetadata } from "@
 
 type FolderNode = WorkspaceFolderNode
 type SceneDragItem = { kind: "scene"; id: string }
+
+const EditorToolbar = dynamic(
+  () => import("@/components/editor/SharedRichTextEditor").then((module) => module.EditorToolbar),
+  { ssr: false }
+)
+
+const AuthorToolsNav = dynamic(
+  () => import("@/components/layout/AuthorToolsNav").then((module) => module.AuthorToolsNav),
+  {
+    ssr: false,
+    loading: () => <div className="rounded-[1.8rem] border border-dashed p-8" />,
+  }
+)
+
+const RichTextEditor = dynamic(
+  () => import("@/components/editor/SharedRichTextEditor").then((module) => module.RichTextEditor),
+  {
+    ssr: false,
+    loading: () => <div className="min-h-[32rem] animate-pulse bg-black/5" />,
+  }
+)
+
+const WhatsTheWordPanel = dynamic(
+  () => import("@/components/intelligence/WhatsTheWordPanel").then((module) => module.WhatsTheWordPanel),
+  { ssr: false }
+)
 
 function sceneFolder(path: string) {
   return workspaceFolderFromPath(path)
@@ -109,10 +134,7 @@ export default function ScenesPage() {
   const [status, setStatus] = useState<string | null>(null)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
 
-  const { data: book = null } = useQuery<Book | null>({
-    queryKey: asQueryKey(bookCacheKey(bookId, "detail")),
-    queryFn: () => booksApi.get(bookId),
-  })
+  const { data: book = null } = useBookDetail(bookId)
   const {
     data: tree = null,
     refetch: refetchTree,
@@ -325,6 +347,7 @@ export default function ScenesPage() {
             bookId={bookId}
             active="scenes"
             isDark={isDark}
+            bookData={book}
             title="Scene workspace"
             description="Draft, organize, and prepare scene files before pulling them into the manuscript."
           />

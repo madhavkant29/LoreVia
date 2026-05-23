@@ -93,8 +93,11 @@ export const publicApi = {
     apiClient.get<PublicForumInterestListResponse>(`/public/forum/posts/${postId}/interests`).then((response) => response.data.items),
   createForumInterest: (postId: string, message: string) =>
     apiClient.post<PublicForumInterest>(`/public/forum/posts/${postId}/interests`, { message }).then((response) => response.data),
-  createForumComment: (postId: string, body: string) =>
-    apiClient.post<PublicForumComment>(`/public/forum/posts/${postId}/comments`, { body }).then((response) => response.data),
+  createForumComment: (postId: string, body: string, parentCommentId?: string | null) =>
+    apiClient.post<PublicForumComment>(`/public/forum/posts/${postId}/comments`, {
+      body,
+      ...(parentCommentId ? { parent_comment_id: parentCommentId } : {}),
+    }).then((response) => response.data),
   reactToForumPost: (postId: string, reaction: "like" | "dislike" | "clear") =>
     apiClient.put<PublicForumPost>(`/public/forum/posts/${postId}/reaction`, { reaction }).then((response) => response.data),
   reactToForumComment: (commentId: string, reaction: "like" | "dislike" | "clear") =>

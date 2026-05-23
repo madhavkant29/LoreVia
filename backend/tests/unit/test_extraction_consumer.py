@@ -28,8 +28,9 @@ async def test_persist_relationship_records_resolves_alias_only_names(monkeypatc
 
     async def _fake_record_candidate(*_args, **kwargs):
         review_calls.append(kwargs)
+        return object()
 
-    monkeypatch.setattr(extraction_consumer, "record_character_candidate", _fake_record_candidate)
+    monkeypatch.setattr(extraction_consumer, "record_relationship_candidate", _fake_record_candidate)
 
     persisted, unresolved, review_count = await extraction_consumer._persist_relationship_records(
         db,
@@ -72,8 +73,9 @@ async def test_persist_relationship_records_quarantines_ambiguous_matches(monkey
 
     async def _fake_record_candidate(*_args, **kwargs):
         review_calls.append(kwargs)
+        return object()
 
-    monkeypatch.setattr(extraction_consumer, "record_character_candidate", _fake_record_candidate)
+    monkeypatch.setattr(extraction_consumer, "record_relationship_candidate", _fake_record_candidate)
 
     persisted, unresolved, review_count = await extraction_consumer._persist_relationship_records(
         db,
@@ -97,4 +99,44 @@ async def test_persist_relationship_records_quarantines_ambiguous_matches(monkey
     assert len(unresolved) == 1
     assert review_count == 1
     assert len(review_calls) == 1
-    assert review_calls[0]["reason_codes"] == ["relationship_unresolved", "relationship_ambiguous_character"]
+    assert review_calls[0]["reason_codes"] == [
+        "relationship_unresolved",
+        "character_a_ambiguous",
+        "character_b_resolved",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_embed_new_character_candidates_reuses_active_db_session(monkeypatch):
+    observed: dict[str, object] = {}
+
+    async def _fake_embed_batch(texts: list[str], **kwargs):
+        observed["texts"] = texts
+        observed["db"] = kwargs.get("db")
+        observed["user_id"] = kwargs.get("user_id")
+        observed["book_id"] = kwargs.get("book_id")
+        observed["feature"] = kwargs.get("feature")
+        return [[0.1, 0.2]]
+
+    monkeypatch.setattr(extraction_consumer, "embed_batch", _fake_embed_batch)
+
+    db = object()
+    user_id = uuid.uuid4()
+    book_id = uuid.uuid4()
+    entity = {"name": "Mara", "traits": {"eyes": {"value": "green"}}}
+
+    result = await extraction_consumer._embed_new_character_candidates(
+        [(entity, set())],
+        db=db,
+        user_id=user_id,
+        book_id=book_id,
+    )
+
+    assert result == [[0.1, 0.2]]
+    assert observed == {
+        "texts": ["Character: Mara. eyes: green"],
+        "db": db,
+        "user_id": user_id,
+        "book_id": book_id,
+        "feature": "character_embedding",
+    }

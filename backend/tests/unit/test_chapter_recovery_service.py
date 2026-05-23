@@ -247,7 +247,7 @@ class _RepairDB(_FakeDB):
         self.deleted = []
 
     async def execute(self, *_args, **_kwargs):
-        return None
+        return _EmptyResult()
 
     def add(self, value):
         self.added.append(value)
@@ -289,3 +289,8 @@ async def test_queue_chapter_repair_if_needed_marks_state_and_enqueues(monkeypat
 
 async def _async_true(*_args, **_kwargs):
     return True
+
+
+class _EmptyResult:
+    def all(self):
+        return []

@@ -521,8 +521,18 @@ async def test_reader_collection_routes_cover_events_relationships_search_and_ch
     monkeypatch.setattr("app.utils.reader_utils.list_custom_tags_for_entity_ids", _async_value({}))
     async def _fake_queue(*_args, **_kwargs):
         return None
+    async def _cache_version(*_args, **_kwargs):
+        return 0
+    async def _cache_miss(*_args, **_kwargs):
+        return None
+    async def _cache_write(*_args, **_kwargs):
+        return None
     monkeypatch.setattr(reader, "queue_analysis_if_missing", _fake_queue)
     monkeypatch.setattr("app.utils.reader_utils.queue_analysis_if_missing", _fake_queue)
+    monkeypatch.setattr(reader, "get_book_cache_version", _cache_version)
+    monkeypatch.setattr(reader, "get_reader_progress_cache_version", _cache_version)
+    monkeypatch.setattr(reader, "get_reader_events_cache", _cache_miss)
+    monkeypatch.setattr(reader, "set_reader_events_cache", _cache_write)
     async def _fake_short_summary(*_args, **_kwargs):
         return {"status": "ready", "content": "Generated", "key_events": [], "diagnostics": {}}
     monkeypatch.setattr(reader, "get_or_generate_summary", _fake_short_summary)
@@ -622,10 +632,20 @@ async def test_reader_highlight_timeline_and_thematic_routes(monkeypatch):
         return {1, 2}
     async def _fake_queue(*_args, **_kwargs):
         return None
+    async def _cache_version(*_args, **_kwargs):
+        return 0
+    async def _cache_miss(*_args, **_kwargs):
+        return None
+    async def _cache_write(*_args, **_kwargs):
+        return None
 
     monkeypatch.setattr(reader, "summary_visible_chapter_set", _fake_summary_visible)
     monkeypatch.setattr(reader, "timeline_visible_chapter_set", _fake_timeline_visible)
     monkeypatch.setattr(reader, "queue_analysis_if_missing", _fake_queue)
+    monkeypatch.setattr(reader, "get_book_cache_version", _cache_version)
+    monkeypatch.setattr(reader, "get_reader_progress_cache_version", _cache_version)
+    monkeypatch.setattr(reader, "get_reader_timeline_cache", _cache_miss)
+    monkeypatch.setattr(reader, "set_reader_timeline_cache", _cache_write)
     monkeypatch.setattr(reader, "build_timeline_track_payload", lambda chapters, events, character_tracks, thread_tracks, relationship_markers: {"chapters": chapters, "events": events, "character_tracks": character_tracks, "thread_tracks": thread_tracks, "relationship_markers": relationship_markers})
     monkeypatch.setattr(reader, "is_valid_timeline_character", lambda *_args: True)
     monkeypatch.setattr(reader, "timeline_character_detail", lambda name, *_args: f"detail:{name}")
@@ -685,6 +705,11 @@ async def test_reader_crud_progress_and_recall_routes(monkeypatch):
     monkeypatch.setattr(reader, "cache_get", _fake_cache_get)
     monkeypatch.setattr(reader, "cache_set", _fake_cache_set)
     monkeypatch.setattr(reader, "generate_recall", _fake_generate_recall)
+    dirty_calls = []
+    async def _mark_progress_dirty(book_id, user_id):
+        dirty_calls.append((book_id, user_id))
+        return 1
+    monkeypatch.setattr(reader, "mark_reader_progress_cache_dirty", _mark_progress_dirty)
     db = _FakeDB(
         get_values=[book, book, book, book, book, book, book],
         execute_values=[
@@ -743,6 +768,7 @@ async def test_reader_crud_progress_and_recall_routes(monkeypatch):
     assert marked["percent_complete"] == 100.0
     assert status["read"] is True
     assert task_calls
+    assert len(dirty_calls) == 3
 
 
 @pytest.mark.asyncio
@@ -763,8 +789,18 @@ async def test_plot_thread_routes_and_relationship_evolution(monkeypatch):
         return [{"id": "1", "title": "Door", "status": "ongoing", "importance": 8, "character_ids": []}]
     async def _fake_update(*_args, **_kwargs):
         return {"id": "1", "title": "Door", "status": "paused", "importance": 8, "character_ids": [], "related_characters": [], "mention_count": 2, "note": "Updated"}
+    async def _cache_version(*_args, **_kwargs):
+        return 0
+    async def _cache_miss(*_args, **_kwargs):
+        return None
+    async def _cache_write(*_args, **_kwargs):
+        return None
     monkeypatch.setattr(reader, "list_plot_threads", _fake_list_threads)
     monkeypatch.setattr(reader, "update_plot_thread_note", _fake_update)
+    monkeypatch.setattr(reader, "get_book_cache_version", _cache_version)
+    monkeypatch.setattr(reader, "get_reader_progress_cache_version", _cache_version)
+    monkeypatch.setattr(reader, "get_relationship_evolution_cache", _cache_miss)
+    monkeypatch.setattr(reader, "set_relationship_evolution_cache", _cache_write)
 
     evolution = await reader.get_relationship_evolution(book.id, chapter=3, db=db, current_user=_user(user_id))
     threads = await reader.get_plot_threads(book.id, chapter=3, db=db, current_user=_user(user_id))
@@ -774,3 +810,34 @@ async def test_plot_thread_routes_and_relationship_evolution(monkeypatch):
     assert threads[0]["title"] == "Door"
     assert updated["note"] == "Updated"
     assert updated["status"] == "paused"
+
+
+@pytest.mark.asyncio
+async def test_reader_events_timeline_and_relationship_evolution_return_cached_payloads(monkeypatch):
+    user_id = uuid.uuid4()
+    book = _book(user_id=user_id)
+    major_payload = {"major_events": [{"chapter_number": 2, "chapter_title": "Storm", "event_title": "Key Falls", "description": "desc", "importance": 5, "involved_characters": None, "involved_character_names": None, "event_type": None}], "character_events": []}
+    timeline_payload = {"chapters": [{"number": 1, "title": "One"}], "events": [], "character_tracks": [], "thread_tracks": [], "relationship_markers": []}
+    evolution_payload = {"pairs": [{"characters": ["Iris", "Milo"], "events": [{"chapter": 2, "type": "ally", "description": "Bonds", "sentiment": 0.4}]}]}
+
+    async def _cache_version(*_args, **_kwargs):
+        return 7
+
+    monkeypatch.setattr(reader, "get_book_cache_version", _cache_version)
+    monkeypatch.setattr(reader, "get_reader_progress_cache_version", _cache_version)
+    monkeypatch.setattr(reader, "get_reader_events_cache", _async_value(major_payload))
+    monkeypatch.setattr(reader, "get_reader_timeline_cache", _async_value(timeline_payload))
+    monkeypatch.setattr(reader, "get_relationship_evolution_cache", _async_value(evolution_payload))
+
+    events = await reader.get_reader_events(
+        book.id,
+        chapter=2,
+        db=_FakeDB(get_values=[book], execute_values=[_Result(scalar=None)]),
+        current_user=_user(user_id),
+    )
+    timeline = await reader.get_timeline(book.id, db=_FakeDB(get_values=[book]), current_user=_user(user_id))
+    evolution = await reader.get_relationship_evolution(book.id, chapter=2, db=_FakeDB(get_values=[book]), current_user=_user(user_id))
+
+    assert events.major_events[0].event_title == "Key Falls"
+    assert timeline["chapters"][0]["title"] == "One"
+    assert evolution["pairs"][0]["characters"] == ["Iris", "Milo"]

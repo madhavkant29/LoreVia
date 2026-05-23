@@ -5,9 +5,11 @@ import { useRouter } from "next/navigation"
 
 import { authApi } from "@/lib/api/auth"
 import { billingApi } from "@/lib/api/billing"
+import { emailApi } from "@/lib/api/email"
 import { tierLabel } from "@/lib/billing/plans"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
+import type { EmailPreferences } from "@/types/email"
 
 const MODES = [
   { value: "casual", label: "Casual", desc: "Quick summaries and light-touch guidance." },
@@ -30,6 +32,10 @@ export default function SettingsPage() {
   const [usernameMessage, setUsernameMessage] = useState<string | null>(null)
   const [permissionSaving, setPermissionSaving] = useState(false)
   const [permissionMessage, setPermissionMessage] = useState<string | null>(null)
+  const [emailPreferences, setEmailPreferences] = useState<EmailPreferences | null>(null)
+  const [emailPreferencesLoading, setEmailPreferencesLoading] = useState(false)
+  const [emailPreferencesSaving, setEmailPreferencesSaving] = useState(false)
+  const [emailPreferencesMessage, setEmailPreferencesMessage] = useState<string | null>(null)
   const router = useRouter()
   const stableUser = authHydrated ? user : null
   const displayTier = stableUser?.tier_label ?? tierLabel(stableUser?.tier)
@@ -45,6 +51,33 @@ export default function SettingsPage() {
   useEffect(() => {
     setUsernameDraft(stableUser?.username ?? "")
   }, [stableUser?.username])
+
+  useEffect(() => {
+    if (!stableUser?.email) return
+    let cancelled = false
+    setEmailPreferencesLoading(true)
+    setEmailPreferencesMessage(null)
+    void emailApi
+      .getPreferences()
+      .then((preferences) => {
+        if (!cancelled) {
+          setEmailPreferences(preferences)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setEmailPreferencesMessage("We could not load your email preferences right now.")
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setEmailPreferencesLoading(false)
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [stableUser?.email])
 
   const changeMode = async (mode: string) => {
     await authApi.setReadingMode(mode)
@@ -133,6 +166,33 @@ export default function SettingsPage() {
     } finally {
       setPermissionSaving(false)
     }
+  }
+
+  const saveEmailPreferences = async (next: EmailPreferences) => {
+    setEmailPreferencesSaving(true)
+    setEmailPreferencesMessage(null)
+    try {
+      const updated = await emailApi.updatePreferences({
+        product_updates: next.product_updates,
+        marketing: next.marketing,
+      })
+      setEmailPreferences(updated)
+      setEmailPreferencesMessage("Email preferences updated.")
+    } catch {
+      setEmailPreferencesMessage("We could not save your email preferences right now.")
+    } finally {
+      setEmailPreferencesSaving(false)
+    }
+  }
+
+  const changeEmailPreference = (key: "product_updates" | "marketing") => {
+    if (!emailPreferences || emailPreferencesSaving) return
+    const next = {
+      ...emailPreferences,
+      [key]: !emailPreferences[key],
+    }
+    next.unsubscribed_all = !next.product_updates && !next.marketing
+    void saveEmailPreferences(next)
   }
 
   const dailyGoal = stableUser?.daily_word_goal ?? 1000
@@ -360,6 +420,46 @@ export default function SettingsPage() {
               })}
             </div>
             {permissionMessage ? <InlineMessage isDark={isDark} message={permissionMessage} tone="neutral" className="mt-4" /> : null}
+          </SettingsCard>
+
+          <SettingsCard
+            isDark={isDark}
+            icon={<MailIcon />}
+            eyebrow="Email preferences"
+            title="Control promotional LoreVia emails"
+            description="Choose which non-critical product and marketing emails reach this inbox."
+            sideNote="Security, password reset, verification, and billing emails still send even when promotional emails are turned off."
+          >
+            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+              {[
+                {
+                  value: "product_updates" as const,
+                  label: "Product updates",
+                  desc: "Feature launches, onboarding guidance, and product news.",
+                },
+                {
+                  value: "marketing" as const,
+                  label: "Marketing emails",
+                  desc: "Offers, discounts, and future promotional campaigns.",
+                },
+              ].map((option) => {
+                const active = emailPreferences ? emailPreferences[option.value] : false
+                return (
+                  <SelectableCard
+                    key={option.value}
+                    isDark={isDark}
+                    active={active}
+                    title={option.label}
+                    description={option.desc}
+                    icon={<MailIcon />}
+                    disabled={emailPreferencesLoading || emailPreferencesSaving || !emailPreferences}
+                    onClick={() => changeEmailPreference(option.value)}
+                  />
+                )
+              })}
+            </div>
+            {emailPreferencesLoading ? <InlineMessage isDark={isDark} message="Loading email preferences..." tone="neutral" className="mt-4" /> : null}
+            {emailPreferencesMessage ? <InlineMessage isDark={isDark} message={emailPreferencesMessage} tone="neutral" className="mt-4" /> : null}
           </SettingsCard>
 
           <SettingsCard
@@ -651,6 +751,15 @@ function PrivacyIcon() {
     <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M12 4l7 3v5c0 4.5-2.7 7.5-7 9-4.3-1.5-7-4.5-7-9V7l7-3z" />
       <path strokeLinecap="round" strokeLinejoin="round" d="M9.5 12.5l1.6 1.6 3.4-3.4" />
+    </svg>
+  )
+}
+
+function MailIcon() {
+  return (
+    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M4 7.5A2.5 2.5 0 016.5 5h11A2.5 2.5 0 0120 7.5v9a2.5 2.5 0 01-2.5 2.5h-11A2.5 2.5 0 014 16.5v-9z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M5 7l7 5 7-5" />
     </svg>
   )
 }

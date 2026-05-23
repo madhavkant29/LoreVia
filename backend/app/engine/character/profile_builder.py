@@ -208,6 +208,10 @@ def build_character_analysis_metadata(extracted: dict, *, persistence_reason: st
     mention_count = int(evidence.get("mention_count") or 0)
     strong_mentions = int(evidence.get("strong_mention_count") or 0)
     grounding_passage_count = max(mention_count, strong_mentions)
+    cluster_size = int(evidence.get("cluster_size") or 1)
+    cluster_mention_count = int(evidence.get("cluster_mention_count") or mention_count or 0)
+    canonical_confidence = float(extracted.get("canonical_confidence") or extracted.get("confidence") or 0.0)
+    grounding_coverage = round(strong_mentions / max(1, mention_count), 3) if mention_count else 0.0
     quality_flags: list[str] = []
     if not extracted.get("arc_summary") or str(extracted.get("arc_summary")).strip().casefold() in GENERIC_SUMMARY_PHRASES:
         quality_flags.append("generic_summary")
@@ -232,6 +236,11 @@ def build_character_analysis_metadata(extracted: dict, *, persistence_reason: st
         "quality_flags": quality_flags,
         "grounding_passage_count": grounding_passage_count,
         "confidence_band": confidence_band,
+        "canonical_confidence": canonical_confidence,
+        "grounding_coverage": grounding_coverage,
+        "cluster_size": cluster_size,
+        "cluster_mention_count": cluster_mention_count,
+        "resolver_status": str(extracted.get("resolver_status") or evidence.get("resolver_status") or "").strip() or None,
     }
 
 

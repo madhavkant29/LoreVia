@@ -17,11 +17,13 @@ from app.models.intelligence import (
 from app.models.user import User
 from app.utils.character_utils import (
     apply_manual_character_description,
+    cluster_character_entities,
     compose_character_description,
     description_similarity,
     merge_characters,
     name_similarity,
     partition_character,
+    resolve_character_reference_from_roster,
 )
 
 
@@ -118,6 +120,72 @@ def test_compose_character_description_prefers_arc_summary_and_relationships_whe
     assert description == (
         "Gregor is the family provider, now trapped in a body he cannot control. Family bond with Grete."
     )
+
+
+def test_cluster_character_entities_merges_family_role_with_named_character_when_grounded_in_same_context():
+    entities = [
+        {
+            "name": "Grete",
+            "aliases": [],
+            "confidence": 0.72,
+            "traits": {},
+            "evidence": {
+                "mention_count": 1,
+                "strong_mention_count": 1,
+                "snippets": ["Grete, Gregor's sister, stepped closer to the door."],
+            },
+            "_source_text": "Grete, Gregor's sister, stepped closer to the door.",
+            "_source_batch_key": "book:1:1",
+        },
+        {
+            "name": "Gregor's sister",
+            "aliases": [],
+            "confidence": 0.68,
+            "traits": {},
+            "evidence": {
+                "mention_count": 1,
+                "strong_mention_count": 1,
+                "snippets": ["Grete, Gregor's sister, stepped closer to the door."],
+            },
+            "_source_text": "Grete, Gregor's sister, stepped closer to the door.",
+            "_source_batch_key": "book:1:1",
+        },
+    ]
+
+    clustered = cluster_character_entities(entities)
+
+    assert len(clustered) == 1
+    assert clustered[0]["name"] == "Grete"
+    assert "Gregor's sister" in clustered[0]["evidence"]["cluster_names"]
+    assert clustered[0]["evidence"]["cluster_size"] == 2
+
+
+def test_resolve_character_reference_from_roster_uses_context_to_match_family_role_reference():
+    grete = Character(
+        id=uuid.uuid4(),
+        book_id=uuid.uuid4(),
+        name="Grete",
+        aliases=[],
+        first_chapter=1,
+        mention_count=3,
+    )
+    gregor = Character(
+        id=uuid.uuid4(),
+        book_id=grete.book_id,
+        name="Gregor",
+        aliases=[],
+        first_chapter=1,
+        mention_count=3,
+    )
+
+    matched = resolve_character_reference_from_roster(
+        [grete, gregor],
+        "Gregor's sister",
+        context_text="Grete, Gregor's sister, pleaded with him to eat something.",
+    )
+
+    assert matched is not None
+    assert matched.id == grete.id
 
 
 @pytest.mark.asyncio

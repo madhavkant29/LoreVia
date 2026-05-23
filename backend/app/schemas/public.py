@@ -180,6 +180,7 @@ class PublicForumPostOut(BaseModel):
     title: str | None = None
     author: str | None = None
     genre: str | None = None
+    description: str | None = None
     work_type: str | None = None
     headline: str
     body: str
@@ -230,6 +231,7 @@ class PublicForumInterestListOut(BaseModel):
 
 class PublicForumCommentCreateBody(BaseModel):
     body: str = Field(..., min_length=2, max_length=5000)
+    parent_comment_id: uuid.UUID | None = None
 
 
 class PublicForumPostReactionBody(BaseModel):
@@ -244,6 +246,7 @@ class PublicForumCommentOut(BaseModel):
     id: str
     post_id: str
     book_id: str | None = None
+    parent_comment_id: str | None = None
     author_user_id: str
     author_username: str | None = None
     author_reputation_score: int = 0
@@ -253,6 +256,7 @@ class PublicForumCommentOut(BaseModel):
     dislike_count: int = 0
     reaction: str | None = None
     can_edit: bool = False
+    replies: list["PublicForumCommentOut"] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 
@@ -349,3 +353,6 @@ class PublicUserProfileOut(BaseModel):
     posts: list[PublicUserActivityPostOut] = Field(default_factory=list)
     comments: list[PublicUserActivityCommentOut] = Field(default_factory=list)
     created_at: datetime
+
+
+PublicForumCommentOut.model_rebuild()

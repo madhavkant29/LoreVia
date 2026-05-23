@@ -111,6 +111,12 @@ class BookOverviewOut(BaseModel):
     summary_collection: SummaryCollectionResponseOut
 
 
+class BookForumMetadataBody(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200)
+    genre: str = Field(..., min_length=1, max_length=120)
+    description: str = Field(..., min_length=1, max_length=5000)
+
+
 class SeriesOut(BaseModel):
     id: uuid.UUID
     name: str
@@ -231,6 +237,8 @@ class CharacterUpdateBody(BaseModel):
     motivations: list[str] | None = None
     fears: list[str] | None = None
     graph_visibility: str | None = None
+    protected_from_repair: bool | None = None
+    review_note: str | None = None
 
 
 class RelationshipCreateBody(BaseModel):
@@ -301,6 +309,20 @@ class CharacterPartitionBody(BaseModel):
 
 class CharacterCandidateAttachBody(BaseModel):
     character_id: uuid.UUID
+
+
+class RelationshipCandidateAttachBody(BaseModel):
+    character_id: uuid.UUID
+
+
+class RelationshipCandidateAcceptBody(BaseModel):
+    character_a_id: uuid.UUID
+    character_b_id: uuid.UUID
+    rel_type: str | None = None
+    sentiment: float | None = None
+    description: str | None = None
+    from_chapter: int | None = Field(default=None, ge=1)
+    to_chapter: int | None = Field(default=None, ge=1)
 
 
 class ChapterReportCharacter(BaseModel):

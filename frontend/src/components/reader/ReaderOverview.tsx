@@ -101,14 +101,14 @@ export function ReaderOverview({
 
   return (
     <div className="relative isolate space-y-5">
-      <div className={cn("pointer-events-none absolute inset-x-0 top-0 -z-10 h-64 blur-3xl", isDark ? "bg-[radial-gradient(circle_at_20%_0%,rgba(124,58,237,0.22),transparent_48%),radial-gradient(circle_at_80%_0%,rgba(59,130,246,0.14),transparent_42%)]" : "bg-[radial-gradient(circle_at_20%_0%,rgba(124,58,237,0.12),transparent_48%),radial-gradient(circle_at_80%_0%,rgba(59,130,246,0.08),transparent_42%)]")} />
+      <div className={cn("pointer-events-none absolute inset-x-0 top-0 -z-10 h-64 blur-3xl", isDark ? "bg-[radial-gradient(circle_at_20%_0%,rgba(13,148,136,0.2),transparent_48%),radial-gradient(circle_at_80%_0%,rgba(148,163,184,0.12),transparent_42%)]" : "bg-[radial-gradient(circle_at_20%_0%,rgba(13,148,136,0.12),transparent_48%),radial-gradient(circle_at_80%_0%,rgba(120,113,108,0.08),transparent_42%)]")} />
 
       <section className={cn("relative overflow-hidden rounded-[1.9rem] border p-4 sm:p-5", isDark ? "border-white/[0.07] bg-[#0b1018]" : "border-slate-200 bg-white")}>
-        <div className={cn("pointer-events-none absolute right-0 top-0 h-40 w-40 rounded-full blur-3xl", isDark ? "bg-violet-500/12" : "bg-violet-200/60")} />
+        <div className={cn("pointer-events-none absolute right-0 top-0 h-40 w-40 rounded-full blur-3xl", isDark ? "bg-teal-500/12" : "bg-teal-100/70")} />
         <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2 text-sm">
-              <button type="button" onClick={() => onNavigate("/library")} className={cn("transition", isDark ? "text-violet-300 hover:text-violet-200" : "text-violet-700 hover:text-violet-900")}>
+              <button type="button" onClick={() => onNavigate("/library")} className={cn("transition", isDark ? "text-teal-300 hover:text-teal-200" : "text-teal-800 hover:text-teal-900")}>
                 My Books
               </button>
               <span className={isDark ? "text-slate-600" : "text-slate-300"}>/</span>
@@ -140,7 +140,7 @@ export function ReaderOverview({
                       "px-4 text-xs font-semibold uppercase tracking-[0.18em] transition",
                       mode === "reader" ? "rounded-l-full" : "rounded-r-full",
                       activeBookMode === mode
-                        ? isDark ? "bg-violet-500 text-white" : "bg-violet-600 text-white"
+                        ? isDark ? "bg-teal-800 text-white" : "bg-teal-800 text-white"
                         : isDark ? "text-slate-300 hover:bg-white/[0.06]" : "text-slate-600 hover:bg-white",
                     )}
                   >
@@ -162,7 +162,7 @@ export function ReaderOverview({
             <button
               type="button"
               onClick={onContinueReading}
-              className={cn("inline-flex h-11 items-center gap-2 rounded-full px-5 text-sm font-semibold shadow-[0_18px_40px_-24px_rgba(124,58,237,0.65)] transition", isDark ? "bg-violet-500 text-white hover:bg-violet-400" : "bg-violet-600 text-white hover:bg-violet-500")}
+              className={cn("inline-flex h-11 items-center gap-2 rounded-full px-5 text-sm font-semibold shadow-[0_18px_40px_-24px_rgba(15,118,110,0.48)] transition", isDark ? "bg-teal-800 text-white hover:bg-teal-700" : "bg-teal-800 text-white hover:bg-teal-700")}
             >
               <ReaderIcon name="book" className="h-4 w-4" />
               Open Reader
@@ -221,7 +221,7 @@ export function ReaderOverview({
 
       <section className="grid gap-5 xl:grid-cols-[minmax(0,1.58fr)_minmax(20rem,0.72fr)]">
         <article className={cn("relative overflow-hidden rounded-[1.9rem] border p-5 sm:p-6", isDark ? "border-white/[0.07] bg-[#0d121b]" : "border-slate-200 bg-white")}>
-          <div className={cn("pointer-events-none absolute -left-8 top-6 h-32 w-32 rounded-full blur-3xl", isDark ? "bg-violet-500/10" : "bg-violet-200/60")} />
+          <div className={cn("pointer-events-none absolute -left-8 top-6 h-32 w-32 rounded-full blur-3xl", isDark ? "bg-teal-500/10" : "bg-teal-100/70")} />
           <div className="grid gap-6 lg:grid-cols-[12rem_minmax(0,1fr)]">
             <SmartBookCover
               src={book.cover_url}
@@ -232,7 +232,7 @@ export function ReaderOverview({
 
             <div className="min-w-0">
               <h1 className={cn("font-serif text-4xl leading-none sm:text-5xl", isDark ? "text-white" : "text-slate-950")}>{book.title}</h1>
-              <p className="mt-3 text-xl text-violet-400">{book.author || "Unknown author"}</p>
+              <p className={cn("mt-3 text-xl", isDark ? "text-teal-300" : "text-teal-800")}>{book.author || "Unknown author"}</p>
 
               <div className="mt-4 flex flex-wrap items-center gap-3">
                 <span className={cn("rounded-full px-3 py-1 text-sm font-medium", isDark ? "bg-white/[0.05] text-slate-200" : "bg-slate-100 text-slate-700")}>
@@ -259,7 +259,7 @@ export function ReaderOverview({
                 <button
                   type="button"
                   onClick={onContinueReading}
-                  className={cn("inline-flex h-12 items-center gap-2 rounded-2xl px-5 text-sm font-semibold transition", isDark ? "bg-violet-500 text-white hover:bg-violet-400" : "bg-violet-600 text-white hover:bg-violet-500")}
+                  className={cn("inline-flex h-12 items-center gap-2 rounded-2xl px-5 text-sm font-semibold transition", isDark ? "bg-teal-800 text-white hover:bg-teal-700" : "bg-teal-800 text-white hover:bg-teal-700")}
                 >
                   <ReaderIcon name="book" />
                   Continue Reading
@@ -362,22 +362,22 @@ export function ReaderOverview({
                   className={cn(
                     "flex w-full items-center justify-between gap-3 rounded-2xl px-3 py-3 text-left transition",
                     isCurrent
-                      ? isDark ? "bg-violet-500/14 text-white" : "bg-violet-50 text-slate-900"
+                      ? isDark ? "bg-teal-800/30 text-white" : "bg-teal-50 text-slate-900"
                       : isDark ? "text-slate-300 hover:bg-white/[0.05]" : "text-slate-700 hover:bg-slate-50",
                   )}
                 >
                   <div className="min-w-0">
-                    <p className={cn("flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em]", isCurrent ? (isDark ? "text-violet-200" : "text-violet-700") : isDark ? "text-slate-500" : "text-slate-400")}>
-                      <span className={cn("h-1.5 w-1.5 rounded-full", isCurrent ? "bg-violet-400" : chapter.read ? "bg-emerald-400" : isDark ? "bg-slate-600" : "bg-slate-300")} />
+                    <p className={cn("flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em]", isCurrent ? (isDark ? "text-teal-200" : "text-teal-800") : isDark ? "text-slate-500" : "text-slate-400")}>
+                      <span className={cn("h-1.5 w-1.5 rounded-full", isCurrent ? "bg-teal-400" : chapter.read ? "bg-emerald-400" : isDark ? "bg-slate-600" : "bg-slate-300")} />
                       {chapterUnit} {chapter.number}
                     </p>
                     <p className="mt-1 truncate text-sm font-medium">{chapter.title || `${chapterUnit} ${chapter.number}`}</p>
                   </div>
                   <div className="shrink-0 text-right text-xs">
                     {isCurrent ? (
-                      <span className={cn("rounded-full px-2 py-1 font-semibold", isDark ? "bg-white/10 text-white" : "bg-white text-violet-700")}>Current</span>
+                      <span className={cn("rounded-full px-2 py-1 font-semibold", isDark ? "bg-white/10 text-white" : "bg-white text-teal-800")}>Current</span>
                     ) : isNext ? (
-                      <span className="font-semibold text-violet-400">Up Next</span>
+                      <span className={cn("font-semibold", isDark ? "text-teal-300" : "text-teal-700")}>Up Next</span>
                     ) : chapter.read ? (
                       <span className={isDark ? "text-slate-500" : "text-slate-400"}>Read</span>
                     ) : (
@@ -394,7 +394,7 @@ export function ReaderOverview({
           <button
             type="button"
             onClick={() => onNavigate(`/${bookId}/chapters`)}
-            className={cn("mt-4 inline-flex items-center gap-2 text-sm font-semibold transition", isDark ? "text-violet-300 hover:text-violet-200" : "text-violet-700 hover:text-violet-900")}
+            className={cn("mt-4 inline-flex items-center gap-2 text-sm font-semibold transition", isDark ? "text-teal-300 hover:text-teal-200" : "text-teal-800 hover:text-teal-900")}
           >
             View all chapters
             <ReaderIcon name="arrow" className="h-4 w-4" />
@@ -455,7 +455,7 @@ export function ReaderOverview({
               <button
                 type="button"
                 onClick={() => onNavigate(`/${bookId}/notes`)}
-                className={cn("mt-5 inline-flex items-center gap-2 text-sm font-semibold transition", isDark ? "text-violet-300 hover:text-violet-200" : "text-violet-700 hover:text-violet-900")}
+                className={cn("mt-5 inline-flex items-center gap-2 text-sm font-semibold transition", isDark ? "text-teal-300 hover:text-teal-200" : "text-teal-800 hover:text-teal-900")}
               >
                 Open note workspace
                 <ReaderIcon name="arrow" className="h-4 w-4" />
@@ -503,7 +503,7 @@ function HeroMetric({ isDark, label, value, note }: { isDark: boolean; label: st
 function SectionTitle({ isDark, icon, children }: { isDark: boolean; icon: IconName; children: React.ReactNode }) {
   return (
     <div className="flex items-center gap-2">
-      <span className={cn("flex h-8 w-8 items-center justify-center rounded-full", isDark ? "bg-violet-500/10 text-violet-300" : "bg-violet-50 text-violet-700")}>
+      <span className={cn("flex h-8 w-8 items-center justify-center rounded-full", isDark ? "bg-teal-500/10 text-teal-300" : "bg-teal-50 text-teal-800")}>
         <ReaderIcon name={icon} className="h-4 w-4" />
       </span>
       <h2 className={cn("text-lg font-semibold", isDark ? "text-white" : "text-slate-900")}>{children}</h2>

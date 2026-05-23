@@ -7,6 +7,12 @@ from typing import TYPE_CHECKING, Any, Callable
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.redis import (
+    get_user_dashboard_cache_version,
+    get_writing_dashboard_cache,
+    set_writing_dashboard_cache,
+)
+
 if TYPE_CHECKING:
     from app.models.book import Book
     from app.models.user import User
@@ -127,6 +133,11 @@ async def build_writing_dashboard_stats(
     from app.models.user import UserWritingActivity
 
     current = now.astimezone(UTC) if now is not None else datetime.now(UTC)
+    version = await get_user_dashboard_cache_version(str(user.id))
+    day_marker = current.date().isoformat()
+    cached = await get_writing_dashboard_cache(str(user.id), version, day_marker)
+    if cached is not None:
+        return cached
     today = current.date()
     start_of_week = today - timedelta(days=today.weekday())
     start_of_year = today.replace(month=1, day=1)
@@ -217,7 +228,7 @@ async def build_writing_dashboard_stats(
         reverse=True,
     )
 
-    return {
+    payload = {
         "today": _writing_period_payload(today_words, target_words=daily_goal),
         "this_week": _writing_period_payload(this_week_words, target_words=daily_goal * 7),
         "this_month": _writing_period_payload(this_month_words),
@@ -237,6 +248,8 @@ async def build_writing_dashboard_stats(
             for entry in ordered_today_entries[:8]
         ],
     }
+    await set_writing_dashboard_cache(str(user.id), version, day_marker, payload)
+    return payload
 
 
 def _sum_daily_totals(

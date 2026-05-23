@@ -61,6 +61,7 @@ class User(Base):
     direct_conversations_as_a = relationship("DirectConversation", foreign_keys="DirectConversation.participant_a_user_id", back_populates="participant_a", cascade="all, delete-orphan")
     direct_conversations_as_b = relationship("DirectConversation", foreign_keys="DirectConversation.participant_b_user_id", back_populates="participant_b", cascade="all, delete-orphan")
     direct_messages_sent = relationship("DirectMessage", foreign_keys="DirectMessage.sender_user_id", back_populates="sender", cascade="all, delete-orphan")
+    email_preferences = relationship("EmailPreference", back_populates="user", cascade="all, delete-orphan", uselist=False)
 
 
 class Subscription(Base):
@@ -167,6 +168,26 @@ class TrialEmailEvent(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     user = relationship("User", back_populates="trial_email_events")
+
+
+class EmailPreference(Base):
+    __tablename__ = "email_preferences"
+    __table_args__ = (
+        UniqueConstraint("user_id", name="uq_email_preferences_user_id"),
+        UniqueConstraint("email", name="uq_email_preferences_email"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    email: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    product_updates: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    marketing: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    unsubscribed_all: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    unsubscribed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), index=True)
+
+    user = relationship("User", back_populates="email_preferences")
 
 
 class UserWritingActivity(Base):

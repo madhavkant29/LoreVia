@@ -1,11 +1,11 @@
 "use client"
 
 import { useQuery } from "@tanstack/react-query"
+import dynamic from "next/dynamic"
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useParams } from "next/navigation"
 
-import { AuthorToolsNav } from "@/components/layout/AuthorToolsNav"
 import { booksApi } from "@/lib/api/books"
 import { intelligenceApi } from "@/lib/api/intelligence"
 import { asQueryKey, bookCacheKey, readerCacheKey } from "@/lib/query/cacheKeys"
@@ -24,6 +24,14 @@ import type { VoiceConsistencyIssue, VoiceConsistencyMatch, VoiceConsistencyRevi
 import type { ChapterListResponse } from "@/types/reader"
 
 const EMPTY_CHAPTERS: ChapterListResponse["chapters"] = []
+
+const AuthorToolsNav = dynamic(
+  () => import("@/components/layout/AuthorToolsNav").then((module) => module.AuthorToolsNav),
+  {
+    ssr: false,
+    loading: () => <div className="rounded-[1.8rem] border border-dashed p-8" />,
+  }
+)
 
 export default function VoiceConsistencyPage() {
   const { bookId } = useParams<{ bookId: string }>()
@@ -200,6 +208,7 @@ export default function VoiceConsistencyPage() {
             bookId={bookId}
             active="voice"
             isDark={isDark}
+            bookData={book}
             title="Voice consistency"
             description="Run a dedicated voice pass, then save the results back into your shared notes and scene workspaces."
           />

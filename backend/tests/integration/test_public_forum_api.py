@@ -30,12 +30,19 @@ async def _create_user(db, *, email: str, tier: str, created_at: datetime | None
     return user
 
 
-async def _create_book(db, *, author_id: uuid.UUID, title: str) -> Book:
+async def _create_book(
+    db,
+    *,
+    author_id: uuid.UUID,
+    title: str,
+    genre: str | None = "Fantasy",
+    public_description: str | None = "A private fantasy manuscript seeking structured reader feedback.",
+) -> Book:
     book = Book(
         user_id=author_id,
         title=title,
         author="M. Author",
-        genre="Fantasy",
+        genre=genre,
         format="manual",
         work_type="novel",
         s3_key=f"books/{title.lower().replace(' ', '-')}.txt",
@@ -43,6 +50,7 @@ async def _create_book(db, *, author_id: uuid.UUID, title: str) -> Book:
         status="ready",
         total_chapters=1,
         is_public=False,
+        public_description=public_description,
     )
     db.add(book)
     await db.commit()
@@ -198,6 +206,18 @@ async def test_private_book_forum_supports_interest_and_rating_rankings(client, 
     assert comment_response.json()["author_username"] == seeker.username
     assert comment_response.json()["like_count"] == 0
     assert comment_response.json()["dislike_count"] == 0
+    assert comment_response.json()["parent_comment_id"] is None
+
+    reply_response = await client.post(
+        f"/api/v1/public/forum/posts/{high_post_id}/comments",
+        headers=_auth_headers(first_reader.id),
+        json={
+            "body": "I would start with chapter one scene transitions before polishing line rhythm.",
+            "parent_comment_id": comment_id,
+        },
+    )
+    assert reply_response.status_code == 201
+    assert reply_response.json()["parent_comment_id"] == comment_id
 
     first_reaction = await client.put(
         f"/api/v1/public/forum/comments/{comment_id}/reaction",
@@ -234,6 +254,8 @@ async def test_private_book_forum_supports_interest_and_rating_rankings(client, 
     assert comment_list.status_code == 200
     assert comment_list.json()["items"][0]["reaction"] == "like"
     assert comment_list.json()["items"][0]["can_edit"] is False
+    assert len(comment_list.json()["items"][0]["replies"]) == 1
+    assert comment_list.json()["items"][0]["replies"][0]["parent_comment_id"] == comment_id
 
     for reader, book in ((first_reader, high_book), (second_reader, low_book)):
         db.add(
@@ -580,6 +602,62 @@ async def test_general_public_discussions_are_open_to_signed_in_users_and_visibl
     profile = profile_response.json()
     assert profile["forum_post_count"] == 1
     assert profile["posts"][0]["thread_type"] == "general"
+
+
+@pytest.mark.asyncio
+async def test_novel_public_discussions_require_book_title_genre_and_description(client, db):
+    author = await _create_user(db, email="forum-metadata-author@lorevia.test", tier="author")
+    book = await _create_book(
+        db,
+        author_id=author.id,
+        title="Untitled Ember",
+        genre=None,
+        public_description=None,
+    )
+
+    rejected = await client.post(
+        "/api/v1/public/forum/posts",
+        headers=_auth_headers(author.id),
+        json={
+            "book_id": str(book.id),
+            "headline": "Need beta readers for a city-on-fire fantasy.",
+            "body": "Looking for reactions on pacing, escalation, and whether the opening promise feels sharp enough.",
+            "desired_beta_reader_count": 3,
+            "allow_contact_requests": True,
+        },
+    )
+    assert rejected.status_code == 400
+    assert rejected.json()["detail"] == "Novel discussions require a genre."
+
+    metadata_update = await client.put(
+        f"/api/v1/books/{book.id}/forum-metadata",
+        headers=_auth_headers(author.id),
+        json={
+            "title": "Ember Harbor",
+            "genre": "Fantasy",
+            "description": "A harbor-city fantasy about ash storms, civic vows, and a gate that should have stayed sealed.",
+        },
+    )
+    assert metadata_update.status_code == 200
+    assert metadata_update.json()["title"] == "Ember Harbor"
+    assert metadata_update.json()["genre"] == "Fantasy"
+    assert metadata_update.json()["public_description"].startswith("A harbor-city fantasy")
+
+    accepted = await client.post(
+        "/api/v1/public/forum/posts",
+        headers=_auth_headers(author.id),
+        json={
+            "book_id": str(book.id),
+            "headline": "Need beta readers for a city-on-fire fantasy.",
+            "body": "Looking for reactions on pacing, escalation, and whether the opening promise feels sharp enough.",
+            "desired_beta_reader_count": 3,
+            "allow_contact_requests": True,
+        },
+    )
+    assert accepted.status_code == 201
+    assert accepted.json()["title"] == "Ember Harbor"
+    assert accepted.json()["genre"] == "Fantasy"
+    assert accepted.json()["description"].startswith("A harbor-city fantasy")
 
 
 @pytest.mark.asyncio

@@ -17,6 +17,7 @@ from app.utils.ingestion_utils import (
     load_processing_chapter_payload,
     load_staged_chapter_payload,
     mark_book_processing_cancelled,
+    processing_state_for_completed_extraction,
     regroup_prose_chapters_for_reading,
     update_book_processing_state,
 )
@@ -110,6 +111,11 @@ def test_update_book_processing_state_preserves_parser_diagnostics():
     )
 
     assert workspace["processing"]["parser_diagnostics"]["chapter_count"] == 3
+
+
+def test_processing_state_for_completed_extraction_stays_processing_until_analysis_finishes():
+    assert processing_state_for_completed_extraction(analysis_complete=False) == ("processing", "analysis")
+    assert processing_state_for_completed_extraction(analysis_complete=True) == ("ready", "complete")
 
 
 @pytest.mark.asyncio

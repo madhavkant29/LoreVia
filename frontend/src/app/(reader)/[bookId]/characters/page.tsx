@@ -1,13 +1,14 @@
 "use client"
 
 import { useQuery } from "@tanstack/react-query"
-import { useDeferredValue, useEffect, useMemo, useState, type ReactNode } from "react"
+import dynamic from "next/dynamic"
+import { startTransition, useDeferredValue, useEffect, useMemo, useState, type ReactNode } from "react"
 import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
 
-import RelationshipGraph from "@/components/intelligence/RelationshipGraph"
 import { booksApi } from "@/lib/api/books"
 import { CONFIDENCE_THRESHOLDS } from "@/lib/constants"
+import { useBookDetail } from "@/lib/hooks/useBookDetail"
 import { intelligenceApi } from "@/lib/api/intelligence"
 import { asQueryKey, bookCacheKey, readerCacheKey } from "@/lib/query/cacheKeys"
 import { readerApi } from "@/lib/api/reader"
@@ -16,11 +17,25 @@ import type { Book } from "@/types/book"
 import type {
   Character,
   CharacterCandidate,
+  CharacterRepairPreview,
+  CharacterRelationshipCandidate,
   CharacterReviewResponse,
   RelationshipGraph as RelationshipGraphData,
 } from "@/types/character"
 import type { ChatMessage } from "@/types/intelligence"
 import type { ReadingProgress, SearchResult } from "@/types/reader"
+
+const RelationshipGraph = dynamic(
+  () => import("@/components/intelligence/RelationshipGraph"),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex min-h-[32rem] items-center justify-center rounded-[1.4rem] border border-dashed text-sm text-inherit">
+        Loading relationship graph...
+      </div>
+    ),
+  }
+)
 
 type EditDraft = {
   name: string
@@ -53,7 +68,7 @@ type RelationshipComposerDraft = {
 type CharacterTab = "overview" | "relationships" | "arc" | "evidence" | "continuity" | "notes"
 type SidebarTab = "insights" | "evidence" | "ask"
 type CastFilter = "all" | "main" | "minor" | "needs-review" | "duplicates"
-type WorkspaceMode = "profile" | "duplicates"
+type WorkspaceMode = "profile" | "review" | "duplicates" | "repair"
 
 type MergeSuggestion = {
   key: string
@@ -62,6 +77,13 @@ type MergeSuggestion = {
   secondaryId: string
   confidence: number
   reasons: string[]
+  sharedClusterKeys: string[]
+  sharedChapters: number[]
+  embeddingSimilarity?: number | null
+  primaryIsProtected: boolean
+  secondaryIsProtected: boolean
+  primaryIsCurated: boolean
+  secondaryIsCurated: boolean
 }
 
 type ConnectedRelationship = RelationshipGraphData["edges"][number] & {
@@ -156,6 +178,30 @@ function characterInitial(name: string) {
   return (name.trim()[0] || "?").toUpperCase()
 }
 
+function formatPercent(value: number | null | undefined) {
+  if (typeof value !== "number" || Number.isNaN(value)) return "Unknown"
+  return `${Math.round(value * 100)}%`
+}
+
+function buildCharacterEvidenceQuery(character: Character) {
+  const terms = Array.from(new Set([character.name, ...(character.aliases ?? [])].map((value) => value.trim()).filter(Boolean)))
+  return terms.slice(0, 4).join(" ")
+}
+
+function buildCandidateEvidenceQuery(candidate: CharacterCandidate) {
+  const terms = Array.from(new Set([
+    candidate.proposed_name,
+    candidate.raw_name,
+    ...(candidate.aliases ?? []),
+    ...(candidate.cluster_names ?? []),
+  ].map((value) => value.trim()).filter(Boolean)))
+  return terms.slice(0, 5).join(" ")
+}
+
+function formatResolverStatus(value: string | null | undefined) {
+  return (value || "needs_review").replaceAll("_", " ")
+}
+
 function formatRole(role: Character["role"]) {
   if (role === "mc") return "Primary character"
   if (role === "sc") return "Supporting character"
@@ -184,6 +230,14 @@ function formatChapterRange(first: number | null | undefined, last: number | nul
   if (typeof first !== "number") return "Chapter range unknown"
   if (typeof last === "number" && last > first) return `Ch. ${first}-${last}`
   return `Ch. ${first}`
+}
+
+function isCuratedCharacter(character: Character | null | undefined) {
+  return Boolean(character?.analysis_metadata?.user_curated)
+}
+
+function isProtectedCharacter(character: Character | null | undefined) {
+  return Boolean(character?.is_manual || character?.analysis_metadata?.protected_from_repair)
 }
 
 function buildDraft(character: Character | null): EditDraft {
@@ -601,10 +655,7 @@ export default function CharactersPage() {
   const { bookId } = useParams<{ bookId: string }>()
   const router = useRouter()
 
-  const { data: bookData = null, isLoading: bookLoading } = useQuery<Book | null>({
-    queryKey: asQueryKey(bookCacheKey(bookId, "detail")),
-    queryFn: () => booksApi.get(bookId),
-  })
+  const { data: bookData = null, isLoading: bookLoading } = useBookDetail(bookId)
   const { data: progressData = null } = useQuery<ReadingProgress | null>({
     queryKey: asQueryKey(readerCacheKey(bookId, "progress")),
     queryFn: () => readerApi.getProgress(bookId).catch(() => null),
@@ -620,9 +671,11 @@ export default function CharactersPage() {
   const emptyReview = useMemo<CharacterReviewResponse>(() => ({
     candidates: [],
     duplicate_suggestions: [],
+    relationship_candidates: [],
     counts: {
       pending_candidates: 0,
       pending_duplicate_suggestions: 0,
+      pending_relationship_candidates: 0,
     },
   }), [])
   const {
@@ -645,6 +698,7 @@ export default function CharactersPage() {
   const [manualMergePrimaryId, setManualMergePrimaryId] = useState("")
   const [manualMergeSecondaryId, setManualMergeSecondaryId] = useState("")
   const [activeTab, setActiveTab] = useState<CharacterTab>("overview")
+  const [relationshipsEnabled, setRelationshipsEnabled] = useState(false)
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>("insights")
   const [castFilter, setCastFilter] = useState<CastFilter>("all")
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("profile")
@@ -678,6 +732,12 @@ export default function CharactersPage() {
   const [pageMenuOpen, setPageMenuOpen] = useState(false)
   const [characterMenuOpen, setCharacterMenuOpen] = useState(false)
   const [candidateActionId, setCandidateActionId] = useState<string | null>(null)
+  const [relationshipCandidateActionId, setRelationshipCandidateActionId] = useState<string | null>(null)
+  const [reviewNoteDraft, setReviewNoteDraft] = useState("")
+  const [reviewNoteBusy, setReviewNoteBusy] = useState(false)
+  const [reprocessAllowMerge, setReprocessAllowMerge] = useState(true)
+  const [reprocessAllowDemote, setReprocessAllowDemote] = useState(true)
+  const [reprocessBusy, setReprocessBusy] = useState(false)
 
   useEffect(() => {
     setBook(bookData)
@@ -692,6 +752,37 @@ export default function CharactersPage() {
     setProgress(progressData)
   }, [progressData])
 
+  const isDark = theme === "dark"
+  const isAuthorMode = book?.mode === "author"
+
+  const emptyRepairPreview = useMemo<CharacterRepairPreview>(() => ({
+    book_id: bookId,
+    dry_run: true,
+    allow_merge_safe_pairs: true,
+    allow_demote_obvious_noise: true,
+    planned_merges: [],
+    planned_demotions: [],
+    skipped_protected_merge_pairs: [],
+    skipped_protected_demotions: [],
+    updated_first_chapters: {},
+    updated_last_seen_chapters: {},
+    pending_duplicate_suggestions: 0,
+    pending_relationship_candidates: 0,
+    unresolved_relationship_deltas: {},
+  }), [bookId])
+  const {
+    data: repairPreview = emptyRepairPreview,
+    refetch: refetchRepairPreview,
+    isFetching: repairPreviewFetching,
+  } = useQuery<CharacterRepairPreview>({
+    queryKey: asQueryKey(bookCacheKey(bookId, `character-review:reprocess:${reprocessAllowMerge}:${reprocessAllowDemote}`)),
+    queryFn: () => booksApi.previewCharacterReprocess(bookId, {
+      allowMergeSafePairs: reprocessAllowMerge,
+      allowDemoteObviousNoise: reprocessAllowDemote,
+    }).catch(() => emptyRepairPreview),
+    enabled: isAuthorMode && workspaceMode === "repair",
+  })
+
   useEffect(() => {
     const stored = window.localStorage.getItem("reader-theme")
     if (stored === "dark" || stored === "light") setTheme(stored)
@@ -702,7 +793,30 @@ export default function CharactersPage() {
     : Math.max(progress?.current_chapter ?? 1, 1)
 
   useEffect(() => {
-    if (!book) return
+    if (relationshipsEnabled || activeTab === "relationships") {
+      setRelationshipsEnabled(true)
+      return
+    }
+
+    const schedule =
+      typeof window.requestIdleCallback === "function"
+        ? window.requestIdleCallback.bind(window)
+        : ((callback: IdleRequestCallback) =>
+            window.setTimeout(() => callback({ didTimeout: false, timeRemaining: () => 0 } as IdleDeadline), 180))
+    const cancel =
+      typeof window.cancelIdleCallback === "function"
+        ? window.cancelIdleCallback.bind(window)
+        : window.clearTimeout.bind(window)
+
+    const handle = schedule(() => {
+      startTransition(() => setRelationshipsEnabled(true))
+    })
+
+    return () => cancel(handle)
+  }, [activeTab, relationshipsEnabled])
+
+  useEffect(() => {
+    if (!book || !relationshipsEnabled) return
 
     let active = true
     readerApi.getRelationships(bookId, relationshipChapter, { includeInactive: book.mode === "author" })
@@ -716,15 +830,17 @@ export default function CharactersPage() {
     return () => {
       active = false
     }
-  }, [book, bookId, relationshipChapter])
+  }, [book, bookId, relationshipChapter, relationshipsEnabled])
 
-  const isDark = theme === "dark"
-  const isAuthorMode = book?.mode === "author"
   const deferredSearch = useDeferredValue(search.trim().toLowerCase())
 
   const pendingCandidates = useMemo(
     () => (reviewData.candidates ?? []).filter((candidate) => candidate.status === "pending"),
     [reviewData.candidates],
+  )
+  const pendingRelationshipCandidates = useMemo(
+    () => (reviewData.relationship_candidates ?? []).filter((candidate) => candidate.status === "pending"),
+    [reviewData.relationship_candidates],
   )
 
   const mergeSuggestions = useMemo(
@@ -737,6 +853,13 @@ export default function CharactersPage() {
         secondaryId: suggestion.secondary_character_id,
         confidence: suggestion.confidence,
         reasons: suggestion.reasons,
+        sharedClusterKeys: suggestion.shared_cluster_keys ?? [],
+        sharedChapters: suggestion.shared_chapters ?? [],
+        embeddingSimilarity: suggestion.embedding_similarity ?? null,
+        primaryIsProtected: suggestion.primary_is_protected,
+        secondaryIsProtected: suggestion.secondary_is_protected,
+        primaryIsCurated: suggestion.primary_is_curated,
+        secondaryIsCurated: suggestion.secondary_is_curated,
       })),
     [dismissedMergeKeys, reviewData.duplicate_suggestions],
   )
@@ -861,6 +984,20 @@ export default function CharactersPage() {
       .toLowerCase()
       .includes(deferredSearch)
   }), [deferredSearch, pendingCandidates])
+  const filteredRelationshipCandidates = useMemo(() => pendingRelationshipCandidates.filter((candidate) => {
+    if (!deferredSearch) return true
+    return [
+      candidate.raw_character_a,
+      candidate.raw_character_b,
+      candidate.rel_type ?? "",
+      candidate.description ?? "",
+      ...(candidate.reason_codes ?? []),
+    ]
+      .join(" ")
+      .toLowerCase()
+      .includes(deferredSearch)
+  }), [deferredSearch, pendingRelationshipCandidates])
+  const selectedReviewCandidate = filteredPendingCandidates[0] ?? null
 
   useEffect(() => {
     if (filteredMergeSuggestions.length === 0) {
@@ -917,6 +1054,10 @@ export default function CharactersPage() {
   }, [editing, selectedCharacter])
 
   useEffect(() => {
+    setReviewNoteDraft(selectedCharacter?.analysis_metadata?.review_note ?? "")
+  }, [selectedCharacter?.id, selectedCharacter?.analysis_metadata?.review_note])
+
+  useEffect(() => {
     const fallbackCounterpart = chars.find((char) => char.id !== selectedCharacter?.id)?.id ?? ""
     setRelationshipDraft(buildRelationshipDraft(relationshipChapter, fallbackCounterpart))
   }, [chars, relationshipChapter, selectedCharacter?.id])
@@ -965,7 +1106,7 @@ export default function CharactersPage() {
     setEvidenceLoadingId(character.id)
     setEvidenceError(null)
     try {
-      const query = [character.name, character.aliases[0]].filter(Boolean).join(" ")
+      const query = buildCharacterEvidenceQuery(character)
       const results = await readerApi.search(bookId, query || character.name, relationshipChapter)
       setEvidenceCache((current) => ({
         ...current,
@@ -998,6 +1139,9 @@ export default function CharactersPage() {
   async function refreshCharacters() {
     const { data: refreshed = [] } = await refetchCharacters()
     await refetchCharacterReview()
+    if (workspaceMode === "repair") {
+      await refetchRepairPreview()
+    }
     setChars(refreshed)
     return refreshed
   }
@@ -1317,6 +1461,12 @@ export default function CharactersPage() {
     setActiveTab("relationships")
   }
 
+  function openReviewQueue() {
+    setCreating(false)
+    setWorkspaceMode("review")
+    setPageMenuOpen(false)
+  }
+
   function openDuplicateReview(targetCharacterId?: string) {
     setCreating(false)
     setWorkspaceMode("duplicates")
@@ -1342,6 +1492,12 @@ export default function CharactersPage() {
     setManualMergePrimaryId(primary)
     setManualMergeSecondaryId(secondaryId && secondaryId !== primary ? secondaryId : fallbackSecondary)
     setSelectedMergeKey("")
+  }
+
+  function openRepairWorkspace() {
+    setCreating(false)
+    setWorkspaceMode("repair")
+    setPageMenuOpen(false)
   }
 
   function resetFilters() {
@@ -1403,6 +1559,141 @@ export default function CharactersPage() {
     }
   }
 
+  async function handleDemoteSelectedCharacter() {
+    if (!selectedCharacter) return
+    setSaving(true)
+    setActionError(null)
+    try {
+      const response = await booksApi.demoteCharacter(bookId, selectedCharacter.id)
+      const refreshed = await refreshCharacters()
+      await refreshGraph()
+      setWorkspaceMode("review")
+      setSelectedId(refreshed[0]?.id ?? "")
+      setNoteToast(`Moved ${selectedCharacter.name} back into review as candidate ${response.candidate_id.slice(0, 8)}.`)
+      window.setTimeout(() => setNoteToast(null), 2600)
+    } catch {
+      setActionError("Could not move this character back into the review queue.")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleToggleProtectedFromRepair() {
+    if (!selectedCharacter) return
+    setReviewNoteBusy(true)
+    setActionError(null)
+    try {
+      const updated = await booksApi.updateCharacter(bookId, selectedCharacter.id, {
+        protectedFromRepair: !isProtectedCharacter(selectedCharacter),
+        reviewNote: reviewNoteDraft.trim() || null,
+      })
+      setChars((current) => current.map((item) => item.id === updated.id ? updated : item))
+      if (workspaceMode === "repair") {
+        await refetchRepairPreview()
+      }
+    } catch {
+      setActionError("Could not update the repair protection flag.")
+    } finally {
+      setReviewNoteBusy(false)
+    }
+  }
+
+  async function handleSaveReviewNote() {
+    if (!selectedCharacter) return
+    setReviewNoteBusy(true)
+    setActionError(null)
+    try {
+      const updated = await booksApi.updateCharacter(bookId, selectedCharacter.id, {
+        reviewNote: reviewNoteDraft.trim() || null,
+        protectedFromRepair: selectedCharacter.analysis_metadata?.protected_from_repair ?? false,
+      })
+      setChars((current) => current.map((item) => item.id === updated.id ? updated : item))
+      setNoteToast(`Saved review note for ${updated.name}.`)
+      window.setTimeout(() => setNoteToast(null), 2200)
+    } catch {
+      setActionError("Could not save this review note.")
+    } finally {
+      setReviewNoteBusy(false)
+    }
+  }
+
+  async function handleAttachRelationshipCandidate(
+    candidate: CharacterRelationshipCandidate,
+    side: "a" | "b",
+  ) {
+    if (!selectedCharacter) {
+      setActionError("Select a character profile first, then attach the unresolved side.")
+      return
+    }
+    setRelationshipCandidateActionId(candidate.id)
+    setActionError(null)
+    try {
+      if (side === "a") {
+        await booksApi.attachRelationshipCandidateA(bookId, candidate.id, selectedCharacter.id)
+      } else {
+        await booksApi.attachRelationshipCandidateB(bookId, candidate.id, selectedCharacter.id)
+      }
+      await refetchCharacterReview()
+    } catch {
+      setActionError("Could not attach that relationship endpoint.")
+    } finally {
+      setRelationshipCandidateActionId(null)
+    }
+  }
+
+  async function handleAcceptRelationshipCandidate(candidate: CharacterRelationshipCandidate) {
+    const leftId = candidate.matched_character_a_id ?? selectedCharacter?.id ?? null
+    const rightId = candidate.matched_character_b_id ?? selectedCharacter?.id ?? null
+    if (!leftId || !rightId || leftId === rightId) {
+      setActionError("Attach both sides to real characters before creating this relationship.")
+      return
+    }
+    setRelationshipCandidateActionId(candidate.id)
+    setActionError(null)
+    try {
+      await booksApi.acceptRelationshipCandidate(bookId, candidate.id, {
+        characterAId: leftId,
+        characterBId: rightId,
+        relType: candidate.rel_type ?? "connection",
+        sentiment: candidate.sentiment ?? null,
+        description: candidate.description ?? null,
+        fromChapter: candidate.chapter_number,
+      })
+      await refreshGraph()
+      await refetchCharacterReview()
+    } catch {
+      setActionError("Could not turn this review item into a relationship.")
+    } finally {
+      setRelationshipCandidateActionId(null)
+    }
+  }
+
+  async function handleResolveRelationshipCandidate(candidate: CharacterRelationshipCandidate) {
+    setRelationshipCandidateActionId(candidate.id)
+    setActionError(null)
+    try {
+      await booksApi.resolveRelationshipCandidate(bookId, candidate.id)
+      await refetchCharacterReview()
+    } catch {
+      setActionError("Could not mark this relationship review item as resolved.")
+    } finally {
+      setRelationshipCandidateActionId(null)
+    }
+  }
+
+  async function handleRejectRelationshipCandidate(candidate: CharacterRelationshipCandidate) {
+    setRelationshipCandidateActionId(candidate.id)
+    setActionError(null)
+    try {
+      await booksApi.rejectRelationshipCandidate(bookId, candidate.id)
+      await refetchCharacterReview()
+    } catch {
+      setActionError("Could not reject this relationship review item.")
+    } finally {
+      setRelationshipCandidateActionId(null)
+    }
+  }
+
   async function dismissDuplicateSuggestion(suggestion: MergeSuggestion) {
     if (!suggestion.suggestionId) {
       dismissMergeSuggestion(suggestion.key)
@@ -1421,11 +1712,33 @@ export default function CharactersPage() {
     }
   }
 
+  async function handleApplyCharacterReprocess() {
+    setReprocessBusy(true)
+    setActionError(null)
+    try {
+      await booksApi.applyCharacterReprocess(bookId, {
+        allowMergeSafePairs: reprocessAllowMerge,
+        allowDemoteObviousNoise: reprocessAllowDemote,
+      })
+      await refreshCharacters()
+      await refreshGraph()
+      await refetchRepairPreview()
+      setNoteToast("Character repair applied.")
+      window.setTimeout(() => setNoteToast(null), 2200)
+    } catch {
+      setActionError("Could not apply the repair plan.")
+    } finally {
+      setReprocessBusy(false)
+    }
+  }
+
   const pageMenuActions: MenuAction[] = [
     ...(isAuthorMode ? [{ label: "Add character", onClick: () => { openCreateCharacter(); setPageMenuOpen(false) } }] : []),
+    ...(isAuthorMode ? [{ label: "Open review queue", onClick: () => openReviewQueue() }] : []),
     { label: exporting === "bible" ? "Exporting bible..." : "Export character bible", onClick: () => void handleExportCharacterBible("md"), disabled: exporting === "bible" },
     { label: exporting === "bible" ? "Exporting PDF..." : "Export as PDF", onClick: () => void handleExportCharacterBible("pdf"), disabled: exporting === "bible" },
     { label: "Review duplicate suggestions", onClick: () => { openDuplicateReview(); setPageMenuOpen(false) } },
+    ...(isAuthorMode ? [{ label: "Open repair workspace", onClick: () => openRepairWorkspace() }] : []),
     { label: "Start manual merge", onClick: () => { openManualMerge(); setPageMenuOpen(false) } },
     { label: refreshingGraph ? "Rebuilding graph..." : "Rebuild relationship graph", onClick: () => void refreshGraph(), disabled: refreshingGraph },
     { label: "Reset filters", onClick: resetFilters },
@@ -1467,6 +1780,13 @@ export default function CharactersPage() {
         setCharacterMenuOpen(false)
       },
     },
+    ...(isAuthorMode ? [{
+      label: "Open review queue",
+      onClick: () => {
+        openReviewQueue()
+        setCharacterMenuOpen(false)
+      },
+    }] : []),
     {
       label: "Merge with another character",
       onClick: () => {
@@ -1474,6 +1794,22 @@ export default function CharactersPage() {
         setCharacterMenuOpen(false)
       },
     },
+    ...(isAuthorMode ? [{
+      label: isProtectedCharacter(selectedCharacter) ? "Remove repair protection" : "Protect from repair",
+      onClick: () => {
+        void handleToggleProtectedFromRepair()
+        setCharacterMenuOpen(false)
+      },
+    }] : []),
+    ...(isAuthorMode ? [{
+      label: saving ? "Moving to review..." : "Demote back to review",
+      onClick: () => {
+        void handleDemoteSelectedCharacter()
+        setCharacterMenuOpen(false)
+      },
+      dividerBefore: true,
+      disabled: saving,
+    }] : []),
     {
       label: partitioning ? "Splitting character..." : "Split character card",
       onClick: () => void handlePartitionCharacter(),
@@ -1488,7 +1824,6 @@ export default function CharactersPage() {
       label: deleting ? "Deleting..." : "Delete character",
       onClick: () => void handleDeleteCharacter(),
       danger: true,
-      dividerBefore: true,
       disabled: deleting || !isAuthorMode,
     },
   ] : []
@@ -1551,11 +1886,27 @@ export default function CharactersPage() {
               ) : null}
               <button
                 type="button"
+                onClick={() => setWorkspaceMode("review")}
+                className={`rounded-[1rem] px-5 py-3 text-sm font-semibold transition ${workspaceMode === "review" ? "bg-[linear-gradient(135deg,#0f766e,#0d9488)] text-white shadow-[0_15px_35px_rgba(13,148,136,0.18)]" : isDark ? "border border-white/10 bg-white/[0.04] text-slate-200 hover:bg-white/[0.07]" : "border border-stone-200 bg-white/90 text-stone-700 hover:bg-white"}`}
+              >
+                Review queue
+              </button>
+              <button
+                type="button"
                 onClick={() => setWorkspaceMode((current) => current === "duplicates" ? "profile" : "duplicates")}
                 className="rounded-[1rem] bg-[linear-gradient(135deg,#8b5cf6,#6d28d9)] px-5 py-3 text-sm font-semibold text-white shadow-[0_15px_35px_rgba(109,40,217,0.22)] transition hover:translate-y-[-1px]"
               >
                 {workspaceMode === "duplicates" ? "Back to bible" : "Review duplicates"}
               </button>
+              {isAuthorMode ? (
+                <button
+                  type="button"
+                  onClick={openRepairWorkspace}
+                  className={`rounded-[1rem] px-5 py-3 text-sm font-semibold transition ${workspaceMode === "repair" ? "bg-[linear-gradient(135deg,#b45309,#d97706)] text-white shadow-[0_15px_35px_rgba(217,119,6,0.2)]" : isDark ? "border border-white/10 bg-white/[0.04] text-slate-200 hover:bg-white/[0.07]" : "border border-stone-200 bg-white/90 text-stone-700 hover:bg-white"}`}
+                >
+                  Repair workspace
+                </button>
+              ) : null}
               <OverflowMenu isDark={isDark} open={pageMenuOpen} onToggle={() => setPageMenuOpen((current) => !current)} actions={pageMenuActions} />
             </div>
           </div>
@@ -1570,11 +1921,15 @@ export default function CharactersPage() {
               <aside className={`border-b xl:min-h-0 xl:overflow-y-auto xl:border-b-0 xl:border-r ${isDark ? "border-white/8" : "border-stone-200"}`}>
                 <div className={`sticky top-0 z-10 border-b px-4 py-4 backdrop-blur ${isDark ? "border-white/8 bg-[#090b10]/96" : "border-stone-200 bg-white/96"}`}>
                   <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>
-                    {workspaceMode === "duplicates" ? "Duplicate review" : "Cast"}
+                    {workspaceMode === "duplicates" ? "Duplicate review" : workspaceMode === "review" ? "Review queue" : workspaceMode === "repair" ? "Repair preview" : "Cast"}
                   </p>
                   <p className={`mt-1 text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>
                     {workspaceMode === "duplicates"
                       ? `${filteredMergeSuggestions.length} suggestions${isManualMerge ? " · manual pair selected" : ""}`
+                      : workspaceMode === "review"
+                        ? `${filteredPendingCandidates.length} candidate items · ${filteredRelationshipCandidates.length} relationship items`
+                        : workspaceMode === "repair"
+                          ? `${repairPreview.planned_merges.length} planned merges · ${repairPreview.planned_demotions.length} planned demotions`
                       : `${filteredChars.length} characters`}
                   </p>
 
@@ -1585,7 +1940,7 @@ export default function CharactersPage() {
                     <input
                       value={search}
                       onChange={(event) => setSearch(event.target.value)}
-                      placeholder={workspaceMode === "duplicates" ? "Search merge suggestions..." : "Search characters, aliases, traits..."}
+                      placeholder={workspaceMode === "duplicates" ? "Search merge suggestions..." : workspaceMode === "review" ? "Search candidates, reasons, snippets..." : workspaceMode === "repair" ? "Search characters, repairs, merges..." : "Search characters, aliases, traits..."}
                       className={`min-w-0 flex-1 bg-transparent text-sm outline-none ${isDark ? "text-slate-100 placeholder:text-slate-500" : "text-stone-900 placeholder:text-stone-400"}`}
                     />
                     <span className={`rounded-md border px-1.5 py-0.5 text-[10px] font-medium ${isDark ? "border-white/10 bg-white/[0.03] text-slate-500" : "border-stone-200 bg-white text-stone-400"}`}>
@@ -1783,6 +2138,64 @@ export default function CharactersPage() {
                         </div>
                       </div>
                     ) : null}
+
+                    {filteredRelationshipCandidates.length > 0 ? (
+                      <div className={`mt-5 border-t px-3 pt-4 ${isDark ? "border-white/8" : "border-stone-200"}`}>
+                        <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Relationship review</p>
+                        <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>{filteredRelationshipCandidates.length} unresolved relationships waiting for review</p>
+                        <div className="mt-3 space-y-3">
+                          {filteredRelationshipCandidates.slice(0, 8).map((candidate) => (
+                            <div key={candidate.id} className={`rounded-[1rem] border px-3 py-3 ${isDark ? "border-white/8 bg-white/[0.02]" : "border-stone-200 bg-white"}`}>
+                              <p className={`truncate text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{candidate.raw_character_a} {"<->"} {candidate.raw_character_b}</p>
+                              <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>Chapter {candidate.chapter_number}{candidate.rel_type ? ` • ${formatRelationshipType(candidate.rel_type)}` : ""}</p>
+                              <p className={`mt-2 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{candidate.reason_codes[0] ?? "Needs relationship review"}</p>
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  disabled={relationshipCandidateActionId === candidate.id || !selectedCharacter}
+                                  onClick={() => void handleAttachRelationshipCandidate(candidate, "a")}
+                                  className={actionButtonClasses(isDark)}
+                                >
+                                  Attach A to selected
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={relationshipCandidateActionId === candidate.id || !selectedCharacter}
+                                  onClick={() => void handleAttachRelationshipCandidate(candidate, "b")}
+                                  className={actionButtonClasses(isDark)}
+                                >
+                                  Attach B to selected
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={relationshipCandidateActionId === candidate.id}
+                                  onClick={() => void handleAcceptRelationshipCandidate(candidate)}
+                                  className={actionButtonClasses(isDark)}
+                                >
+                                  {relationshipCandidateActionId === candidate.id ? "Working..." : "Create relationship"}
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={relationshipCandidateActionId === candidate.id}
+                                  onClick={() => void handleResolveRelationshipCandidate(candidate)}
+                                  className={actionButtonClasses(isDark)}
+                                >
+                                  Mark resolved
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={relationshipCandidateActionId === candidate.id}
+                                  onClick={() => void handleRejectRelationshipCandidate(candidate)}
+                                  className={actionButtonClasses(isDark)}
+                                >
+                                  Reject
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
                 )}
               </aside>
@@ -1903,6 +2316,13 @@ export default function CharactersPage() {
                             ))}
                           </div>
                         ) : null}
+                        {isProtectedCharacter(selectedCharacter) || isCuratedCharacter(selectedCharacter) ? (
+                          <div className={`mt-3 rounded-[0.9rem] border px-3 py-2 text-xs ${isDark ? "border-amber-500/25 bg-amber-500/10 text-amber-100" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
+                            {isProtectedCharacter(selectedCharacter)
+                              ? "This record is protected from automated repair. Review actions can still touch it manually."
+                              : "This record has been curated by an author edit and should be reviewed carefully before merging."}
+                          </div>
+                        ) : null}
                       </div>
 
                       <div className="flex flex-wrap gap-2">
@@ -2016,6 +2436,37 @@ export default function CharactersPage() {
                             ) : null}
                           </div>
                         </SurfaceCard>
+
+                        {isAuthorMode ? (
+                          <SurfaceCard title="Review controls" isDark={isDark}>
+                            <div className="space-y-3">
+                              <div className={`rounded-xl border px-3 py-3 text-sm ${isDark ? "border-white/8 bg-black/20 text-slate-300" : "border-stone-200 bg-white text-stone-600"}`}>
+                                <p className={`font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>Canonical confidence {formatPercent(selectedCharacter.analysis_metadata?.canonical_confidence)}</p>
+                                <p className="mt-1">Grounding coverage {formatPercent(selectedCharacter.analysis_metadata?.grounding_coverage)}. Resolver status: {formatResolverStatus(selectedCharacter.analysis_metadata?.resolver_status)}.</p>
+                              </div>
+                              <label className="space-y-1">
+                                <span className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Reviewer note</span>
+                                <textarea
+                                  value={reviewNoteDraft}
+                                  onChange={(event) => setReviewNoteDraft(event.target.value)}
+                                  rows={4}
+                                  className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`}
+                                />
+                              </label>
+                              <div className="flex flex-wrap gap-2">
+                                <button type="button" disabled={reviewNoteBusy} onClick={() => void handleSaveReviewNote()} className={actionButtonClasses(isDark)}>
+                                  {reviewNoteBusy ? "Saving..." : "Save review note"}
+                                </button>
+                                <button type="button" disabled={reviewNoteBusy} onClick={() => void handleToggleProtectedFromRepair()} className={actionButtonClasses(isDark)}>
+                                  {isProtectedCharacter(selectedCharacter) ? "Unprotect from repair" : "Protect from repair"}
+                                </button>
+                                <button type="button" disabled={saving} onClick={() => void handleDemoteSelectedCharacter()} className={actionButtonClasses(isDark)}>
+                                  {saving ? "Moving..." : "Demote to review"}
+                                </button>
+                              </div>
+                            </div>
+                          </SurfaceCard>
+                        ) : null}
 
                         <SurfaceCard title="Traits" isDark={isDark}>
                           <div className="flex flex-wrap gap-2">
@@ -2573,17 +3024,248 @@ export default function CharactersPage() {
                   </div>
                 ) : null}
 
+                {workspaceMode === "review" ? (
+                  <div className="p-5">
+                    <div className="space-y-5">
+                      <div>
+                        <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-teal-300" : "text-teal-700"}`}>Review queue</p>
+                        <h2 className={`mt-2 text-3xl font-semibold tracking-tight ${isDark ? "text-white" : "text-stone-950"}`}>Grounded review workspace</h2>
+                        <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+                          Review held candidates and unresolved relationships with their evidence, resolver reasons, and promotion blockers.
+                        </p>
+                      </div>
+
+                      {selectedReviewCandidate ? (
+                        <SurfaceCard title="Next candidate" isDark={isDark}>
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <h3 className={`text-xl font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{selectedReviewCandidate.proposed_name}</h3>
+                              <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+                                Chapter {selectedReviewCandidate.chapter_number} / {selectedReviewCandidate.confidence}% confidence / {formatResolverStatus(selectedReviewCandidate.resolver_status)}
+                              </p>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              <span className={`rounded-full px-3 py-1.5 text-xs ${isDark ? "bg-white/[0.05] text-slate-200" : "border border-stone-200 bg-white text-stone-700"}`}>
+                                Grounding {formatPercent(selectedReviewCandidate.grounding_coverage)}
+                              </span>
+                              <span className={`rounded-full px-3 py-1.5 text-xs ${isDark ? "bg-white/[0.05] text-slate-200" : "border border-stone-200 bg-white text-stone-700"}`}>
+                                Canonical confidence {formatPercent(selectedReviewCandidate.canonical_confidence)}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="mt-4 grid gap-4 xl:grid-cols-2">
+                            <div>
+                              <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Resolver reasons</p>
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                {(selectedReviewCandidate.resolver_reasons.length > 0 ? selectedReviewCandidate.resolver_reasons : selectedReviewCandidate.reason_codes).map((reason) => (
+                                  <span key={reason} className={`rounded-full px-3 py-1.5 text-xs ${isDark ? "bg-teal-500/12 text-teal-100" : "bg-teal-50 text-teal-700"}`}>
+                                    {reason}
+                                  </span>
+                                ))}
+                              </div>
+                              <p className={`mt-4 text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Cluster names</p>
+                              <p className={`mt-2 text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>
+                                {selectedReviewCandidate.cluster_names.length > 0 ? selectedReviewCandidate.cluster_names.join(", ") : "No cluster aliases captured yet."}
+                              </p>
+                              <p className={`mt-4 text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Grounding counts</p>
+                              <p className={`mt-2 text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>
+                                {selectedReviewCandidate.cluster_mention_count} mentions across {selectedReviewCandidate.cluster_size} clustered names.
+                              </p>
+                            </div>
+                            <div>
+                              <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Evidence snippets</p>
+                              <div className="mt-2 space-y-2">
+                                {selectedReviewCandidate.snippets.map((snippet, index) => (
+                                  <div key={`${selectedReviewCandidate.id}-snippet-${index}`} className={`rounded-xl border px-3 py-3 text-sm leading-6 ${isDark ? "border-white/8 bg-black/20 text-slate-300" : "border-stone-200 bg-white text-stone-600"}`}>
+                                    {snippet}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="mt-4 flex flex-wrap gap-2">
+                            <button type="button" disabled={candidateActionId === selectedReviewCandidate.id} onClick={() => void handlePromoteCandidate(selectedReviewCandidate)} className="rounded-[1rem] bg-[linear-gradient(135deg,#0f766e,#0d9488)] px-5 py-3 text-sm font-semibold text-white disabled:opacity-60">
+                              {candidateActionId === selectedReviewCandidate.id ? "Promoting..." : "Promote candidate"}
+                            </button>
+                            <button type="button" disabled={candidateActionId === selectedReviewCandidate.id || !selectedCharacter} onClick={() => void handleAttachCandidate(selectedReviewCandidate)} className={actionButtonClasses(isDark)}>
+                              Attach to selected character
+                            </button>
+                            <button type="button" disabled={candidateActionId === selectedReviewCandidate.id} onClick={() => void handleRejectCandidate(selectedReviewCandidate)} className={actionButtonClasses(isDark)}>
+                              Reject candidate
+                            </button>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                setEvidenceLoadingId(selectedReviewCandidate.id)
+                                setEvidenceError(null)
+                                try {
+                                  const results = await readerApi.search(bookId, buildCandidateEvidenceQuery(selectedReviewCandidate), selectedReviewCandidate.chapter_number)
+                                  setEvidenceCache((current) => ({
+                                    ...current,
+                                    [selectedReviewCandidate.id]: {
+                                      chapter: selectedReviewCandidate.chapter_number,
+                                      results,
+                                    },
+                                  }))
+                                } catch {
+                                  setEvidenceError("Could not load candidate evidence.")
+                                } finally {
+                                  setEvidenceLoadingId(null)
+                                }
+                              }}
+                              className={actionButtonClasses(isDark)}
+                            >
+                              Find evidence
+                            </button>
+                          </div>
+                          {evidenceCache[selectedReviewCandidate.id]?.results?.length ? (
+                            <div className="mt-4 space-y-2">
+                              {evidenceCache[selectedReviewCandidate.id].results.slice(0, 3).map((result, index) => (
+                                <div key={`${selectedReviewCandidate.id}-search-${index}`} className={`rounded-xl border px-3 py-3 ${isDark ? "border-white/8 bg-black/20" : "border-stone-200 bg-white"}`}>
+                                  <p className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Chapter {result.chapter_num}</p>
+                                  <p className={`mt-1 text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{result.summary}</p>
+                                  <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{result.text}</p>
+                                </div>
+                              ))}
+                            </div>
+                          ) : null}
+                        </SurfaceCard>
+                      ) : (
+                        <SurfaceCard title="Queue clear" isDark={isDark}>
+                          <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No pending character candidates match the current filters.</p>
+                        </SurfaceCard>
+                      )}
+
+                      <SurfaceCard title="Relationship review" isDark={isDark}>
+                        {filteredRelationshipCandidates.length > 0 ? (
+                          <div className="space-y-3">
+                            {filteredRelationshipCandidates.slice(0, 6).map((candidate) => (
+                              <div key={candidate.id} className={`rounded-xl border px-4 py-3 ${isDark ? "border-white/8 bg-black/20" : "border-stone-200 bg-white"}`}>
+                                <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{candidate.raw_character_a} {"<->"} {candidate.raw_character_b}</p>
+                                <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Chapter {candidate.chapter_number}{candidate.rel_type ? ` · ${formatRelationshipType(candidate.rel_type)}` : ""}</p>
+                                <p className={`mt-2 text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>{candidate.description || candidate.reason_codes[0] || "Needs relationship review."}</p>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No unresolved relationship candidates match the current filters.</p>
+                        )}
+                      </SurfaceCard>
+                    </div>
+                  </div>
+                ) : null}
+
+                {workspaceMode === "repair" ? (
+                  <div className="p-5">
+                    <div className="space-y-5">
+                      <div>
+                        <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-amber-300" : "text-amber-700"}`}>Repair workspace</p>
+                        <h2 className={`mt-2 text-3xl font-semibold tracking-tight ${isDark ? "text-white" : "text-stone-950"}`}>Book reprocess preview</h2>
+                        <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+                          Preview safe merges, obvious-noise demotions, and protected skips before reprocessing the Character Bible.
+                        </p>
+                      </div>
+
+                      <SurfaceCard title="Repair controls" isDark={isDark}>
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <label className={`rounded-xl border px-4 py-3 text-sm ${isDark ? "border-white/8 bg-black/20 text-slate-300" : "border-stone-200 bg-white text-stone-700"}`}>
+                            <div className="flex items-center gap-3">
+                              <input type="checkbox" checked={reprocessAllowMerge} onChange={(event) => setReprocessAllowMerge(event.target.checked)} />
+                              <span>Allow safe duplicate merges</span>
+                            </div>
+                          </label>
+                          <label className={`rounded-xl border px-4 py-3 text-sm ${isDark ? "border-white/8 bg-black/20 text-slate-300" : "border-stone-200 bg-white text-stone-700"}`}>
+                            <div className="flex items-center gap-3">
+                              <input type="checkbox" checked={reprocessAllowDemote} onChange={(event) => setReprocessAllowDemote(event.target.checked)} />
+                              <span>Allow obvious-noise demotions</span>
+                            </div>
+                          </label>
+                        </div>
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          <button type="button" onClick={() => void refetchRepairPreview()} className={actionButtonClasses(isDark)}>
+                            {repairPreviewFetching ? "Refreshing..." : "Refresh preview"}
+                          </button>
+                          <button type="button" disabled={reprocessBusy} onClick={() => void handleApplyCharacterReprocess()} className="rounded-[1rem] bg-[linear-gradient(135deg,#b45309,#d97706)] px-5 py-3 text-sm font-semibold text-white disabled:opacity-60">
+                            {reprocessBusy ? "Applying..." : "Apply repair plan"}
+                          </button>
+                        </div>
+                      </SurfaceCard>
+
+                      <div className="grid gap-4 xl:grid-cols-2">
+                        <SurfaceCard title="Planned merges" isDark={isDark}>
+                          <p className={`text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>{repairPreview.planned_merges.length} safe merges ready.</p>
+                          <div className="mt-3 space-y-2">
+                            {repairPreview.planned_merges.slice(0, 8).map(([primaryId, secondaryId]) => {
+                              const primary = chars.find((char) => char.id === primaryId)
+                              const secondary = chars.find((char) => char.id === secondaryId)
+                              return (
+                                <div key={`${primaryId}:${secondaryId}`} className={`rounded-xl border px-3 py-3 text-sm ${isDark ? "border-white/8 bg-black/20 text-slate-300" : "border-stone-200 bg-white text-stone-700"}`}>
+                                  {(primary?.name ?? primaryId)} {"<-"} {(secondary?.name ?? secondaryId)}
+                                </div>
+                              )
+                            })}
+                            {repairPreview.planned_merges.length === 0 ? <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No safe merges are planned.</p> : null}
+                          </div>
+                        </SurfaceCard>
+
+                        <SurfaceCard title="Planned demotions" isDark={isDark}>
+                          <p className={`text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>{repairPreview.planned_demotions.length} obvious-noise records ready for review holdback.</p>
+                          <div className="mt-3 space-y-2">
+                            {repairPreview.planned_demotions.slice(0, 8).map((characterId) => {
+                              const character = chars.find((item) => item.id === characterId)
+                              return (
+                                <div key={characterId} className={`rounded-xl border px-3 py-3 text-sm ${isDark ? "border-white/8 bg-black/20 text-slate-300" : "border-stone-200 bg-white text-stone-700"}`}>
+                                  {character?.name ?? characterId}
+                                </div>
+                              )
+                            })}
+                            {repairPreview.planned_demotions.length === 0 ? <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No demotions are planned.</p> : null}
+                          </div>
+                        </SurfaceCard>
+                      </div>
+
+                      <SurfaceCard title="Protected skips and chapter refreshes" isDark={isDark}>
+                        <div className="grid gap-4 xl:grid-cols-2">
+                          <div>
+                            <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Skipped protected merges</p>
+                            <p className={`mt-2 text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>{repairPreview.skipped_protected_merge_pairs.length} protected merge pairs skipped.</p>
+                          </div>
+                          <div>
+                            <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Skipped protected demotions</p>
+                            <p className={`mt-2 text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>{repairPreview.skipped_protected_demotions.length} protected records left untouched.</p>
+                          </div>
+                          <div>
+                            <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>First chapter refreshes</p>
+                            <p className={`mt-2 text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>{Object.keys(repairPreview.updated_first_chapters).length} records will refresh first-seen chapter.</p>
+                          </div>
+                          <div>
+                            <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Last seen refreshes</p>
+                            <p className={`mt-2 text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>{Object.keys(repairPreview.updated_last_seen_chapters).length} records will refresh latest chapter.</p>
+                          </div>
+                        </div>
+                      </SurfaceCard>
+                    </div>
+                  </div>
+                ) : null}
+
                 {workspaceMode === "duplicates" ? (
                   <div className="p-5">
                     {selectedMergePrimary && selectedMergeSecondary ? (
                       <div className="space-y-5">
-                        <div>
-                          <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-violet-300" : "text-violet-600"}`}>Duplicate review</p>
-                          <h2 className={`mt-2 text-3xl font-semibold tracking-tight ${isDark ? "text-white" : "text-stone-950"}`}>{isManualMerge ? "Manual merge" : "Merge suggestion"}</h2>
-                          <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-                            Compare evidence before merging duplicate character records.
-                          </p>
-                        </div>
+                          <div>
+                            <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-violet-300" : "text-violet-600"}`}>Duplicate review</p>
+                            <h2 className={`mt-2 text-3xl font-semibold tracking-tight ${isDark ? "text-white" : "text-stone-950"}`}>{isManualMerge ? "Manual merge" : "Merge suggestion"}</h2>
+                            <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+                              Compare evidence before merging duplicate character records.
+                            </p>
+                            {isProtectedCharacter(selectedMergePrimary) || isProtectedCharacter(selectedMergeSecondary) || isCuratedCharacter(selectedMergePrimary) || isCuratedCharacter(selectedMergeSecondary) ? (
+                              <div className={`mt-3 rounded-[0.9rem] border px-3 py-2 text-xs ${isDark ? "border-amber-500/25 bg-amber-500/10 text-amber-100" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
+                                One of these records is protected or curated. Auto-cleanup will skip it, so merge carefully and only if the evidence is strong.
+                              </div>
+                            ) : null}
+                          </div>
 
                         <SurfaceCard title="Manual pair" isDark={isDark}>
                           <div className="grid gap-3 xl:grid-cols-2">
@@ -3012,6 +3694,21 @@ export default function CharactersPage() {
                                   {reason}
                                 </div>
                               ))}
+                              {selectedMergeSuggestion.sharedClusterKeys.length > 0 ? (
+                                <div className={`rounded-xl border px-3 py-2.5 text-sm ${isDark ? "border-white/8 bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+                                  Shared clusters: {selectedMergeSuggestion.sharedClusterKeys.join(", ")}
+                                </div>
+                              ) : null}
+                              {selectedMergeSuggestion.sharedChapters.length > 0 ? (
+                                <div className={`rounded-xl border px-3 py-2.5 text-sm ${isDark ? "border-white/8 bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+                                  Shared chapters: {selectedMergeSuggestion.sharedChapters.join(", ")}
+                                </div>
+                              ) : null}
+                              {typeof selectedMergeSuggestion.embeddingSimilarity === "number" ? (
+                                <div className={`rounded-xl border px-3 py-2.5 text-sm ${isDark ? "border-white/8 bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+                                  Embedding similarity: {formatPercent(selectedMergeSuggestion.embeddingSimilarity)}
+                                </div>
+                              ) : null}
                             </div>
                           ) : null}
                         </section>

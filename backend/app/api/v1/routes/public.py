@@ -13,12 +13,15 @@ from app.core.redis import (
     cache_get,
     cache_get_int,
     cache_set,
+    get_public_forum_comments_cache,
     key_public_book_detail,
     key_public_books,
     key_public_chapter,
     key_public_forum_cache_version,
+    mark_public_profile_cache_dirty,
     key_public_forum_post_detail,
     key_public_forum_posts,
+    set_public_forum_comments_cache,
 )
 from app.core.storage import download_book, get_presigned_url, upload_text
 from app.models.book import Book, BookForumPost, Chapter
@@ -278,13 +281,25 @@ async def list_public_beta_forum_comments(
     current_user=Depends(get_optional_current_user),
 ):
     ensure_public_forum_read_enabled()
-    return PublicForumCommentListOut(
+    if current_user is None:
+        version = await cache_get_int(key_public_forum_cache_version(), default=1)
+        cached = await get_public_forum_comments_cache(version, str(post_id))
+        if cached is not None:
+            return PublicForumCommentListOut(items=cached)
+    payload = PublicForumCommentListOut(
         items=await list_public_forum_comments(
             db,
             post_id=post_id,
             current_user=current_user,
         )
     )
+    if current_user is None:
+        await set_public_forum_comments_cache(
+            version,
+            str(post_id),
+            [item.model_dump(mode="json") for item in payload.items],
+        )
+    return payload
 
 
 @router.post("/forum/posts/{post_id}/comments", response_model=PublicForumCommentOut, status_code=201)
@@ -491,6 +506,7 @@ async def record_public_book_view(
         chapter_number=body.chapter_number,
     )
     await db.commit()
+    await mark_public_profile_cache_dirty(str(book.user_id))
 
 
 @router.get("/books/{book_slug}/chapter/{chapter_num}", response_model=PublicChapterOut)
@@ -592,6 +608,7 @@ async def create_public_book_manual(
     await db.commit()
     await db.refresh(book)
     await cache_del(key_public_books())
+    await mark_public_profile_cache_dirty(str(book.user_id))
     return {
         "book_id": str(book.id),
         "status": "ready",
@@ -637,6 +654,7 @@ async def append_public_chapter(
     await cache_del(key_public_book_detail(str(book.id)))
     await cache_del(key_public_chapter(str(book.id), next_number))
     await cache_del(key_public_books())
+    await mark_public_profile_cache_dirty(str(book.user_id))
     return {"book_id": str(book.id), "chapter_number": next_number, "saved": True}
 
 
@@ -756,6 +774,7 @@ async def publish_user_shared_book(
     await db.commit()
     await cache_del(key_public_books())
     await cache_del(key_public_book_detail(str(book.id)))
+    await mark_public_profile_cache_dirty(str(book.user_id))
     approval_status = get_public_share_status(book)
     return {
         "book_id": str(book.id),
@@ -789,6 +808,7 @@ async def unpublish_user_shared_book(
     await db.commit()
     await cache_del(key_public_books())
     await cache_del(key_public_book_detail(str(book.id)))
+    await mark_public_profile_cache_dirty(str(book.user_id))
     return {
         "book_id": str(book.id),
         "status": book.status,

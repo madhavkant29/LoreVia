@@ -2,10 +2,10 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
+import dynamic from "next/dynamic"
 import Link from "next/link"
 import { useParams } from "next/navigation"
 
-import { AuthorToolsNav } from "@/components/layout/AuthorToolsNav"
 import { booksApi } from "@/lib/api/books"
 import { intelligenceApi } from "@/lib/api/intelligence"
 import { canUseAuthorFeatures } from "@/lib/billing/plans"
@@ -15,6 +15,14 @@ import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { saveContextualVaultNote } from "@/lib/utils/notes"
 import type { Book } from "@/types/book"
 import type { EditorialContinuityIssue, EditorialGrammarIssue, EditorialReview, EditorialReviewPassage } from "@/types/intelligence"
+
+const AuthorToolsNav = dynamic(
+  () => import("@/components/layout/AuthorToolsNav").then((module) => module.AuthorToolsNav),
+  {
+    ssr: false,
+    loading: () => <div className="rounded-[1.8rem] border border-dashed p-8" />,
+  }
+)
 
 export default function EditorialReviewPage() {
   const { bookId } = useParams<{ bookId: string }>()
@@ -114,6 +122,7 @@ export default function EditorialReviewPage() {
             bookId={bookId}
             active="editorial-review"
             isDark={isDark}
+            bookData={book}
             title="Editorial review"
             description="Run a focused editorial pass with continuity, grammar, formatting, and theme checks in one place."
           />

@@ -109,13 +109,37 @@ describe("AuthorToolsNav", () => {
 
     expect(useQueryMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        staleTime: 60_000,
+        enabled: false,
+        staleTime: Number.POSITIVE_INFINITY,
       })
     )
   })
+
+  it("supports a compact rail size for tighter overview layouts", () => {
+    mockBaseState()
+
+    const view = renderAuthorToolsNav({ railSize: "compact" })
+
+    const nav = view.querySelector('[data-testid="author-tools-nav-rail"]')
+    expect(nav?.className ?? "").toContain("w-[4.35rem]")
+    expect(nav?.className ?? "").toContain("hover:w-[16.5rem]")
+  })
+
+  it("shows author sections for a free owner when the book is in author mode", () => {
+    mockBaseState({
+      tier: "free",
+      hasOwnAuthorAccess: false,
+      collaborationPermissions: null,
+    })
+
+    const view = renderAuthorToolsNav()
+
+    expect(view.querySelector('[data-testid="author-nav-item-manuscript"]')?.textContent).toContain("Manuscript Editor")
+    expect(view.querySelector('[data-testid="author-nav-item-characters"]')?.textContent).toContain("Character Bible")
+  })
 })
 
-function renderAuthorToolsNav() {
+function renderAuthorToolsNav({ railSize }: { railSize?: "default" | "compact" } = {}) {
   container = document.createElement("div")
   document.body.appendChild(container)
   root = createRoot(container)
@@ -129,6 +153,7 @@ function renderAuthorToolsNav() {
         currentChapter={2}
         mode="author"
         variant="rail"
+        railSize={railSize}
       />
     )
   })

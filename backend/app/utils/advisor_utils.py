@@ -8,9 +8,7 @@ import asyncio
 import hashlib
 import json
 import re
-import time
 import uuid
-from collections import OrderedDict
 from typing import Any
 
 from openai import AsyncOpenAI
@@ -20,6 +18,25 @@ from sqlalchemy import text as sql_text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.redis import (
+    get_advisor_response_cache,
+    get_book_cache_version,
+    get_editorial_review_cache,
+    get_proactive_scan_cache,
+    get_series_cache_version,
+    get_series_advisor_response_cache,
+    get_series_story_context_cache,
+    get_story_context_cache,
+    invalidate_advisor_cache_namespaces,
+    mark_book_cache_dirty,
+    mark_series_cache_dirty,
+    set_advisor_response_cache,
+    set_editorial_review_cache,
+    set_proactive_scan_cache,
+    set_series_advisor_response_cache,
+    set_series_story_context_cache,
+    set_story_context_cache,
+)
 from app.engine.embeddings.embedder import embed_text
 from app.models.book import Book, Chapter, SeriesBook
 from app.models.character import Character
@@ -32,44 +49,31 @@ from app.utils.world_building_utils import build_world_logic_response, classify_
 # Simple TTL-based LRU in-process cache keyed on sha256(book_id + last_msg).
 # No external dependency — expires automatically in CACHE_TTL_SECONDS.
 
-CACHE_TTL_SECONDS = 600   # 10 minutes
-_CACHE_MAX_SIZE = 512
+async def invalidate_advisor_caches(
+    *,
+    book_id: uuid.UUID | str | None = None,
+    series_ids: list[uuid.UUID | str] | None = None,
+) -> None:
+    """Drop shared advisor/editorial cache namespaces after semantic content changes."""
+    await invalidate_advisor_cache_namespaces(
+        book_id=str(book_id) if book_id is not None else None,
+        series_ids=[str(series_id) for series_id in (series_ids or [])],
+    )
 
 
-class _TTLCache:
-    """OrderedDict-backed LRU cache with per-entry TTL."""
-
-    def __init__(self, maxsize: int = _CACHE_MAX_SIZE) -> None:
-        self._store: OrderedDict[str, tuple[Any, float]] = OrderedDict()
-        self._maxsize = maxsize
-
-    def get(self, key: str) -> Any | None:
-        if key not in self._store:
-            return None
-        value, expires_at = self._store[key]
-        if time.monotonic() > expires_at:
-            del self._store[key]
-            return None
-        self._store.move_to_end(key)
-        return value
-
-    def set(self, key: str, value: Any, ttl: float = CACHE_TTL_SECONDS) -> None:
-        if key in self._store:
-            self._store.move_to_end(key)
-        self._store[key] = (value, time.monotonic() + ttl)
-        while len(self._store) > self._maxsize:
-            self._store.popitem(last=False)
-
-    def clear(self) -> None:
-        self._store.clear()
-
-
-advisor_response_cache = _TTLCache()
-
-
-def invalidate_advisor_caches() -> None:
-    """Drop cached advisor/editorial responses after manuscript content changes."""
-    advisor_response_cache.clear()
+async def invalidate_advisor_caches_for_book(db: AsyncSession, *, book_id: uuid.UUID | str) -> None:
+    series_rows = (
+        await db.execute(
+            select(SeriesBook.series_id).where(SeriesBook.book_id == uuid.UUID(str(book_id)))
+        )
+    ).all()
+    await mark_book_cache_dirty(str(book_id))
+    for row in series_rows:
+        await mark_series_cache_dirty(str(row.series_id))
+    await invalidate_advisor_caches(
+        book_id=book_id,
+        series_ids=[row.series_id for row in series_rows],
+    )
 
 
 def make_advisor_cache_key(book_id: str | uuid.UUID, last_user_message: str) -> str:
@@ -712,6 +716,10 @@ async def classify_response_type(client: AsyncOpenAI, reply: str) -> str:
 # ─── Story context builder ────────────────────────────────────────────────────
 
 async def build_story_context(db: AsyncSession, book_id: uuid.UUID, total_ch: int) -> str:
+    version = await get_book_cache_version(str(book_id))
+    cached = await get_story_context_cache(str(book_id), version, int(total_ch or 0))
+    if cached is not None:
+        return cached
     """Pulls structured story data — characters + plot threads — to give the advisor
     grounding even when passage retrieval returns nothing."""
     lines: list[str] = [f"Total chapters processed: {total_ch}"]
@@ -888,7 +896,9 @@ async def build_story_context(db: AsyncSession, book_id: uuid.UUID, total_ch: in
         lines.append("\nTHEMES (including philosophical subtext):")
         lines.extend(theme_lines)
 
-    return "\n".join(lines)
+    payload = "\n".join(lines)
+    await set_story_context_cache(str(book_id), version, int(total_ch or 0), payload)
+    return payload
 
 
 async def build_advisor_reply_payload(
@@ -910,7 +920,7 @@ async def build_advisor_reply_payload(
         raise ValueError("no user message found")
 
     cache_key = make_advisor_cache_key(book.id, last_user_msg)
-    cached = advisor_response_cache.get(cache_key)
+    cached = await get_advisor_response_cache(str(book.id), cache_key)
     if cached is not None:
         return {**cached, "cached": True}
 
@@ -1046,7 +1056,7 @@ async def build_advisor_reply_payload(
             "world_analysis": world_analysis,
             "cached": False,
         }
-        advisor_response_cache.set(cache_key, result)
+        await set_advisor_response_cache(str(book.id), cache_key, result)
         return result
     finally:
         await client.close()
@@ -1070,7 +1080,7 @@ async def build_series_advisor_reply_payload(
         raise ValueError("no user message found")
 
     cache_key = make_advisor_cache_key(f"series:{series.id}", last_user_msg)
-    cached = advisor_response_cache.get(cache_key)
+    cached = await get_series_advisor_response_cache(str(series.id), cache_key)
     if cached is not None:
         return {**cached, "cached": True}
 
@@ -1140,7 +1150,7 @@ async def build_series_advisor_reply_payload(
             "retrieved_passages": [],
             "cached": False,
         }
-        advisor_response_cache.set(cache_key, result)
+        await set_series_advisor_response_cache(str(series.id), cache_key, result)
         return result
     finally:
         await client.close()
@@ -1733,6 +1743,23 @@ async def build_series_story_context(
     Each book section is labelled with the book title so the LLM can distinguish
     between volumes.  Capped to keep prompt size cost-efficient.
     """
+    series_key_parts = [
+        f"{book_id}:{book_titles.get(book_id, str(book_id))}"
+        for book_id in book_ids
+    ]
+    series_key = hashlib.sha256("||".join(series_key_parts).encode("utf-8")).hexdigest()
+    version = 0
+    for book_id in book_ids:
+        version = max(version, await get_book_cache_version(str(book_id)))
+        series_rows = (
+            await db.execute(select(SeriesBook.series_id).where(SeriesBook.book_id == book_id))
+        ).all()
+        for row in series_rows:
+            version = max(version, await get_series_cache_version(str(row.series_id)))
+    cached = await get_series_story_context_cache(series_key, version)
+    if cached is not None:
+        return cached
+
     lines: list[str] = []
 
     for book_id in book_ids:
@@ -1782,7 +1809,9 @@ async def build_series_story_context(
                 desc = (t.description[:80] + "...") if t.description and len(t.description) > 80 else (t.description or "")
                 lines.append(f"  • [{t.status}] {t.title} (ch.{t.introduced_at}). {desc}")
 
-    return "\n".join(lines)
+    payload = "\n".join(lines)
+    await set_series_story_context_cache(series_key, version, payload)
+    return payload
 
 
 def normalize_series_continuity_result(raw: str) -> dict:

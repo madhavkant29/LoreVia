@@ -4,7 +4,7 @@ import { notFound } from "next/navigation"
 
 import { resolveApiOrigin } from "@/lib/constants"
 import type { PublicBook, PublicBookDetail, PublicChapter } from "@/types/book"
-import type { PublicForumPost, PublicForumPostListResponse, PublicUploadsOverview, PublicUserProfile } from "@/types/public"
+import type { PublicForumComment, PublicForumPost, PublicForumPostListResponse, PublicUploadsOverview, PublicUserProfile } from "@/types/public"
 
 const PUBLIC_API_BASE = `${resolveApiOrigin()}/api/v1/public`
 
@@ -60,6 +60,10 @@ export function listPublicForumPostsServer(query?: string): Promise<PublicForumP
 
 export function getPublicForumPostServer(postId: string): Promise<PublicForumPost> {
   return fetchPublicJson<PublicForumPost>(`/forum/posts/${encodeURIComponent(postId)}`, 120)
+}
+
+export function listPublicForumCommentsServer(postId: string): Promise<PublicForumComment[]> {
+  return fetchPublicJson<PublicForumComment[]>(`/forum/posts/${encodeURIComponent(postId)}/comments`, 120)
 }
 
 export function getPublicUserProfileServer(username: string): Promise<PublicUserProfile> {

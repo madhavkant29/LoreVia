@@ -21,6 +21,9 @@ export function emitChatsChanged() {
 export function useChatUnreadCount(options: UseChatUnreadCountOptions = {}) {
   const { user, hydrated } = useAuthStore()
   const [unreadCount, setUnreadCount] = useState(0)
+  const [isDocumentVisible, setIsDocumentVisible] = useState(
+    typeof document === "undefined" ? true : document.visibilityState === "visible"
+  )
   const enabled = options.enabled ?? true
   const pollMs = options.pollMs ?? 30_000
   const refreshOnFocus = options.refreshOnFocus ?? true
@@ -44,14 +47,14 @@ export function useChatUnreadCount(options: UseChatUnreadCountOptions = {}) {
   }, [enabled, hydrated, refresh])
 
   useEffect(() => {
-    if (!user || !enabled || !pollMs) return
+    if (!user || !enabled || !pollMs || !isDocumentVisible) return
 
     const intervalId = window.setInterval(() => {
       void refresh()
     }, pollMs)
 
     return () => window.clearInterval(intervalId)
-  }, [enabled, pollMs, refresh, user])
+  }, [enabled, isDocumentVisible, pollMs, refresh, user])
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -65,11 +68,21 @@ export function useChatUnreadCount(options: UseChatUnreadCountOptions = {}) {
       void refresh()
     }
 
+    const handleVisibilityChange = () => {
+      const visible = document.visibilityState === "visible"
+      setIsDocumentVisible(visible)
+      if (visible) {
+        void refresh()
+      }
+    }
+
     window.addEventListener(CHATS_CHANGED_EVENT, handleChatsChanged)
     window.addEventListener("focus", handleFocus)
+    document.addEventListener("visibilitychange", handleVisibilityChange)
     return () => {
       window.removeEventListener(CHATS_CHANGED_EVENT, handleChatsChanged)
       window.removeEventListener("focus", handleFocus)
+      document.removeEventListener("visibilitychange", handleVisibilityChange)
     }
   }, [refresh, refreshOnFocus])
 

@@ -4,8 +4,8 @@ import pytest
 from sqlalchemy import select
 
 from app.models.book import Book, Chapter
-from app.models.character import Character, CharacterCandidate
-from app.models.intelligence import Notification
+from app.models.character import Character, CharacterCandidate, CharacterRelationshipCandidate
+from app.models.intelligence import CharacterRelationship, Notification
 from app.workers.consumers.extraction_consumer import _process_chapter, process_book
 
 
@@ -373,6 +373,332 @@ async def test_upload_pipeline_rejects_noise_characters_and_records_diagnostics(
     ).scalars().all()
     assert rejected_reported or candidate_rows
     assert persisted_characters[0].analysis_metadata["confidence_band"] in {"high", "medium"}
+
+
+@pytest.mark.asyncio
+async def test_upload_pipeline_routes_low_confidence_new_character_into_review_queue(client, db, auth_headers, monkeypatch):
+    captured_book_tasks: list[dict] = []
+
+    class _ProcessBookTask:
+        @staticmethod
+        def apply_async(*, args, queue, **kwargs):
+            captured_book_tasks.append({"args": args, "queue": queue, "kwargs": kwargs})
+            return None
+
+    chapters = [
+        {"number": 1, "title": "One", "text": "Anna looked up once. Gregor kept moving toward the door."},
+    ]
+
+    async def _fake_extract(_text: str, **_kwargs) -> dict:
+        return {
+            "characters": [
+                {
+                    "name": "Anna",
+                    "entity_type": "person",
+                    "confidence": 0.32,
+                    "traits": {},
+                    "personality_tags": [],
+                    "motivations": [],
+                    "fears": [],
+                    "arc_summary": "background character",
+                    "evidence": {
+                        "mention_count": 1,
+                        "strong_mention_count": 1,
+                        "has_dialogue_or_action": True,
+                        "has_physical_description": False,
+                        "appears_multiple_times": False,
+                    },
+                },
+                {
+                    "name": "Gregor",
+                    "entity_type": "person",
+                    "confidence": 0.94,
+                    "traits": {},
+                    "personality_tags": ["anxious"],
+                    "motivations": ["protect his family"],
+                    "fears": ["losing control"],
+                    "arc_summary": "A grounded central character.",
+                    "evidence": {
+                        "mention_count": 2,
+                        "strong_mention_count": 1,
+                        "has_dialogue_or_action": True,
+                        "has_physical_description": True,
+                        "appears_multiple_times": True,
+                    },
+                },
+            ],
+            "relationships": [],
+        }
+
+    async def _fake_embed(texts: list[str], **_kwargs) -> list[list[float]]:
+        return _embedding_for(len(texts))
+
+    monkeypatch.setattr("app.api.v1.routes.books.process_book_task", _ProcessBookTask())
+    monkeypatch.setattr("app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES)
+    monkeypatch.setattr(
+        "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
+        lambda raw, *, split_large_chapters=True: (chapters, {"source": "pdf", "chapter_count": len(chapters)}),
+    )
+    monkeypatch.setattr("app.parsers.pdf_parser.extract_first_page_cover", lambda raw: None)
+    monkeypatch.setattr("app.workers.consumers.extraction_consumer.extract_characters_and_relationships", _fake_extract)
+    monkeypatch.setattr("app.workers.consumers.extraction_consumer.embed_batch", _fake_embed)
+
+    response = await client.post(
+        "/api/v1/books/upload",
+        headers=auth_headers,
+        data={"title": "Low Confidence Review Test", "mode": "reader"},
+        files={"file": ("low-confidence-review.pdf", VALID_PDF_BYTES, "application/pdf")},
+    )
+
+    assert response.status_code == 202
+    book_id = uuid.UUID(str(captured_book_tasks[0]["args"][0]))
+    await process_book(str(book_id), queue_wait_ms=6)
+
+    book = await db.get(Book, book_id)
+    assert book is not None
+    await _process_chapter(db, book, chapters[0], queue_wait_ms=2)
+
+    persisted_characters = (
+        await db.execute(select(Character).where(Character.book_id == book_id).order_by(Character.name.asc()))
+    ).scalars().all()
+    candidate_rows = (
+        await db.execute(select(CharacterCandidate).where(CharacterCandidate.book_id == book_id).order_by(CharacterCandidate.proposed_name.asc()))
+    ).scalars().all()
+
+    assert [character.name for character in persisted_characters] == ["Gregor"]
+    assert [candidate.proposed_name for candidate in candidate_rows] == ["Anna", "Gregor"]
+    anna_candidate = next(candidate for candidate in candidate_rows if candidate.proposed_name == "Anna")
+    assert anna_candidate.status == "pending"
+    assert "low_confidence_needs_review" in (anna_candidate.reason_codes or [])
+
+
+@pytest.mark.asyncio
+async def test_upload_pipeline_collapses_same_batch_full_name_and_short_name_duplicates(client, db, auth_headers, monkeypatch):
+    captured_book_tasks: list[dict] = []
+
+    class _ProcessBookTask:
+        @staticmethod
+        def apply_async(*, args, queue, **kwargs):
+            captured_book_tasks.append({"args": args, "queue": queue, "kwargs": kwargs})
+            return None
+
+    chapters = [
+        {"number": 1, "title": "One", "text": "Gregor Samsa woke before dawn. Gregor warned Grete to stay back."},
+    ]
+
+    async def _fake_extract(_text: str, **_kwargs) -> dict:
+        return {
+            "characters": [
+                {
+                    "name": "Gregor Samsa",
+                    "canonical_name": "Gregor Samsa",
+                    "aliases": [],
+                    "entity_type": "person",
+                    "confidence": 0.95,
+                    "traits": {},
+                    "personality_tags": ["anxious"],
+                    "motivations": ["protect his family"],
+                    "fears": ["losing control"],
+                    "arc_summary": "A grounded central character.",
+                    "evidence": {
+                        "mention_count": 2,
+                        "strong_mention_count": 1,
+                        "has_dialogue_or_action": True,
+                        "has_physical_description": True,
+                        "appears_multiple_times": True,
+                    },
+                },
+                {
+                    "name": "Gregor",
+                    "canonical_name": "Gregor",
+                    "aliases": [],
+                    "entity_type": "person",
+                    "confidence": 0.93,
+                    "traits": {},
+                    "personality_tags": ["anxious"],
+                    "motivations": ["protect his sister"],
+                    "fears": ["losing control"],
+                    "arc_summary": "The same grounded central character under a shorter mention.",
+                    "evidence": {
+                        "mention_count": 1,
+                        "strong_mention_count": 1,
+                        "has_dialogue_or_action": True,
+                        "has_physical_description": False,
+                        "appears_multiple_times": False,
+                    },
+                },
+                {
+                    "name": "Grete",
+                    "canonical_name": "Grete",
+                    "aliases": [],
+                    "entity_type": "person",
+                    "confidence": 0.94,
+                    "traits": {},
+                    "personality_tags": [],
+                    "motivations": ["protect Gregor"],
+                    "fears": [],
+                    "arc_summary": "A grounded supporting character.",
+                    "evidence": {
+                        "mention_count": 1,
+                        "strong_mention_count": 1,
+                        "has_dialogue_or_action": True,
+                        "has_physical_description": False,
+                        "appears_multiple_times": False,
+                    },
+                },
+            ],
+            "relationships": [
+                {
+                    "character_a": "Gregor",
+                    "character_b": "Grete",
+                    "type": "family",
+                    "sentiment": 0.7,
+                    "description": "Gregor warns Grete to stay back.",
+                }
+            ],
+        }
+
+    async def _fake_embed(texts: list[str], **_kwargs) -> list[list[float]]:
+        return _embedding_for(len(texts))
+
+    monkeypatch.setattr("app.api.v1.routes.books.process_book_task", _ProcessBookTask())
+    monkeypatch.setattr("app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES)
+    monkeypatch.setattr(
+        "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
+        lambda raw, *, split_large_chapters=True: (chapters, {"source": "pdf", "chapter_count": len(chapters)}),
+    )
+    monkeypatch.setattr("app.parsers.pdf_parser.extract_first_page_cover", lambda raw: None)
+    monkeypatch.setattr("app.workers.consumers.extraction_consumer.extract_characters_and_relationships", _fake_extract)
+    monkeypatch.setattr("app.workers.consumers.extraction_consumer.embed_batch", _fake_embed)
+
+    response = await client.post(
+        "/api/v1/books/upload",
+        headers=auth_headers,
+        data={"title": "Same Batch Dedup Test", "mode": "reader"},
+        files={"file": ("same-batch-dedup.pdf", VALID_PDF_BYTES, "application/pdf")},
+    )
+
+    assert response.status_code == 202
+    book_id = uuid.UUID(str(captured_book_tasks[0]["args"][0]))
+    await process_book(str(book_id), queue_wait_ms=6)
+
+    book = await db.get(Book, book_id)
+    assert book is not None
+    await _process_chapter(db, book, chapters[0], queue_wait_ms=2)
+
+    persisted_characters = (
+        await db.execute(select(Character).where(Character.book_id == book_id).order_by(Character.name.asc()))
+    ).scalars().all()
+    relationships = (
+        await db.execute(select(CharacterRelationship).where(CharacterRelationship.book_id == book_id))
+    ).scalars().all()
+    candidate_rows = (
+        await db.execute(select(CharacterCandidate).where(CharacterCandidate.book_id == book_id).order_by(CharacterCandidate.proposed_name.asc()))
+    ).scalars().all()
+
+    assert [character.name for character in persisted_characters] == ["Gregor Samsa", "Grete"]
+    gregor = next(character for character in persisted_characters if character.name == "Gregor Samsa")
+    grete = next(character for character in persisted_characters if character.name == "Grete")
+    assert gregor.mention_count == 2
+    assert len(relationships) == 1
+    assert relationships[0].character_a_id == gregor.id
+    assert relationships[0].character_b_id == grete.id
+
+    gregor_candidates = [candidate for candidate in candidate_rows if candidate.proposed_name == "Gregor"]
+    assert len(gregor_candidates) == 1
+    assert gregor_candidates[0].matched_character_id == gregor.id
+    assert gregor_candidates[0].status == "accepted"
+
+
+@pytest.mark.asyncio
+async def test_unresolved_relationships_become_relationship_review_records(client, db, auth_headers, monkeypatch):
+    captured_book_tasks: list[dict] = []
+
+    class _ProcessBookTask:
+        @staticmethod
+        def apply_async(*, args, queue, **kwargs):
+            captured_book_tasks.append({"args": args, "queue": queue, "kwargs": kwargs})
+            return None
+
+    chapters = [
+        {"number": 1, "title": "One", "text": "Gregor argued with the Doctor in the hall."},
+    ]
+
+    async def _fake_extract(_text: str, **_kwargs) -> dict:
+        return {
+            "characters": [
+                {
+                    "name": "Gregor",
+                    "entity_type": "person",
+                    "confidence": 0.95,
+                    "traits": {},
+                    "personality_tags": [],
+                    "motivations": [],
+                    "fears": [],
+                    "arc_summary": "Grounded lead.",
+                    "evidence": {
+                        "mention_count": 2,
+                        "strong_mention_count": 1,
+                        "has_dialogue_or_action": True,
+                        "has_physical_description": True,
+                        "appears_multiple_times": True,
+                    },
+                },
+            ],
+            "relationships": [
+                {
+                    "character_a": "Gregor",
+                    "character_b": "Doctor",
+                    "type": "hostile",
+                    "sentiment": -0.5,
+                    "description": "A tense confrontation.",
+                }
+            ],
+        }
+
+    async def _fake_embed(texts: list[str], **_kwargs) -> list[list[float]]:
+        return _embedding_for(len(texts))
+
+    monkeypatch.setattr("app.api.v1.routes.books.process_book_task", _ProcessBookTask())
+    monkeypatch.setattr("app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES)
+    monkeypatch.setattr(
+        "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
+        lambda raw, *, split_large_chapters=True: (chapters, {"source": "pdf", "chapter_count": len(chapters)}),
+    )
+    monkeypatch.setattr("app.parsers.pdf_parser.extract_first_page_cover", lambda raw: None)
+    monkeypatch.setattr("app.workers.consumers.extraction_consumer.extract_characters_and_relationships", _fake_extract)
+    monkeypatch.setattr("app.workers.consumers.extraction_consumer.embed_batch", _fake_embed)
+
+    response = await client.post(
+        "/api/v1/books/upload",
+        headers=auth_headers,
+        data={"title": "Relationship Review Test", "mode": "reader"},
+        files={"file": ("relationship-review.pdf", VALID_PDF_BYTES, "application/pdf")},
+    )
+
+    assert response.status_code == 202
+    book_id = uuid.UUID(str(captured_book_tasks[0]["args"][0]))
+    await process_book(str(book_id), queue_wait_ms=6)
+
+    book = await db.get(Book, book_id)
+    assert book is not None
+    await _process_chapter(db, book, chapters[0], queue_wait_ms=2)
+    await db.refresh(book)
+
+    relationship_candidates = (
+        await db.execute(
+            select(CharacterRelationshipCandidate).where(CharacterRelationshipCandidate.book_id == book_id)
+        )
+    ).scalars().all()
+    character_candidates = (
+        await db.execute(select(CharacterCandidate).where(CharacterCandidate.book_id == book_id))
+    ).scalars().all()
+
+    assert len(relationship_candidates) == 1
+    assert relationship_candidates[0].raw_character_a == "Gregor"
+    assert relationship_candidates[0].raw_character_b == "Doctor"
+    assert relationship_candidates[0].status == "pending"
+    assert all("relationship_unresolved" not in (candidate.reason_codes or []) for candidate in character_candidates)
 
 
 @pytest.mark.asyncio

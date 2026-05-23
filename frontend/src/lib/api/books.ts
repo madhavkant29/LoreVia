@@ -12,6 +12,8 @@ import { normalizeBookRouteId } from "@/lib/utils/bookRoutes"
 import type { Book, BookCollaborator, BookEvents, BookNote, BookOverviewPayload, BookSeries, BookWorkType, ChapterConsistencyReport, ChapterSceneOrder, ChapterVersion, ChapterVersionDetail, CollaborationPermissions, CollaborationRole, CollaborationScope, EmotionalArcOverview, ManuscriptAnnotation, ManuscriptWorkspaceTree, NovelScene, ObsidianGraph, ObsidianNoteRelations, ObsidianPreview, ObsidianVaultNote, ObsidianVaultNoteSaveResult, PreWritingCheck, ReadabilityMetrics, RevisionIntelligence, RevisionTagSet, RevisionTagTarget, SavedQuote, SceneMetadata, SceneVersion, SceneVersionDetail, SeriesBible, StoryHealth, UserStats, WorkspaceSearchFilters, WorkspaceSearchResult, WriterWorkspace } from "@/types/book"
 import type {
   Character,
+  CharacterRepairApplyResult,
+  CharacterRepairPreview,
   CharacterReviewResponse,
   CharacterShareResponse,
   RelationshipGraph,
@@ -332,6 +334,8 @@ export const booksApi = {
       motivations?: string[]
       fears?: string[]
       graphVisibility?: "include" | "exclude" | null
+      protectedFromRepair?: boolean | null
+      reviewNote?: string | null
     }
   ) => apiClient.put<Character>(bookPath(bookId, `/characters/${characterId}`), {
     name: payload.name,
@@ -347,6 +351,8 @@ export const booksApi = {
     motivations: payload.motivations,
     fears: payload.fears,
     graph_visibility: payload.graphVisibility,
+    protected_from_repair: payload.protectedFromRepair,
+    review_note: payload.reviewNote,
   }).then(r => {
     invalidateBookCache(bookId)
     invalidateReaderCache(bookId)
@@ -378,6 +384,12 @@ export const booksApi = {
       invalidateBookCache(bookId)
       return r.data
     }),
+  demoteCharacter: (bookId: string, characterId: string) =>
+    apiClient.post<{ demoted: string; candidate_id: string }>(bookPath(bookId, `/characters/${characterId}/demote`)).then(r => {
+      invalidateBookCache(bookId)
+      invalidateReaderCache(bookId)
+      return r.data
+    }),
   promoteCharacterCandidate: (bookId: string, candidateId: string) =>
     apiClient.post<{ promoted: string; candidate_id: string }>(bookPath(bookId, `/character-review/${candidateId}/promote`)).then(r => {
       invalidateBookCache(bookId)
@@ -395,6 +407,55 @@ export const booksApi = {
       invalidateBookCache(bookId)
       return r.data
     }),
+  attachRelationshipCandidateA: (bookId: string, candidateId: string, characterId: string) =>
+    apiClient.post<{ attached_a: string; relationship_candidate_id: string }>(bookPath(bookId, `/relationship-review/${candidateId}/attach-a`), {
+      character_id: characterId,
+    }).then(r => {
+      invalidateBookCache(bookId)
+      return r.data
+    }),
+  attachRelationshipCandidateB: (bookId: string, candidateId: string, characterId: string) =>
+    apiClient.post<{ attached_b: string; relationship_candidate_id: string }>(bookPath(bookId, `/relationship-review/${candidateId}/attach-b`), {
+      character_id: characterId,
+    }).then(r => {
+      invalidateBookCache(bookId)
+      return r.data
+    }),
+  acceptRelationshipCandidate: (
+    bookId: string,
+    candidateId: string,
+    payload: {
+      characterAId: string
+      characterBId: string
+      relType?: string | null
+      sentiment?: number | null
+      description?: string | null
+      fromChapter?: number | null
+      toChapter?: number | null
+    },
+  ) => apiClient.post(bookPath(bookId, `/relationship-review/${candidateId}/accept`), {
+    character_a_id: payload.characterAId,
+    character_b_id: payload.characterBId,
+    rel_type: payload.relType,
+    sentiment: payload.sentiment,
+    description: payload.description,
+    from_chapter: payload.fromChapter,
+    to_chapter: payload.toChapter,
+  }).then(r => {
+    invalidateBookCache(bookId)
+    invalidateReaderCache(bookId)
+    return r.data
+  }),
+  resolveRelationshipCandidate: (bookId: string, candidateId: string) =>
+    apiClient.post<{ resolved: string }>(bookPath(bookId, `/relationship-review/${candidateId}/resolve`)).then(r => {
+      invalidateBookCache(bookId)
+      return r.data
+    }),
+  rejectRelationshipCandidate: (bookId: string, candidateId: string) =>
+    apiClient.post<{ rejected: string }>(bookPath(bookId, `/relationship-review/${candidateId}/reject`)).then(r => {
+      invalidateBookCache(bookId)
+      return r.data
+    }),
   acceptDuplicateSuggestion: (bookId: string, suggestionId: string) =>
     apiClient.post<{ merged: string; suggestion_id: string }>(bookPath(bookId, `/duplicate-suggestions/${suggestionId}/accept`)).then(r => {
       invalidateBookCache(bookId)
@@ -405,6 +466,28 @@ export const booksApi = {
       invalidateBookCache(bookId)
       return r.data
     }),
+  previewCharacterReprocess: (
+    bookId: string,
+    payload?: { allowMergeSafePairs?: boolean; allowDemoteObviousNoise?: boolean },
+  ) => apiClient.get<CharacterRepairPreview>(bookPath(bookId, "/character-review/reprocess"), {
+    params: {
+      allow_merge_safe_pairs: payload?.allowMergeSafePairs ?? true,
+      allow_demote_obvious_noise: payload?.allowDemoteObviousNoise ?? true,
+    },
+  }).then(r => r.data),
+  applyCharacterReprocess: (
+    bookId: string,
+    payload?: { allowMergeSafePairs?: boolean; allowDemoteObviousNoise?: boolean },
+  ) => apiClient.post<CharacterRepairApplyResult>(bookPath(bookId, "/character-review/reprocess"), null, {
+    params: {
+      allow_merge_safe_pairs: payload?.allowMergeSafePairs ?? true,
+      allow_demote_obvious_noise: payload?.allowDemoteObviousNoise ?? true,
+    },
+  }).then(r => {
+    invalidateBookCache(bookId)
+    invalidateReaderCache(bookId)
+    return r.data
+  }),
   updateRelationship: (
     bookId: string,
     relationshipId: string,
@@ -628,6 +711,17 @@ export const booksApi = {
       invalidateBookCache(id)
       return r.data
     }),
+  updateForumMetadata: (
+    id: string,
+    payload: { title: string; genre: string; description: string }
+  ) => apiClient.put<Book>(bookPath(id, "/forum-metadata"), {
+    title: payload.title,
+    genre: payload.genre,
+    description: payload.description,
+  }).then(r => {
+    invalidateBookCache(id)
+    return r.data
+  }),
   upload: (
     file: File,
     title: string,

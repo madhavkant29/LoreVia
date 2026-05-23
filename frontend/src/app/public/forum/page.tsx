@@ -1,7 +1,7 @@
 import type { Metadata } from "next"
+import dynamic from "next/dynamic"
 
 import { JsonLdScript } from "@/components/seo/JsonLdScript"
-import { PublicForumPageClient } from "@/components/public/PublicForumPageClient"
 import { listPublicForumPostsServer } from "@/lib/api/public.server"
 import {
   DEFAULT_OG_IMAGE,
@@ -10,6 +10,10 @@ import {
   buildCollectionPageJsonLd,
   buildItemListJsonLd,
 } from "@/lib/seo"
+
+const PublicForumPageClient = dynamic(
+  () => import("@/components/public/PublicForumPageClient").then((module) => module.PublicForumPageClient)
+)
 
 export const metadata: Metadata = {
   title: "Public Forum",

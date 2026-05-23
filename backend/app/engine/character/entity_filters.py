@@ -225,9 +225,16 @@ def _single_token_has_grounded_support(evidence: dict | None) -> bool:
     return bool(
         strong_mention_count >= 2
         or (
-            strong_mention_count >= 1
+            mention_count >= 2
             and has_dialogue_or_action
-            and (appears_multiple_times or mention_count >= 3 or has_physical_description)
+            and (appears_multiple_times or has_physical_description)
+        )
+        or (
+            strong_mention_count >= 1
+            and (
+                has_dialogue_or_action
+                or has_physical_description
+            )
         )
     )
 
@@ -300,10 +307,12 @@ def character_persistence_decision(
     if support_score == 0 and profile_score == 0:
         reasons.append("insufficient_passage_support")
 
+    strong_single_token_profile = profile_score >= 2 and _has_meaningful_text(arc_summary)
+
     if _single_token_name(name):
-        if not _single_token_has_grounded_support(evidence):
+        if not _single_token_has_grounded_support(evidence) and not strong_single_token_profile:
             reasons.append("single_token_needs_stronger_support")
-        if support_score < 3 and profile_score == 0:
+        if support_score < 3 and profile_score == 0 and not strong_single_token_profile:
             reasons.append("single_token_lacks_profile_evidence")
 
     if any(reason == "visibility_score_below_threshold" for reason in reasons):
@@ -316,7 +325,7 @@ def character_persistence_decision(
     if support_score < 2 and profile_score == 0:
         reasons.append("no_profile_or_passage_signal")
 
-    if _single_token_name(name) and not _single_token_has_grounded_support(evidence):
+    if _single_token_name(name) and not _single_token_has_grounded_support(evidence) and not strong_single_token_profile:
         reasons.append("single_token_requires_more_evidence")
 
     allowed = not reasons

@@ -37,6 +37,28 @@ describe("intelligence api", () => {
     })
   })
 
+  it("truncates long advisor passages before posting inline continuity checks", async () => {
+    const longText = "a".repeat(12_500)
+
+    await intelligenceApi.inlineContinuity("book-1", longText, 3)
+
+    expect(postMock).toHaveBeenCalledWith("/intelligence/book-1/advisor/inline-continuity", {
+      text: "a".repeat(12_000),
+      chapter_num: 3,
+    })
+  })
+
+  it("truncates long advisor passages before posting voice consistency checks", async () => {
+    const longText = "b".repeat(12_345)
+
+    await intelligenceApi.voiceConsistencyReview("book-1", longText)
+
+    expect(postMock).toHaveBeenCalledWith("/intelligence/book-1/advisor/voice-consistency", {
+      text: "b".repeat(12_000),
+      chapter_num: null,
+    })
+  })
+
   it("polls advisor tasks until the result is ready", async () => {
     postMock.mockResolvedValueOnce({ data: { task_id: "task-1", status: "queued", cached: false } })
     getMock

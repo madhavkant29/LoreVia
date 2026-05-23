@@ -10,6 +10,7 @@ from app.api.v1.routes import (
     books,
     characters,
     collaboration,
+    email,
     internal,
     intelligence,
     manuscript,
@@ -51,6 +52,7 @@ api_router.include_router(manuscript.router,    prefix="/books",         tags=["
 api_router.include_router(public.router,        prefix="/public",        tags=["public"], dependencies=[Depends(rate_limit_public)])
 api_router.include_router(reports.router,       prefix="/reports",       tags=["reports"])
 api_router.include_router(billing.router,       prefix="/billing",       tags=["billing"])
+api_router.include_router(email.router,         prefix="/email",         tags=["email"])
 api_router.include_router(beta_reads.router,    tags=["beta-reads"], dependencies=[Depends(rate_limit_api)])
 api_router.include_router(internal.router,      prefix="/internal",      tags=["internal"])
 api_router.include_router(webhooks.router,      prefix="/webhooks",      tags=["webhooks"])

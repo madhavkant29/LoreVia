@@ -1,7 +1,7 @@
 import type { Metadata } from "next"
+import dynamic from "next/dynamic"
 
 import { JsonLdScript } from "@/components/seo/JsonLdScript"
-import { PublicLibraryPageClient } from "@/components/public/PublicLibraryPageClient"
 import { listPublicBooksServer } from "@/lib/api/public.server"
 import {
   DEFAULT_OG_IMAGE,
@@ -10,6 +10,10 @@ import {
   buildCollectionPageJsonLd,
   buildItemListJsonLd,
 } from "@/lib/seo"
+
+const PublicLibraryPageClient = dynamic(
+  () => import("@/components/public/PublicLibraryPageClient").then((module) => module.PublicLibraryPageClient)
+)
 
 export const metadata: Metadata = {
   title: "Public Library",

@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import ARRAY, Boolean, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint, func
+from sqlalchemy import ARRAY, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -87,6 +87,21 @@ class Character(Base):
         foreign_keys="CharacterDuplicateSuggestion.secondary_character_id",
         back_populates="secondary_character",
         cascade="all, delete-orphan",
+    )
+    relationship_candidates_as_a = relationship(
+        "CharacterRelationshipCandidate",
+        foreign_keys="CharacterRelationshipCandidate.matched_character_a_id",
+        back_populates="matched_character_a",
+    )
+    relationship_candidates_as_b = relationship(
+        "CharacterRelationshipCandidate",
+        foreign_keys="CharacterRelationshipCandidate.matched_character_b_id",
+        back_populates="matched_character_b",
+    )
+    mention_records = relationship(
+        "CharacterMention",
+        foreign_keys="CharacterMention.matched_character_id",
+        back_populates="matched_character",
     )
 
 
@@ -174,6 +189,42 @@ class CharacterCandidate(Base):
     matched_character = relationship("Character", back_populates="matched_candidates")
 
 
+class CharacterMention(Base):
+    __tablename__ = "character_mentions"
+    __table_args__ = (
+        Index("ix_character_mentions_book_chapter", "book_id", "chapter_number"),
+        Index("ix_character_mentions_book_normalized_name", "book_id", "normalized_name"),
+        Index("ix_character_mentions_book_cluster_key", "book_id", "cluster_key"),
+        Index("ix_character_mentions_matched_character_id", "matched_character_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    book_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False)
+    chapter_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    raw_name: Mapped[str] = mapped_column(String, nullable=False)
+    normalized_name: Mapped[str] = mapped_column(String, nullable=False)
+    source_batch_key: Mapped[str | None] = mapped_column(String)
+    cluster_key: Mapped[str | None] = mapped_column(String)
+    mention_text: Mapped[str | None] = mapped_column(String)
+    matched_character_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("characters.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    resolver_status: Mapped[str] = mapped_column(String, nullable=False, default="unresolved", server_default="unresolved")
+    resolver_reasons: Mapped[list[str] | None] = mapped_column(ARRAY(String))
+    evidence: Mapped[dict | None] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    matched_character = relationship("Character", back_populates="mention_records")
+
+
 class CharacterDuplicateSuggestion(Base):
     __tablename__ = "character_duplicate_suggestions"
     __table_args__ = (
@@ -219,4 +270,55 @@ class CharacterDuplicateSuggestion(Base):
         "Character",
         foreign_keys=[secondary_character_id],
         back_populates="duplicate_suggestions_as_secondary",
+    )
+
+
+class CharacterRelationshipCandidate(Base):
+    __tablename__ = "character_relationship_candidates"
+    __table_args__ = (
+        Index("ix_character_relationship_candidates_book_status", "book_id", "status"),
+        Index("ix_character_relationship_candidates_book_chapter", "book_id", "chapter_number"),
+        Index("ix_character_relationship_candidates_match_a", "matched_character_a_id"),
+        Index("ix_character_relationship_candidates_match_b", "matched_character_b_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    book_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False)
+    chapter_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    raw_character_a: Mapped[str] = mapped_column(String, nullable=False)
+    raw_character_b: Mapped[str] = mapped_column(String, nullable=False)
+    matched_character_a_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("characters.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    matched_character_b_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("characters.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    rel_type: Mapped[str | None] = mapped_column(String)
+    sentiment: Mapped[float | None] = mapped_column(Float)
+    description: Mapped[str | None] = mapped_column(String)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="pending", server_default="pending")
+    reason_codes: Mapped[list[str] | None] = mapped_column(ARRAY(String))
+    evidence: Mapped[dict | None] = mapped_column(JSONB, default=dict)
+    source_batch_key: Mapped[str | None] = mapped_column(String)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    matched_character_a = relationship(
+        "Character",
+        foreign_keys=[matched_character_a_id],
+        back_populates="relationship_candidates_as_a",
+    )
+    matched_character_b = relationship(
+        "Character",
+        foreign_keys=[matched_character_b_id],
+        back_populates="relationship_candidates_as_b",
     )

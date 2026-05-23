@@ -27,6 +27,7 @@ async function initPostHog() {
         persistence: "localStorage",
         disable_session_recording: true,
       })
+      window.__loreviaPosthog = posthog
     })
   }
   await posthogInitPromise

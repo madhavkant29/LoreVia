@@ -4,6 +4,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -108,3 +109,19 @@ async def mark_advisor_job_failed(
     await db.commit()
     await db.refresh(job)
     return job
+
+
+async def purge_expired_advisor_jobs(
+    db: AsyncSession,
+    *,
+    now: datetime | None = None,
+) -> int:
+    cutoff = now or datetime.now(UTC)
+    result = await db.execute(
+        delete(AdvisorJob).where(
+            AdvisorJob.expires_at.is_not(None),
+            AdvisorJob.expires_at < cutoff,
+        )
+    )
+    await db.commit()
+    return int(result.rowcount or 0)

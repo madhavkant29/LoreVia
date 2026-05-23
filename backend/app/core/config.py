@@ -116,6 +116,9 @@ class Settings(BaseSettings):
     EMAIL_FROM: str = "support@mail.getlorevia.com"
     SUPPORT_EMAIL: str = "support@getlorevia.com"
     LEGAL_EMAIL: str = "legal@getlorevia.com"
+    BUSINESS_MAILING_ADDRESS: str = ""
+    EMAIL_PREFERENCES_TOKEN_TTL_SECONDS: int = 7 * 24 * 60 * 60
+    EMAIL_UNSUBSCRIBE_TOKEN_TTL_SECONDS: int = 7 * 24 * 60 * 60
     INTERNAL_JOB_SECRET: str | None = None
 
     # Public demo / sharing

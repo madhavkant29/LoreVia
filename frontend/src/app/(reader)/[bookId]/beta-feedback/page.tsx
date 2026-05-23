@@ -1,10 +1,10 @@
 "use client"
 
 import { useQuery } from "@tanstack/react-query"
+import dynamic from "next/dynamic"
 import { useEffect, useMemo, useState } from "react"
 import { useParams } from "next/navigation"
 
-import { AuthorToolsNav } from "@/components/layout/AuthorToolsNav"
 import { betaReadsApi } from "@/lib/api/betaReads"
 import { booksApi } from "@/lib/api/books"
 import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
@@ -12,6 +12,14 @@ import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { formatFeedbackKindLabel, parseQuestionLines, selectPrimaryAssignment } from "@/lib/utils/betaRead"
 import type { BetaReadAssignment, BetaReadAssignmentDetail } from "@/types/betaRead"
 import type { Book } from "@/types/book"
+
+const AuthorToolsNav = dynamic(
+  () => import("@/components/layout/AuthorToolsNav").then((module) => module.AuthorToolsNav),
+  {
+    ssr: false,
+    loading: () => <div className="rounded-md border border-white/[0.065] bg-[#0d141c] p-4" />,
+  }
+)
 
 const FEEDBACK_KIND_OPTIONS = [
   { value: "chapter_comment", label: "Chapter comment", detail: "General comments on pacing, flow, or impact in a chapter." },
@@ -270,6 +278,7 @@ export default function BetaFeedbackPage() {
             bookId={bookId}
             active="beta-feedback"
             isDark={isDark}
+            bookData={book}
             title="Beta feedback"
             description="Close the loop between draft sharing, reader response, and review-gated rewards."
             mode={book?.mode ?? "author"}

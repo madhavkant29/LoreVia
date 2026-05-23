@@ -1,14 +1,18 @@
 import type { Metadata } from "next"
+import dynamic from "next/dynamic"
 
 import { JsonLdScript } from "@/components/seo/JsonLdScript"
-import { PublicForumPostPageClient } from "@/components/public/PublicForumPostPageClient"
-import { getPublicForumPostServer } from "@/lib/api/public.server"
+import { getPublicForumPostServer, listPublicForumCommentsServer } from "@/lib/api/public.server"
 import {
   DEFAULT_OG_IMAGE,
   SITE_NAME,
   buildBreadcrumbJsonLd,
   buildForumThreadJsonLd,
 } from "@/lib/seo"
+
+const PublicForumPostPageClient = dynamic(
+  () => import("@/components/public/PublicForumPostPageClient").then((module) => module.PublicForumPostPageClient)
+)
 
 export async function generateMetadata({ params }: { params: Promise<{ postId: string }> }): Promise<Metadata> {
   const { postId } = await params
@@ -43,7 +47,10 @@ export async function generateMetadata({ params }: { params: Promise<{ postId: s
 
 export default async function PublicForumPostPage({ params }: { params: Promise<{ postId: string }> }) {
   const { postId } = await params
-  const post = await getPublicForumPostServer(postId).catch(() => null)
+  const [post, comments] = await Promise.all([
+    getPublicForumPostServer(postId).catch(() => null),
+    listPublicForumCommentsServer(postId).catch(() => []),
+  ])
   const threadJsonLd = post ? buildForumThreadJsonLd({
     title: post.headline,
     body: post.body,
@@ -66,7 +73,7 @@ export default async function PublicForumPostPage({ params }: { params: Promise<
       {post && breadcrumbJsonLd ? (
         <JsonLdScript id={`public-forum-post-breadcrumbs-jsonld-${post.id}`} data={breadcrumbJsonLd} />
       ) : null}
-      <PublicForumPostPageClient postId={postId} initialPost={post} />
+      <PublicForumPostPageClient postId={postId} initialPost={post} initialComments={comments} />
     </>
   )
 }

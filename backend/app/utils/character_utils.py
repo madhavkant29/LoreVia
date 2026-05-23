@@ -42,6 +42,8 @@ from app.models.character import (
     Character,
     CharacterCandidate,
     CharacterDuplicateSuggestion,
+    CharacterMention,
+    CharacterRelationshipCandidate,
     CharacterState,
     CharacterVoiceProfile,
 )
@@ -63,6 +65,17 @@ CHARACTER_CANDIDATE_MERGED = "merged"
 CHARACTER_DUPLICATE_PENDING = "pending"
 CHARACTER_DUPLICATE_ACCEPTED = "accepted"
 CHARACTER_DUPLICATE_DISMISSED = "dismissed"
+CHARACTER_RELATIONSHIP_CANDIDATE_PENDING = "pending"
+CHARACTER_RELATIONSHIP_CANDIDATE_ACCEPTED = "accepted"
+CHARACTER_RELATIONSHIP_CANDIDATE_REJECTED = "rejected"
+CHARACTER_RELATIONSHIP_CANDIDATE_RESOLVED = "resolved"
+CHARACTER_RELATIONSHIP_CANDIDATE_MERGED = "merged"
+ROLE_ONLY_REFERENCE_WORDS = {
+    "aunt", "brother", "captain", "chief", "chief clerk", "clerk", "doctor", "father", "headmaster",
+    "lady", "lord", "master", "mentor", "mother", "mr", "mrs", "ms", "nurse", "professor", "servant",
+    "sister", "teacher", "uncle",
+}
+FAMILY_ROLE_WORDS = {"aunt", "brother", "father", "mother", "sister", "uncle"}
 
 # ─── Display filter ───────────────────────────────────────────────────────────
 
@@ -307,7 +320,30 @@ def build_character_analysis_payload(char: Character) -> dict[str, Any]:
         "quality_flags": quality_flags,
         "grounding_passage_count": grounding_passage_count,
         "confidence_band": confidence_band,
+        "user_curated": bool(metadata.get("user_curated")),
+        "protected_from_repair": bool(metadata.get("protected_from_repair")),
+        "canonical_confidence": (
+            float(metadata.get("canonical_confidence"))
+            if metadata.get("canonical_confidence") is not None
+            else None
+        ),
+        "grounding_coverage": (
+            float(metadata.get("grounding_coverage"))
+            if metadata.get("grounding_coverage") is not None
+            else None
+        ),
+        "cluster_size": int(metadata.get("cluster_size") or 0),
+        "cluster_mention_count": int(metadata.get("cluster_mention_count") or 0),
+        "resolver_status": str(metadata.get("resolver_status") or "").strip() or None,
+        "review_note": str(metadata.get("review_note") or "").strip() or None,
     }
+
+
+def is_protected_character(char: Character | None) -> bool:
+    if char is None:
+        return False
+    metadata = dict(getattr(char, "analysis_metadata", None) or {})
+    return bool(getattr(char, "is_manual", False) or metadata.get("protected_from_repair"))
 
 
 def serialize_character_detail(char: Character) -> dict[str, Any]:
@@ -466,6 +502,339 @@ def build_character_roster_snapshot(characters: Sequence[Character]) -> list[dic
     return roster
 
 
+def is_role_only_character_name(name: str | None) -> bool:
+    normalized = normalize_character_name(name)
+    if not normalized:
+        return False
+    if normalized in ROLE_ONLY_REFERENCE_WORDS:
+        return True
+    tokens = normalized.split()
+    return bool(tokens and all(token in ROLE_ONLY_REFERENCE_WORDS for token in tokens))
+
+
+def family_role_reference(name: str | None) -> tuple[str | None, str | None]:
+    normalized = normalize_character_name(name)
+    if not normalized:
+        return None, None
+    for role in FAMILY_ROLE_WORDS:
+        suffix = f" {role}"
+        if normalized.endswith(suffix):
+            anchor = normalized[: -len(suffix)].strip()
+            anchor = re.sub(r"\bs\b$", "", anchor).strip()
+            anchor = re.sub(r"\s+", " ", anchor)
+            if anchor.endswith("'"):
+                anchor = anchor[:-1]
+            if anchor.endswith(" s"):
+                anchor = anchor[:-2].strip()
+            if anchor:
+                return anchor, role
+    return None, None
+
+
+def build_character_mention_cluster_key(name: str | None, aliases: Sequence[str] | None = None) -> str:
+    parts = [normalize_character_name(name), *(normalize_character_name(alias) for alias in aliases or [])]
+    parts = sorted({part for part in parts if part})
+    if not parts:
+        return ""
+    return parts[0]
+
+
+def _context_links_family_role_to_name(role_name: str, proper_name: str, text: str) -> bool:
+    anchor, role = family_role_reference(role_name)
+    normalized_proper = normalize_character_name(proper_name)
+    if not anchor or not role or not normalized_proper or not text:
+        return False
+    anchor_phrase = rf"\b{re.escape(anchor)}(?:'s|\u2019s) {re.escape(role)}\b"
+    proper_phrase = rf"\b{re.escape(normalized_proper)}\b"
+    patterns = (
+        rf"{anchor_phrase}[^.?!\n]{{0,80}}{proper_phrase}",
+        rf"{proper_phrase}[^.?!\n]{{0,80}}{anchor_phrase}",
+    )
+    return any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in patterns)
+
+
+def _entity_display_name(entity: Mapping[str, Any]) -> str:
+    return " ".join(str(entity.get("name") or "").split()).strip()
+
+
+def _entity_source_text(entity: Mapping[str, Any]) -> str:
+    return " ".join(str(entity.get("_source_text") or "").split()).strip()
+
+
+def _entity_aliases(entity: Mapping[str, Any]) -> list[str]:
+    return clean_string_list(entity.get("aliases") if isinstance(entity.get("aliases"), list) else [])
+
+
+def _mention_entity_evidence(entity: Mapping[str, Any]) -> dict[str, Any]:
+    evidence = entity.get("evidence")
+    return dict(evidence) if isinstance(evidence, dict) else {}
+
+
+def _entity_mentions_linked_in_text(left_name: str, right_name: str, text: str) -> bool:
+    if not left_name or not right_name or not text:
+        return False
+
+    left_anchor, left_role = family_role_reference(left_name)
+    right_anchor, right_role = family_role_reference(right_name)
+    normalized_left = normalize_character_name(left_name)
+    normalized_right = normalize_character_name(right_name)
+
+    def _phrase(name: str, role: str | None) -> str:
+        return role or normalize_character_name(name)
+
+    left_phrase = _phrase(left_name, left_role if left_role else ("chief clerk" if normalized_left.endswith("chief clerk") else None))
+    right_phrase = _phrase(right_name, right_role if right_role else ("chief clerk" if normalized_right.endswith("chief clerk") else None))
+    escaped_left = re.escape(left_phrase)
+    escaped_right = re.escape(right_phrase)
+    if not escaped_left or not escaped_right:
+        return False
+
+    patterns = (
+        rf"\b{escaped_left}\b[^.?!\n]{{0,80}}\b{escaped_right}\b",
+        rf"\b{escaped_right}\b[^.?!\n]{{0,80}}\b{escaped_left}\b",
+    )
+    for pattern in patterns:
+        if re.search(pattern, text, flags=re.IGNORECASE):
+            return True
+
+    if left_role and left_anchor:
+        anchor_patterns = (
+            rf"\b{re.escape(left_anchor)}['’]s {re.escape(left_role)}\b[^.?!\n]{{0,80}}\b{re.escape(normalized_right)}\b",
+            rf"\b{re.escape(normalized_right)}\b[^.?!\n]{{0,80}}\b{re.escape(left_anchor)}['’]s {re.escape(left_role)}\b",
+        )
+        if any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in anchor_patterns):
+            return True
+    if right_role and right_anchor:
+        anchor_patterns = (
+            rf"\b{re.escape(right_anchor)}['’]s {re.escape(right_role)}\b[^.?!\n]{{0,80}}\b{re.escape(normalized_left)}\b",
+            rf"\b{re.escape(normalized_left)}\b[^.?!\n]{{0,80}}\b{re.escape(right_anchor)}['’]s {re.escape(right_role)}\b",
+        )
+        if any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in anchor_patterns):
+            return True
+
+    return False
+
+
+def _character_entity_matches_cluster(candidate: Mapping[str, Any], cluster: Mapping[str, Any]) -> bool:
+    from app.engine.character.deduplicator import names_equivalent
+
+    candidate_name = _entity_display_name(candidate)
+    cluster_name = _entity_display_name(cluster)
+    candidate_aliases = _entity_aliases(candidate)
+    cluster_aliases = _entity_aliases(cluster)
+    if not candidate_name or not cluster_name:
+        return False
+    if names_equivalent(candidate_name, candidate_aliases, cluster_name, cluster_aliases):
+        return True
+
+    source_text = " ".join(filter(None, [_entity_source_text(candidate), _entity_source_text(cluster)]))
+    if _entity_mentions_linked_in_text(candidate_name, cluster_name, source_text):
+        return True
+    if _context_links_family_role_to_name(candidate_name, cluster_name, source_text):
+        return True
+    if _context_links_family_role_to_name(cluster_name, candidate_name, source_text):
+        return True
+
+    candidate_keys = {build_character_mention_cluster_key(candidate_name, candidate_aliases), *(normalize_character_name(alias) for alias in candidate_aliases)}
+    cluster_keys = {build_character_mention_cluster_key(cluster_name, cluster_aliases), *(normalize_character_name(alias) for alias in cluster_aliases)}
+    candidate_keys.discard("")
+    cluster_keys.discard("")
+    return bool(candidate_keys & cluster_keys)
+
+
+def cluster_character_entities(entities: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    clusters: list[list[dict[str, Any]]] = []
+    for raw in entities:
+        entity = dict(raw)
+        if not _entity_display_name(entity):
+            continue
+        matched_cluster: list[dict[str, Any]] | None = None
+        for cluster in clusters:
+            if any(_character_entity_matches_cluster(entity, member) for member in cluster):
+                matched_cluster = cluster
+                break
+        if matched_cluster is None:
+            clusters.append([entity])
+            continue
+        matched_cluster.append(entity)
+
+    aggregated: list[dict[str, Any]] = []
+    for cluster in clusters:
+        ranked = sorted(
+            cluster,
+            key=lambda item: (
+                0 if is_role_only_character_name(_entity_display_name(item)) else 1,
+                int((_mention_entity_evidence(item).get("strong_mention_count") or 0)),
+                int((_mention_entity_evidence(item).get("mention_count") or 0)),
+                float(item.get("confidence") or 0.0),
+            ),
+            reverse=True,
+        )
+        primary = dict(ranked[0])
+        cluster_names = clean_string_list([_entity_display_name(item) for item in cluster])
+        cluster_aliases = merge_list_values(*(item.get("aliases") if isinstance(item.get("aliases"), list) else [] for item in cluster))
+        merged_traits: dict[str, Any] = {}
+        evidence = dict(_mention_entity_evidence(primary))
+        passages: list[str] = []
+        total_mentions = 0
+        strong_mentions = 0
+        for item in cluster:
+            merged_traits = merge_trait_states(merged_traits, item.get("traits") if isinstance(item.get("traits"), dict) else {})
+            item_evidence = _mention_entity_evidence(item)
+            total_mentions += int(item_evidence.get("mention_count") or 0)
+            strong_mentions += int(item_evidence.get("strong_mention_count") or 0)
+            passages.extend(clean_string_list(item_evidence.get("snippets") if isinstance(item_evidence.get("snippets"), list) else []))
+
+        primary["aliases"] = [
+            alias for alias in merge_list_values(cluster_aliases, cluster_names)
+            if normalize_character_name(alias) != normalize_character_name(primary.get("name"))
+        ]
+        primary["traits"] = merged_traits
+        primary["confidence"] = max(float(item.get("confidence") or 0.0) for item in cluster)
+        evidence.update(
+            {
+                "mention_count": total_mentions or int(evidence.get("mention_count") or 0),
+                "strong_mention_count": strong_mentions or int(evidence.get("strong_mention_count") or 0),
+                "cluster_size": len(cluster),
+                "cluster_mention_count": total_mentions or int(evidence.get("mention_count") or 0),
+                "cluster_names": cluster_names,
+                "resolver_status": "clustered" if len(cluster) > 1 else "single",
+                "snippets": clean_string_list(passages)[:6],
+            }
+        )
+        primary["evidence"] = evidence
+        primary["resolver_status"] = str(evidence.get("resolver_status") or "single")
+        primary["canonical_confidence"] = max(
+            float(primary.get("confidence") or 0.0),
+            min(0.99, 0.35 + (0.1 * len(cluster)) + (0.08 * min(strong_mentions, 4))),
+        )
+        primary["cluster_members"] = [
+            {
+                "name": _entity_display_name(item),
+                "aliases": _entity_aliases(item),
+                "source_batch_key": item.get("_source_batch_key"),
+                "source_text": _entity_source_text(item),
+                "evidence": _mention_entity_evidence(item),
+            }
+            for item in cluster
+        ]
+        aggregated.append(primary)
+
+    return aggregated
+
+
+async def record_character_mention(
+    db: AsyncSession,
+    *,
+    book_id: uuid.UUID,
+    chapter_number: int,
+    raw_name: str,
+    normalized_name: str,
+    source_batch_key: str | None = None,
+    cluster_key: str | None = None,
+    mention_text: str | None = None,
+    matched_character_id: uuid.UUID | None = None,
+    resolver_status: str = "unresolved",
+    resolver_reasons: Sequence[object] | None = None,
+    evidence: Mapping[str, Any] | None = None,
+) -> CharacterMention:
+    cleaned_mention_text = clean_optional_text(mention_text)
+    stmt = select(CharacterMention).where(
+        CharacterMention.book_id == book_id,
+        CharacterMention.chapter_number == chapter_number,
+        CharacterMention.normalized_name == normalized_name,
+        CharacterMention.source_batch_key == source_batch_key,
+        CharacterMention.cluster_key == cluster_key,
+        CharacterMention.mention_text == cleaned_mention_text,
+    )
+    mention = (await db.execute(stmt)).scalar_one_or_none()
+    if mention is None:
+        mention = CharacterMention(
+            book_id=book_id,
+            chapter_number=chapter_number,
+            raw_name=raw_name,
+            normalized_name=normalized_name,
+            source_batch_key=source_batch_key,
+            cluster_key=cluster_key,
+        )
+        db.add(mention)
+    mention.raw_name = clean_optional_text(raw_name) or raw_name
+    mention.normalized_name = normalized_name
+    mention.source_batch_key = source_batch_key
+    mention.cluster_key = cluster_key
+    mention.mention_text = cleaned_mention_text
+    mention.matched_character_id = matched_character_id
+    mention.resolver_status = clean_optional_text(resolver_status) or "unresolved"
+    mention.resolver_reasons = _clean_reason_codes(resolver_reasons)
+    merged_evidence = dict(mention.evidence or {})
+    if evidence:
+        merged_evidence.update(dict(evidence))
+    mention.evidence = merged_evidence
+    await db.flush()
+    return mention
+
+
+def resolve_character_reference_from_roster(
+    characters: Sequence[Character],
+    raw_name: str | None,
+    *,
+    context_text: str | None = None,
+) -> Character | None:
+    from app.engine.character.deduplicator import names_equivalent
+
+    candidate_name = " ".join(str(raw_name or "").split()).strip()
+    if not candidate_name:
+        return None
+
+    scored: list[tuple[int, Character]] = []
+    normalized_candidate = normalize_character_name(candidate_name)
+    candidate_anchor, candidate_role = family_role_reference(candidate_name)
+    for character in characters:
+        aliases = clean_string_list(character.aliases or [])
+        score = 0
+        if names_equivalent(candidate_name, [], character.name, aliases):
+            score += 90
+        elif normalized_candidate == normalize_character_name(character.name):
+            score += 85
+        elif normalized_candidate and normalized_candidate in {normalize_character_name(alias) for alias in aliases}:
+            score += 82
+
+        joined_names = [character.name, *aliases]
+        if context_text and any(
+            _entity_mentions_linked_in_text(candidate_name, value, context_text)
+            for value in joined_names
+            if value
+        ):
+            score += 24
+        if context_text and any(
+            _context_links_family_role_to_name(candidate_name, value, context_text)
+            or _context_links_family_role_to_name(value, candidate_name, context_text)
+            for value in joined_names
+            if value
+        ):
+            score += 72
+
+        if candidate_anchor and candidate_role and normalize_character_name(character.name) == candidate_anchor:
+            score -= 32
+
+        if is_role_only_character_name(candidate_name) and not is_role_only_character_name(character.name):
+            score -= 12
+
+        if score > 0:
+            scored.append((score, character))
+
+    if not scored:
+        return None
+
+    scored.sort(key=lambda item: (item[0], int(item[1].mention_count or 0)), reverse=True)
+    best_score, best_character = scored[0]
+    if best_score < 60:
+        return None
+    if len(scored) > 1 and scored[1][0] >= best_score - 8:
+        return None
+    return best_character
+
+
 def _character_candidate_identity_key(
     *,
     book_id: uuid.UUID,
@@ -514,6 +883,7 @@ def _normalize_candidate_confidence(value: object | None) -> int:
 
 
 def serialize_character_candidate(candidate: CharacterCandidate) -> dict[str, Any]:
+    normalized_evidence = _normalize_candidate_evidence(candidate)
     return {
         "id": str(candidate.id),
         "book_id": str(candidate.book_id),
@@ -526,7 +896,15 @@ def serialize_character_candidate(candidate: CharacterCandidate) -> dict[str, An
         "status": candidate.status,
         "confidence": int(candidate.confidence or 0),
         "reason_codes": _clean_reason_codes(candidate.reason_codes or []),
-        "evidence": dict(candidate.evidence or {}),
+        "evidence": normalized_evidence,
+        "cluster_names": _coerce_string_list(normalized_evidence.get("cluster_names")),
+        "cluster_size": _coerce_int(normalized_evidence.get("cluster_size"), fallback=1),
+        "cluster_mention_count": _coerce_int(normalized_evidence.get("cluster_mention_count")),
+        "resolver_status": clean_optional_text(normalized_evidence.get("resolver_status")),
+        "resolver_reasons": _coerce_string_list(normalized_evidence.get("resolver_reasons")),
+        "canonical_confidence": _coerce_float(normalized_evidence.get("canonical_confidence")),
+        "grounding_coverage": _coerce_float(normalized_evidence.get("grounding_coverage")),
+        "snippets": _coerce_string_list(normalized_evidence.get("snippets")),
         "source_batch_key": candidate.source_batch_key,
         "created_at": candidate.created_at,
         "updated_at": candidate.updated_at,
@@ -535,7 +913,15 @@ def serialize_character_candidate(candidate: CharacterCandidate) -> dict[str, An
 
 def serialize_character_duplicate_suggestion(
     suggestion: CharacterDuplicateSuggestion,
+    *,
+    primary: Character | None = None,
+    secondary: Character | None = None,
 ) -> dict[str, Any]:
+    shared_evidence = _normalize_duplicate_shared_evidence(
+        suggestion,
+        primary=primary,
+        secondary=secondary,
+    )
     return {
         "id": str(suggestion.id),
         "book_id": str(suggestion.book_id),
@@ -543,25 +929,77 @@ def serialize_character_duplicate_suggestion(
         "secondary_character_id": str(suggestion.secondary_character_id),
         "confidence": int(suggestion.confidence or 0),
         "reasons": _clean_reason_codes(suggestion.reasons or []),
-        "shared_evidence": dict(suggestion.shared_evidence or {}),
+        "shared_evidence": shared_evidence,
+        "shared_cluster_keys": _coerce_string_list(shared_evidence.get("shared_cluster_keys")),
+        "shared_chapters": [
+            chapter
+            for chapter in (
+                _coerce_int(value, fallback=0)
+                for value in cast(Sequence[object], shared_evidence.get("shared_chapters") or [])
+            )
+            if chapter > 0
+        ],
+        "embedding_similarity": _coerce_float(shared_evidence.get("embedding_similarity")),
+        "primary_is_protected": bool(shared_evidence.get("primary_is_protected")),
+        "secondary_is_protected": bool(shared_evidence.get("secondary_is_protected")),
+        "primary_is_manual": bool(shared_evidence.get("primary_is_manual")),
+        "secondary_is_manual": bool(shared_evidence.get("secondary_is_manual")),
+        "primary_is_curated": bool(shared_evidence.get("primary_is_curated")),
+        "secondary_is_curated": bool(shared_evidence.get("secondary_is_curated")),
         "status": suggestion.status,
         "created_at": suggestion.created_at,
         "updated_at": suggestion.updated_at,
     }
 
 
+def serialize_character_relationship_candidate(
+    candidate: CharacterRelationshipCandidate,
+) -> dict[str, Any]:
+    return {
+        "id": str(candidate.id),
+        "book_id": str(candidate.book_id),
+        "chapter_number": int(candidate.chapter_number or 0),
+        "raw_character_a": candidate.raw_character_a,
+        "raw_character_b": candidate.raw_character_b,
+        "matched_character_a_id": str(candidate.matched_character_a_id) if candidate.matched_character_a_id else None,
+        "matched_character_b_id": str(candidate.matched_character_b_id) if candidate.matched_character_b_id else None,
+        "rel_type": clean_optional_text(candidate.rel_type),
+        "sentiment": candidate.sentiment,
+        "description": clean_optional_text(candidate.description),
+        "status": candidate.status,
+        "reason_codes": _clean_reason_codes(candidate.reason_codes or []),
+        "evidence": dict(candidate.evidence or {}),
+        "source_batch_key": candidate.source_batch_key,
+        "created_at": candidate.created_at,
+        "updated_at": candidate.updated_at,
+    }
+
+
 def build_character_review_payload(
     candidates: Sequence[CharacterCandidate],
     duplicate_suggestions: Sequence[CharacterDuplicateSuggestion],
+    relationship_candidates: Sequence[CharacterRelationshipCandidate] | None = None,
+    *,
+    character_map: Mapping[uuid.UUID, Character] | None = None,
 ) -> dict[str, Any]:
+    relationship_candidates = relationship_candidates or []
     serialized_candidates = [serialize_character_candidate(candidate) for candidate in candidates]
     serialized_duplicates = [
-        serialize_character_duplicate_suggestion(suggestion)
+        serialize_character_duplicate_suggestion(
+            suggestion,
+            primary=(character_map or {}).get(suggestion.primary_character_id),
+            secondary=(character_map or {}).get(suggestion.secondary_character_id),
+        )
         for suggestion in duplicate_suggestions
+    ]
+    serialized_relationship_candidates = [
+        serialize_character_relationship_candidate(candidate)
+        for candidate in relationship_candidates
     ]
     return {
         "candidates": serialized_candidates,
         "duplicate_suggestions": serialized_duplicates,
+        "relationship_candidates": serialized_relationship_candidates,
         "counts": {
             "pending_candidates": sum(
                 1 for item in candidates if str(item.status or "") == CHARACTER_CANDIDATE_PENDING
@@ -570,6 +1008,11 @@ def build_character_review_payload(
                 1
                 for item in duplicate_suggestions
                 if str(item.status or "") == CHARACTER_DUPLICATE_PENDING
+            ),
+            "pending_relationship_candidates": sum(
+                1
+                for item in relationship_candidates
+                if str(item.status or "") == CHARACTER_RELATIONSHIP_CANDIDATE_PENDING
             ),
         },
     }
@@ -603,7 +1046,34 @@ async def list_character_review_data(
             .order_by(CharacterDuplicateSuggestion.confidence.desc(), CharacterDuplicateSuggestion.created_at)
         )
     ).scalars().all()
-    return build_character_review_payload(candidates, duplicate_suggestions)
+    relationship_candidates = (
+        await db.execute(
+            select(CharacterRelationshipCandidate)
+            .where(
+                CharacterRelationshipCandidate.book_id == book_id,
+                CharacterRelationshipCandidate.status.in_(
+                    (
+                        CHARACTER_RELATIONSHIP_CANDIDATE_PENDING,
+                        CHARACTER_RELATIONSHIP_CANDIDATE_ACCEPTED,
+                        CHARACTER_RELATIONSHIP_CANDIDATE_RESOLVED,
+                    )
+                ),
+            )
+            .order_by(CharacterRelationshipCandidate.chapter_number, CharacterRelationshipCandidate.created_at)
+        )
+    ).scalars().all()
+    character_rows = (
+        await db.execute(
+            select(Character).where(Character.book_id == book_id)
+        )
+    ).scalars().all()
+    character_map = {item.id: item for item in character_rows if item.id is not None}
+    return build_character_review_payload(
+        candidates,
+        duplicate_suggestions,
+        relationship_candidates,
+        character_map=character_map,
+    )
 
 
 async def record_character_candidate(
@@ -654,6 +1124,219 @@ async def record_character_candidate(
         db.add(candidate)
     await db.flush()
     return candidate
+
+
+async def record_relationship_candidate(
+    db: AsyncSession,
+    *,
+    book_id: uuid.UUID,
+    chapter_number: int,
+    raw_character_a: str,
+    raw_character_b: str,
+    matched_character_a_id: uuid.UUID | None = None,
+    matched_character_b_id: uuid.UUID | None = None,
+    rel_type: str | None = None,
+    sentiment: float | None = None,
+    description: str | None = None,
+    status: str = CHARACTER_RELATIONSHIP_CANDIDATE_PENDING,
+    reason_codes: Sequence[object] | None = None,
+    evidence: Mapping[str, Any] | None = None,
+    source_batch_key: str | None = None,
+) -> CharacterRelationshipCandidate:
+    stmt = select(CharacterRelationshipCandidate).where(
+        CharacterRelationshipCandidate.book_id == book_id,
+        CharacterRelationshipCandidate.chapter_number == chapter_number,
+        CharacterRelationshipCandidate.raw_character_a == raw_character_a,
+        CharacterRelationshipCandidate.raw_character_b == raw_character_b,
+        CharacterRelationshipCandidate.source_batch_key == source_batch_key,
+    )
+    existing = (await db.execute(stmt)).scalar_one_or_none()
+    candidate = existing or CharacterRelationshipCandidate(
+        book_id=book_id,
+        chapter_number=chapter_number,
+        raw_character_a=raw_character_a,
+        raw_character_b=raw_character_b,
+        source_batch_key=source_batch_key,
+    )
+    candidate.raw_character_a = clean_optional_text(raw_character_a) or raw_character_a
+    candidate.raw_character_b = clean_optional_text(raw_character_b) or raw_character_b
+    candidate.matched_character_a_id = matched_character_a_id
+    candidate.matched_character_b_id = matched_character_b_id
+    candidate.rel_type = clean_optional_text(rel_type)
+    candidate.sentiment = sentiment
+    candidate.description = clean_optional_text(description)
+    candidate.status = status
+    candidate.reason_codes = _clean_reason_codes(reason_codes)
+    merged_evidence = dict(candidate.evidence or {})
+    if evidence:
+        merged_evidence.update(dict(evidence))
+    candidate.evidence = merged_evidence
+    candidate.source_batch_key = source_batch_key
+    if existing is None:
+        db.add(candidate)
+    await db.flush()
+    return candidate
+
+
+def append_character_review_audit_entry(
+    character: Character,
+    *,
+    action: str,
+    details: Mapping[str, Any] | None = None,
+) -> None:
+    metadata = dict(character.analysis_metadata or {})
+    entries = list(metadata.get("review_audit") or [])
+    entries.append(
+        {
+            "action": action,
+            "details": dict(details or {}),
+        }
+    )
+    metadata["review_audit"] = entries[-12:]
+    metadata["user_reviewed"] = True
+    character.analysis_metadata = metadata
+
+
+def mark_character_curated(
+    character: Character,
+    *,
+    protected_from_repair: bool | None = None,
+    review_note: str | None = None,
+) -> None:
+    metadata = dict(character.analysis_metadata or {})
+    metadata["user_curated"] = True
+    metadata["user_reviewed"] = True
+    if protected_from_repair is not None:
+        metadata["protected_from_repair"] = bool(protected_from_repair)
+    if review_note is not None:
+        cleaned_note = clean_optional_text(review_note)
+        if cleaned_note:
+            metadata["review_note"] = cleaned_note
+        else:
+            metadata.pop("review_note", None)
+    character.analysis_metadata = metadata
+
+
+def _clean_text_list(values: Sequence[object] | None) -> list[str]:
+    cleaned: list[str] = []
+    for value in values or []:
+        text = clean_optional_text(value)
+        if text:
+            cleaned.append(text)
+    return dedupe_preserve_order(cleaned)
+
+
+def _coerce_string_list(value: object) -> list[str]:
+    if isinstance(value, str):
+        return _clean_text_list([value])
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return _clean_text_list(list(value))
+    return []
+
+
+def _coerce_int(value: object, fallback: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _coerce_float(value: object) -> float | None:
+    try:
+        coerced = float(value)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(coerced) or math.isinf(coerced):
+        return None
+    return coerced
+
+
+def _extract_candidate_snippets(evidence: Mapping[str, Any], candidate: CharacterCandidate) -> list[str]:
+    snippets = _coerce_string_list(evidence.get("snippets"))
+    snippets.extend(_coerce_string_list(evidence.get("mention_texts")))
+    snippets.extend(_coerce_string_list(evidence.get("passages")))
+    snippets.extend(_coerce_string_list(evidence.get("local_passages")))
+    mention_text = clean_optional_text(evidence.get("mention_text"))
+    if mention_text:
+        snippets.append(mention_text)
+    local_passage = clean_optional_text(evidence.get("local_passage"))
+    if local_passage:
+        snippets.append(local_passage)
+    repair_source = evidence.get("repair_source")
+    if isinstance(repair_source, Mapping):
+        summary = (
+            f"Existing character demoted from canonical roster. "
+            f"Mentions: {_coerce_int(repair_source.get('mention_count'))}. "
+            f"First chapter: {_coerce_int(repair_source.get('first_chapter'))}."
+        )
+        snippets.append(summary)
+    if not snippets:
+        snippets.append(f"{candidate.proposed_name} review candidate from chapter {int(candidate.chapter_number or 0)}.")
+    return dedupe_preserve_order(snippets)[:6]
+
+
+def _normalize_candidate_evidence(candidate: CharacterCandidate) -> dict[str, Any]:
+    evidence = dict(candidate.evidence or {})
+    cluster_names = _coerce_string_list(evidence.get("cluster_names"))
+    if not cluster_names:
+        cluster_names = _coerce_string_list(evidence.get("cluster_key"))
+    if not cluster_names:
+        cluster_names = _clean_text_list([candidate.proposed_name, candidate.raw_name, *(candidate.aliases or [])])
+    cluster_size = max(1, _coerce_int(evidence.get("cluster_size"), fallback=len(cluster_names) or 1))
+    cluster_mention_count = max(
+        0,
+        _coerce_int(
+            evidence.get("cluster_mention_count"),
+            fallback=_coerce_int(evidence.get("mention_count"), fallback=_coerce_int(evidence.get("strong_mention_count"), fallback=0)),
+        ),
+    )
+    resolver_status = clean_optional_text(evidence.get("resolver_status")) or "needs_review"
+    resolver_reasons = _coerce_string_list(evidence.get("resolver_reasons")) or _clean_reason_codes(candidate.reason_codes or [])
+    canonical_confidence = _coerce_float(evidence.get("canonical_confidence"))
+    if canonical_confidence is None:
+        canonical_confidence = round(max(0.0, min(1.0, float(candidate.confidence or 0) / 100.0)), 2)
+    grounding_coverage = _coerce_float(evidence.get("grounding_coverage"))
+    if grounding_coverage is None:
+        denominator = max(1, cluster_size)
+        grounding_coverage = round(min(1.0, cluster_mention_count / denominator), 2) if cluster_mention_count > 0 else 0.0
+    snippets = _extract_candidate_snippets(evidence, candidate)
+    normalized = dict(evidence)
+    normalized.update({
+        "cluster_names": cluster_names,
+        "cluster_size": cluster_size,
+        "cluster_mention_count": cluster_mention_count,
+        "resolver_status": resolver_status,
+        "resolver_reasons": resolver_reasons,
+        "canonical_confidence": canonical_confidence,
+        "grounding_coverage": grounding_coverage,
+        "snippets": snippets,
+    })
+    return normalized
+
+
+def _normalize_duplicate_shared_evidence(
+    suggestion: CharacterDuplicateSuggestion,
+    *,
+    primary: Character | None = None,
+    secondary: Character | None = None,
+) -> dict[str, Any]:
+    shared = dict(suggestion.shared_evidence or {})
+    shared_cluster_keys = _coerce_string_list(shared.get("shared_cluster_keys"))
+    shared_chapters = sorted({
+        chapter
+        for chapter in (_coerce_int(value, fallback=0) for value in _coerce_string_list(shared.get("shared_chapters")))
+        if chapter > 0
+    })
+    shared["shared_cluster_keys"] = shared_cluster_keys
+    shared["shared_chapters"] = shared_chapters
+    shared["embedding_similarity"] = _coerce_float(shared.get("embedding_similarity"))
+    shared["primary_is_protected"] = bool(primary and is_protected_character(primary))
+    shared["secondary_is_protected"] = bool(secondary and is_protected_character(secondary))
+    shared["primary_is_manual"] = bool(primary and getattr(primary, "is_manual", False))
+    shared["secondary_is_manual"] = bool(secondary and getattr(secondary, "is_manual", False))
+    shared["primary_is_curated"] = bool(primary and bool((primary.analysis_metadata or {}).get("user_curated")))
+    shared["secondary_is_curated"] = bool(secondary and bool((secondary.analysis_metadata or {}).get("user_curated")))
+    return shared
 
 
 async def mark_character_candidates_merged(
@@ -718,11 +1401,130 @@ async def attach_character_candidate(
     return character
 
 
+async def demote_character_to_review_candidate(
+    db: AsyncSession,
+    *,
+    character: Character,
+    reason_codes: Sequence[object] | None = None,
+    review_note: str | None = None,
+) -> CharacterCandidate:
+    mention_rows = (
+        await db.execute(
+            select(CharacterMention)
+            .where(CharacterMention.book_id == character.book_id, CharacterMention.matched_character_id == character.id)
+            .order_by(CharacterMention.chapter_number, CharacterMention.created_at)
+        )
+    ).scalars().all()
+    cluster_names = dedupe_preserve_order(
+        [
+            *[row.cluster_key for row in mention_rows if clean_optional_text(row.cluster_key)],
+            character.name,
+            *(character.aliases or []),
+        ]
+    )
+    snippets = dedupe_preserve_order(
+        [row.mention_text for row in mention_rows if clean_optional_text(row.mention_text)]
+    )[:6]
+    metadata = dict(character.analysis_metadata or {})
+    candidate = await record_character_candidate(
+        db,
+        book_id=character.book_id,
+        chapter_number=int(character.first_chapter or 1),
+        raw_name=character.name,
+        proposed_name=character.name,
+        aliases=character.aliases or [],
+        matched_character_id=None,
+        status=CHARACTER_CANDIDATE_PENDING,
+        confidence=max(0, min(100, int(round(float(metadata.get("canonical_confidence") or 0) * 100)))),
+        reason_codes=["manual_demoted_for_review", *list(reason_codes or [])],
+        evidence={
+            "cluster_names": cluster_names,
+            "cluster_size": max(1, int(metadata.get("cluster_size") or len(cluster_names) or 1)),
+            "cluster_mention_count": max(
+                0,
+                int(metadata.get("cluster_mention_count") or character.mention_count or len(mention_rows)),
+            ),
+            "resolver_status": "manual_demoted_for_review",
+            "resolver_reasons": ["manual_demoted_for_review", *[str(code).strip() for code in (reason_codes or []) if str(code).strip()]],
+            "canonical_confidence": metadata.get("canonical_confidence"),
+            "grounding_coverage": metadata.get("grounding_coverage"),
+            "snippets": snippets,
+            "repair_source": {
+                "character_id": str(character.id),
+                "mention_count": int(character.mention_count or 0),
+                "first_chapter": int(character.first_chapter or 0),
+                "last_seen_chapter": int(character.last_seen_chapter or 0) if character.last_seen_chapter else None,
+                "review_note": clean_optional_text(review_note),
+            },
+        },
+        source_batch_key=f"manual-demote:{character.book_id}:{character.id}",
+    )
+    await db.delete(character)
+    await db.flush()
+    return candidate
+
+
 def _normalize_merge_score_value(value: float) -> int:
     return max(0, min(96, int(round(value * 100))))
 
 
-def score_duplicate_characters(left: Character, right: Character) -> dict[str, Any] | None:
+def _cosine_similarity(left: Sequence[float] | None, right: Sequence[float] | None) -> float:
+    if not left or not right or len(left) != len(right):
+        return 0.0
+    dot = sum(float(a) * float(b) for a, b in zip(left, right))
+    left_norm = math.sqrt(sum(float(value) * float(value) for value in left))
+    right_norm = math.sqrt(sum(float(value) * float(value) for value in right))
+    if left_norm <= 0.0 or right_norm <= 0.0:
+        return 0.0
+    return dot / (left_norm * right_norm)
+
+
+def _chapter_window_overlap(left: Character, right: Character) -> bool:
+    left_first = int(left.first_chapter or 0)
+    left_last = int(left.last_seen_chapter or left.first_chapter or 0)
+    right_first = int(right.first_chapter or 0)
+    right_last = int(right.last_seen_chapter or right.first_chapter or 0)
+    return max(left_first, right_first) <= min(left_last, right_last)
+
+
+async def _load_character_mention_evidence_map(
+    db: AsyncSession,
+    *,
+    book_id: uuid.UUID,
+) -> dict[uuid.UUID, dict[str, Any]]:
+    rows = (
+        await db.execute(
+            select(CharacterMention).where(
+                CharacterMention.book_id == book_id,
+                CharacterMention.matched_character_id.is_not(None),
+            )
+        )
+    ).scalars().all()
+    evidence_by_character_id: dict[uuid.UUID, dict[str, Any]] = {}
+    for row in rows:
+        if row.matched_character_id is None:
+            continue
+        bucket = evidence_by_character_id.setdefault(
+            row.matched_character_id,
+            {"cluster_keys": set(), "chapter_numbers": set(), "snippets": [], "mention_count": 0},
+        )
+        if row.cluster_key:
+            cast(set[str], bucket["cluster_keys"]).add(row.cluster_key)
+        cast(set[int], bucket["chapter_numbers"]).add(int(row.chapter_number or 0))
+        bucket["mention_count"] = int(bucket.get("mention_count") or 0) + int((row.evidence or {}).get("mention_count") or 1)
+        snippet = clean_optional_text(row.mention_text)
+        if snippet and snippet not in bucket["snippets"]:
+            cast(list[str], bucket["snippets"]).append(snippet)
+    return evidence_by_character_id
+
+
+def score_duplicate_characters(
+    left: Character,
+    right: Character,
+    *,
+    left_evidence: dict[str, Any] | None = None,
+    right_evidence: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
     if getattr(left, "is_manual", False) and getattr(right, "is_manual", False):
         return None
     left_name = normalize_character_name(left.name)
@@ -766,6 +1568,36 @@ def score_duplicate_characters(left: Character, right: Character) -> dict[str, A
         reasons.append("High name similarity")
         score += 0.10
 
+    shared_cluster_keys = sorted(
+        set(cast(set[str], (left_evidence or {}).get("cluster_keys") or set()))
+        & set(cast(set[str], (right_evidence or {}).get("cluster_keys") or set()))
+    )
+    if shared_cluster_keys:
+        reasons.append("Shared mention clusters")
+        score += min(0.24, len(shared_cluster_keys) * 0.10)
+        if bool(family_role_reference(left.name)[1]) ^ bool(family_role_reference(right.name)[1]):
+            reasons.append("Role reference shares grounded cluster with canonical name")
+            score += 0.12
+
+    if _chapter_window_overlap(left, right):
+        reasons.append("Overlapping chapter windows")
+        score += 0.05
+
+    left_chapters = set(cast(set[int], (left_evidence or {}).get("chapter_numbers") or set()))
+    right_chapters = set(cast(set[int], (right_evidence or {}).get("chapter_numbers") or set()))
+    shared_chapters = sorted(left_chapters & right_chapters)
+    if shared_chapters:
+        reasons.append("Shared grounded chapters")
+        score += min(0.10, len(shared_chapters) * 0.02)
+
+    embedding_similarity = _cosine_similarity(left.embedding, right.embedding)
+    if embedding_similarity >= 0.92:
+        reasons.append("High embedding similarity")
+        score += 0.12
+    elif embedding_similarity >= 0.84:
+        reasons.append("Related embedding similarity")
+        score += 0.06
+
     if score < 0.34:
         return None
 
@@ -779,6 +1611,9 @@ def score_duplicate_characters(left: Character, right: Character) -> dict[str, A
         "shared_evidence": {
             "shared_aliases": shared_aliases[:6],
             "shared_tokens": shared_tokens[:6],
+            "shared_cluster_keys": shared_cluster_keys[:6],
+            "shared_chapters": shared_chapters[:8],
+            "embedding_similarity": round(embedding_similarity, 4) if embedding_similarity > 0 else None,
             "first_chapter_pair": [int(left.first_chapter or 0), int(right.first_chapter or 0)],
             "manual_anchor_present": bool(getattr(left, "is_manual", False) or getattr(right, "is_manual", False)),
         },
@@ -810,10 +1645,16 @@ async def refresh_character_duplicate_suggestions(
         for item in existing_suggestions
     }
     active_pairs: set[tuple[str, str]] = set()
+    mention_evidence_by_character_id = await _load_character_mention_evidence_map(db, book_id=book_id)
 
     for index, left in enumerate(characters):
         for right in characters[index + 1:]:
-            suggestion = score_duplicate_characters(left, right)
+            suggestion = score_duplicate_characters(
+                left,
+                right,
+                left_evidence=mention_evidence_by_character_id.get(left.id),
+                right_evidence=mention_evidence_by_character_id.get(right.id),
+            )
             if suggestion is None:
                 continue
             primary = cast(Character, suggestion["primary"])
@@ -1773,6 +2614,24 @@ async def _merge_character_references(
     for quote in quotes:
         if _normalize_character_reference(quote.character_name) in reference_values:
             quote.character_name = primary.name
+
+    relationship_candidates = (
+        await db.execute(
+            select(CharacterRelationshipCandidate).where(
+                CharacterRelationshipCandidate.book_id == book_id
+            )
+        )
+    ).scalars().all()
+    for candidate in relationship_candidates:
+        changed = False
+        if candidate.matched_character_a_id == secondary.id:
+            candidate.matched_character_a_id = primary.id
+            changed = True
+        if candidate.matched_character_b_id == secondary.id:
+            candidate.matched_character_b_id = primary.id
+            changed = True
+        if changed and candidate.status == CHARACTER_RELATIONSHIP_CANDIDATE_PENDING:
+            candidate.status = CHARACTER_RELATIONSHIP_CANDIDATE_MERGED
 
 
 async def merge_characters(

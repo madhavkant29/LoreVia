@@ -17,6 +17,7 @@ export interface PublicForumPost {
   title: string | null
   author: string | null
   genre: string | null
+  description: string | null
   work_type: string | null
   headline: string
   body: string
@@ -39,6 +40,7 @@ export interface PublicForumComment {
   id: string
   post_id: string
   book_id: string | null
+  parent_comment_id: string | null
   author_user_id: string
   author_username: string | null
   author_reputation_score: number
@@ -48,6 +50,7 @@ export interface PublicForumComment {
   dislike_count: number
   reaction: "like" | "dislike" | null
   can_edit: boolean
+  replies: PublicForumComment[]
   created_at: string
   updated_at: string
 }

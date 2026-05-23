@@ -167,6 +167,11 @@ celery_app.conf.update(
             "schedule": crontab(minute="*/15"),
             "kwargs": {"limit": 100},
         },
+        "maintenance-cleanup-expired-advisor-jobs-hourly": {
+            "task": "maintenance_tasks.cleanup_expired_advisor_jobs",
+            "schedule": crontab(minute=30),
+            "kwargs": {"limit": 1000},
+        },
     },
     task_default_retry_delay=30,
     task_max_retries=3,

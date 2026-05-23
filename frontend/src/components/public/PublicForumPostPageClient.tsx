@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import type { Route } from "next"
-import { useEffect, useState } from "react"
+import { startTransition, useEffect, useState } from "react"
 
 import { authApi } from "@/lib/api/auth"
 import { canUseAuthorFeatures } from "@/lib/billing/plans"
@@ -15,22 +15,28 @@ import type { User } from "@/types/user"
 export function PublicForumPostPageClient({
   postId,
   initialPost = null,
+  initialComments = [],
 }: {
   postId: string
   initialPost?: PublicForumPost | null
+  initialComments?: PublicForumComment[]
 }) {
   const [post, setPost] = useState<PublicForumPost | null>(initialPost)
-  const [comments, setComments] = useState<PublicForumComment[]>([])
+  const [comments, setComments] = useState<PublicForumComment[]>(initialComments)
   const [interests, setInterests] = useState<PublicForumInterest[]>([])
   const [viewer, setViewer] = useState<User | null>(null)
   const [draft, setDraft] = useState("")
+  const [replyDraft, setReplyDraft] = useState("")
+  const [activeReplyCommentId, setActiveReplyCommentId] = useState<string | null>(null)
   const [interestDraft, setInterestDraft] = useState("")
   const [editHeadline, setEditHeadline] = useState(initialPost?.headline ?? "")
   const [editBody, setEditBody] = useState(initialPost?.body ?? "")
   const [editDesiredCount, setEditDesiredCount] = useState(initialPost?.desired_beta_reader_count ? String(initialPost.desired_beta_reader_count) : "")
   const [editAllowContactRequests, setEditAllowContactRequests] = useState(initialPost?.allow_contact_requests ?? true)
-  const [loading, setLoading] = useState(true)
+  const [viewerContextEnabled, setViewerContextEnabled] = useState(false)
+  const [loading, setLoading] = useState(initialPost === null)
   const [submitting, setSubmitting] = useState(false)
+  const [replySubmittingId, setReplySubmittingId] = useState<string | null>(null)
   const [interestSubmitting, setInterestSubmitting] = useState(false)
   const [interestLoadFailed, setInterestLoadFailed] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -46,6 +52,26 @@ export function PublicForumPostPageClient({
     setInteractiveReady(true)
   }, [])
 
+  useEffect(() => {
+    if (viewerContextEnabled) return
+
+    const schedule =
+      typeof window.requestIdleCallback === "function"
+        ? window.requestIdleCallback.bind(window)
+        : ((callback: IdleRequestCallback) =>
+            window.setTimeout(() => callback({ didTimeout: false, timeRemaining: () => 0 } as IdleDeadline), 150))
+    const cancel =
+      typeof window.cancelIdleCallback === "function"
+        ? window.cancelIdleCallback.bind(window)
+        : window.clearTimeout.bind(window)
+
+    const handle = schedule(() => {
+      startTransition(() => setViewerContextEnabled(true))
+    })
+
+    return () => cancel(handle)
+  }, [viewerContextEnabled])
+
   const resetEditorFromPost = (source: PublicForumPost) => {
     setEditHeadline(source.headline)
     setEditBody(source.body)
@@ -56,35 +82,18 @@ export function PublicForumPostPageClient({
   useEffect(() => {
     let active = true
 
-    const load = async () => {
+    const loadPostShell = async () => {
       setLoading(true)
       setStatus(null)
       try {
-        const [postPayload, commentsPayload, viewerPayload] = await Promise.all([
+        const [postPayload, commentsPayload] = await Promise.all([
           publicApi.getForumPost(postId),
           publicApi.listForumComments(postId),
-          authApi.me().catch(() => null),
         ])
         if (!active) return
         setPost(postPayload)
         setComments(commentsPayload)
-        setViewer(viewerPayload)
         resetEditorFromPost(postPayload)
-        setInterestLoadFailed(false)
-
-        if (viewerPayload?.id === postPayload.author_user_id) {
-          try {
-            const interestPayload = await publicApi.listForumInterests(postId)
-            if (!active) return
-            setInterests(interestPayload)
-          } catch {
-            if (!active) return
-            setInterests([])
-            setInterestLoadFailed(true)
-          }
-        } else {
-          setInterests([])
-        }
       } catch {
         if (!active) return
         setStatus("Could not load this surfaced discussion.")
@@ -94,11 +103,46 @@ export function PublicForumPostPageClient({
       }
     }
 
-    void load()
+    if (!initialPost) {
+      void loadPostShell()
+    }
     return () => {
       active = false
     }
-  }, [postId])
+  }, [initialPost, postId])
+
+  useEffect(() => {
+    if (!viewerContextEnabled || !post) return
+
+    let active = true
+
+    const loadViewerContext = async () => {
+      const viewerPayload = await authApi.me().catch(() => null)
+      if (!active) return
+      setViewer(viewerPayload)
+      setInterestLoadFailed(false)
+
+      if (viewerPayload?.id === post.author_user_id) {
+        try {
+          const interestPayload = await publicApi.listForumInterests(postId)
+          if (!active) return
+          setInterests(interestPayload)
+        } catch {
+          if (!active) return
+          setInterests([])
+          setInterestLoadFailed(true)
+        }
+        return
+      }
+
+      setInterests([])
+    }
+
+    void loadViewerContext()
+    return () => {
+      active = false
+    }
+  }, [post, postId, viewerContextEnabled])
 
   const isAuthorViewer = viewer?.id === post?.author_user_id
   const isPubliclyInteractive = post?.status === "open"
@@ -108,7 +152,7 @@ export function PublicForumPostPageClient({
   const refreshComments = async () => {
     const items = await publicApi.listForumComments(postId)
     setComments(items)
-    setPost((current) => current ? { ...current, comment_count: items.length } : current)
+    setPost((current) => current ? { ...current, comment_count: countComments(items) } : current)
   }
 
   const submitComment = async () => {
@@ -128,6 +172,27 @@ export function PublicForumPostPageClient({
       setStatus("Could not post your comment.")
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  const submitReply = async (parentCommentId: string) => {
+    if (!viewer) {
+      setStatus("Sign in to reply to public comments.")
+      return
+    }
+    if (!replyDraft.trim()) return
+    setReplySubmittingId(parentCommentId)
+    setStatus(null)
+    try {
+      const created = await publicApi.createForumComment(postId, replyDraft.trim(), parentCommentId)
+      setComments((current) => appendCommentToTree(current, created))
+      setPost((current) => current ? { ...current, comment_count: current.comment_count + 1 } : current)
+      setReplyDraft("")
+      setActiveReplyCommentId(null)
+    } catch {
+      setStatus("Could not post your reply.")
+    } finally {
+      setReplySubmittingId(null)
     }
   }
 
@@ -231,7 +296,7 @@ export function PublicForumPostPageClient({
     try {
       const nextReaction = comment.reaction === reaction ? "clear" : reaction
       const updated = await publicApi.reactToForumComment(comment.id, nextReaction)
-      setComments((current) => current.map((item) => item.id === updated.id ? updated : item))
+      setComments((current) => replaceCommentInTree(current, updated))
     } catch {
       setStatus("Could not update that reaction.")
       await refreshComments().catch(() => undefined)
@@ -330,6 +395,9 @@ export function PublicForumPostPageClient({
 
                 <h1 className="mt-3 text-2xl font-semibold tracking-tight sm:text-[2rem]">{post.headline}</h1>
                 {post.title ? <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-slate-600"}`}>{post.title}</p> : null}
+                {post.thread_type === "novel" && post.description ? (
+                  <p className={`mt-3 text-sm leading-7 ${isDark ? "text-slate-400" : "text-slate-600"}`}>{post.description}</p>
+                ) : null}
                 <p className={`mt-4 text-sm leading-7 ${isDark ? "text-slate-300" : "text-slate-700"}`}>{post.body}</p>
 
                 <div className="mt-5 flex flex-wrap items-center gap-2 text-xs">
@@ -533,8 +601,19 @@ export function PublicForumPostPageClient({
                   key={comment.id}
                   comment={comment}
                   isDark={isDark}
+                  viewer={viewer}
                   isPubliclyInteractive={isPubliclyInteractive}
                   reactingId={reactingId}
+                  activeReplyCommentId={activeReplyCommentId}
+                  replyDraft={replyDraft}
+                  replySubmittingId={replySubmittingId}
+                  onReplyDraftChange={setReplyDraft}
+                  onReplyToggle={(commentId) => {
+                    setStatus(null)
+                    setReplyDraft("")
+                    setActiveReplyCommentId((current) => current === commentId ? null : commentId)
+                  }}
+                  onReplySubmit={submitReply}
                   onReact={react}
                 />
               ))}
@@ -660,21 +739,39 @@ export function PublicForumPostPageClient({
 function CommentRow({
   comment,
   isDark,
+  viewer,
   isPubliclyInteractive,
   reactingId,
+  activeReplyCommentId,
+  replyDraft,
+  replySubmittingId,
+  onReplyDraftChange,
+  onReplyToggle,
+  onReplySubmit,
   onReact,
 }: {
   comment: PublicForumComment
   isDark: boolean
+  viewer: User | null
   isPubliclyInteractive: boolean
   reactingId: string | null
+  activeReplyCommentId: string | null
+  replyDraft: string
+  replySubmittingId: string | null
+  onReplyDraftChange: (value: string) => void
+  onReplyToggle: (commentId: string) => void
+  onReplySubmit: (commentId: string) => Promise<void>
   onReact: (comment: PublicForumComment, reaction: "like" | "dislike") => Promise<void>
 }) {
+  const isReplyComposerOpen = activeReplyCommentId === comment.id
+  const hasReplies = comment.replies.length > 0
+
   return (
-    <article className="flex gap-3 px-4 py-4 sm:px-5">
-      <div className={`mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold ${isDark ? "bg-[#202834] text-slate-100" : "bg-slate-100 text-slate-700"}`}>
-        {(comment.author_username || "C").slice(0, 1).toUpperCase()}
-      </div>
+    <article className="px-4 py-4 sm:px-5">
+      <div className="flex gap-3">
+        <div className={`mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold ${isDark ? "bg-[#202834] text-slate-100" : "bg-slate-100 text-slate-700"}`}>
+          {(comment.author_username || "C").slice(0, 1).toUpperCase()}
+        </div>
 
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -719,11 +816,117 @@ function CommentRow({
             <DownVoteIcon className="h-4 w-4" />
             {comment.dislike_count}
           </button>
+          {viewer ? (
+            <button
+              type="button"
+              disabled={!isPubliclyInteractive}
+              onClick={() => onReplyToggle(comment.id)}
+              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 font-semibold transition disabled:cursor-not-allowed disabled:opacity-80 ${isDark ? "border-white/10 bg-white/5 text-slate-300 hover:bg-white/10" : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"}`}
+            >
+              Reply
+            </button>
+          ) : null}
           {!isPubliclyInteractive ? <MetaText isDark={isDark}>Reactions paused</MetaText> : null}
         </div>
+
+        {isReplyComposerOpen ? (
+          <div className={`mt-3 rounded-2xl border p-3 text-sm ${isDark ? "border-white/10 bg-[#0f141b]" : "border-slate-200 bg-slate-50"}`}>
+            <textarea
+              value={replyDraft}
+              onChange={(event) => onReplyDraftChange(event.target.value)}
+              onInput={(event) => onReplyDraftChange((event.target as HTMLTextAreaElement).value)}
+              placeholder={`Reply to @${comment.author_username || "commenter"}`}
+              className={`min-h-[6rem] w-full rounded-2xl border px-4 py-3 text-sm leading-6 outline-none transition ${isDark ? "border-white/10 bg-[#121821] text-slate-100 placeholder:text-slate-600 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-orange-500"}`}
+            />
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={!isPubliclyInteractive || replySubmittingId === comment.id || !replyDraft.trim()}
+                onClick={() => void onReplySubmit(comment.id)}
+                className={`inline-flex h-10 items-center justify-center rounded-full px-4 text-sm font-semibold transition ${isDark ? "bg-amber-400 text-slate-950 hover:bg-amber-300 disabled:bg-amber-400/40" : "bg-[#ff6a1a] text-white hover:bg-[#f05a09] disabled:bg-slate-300"}`}
+              >
+                {replySubmittingId === comment.id ? "Replying..." : "Post reply"}
+              </button>
+              <button
+                type="button"
+                onClick={() => onReplyToggle(comment.id)}
+                className={`inline-flex h-10 items-center justify-center rounded-full px-4 text-sm font-semibold transition ${isDark ? "border border-white/10 bg-white/5 text-slate-100 hover:bg-white/10" : "border border-slate-200 bg-white text-slate-900 hover:bg-slate-50"}`}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : null}
+        </div>
       </div>
+
+      {hasReplies ? (
+        <div className={`ml-12 mt-4 space-y-0 rounded-2xl border-l pl-4 ${isDark ? "border-white/10" : "border-slate-200"}`}>
+          {comment.replies.map((reply) => (
+            <CommentRow
+              key={reply.id}
+              comment={reply}
+              isDark={isDark}
+              viewer={viewer}
+              isPubliclyInteractive={isPubliclyInteractive}
+              reactingId={reactingId}
+              activeReplyCommentId={activeReplyCommentId}
+              replyDraft={replyDraft}
+              replySubmittingId={replySubmittingId}
+              onReplyDraftChange={onReplyDraftChange}
+              onReplyToggle={onReplyToggle}
+              onReplySubmit={onReplySubmit}
+              onReact={onReact}
+            />
+          ))}
+        </div>
+      ) : null}
     </article>
   )
+}
+
+function appendCommentToTree(comments: PublicForumComment[], created: PublicForumComment): PublicForumComment[] {
+  if (!created.parent_comment_id) {
+    return [...comments, created]
+  }
+
+  return comments.map((comment) => {
+    if (comment.id === created.parent_comment_id) {
+      return {
+        ...comment,
+        replies: [...comment.replies, created],
+      }
+    }
+    if (comment.replies.length === 0) {
+      return comment
+    }
+    return {
+      ...comment,
+      replies: appendCommentToTree(comment.replies, created),
+    }
+  })
+}
+
+function replaceCommentInTree(comments: PublicForumComment[], updated: PublicForumComment): PublicForumComment[] {
+  return comments.map((comment) => {
+    if (comment.id === updated.id) {
+      return {
+        ...updated,
+        replies: comment.replies,
+      }
+    }
+    if (comment.replies.length === 0) {
+      return comment
+    }
+    return {
+      ...comment,
+      replies: replaceCommentInTree(comment.replies, updated),
+    }
+  })
+}
+
+function countComments(comments: PublicForumComment[]): number {
+  return comments.reduce((total, comment) => total + 1 + countComments(comment.replies), 0)
 }
 
 function formatRelativeDay(value: string): string {

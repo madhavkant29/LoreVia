@@ -211,6 +211,15 @@ describe("public api", () => {
     })
   })
 
+  it("creates a forum reply comment", async () => {
+    await publicApi.createForumComment("post-2", "Helpful reply", "comment-8")
+
+    expect(postMock).toHaveBeenCalledWith("/public/forum/posts/post-2/comments", {
+      body: "Helpful reply",
+      parent_comment_id: "comment-8",
+    })
+  })
+
   it("reacts to a forum post", async () => {
     await publicApi.reactToForumPost("post-2", "like")
 

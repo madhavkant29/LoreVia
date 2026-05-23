@@ -1,7 +1,16 @@
 "use client"
 
-import { NotificationsPanel } from "@/components/layout/NotificationsPanel"
+import dynamic from "next/dynamic"
+
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
+
+const NotificationsPanel = dynamic(
+  () => import("@/components/layout/NotificationsPanel").then((module) => module.NotificationsPanel),
+  {
+    ssr: false,
+    loading: () => <div className="min-h-screen rounded-[1.5rem] border p-6" />,
+  }
+)
 
 export default function NotificationsPage() {
   const { theme } = usePreferencesStore()

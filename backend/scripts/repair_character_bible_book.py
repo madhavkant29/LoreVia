@@ -3,8 +3,8 @@
 Dry-run by default:
     python scripts/repair_character_bible_book.py --book-id <uuid>
 
-Apply changes after reviewing the plan:
-    python scripts/repair_character_bible_book.py --book-id <uuid> --apply
+Apply only after explicit confirmation:
+    python scripts/repair_character_bible_book.py --book-id <uuid> --apply --confirm-apply REPAIR_CHARACTER_BIBLE --allow-merge-safe-pairs
 """
 from __future__ import annotations
 
@@ -13,16 +13,19 @@ import asyncio
 import json
 import uuid
 from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.core.database import AsyncSessionLocal
 from app.models.book import Book, Chapter
-from app.models.character import Character, CharacterCandidate
+from app.models.character import Character, CharacterCandidate, CharacterRelationshipCandidate
 from app.utils.character_utils import (
     CHARACTER_CANDIDATE_PENDING,
     CHARACTER_DUPLICATE_PENDING,
+    CHARACTER_RELATIONSHIP_CANDIDATE_PENDING,
     build_character_review_payload,
     find_earliest_character_mention_chapters,
     merge_characters,
@@ -32,18 +35,27 @@ from app.utils.character_utils import (
 )
 from app.utils.logging import get_logger
 
-from scripts.audit_character_bible_noise import _is_obvious_noise_character
+from scripts.audit_character_bible_noise import _has_meaningful_profile, _is_obvious_noise_character
 
 log = get_logger("lorevia.repair.character_bible")
+CONFIRM_TOKEN = "REPAIR_CHARACTER_BIBLE"
 
 
 @dataclass(frozen=True)
 class RepairPlan:
-    auto_merge_pairs: list[tuple[str, str]]
-    demote_character_ids: list[str]
+    book_id: str
+    dry_run: bool
+    allow_merge_safe_pairs: bool
+    allow_demote_obvious_noise: bool
+    planned_merges: list[tuple[str, str]]
+    planned_demotions: list[str]
+    skipped_protected_merge_pairs: list[tuple[str, str]]
+    skipped_protected_demotions: list[str]
     updated_first_chapters: dict[str, int]
     updated_last_seen_chapters: dict[str, int]
     pending_duplicate_suggestions: int
+    pending_relationship_candidates: int
+    unresolved_relationship_deltas: dict[str, int]
 
 
 def _candidate_names(character: Character) -> list[str]:
@@ -61,8 +73,37 @@ def _candidate_names(character: Character) -> list[str]:
     return ordered
 
 
-def _auto_mergeable(suggestion) -> bool:
+def _has_manual_edit_markers(character: Character) -> bool:
+    trait_state = dict(character.trait_state or {})
+    manual_description = trait_state.get("manual_description")
+    manual_entry = trait_state.get("manual_entry")
+    return bool(
+        getattr(character, "is_manual", False)
+        or (isinstance(manual_description, dict) and str(manual_description.get("value") or "").strip())
+        or (isinstance(manual_entry, dict) and str(manual_entry.get("value") or "").strip())
+    )
+
+
+def _is_protected_character(character: Character) -> bool:
+    metadata = dict(character.analysis_metadata or {})
+    return bool(
+        _has_manual_edit_markers(character)
+        or _has_meaningful_profile(character)
+        or int(character.mention_count or 0) >= 6
+        or len(character.states or []) > 0
+        or getattr(character, "voice_profile", None) is not None
+        or bool(metadata.get("user_reviewed"))
+        or bool(metadata.get("user_curated"))
+        or bool(metadata.get("protected_from_repair"))
+    )
+
+
+def _auto_mergeable(suggestion, *, primary: Character | None = None, secondary: Character | None = None) -> bool:
     reasons = {str(reason).strip().lower() for reason in (suggestion.reasons or [])}
+    if primary is not None and _is_protected_character(primary):
+        return False
+    if secondary is not None and _is_protected_character(secondary):
+        return False
     return bool(
         suggestion.status == CHARACTER_DUPLICATE_PENDING
         and (
@@ -125,24 +166,56 @@ def _chapter_mentions(chapter_rows: list[tuple[int, str]], names: list[str]) -> 
     return hits
 
 
-async def build_repair_plan(book_id: uuid.UUID) -> RepairPlan:
+async def _load_pending_relationship_candidates(db, book_id: uuid.UUID) -> list[CharacterRelationshipCandidate]:
+    return (
+        await db.execute(
+            select(CharacterRelationshipCandidate).where(
+                CharacterRelationshipCandidate.book_id == book_id,
+                CharacterRelationshipCandidate.status == CHARACTER_RELATIONSHIP_CANDIDATE_PENDING,
+            )
+        )
+    ).scalars().all()
+
+
+async def build_repair_plan(
+    book_id: uuid.UUID,
+    *,
+    allow_merge_safe_pairs: bool,
+    allow_demote_obvious_noise: bool,
+) -> RepairPlan:
     async with AsyncSessionLocal() as db:
         book = await db.get(Book, book_id)
         if book is None:
             raise SystemExit(f"Book not found: {book_id}")
 
         characters = await _load_characters(db, book_id)
+        character_map = {character.id: character for character in characters if character.id is not None}
         suggestions = await refresh_character_duplicate_suggestions(db, book_id=book_id, characters=characters)
-        auto_merge_pairs = [
-            (str(item.primary_character_id), str(item.secondary_character_id))
-            for item in suggestions
-            if _auto_mergeable(item)
-        ]
-        demote_character_ids = [
-            str(character.id)
-            for character in characters
-            if _is_obvious_noise_character(character)[0]
-        ]
+        relationship_candidates = await _load_pending_relationship_candidates(db, book_id)
+        planned_merges: list[tuple[str, str]] = []
+        skipped_protected_merge_pairs: list[tuple[str, str]] = []
+        for item in suggestions:
+            primary = character_map.get(item.primary_character_id)
+            secondary = character_map.get(item.secondary_character_id)
+            if _auto_mergeable(item, primary=primary, secondary=secondary):
+                if allow_merge_safe_pairs:
+                    planned_merges.append((str(item.primary_character_id), str(item.secondary_character_id)))
+            elif primary is not None and secondary is not None and (
+                _is_protected_character(primary) or _is_protected_character(secondary)
+            ):
+                skipped_protected_merge_pairs.append((str(item.primary_character_id), str(item.secondary_character_id)))
+
+        planned_demotions: list[str] = []
+        skipped_protected_demotions: list[str] = []
+        for character in characters:
+            is_noise, _reasons = _is_obvious_noise_character(character)
+            if not is_noise:
+                continue
+            if _is_protected_character(character):
+                skipped_protected_demotions.append(str(character.id))
+                continue
+            if allow_demote_obvious_noise:
+                planned_demotions.append(str(character.id))
 
         chapter_rows = await _load_chapter_rows(db, book_id)
         candidates_by_key = {
@@ -163,29 +236,55 @@ async def build_repair_plan(book_id: uuid.UUID) -> RepairPlan:
                 last_seen_updates[str(character.id)] = chapter_hits[-1]
 
         return RepairPlan(
-            auto_merge_pairs=auto_merge_pairs,
-            demote_character_ids=demote_character_ids,
+            book_id=str(book_id),
+            dry_run=True,
+            allow_merge_safe_pairs=allow_merge_safe_pairs,
+            allow_demote_obvious_noise=allow_demote_obvious_noise,
+            planned_merges=planned_merges,
+            planned_demotions=planned_demotions,
+            skipped_protected_merge_pairs=skipped_protected_merge_pairs,
+            skipped_protected_demotions=skipped_protected_demotions,
             updated_first_chapters={str(key): int(value) for key, value in first_chapters.items()},
             updated_last_seen_chapters=last_seen_updates,
             pending_duplicate_suggestions=sum(1 for item in suggestions if item.status == CHARACTER_DUPLICATE_PENDING),
+            pending_relationship_candidates=len(relationship_candidates),
+            unresolved_relationship_deltas={
+                "before": len(relationship_candidates),
+                "after_if_apply": len(relationship_candidates),
+            },
         )
 
 
-async def apply_repair_plan(book_id: uuid.UUID) -> dict[str, object]:
+async def apply_repair_plan(
+    book_id: uuid.UUID,
+    *,
+    allow_merge_safe_pairs: bool,
+    allow_demote_obvious_noise: bool,
+) -> dict[str, object]:
     async with AsyncSessionLocal() as db:
         book = await db.get(Book, book_id)
         if book is None:
             raise SystemExit(f"Book not found: {book_id}")
 
+        if not allow_merge_safe_pairs and not allow_demote_obvious_noise:
+            raise SystemExit("No repair actions enabled. Pass --allow-merge-safe-pairs and/or --allow-demote-obvious-noise.")
+
         characters = await _load_characters(db, book_id)
+        character_map = {character.id: character for character in characters if character.id is not None}
         suggestions = await refresh_character_duplicate_suggestions(db, book_id=book_id, characters=characters)
+        relationship_candidates_before = await _load_pending_relationship_candidates(db, book_id)
         merged_pairs: list[tuple[str, str]] = []
+        skipped_protected_merge_pairs: list[tuple[str, str]] = []
         for suggestion in suggestions:
-            if not _auto_mergeable(suggestion):
+            primary = character_map.get(suggestion.primary_character_id)
+            secondary = character_map.get(suggestion.secondary_character_id)
+            if not _auto_mergeable(suggestion, primary=primary, secondary=secondary):
+                if primary is not None and secondary is not None and (
+                    _is_protected_character(primary) or _is_protected_character(secondary)
+                ):
+                    skipped_protected_merge_pairs.append((str(suggestion.primary_character_id), str(suggestion.secondary_character_id)))
                 continue
-            primary = await db.get(Character, suggestion.primary_character_id)
-            secondary = await db.get(Character, suggestion.secondary_character_id)
-            if not primary or not secondary:
+            if not allow_merge_safe_pairs or not primary or not secondary:
                 continue
             await merge_characters(db, primary.id, secondary.id, book_id)
             merged_pairs.append((str(primary.id), str(secondary.id)))
@@ -193,9 +292,15 @@ async def apply_repair_plan(book_id: uuid.UUID) -> dict[str, object]:
 
         characters = await _load_characters(db, book_id)
         demoted_character_ids: list[str] = []
+        skipped_protected_demotions: list[str] = []
         for character in characters:
             is_noise, reasons = _is_obvious_noise_character(character)
             if not is_noise:
+                continue
+            if _is_protected_character(character):
+                skipped_protected_demotions.append(str(character.id))
+                continue
+            if not allow_demote_obvious_noise:
                 continue
             await record_character_candidate(
                 db,
@@ -235,13 +340,17 @@ async def apply_repair_plan(book_id: uuid.UUID) -> dict[str, object]:
             upto_chapter=int(book.total_chapters or 0) or None,
         )
         chapter_rows = await _load_chapter_rows(db, book_id)
+        first_chapter_recomputes: dict[str, int] = {}
+        last_seen_recomputes: dict[str, int] = {}
         for character in characters:
             first = first_chapters.get(character.id)
             if first and first < int(character.first_chapter or first):
                 character.first_chapter = int(first)
+                first_chapter_recomputes[str(character.id)] = int(first)
             hits = _chapter_mentions(chapter_rows, _candidate_names(character))
             if hits:
                 character.last_seen_chapter = hits[-1]
+                last_seen_recomputes[str(character.id)] = hits[-1]
                 if character.first_chapter > character.last_seen_chapter:
                     character.first_chapter = character.last_seen_chapter
             elif character.last_seen_chapter is None:
@@ -252,6 +361,7 @@ async def apply_repair_plan(book_id: uuid.UUID) -> dict[str, object]:
             character.analysis_metadata = metadata
 
         refreshed = await refresh_character_duplicate_suggestions(db, book_id=book_id, characters=characters)
+        relationship_candidates_after = await _load_pending_relationship_candidates(db, book_id)
         candidates = (
             await db.execute(select(CharacterCandidate).where(CharacterCandidate.book_id == book_id))
         ).scalars().all()
@@ -260,25 +370,61 @@ async def apply_repair_plan(book_id: uuid.UUID) -> dict[str, object]:
             "book_id": str(book_id),
             "merged_pairs": merged_pairs,
             "demoted_character_ids": demoted_character_ids,
-            "review": build_character_review_payload(candidates, refreshed),
+            "skipped_protected_merge_pairs": skipped_protected_merge_pairs,
+            "skipped_protected_demotions": skipped_protected_demotions,
+            "first_chapter_recomputes": first_chapter_recomputes,
+            "last_seen_chapter_recomputes": last_seen_recomputes,
+            "duplicate_suggestion_delta": {
+                "pending_after": sum(1 for item in refreshed if item.status == CHARACTER_DUPLICATE_PENDING),
+            },
+            "unresolved_relationship_deltas": {
+                "before": len(relationship_candidates_before),
+                "after": len(relationship_candidates_after),
+            },
+            "review": build_character_review_payload(candidates, refreshed, relationship_candidates_after),
         }
+
+
+def _write_output_json(path: str | None, payload: dict[str, Any]) -> None:
+    if not path:
+        return
+    output_path = Path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
 
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Repair duplicate/noisy character-bible data for a book.")
     parser.add_argument("--book-id", type=uuid.UUID, required=True, help="Target book ID.")
     parser.add_argument("--apply", action="store_true", help="Apply the repair plan instead of printing a dry run.")
+    parser.add_argument("--confirm-apply", type=str, default="", help=f"Required confirmation token for apply mode: {CONFIRM_TOKEN}")
+    parser.add_argument("--allow-merge-safe-pairs", action="store_true", help="Allow high-confidence duplicate merges.")
+    parser.add_argument("--allow-demote-obvious-noise", action="store_true", help="Allow demotion of obvious noise characters into review candidates.")
+    parser.add_argument("--output-json", type=str, default=None, help="Optional path to write the report JSON.")
     return parser.parse_args()
 
 
 async def _main() -> None:
     args = _parse_args()
     if args.apply:
-        result = await apply_repair_plan(args.book_id)
+        if args.confirm_apply != CONFIRM_TOKEN:
+            raise SystemExit(f"Apply mode requires --confirm-apply {CONFIRM_TOKEN}")
+        result = await apply_repair_plan(
+            args.book_id,
+            allow_merge_safe_pairs=bool(args.allow_merge_safe_pairs),
+            allow_demote_obvious_noise=bool(args.allow_demote_obvious_noise),
+        )
+        _write_output_json(args.output_json, result)
         log.info("character_bible_repair_applied %s", json.dumps(result, default=str))
         return
-    plan = await build_repair_plan(args.book_id)
-    log.info("character_bible_repair_plan %s", json.dumps(asdict(plan), default=str))
+    plan = await build_repair_plan(
+        args.book_id,
+        allow_merge_safe_pairs=bool(args.allow_merge_safe_pairs),
+        allow_demote_obvious_noise=bool(args.allow_demote_obvious_noise),
+    )
+    payload = asdict(plan)
+    _write_output_json(args.output_json, payload)
+    log.info("character_bible_repair_plan %s", json.dumps(payload, default=str))
 
 
 if __name__ == "__main__":

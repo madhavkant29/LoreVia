@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import type { Route } from "next"
-import { useDeferredValue, useEffect, useState } from "react"
+import { startTransition, useDeferredValue, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useQuery } from "@tanstack/react-query"
 
@@ -33,22 +33,58 @@ export function PublicForumPageClient({
   const [selectedBookId, setSelectedBookId] = useState("")
   const [headline, setHeadline] = useState("")
   const [body, setBody] = useState("")
+  const [novelTitle, setNovelTitle] = useState("")
+  const [novelGenre, setNovelGenre] = useState("")
+  const [novelDescription, setNovelDescription] = useState("")
   const [desiredCount, setDesiredCount] = useState("")
   const [allowContactRequests, setAllowContactRequests] = useState(true)
   const [composerStatus, setComposerStatus] = useState<string | null>(null)
   const [creatingPost, setCreatingPost] = useState(false)
   const [authorForumLoadFailed, setAuthorForumLoadFailed] = useState(false)
+  const [viewerContextEnabled, setViewerContextEnabled] = useState(false)
   const deferredQuery = useDeferredValue(query)
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
   const normalizedQuery = deferredQuery.trim()
   const canOpenPublicDiscussions = canUseAuthorFeatures(viewer?.tier)
+  const selectedBook = authorBooks.find((book) => book.id === selectedBookId) ?? null
 
   useEffect(() => {
     setPage(1)
   }, [normalizedQuery])
 
   useEffect(() => {
+    if (viewerContextEnabled) return
+
+    const schedule =
+      typeof window.requestIdleCallback === "function"
+        ? window.requestIdleCallback.bind(window)
+        : ((callback: IdleRequestCallback) =>
+            window.setTimeout(() => callback({ didTimeout: false, timeRemaining: () => 0 } as IdleDeadline), 150))
+    const cancel =
+      typeof window.cancelIdleCallback === "function"
+        ? window.cancelIdleCallback.bind(window)
+        : window.clearTimeout.bind(window)
+
+    const handle = schedule(() => {
+      startTransition(() => setViewerContextEnabled(true))
+    })
+
+    return () => cancel(handle)
+  }, [viewerContextEnabled])
+
+  useEffect(() => {
+    if (composerThreadType !== "novel") {
+      return
+    }
+    setNovelTitle(selectedBook?.title ?? "")
+    setNovelGenre(selectedBook?.genre ?? "")
+    setNovelDescription(selectedBook?.public_description ?? "")
+  }, [composerThreadType, selectedBookId, selectedBook?.genre, selectedBook?.public_description, selectedBook?.title])
+
+  useEffect(() => {
+    if (!viewerContextEnabled) return
+
     let active = true
 
     const loadViewerContext = async () => {
@@ -85,19 +121,31 @@ export function PublicForumPageClient({
       setAuthorForumLoadFailed(false)
       setComposerStatus(null)
       setAuthorBooks(eligibleBooks)
-      setSelectedBookId((current) => current || eligibleBooks[0]?.id || "")
+      setSelectedBookId((current) => (
+        eligibleBooks.some((book) => book.id === current)
+          ? current
+          : (eligibleBooks[0]?.id || "")
+      ))
     }
 
     void loadViewerContext()
+    const handleWindowRefresh = () => {
+      void loadViewerContext()
+    }
+    window.addEventListener("focus", handleWindowRefresh)
+    window.addEventListener("pageshow", handleWindowRefresh)
     return () => {
       active = false
+      window.removeEventListener("focus", handleWindowRefresh)
+      window.removeEventListener("pageshow", handleWindowRefresh)
     }
-  }, [])
+  }, [viewerContextEnabled])
 
   const { data, isLoading: loading, isError } = useQuery<PublicForumPostListResponse>({
     queryKey: asQueryKey(`public:forum:${normalizedQuery || "all"}:${page}`),
     queryFn: () => publicApi.listForumPosts(normalizedQuery, page, FORUM_PAGE_SIZE),
     initialData: normalizedQuery.length === 0 && page === (initialData?.page ?? 1) ? initialData : undefined,
+    staleTime: 30_000,
   })
   const posts = data?.items ?? []
   const error = isError ? "Could not load the public forum right now." : null
@@ -123,6 +171,10 @@ export function PublicForumPageClient({
       setComposerStatus("Choose an eligible manuscript first.")
       return
     }
+    if (composerThreadType === "novel" && (!novelTitle.trim() || !novelGenre.trim() || !novelDescription.trim())) {
+      setComposerStatus("Novel discussions require a novel name, genre, and description.")
+      return
+    }
     const hasDesiredCount = desiredCount.trim().length > 0
     const parsedDesiredCount = hasDesiredCount ? Number.parseInt(desiredCount, 10) : null
     if (composerThreadType === "novel" && hasDesiredCount && (!Number.isFinite(parsedDesiredCount) || (parsedDesiredCount ?? 0) < 1)) {
@@ -132,6 +184,14 @@ export function PublicForumPageClient({
     setCreatingPost(true)
     setComposerStatus(null)
     try {
+      if (composerThreadType === "novel") {
+        const updatedBook = await booksApi.updateForumMetadata(selectedBookId, {
+          title: novelTitle.trim(),
+          genre: novelGenre.trim(),
+          description: novelDescription.trim(),
+        })
+        setAuthorBooks((current) => current.map((book) => book.id === updatedBook.id ? updatedBook : book))
+      }
       const created = await publicApi.createForumPost({
         threadType: composerThreadType,
         bookId: composerThreadType === "novel" ? selectedBookId : null,
@@ -314,6 +374,24 @@ export function PublicForumPageClient({
                           ))}
                         </select>
                         <input
+                          value={novelTitle}
+                          onChange={(event) => setNovelTitle(event.target.value)}
+                          placeholder="Novel name"
+                          className={`w-full rounded-2xl border px-4 py-3 text-sm outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 placeholder:text-slate-600 focus:border-amber-400" : "border-slate-200 bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:border-orange-500"}`}
+                        />
+                        <input
+                          value={novelGenre}
+                          onChange={(event) => setNovelGenre(event.target.value)}
+                          placeholder="Genre"
+                          className={`w-full rounded-2xl border px-4 py-3 text-sm outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 placeholder:text-slate-600 focus:border-amber-400" : "border-slate-200 bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:border-orange-500"}`}
+                        />
+                        <textarea
+                          value={novelDescription}
+                          onChange={(event) => setNovelDescription(event.target.value)}
+                          placeholder="Novel description"
+                          className={`min-h-[7rem] w-full rounded-2xl border px-4 py-3 text-sm leading-6 outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 placeholder:text-slate-600 focus:border-amber-400" : "border-slate-200 bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:border-orange-500"}`}
+                        />
+                        <input
                           value={desiredCount}
                           onChange={(event) => setDesiredCount(event.target.value)}
                           placeholder="Desired readers"
@@ -438,6 +516,10 @@ function ForumFeedCard({ isDark, post }: { isDark: boolean, post: PublicForumPos
               </>
             ) : null}
           </div>
+
+          {isNovelThread && post.description ? (
+            <p className={`mt-3 text-sm leading-6 ${isDark ? "text-slate-400" : "text-slate-600"}`}>{truncateBody(post.description)}</p>
+          ) : null}
 
           <Link href={`/public/forum/${post.id}` as Route} className="group mt-2 block">
             <h2 className={`text-xl font-semibold leading-tight tracking-tight transition sm:text-[1.35rem] ${isDark ? "group-hover:text-amber-200" : "group-hover:text-orange-700"}`}>{post.headline}</h2>

@@ -1,11 +1,19 @@
 "use client"
 
 import { Suspense } from "react"
+import dynamic from "next/dynamic"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 
-import { UploadModal } from "@/components/modals/UploadModal"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
+
+const UploadModal = dynamic(
+  () => import("@/components/modals/UploadModal").then((module) => module.UploadModal),
+  {
+    ssr: false,
+    loading: () => <div className="rounded-[2rem] border p-8" />,
+  }
+)
 
 export default function AddChapterPage() {
   return (

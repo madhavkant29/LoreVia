@@ -11,7 +11,16 @@ from sqlalchemy import Numeric, and_, case, cast, func, literal, literal_column,
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.redis import cache_del, cache_set_version_marker, key_public_books, key_public_forum_cache_version
+from app.core.redis import (
+    cache_del,
+    cache_set_version_marker,
+    get_public_profile_cache_version,
+    get_public_user_profile_cache,
+    key_public_books,
+    key_public_forum_cache_version,
+    mark_public_profile_cache_dirty,
+    set_public_user_profile_cache,
+)
 from app.models.beta_read import BetaReadAssignment
 from app.models.book import Book, BookForumComment, BookForumCommentReaction, BookForumInterest, BookForumPost, BookForumPostReaction, Chapter, PublicBookAnalyticsEvent
 from app.models.intelligence import Notification
@@ -579,6 +588,15 @@ def _is_general_forum_post(post: BookForumPost | None) -> bool:
     return _forum_post_thread_type(post) == FORUM_THREAD_TYPE_GENERAL
 
 
+def _validate_forum_book_metadata(book: Book) -> None:
+    if not " ".join(str(getattr(book, "title", "") or "").split()).strip():
+        raise HTTPException(400, "Novel discussions require a novel title.")
+    if not " ".join(str(getattr(book, "genre", "") or "").split()).strip():
+        raise HTTPException(400, "Novel discussions require a genre.")
+    if not " ".join(str(getattr(book, "public_description", "") or "").split()).strip():
+        raise HTTPException(400, "Novel discussions require a novel description.")
+
+
 async def _get_forum_eligible_owned_book(
     db: AsyncSession,
     *,
@@ -650,6 +668,13 @@ async def enforce_daily_general_forum_post_limit(db: AsyncSession, *, user_id: u
 async def _invalidate_public_forum_cache() -> None:
     await cache_set_version_marker(key_public_forum_cache_version())
     await cache_del(key_public_books())
+
+
+async def _invalidate_public_profile_cache_for_users(*user_ids: uuid.UUID | None) -> None:
+    for user_id in user_ids:
+        if user_id is None:
+            continue
+        await mark_public_profile_cache_dirty(str(user_id))
 
 
 def _normalize_public_forum_pagination(page: int, page_size: int) -> tuple[int, int]:
@@ -1594,6 +1619,7 @@ def build_public_forum_post_out(
         title=getattr(book, "title", None),
         author=getattr(book, "author", None),
         genre=getattr(book, "genre", None),
+        description=getattr(book, "public_description", None),
         work_type=getattr(book, "work_type", None),
         headline=post.headline,
         body=post.body,
@@ -1632,6 +1658,7 @@ async def create_public_forum_post(
         if body.book_id is None:
             raise HTTPException(400, "Novel discussions require a manuscript.")
         book = await _get_forum_eligible_owned_book(db, book_id=body.book_id, author_user_id=current_user.id)
+        _validate_forum_book_metadata(book)
         existing_open_post = (
             await db.execute(
                 select(BookForumPost).where(
@@ -1664,6 +1691,7 @@ async def create_public_forum_post(
     await db.commit()
     await db.refresh(post)
     await _invalidate_public_forum_cache()
+    await _invalidate_public_profile_cache_for_users(current_user.id)
     return await get_public_forum_post_detail(db, post_id=post.id, current_user=current_user)
 
 
@@ -1686,6 +1714,7 @@ async def update_public_forum_post(
         if post.book_id is None:
             raise HTTPException(409, "Novel discussion is missing its manuscript link.")
         book = await _get_forum_eligible_owned_book(db, book_id=post.book_id, author_user_id=current_user.id)
+        _validate_forum_book_metadata(book)
     headline = " ".join(body.headline.split()).strip()
     description = body.body.strip()
     if not headline or not description:
@@ -1722,6 +1751,7 @@ async def update_public_forum_post(
     await db.commit()
     await db.refresh(post)
     await _invalidate_public_forum_cache()
+    await _invalidate_public_profile_cache_for_users(current_user.id)
     return await get_public_forum_post_detail(db, post_id=post.id, current_user=current_user)
 
 
@@ -1942,6 +1972,7 @@ async def create_public_forum_interest(
     await db.commit()
     await db.refresh(interest)
     await _invalidate_public_forum_cache()
+    await _invalidate_public_profile_cache_for_users(post.author_user_id, current_user.id)
     return await build_public_forum_interest_out(db, interest=interest)
 
 
@@ -1982,6 +2013,7 @@ async def build_public_forum_comment_out(
         id=str(comment.id),
         post_id=str(comment.post_id),
         book_id=str(comment.book_id) if comment.book_id is not None else None,
+        parent_comment_id=str(comment.parent_comment_id) if comment.parent_comment_id is not None else None,
         author_user_id=str(comment.author_user_id),
         author_username=resolved_author.username,
         author_reputation_score=int(resolved_author.reputation_score or 0),
@@ -1994,6 +2026,22 @@ async def build_public_forum_comment_out(
         created_at=comment.created_at,
         updated_at=comment.updated_at,
     )
+
+
+def _nest_public_forum_comments(comments: list[PublicForumCommentOut]) -> list[PublicForumCommentOut]:
+    comment_map = {
+        comment.id: comment.model_copy(update={"replies": []})
+        for comment in comments
+    }
+    roots: list[PublicForumCommentOut] = []
+    for comment in comments:
+        current = comment_map[comment.id]
+        if current.parent_comment_id and current.parent_comment_id in comment_map:
+            parent = comment_map[current.parent_comment_id]
+            parent.replies.append(current)
+            continue
+        roots.append(current)
+    return roots
 
 
 async def list_public_forum_comments(
@@ -2026,7 +2074,7 @@ async def list_public_forum_comments(
         post_id=post.id,
         user_id=current_user.id if current_user is not None else None,
     )
-    return [
+    comment_payloads = [
         await build_public_forum_comment_out(
             db,
             comment=comment,
@@ -2036,6 +2084,7 @@ async def list_public_forum_comments(
         )
         for comment, author_user in rows
     ]
+    return _nest_public_forum_comments(comment_payloads)
 
 
 async def create_public_forum_comment(
@@ -2049,15 +2098,24 @@ async def create_public_forum_comment(
     comment_body = body.body.strip()
     if not comment_body:
         raise HTTPException(400, "A comment is required.")
+    parent_comment = None
+    if body.parent_comment_id is not None:
+        parent_comment = await db.get(BookForumComment, body.parent_comment_id)
+        if parent_comment is None or parent_comment.post_id != post.id:
+            raise HTTPException(404, "Parent forum comment not found.")
     comment = BookForumComment(
         post_id=post.id,
         book_id=post.book_id,
+        parent_comment_id=parent_comment.id if parent_comment is not None else None,
         author_user_id=current_user.id,
         body=comment_body,
     )
     post.last_activity_at = func.now()
     db.add(comment)
+    await db.flush()
+    notified_user_ids: set[uuid.UUID] = set()
     if post.author_user_id != current_user.id:
+        notified_user_ids.add(post.author_user_id)
         notification_title = "New beta forum comment" if _forum_post_thread_type(post) == FORUM_THREAD_TYPE_NOVEL else "New forum comment"
         notification_body = (
             "Someone replied to your public beta forum post."
@@ -2078,9 +2136,31 @@ async def create_public_forum_comment(
                 },
             )
         )
+    if (
+        parent_comment is not None
+        and parent_comment.author_user_id != current_user.id
+        and parent_comment.author_user_id not in notified_user_ids
+    ):
+        db.add(
+            Notification(
+                user_id=parent_comment.author_user_id,
+                book_id=post.book_id,
+                kind="beta_forum_comment_reply_received",
+                title="New forum reply",
+                body="Someone replied to your public forum comment.",
+                data={
+                    "post_id": str(post.id),
+                    "book_id": str(post.book_id),
+                    "comment_id": str(parent_comment.id),
+                    "reply_comment_id": str(comment.id),
+                    "comment_author_user_id": str(current_user.id),
+                },
+            )
+        )
     await db.commit()
     await db.refresh(comment)
     await _invalidate_public_forum_cache()
+    await _invalidate_public_profile_cache_for_users(post.author_user_id, current_user.id)
     return await build_public_forum_comment_out(db, comment=comment, author_user=current_user, current_user=current_user)
 
 
@@ -2151,6 +2231,7 @@ async def react_to_public_forum_comment(
     await db.refresh(comment)
     await db.refresh(author_user)
     await _invalidate_public_forum_cache()
+    await _invalidate_public_profile_cache_for_users(comment.author_user_id, current_user.id)
     reaction_map = {comment.id: next_reaction} if next_reaction else {}
     return await build_public_forum_comment_out(
         db,
@@ -2214,6 +2295,7 @@ async def react_to_public_forum_post(
     await db.refresh(post)
     await db.refresh(author_user)
     await _invalidate_public_forum_cache()
+    await _invalidate_public_profile_cache_for_users(post.author_user_id, current_user.id)
     return await get_public_forum_post_detail(db, post_id=post.id, current_user=current_user)
 
 
@@ -2232,4 +2314,15 @@ async def get_public_user_profile(
         raise HTTPException(404, "Public profile not found.")
     if not await _user_has_public_profile_presence(db, user_id=user.id):
         raise HTTPException(404, "Public profile not found.")
-    return await build_public_user_profile_out(db, user=user)
+    cache_version = await get_public_profile_cache_version(str(user.id))
+    cached = await get_public_user_profile_cache(str(user.id), user.username.lower(), cache_version)
+    if cached is not None:
+        return PublicUserProfileOut(**cached)
+    payload = await build_public_user_profile_out(db, user=user)
+    await set_public_user_profile_cache(
+        str(user.id),
+        user.username.lower(),
+        cache_version,
+        payload.model_dump(mode="json"),
+    )
+    return payload

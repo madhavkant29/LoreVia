@@ -1,13 +1,17 @@
 import type { Metadata } from "next"
+import dynamic from "next/dynamic"
 
 import { JsonLdScript } from "@/components/seo/JsonLdScript"
-import { PublicWriterProfilePageClient } from "@/components/public/PublicWriterProfilePageClient"
 import { getPublicUserProfileServer } from "@/lib/api/public.server"
 import {
   DEFAULT_OG_IMAGE,
   SITE_NAME,
   buildProfilePageJsonLd,
 } from "@/lib/seo"
+
+const PublicWriterProfilePageClient = dynamic(
+  () => import("@/components/public/PublicWriterProfilePageClient").then((module) => module.PublicWriterProfilePageClient)
+)
 
 export async function generateMetadata({ params }: { params: Promise<{ username: string }> }): Promise<Metadata> {
   const { username } = await params

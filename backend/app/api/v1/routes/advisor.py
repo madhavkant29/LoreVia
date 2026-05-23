@@ -27,6 +27,22 @@ from app.api.deps.auth import get_current_user
 from app.api.deps.rate_limit import rate_limit_advisor, rate_limit_continuity_checker
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.redis import (
+    get_advisor_response_cache,
+    get_editorial_review_cache,
+    get_proactive_scan_cache,
+    get_prose_tighten_cache,
+    get_series_advisor_response_cache,
+    get_series_continuity_cache,
+    get_voice_consistency_cache,
+    set_advisor_response_cache,
+    set_editorial_review_cache,
+    set_proactive_scan_cache,
+    set_prose_tighten_cache,
+    set_series_advisor_response_cache,
+    set_series_continuity_cache,
+    set_voice_consistency_cache,
+)
 from app.core.storage import download_book
 from app.engine.embeddings.embedder import embed_text
 from app.engine.search.semantic import semantic_search
@@ -68,7 +84,6 @@ from app.utils.advisor_utils import (
     SYNOPSIS_USER,
     VOICE_CONSISTENCY_SYSTEM,
     VOICE_CONSISTENCY_USER,
-    advisor_response_cache,
     build_advisor_world_analysis,
     build_advisor_world_context,
     build_character_voice_context,
@@ -148,7 +163,7 @@ async def _enqueue_book_advisor_task(
     if not last_user_msg:
         raise HTTPException(400, detail="no user message found")
     cache_key = make_advisor_cache_key(book.id, last_user_msg)
-    cached = advisor_response_cache.get(cache_key)
+    cached = await get_advisor_response_cache(str(book.id), cache_key)
     if cached is not None:
         return {**cached, "cached": True}
 
@@ -196,7 +211,7 @@ async def _enqueue_series_advisor_task(
     if not last_user_msg:
         raise HTTPException(400, detail="no user message found")
     cache_key = make_advisor_cache_key(f"series:{series.id}", last_user_msg)
-    cached = advisor_response_cache.get(cache_key)
+    cached = await get_series_advisor_response_cache(str(series.id), cache_key)
     if cached is not None:
         return {**cached, "cached": True}
 
@@ -918,7 +933,7 @@ async def advisor_suggestions(
             "\n".join(recent_summary_blocks + open_thread_blocks + world_watch_blocks),
             heuristic_count,
         )
-        proactive_result = advisor_response_cache.get(proactive_cache_key)
+        proactive_result = await get_proactive_scan_cache(str(book.id), proactive_cache_key)
         if proactive_result is None:
             if settings.OPENAI_API_KEY and settings.OPENAI_INTEL_MODEL:
                 client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
@@ -953,7 +968,7 @@ async def advisor_suggestions(
                         ],
                     )
                     proactive_result = normalize_proactive_scan_result(response.choices[0].message.content or "{}")
-                    advisor_response_cache.set(proactive_cache_key, proactive_result)
+                    await set_proactive_scan_cache(str(book.id), proactive_cache_key, proactive_result)
                 except Exception:
                     proactive_result = {
                         "findings": [],
@@ -1066,7 +1081,7 @@ async def editorial_review(
 
     # Cache check
     cache_key = make_editorial_cache_key(book_id, body.text, body.chapter_num)
-    cached = advisor_response_cache.get(cache_key)
+    cached = await get_editorial_review_cache(str(book.id), cache_key)
     if cached is not None:
         return {**cached, "cached": True}
 
@@ -1141,7 +1156,7 @@ async def editorial_review(
             ],
             "cached": False,
         }
-        advisor_response_cache.set(cache_key, response_payload)
+        await set_editorial_review_cache(str(book.id), cache_key, response_payload)
         return response_payload
 
     finally:
@@ -1161,6 +1176,11 @@ async def prose_tighten(
         raise HTTPException(404)
     if not body.text.strip():
         raise HTTPException(400, detail="Selected text is required.")
+
+    cache_key = make_editorial_cache_key(book_id, body.text, body.chapter_num)
+    cached = await get_prose_tighten_cache(str(book.id), cache_key)
+    if cached is not None:
+        return ProseTightenResponse(**{**cached, "cached": True})
 
     client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
     try:
@@ -1191,7 +1211,9 @@ async def prose_tighten(
             ],
         )
         normalized = normalize_prose_tighten_result(response.choices[0].message.content or "{}", body.text)
-        return ProseTightenResponse(**normalized)
+        response_payload = {**normalized, "cached": False}
+        await set_prose_tighten_cache(str(book.id), cache_key, response_payload)
+        return ProseTightenResponse(**response_payload)
     finally:
         await client.close()
 
@@ -1347,6 +1369,11 @@ async def voice_consistency_review(
     if not body.text.strip():
         raise HTTPException(400, detail="Passage text is required.")
 
+    cache_key = make_editorial_cache_key(book_id, body.text, body.chapter_num)
+    cached = await get_voice_consistency_cache(str(book.id), cache_key)
+    if cached is not None:
+        return {**cached, "cached": True}
+
     total_ch = book.total_chapters or 9999
     client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 
@@ -1495,7 +1522,7 @@ async def voice_consistency_review(
                 }
             )
 
-        return {
+        response_payload = {
             "review": result,
             "retrieved_passages": [
                 {
@@ -1510,6 +1537,9 @@ async def voice_consistency_review(
             "characters_reviewed": [character["name"] for character in relevant_characters],
             "character_matches": character_matches,
         }
+        response_payload["cached"] = False
+        await set_voice_consistency_cache(str(book.id), cache_key, response_payload)
+        return response_payload
     finally:
         await client.close()
 
@@ -1662,7 +1692,7 @@ async def series_continuity_check(
         body.text,
         body.chapter_num,
     )
-    cached_series = advisor_response_cache.get(series_cache_key)
+    cached_series = await get_series_continuity_cache(str(series.id), str(current_book.id), series_cache_key)
     if cached_series is not None:
         return {**cached_series, "cached": True}
 
@@ -1805,7 +1835,7 @@ async def series_continuity_check(
             ],
             "cached": False,
         }
-        advisor_response_cache.set(series_cache_key, response_payload)
+        await set_series_continuity_cache(str(series.id), str(current_book.id), series_cache_key, response_payload)
         return response_payload
     finally:
         await client.close()

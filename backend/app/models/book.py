@@ -247,11 +247,13 @@ class BookForumComment(Base):
     __tablename__ = "book_forum_comments"
     __table_args__ = (
         Index("ix_book_forum_comments_post_created_at", "post_id", "created_at"),
+        Index("ix_book_forum_comments_parent_created_at", "parent_comment_id", "created_at"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     post_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("book_forum_posts.id", ondelete="CASCADE"), nullable=False, index=True)
     book_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), index=True)
+    parent_comment_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("book_forum_comments.id", ondelete="CASCADE"), index=True)
     author_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     body: Mapped[str] = mapped_column(Text, nullable=False)
     like_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
@@ -262,6 +264,8 @@ class BookForumComment(Base):
     post = relationship("BookForumPost", back_populates="comments")
     book = relationship("Book", back_populates="forum_comments")
     author = relationship("User", foreign_keys=[author_user_id], back_populates="forum_comments")
+    parent_comment = relationship("BookForumComment", remote_side=[id], back_populates="replies")
+    replies = relationship("BookForumComment", back_populates="parent_comment", cascade="all, delete-orphan")
     reactions = relationship("BookForumCommentReaction", back_populates="comment", cascade="all, delete-orphan")
 
 

@@ -4565,6 +4565,8 @@ async def sync_chapter_content_from_novel_scenes(
     chapter_number: int,
     increment_content_version: bool = True,
 ) -> dict[str, Any]:
+    from app.utils.advisor_utils import invalidate_advisor_caches_for_book
+
     chapter, chapter_created = await _ensure_syncable_chapter(
         db,
         book=book,
@@ -4614,6 +4616,8 @@ async def sync_chapter_content_from_novel_scenes(
     if not chapter.title:
         chapter.title = f"Chapter {chapter_number}"
     await db.flush()
+    if chapter_created or previous_text != next_text or previous_html != next_html:
+        await invalidate_advisor_caches_for_book(db, book_id=book.id)
     return {
         "chapter": chapter,
         "text": next_text,

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { canUseAuthorFeatures, isPaidTier, tierLabel } from "./billing/plans"
 import { LEGAL_EMAIL, SUPPORT_EMAIL } from "./constants/contact"
 import { TRUST_EFFECTIVE_DATE, TRUST_RESOURCE_LINKS } from "./constants/trust"
-import { shouldSkipAuthBootstrap } from "./routes"
+import { shouldHideSiteFooter, shouldSkipAuthBootstrap } from "./routes"
 import {
   DEFAULT_OG_IMAGE,
   INDEXNOW_KEY_PATH,
@@ -110,6 +110,28 @@ describe("foundation utilities", () => {
 
   it("does not skip auth bootstrap for authenticated app routes", () => {
     expect(shouldSkipAuthBootstrap("/library")).toBe(false)
+  })
+
+  it("keeps the site footer visible on the library route", () => {
+    expect(shouldHideSiteFooter("/library")).toBe(false)
+  })
+
+  it("keeps the site footer visible on nested library routes", () => {
+    expect(shouldHideSiteFooter("/library/add-chapter")).toBe(false)
+  })
+
+  it("hides the site footer on the top-level book route", () => {
+    expect(shouldHideSiteFooter("/book-123")).toBe(true)
+  })
+
+  it("hides the site footer on nested book routes", () => {
+    expect(shouldHideSiteFooter("/book-123/characters")).toBe(true)
+    expect(shouldHideSiteFooter("/book-123/chapter/4")).toBe(true)
+  })
+
+  it("keeps the site footer visible on public static routes", () => {
+    expect(shouldHideSiteFooter("/pricing")).toBe(false)
+    expect(shouldHideSiteFooter("/public/uploads")).toBe(false)
   })
 
   it("resolves root-relative paths with toAbsoluteUrl", () => {

@@ -36,3 +36,44 @@ def process_beta_reads_task(self, *, limit: int = 100):
         return run_worker_coro(_run())
     except Exception as exc:
         raise self.retry(exc=exc)
+
+
+@celery_app.task(bind=True, name="maintenance_tasks.cleanup_expired_advisor_jobs", queue="intelligence", max_retries=2, ignore_result=True)
+def cleanup_expired_advisor_jobs_task(self, *, limit: int = 1000):
+    async def _run():
+        from app.core.database import AsyncSessionLocal
+        from app.models.intelligence import AdvisorJob
+        from app.services.advisor_jobs_service import purge_expired_advisor_jobs
+        from sqlalchemy import delete, func, select
+
+        async with AsyncSessionLocal() as db:
+            # Keep each cleanup run bounded so periodic maintenance does not monopolize the worker.
+            expired_count = await db.scalar(
+                select(func.count())
+                .select_from(AdvisorJob)
+                .where(AdvisorJob.expires_at.is_not(None), AdvisorJob.expires_at < func.now())
+            )
+            if int(expired_count or 0) > limit:
+                # Delete only up to the cutoff population in repeated hourly runs.
+                rows = (
+                    await db.execute(
+                        select(AdvisorJob.id)
+                        .where(AdvisorJob.expires_at.is_not(None), AdvisorJob.expires_at < func.now())
+                        .order_by(AdvisorJob.expires_at.asc())
+                        .limit(limit)
+                    )
+                ).scalars().all()
+                if rows:
+                    await db.execute(
+                        delete(AdvisorJob).where(AdvisorJob.id.in_(list(rows)))
+                    )
+                    await db.commit()
+                    return {"deleted": len(rows), "limited": True}
+                return {"deleted": 0, "limited": True}
+            deleted = await purge_expired_advisor_jobs(db)
+            return {"deleted": deleted, "limited": False}
+
+    try:
+        return run_worker_coro(_run())
+    except Exception as exc:
+        raise self.retry(exc=exc)

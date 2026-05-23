@@ -20,8 +20,14 @@ import type {
   VoiceConsistencyResponse,
 } from "@/types/intelligence"
 
+const MAX_ADVISOR_PASSAGE_CHARS = 12_000
+
 function intelligencePath(bookId: string, suffix = "") {
   return `/intelligence/${normalizeBookRouteId(bookId)}${suffix}`
+}
+
+function clampAdvisorPassage(text: string) {
+  return text.length > MAX_ADVISOR_PASSAGE_CHARS ? text.slice(0, MAX_ADVISOR_PASSAGE_CHARS) : text
 }
 
 async function pollAdvisorMessage(bookId: string, taskId: string): Promise<AdvisorResponse> {
@@ -92,7 +98,7 @@ export const intelligenceApi = {
 
   editorialReview: (bookId: string, text: string, chapterNum?: number) =>
     apiClient.post<EditorialReviewResponse>(intelligencePath(bookId, "/advisor/editorial-review"), {
-      text,
+      text: clampAdvisorPassage(text),
       chapter_num: chapterNum ?? null,
     }).then(r => r.data),
   proseTighten: (bookId: string, text: string, chapterNum?: number) =>
@@ -107,12 +113,12 @@ export const intelligenceApi = {
     }).then(r => r.data),
   inlineContinuity: (bookId: string, text: string, chapterNum?: number) =>
     apiClient.post<InlineContinuityResponse>(intelligencePath(bookId, "/advisor/inline-continuity"), {
-      text,
+      text: clampAdvisorPassage(text),
       chapter_num: chapterNum ?? null,
     }).then(r => r.data),
   voiceConsistencyReview: (bookId: string, text: string, chapterNum?: number) =>
     apiClient.post<VoiceConsistencyResponse>(intelligencePath(bookId, "/advisor/voice-consistency"), {
-      text,
+      text: clampAdvisorPassage(text),
       chapter_num: chapterNum ?? null,
     }).then(r => r.data),
   continuityReport: (bookId: string, text: string, format: ContinuityReportFormat, chapterNum?: number) =>

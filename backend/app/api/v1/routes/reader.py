@@ -18,10 +18,19 @@ from app.core.database import get_db
 from app.core.redis import (
     cache_get,
     cache_set,
+    get_book_cache_version,
+    get_reader_events_cache,
+    get_reader_progress_cache_version,
+    get_reader_timeline_cache,
+    get_relationship_evolution_cache,
     key_chapter_summary,
     key_memory_recall,
     key_relationship_graph,
     key_search_results,
+    mark_reader_progress_cache_dirty,
+    set_reader_events_cache,
+    set_reader_timeline_cache,
+    set_relationship_evolution_cache,
 )
 from app.core.security import decode_token
 from app.core.storage import download_book
@@ -466,6 +475,17 @@ async def get_reader_events(
     progress = progress_result.scalar()
     read_set = set(progress.chapters_read or []) if progress else set()
     max_visible_chapter = chapter or (max(read_set) if read_set else (progress.current_chapter if progress else 1))
+    book_version = await get_book_cache_version(str(book_id))
+    progress_version = await get_reader_progress_cache_version(str(book_id), str(current_user.id))
+    cached = await get_reader_events_cache(
+        str(book_id),
+        str(current_user.id),
+        int(max_visible_chapter),
+        book_version,
+        progress_version,
+    )
+    if cached is not None:
+        return BookEventsOut(**cached)
 
     chapter_rows = (
         await db.execute(
@@ -491,7 +511,16 @@ async def get_reader_events(
             if isinstance(event, dict) and int(event.get("chapter_number") or 0) <= max_visible_chapter:
                 character_events.append(CharacterEventOut(**_normalize_reader_character_event(character, event)))
 
-    return BookEventsOut(major_events=major_events, character_events=character_events)
+    payload = BookEventsOut(major_events=major_events, character_events=character_events)
+    await set_reader_events_cache(
+        str(book_id),
+        str(current_user.id),
+        int(max_visible_chapter),
+        book_version,
+        progress_version,
+        payload.model_dump(mode="json"),
+    )
+    return payload
 
 
 @router.get("/{book_id}/relationships")
@@ -792,9 +821,28 @@ async def get_timeline(
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
 
+    book_version = await get_book_cache_version(str(book_id))
+    progress_version = await get_reader_progress_cache_version(str(book_id), str(current_user.id))
+    cached = await get_reader_timeline_cache(
+        str(book_id),
+        str(current_user.id),
+        book_version,
+        progress_version,
+    )
+    if cached is not None:
+        return cached
+
     read_set = await timeline_visible_chapter_set(db, book, current_user)
     if not read_set:
-        return build_timeline_track_payload([], [], [], [], [])
+        payload = build_timeline_track_payload([], [], [], [], [])
+        await set_reader_timeline_cache(
+            str(book_id),
+            str(current_user.id),
+            book_version,
+            progress_version,
+            payload,
+        )
+        return payload
 
     summary_rows = (await db.execute(
         select(Chapter.number, Chapter.title, ChapterSummary.key_events)
@@ -921,7 +969,15 @@ async def get_timeline(
     character_tracks.sort(key=lambda item: (item["start_chapter"], item["name"]))
     thread_tracks.sort(key=lambda item: (item["start_chapter"], item["title"]))
     relationship_markers.sort(key=lambda item: (item["chapter_number"], item["title"]))
-    return build_timeline_track_payload(chapter_points, events, character_tracks, thread_tracks, relationship_markers)
+    payload = build_timeline_track_payload(chapter_points, events, character_tracks, thread_tracks, relationship_markers)
+    await set_reader_timeline_cache(
+        str(book_id),
+        str(current_user.id),
+        book_version,
+        progress_version,
+        payload,
+    )
+    return payload
 
 
 @router.get("/{book_id}/thematic-search")
@@ -998,6 +1054,17 @@ async def get_relationship_evolution(
     book = await db.get(Book, book_id)
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
+    book_version = await get_book_cache_version(str(book_id))
+    progress_version = await get_reader_progress_cache_version(str(book_id), str(current_user.id))
+    cached = await get_relationship_evolution_cache(
+        str(book_id),
+        str(current_user.id),
+        chapter,
+        book_version,
+        progress_version,
+    )
+    if cached is not None:
+        return cached
 
     rels_result = await db.execute(
         select(CharacterRelationship).where(
@@ -1023,7 +1090,16 @@ async def get_relationship_evolution(
             "description": rel.description, "sentiment": rel.sentiment,
         })
 
-    return {"pairs": [{"characters": list(key), "events": value} for key, value in grouped.items()]}
+    payload = {"pairs": [{"characters": list(key), "events": value} for key, value in grouped.items()]}
+    await set_relationship_evolution_cache(
+        str(book_id),
+        str(current_user.id),
+        chapter,
+        book_version,
+        progress_version,
+        payload,
+    )
+    return payload
 
 
 @router.post("/{book_id}/quotes")
@@ -1196,6 +1272,7 @@ async def update_progress(
         db.add(ReadingProgress(user_id=current_user.id, book_id=book_id,
                                current_chapter=current_chapter, scroll_pct=scroll_pct, chapters_read=[current_chapter]))
     await db.commit()
+    await mark_reader_progress_cache_dirty(str(book_id), str(current_user.id))
 
     from app.workers.tasks.extraction_tasks import process_chapter_task
     total = book.total_chapters or 1
@@ -1251,6 +1328,7 @@ async def mark_book_read(
         progress.last_read = datetime.now(UTC)
 
     await db.commit()
+    await mark_reader_progress_cache_dirty(str(book_id), str(current_user.id))
     await sync_beta_assignments_for_reader_book(db, book_id=book_id, current_user=current_user)
     return {"ok": True, "current_chapter": max(chapters_read), "chapters_read_count": len(chapters_read), "percent_complete": 100.0, "chapters_left": 0}
 
@@ -1287,6 +1365,7 @@ async def update_chapter_read_status(
         progress.last_read = datetime.now(UTC)
 
     await db.commit()
+    await mark_reader_progress_cache_dirty(str(book_id), str(current_user.id))
     if read:
         chapter_row = (await db.execute(
             select(Chapter).where(Chapter.book_id == book_id, Chapter.number == chapter)

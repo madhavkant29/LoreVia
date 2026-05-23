@@ -27,6 +27,9 @@ export function useNotifications(limit = 40) {
 export function useNotificationsState(limit = 40, options: UseNotificationsOptions = {}) {
   const user = useAuthStore((state) => state.user)
   const [error, setError] = useState<string | null>(null)
+  const [isDocumentVisible, setIsDocumentVisible] = useState(
+    typeof document === "undefined" ? true : document.visibilityState === "visible"
+  )
   const queryClient = useQueryClient()
   const queryKey = useMemo(() => asQueryKey(notificationsCacheKey(limit)), [limit])
   const enabled = options.enabled ?? true
@@ -37,7 +40,7 @@ export function useNotificationsState(limit = 40, options: UseNotificationsOptio
     queryKey,
     queryFn: () => notificationsApi.list(limit),
     enabled: Boolean(user) && enabled,
-    refetchInterval: user && enabled && pollMs ? pollMs : false,
+    refetchInterval: user && enabled && pollMs && isDocumentVisible ? pollMs : false,
     refetchIntervalInBackground: false,
   })
 
@@ -62,11 +65,21 @@ export function useNotificationsState(limit = 40, options: UseNotificationsOptio
       void refresh()
     }
 
+    const handleVisibilityChange = () => {
+      const visible = document.visibilityState === "visible"
+      setIsDocumentVisible(visible)
+      if (visible && refreshOnFocus) {
+        void refresh()
+      }
+    }
+
     window.addEventListener(NOTIFICATIONS_CHANGED_EVENT, handleNotificationsChanged)
     window.addEventListener("focus", handleFocus)
+    document.addEventListener("visibilitychange", handleVisibilityChange)
     return () => {
       window.removeEventListener(NOTIFICATIONS_CHANGED_EVENT, handleNotificationsChanged)
       window.removeEventListener("focus", handleFocus)
+      document.removeEventListener("visibilitychange", handleVisibilityChange)
     }
   }, [refresh, refreshOnFocus])
 

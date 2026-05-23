@@ -51,7 +51,6 @@ export function WorldbuildingWorkspace({
   const [analysis, setAnalysis] = useState<WorldGapResult | null>(null)
   const [integration, setIntegration] = useState<WorldIntegrationResult | null>(null)
   const [loadingIntegration, setLoadingIntegration] = useState(false)
-  const [notes, setNotes] = useState<WorldNote[]>([])
   const [canonName, setCanonName] = useState("")
   const [canonAliases, setCanonAliases] = useState("")
   const [savingCanon, setSavingCanon] = useState(false)
@@ -78,7 +77,7 @@ export function WorldbuildingWorkspace({
     enabled: Boolean(selectedDocumentId),
   })
 
-  const { data: notesData = [], isLoading: loadingNotes, refetch: refetchNotes } = useQuery<WorldNote[]>({
+  const { data: notes = [], isLoading: loadingNotes, refetch: refetchNotes } = useQuery<WorldNote[]>({
     queryKey: [`worldbuilding:${bookId}:notes`],
     queryFn: () => worldBuildingApi.listNotes(bookId),
   })
@@ -173,10 +172,6 @@ export function WorldbuildingWorkspace({
       setLoadingIntegration(false)
     }
   }
-
-  useEffect(() => {
-    setNotes(notesData)
-  }, [notesData])
 
   useEffect(() => {
     if (!documents.length) {

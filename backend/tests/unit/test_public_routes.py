@@ -222,6 +222,86 @@ async def test_list_public_beta_forum_posts_caches_anonymous_page(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_list_public_beta_forum_comments_uses_anonymous_cache(monkeypatch):
+    monkeypatch.setattr("app.core.config.settings.PUBLIC_FORUM_STATUS", "public", raising=False)
+    comment_payload = {
+        "id": str(uuid.uuid4()),
+        "post_id": str(uuid.uuid4()),
+        "book_id": str(uuid.uuid4()),
+        "author_user_id": str(uuid.uuid4()),
+        "author_username": "reader",
+        "author_reputation_score": 3,
+        "author_trust_level": "Trusted",
+        "body": "Great premise",
+        "like_count": 1,
+        "dislike_count": 0,
+        "reaction": None,
+        "can_edit": False,
+        "created_at": "2026-05-16T00:00:00Z",
+        "updated_at": "2026-05-16T00:00:00Z",
+    }
+
+    async def _fake_cache_get_int(_key, default=1):
+        return default
+
+    async def _fake_get_comments_cache(_version, _post_id):
+        return [comment_payload]
+
+    monkeypatch.setattr(public, "cache_get_int", _fake_cache_get_int)
+    monkeypatch.setattr(public, "get_public_forum_comments_cache", _fake_get_comments_cache)
+
+    payload = await public.list_public_beta_forum_comments(post_id=uuid.uuid4(), db=_FakeDB(), current_user=None)
+
+    assert payload.items[0].body == "Great premise"
+
+
+@pytest.mark.asyncio
+async def test_list_public_beta_forum_comments_caches_anonymous_payload(monkeypatch):
+    monkeypatch.setattr("app.core.config.settings.PUBLIC_FORUM_STATUS", "public", raising=False)
+    cached = {}
+
+    async def _fake_cache_get_int(_key, default=1):
+        return default
+
+    async def _fake_get_comments_cache(_version, _post_id):
+        return None
+
+    async def _fake_set_comments_cache(version, post_id, payload):
+        cached["args"] = (version, post_id, payload)
+
+    async def _fake_list_comments(_db, *, post_id, current_user):
+        return [
+            public.PublicForumCommentOut(
+                id=str(uuid.uuid4()),
+                post_id=str(post_id),
+                book_id=None,
+                author_user_id=str(uuid.uuid4()),
+                author_username="reader",
+                author_reputation_score=4,
+                author_trust_level="Trusted",
+                body="Looks fun",
+                like_count=0,
+                dislike_count=0,
+                reaction=None,
+                can_edit=False,
+                created_at="2026-05-16T00:00:00Z",
+                updated_at="2026-05-16T00:00:00Z",
+            )
+        ]
+
+    monkeypatch.setattr(public, "cache_get_int", _fake_cache_get_int)
+    monkeypatch.setattr(public, "get_public_forum_comments_cache", _fake_get_comments_cache)
+    monkeypatch.setattr(public, "set_public_forum_comments_cache", _fake_set_comments_cache)
+    monkeypatch.setattr(public, "list_public_forum_comments", _fake_list_comments)
+
+    post_id = uuid.uuid4()
+    payload = await public.list_public_beta_forum_comments(post_id=post_id, db=_FakeDB(), current_user=None)
+
+    assert payload.items[0].body == "Looks fun"
+    assert cached["args"][1] == str(post_id)
+
+
+@pytest.mark.asyncio
 async def test_list_public_books_returns_cached_payload(monkeypatch):
     monkeypatch.setattr(public, "build_public_book_analytics_map", _async_empty_analytics_map)
 

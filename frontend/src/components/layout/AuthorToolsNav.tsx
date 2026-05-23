@@ -1,15 +1,13 @@
 "use client"
 
-import { useQuery } from "@tanstack/react-query"
 import React from "react"
 import { useMemo, useState } from "react"
 import type { Route } from "next"
 import Link from "next/link"
 
 import { AuthorFeatureComponent } from "@/components/billing/AuthorFeatureComponent"
-import { booksApi } from "@/lib/api/books"
 import { canUseAuthorFeatures } from "@/lib/billing/plans"
-import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
+import { useCachedBookDetail } from "@/lib/hooks/useBookDetail"
 import { useAuthStore } from "@/lib/stores/authStore"
 import type { Book } from "@/types/book"
 import type { CollaborationPermissions } from "@/types/book"
@@ -26,6 +24,7 @@ type AuthorToolsNavProps = {
   currentChapter?: number
   mode?: BookMode
   variant?: "panel" | "rail"
+  railSize?: "default" | "compact"
 }
 
 type NavIcon =
@@ -160,21 +159,18 @@ export function AuthorToolsNav({
   currentChapter = 1,
   mode = "author",
   variant = "panel",
+  railSize = "default",
 }: AuthorToolsNavProps) {
   const tier = useAuthStore((state) => state.user?.tier)
-  const { data: queriedBook = null } = useQuery({
-    queryKey: asQueryKey(bookCacheKey(bookId, "detail")),
-    queryFn: () => booksApi.get(bookId),
-    enabled: !bookData,
-    staleTime: 60_000,
-  })
-  const book = bookData ?? queriedBook
+  const { data: cachedBook = null } = useCachedBookDetail(bookId)
+  const book = bookData ?? cachedBook
   const collaborationRole = book?.collaboration_role ?? null
   const collaborationPermissions = book?.collaboration_permissions ?? null
+  const isOwnerSession = !collaborationRole
   const hasOwnAuthorAccess = canUseAuthorFeatures(tier)
   const hasFreeSampleIntelligenceAccess = tier === "free"
   const hasCollaboratorAccess = Boolean(collaborationRole && collaborationPermissions)
-  const showAuthorSections = mode === "author" && (hasOwnAuthorAccess || hasCollaboratorAccess)
+  const showAuthorSections = mode === "author" && (isOwnerSession || hasOwnAuthorAccess || hasCollaboratorAccess)
 
   const sections = useMemo(
     () =>
@@ -191,7 +187,7 @@ export function AuthorToolsNav({
             if (!showAuthorSections && hasFreeSampleIntelligenceAccess) {
               return item.id === "advisor" || item.id === "editorial-review"
             }
-            if (hasOwnAuthorAccess || !collaborationRole) return true
+            if (isOwnerSession || hasOwnAuthorAccess || !collaborationRole) return true
             return canSeeCollaboratorItem(item.id, collaborationPermissions)
           }),
         }))
@@ -199,8 +195,10 @@ export function AuthorToolsNav({
     [bookId, collaborationPermissions, collaborationRole, currentChapter, hasFreeSampleIntelligenceAccess, hasOwnAuthorAccess, showAuthorSections]
   )
   const rail = variant === "rail"
+  const collapsedRailWidth = railSize === "compact" ? "w-[4.35rem]" : "w-[4.9rem]"
+  const expandedRailWidth = railSize === "compact" ? "hover:w-[16.5rem] focus-within:w-[16.5rem]" : "hover:w-[18.5rem] focus-within:w-[18.5rem]"
   const containerClass = rail
-    ? `group/rail sticky top-24 z-20 flex h-[calc(100vh-7.5rem)] w-[4.9rem] flex-col overflow-hidden rounded-[1.6rem] border p-3 shadow-[0_22px_54px_-42px_rgba(58,49,37,0.24)] transition-[width,background-color,border-color,box-shadow] duration-300 hover:w-[18.5rem] focus-within:w-[18.5rem] ${
+    ? `group/rail sticky top-24 z-20 flex h-[calc(100vh-7.5rem)] ${collapsedRailWidth} flex-col overflow-hidden rounded-[1.6rem] border p-3 shadow-[0_22px_54px_-42px_rgba(58,49,37,0.24)] transition-[width,background-color,border-color,box-shadow] duration-300 ${expandedRailWidth} ${
         isDark ? "border-white/10 bg-[#1b2024]/96 text-white hover:border-white/14 hover:bg-[#1f2528]/96" : "border-[rgba(var(--border),0.9)] bg-[rgba(255,252,247,0.96)] text-stone-950 hover:border-stone-300 hover:bg-white"
       }`
     : `rounded-2xl border p-4 ${isDark ? "border-white/10 bg-[#1b2024]/96" : "border-[rgba(var(--border),0.9)] bg-[rgba(255,252,247,0.96)]"}`

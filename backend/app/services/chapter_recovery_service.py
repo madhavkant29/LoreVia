@@ -17,6 +17,7 @@ from app.utils.book_utils import (
     manuscript_text_to_html,
     serialize_manuscript_content,
 )
+from app.utils.advisor_utils import invalidate_advisor_caches_for_book
 from app.utils.ingestion_utils import (
     CHAPTER_RECOVERY_INFLIGHT_TTL_SECONDS,
     build_analysis_chapter_state,
@@ -159,6 +160,7 @@ async def repair_chapter_payload_from_source(
             ),
         )
         await db.commit()
+        await invalidate_advisor_caches_for_book(db, book_id=book.id)
         return True
     finally:
         await cache_del(inflight_key)

@@ -1,8 +1,12 @@
 import type { Metadata } from "next"
+import dynamic from "next/dynamic"
 
-import { PublicUploadsPageClient } from "@/components/public/PublicUploadsPageClient"
 import { getPublicUploadsAnalyticsServer, listCreatorPublicUploadsServer } from "@/lib/api/public.server"
 import { SITE_NAME, SITE_URL } from "@/lib/seo"
+
+const PublicUploadsPageClient = dynamic(
+  () => import("@/components/public/PublicUploadsPageClient").then((module) => module.PublicUploadsPageClient)
+)
 
 export const metadata: Metadata = {
   title: "Creator Public Uploads",

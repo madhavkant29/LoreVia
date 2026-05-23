@@ -45,6 +45,12 @@ test("public forum surfaces reputation and writer profile details", async ({ pag
 
   await expect(page.getByRole("heading", { name: /manuscript discussions worth opening/i })).toBeVisible()
   await expect(page.getByRole("link", { name: /back to library/i })).toBeVisible()
+  await expect(page.getByText("Showing 1-20 of 24 threads")).toBeVisible()
+  await page.getByRole("button", { name: "Next", exact: true }).click()
+  await expect(page.getByText("Page 2")).toBeVisible()
+  await expect(page.getByText("Showing 21-24 of 24 threads")).toBeVisible()
+  await page.getByRole("button", { name: "Previous", exact: true }).click()
+  await expect(page.getByText("Showing 1-20 of 24 threads")).toBeVisible()
   await expect(page.getByText(/novel discussion/i).first()).toBeVisible()
   await expect(page.getByText(/general discussion/i).first()).toBeVisible()
   await page.getByRole("button", { name: "General discussion" }).click()
@@ -58,6 +64,10 @@ test("public forum surfaces reputation and writer profile details", async ({ pag
   await page.getByPlaceholder(/add a thoughtful public comment/i).fill("Happy to review pacing and clarity.")
   await page.getByRole("button", { name: "Post comment" }).click()
   await expect(page.getByText("Happy to review pacing and clarity.")).toBeVisible()
+  await page.getByRole("button", { name: "Reply" }).first().click()
+  await page.getByPlaceholder(/reply to @author/i).fill("That is exactly the section I would start with too.")
+  await page.getByRole("button", { name: "Post reply" }).click()
+  await expect(page.getByText("That is exactly the section I would start with too.")).toBeVisible()
   await expect(page.getByRole("link", { name: "@author" }).first()).toBeVisible()
   await page.goto("/public/writers/author")
 
@@ -132,6 +142,16 @@ test("settings page updates the public username", async ({ page }) => {
   await expect(page.getByText("@storysmith")).toBeVisible()
 })
 
+test("settings page updates promotional email preferences", async ({ page }) => {
+  await installMockApi(page)
+  await page.goto("/settings")
+
+  await expect(page.getByText("Control promotional LoreVia emails")).toBeVisible()
+  await page.getByRole("button", { name: /Product updates/i }).click()
+
+  await expect(page.getByText("Email preferences updated.")).toBeVisible()
+})
+
 test("author uploads default the manuscript byline from the public username", async ({ page }) => {
   await installMockApi(page)
   await page.goto("/library")
@@ -187,7 +207,7 @@ test("book overview opens the manuscript editor", async ({ page }) => {
   const sidebarRail = page.locator('[data-testid="author-tools-nav-rail"]')
   await expect(sidebarRail).toBeVisible()
   await sidebarRail.hover()
-  await expect(page.locator('[data-testid="author-nav-helper-overview"]')).toContainText("See progress, next steps, and the latest signals around this book.")
+  await expect(sidebarRail.locator('[data-testid="author-nav-helper-overview"]')).toContainText("See progress, next steps, and the latest signals around this book.")
 
   const dismissCookies = page.getByRole("button", { name: /not now/i })
   if (await dismissCookies.isVisible().catch(() => false)) {
@@ -199,6 +219,17 @@ test("book overview opens the manuscript editor", async ({ page }) => {
   await expect(page).toHaveURL(/\/(?:[^/]+--)?book-1\/manuscript$/)
   await expect(page.getByText("Story manuscript")).toBeVisible()
   await expect(page.getByText("Manuscript progress")).toBeVisible()
+})
+
+test("book overview shows the nav panel on mobile", async ({ page }) => {
+  await installMockApi(page)
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto("/book-1")
+
+  const mobileNavPanel = page.locator('[data-testid="author-tools-nav-panel"]')
+  await expect(mobileNavPanel).toBeVisible()
+  await expect(mobileNavPanel.locator('[data-testid="author-nav-item-overview"]')).toContainText("Overview")
+  await expect(mobileNavPanel.locator('[data-testid="author-nav-item-read"]')).toContainText("Preview Draft")
 })
 
 test("book overview keeps world-gap issue language constructive", async ({ page }) => {
@@ -381,6 +412,35 @@ test("reader published layout applies book typography without mobile overflow", 
   await expect(normalParagraph).toHaveCSS("text-align", "left")
   const hasHorizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)
   expect(hasHorizontalOverflow).toBe(false)
+})
+
+test("book overview renders the shared book cover asset", async ({ page }) => {
+  await installMockApi(page)
+
+  await page.goto("/book-1")
+  await expect(page.getByAltText("Sky of Ash cover").first()).toBeVisible()
+})
+
+test("reader renders inline images from asset urls and base64 fallback", async ({ page }) => {
+  await installMockApi(page)
+
+  await page.goto("/book-1/chapter/2")
+  await expect(page.getByAltText("Ash bridge sketch")).toBeVisible()
+  await expect(page.getByText("Fallback inset")).toBeVisible()
+})
+
+test("character review surfaces unresolved relationship candidates in duplicate review mode", async ({ page }) => {
+  const { consoleMessages, pageErrors } = watchBrowserSignals(page)
+  await installMockApi(page)
+
+  await page.goto("/book-1/characters")
+  await expect(page.getByRole("heading", { name: "Character Bible" })).toBeVisible()
+  await page.getByRole("button", { name: /^Review duplicates$/i }).click()
+  await expect(page.getByText("Relationship review")).toBeVisible()
+  await expect(page.getByText("Grete <-> Gregor's father")).toBeVisible()
+
+  expect(consoleMessages.some((message) => /Maximum update depth exceeded/i.test(message))).toBe(false)
+  expect(pageErrors.some((message) => /Maximum update depth exceeded/i.test(message))).toBe(false)
 })
 
 test("world gap workspace surfaces consistency flags and the coverage watchlist", async ({ page }) => {

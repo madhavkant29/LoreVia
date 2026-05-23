@@ -4,7 +4,7 @@ import { Suspense, useEffect } from "react"
 import type { Route } from "next"
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation"
 
-import { booksApi } from "@/lib/api/books"
+import { useCachedBookDetail } from "@/lib/hooks/useBookDetail"
 import { getBookRouteSegment, normalizeBookRouteId, replaceBookRouteSegment } from "@/lib/utils/bookRoutes"
 
 const canonicalBookRouteCache = new Map<string, string>()
@@ -43,44 +43,34 @@ function BookLayoutInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const router = useRouter()
   const searchParams = useSearchParams()
+  const normalizedBookId = normalizeBookRouteId(bookId)
+  const { data: cachedBook = null } = useCachedBookDetail(normalizedBookId)
 
   useEffect(() => {
     if (!bookId || !pathname) return
-    const normalizedBookId = normalizeBookRouteId(bookId)
     const cachedCanonicalSegment = getCachedCanonicalRouteSegment(normalizedBookId)
 
     if (cachedCanonicalSegment === bookId) {
       return
     }
 
-    if (cachedCanonicalSegment) {
-      const nextPath = replaceBookRouteSegment(pathname, bookId, cachedCanonicalSegment)
-      if (nextPath !== pathname) {
-        const query = searchParams.toString()
-        router.replace((query ? `${nextPath}?${query}` : nextPath) as Route)
-      }
+    const canonicalSegment = cachedCanonicalSegment ?? (cachedBook ? getBookRouteSegment(cachedBook) : null)
+    if (!canonicalSegment) {
       return
     }
 
-    let cancelled = false
+    setCachedCanonicalRouteSegment(normalizedBookId, canonicalSegment)
 
-    booksApi.get(normalizedBookId).then((book) => {
-      if (cancelled) return
-      const canonicalSegment = getBookRouteSegment(book)
-      setCachedCanonicalRouteSegment(normalizedBookId, canonicalSegment)
-      if (canonicalSegment === bookId) return
+    if (canonicalSegment === bookId) {
+      return
+    }
 
-      const nextPath = replaceBookRouteSegment(pathname, bookId, canonicalSegment)
-      if (nextPath === pathname) return
-
+    const nextPath = replaceBookRouteSegment(pathname, bookId, canonicalSegment)
+    if (nextPath !== pathname) {
       const query = searchParams.toString()
       router.replace((query ? `${nextPath}?${query}` : nextPath) as Route)
-    }).catch(() => {})
-
-    return () => {
-      cancelled = true
     }
-  }, [bookId, pathname, router, searchParams])
+  }, [bookId, cachedBook, normalizedBookId, pathname, router, searchParams])
 
   return <>{children}</>
 }

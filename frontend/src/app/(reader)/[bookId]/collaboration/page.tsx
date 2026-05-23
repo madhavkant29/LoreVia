@@ -2,9 +2,9 @@
 
 import { useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
+import dynamic from "next/dynamic"
 import { useParams } from "next/navigation"
 
-import { AuthorToolsNav } from "@/components/layout/AuthorToolsNav"
 import { betaReadsApi } from "@/lib/api/betaReads"
 import { booksApi } from "@/lib/api/books"
 import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
@@ -13,6 +13,14 @@ import { parseQuestionLines } from "@/lib/utils/betaRead"
 import type { BetaReadAssignment } from "@/types/betaRead"
 import type { Book, BookCollaborator, CollaborationPermissions, CollaborationRole, CollaborationScope } from "@/types/book"
 import type { BetaReadAssignmentCreateInput } from "@/types/reader"
+
+const AuthorToolsNav = dynamic(
+  () => import("@/components/layout/AuthorToolsNav").then((module) => module.AuthorToolsNav),
+  {
+    ssr: false,
+    loading: () => <div className="rounded-md border border-white/[0.065] bg-[#0d141c] p-4" />,
+  }
+)
 
 const ROLE_OPTIONS: Array<{ value: CollaborationRole; label: string; detail: string }> = [
   { value: "viewer", label: "Viewer", detail: "Read-only access to the shared draft." },
@@ -294,6 +302,7 @@ export default function CollaborationPage() {
             bookId={bookId}
             active="collaboration"
             isDark={isDark}
+            bookData={book}
             title="Author workspace"
             description="Invite readers, editors, and co-writers into the right slices of the story."
             mode={book?.mode ?? "author"}

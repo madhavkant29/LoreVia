@@ -26,14 +26,9 @@ function loadStoredPositions() {
   }
 }
 
-function persistPositions(cy: Core) {
+function persistStoredPositions(positions: StoredPositions) {
   if (typeof window === "undefined") return
-  const current = loadStoredPositions()
-  cy.nodes().forEach((node) => {
-    const position = node.position()
-    current[node.id()] = { x: position.x, y: position.y }
-  })
-  window.localStorage.setItem(POSITION_STORAGE_KEY, JSON.stringify(current))
+  window.localStorage.setItem(POSITION_STORAGE_KEY, JSON.stringify(positions))
 }
 
 function buildLocalGraph(graph: ObsidianGraph, focusPath: string | null) {
@@ -64,6 +59,8 @@ export function GraphViewer({
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const cyRef = useRef<Core | null>(null)
+  const storedPositionsRef = useRef<StoredPositions>({})
+  const persistTimerRef = useRef<number | null>(null)
   const [hoveredPath, setHoveredPath] = useState<string | null>(null)
   const [localMode, setLocalMode] = useState(false)
   const [labelsVisible, setLabelsVisible] = useState(true)
@@ -80,6 +77,7 @@ export function GraphViewer({
     if (!containerRef.current) return
 
     const storedPositions = loadStoredPositions()
+    storedPositionsRef.current = storedPositions
     const stylesheet: any = [
       {
         selector: "node",
@@ -226,7 +224,17 @@ export function GraphViewer({
     })
 
     cy.on("dragfree", "node", () => {
-      persistPositions(cy)
+      cy.nodes().forEach((node) => {
+        const position = node.position()
+        storedPositionsRef.current[node.id()] = { x: position.x, y: position.y }
+      })
+      if (persistTimerRef.current) {
+        window.clearTimeout(persistTimerRef.current)
+      }
+      persistTimerRef.current = window.setTimeout(() => {
+        persistStoredPositions(storedPositionsRef.current)
+        persistTimerRef.current = null
+      }, 180)
     })
 
     cy.on("zoom", updateLabelVisibility)
@@ -235,7 +243,15 @@ export function GraphViewer({
     highlightNeighborhood(selectedPath)
 
     return () => {
-      persistPositions(cy)
+      if (persistTimerRef.current) {
+        window.clearTimeout(persistTimerRef.current)
+        persistTimerRef.current = null
+      }
+      cy.nodes().forEach((node) => {
+        const position = node.position()
+        storedPositionsRef.current[node.id()] = { x: position.x, y: position.y }
+      })
+      persistStoredPositions(storedPositionsRef.current)
       cy.destroy()
       cyRef.current = null
     }

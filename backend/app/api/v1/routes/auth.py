@@ -22,6 +22,7 @@ from app.core.redis import (
     begin_password_reset_cooldown,
     consume_email_verification_token,
     consume_password_reset_token,
+    mark_user_dashboard_cache_dirty,
     refresh_session_active,
     revoke_refresh_session,
     store_email_verification_token,
@@ -138,6 +139,7 @@ def _build_user_out(user: User) -> UserOut:
 
 async def _record_login_activity(db: AsyncSession, user: User) -> None:
     record_login_activity(user)
+    await mark_user_dashboard_cache_dirty(str(user.id))
 
 
 async def _issue_email_verification(user: User) -> tuple[bool, str]:

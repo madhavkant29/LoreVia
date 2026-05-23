@@ -27,6 +27,8 @@ from app.models.character import (
     Character,
     CharacterCandidate,
     CharacterDuplicateSuggestion,
+    CharacterMention,
+    CharacterRelationshipCandidate,
     CharacterState,
 )
 from app.models.intelligence import (
@@ -49,6 +51,7 @@ from app.models.social import DirectConversation, DirectMessage, FriendRequest
 from app.models.tag import CustomTag
 from app.models.user import (
     DeviceTrial,
+    EmailPreference,
     LlmUsageEvent,
     Subscription,
     SubscriptionEvent,

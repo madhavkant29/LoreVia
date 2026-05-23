@@ -105,7 +105,12 @@ export function UploadModal({
     queryKey: processingBookId ? asQueryKey(bookCacheKey(processingBookId, "detail")) : ["upload:processing:none"],
     queryFn: () => booksApi.get(processingBookId as string),
     enabled: Boolean(processingBookId),
-    refetchInterval: 4000,
+    refetchInterval: (query) => {
+      const currentBook = query.state.data as Book | null | undefined
+      const canPoll = typeof document === "undefined" || document.visibilityState === "visible"
+      return canPoll && currentBook && currentBook.status !== "ready" && currentBook.status !== "failed" ? 4_000 : false
+    },
+    refetchIntervalInBackground: false,
   })
 
   const infoButtonClass = `inline-flex h-4 w-4 items-center justify-center rounded-full border text-[10px] font-semibold leading-none transition ${

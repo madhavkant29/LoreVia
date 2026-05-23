@@ -104,6 +104,13 @@ LoreVia2/
 - If tests need app settings, seed safe local dummy env vars instead of changing production config.
 - For DB-backed tests, confirm the local test database and required extensions are available before running the suite.
 
+### 8. Environment Files
+
+- **Do not modify, delete, replace, rename, or rewrite any `.env`, `.env.*`, production env file, or local secret file unless the user explicitly asks for that exact change.**
+- This includes `backend/.env`, `backend/.env.local`, root `.env`, deploy env files, and any secret-bearing config file.
+- If env values need to be discussed, explain the required changes in the response instead of editing the file directly unless the user clearly told you to edit it.
+- For tests, use temporary in-process dummy values, monkeypatching, or documented commands rather than changing tracked or local env files.
+
 ---
 
 ## Before you write any code
