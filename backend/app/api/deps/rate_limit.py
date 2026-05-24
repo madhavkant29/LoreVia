@@ -63,7 +63,7 @@ def _utc_day_bucket(action: str, now: datetime | None = None) -> tuple[str, int]
 
 async def _bump_daily_bucket(
     db: AsyncSession,
-    user: User,
+    user: User | object,
     action: str,
     limit: int,
 ) -> None:
@@ -71,12 +71,14 @@ async def _bump_daily_bucket(
         raise HTTPException(403, DAILY_LIMIT_MESSAGE)
 
     bucket, ttl_seconds = _utc_day_bucket(action)
-    key = key_ratelimit(str(user.id), bucket)
+    user_id = getattr(user, "id", user)
+    key = key_ratelimit(str(user_id), bucket)
     r = await get_redis()
     await r.set(key, "0", ex=ttl_seconds, nx=True)
     count = int(await r.incr(key))
     if count > limit:
-        await track_usage_limit_friction_and_maybe_send(user, action=action)
+        if isinstance(user, User) or getattr(user, "email", None):
+            await track_usage_limit_friction_and_maybe_send(user, action=action)
         raise HTTPException(429, DAILY_LIMIT_MESSAGE)
 
 

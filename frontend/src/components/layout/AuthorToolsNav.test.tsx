@@ -5,6 +5,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import type { CollaborationPermissions } from "@/types/book"
 
 const useQueryMock = vi.hoisted(() => vi.fn())
+const useQueryClientMock = vi.hoisted(() => vi.fn())
 const useAuthStoreMock = vi.hoisted(() => vi.fn())
 const canUseAuthorFeaturesMock = vi.hoisted(() => vi.fn())
 
@@ -18,6 +19,7 @@ vi.mock("next/link", () => ({
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: useQueryMock,
+  useQueryClient: useQueryClientMock,
 }))
 
 vi.mock("@/components/billing/AuthorFeatureComponent", () => ({
@@ -58,6 +60,7 @@ describe("AuthorToolsNav", () => {
       container.remove()
     }
     useQueryMock.mockReset()
+    useQueryClientMock.mockReset()
     useAuthStoreMock.mockReset()
     canUseAuthorFeaturesMock.mockReset()
     container = null
@@ -172,6 +175,16 @@ function mockBaseState({
 } = {}) {
   useAuthStoreMock.mockImplementation((selector: (state: { user: { tier: string } | null }) => unknown) => selector({ user: tier ? { tier } : null }))
   canUseAuthorFeaturesMock.mockReturnValue(hasOwnAuthorAccess)
+  useQueryClientMock.mockReturnValue({
+    getQueryData: vi.fn().mockReturnValue(
+      collaborationPermissions
+        ? {
+            collaboration_role: "editor",
+            collaboration_permissions: collaborationPermissions,
+          }
+        : null
+    ),
+  })
   useQueryMock.mockReturnValue({
     data: collaborationPermissions
       ? {

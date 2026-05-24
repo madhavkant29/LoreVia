@@ -61,13 +61,24 @@ describe("middleware CSP", () => {
     expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff")
     expect(response.headers.get("Referrer-Policy")).toBe("strict-origin-when-cross-origin")
     expect(response.headers.get("Permissions-Policy")).toContain("camera=()")
-    expect(response.headers.get("Permissions-Policy")).toContain("payment=*")
+    expect(response.headers.get("Permissions-Policy")).toContain("payment=()")
     expect(csp).toContain("style-src 'self' 'unsafe-inline'")
     expect(scriptDirective).not.toContain("'unsafe-eval'")
     expect(scriptDirective).not.toContain("'unsafe-inline'")
     expect(nonceMatch?.[1]).toBeTruthy()
     expect(response.headers.get("x-middleware-request-content-security-policy")).toBe(csp)
     expect(response.headers.get("x-middleware-request-x-nonce")).toBe(nonceMatch?.[1] ?? null)
+  })
+
+  it("adds the Netlify preview frame source without relaxing the payment policy", () => {
+    Object.assign(process.env, { NODE_ENV: "production" })
+
+    const response = middleware(new NextRequest("https://lorevia-preview.netlify.app/login"))
+    const csp = response.headers.get("Content-Security-Policy") ?? ""
+
+    expect(csp).toContain("frame-src 'self' https://*.paddle.com")
+    expect(csp).toContain("; frame-src 'self' https://app.netlify.com")
+    expect(response.headers.get("Permissions-Policy")).toContain("payment=()")
   })
 
   it("skips static assets and metadata routes", () => {

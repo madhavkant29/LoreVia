@@ -102,7 +102,7 @@ async def test_send_processing_complete_with_stats_renders_metrics_and_library_c
 
     html = captured[0]["html"]
     assert captured[0]["subject"] == "The Atlas is ready in LoreVia"
-    assert "The Atlas has finished processing and is now ready inside LoreVia" in html
+    assert "<strong>The Atlas</strong> has finished processing and is now ready inside LoreVia." in html
     assert "characters, relationships, plot threads, and continuity signals" in html
     assert "12" in html
     assert "characters tracked" in html

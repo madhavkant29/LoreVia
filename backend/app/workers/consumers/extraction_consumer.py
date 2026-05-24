@@ -45,6 +45,7 @@ from app.utils.character_utils import (
     build_character_roster_snapshot,
     find_earliest_character_mention_chapters,
     is_role_only_character_name,
+    normalize_character_name,
     record_character_candidate,
     record_character_mention,
     record_relationship_candidate,

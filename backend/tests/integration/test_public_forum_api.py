@@ -337,7 +337,7 @@ async def test_private_book_forum_supports_interest_and_rating_rankings(client, 
     items = forum_list.json()["items"]
     assert items[0]["book_id"] == str(high_book.id)
     assert items[0]["author_username"] == author.username
-    assert items[0]["comment_count"] == 1
+    assert items[0]["comment_count"] == 2
     assert items[0]["rating_summary"]["average_rating"] == 4.5
     assert items[1]["book_id"] == str(low_book.id)
     assert items[1]["rating_summary"]["average_rating"] == 1.5
