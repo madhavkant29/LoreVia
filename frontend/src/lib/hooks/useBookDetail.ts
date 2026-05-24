@@ -36,6 +36,6 @@ export function useCachedBookDetail(bookId: string) {
     queryFn: () => booksApi.get(bookId),
     enabled: false,
     staleTime: Number.POSITIVE_INFINITY,
-    initialData: () => queryClient.getQueryData<Book | null>(getBookDetailQueryKey(bookId)) ?? null,
+    initialData: () => queryClient.getQueryData<Book | null>(getBookDetailQueryKey(bookId)),
   })
 }

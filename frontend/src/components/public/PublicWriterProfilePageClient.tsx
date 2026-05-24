@@ -62,7 +62,10 @@ export function PublicWriterProfilePageClient({
   const { data: profile = initialProfile, isLoading: loading, isError } = useQuery<PublicUserProfile | null>({
     queryKey: asQueryKey(`public:writer:${username}`),
     queryFn: () => publicApi.getUserProfile(username),
-    initialData: initialProfile,
+    enabled: Boolean(username),
+    staleTime: 0,
+    refetchOnMount: "always",
+    ...(initialProfile !== undefined ? { initialData: initialProfile } : {}),
   })
   const resolvedProfile = profile ?? (username ? fallbackProfile : null)
 

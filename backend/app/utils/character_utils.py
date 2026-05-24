@@ -628,8 +628,6 @@ def _character_entity_matches_cluster(candidate: Mapping[str, Any], cluster: Map
         return True
 
     source_text = " ".join(filter(None, [_entity_source_text(candidate), _entity_source_text(cluster)]))
-    if _entity_mentions_linked_in_text(candidate_name, cluster_name, source_text):
-        return True
     if _context_links_family_role_to_name(candidate_name, cluster_name, source_text):
         return True
     if _context_links_family_role_to_name(cluster_name, candidate_name, source_text):

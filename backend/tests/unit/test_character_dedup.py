@@ -160,6 +160,41 @@ def test_cluster_character_entities_merges_family_role_with_named_character_when
     assert clustered[0]["evidence"]["cluster_size"] == 2
 
 
+def test_cluster_character_entities_keeps_distinct_nearby_names_separate():
+    entities = [
+        {
+            "name": "Gregor Samsa",
+            "aliases": ["Gregor"],
+            "confidence": 0.92,
+            "traits": {},
+            "evidence": {
+                "mention_count": 2,
+                "strong_mention_count": 2,
+                "snippets": ["Gregor Samsa warned Grete to stay back."],
+            },
+            "_source_text": "Gregor Samsa warned Grete to stay back.",
+            "_source_batch_key": "book:1:1",
+        },
+        {
+            "name": "Grete",
+            "aliases": [],
+            "confidence": 0.88,
+            "traits": {},
+            "evidence": {
+                "mention_count": 1,
+                "strong_mention_count": 1,
+                "snippets": ["Gregor Samsa warned Grete to stay back."],
+            },
+            "_source_text": "Gregor Samsa warned Grete to stay back.",
+            "_source_batch_key": "book:1:1",
+        },
+    ]
+
+    clustered = cluster_character_entities(entities)
+
+    assert [item["name"] for item in clustered] == ["Gregor Samsa", "Grete"]
+
+
 def test_resolve_character_reference_from_roster_uses_context_to_match_family_role_reference():
     grete = Character(
         id=uuid.uuid4(),

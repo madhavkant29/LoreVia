@@ -46,7 +46,9 @@ export const metadata: Metadata = {
 }
 
 export default async function PublicLibraryPage() {
-  const books = await listPublicBooksServer().catch(() => [])
+  const books = process.env.NODE_ENV === "production"
+    ? await listPublicBooksServer().catch(() => [])
+    : []
   const collectionJsonLd = buildCollectionPageJsonLd({
     name: "LoreVia Public Library",
     description:

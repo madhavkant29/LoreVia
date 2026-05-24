@@ -170,7 +170,7 @@ async def test_upload_pipeline_stages_and_processes_multiple_chapters(client, db
 
     assert book.status == "ready"
     final_processing_state = (book.writer_workspace or {}).get("processing", {})
-    assert final_processing_state["stage"] == "complete"
+    assert final_processing_state["stage"] == "analysis"
     assert final_processing_state["chapters_completed"] == 3
     assert final_processing_state["chapters_total"] == 3
     assert final_processing_state["progress_pct"] == 100.0

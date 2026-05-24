@@ -1733,13 +1733,13 @@ export default function CharactersPage() {
   }
 
   const pageMenuActions: MenuAction[] = [
-    ...(isAuthorMode ? [{ label: "Add character", onClick: () => { openCreateCharacter(); setPageMenuOpen(false) } }] : []),
+    ...(isAuthorMode ? [{ label: "Open add character", onClick: () => { openCreateCharacter(); setPageMenuOpen(false) } }] : []),
     ...(isAuthorMode ? [{ label: "Open review queue", onClick: () => openReviewQueue() }] : []),
     { label: exporting === "bible" ? "Exporting bible..." : "Export character bible", onClick: () => void handleExportCharacterBible("md"), disabled: exporting === "bible" },
     { label: exporting === "bible" ? "Exporting PDF..." : "Export as PDF", onClick: () => void handleExportCharacterBible("pdf"), disabled: exporting === "bible" },
     { label: "Review duplicate suggestions", onClick: () => { openDuplicateReview(); setPageMenuOpen(false) } },
     ...(isAuthorMode ? [{ label: "Open repair workspace", onClick: () => openRepairWorkspace() }] : []),
-    { label: "Start manual merge", onClick: () => { openManualMerge(); setPageMenuOpen(false) } },
+    { label: "Open manual merge", onClick: () => { openManualMerge(); setPageMenuOpen(false) } },
     { label: refreshingGraph ? "Rebuilding graph..." : "Rebuild relationship graph", onClick: () => void refreshGraph(), disabled: refreshingGraph },
     { label: "Reset filters", onClick: resetFilters },
   ]
@@ -3303,7 +3303,7 @@ export default function CharactersPage() {
                           </div>
                           <div className="mt-3 flex flex-wrap gap-2">
                             <button type="button" onClick={() => openManualMerge(selectedMergePrimary.id, selectedMergeSecondary.id)} className={actionButtonClasses(isDark)}>
-                              Use manual pair
+                              Start manual merge
                             </button>
                             <button
                               type="button"

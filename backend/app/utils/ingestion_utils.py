@@ -374,7 +374,7 @@ def update_book_processing_state(
         parser_diagnostics=effective_parser_diagnostics,
     )
     extraction_status = "running"
-    if status == "ready":
+    if status == "ready" or stage == "analysis":
         extraction_status = "succeeded"
     elif status in {"failed", "error"}:
         extraction_status = "failed"

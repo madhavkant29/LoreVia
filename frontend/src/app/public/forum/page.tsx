@@ -39,13 +39,9 @@ export const metadata: Metadata = {
 }
 
 export default async function PublicForumPage() {
-  const initialData = await listPublicForumPostsServer().catch(() => ({
-    items: [],
-    total: 0,
-    page: 1,
-    page_size: 20,
-    has_more: false,
-  }))
+  const initialData = process.env.NODE_ENV === "production"
+    ? await listPublicForumPostsServer().catch(() => undefined)
+    : undefined
   const collectionJsonLd = buildCollectionPageJsonLd({
     name: "LoreVia Public Forum",
     description:
@@ -56,7 +52,7 @@ export default async function PublicForumPage() {
   const itemListJsonLd = buildItemListJsonLd({
     name: "LoreVia public forum threads",
     path: "/public/forum",
-    items: initialData.items.slice(0, 12).map((post) => ({
+    items: (initialData?.items ?? []).slice(0, 12).map((post) => ({
       name: post.headline,
       path: `/public/forum/${post.id}`,
     })),
