@@ -63,7 +63,7 @@ export function SiteFooter() {
             <p className={`text-[11px] font-semibold uppercase tracking-[0.28em] ${isEditorialMarketingSurface ? "text-[#6fae9f]" : "text-stone-500 dark:text-slate-400"}`}>Navigation</p>
             <div className="mt-6 grid gap-8 sm:grid-cols-2">
               {navigationColumns.map((column, index) => (
-                <div key={index} className="space-y-4">
+                <div key={index} className="flex flex-col items-start gap-4">
                   {column.map((link) =>
                     link.external ? (
                       <a key={link.label} href={link.href} className={footerLinkClass}>

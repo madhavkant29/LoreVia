@@ -2134,9 +2134,9 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
         missing_configuration: [],
         plans: [
           { code: "author_monthly", display_name: "Author", billing_interval: "monthly", price_usd: 29, configured: true, price_id_present: true },
-          { code: "author_annual", display_name: "Author", billing_interval: "annual", price_usd: 290, configured: true, price_id_present: true },
+          { code: "author_annual", display_name: "Author", billing_interval: "annual", price_usd: 249, configured: true, price_id_present: true },
           { code: "architect_monthly", display_name: "Architect", billing_interval: "monthly", price_usd: 49, configured: true, price_id_present: true },
-          { code: "architect_annual", display_name: "Architect", billing_interval: "annual", price_usd: 490, configured: true, price_id_present: true },
+          { code: "architect_annual", display_name: "Architect", billing_interval: "annual", price_usd: 449, configured: true, price_id_present: true },
         ],
         webhook_endpoint_path: "/api/v1/webhooks/paddle",
         supported_webhook_events: ["transaction.completed", "subscription.updated"],

@@ -532,15 +532,6 @@ export default function HomePage() {
                     </Link>
                   </div>
 
-                  <div className="mt-8 flex flex-wrap gap-5 text-sm text-[#9fb0a8]">
-                    {["No credit card", "No AI fluff", "Your story stays private"].map((item) => (
-                      <span key={item} className="inline-flex items-center gap-2">
-                        <span className="h-2 w-2 rounded-full bg-[#5db9a8]" />
-                        {item}
-                      </span>
-                    ))}
-                  </div>
-
                   <div className="mt-9">
                     <p className="text-sm text-[#8fa19a]">Works with your files</p>
                     <div className="mt-4 flex flex-wrap gap-3">
@@ -597,11 +588,11 @@ export default function HomePage() {
             title="Questions worth settling before you start."
             align="center"
           />
-          <div className="mx-auto mt-8 grid max-w-5xl gap-4 md:grid-cols-2">
+          <div className="mx-auto mt-8 grid max-w-5xl items-start gap-4 md:grid-cols-2">
             {faqItems.map((item) => (
               <details
                 key={item.q}
-                className="group rounded-[1.3rem] border border-white/8 bg-[#0d1715] p-5 open:border-[#235f57]"
+                className="group self-start rounded-[1.3rem] border border-white/8 bg-[#0d1715] p-5 open:border-[#235f57]"
               >
                 <summary className="flex cursor-pointer list-none items-center justify-between gap-4 text-lg font-semibold text-white">
                   <span>{item.q}</span>

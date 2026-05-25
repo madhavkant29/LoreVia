@@ -14,7 +14,7 @@
       "tier": "author",
       "display_name": "Author",
       "billing_interval": "annual",
-      "price_usd": 290,
+      "price_usd": 249,
       "checkout_enabled": true,
       "price_id_env_keys": ["PADDLE_AUTHOR_ANNUAL_PRICE_ID", "PADDLE_PRO_ANNUAL_PRICE_ID"]
     },
@@ -32,7 +32,7 @@
       "tier": "architect",
       "display_name": "Architect",
       "billing_interval": "annual",
-      "price_usd": 490,
+      "price_usd": 449,
       "checkout_enabled": true,
       "price_id_env_keys": ["PADDLE_ARCHITECT_ANNUAL_PRICE_ID", "PADDLE_POWER_ANNUAL_PRICE_ID"]
     }
@@ -73,7 +73,7 @@
       "monthly_code": "author_monthly",
       "annual_code": "author_annual",
       "price_monthly": 29,
-      "price_annual": 290,
+      "price_annual": 249,
       "bullets": [
         "Everything in Free, plus:",
         "15 uploads across manuscript and worldbuilding workspaces",
@@ -97,7 +97,7 @@
       "monthly_code": "architect_monthly",
       "annual_code": "architect_annual",
       "price_monthly": 49,
-      "price_annual": 490,
+      "price_annual": 449,
       "bullets": [
         "Everything in Author, plus:",
         "Unlimited uploads, including series-linked worldbuilding",

@@ -1,13 +1,14 @@
 import Link from "next/link"
 import type { Route } from "next"
+import type { UrlObject } from "url"
 
 import { BrandLockup } from "@/components/layout/BrandLockup"
 
-const navItems: Array<{ label: string; href: string }> = [
-  { label: "Features", href: "/#features" },
-  { label: "How it works", href: "/#workflow" },
+const navItems: Array<{ label: string; href: Route | UrlObject }> = [
+  { label: "Features", href: { pathname: "/", hash: "features" } },
+  { label: "How it works", href: { pathname: "/", hash: "workflow" } },
   { label: "Compare", href: "/compare" },
-  { label: "Pricing", href: "/#pricing" },
+  { label: "Pricing", href: { pathname: "/", hash: "pricing" } },
   { label: "Resources", href: "/blog" },
 ]
 

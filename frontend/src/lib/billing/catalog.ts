@@ -35,7 +35,7 @@ export function pricingTierPrice(tier: PricingTier, billingCycle: BillingCycle) 
 
 export function pricingTierPriceSuffix(tier: PricingTier, billingCycle: BillingCycle) {
   if (tier.access === "free") return ""
-  return billingCycle === "annual" ? "/yr" : "/mo"
+  return billingCycle === "annual" ? "/year" : "/mo"
 }
 
 export function pricingTierAnnualSavings(tier: PricingTier) {

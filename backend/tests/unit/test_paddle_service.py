@@ -212,7 +212,7 @@ async def test_get_transaction_summary_derives_annual_interval_from_billing_cycl
                                 }
                             }
                         ],
-                        "details": {"totals": {"total": 29000}},
+                        "details": {"totals": {"total": 24900}},
                         "customer": {"email": "author@getlorevia.com"},
                         "billed_at": "2026-05-24T12:00:00Z",
                     }

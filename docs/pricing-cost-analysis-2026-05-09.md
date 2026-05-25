@@ -1,6 +1,6 @@
 # LoreVia Pricing, Cost, Profit, and Integration Analysis
 
-Last updated: 2026-05-24
+Last updated: 2026-05-25
 
 ## Executive Summary
 
@@ -21,8 +21,8 @@ The repo does not currently position legacy wallet, points, or ad-based monetiza
 Canonical sellable pricing from the shared catalog:
 
 - Free: `$0`
-- Author: `$29/mo` or `$290/yr`
-- Architect: `$49/mo` or `$490/yr`
+- Author: `$29/mo` or `$249/year`
+- Architect: `$49/mo` or `$449/year`
 
 Commercial shape visible to users:
 
@@ -46,8 +46,8 @@ The current codebase positions the tiers like this:
 | Tier | Price | Core monetization posture | Important configured limits |
 | --- | ---: | --- | --- |
 | Free | $0 | acquisition and fallback plan after trial | 1 upload total, 3 searches/day, 1 prediction/day, 2 recall/day, 1 advisor/day, 1 continuity tool use/day |
-| Author | $29/mo or $290/yr | main working plan for active authors | 15 uploads, 30 predictions/day, 30 high-cost turns/day |
-| Architect | $49/mo or $490/yr | heavy-use and series-scale plan | unlimited uploads, 60 predictions/day, 60 high-cost turns/day, priority processing |
+| Author | $29/mo or $249/year | main working plan for active authors | 15 uploads, 30 predictions/day, 30 high-cost turns/day |
+| Architect | $49/mo or $449/year | heavy-use and series-scale plan | unlimited uploads, 60 predictions/day, 60 high-cost turns/day, priority processing |
 
 Implementation notes:
 
@@ -69,20 +69,20 @@ Estimated net revenue per successful transaction before infrastructure, support,
 | --- | ---: | ---: | ---: |
 | Author monthly | $29.00 | $1.95 | $27.05 |
 | Architect monthly | $49.00 | $2.95 | $46.05 |
-| Author annual | $290.00 | $15.00 | $275.00 |
-| Architect annual | $490.00 | $25.00 | $465.00 |
+| Author annual | $249.00 | $12.95 | $236.05 |
+| Architect annual | $449.00 | $22.95 | $426.05 |
 
 Effective net revenue per active month if annual plans are recognized ratably:
 
 | Plan | Net annual revenue | Effective monthly revenue |
 | --- | ---: | ---: |
-| Author annual | $275.00 | $22.92 |
-| Architect annual | $465.00 | $38.75 |
+| Author annual | $236.05 | $19.67 |
+| Architect annual | $426.05 | $35.50 |
 
 Commercial read:
 
 - Annual billing improves cash collection and reduces churn risk, but lowers recognized monthly revenue versus the monthly plan.
-- The current annual discount is exactly two free months on both paid tiers.
+- The current annual discount is `$99` on Author and `$139` on Architect.
 
 ## Model Cost Assumptions
 

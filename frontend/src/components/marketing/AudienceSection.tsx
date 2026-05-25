@@ -16,10 +16,10 @@ const audienceTabs = {
       "Revise with chapter-grounded answers instead of guesswork.",
     ],
     nodes: [
-      { name: "Mira", role: "Ally", trait: "Strategic, observant", x: "65%", y: "14%" },
-      { name: "Kael", role: "Lead", trait: "Driven, conflicted", x: "18%", y: "56%" },
-      { name: "The Old Order", role: "Antagonist", trait: "Watching the harbor", x: "74%", y: "20%" },
-      { name: "Elias", role: "Brother", trait: "Impulsive, loyal", x: "68%", y: "63%" },
+      { name: "Mira", role: "Ally", trait: "Strategic, observant", x: "45%", y: "20%" },
+      { name: "Kael", role: "Lead", trait: "Driven, conflicted", x: "20%", y: "56%" },
+      { name: "The Old Order", role: "Antagonist", trait: "Watching the harbor", x: "86%", y: "35%" },
+      { name: "Elias", role: "Brother", trait: "Impulsive, loyal", x: "76%", y: "73%" },
     ],
   },
   "Beta readers": {
@@ -123,7 +123,7 @@ export function AudienceSection() {
           </Reveal>
 
           <Reveal delay={90}>
-            <div className="relative min-h-[360px] overflow-hidden rounded-[1.75rem] border border-white/10 bg-[#0d1715] p-6">
+            <div className="relative min-h-[420px] overflow-hidden rounded-[1.75rem] border border-white/10 bg-[#0d1715] p-6 xl:min-h-[360px]">
               <div className="absolute inset-x-12 top-14 h-px border-t border-dashed border-[#20443f]" />
               <div className="absolute left-1/2 top-16 h-[58%] w-px -translate-x-1/2 border-l border-dashed border-[#20443f]" />
               <div className="absolute inset-x-16 bottom-24 h-px border-t border-dashed border-[#20443f]" />
@@ -131,7 +131,7 @@ export function AudienceSection() {
               {active.nodes.map((node) => (
                 <article
                   key={node.name}
-                  className="absolute w-[10.5rem] rounded-[1.2rem] border border-white/8 bg-[#111d1a] p-4 shadow-[0_18px_36px_-30px_rgba(0,0,0,0.7)]"
+                  className="absolute w-[min(10.75rem,calc(100%-2rem))] rounded-[1.2rem] border border-white/8 bg-[#111d1a] p-4 shadow-[0_18px_36px_-30px_rgba(0,0,0,0.7)] xl:w-[min(11.5rem,calc(100%-2rem))]"
                   style={{ left: node.x, top: node.y, transform: "translate(-50%, -50%)" }}
                 >
                   <p className="text-sm font-semibold text-white">{node.name}</p>
