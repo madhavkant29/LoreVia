@@ -1,5 +1,6 @@
 const PUBLIC_PAGE_ROUTES = new Set([
   "/",
+  "/compare",
   "/blog",
   "/answers",
   "/compliance",
@@ -22,6 +23,7 @@ const NON_BOOK_TOP_LEVEL_SEGMENTS = new Set([
   "chats",
   "checkout",
   "compliance",
+  "compare",
   "complete-username",
   "contact",
   "copyright",
@@ -54,6 +56,7 @@ const AUTH_BOOTSTRAP_EXCLUDED_PREFIXES = [
   "/answers",
   "/blog",
   "/checkout",
+  "/compare",
   "/complete-username",
   "/demo",
   "/forgot-password",

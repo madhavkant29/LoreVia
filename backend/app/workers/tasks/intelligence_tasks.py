@@ -1,6 +1,7 @@
 """Phase 3 intelligence tasks."""
 import uuid
 
+from app.utils.logging.errors import public_error_message
 from app.workers.celery_app import celery_app
 from app.utils.worker_async_utils import run_worker_coro
 
@@ -71,7 +72,7 @@ def generate_advisor_reply_task(
                         db,
                         job_id=uuid.UUID(job_id),
                         error_code="advisor_generation_failed",
-                        error_detail=str(exc),
+                        error_detail=public_error_message(500),
                     )
 
             run_worker_coro(_mark_failed())
@@ -134,7 +135,7 @@ def generate_series_advisor_reply_task(
                         db,
                         job_id=uuid.UUID(job_id),
                         error_code="advisor_generation_failed",
-                        error_detail=str(exc),
+                        error_detail=public_error_message(500),
                     )
 
             run_worker_coro(_mark_failed())

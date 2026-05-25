@@ -1,11 +1,21 @@
 import uuid
 from datetime import UTC, date, datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps.auth import get_admin
+from app.api.deps.auth import (
+    admin_step_up_active,
+    mark_admin_step_up,
+    require_admin_csrf,
+    require_admin_principal,
+    require_admin_step_up,
+    require_billing_admin,
+    require_moderation_admin,
+    require_owner_admin,
+    require_super_admin,
+)
 from app.core.database import get_db
 from app.core.redis import cache_del, key_public_book_detail, key_public_books
 import app.core.redis
@@ -13,21 +23,53 @@ from app.models.book import Book
 from app.models.moderation import ContentReport, CreatorStrike
 from app.models.character import Character
 from app.models.intelligence import BookChunk, ChapterSummary
-from app.models.user import User, UserRateLimitOverride
+from app.models.user import AdminAuditEvent, AdminPrincipal, User, UserRateLimitOverride
 from app.schemas.admin import (
+    AdminAuditEventOut,
     AdminBookModerationBody,
+    AdminPrincipalGrantBody,
+    AdminPrincipalOut,
+    AdminPrincipalRevokeBody,
     AdminRestoreBookBody,
+    AdminSessionOut,
+    AdminStepUpBody,
     ContentReportAdminOut,
     CreatorStrikeCreateBody,
     CreatorStrikeOut,
     PendingPublicShareOut,
     PublicShareApprovalBody,
     RateLimitOverrideBody,
+    RefundReviewCreateBody,
+    RefundReviewDecisionBody,
+    RefundReviewOut,
     SubscriptionMetricsOut,
     UpdateUserTierBody,
 )
+from app.schemas.billing import BillingStatusOut
+from app.schemas.public import (
+    PublicBookCreateOut,
+    PublicBookManualIn,
+    PublicChapterAppendOut,
+    PublicChapterIn,
+)
+from app.services.admin_service import (
+    grant_admin_principal,
+    list_admin_principals,
+    principal_scope_snapshot,
+    record_admin_audit_event,
+    revoke_admin_principal,
+)
+from app.services.refund_service import (
+    approve_refund_review,
+    create_refund_review_request,
+    deny_refund_review,
+    list_refund_reviews,
+)
+from app.core.security import verify_password
+from app.utils.admin_security import set_admin_csrf_cookie
 from app.utils.billing_utils import (
     VALID_USER_TIERS,
+    billing_configuration_status,
     build_subscription_metrics_summary,
     normalize_tier,
 )
@@ -44,17 +86,244 @@ from app.utils.public_utils import (
     USER_PUBLIC_SHARE_SOURCE_KIND,
     add_moderation_action,
     active_serious_strike_count,
+    append_public_demo_book_chapter,
     get_public_share_status,
+    create_public_demo_book,
 )
 from app.utils.redis_utils import maybe_await
 
 router = APIRouter()
 
 
+def _admin_scopes_from_request(request: Request) -> list[str]:
+    return principal_scope_snapshot(getattr(request.state, "admin_principal", None))
+
+
+async def _record_admin_read(
+    *,
+    db: AsyncSession,
+    request: Request,
+    admin_user: User,
+    action_type: str,
+    reason: str,
+    metadata: dict[str, object] | None = None,
+) -> None:
+    await record_admin_audit_event(
+        db,
+        actor_user_id=admin_user.id,
+        action_type=action_type,
+        result="allowed",
+        reason=reason,
+        request=request,
+        scopes_snapshot=_admin_scopes_from_request(request),
+        metadata=metadata,
+    )
+    await db.commit()
+
+
+@router.get("/session", response_model=AdminSessionOut)
+async def admin_session(
+    request: Request,
+    response: Response,
+    admin_user: User = Depends(require_admin_principal),
+):
+    principal = getattr(request.state, "admin_principal", None)
+    set_admin_csrf_cookie(response)
+    return AdminSessionOut(
+        is_admin=True,
+        scopes=_admin_scopes_from_request(request),
+        is_owner=bool(getattr(principal, "is_owner", False)),
+        requires_step_up=not await admin_step_up_active(request, admin_user.id),
+        session_expires_at=None,
+    )
+
+
+@router.post("/step-up")
+async def admin_step_up(
+    request: Request,
+    body: AdminStepUpBody,
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_admin_csrf),
+    admin_user: User = Depends(require_admin_principal),
+):
+    try:
+        valid = verify_password(body.password, admin_user.password_hash)
+    except Exception:
+        valid = False
+    if not valid:
+        await record_admin_audit_event(
+            db,
+            actor_user_id=admin_user.id,
+            action_type="admin_step_up",
+            result="denied",
+            reason="Invalid password.",
+            request=request,
+            scopes_snapshot=_admin_scopes_from_request(request),
+        )
+        await db.commit()
+        raise HTTPException(403, "Invalid admin verification.")
+    await mark_admin_step_up(request, admin_user.id)
+    await record_admin_audit_event(
+        db,
+        actor_user_id=admin_user.id,
+        action_type="admin_step_up",
+        result="allowed",
+        reason="Recent admin verification completed.",
+        request=request,
+        scopes_snapshot=_admin_scopes_from_request(request),
+    )
+    await db.commit()
+    return {"ok": True}
+
+
+@router.get("/access", response_model=list[AdminPrincipalOut])
+async def get_admin_access(
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(require_owner_admin),
+):
+    principals = await list_admin_principals(db, limit=limit, offset=offset)
+    await _record_admin_read(
+        db=db,
+        request=request,
+        admin_user=admin_user,
+        action_type="admin_access_list_viewed",
+        reason="Viewed admin principal list.",
+        metadata={"limit": limit, "offset": offset},
+    )
+    return principals
+
+
+@router.post("/access", response_model=AdminPrincipalOut)
+async def grant_admin_access(
+    request: Request,
+    body: AdminPrincipalGrantBody,
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_admin_csrf),
+    __: None = Depends(require_admin_step_up),
+    owner_user: User = Depends(require_owner_admin),
+):
+    target_user = await db.get(User, body.user_id)
+    if target_user is None:
+        raise HTTPException(404, "User not found")
+    try:
+        principal = await grant_admin_principal(
+            db,
+            target_user=target_user,
+            granted_by_user_id=owner_user.id,
+            scopes=body.scopes,
+            is_owner=body.is_owner,
+            reason=body.reason,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    await record_admin_audit_event(
+        db,
+        actor_user_id=owner_user.id,
+        target_user_id=target_user.id,
+        action_type="admin_access_granted",
+        result="allowed",
+        reason=body.reason,
+        request=request,
+        scopes_snapshot=_admin_scopes_from_request(request),
+        metadata={"granted_scopes": principal.scopes, "is_owner": principal.is_owner},
+    )
+    await db.commit()
+    await db.refresh(principal)
+    return principal
+
+
+@router.post("/access/{principal_id}/revoke", response_model=AdminPrincipalOut)
+async def revoke_admin_access(
+    request: Request,
+    principal_id: uuid.UUID,
+    body: AdminPrincipalRevokeBody,
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_admin_csrf),
+    __: None = Depends(require_admin_step_up),
+    owner_user: User = Depends(require_owner_admin),
+):
+    principal = await db.get(AdminPrincipal, principal_id)
+    if principal is None:
+        raise HTTPException(404, "Admin principal not found")
+    if principal.user_id == owner_user.id and principal.is_owner:
+        raise HTTPException(409, "Owners cannot revoke their own owner access.")
+    await revoke_admin_principal(
+        db,
+        principal=principal,
+        revoked_by_user_id=owner_user.id,
+        reason=body.reason,
+    )
+    await record_admin_audit_event(
+        db,
+        actor_user_id=owner_user.id,
+        target_user_id=principal.user_id,
+        action_type="admin_access_revoked",
+        result="allowed",
+        reason=body.reason,
+        request=request,
+        scopes_snapshot=_admin_scopes_from_request(request),
+    )
+    await db.commit()
+    await db.refresh(principal)
+    return principal
+
+
+@router.get("/audit", response_model=list[AdminAuditEventOut])
+async def list_admin_audit_events(
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(require_owner_admin),
+):
+    events = list(
+        (
+            await db.execute(
+                select(AdminAuditEvent)
+                .order_by(AdminAuditEvent.created_at.desc())
+                .offset(offset)
+                .limit(limit)
+            )
+        ).scalars().all()
+    )
+    await _record_admin_read(
+        db=db,
+        request=request,
+        admin_user=admin_user,
+        action_type="admin_audit_viewed",
+        reason="Viewed admin audit history.",
+        metadata={"limit": limit, "offset": offset},
+    )
+    return events
+
+
+@router.get("/billing/status", response_model=BillingStatusOut)
+async def get_admin_billing_status(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(require_billing_admin),
+):
+    payload = BillingStatusOut(**billing_configuration_status())
+    await _record_admin_read(
+        db=db,
+        request=request,
+        admin_user=admin_user,
+        action_type="billing_status_viewed",
+        reason="Viewed billing configuration status.",
+    )
+    return payload
+
+
 @router.get("/public-shares/pending", response_model=list[PendingPublicShareOut])
 async def list_pending_public_shares(
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),
-    _=Depends(get_admin),
+    admin_user: User = Depends(require_moderation_admin),
 ):
     rows = (
         await db.execute(
@@ -67,9 +336,11 @@ async def list_pending_public_shares(
                 Book.archived_at.is_(None),
             )
             .order_by(Book.public_share_requested_at.asc(), Book.created_at.asc())
+            .offset(offset)
+            .limit(limit)
         )
     ).all()
-    return [
+    payload = [
         PendingPublicShareOut(
             book_id=str(book.id),
             user_id=str(book.user_id),
@@ -85,15 +356,81 @@ async def list_pending_public_shares(
         )
         for book, username in rows
     ]
+    await _record_admin_read(
+        db=db,
+        request=request,
+        admin_user=admin_user,
+        action_type="public_share_queue_viewed",
+        reason="Viewed pending public-share queue.",
+        metadata={"limit": limit, "offset": offset},
+    )
+    return payload
+
+
+@router.post("/public-books/manual", response_model=PublicBookCreateOut)
+async def create_admin_public_demo_book(
+    request: Request,
+    body: PublicBookManualIn,
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_admin_csrf),
+    __: None = Depends(require_admin_step_up),
+    admin_user: User = Depends(require_moderation_admin),
+):
+    book, payload = await create_public_demo_book(db, admin_user=admin_user, body=body)
+    await record_admin_audit_event(
+        db,
+        actor_user_id=admin_user.id,
+        target_user_id=book.user_id,
+        target_book_id=book.id,
+        action_type="public_demo_book_created",
+        result="allowed",
+        reason="Created public demo book.",
+        request=request,
+        scopes_snapshot=_admin_scopes_from_request(request),
+        metadata={"chapter_count": len(body.chapters), "public_slug": book.public_slug},
+    )
+    await db.commit()
+    return payload
+
+
+@router.post("/public-books/{book_id}/chapters", response_model=PublicChapterAppendOut)
+async def append_admin_public_demo_book_chapter(
+    request: Request,
+    book_id: uuid.UUID,
+    body: PublicChapterIn,
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_admin_csrf),
+    __: None = Depends(require_admin_step_up),
+    admin_user: User = Depends(require_moderation_admin),
+):
+    book, payload = await append_public_demo_book_chapter(db, book_id=book_id, body=body)
+    await record_admin_audit_event(
+        db,
+        actor_user_id=admin_user.id,
+        target_user_id=book.user_id,
+        target_book_id=book.id,
+        action_type="public_demo_book_chapter_appended",
+        result="allowed",
+        reason="Appended chapter to public demo book.",
+        request=request,
+        scopes_snapshot=_admin_scopes_from_request(request),
+        metadata={"chapter_number": payload.chapter_number},
+    )
+    await db.commit()
+    return payload
 
 
 @router.put("/public-shares/{book_id}")
 async def review_public_share(
+    request: Request,
     book_id: uuid.UUID,
     body: PublicShareApprovalBody,
     db: AsyncSession = Depends(get_db),
-    admin_user: User = Depends(get_admin),
+    _: None = Depends(require_admin_csrf),
+    admin_user: User = Depends(require_moderation_admin),
 ):
+    if not body.approved and not (body.reason or "").strip():
+        raise HTTPException(400, "A reason is required when rejecting public sharing.")
     book = await db.get(Book, book_id)
     if not book:
         raise HTTPException(404, "Book not found")
@@ -128,6 +465,18 @@ async def review_public_share(
         book.source_kind = USER_PUBLIC_SHARE_SOURCE_KIND
         visibility = "private"
 
+    await record_admin_audit_event(
+        db,
+        actor_user_id=admin_user.id,
+        target_user_id=book.user_id,
+        target_book_id=book.id,
+        action_type="public_share_reviewed",
+        result="allowed",
+        reason=(body.reason or "Public share approved.").strip(),
+        request=request,
+        scopes_snapshot=_admin_scopes_from_request(request),
+        metadata={"approved": body.approved},
+    )
     await db.commit()
     await cache_del(key_public_books())
     await cache_del(key_public_book_detail(str(book.id)))
@@ -140,7 +489,11 @@ async def review_public_share(
 
 
 @router.get("/metrics")
-async def metrics(db: AsyncSession = Depends(get_db), _=Depends(get_admin)):
+async def metrics(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(require_super_admin),
+):
     users = (await db.execute(select(func.count()).select_from(User))).scalar()
     books = (await db.execute(select(func.count()).select_from(Book))).scalar()
     chars = (await db.execute(select(func.count()).select_from(Character))).scalar()
@@ -148,20 +501,29 @@ async def metrics(db: AsyncSession = Depends(get_db), _=Depends(get_admin)):
     summaries = (await db.execute(select(func.count()).select_from(ChapterSummary))).scalar()
     r = await app.core.redis.get_redis()
     mem = await r.info("memory")
-    return {
+    payload = {
         "users": users, "books": books, "characters": chars,
         "chunks_indexed": chunks, "summaries_cached": summaries,
         "redis_memory_mb": round(mem.get("used_memory", 0) / 1024 / 1024, 2),
     }
+    await _record_admin_read(
+        db=db,
+        request=request,
+        admin_user=admin_user,
+        action_type="admin_metrics_viewed",
+        reason="Viewed admin metrics.",
+    )
+    return payload
 
 
 @router.get("/subscription-metrics", response_model=SubscriptionMetricsOut)
 async def subscription_metrics(
+    request: Request,
     start_date: date | None = None,
     end_date: date | None = None,
     reactivation_window_days: int = 30,
     db: AsyncSession = Depends(get_db),
-    _=Depends(get_admin),
+    admin_user: User = Depends(require_billing_admin),
 ):
     today = datetime.now(UTC).date()
     resolved_end_date = end_date or today
@@ -172,25 +534,169 @@ async def subscription_metrics(
         cohort_end=resolved_end_date,
         reactivation_window_days=reactivation_window_days,
     )
+    await _record_admin_read(
+        db=db,
+        request=request,
+        admin_user=admin_user,
+        action_type="subscription_metrics_viewed",
+        reason="Viewed subscription metrics.",
+        metadata={
+            "start_date": resolved_start_date.isoformat(),
+            "end_date": resolved_end_date.isoformat(),
+            "reactivation_window_days": reactivation_window_days,
+        },
+    )
     return SubscriptionMetricsOut(**summary.__dict__)
 
 
+@router.get("/refunds/reviews", response_model=list[RefundReviewOut])
+async def get_refund_reviews(
+    request: Request,
+    status: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(require_billing_admin),
+):
+    reviews = await list_refund_reviews(db, status=status, limit=limit, offset=offset)
+    await _record_admin_read(
+        db=db,
+        request=request,
+        admin_user=admin_user,
+        action_type="refund_review_list_viewed",
+        reason="Viewed refund review list.",
+        metadata={"status": status, "limit": limit, "offset": offset},
+    )
+    return reviews
+
+
+@router.post("/refunds/reviews", response_model=RefundReviewOut)
+async def create_refund_review(
+    request: Request,
+    body: RefundReviewCreateBody,
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_admin_csrf),
+    __: None = Depends(require_admin_step_up),
+    admin_user: User = Depends(require_billing_admin),
+):
+    review = await create_refund_review_request(
+        db,
+        transaction_id=body.transaction_id,
+        request_reason=body.reason,
+        request_source=body.request_source,
+        support_reference=body.support_reference,
+        requested_by_admin_user_id=admin_user.id,
+    )
+    await record_admin_audit_event(
+        db,
+        actor_user_id=admin_user.id,
+        target_user_id=review.user_id,
+        target_refund_review_id=review.id,
+        action_type="refund_review_created",
+        result="allowed",
+        reason=body.reason,
+        request=request,
+        scopes_snapshot=_admin_scopes_from_request(request),
+        metadata={"status": review.status, "transaction_id": review.paddle_transaction_id},
+    )
+    await db.commit()
+    return review
+
+
+@router.post("/refunds/reviews/{review_id}/approve", response_model=RefundReviewOut)
+async def approve_refund_review_request(
+    request: Request,
+    review_id: uuid.UUID,
+    body: RefundReviewDecisionBody,
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_admin_csrf),
+    __: None = Depends(require_admin_step_up),
+    admin_user: User = Depends(require_billing_admin),
+):
+    review = await approve_refund_review(
+        db,
+        review_id=review_id,
+        resolved_by_admin_user_id=admin_user.id,
+        reason=body.reason,
+        provider_followup_only=body.provider_followup_only,
+    )
+    await record_admin_audit_event(
+        db,
+        actor_user_id=admin_user.id,
+        target_user_id=review.user_id,
+        target_refund_review_id=review.id,
+        action_type="refund_review_approved",
+        result="allowed",
+        reason=body.reason,
+        request=request,
+        scopes_snapshot=_admin_scopes_from_request(request),
+        metadata={"status": review.status},
+    )
+    await db.commit()
+    return review
+
+
+@router.post("/refunds/reviews/{review_id}/deny", response_model=RefundReviewOut)
+async def deny_refund_review_request(
+    request: Request,
+    review_id: uuid.UUID,
+    body: RefundReviewDecisionBody,
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_admin_csrf),
+    __: None = Depends(require_admin_step_up),
+    admin_user: User = Depends(require_billing_admin),
+):
+    review = await deny_refund_review(
+        db,
+        review_id=review_id,
+        resolved_by_admin_user_id=admin_user.id,
+        reason=body.reason,
+    )
+    await record_admin_audit_event(
+        db,
+        actor_user_id=admin_user.id,
+        target_user_id=review.user_id,
+        target_refund_review_id=review.id,
+        action_type="refund_review_denied",
+        result="allowed",
+        reason=body.reason,
+        request=request,
+        scopes_snapshot=_admin_scopes_from_request(request),
+        metadata={"status": review.status},
+    )
+    await db.commit()
+    return review
+
+
 @router.get("/queue-depth")
-async def queue_depth(_=Depends(get_admin)):
+async def queue_depth(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(require_super_admin),
+):
     r = await app.core.redis.get_redis()
-    return {
+    payload = {
         "extraction": await maybe_await(r.llen("extraction")),
         "analysis": await maybe_await(r.llen("analysis")),
         "embedding": await maybe_await(r.llen("embedding")),
         "intelligence": await maybe_await(r.llen("intelligence")),
     }
+    await _record_admin_read(
+        db=db,
+        request=request,
+        admin_user=admin_user,
+        action_type="queue_depth_viewed",
+        reason="Viewed worker queue depths.",
+    )
+    return payload
 
 
 @router.get("/rate-limits/{user_id}")
 async def get_rate_limit_override(
+    request: Request,
     user_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _=Depends(get_admin),
+    admin_user: User = Depends(require_super_admin),
 ):
     user = await db.get(User, user_id)
     if not user:
@@ -200,7 +706,7 @@ async def get_rate_limit_override(
             select(UserRateLimitOverride).where(UserRateLimitOverride.user_id == user_id)
         )
     ).scalars().first()
-    return {
+    payload = {
         "user_id": str(user_id),
         "email": user.email,
         "override": {
@@ -210,14 +716,25 @@ async def get_rate_limit_override(
             "api_per_minute": override.api_per_minute if override else None,
         },
     }
+    await _record_admin_read(
+        db=db,
+        request=request,
+        admin_user=admin_user,
+        action_type="rate_limit_override_viewed",
+        reason="Viewed user rate limit override.",
+        metadata={"target_user_id": str(user_id)},
+    )
+    return payload
 
 
 @router.put("/rate-limits/{user_id}")
 async def upsert_rate_limit_override(
+    request: Request,
     user_id: uuid.UUID,
     body: RateLimitOverrideBody,
     db: AsyncSession = Depends(get_db),
-    _=Depends(get_admin),
+    _: None = Depends(require_admin_csrf),
+    admin_user: User = Depends(require_super_admin),
 ):
     user = await db.get(User, user_id)
     if not user:
@@ -235,18 +752,33 @@ async def upsert_rate_limit_override(
     override.summary_per_hour = body.summary_per_hour
     override.chat_per_day = body.chat_per_day
     override.api_per_minute = body.api_per_minute
+    await record_admin_audit_event(
+        db,
+        actor_user_id=admin_user.id,
+        target_user_id=user_id,
+        action_type="rate_limit_override_updated",
+        result="allowed",
+        reason="Admin rate limit override updated.",
+        request=request,
+        scopes_snapshot=_admin_scopes_from_request(request),
+    )
     await db.commit()
     return {"ok": True, "user_id": str(user_id)}
 
 
 @router.put("/users/{user_id}/tier")
 async def update_user_tier(
+    request: Request,
     user_id: uuid.UUID,
     body: UpdateUserTierBody,
     db: AsyncSession = Depends(get_db),
-    _=Depends(get_admin),
+    _: None = Depends(require_admin_csrf),
+    __: None = Depends(require_admin_step_up),
+    admin_user: User = Depends(require_super_admin),
 ):
     tier = normalize_tier(body.tier)
+    if tier == "admin":
+        raise HTTPException(400, "Admin access is managed through admin principals, not user tiers.")
     if tier not in VALID_USER_TIERS:
         raise HTTPException(400, f"Invalid tier. Must be one of: {', '.join(sorted(VALID_USER_TIERS))}")
 
@@ -255,21 +787,35 @@ async def update_user_tier(
         raise HTTPException(404, "User not found")
 
     user.tier = tier
+    await record_admin_audit_event(
+        db,
+        actor_user_id=admin_user.id,
+        target_user_id=user.id,
+        action_type="user_tier_updated",
+        result="allowed",
+        reason=f"Changed product tier to {tier}.",
+        request=request,
+        scopes_snapshot=_admin_scopes_from_request(request),
+        metadata={"tier": tier},
+    )
     await db.commit()
     return {"ok": True, "user_id": str(user_id), "tier": tier}
 
 
 @router.get("/reports", response_model=list[ContentReportAdminOut])
 async def list_content_reports(
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),
-    _=Depends(get_admin),
+    admin_user: User = Depends(require_moderation_admin),
 ):
     reports = (
         await db.execute(
-            select(ContentReport).order_by(ContentReport.created_at.desc())
+            select(ContentReport).order_by(ContentReport.created_at.desc()).offset(offset).limit(limit)
         )
     ).scalars().all()
-    return [
+    payload = [
         ContentReportAdminOut(
             id=str(report.id),
             reported_book_id=str(report.reported_book_id),
@@ -284,14 +830,26 @@ async def list_content_reports(
         )
         for report in reports
     ]
+    await _record_admin_read(
+        db=db,
+        request=request,
+        admin_user=admin_user,
+        action_type="content_reports_viewed",
+        reason="Viewed content report list.",
+        metadata={"limit": limit, "offset": offset},
+    )
+    return payload
 
 
 @router.post("/books/{book_id}/hide")
 async def hide_public_book(
+    request: Request,
     book_id: uuid.UUID,
     body: AdminBookModerationBody,
     db: AsyncSession = Depends(get_db),
-    admin_user: User = Depends(get_admin),
+    _: None = Depends(require_admin_csrf),
+    __: None = Depends(require_admin_step_up),
+    admin_user: User = Depends(require_moderation_admin),
 ):
     book = await db.get(Book, book_id)
     if book is None:
@@ -313,16 +871,30 @@ async def hide_public_book(
         new_status=book.moderation_status,
         reason=body.reason,
     )
+    await record_admin_audit_event(
+        db,
+        actor_user_id=admin_user.id,
+        target_user_id=book.user_id,
+        target_book_id=book.id,
+        action_type="book_hidden",
+        result="allowed",
+        reason=body.reason,
+        request=request,
+        scopes_snapshot=_admin_scopes_from_request(request),
+    )
     await db.commit()
     return {"ok": True, "book_id": str(book.id), "moderation_status": book.moderation_status}
 
 
 @router.post("/books/{book_id}/remove")
 async def remove_public_book(
+    request: Request,
     book_id: uuid.UUID,
     body: AdminBookModerationBody,
     db: AsyncSession = Depends(get_db),
-    admin_user: User = Depends(get_admin),
+    _: None = Depends(require_admin_csrf),
+    __: None = Depends(require_admin_step_up),
+    admin_user: User = Depends(require_moderation_admin),
 ):
     book = await db.get(Book, book_id)
     if book is None:
@@ -344,16 +916,30 @@ async def remove_public_book(
         new_status=book.moderation_status,
         reason=body.reason,
     )
+    await record_admin_audit_event(
+        db,
+        actor_user_id=admin_user.id,
+        target_user_id=book.user_id,
+        target_book_id=book.id,
+        action_type="book_removed",
+        result="allowed",
+        reason=body.reason,
+        request=request,
+        scopes_snapshot=_admin_scopes_from_request(request),
+    )
     await db.commit()
     return {"ok": True, "book_id": str(book.id), "moderation_status": book.moderation_status}
 
 
 @router.post("/books/{book_id}/restore")
 async def restore_public_book(
+    request: Request,
     book_id: uuid.UUID,
     body: AdminRestoreBookBody,
     db: AsyncSession = Depends(get_db),
-    admin_user: User = Depends(get_admin),
+    _: None = Depends(require_admin_csrf),
+    __: None = Depends(require_admin_step_up),
+    admin_user: User = Depends(require_moderation_admin),
 ):
     book = await db.get(Book, book_id)
     if book is None:
@@ -375,16 +961,30 @@ async def restore_public_book(
         new_status=book.moderation_status,
         reason=body.reason,
     )
+    await record_admin_audit_event(
+        db,
+        actor_user_id=admin_user.id,
+        target_user_id=book.user_id,
+        target_book_id=book.id,
+        action_type="book_restored",
+        result="allowed",
+        reason=body.reason,
+        request=request,
+        scopes_snapshot=_admin_scopes_from_request(request),
+    )
     await db.commit()
     return {"ok": True, "book_id": str(book.id), "moderation_status": book.moderation_status}
 
 
 @router.post("/users/{user_id}/strikes", response_model=CreatorStrikeOut)
 async def add_creator_strike(
+    request: Request,
     user_id: uuid.UUID,
     body: CreatorStrikeCreateBody,
     db: AsyncSession = Depends(get_db),
-    admin_user: User = Depends(get_admin),
+    _: None = Depends(require_admin_csrf),
+    __: None = Depends(require_admin_step_up),
+    admin_user: User = Depends(require_moderation_admin),
 ):
     user = await db.get(User, user_id)
     if user is None:
@@ -412,6 +1012,19 @@ async def add_creator_strike(
         previous_status=None,
         new_status=f"serious_strikes:{serious_count}",
         reason=body.reason,
+        metadata={"severity": body.severity, "strike_type": body.strike_type},
+    )
+    await record_admin_audit_event(
+        db,
+        actor_user_id=admin_user.id,
+        target_user_id=user_id,
+        target_book_id=strike.book_id,
+        target_report_id=strike.report_id,
+        action_type="strike_added",
+        result="allowed",
+        reason=body.reason,
+        request=request,
+        scopes_snapshot=_admin_scopes_from_request(request),
         metadata={"severity": body.severity, "strike_type": body.strike_type},
     )
     await db.commit()

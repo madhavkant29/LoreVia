@@ -991,7 +991,12 @@ function ManuscriptPageInner() {
     setLogicSelectionText(selectedText)
     setTighteningSelection(true)
     try {
-      const payload = await intelligenceApi.proseTighten(bookId, selectedText, activeChapterNumber)
+      const payload = await intelligenceApi.proseTightenStream(
+        bookId,
+        selectedText,
+        activeChapterNumber,
+        { onStage: setStatusMessage },
+      )
       if (!payload.tightened_text || payload.tightened_text === selectedText) {
         setStatusMessage("No tighter rewrite was needed for the selected passage.")
         return

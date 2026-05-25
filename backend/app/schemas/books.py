@@ -73,6 +73,7 @@ class BookOut(BaseModel):
     public_status: str = "draft"
     public_slug: str | None = None
     published_at: datetime | None = None
+    public_updated_at: datetime | None = None
     public_visibility: str = "private"
     rights_confirmation: bool = False
     rights_confirmation_at: datetime | None = None

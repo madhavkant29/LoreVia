@@ -44,6 +44,7 @@ export default function VoiceConsistencyPage() {
   const [reviewLoading, setReviewLoading] = useState(false)
   const [saveStatus, setSaveStatus] = useState<string | null>(null)
   const [reviewError, setReviewError] = useState<string | null>(null)
+  const [reviewProgress, setReviewProgress] = useState<string | null>(null)
   const [review, setReview] = useState<VoiceConsistencyReview | null>(null)
   const [voiceCharacters, setVoiceCharacters] = useState<string[]>([])
   const [voiceMatches, setVoiceMatches] = useState<VoiceConsistencyMatch[]>([])
@@ -129,11 +130,17 @@ export default function VoiceConsistencyPage() {
   const runReview = async () => {
     const trimmed = text.trim()
     if (!trimmed) return
+    const targetBookId = book?.id || bookId
     setReviewLoading(true)
     setSaveStatus(null)
     setReviewError(null)
+    setReviewProgress(null)
     try {
-      const result = await intelligenceApi.voiceConsistencyReview(bookId, trimmed, selectedChapter ?? undefined)
+      const result = await intelligenceApi.voiceConsistencyReview(
+        targetBookId,
+        trimmed,
+        selectedChapter ?? undefined,
+      )
       setReview(result.review)
       setVoiceCharacters(result.characters_reviewed)
       setVoiceMatches(result.character_matches ?? [])
@@ -144,6 +151,7 @@ export default function VoiceConsistencyPage() {
       setReviewError(getApiErrorDetail(error) ?? "Could not run the voice review right now. Please try again.")
     } finally {
       setReviewLoading(false)
+      setReviewProgress(null)
     }
   }
 
@@ -305,6 +313,9 @@ export default function VoiceConsistencyPage() {
                     <p className={`mt-3 rounded-[0.95rem] border px-3 py-2 text-sm ${isDark ? "border-rose-500/30 bg-rose-500/10 text-rose-200" : "border-rose-200 bg-rose-50 text-rose-700"}`}>
                       {reviewError}
                     </p>
+                  ) : null}
+                  {reviewLoading && reviewProgress ? (
+                    <p className={`mt-3 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>{reviewProgress}</p>
                   ) : null}
                   {saveStatus ? <p className={`mt-3 text-sm ${isDark ? "text-emerald-300" : "text-emerald-700"}`}>{saveStatus}</p> : null}
                 </div>

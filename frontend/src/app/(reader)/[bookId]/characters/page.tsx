@@ -9,7 +9,6 @@ import { useParams, useRouter } from "next/navigation"
 import { booksApi } from "@/lib/api/books"
 import { CONFIDENCE_THRESHOLDS } from "@/lib/constants"
 import { useBookDetail } from "@/lib/hooks/useBookDetail"
-import { intelligenceApi } from "@/lib/api/intelligence"
 import { asQueryKey, bookCacheKey, readerCacheKey } from "@/lib/query/cacheKeys"
 import { readerApi } from "@/lib/api/reader"
 import { saveContextualVaultNote } from "@/lib/utils/notes"
@@ -22,7 +21,6 @@ import type {
   CharacterReviewResponse,
   RelationshipGraph as RelationshipGraphData,
 } from "@/types/character"
-import type { ChatMessage } from "@/types/intelligence"
 import type { ReadingProgress, SearchResult } from "@/types/reader"
 
 const RelationshipGraph = dynamic(
@@ -66,7 +64,7 @@ type RelationshipComposerDraft = {
 }
 
 type CharacterTab = "overview" | "relationships" | "arc" | "evidence" | "continuity" | "notes"
-type SidebarTab = "insights" | "evidence" | "ask"
+type SidebarTab = "insights" | "evidence"
 type CastFilter = "all" | "main" | "minor" | "needs-review" | "duplicates"
 type WorkspaceMode = "profile" | "review" | "duplicates" | "repair"
 
@@ -722,10 +720,6 @@ export default function CharactersPage() {
   const [relationshipDraft, setRelationshipDraft] = useState<RelationshipComposerDraft>(buildRelationshipDraft(1))
   const [createRelationshipBusy, setCreateRelationshipBusy] = useState(false)
   const [graphOverrideBusy, setGraphOverrideBusy] = useState(false)
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
-  const [chatInput, setChatInput] = useState("")
-  const [chatLoading, setChatLoading] = useState(false)
-  const [chatHint, setChatHint] = useState<string | null>(null)
   const [evidenceCache, setEvidenceCache] = useState<Record<string, EvidenceCacheEntry>>({})
   const [evidenceLoadingId, setEvidenceLoadingId] = useState<string | null>(null)
   const [evidenceError, setEvidenceError] = useState<string | null>(null)
@@ -1063,12 +1057,6 @@ export default function CharactersPage() {
   }, [chars, relationshipChapter, selectedCharacter?.id])
 
   useEffect(() => {
-    setChatMessages([])
-    setChatInput("")
-    setChatHint(null)
-  }, [selectedCharacter?.id])
-
-  useEffect(() => {
     setCharacterMenuOpen(false)
     setPageMenuOpen(false)
   }, [selectedId, selectedMergeKey, workspaceMode])
@@ -1387,30 +1375,6 @@ export default function CharactersPage() {
     }
   }
 
-  async function handleCharacterChat() {
-    if (!selectedCharacter || !chatInput.trim()) return
-    const nextMessages: ChatMessage[] = [...chatMessages, { role: "user", content: chatInput.trim() }]
-    setChatMessages(nextMessages)
-    setChatInput("")
-    setChatLoading(true)
-    setChatHint(null)
-    try {
-      const response = await intelligenceApi.chat(
-        bookId,
-        selectedCharacter.id,
-        nextMessages,
-        relationshipChapter,
-        selectedCharacterSummary,
-      )
-      setChatMessages([...nextMessages, { role: "assistant", content: response.reply }])
-      setChatHint(response.grounded_hint ?? null)
-    } catch {
-      setChatMessages([...nextMessages, { role: "assistant", content: "I cannot answer that right now." }])
-    } finally {
-      setChatLoading(false)
-    }
-  }
-
   function openCharacterEvidence() {
     if (!selectedCharacter) return
     setWorkspaceMode("profile")
@@ -1449,11 +1413,6 @@ export default function CharactersPage() {
     } catch {
       setActionError("Could not save this character to the notes workspace.")
     }
-  }
-
-  function openCharacterChat() {
-    setWorkspaceMode("profile")
-    setSidebarTab("ask")
   }
 
   function openRelationships() {
@@ -3491,7 +3450,6 @@ export default function CharactersPage() {
                       {([
                         ["insights", "Insights"],
                         ["evidence", "Evidence"],
-                        ["ask", "Ask Character"],
                       ] as Array<[SidebarTab, string]>).map(([value, label]) => (
                         <button
                           key={value}
@@ -3539,7 +3497,6 @@ export default function CharactersPage() {
                             <QuickActionTile isDark={isDark} title="Review duplicates" description={mergeSuggestions.length > 0 ? `${mergeSuggestions.length} suggestions ready for review.` : "No suggestion yet? Start a manual merge for this character."} onClick={() => openDuplicateReview(selectedCharacter.id)} />
                             <QuickActionTile isDark={isDark} title="Manual merge" description="Choose another record and merge it yourself." onClick={() => openManualMerge(selectedCharacter.id)} />
                             <QuickActionTile isDark={isDark} title={partitioning ? "Splitting..." : "Split card"} description="Break one merged record into separate character cards and keep the new profiles." onClick={() => void handlePartitionCharacter()} />
-                            <QuickActionTile isDark={isDark} title="Ask as character" description="Simulate a grounded reply in voice." onClick={openCharacterChat} />
                           </div>
                         </section>
 
@@ -3626,56 +3583,6 @@ export default function CharactersPage() {
                       </div>
                     ) : null}
 
-                    {sidebarTab === "ask" ? (
-                      <div className="mt-4 space-y-4">
-                        <section className={`rounded-[1.2rem] border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50/75"}`}>
-                          <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-violet-300" : "text-violet-700"}`}>Ask Character</p>
-                          <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-                            Replies use extracted personality, motivations, fears, relationships, and growth evidence up to chapter {relationshipChapter}.
-                          </p>
-
-                          <div className={`mt-4 max-h-[340px] space-y-2 overflow-y-auto rounded-[1rem] border p-3 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-white"}`}>
-                            {chatMessages.length === 0 ? (
-                              <p className={`text-sm ${isDark ? "text-slate-500" : "text-stone-500"}`}>Ask {selectedCharacter.name} something in their own voice.</p>
-                            ) : null}
-                            {chatMessages.map((message, index) => (
-                              <div
-                                key={`${message.role}-${index}`}
-                                className={`rounded-xl px-3 py-2 text-sm leading-6 ${message.role === "user"
-                                  ? isDark ? "bg-violet-500/15 text-violet-100" : "bg-violet-50 text-violet-800"
-                                  : isDark ? "bg-white/[0.05] text-slate-200" : "bg-stone-50 text-stone-700"
-                                }`}
-                              >
-                                {message.content}
-                              </div>
-                            ))}
-                            {chatLoading ? <p className={`text-sm ${isDark ? "text-slate-500" : "text-stone-500"}`}>{selectedCharacter.name} is answering...</p> : null}
-                          </div>
-
-                          {chatHint ? <p className={`mt-2 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{chatHint}</p> : null}
-
-                          <div className="mt-3 flex gap-2">
-                            <input
-                              value={chatInput}
-                              onChange={(event) => setChatInput(event.target.value)}
-                              onKeyDown={(event) => {
-                                if (event.key === "Enter") void handleCharacterChat()
-                              }}
-                              placeholder={`Ask ${selectedCharacter.name}...`}
-                              className={`min-w-0 flex-1 rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
-                            />
-                            <button
-                              type="button"
-                              onClick={() => void handleCharacterChat()}
-                              disabled={chatLoading || !chatInput.trim()}
-                              className="rounded-xl bg-[linear-gradient(135deg,#8b5cf6,#6d28d9)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-                            >
-                              Send
-                            </button>
-                          </div>
-                        </section>
-                      </div>
-                    ) : null}
                   </div>
                 ) : null}
 
@@ -3747,6 +3654,29 @@ export default function CharactersPage() {
                               }}
                             />
                           </div>
+                        </section>
+
+                        <section className={`rounded-[1.2rem] border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50/75"}`}>
+                          <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Relationship queue</p>
+                          {filteredRelationshipCandidates.length > 0 ? (
+                            <div className="mt-4 space-y-3">
+                              {filteredRelationshipCandidates.slice(0, 4).map((candidate) => (
+                                <div key={`duplicate-review-${candidate.id}`} className={`rounded-xl border px-3 py-3 ${isDark ? "border-white/8 bg-black/20" : "border-stone-200 bg-white"}`}>
+                                  <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{candidate.raw_character_a} and {candidate.raw_character_b}</p>
+                                  <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>
+                                    Chapter {candidate.chapter_number}{candidate.rel_type ? ` · ${formatRelationshipType(candidate.rel_type)}` : ""}
+                                  </p>
+                                  <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
+                                    {candidate.description || candidate.reason_codes[0] || "Needs relationship review."}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className={`mt-4 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+                              No unresolved relationship candidates match the current filters.
+                            </p>
+                          )}
                         </section>
                       </div>
                     ) : (

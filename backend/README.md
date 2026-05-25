@@ -60,7 +60,6 @@ Notes:
 | GET | /api/v1/reader/{id}/relationships?chapter=N | Relationship graph |
 | GET | /api/v1/reader/{id}/search?q=X&chapter=N | Semantic search |
 | GET | /api/v1/reader/{id}/recall | Memory recall |
-| POST | /api/v1/intelligence/{id}/chat/{char_id} | Character chat |
 
 
 ## Targeted backend auth/security verification

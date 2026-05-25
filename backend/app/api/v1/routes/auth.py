@@ -71,6 +71,7 @@ from app.utils.auth_cookies import (
 )
 from app.utils.auth_utils import current_token_version, next_token_version, normalize_device_id, normalize_email, password_is_valid
 from app.utils.billing_utils import build_tier_presentation
+from app.utils.logging.errors import public_error_message
 from app.utils.user_utils import (
     current_daily_word_count,
     current_daily_word_goal,
@@ -161,8 +162,8 @@ async def register(
     email = normalize_email(body.email)
     try:
         device_id = normalize_device_id(body.device_id)
-    except ValueError as exc:
-        raise HTTPException(400, str(exc))
+    except ValueError:
+        raise HTTPException(400, "Invalid device identifier.")
     username = (body.username or "").strip()
     if not body.accepted_terms:
         raise HTTPException(400, "You must accept the Terms, Compliance notice, and EULA to create an account.")
@@ -175,8 +176,8 @@ async def register(
         raise HTTPException(400, "Username already taken")
     try:
         await ensure_device_trial_available(db, device_id)
-    except DeviceTrialLimitError as exc:
-        raise HTTPException(403, str(exc))
+    except DeviceTrialLimitError:
+        raise HTTPException(403, f"This device has already used the maximum of {settings.DEVICE_TRIAL_MAX_ACCOUNTS} trial accounts.")
     user = User(
         email=email,
         username=username,
@@ -274,16 +275,16 @@ async def oauth_supabase(
         if not existing:
             try:
                 device_id = normalize_device_id(body.device_id)
-            except ValueError as exc:
-                raise HTTPException(400, str(exc))
+            except ValueError:
+                raise HTTPException(400, "Invalid device identifier.")
             local_supabase_recovery = settings.DEBUG
             if not body.accepted_terms and not local_supabase_recovery:
                 raise HTTPException(400, "You must accept the Terms, Compliance notice, and EULA before creating an account with Google.")
             if not local_supabase_recovery:
                 try:
                     await ensure_device_trial_available(db, device_id)
-                except DeviceTrialLimitError as exc:
-                    raise HTTPException(403, str(exc))
+                except DeviceTrialLimitError:
+                    raise HTTPException(403, f"This device has already used the maximum of {settings.DEVICE_TRIAL_MAX_ACCOUNTS} trial accounts.")
             existing = User(
                 email=email,
                 password_hash=hash_password(str(uuid.uuid4())),
@@ -324,7 +325,7 @@ async def oauth_supabase(
             "Supabase OAuth login failed after verification",
             extra={"email": email, "has_existing_user": bool(existing) if "existing" in locals() else False},
         )
-        raise
+        raise HTTPException(500, public_error_message(500))
 
 
 @router.post("/forgot-password")

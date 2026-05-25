@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import re
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
+from typing import Any, cast as type_cast
 
 from fastapi import HTTPException, Request
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy import Numeric, and_, case, cast, func, literal, literal_column, or_, select
+from sqlalchemy import Numeric, and_, case, cast, delete, func, literal, literal_column, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -15,19 +17,26 @@ from app.core.redis import (
     cache_del,
     cache_set_version_marker,
     get_public_profile_cache_version,
+    key_public_book_detail,
     get_public_user_profile_cache,
     key_public_books,
+    key_public_chapter,
     key_public_forum_cache_version,
     mark_public_profile_cache_dirty,
     set_public_user_profile_cache,
 )
+from app.core.storage import download_book, upload_text
 from app.models.beta_read import BetaReadAssignment
-from app.models.book import Book, BookForumComment, BookForumCommentReaction, BookForumInterest, BookForumPost, BookForumPostReaction, Chapter, PublicBookAnalyticsEvent
+from app.models.book import Book, BookForumComment, BookForumCommentReaction, BookForumInterest, BookForumPost, BookForumPostReaction, Chapter, PublicBookAnalyticsEvent, PublicBookRanking
+from app.models.character import Character
 from app.models.intelligence import Notification
 from app.models.moderation import ContentReport, CreatorStrike, ModerationAction
 from app.models.user import User
+from app.parsers.chunker import count_tokens
 from app.schemas.public import (
     PublicAuthorAnalyticsOut,
+    PublicBookListOut,
+    PublicBookCreateOut,
     PublicForumCommentCreateBody,
     PublicForumCommentOut,
     PublicForumInterestCreateBody,
@@ -42,12 +51,19 @@ from app.schemas.public import (
     PublicUserActivityCommentOut,
     PublicUserActivityPostOut,
     PublicBookAnalyticsOut,
+    PublicBookManualIn,
     PublicBookOut,
+    PublicChapterAppendOut,
+    PublicChapterIn,
+    PublicRankedBookListOut,
+    PublicRankingMetadataOut,
     PublicUserProfileOut,
     PublicUserProjectOut,
 )
 from app.utils.billing_utils import has_authoring_access
 from app.utils.beta_read_utils import NEUTRAL_RATING_MIN, POSITIVE_RATING_MIN, RATED_ASSIGNMENT_STATES
+from app.utils.book_utils import build_story_health_payload, deserialize_manuscript_content, estimate_readability
+from app.utils.character_utils import is_displayable_character
 
 FORUM_POST_OPEN = "open"
 FORUM_POST_CLOSED = "closed"
@@ -162,10 +178,69 @@ VALID_PUBLIC_ANALYTICS_EVENT_TYPES = {
     PUBLIC_ANALYTICS_EVENT_BOOK_VIEW,
     PUBLIC_ANALYTICS_EVENT_CHAPTER_VIEW,
 }
+PUBLIC_RANKING_SURFACE_UPLOADS = "creator_uploads"
+PUBLIC_RANKING_SURFACE_BETA = "beta_novels"
+VALID_PUBLIC_RANKING_SURFACES = {
+    PUBLIC_RANKING_SURFACE_UPLOADS,
+    PUBLIC_RANKING_SURFACE_BETA,
+}
+PUBLIC_RANKING_TOP_RATED = "top_rated"
+PUBLIC_RANKING_MOST_POPULAR = "most_popular"
+PUBLIC_RANKING_MOST_COMPLEX = "most_complex"
+PUBLIC_RANKING_BIG_CAST = "big_cast"
+PUBLIC_RANKING_MOST_WELL_WRITTEN = "most_well_written"
+PUBLIC_RANKING_BEGINNER_FRIENDLY = "beginner_friendly"
+PUBLIC_RANKING_RECENTLY_UPDATED = "recently_updated"
+PUBLIC_RANKING_RECENTLY_RELEASED = "recently_released"
+VALID_PUBLIC_RANKING_KEYS = {
+    PUBLIC_RANKING_TOP_RATED,
+    PUBLIC_RANKING_MOST_POPULAR,
+    PUBLIC_RANKING_MOST_COMPLEX,
+    PUBLIC_RANKING_BIG_CAST,
+    PUBLIC_RANKING_MOST_WELL_WRITTEN,
+    PUBLIC_RANKING_BEGINNER_FRIENDLY,
+    PUBLIC_RANKING_RECENTLY_UPDATED,
+    PUBLIC_RANKING_RECENTLY_RELEASED,
+}
+PUBLIC_RANKING_WINDOW_DAILY = "daily"
+PUBLIC_RANKING_WINDOW_WEEKLY = "weekly"
+PUBLIC_RANKING_WINDOW_MONTHLY = "monthly"
+PUBLIC_RANKING_WINDOW_YEARLY = "yearly"
+PUBLIC_RANKING_WINDOW_ALL_TIME = "all_time"
+VALID_PUBLIC_RANKING_WINDOWS = {
+    PUBLIC_RANKING_WINDOW_DAILY,
+    PUBLIC_RANKING_WINDOW_WEEKLY,
+    PUBLIC_RANKING_WINDOW_MONTHLY,
+    PUBLIC_RANKING_WINDOW_YEARLY,
+    PUBLIC_RANKING_WINDOW_ALL_TIME,
+}
+PUBLIC_RANKING_WINDOW_DAYS = {
+    PUBLIC_RANKING_WINDOW_DAILY: 1,
+    PUBLIC_RANKING_WINDOW_WEEKLY: 7,
+    PUBLIC_RANKING_WINDOW_MONTHLY: 30,
+    PUBLIC_RANKING_WINDOW_YEARLY: 365,
+}
+PUBLIC_RANKING_LABELS = {
+    PUBLIC_RANKING_TOP_RATED: "Top rated",
+    PUBLIC_RANKING_MOST_POPULAR: "Most popular",
+    PUBLIC_RANKING_MOST_COMPLEX: "Most complex",
+    PUBLIC_RANKING_BIG_CAST: "Big cast",
+    PUBLIC_RANKING_MOST_WELL_WRITTEN: "Most well written",
+    PUBLIC_RANKING_BEGINNER_FRIENDLY: "Beginner friendly",
+    PUBLIC_RANKING_RECENTLY_UPDATED: "Recently updated",
+    PUBLIC_RANKING_RECENTLY_RELEASED: "Recently released",
+}
+PUBLIC_RANKING_WINDOW_LABELS = {
+    PUBLIC_RANKING_WINDOW_DAILY: "today",
+    PUBLIC_RANKING_WINDOW_WEEKLY: "this week",
+    PUBLIC_RANKING_WINDOW_MONTHLY: "this month",
+    PUBLIC_RANKING_WINDOW_YEARLY: "this year",
+    PUBLIC_RANKING_WINDOW_ALL_TIME: "all time",
+}
 
 
 def is_admin_user(user: User | None) -> bool:
-    return bool(user is not None and str(getattr(user, "tier", "") or "").strip().lower() == "admin")
+    return False
 
 
 def normalize_public_slug(value: str) -> str:
@@ -174,6 +249,126 @@ def normalize_public_slug(value: str) -> str:
     if len(slug) < 3 or len(slug) > 120 or not PUBLIC_SLUG_PATTERN.fullmatch(slug):
         raise HTTPException(400, "Public slug must be 3-120 characters and use lowercase letters, numbers, or hyphens.")
     return slug
+
+
+async def create_public_demo_book(
+    db: AsyncSession,
+    *,
+    admin_user: User,
+    body: PublicBookManualIn,
+) -> tuple[Book, PublicBookCreateOut]:
+    ensure_public_mode_enabled()
+    if not body.chapters:
+        raise HTTPException(400, "At least one chapter is required")
+
+    public_slug = normalize_public_slug(body.title)
+    existing = (
+        await db.execute(
+            select(Book.id).where(Book.public_slug == public_slug)
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        raise HTTPException(409, "A public book with that slug already exists.")
+
+    book = Book(
+        id=uuid.uuid4(),
+        user_id=admin_user.id,
+        title=body.title,
+        author=body.author,
+        genre=body.genre,
+        format="manual",
+        s3_key=f"public/manual/{admin_user.id}/{body.title}".replace(" ", "-").lower(),
+        status="ready",
+        is_public=True,
+        source_kind=PUBLIC_DEMO_SOURCE_KIND,
+        public_status=PUBLIC_STATUS_PUBLISHED,
+        public_slug=public_slug,
+        published_at=datetime.now(UTC),
+        public_visibility="public",
+        content_source_type=CONTENT_SOURCE_TYPE_PUBLIC_DOMAIN,
+        moderation_status=MODERATION_STATUS_CLEAN,
+        source_title=body.title,
+        source_author=body.author,
+        source_public_domain_note="Public-domain demo book used to showcase LoreVia features.",
+        public_description=body.description,
+    )
+    db.add(book)
+    await db.flush()
+
+    total_tokens = 0
+    for index, chapter_in in enumerate(body.chapters, start=1):
+        chapter_token_count = count_tokens(chapter_in.text)
+        chapter_key = f"public_chapters/{book.id}/{index}.txt"
+        upload_text(chapter_key, chapter_in.text)
+        total_tokens += chapter_token_count
+        db.add(
+            Chapter(
+                book_id=book.id,
+                number=index,
+                title=chapter_in.title,
+                description=chapter_in.description,
+                s3_key=chapter_key,
+                token_count=chapter_token_count,
+                processed=False,
+            )
+        )
+
+    book.total_chapters = len(body.chapters)
+    book.total_tokens = total_tokens
+    await cache_del(key_public_books())
+    await mark_public_profile_cache_dirty(str(book.user_id))
+    return book, PublicBookCreateOut(
+        book_id=str(book.id),
+        status="ready",
+        visibility="public",
+        public_kind=PUBLIC_DEMO_SOURCE_KIND,
+        approval_status=PUBLIC_SHARE_STATUS_APPROVED,
+        public_slug=book.public_slug,
+        message="Public demo is live.",
+    )
+
+
+async def append_public_demo_book_chapter(
+    db: AsyncSession,
+    *,
+    book_id: uuid.UUID,
+    body: PublicChapterIn,
+) -> tuple[Book, PublicChapterAppendOut]:
+    ensure_public_mode_enabled()
+    book = await db.get(Book, book_id)
+    if not is_public_demo_book(book):
+        raise HTTPException(404, "Public book not found")
+
+    next_number = (
+        await db.execute(
+            select(func.coalesce(func.max(Chapter.number), 0) + 1).where(Chapter.book_id == book.id)
+        )
+    ).scalar_one()
+    token_count = count_tokens(body.text)
+    chapter_key = f"public_chapters/{book.id}/{next_number}.txt"
+    upload_text(chapter_key, body.text)
+    db.add(
+        Chapter(
+            book_id=book.id,
+            number=next_number,
+            title=body.title,
+            description=body.description,
+            s3_key=chapter_key,
+            token_count=token_count,
+            processed=False,
+        )
+    )
+    book.total_chapters = next_number
+    book.total_tokens = (book.total_tokens or 0) + token_count
+    await cache_del(key_public_book_detail(str(book.id)))
+    await cache_del(key_public_chapter(str(book.id), next_number))
+    await cache_del(key_public_books())
+    await mark_public_profile_cache_dirty(str(book.user_id))
+    return book, PublicChapterAppendOut(
+        book_id=str(book.id),
+        chapter_number=next_number,
+        saved=True,
+    )
 
 
 def hash_text(value: str | None) -> str | None:
@@ -447,6 +642,900 @@ def build_public_book_out(
         analytics=analytics,
         created_at=book.created_at,
         published_at=getattr(book, "published_at", None),
+        public_updated_at=getattr(book, "public_updated_at", None),
+    )
+
+
+def normalize_public_ranking_key(value: str | None) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized not in VALID_PUBLIC_RANKING_KEYS:
+        raise HTTPException(400, "Invalid public ranking key.")
+    return normalized
+
+
+def normalize_public_ranking_window(value: str | None) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized not in VALID_PUBLIC_RANKING_WINDOWS:
+        raise HTTPException(400, "Invalid public ranking window.")
+    return normalized
+
+
+def public_ranking_window_start(*, time_window: str, now: datetime | None = None) -> datetime | None:
+    normalized_window = normalize_public_ranking_window(time_window)
+    if normalized_window == PUBLIC_RANKING_WINDOW_ALL_TIME:
+        return None
+    return (now or datetime.now(UTC)) - timedelta(days=PUBLIC_RANKING_WINDOW_DAYS[normalized_window])
+
+
+def public_ranking_label(*, ranking_key: str, time_window: str) -> str:
+    return f"{PUBLIC_RANKING_LABELS[ranking_key]} {PUBLIC_RANKING_WINDOW_LABELS[time_window]}"
+
+
+def build_public_ranking_metadata(
+    *,
+    surface: str,
+    ranking_key: str,
+    time_window: str,
+    position: int | None = None,
+    score: float | None = None,
+    primary_timestamp: datetime | None = None,
+) -> PublicRankingMetadataOut:
+    return PublicRankingMetadataOut(
+        surface=surface,
+        ranking_key=ranking_key,
+        time_window=time_window,
+        position=position,
+        score=float(score) if score is not None else None,
+        label=public_ranking_label(ranking_key=ranking_key, time_window=time_window),
+        supporting_note=_public_ranking_supporting_note(ranking_key=ranking_key, time_window=time_window),
+        primary_timestamp=primary_timestamp,
+    )
+
+
+def _public_ranking_supporting_note(*, ranking_key: str, time_window: str) -> str:
+    if ranking_key == PUBLIC_RANKING_TOP_RATED:
+        return "Weighted by beta-reader ratings and rating volume."
+    if ranking_key == PUBLIC_RANKING_MOST_POPULAR:
+        return "Weighted by recent reader activity, views, discussion, and interest."
+    if ranking_key == PUBLIC_RANKING_MOST_COMPLEX:
+        return "Weighted by LoreVia craft-analysis signals for density, structure, and story systems."
+    if ranking_key == PUBLIC_RANKING_BIG_CAST:
+        return "Weighted by visible character breadth across the manuscript."
+    if ranking_key == PUBLIC_RANKING_MOST_WELL_WRITTEN:
+        return "Weighted by LoreVia craft-analysis signals for continuity, voice, plot, and world cohesion."
+    if ranking_key == PUBLIC_RANKING_BEGINNER_FRIENDLY:
+        return "Weighted by accessibility, clarity, and smoother reading flow."
+    if ranking_key == PUBLIC_RANKING_RECENTLY_UPDATED:
+        return f"Based on the latest visible manuscript update in {PUBLIC_RANKING_WINDOW_LABELS[time_window]}."
+    return f"Based on the latest release date in {PUBLIC_RANKING_WINDOW_LABELS[time_window]}."
+
+
+def _safe_average(values: list[float]) -> float:
+    filtered = [float(value) for value in values]
+    return round(sum(filtered) / len(filtered), 2) if filtered else 0.0
+
+
+def _timestamp_score(value: datetime | None) -> float:
+    return value.timestamp() if value is not None else 0.0
+
+
+def _book_public_activity_timestamp(book: Book) -> datetime | None:
+    return (
+        getattr(book, "public_updated_at", None)
+        or getattr(book, "published_at", None)
+        or getattr(book, "created_at", None)
+    )
+
+
+def _search_matches_public_book(book: PublicBookOut, normalized_search: str) -> bool:
+    haystack = " ".join(
+        str(getattr(book, field) or "")
+        for field in (
+            "title",
+            "author",
+            "author_username",
+            "genre",
+            "description",
+            "source_title",
+            "source_author",
+        )
+    ).lower()
+    return normalized_search in haystack
+
+
+async def _public_book_view_counts_by_window(
+    db: AsyncSession,
+    *,
+    book_ids: list[uuid.UUID],
+    window_start: datetime | None,
+) -> dict[uuid.UUID, dict[str, int]]:
+    if not book_ids:
+        return {}
+
+    statement = select(
+        PublicBookAnalyticsEvent.book_id,
+        PublicBookAnalyticsEvent.event_type,
+        PublicBookAnalyticsEvent.visitor_fingerprint_hash,
+    ).where(PublicBookAnalyticsEvent.book_id.in_(book_ids))
+    if window_start is not None:
+        statement = statement.where(PublicBookAnalyticsEvent.event_date >= window_start.date())
+    rows = (await db.execute(statement)).all()
+    payload: dict[uuid.UUID, dict[str, int | set[str]]] = {}
+    for book_id, event_type, visitor_fingerprint_hash in rows:
+        bucket = payload.setdefault(
+            book_id,
+            {
+                "book_view_count": 0,
+                "chapter_view_count": 0,
+                "unique_reader_count": set(),
+            },
+        )
+        if event_type == PUBLIC_ANALYTICS_EVENT_BOOK_VIEW:
+            bucket["book_view_count"] = int(bucket["book_view_count"]) + 1
+        elif event_type == PUBLIC_ANALYTICS_EVENT_CHAPTER_VIEW:
+            bucket["chapter_view_count"] = int(bucket["chapter_view_count"]) + 1
+        if visitor_fingerprint_hash:
+            type_cast(set[str], bucket["unique_reader_count"]).add(str(visitor_fingerprint_hash))
+    return {
+        book_id: {
+            "book_view_count": int(bucket["book_view_count"]),
+            "chapter_view_count": int(bucket["chapter_view_count"]),
+            "unique_reader_count": len(type_cast(set[str], bucket["unique_reader_count"])),
+        }
+        for book_id, bucket in payload.items()
+    }
+
+
+async def _book_rating_stats_by_window(
+    db: AsyncSession,
+    *,
+    book_ids: list[uuid.UUID],
+    window_start: datetime | None,
+) -> dict[uuid.UUID, dict[str, Any]]:
+    if not book_ids:
+        return {}
+
+    rows = (
+        await db.execute(
+            select(
+                BetaReadAssignment.book_id,
+                BetaReadAssignment.final_rating,
+                BetaReadAssignment.submitted_at,
+                BetaReadAssignment.completed_at,
+                BetaReadAssignment.updated_at,
+                BetaReadAssignment.created_at,
+            ).where(
+                BetaReadAssignment.book_id.in_(book_ids),
+                BetaReadAssignment.state.in_(list(RATED_ASSIGNMENT_STATES)),
+                BetaReadAssignment.final_rating.is_not(None),
+            )
+        )
+    ).all()
+    payload: dict[uuid.UUID, dict[str, Any]] = {}
+    for book_id, rating, submitted_at, completed_at, updated_at, created_at in rows:
+        event_timestamp = completed_at or submitted_at or updated_at or created_at
+        if window_start is not None and event_timestamp is not None and event_timestamp < window_start:
+            continue
+        bucket = payload.setdefault(
+            book_id,
+            {
+                "ratings": [],
+                "positive_rating_count": 0,
+                "neutral_rating_count": 0,
+                "negative_rating_count": 0,
+                "latest_rating_at": None,
+            },
+        )
+        normalized_rating = float(rating or 0.0)
+        type_cast(list[float], bucket["ratings"]).append(normalized_rating)
+        if normalized_rating >= POSITIVE_RATING_MIN:
+            bucket["positive_rating_count"] = int(bucket["positive_rating_count"]) + 1
+        elif normalized_rating >= NEUTRAL_RATING_MIN:
+            bucket["neutral_rating_count"] = int(bucket["neutral_rating_count"]) + 1
+        else:
+            bucket["negative_rating_count"] = int(bucket["negative_rating_count"]) + 1
+        latest_rating_at = type_cast(datetime | None, bucket["latest_rating_at"])
+        if event_timestamp is not None and (latest_rating_at is None or event_timestamp > latest_rating_at):
+            bucket["latest_rating_at"] = event_timestamp
+    return {
+        book_id: {
+            "average_rating": round(sum(type_cast(list[float], bucket["ratings"])) / len(type_cast(list[float], bucket["ratings"])), 2)
+            if bucket["ratings"]
+            else None,
+            "rating_count": len(type_cast(list[float], bucket["ratings"])),
+            "positive_rating_count": int(bucket["positive_rating_count"]),
+            "neutral_rating_count": int(bucket["neutral_rating_count"]),
+            "negative_rating_count": int(bucket["negative_rating_count"]),
+            "latest_rating_at": bucket["latest_rating_at"],
+        }
+        for book_id, bucket in payload.items()
+    }
+
+
+async def _book_forum_activity_by_window(
+    db: AsyncSession,
+    *,
+    book_ids: list[uuid.UUID],
+    window_start: datetime | None,
+) -> dict[uuid.UUID, dict[str, Any]]:
+    if not book_ids:
+        return {}
+
+    payload: dict[uuid.UUID, dict[str, Any]] = {
+        book_id: {
+            "open_discussion_count": 0,
+            "discussion_comment_count": 0,
+            "discussion_interest_count": 0,
+            "latest_activity_at": None,
+        }
+        for book_id in book_ids
+    }
+
+    post_rows = (
+        await db.execute(
+            select(
+                BookForumPost.id,
+                BookForumPost.book_id,
+                BookForumPost.status,
+                BookForumPost.last_activity_at,
+                BookForumPost.updated_at,
+                BookForumPost.created_at,
+            ).where(
+                BookForumPost.book_id.in_(book_ids),
+                BookForumPost.thread_type == FORUM_THREAD_TYPE_NOVEL,
+            )
+        )
+    ).all()
+    post_ids: list[uuid.UUID] = []
+    post_to_book: dict[uuid.UUID, uuid.UUID] = {}
+    for post_id, book_id, status, last_activity_at, updated_at, created_at in post_rows:
+        if book_id is None:
+            continue
+        post_ids.append(post_id)
+        post_to_book[post_id] = book_id
+        bucket = payload.setdefault(
+            book_id,
+            {"open_discussion_count": 0, "discussion_comment_count": 0, "discussion_interest_count": 0, "latest_activity_at": None},
+        )
+        if status == FORUM_POST_OPEN:
+            bucket["open_discussion_count"] = int(bucket["open_discussion_count"]) + 1
+        latest_activity_at = last_activity_at or updated_at or created_at
+        current_latest = type_cast(datetime | None, bucket["latest_activity_at"])
+        if latest_activity_at is not None and (current_latest is None or latest_activity_at > current_latest):
+            bucket["latest_activity_at"] = latest_activity_at
+
+    if not post_ids:
+        return payload
+
+    comment_statement = select(BookForumComment.post_id, func.count(BookForumComment.id)).where(
+        BookForumComment.post_id.in_(post_ids)
+    )
+    if window_start is not None:
+        comment_statement = comment_statement.where(BookForumComment.created_at >= window_start)
+    comment_rows = (await db.execute(comment_statement.group_by(BookForumComment.post_id))).all()
+    for post_id, comment_count in comment_rows:
+        book_id = post_to_book.get(post_id)
+        if book_id is None:
+            continue
+        payload[book_id]["discussion_comment_count"] = int(payload[book_id]["discussion_comment_count"]) + int(comment_count or 0)
+
+    interest_statement = select(BookForumInterest.post_id, func.count(BookForumInterest.id)).where(
+        BookForumInterest.post_id.in_(post_ids)
+    )
+    if window_start is not None:
+        interest_statement = interest_statement.where(BookForumInterest.created_at >= window_start)
+    interest_rows = (await db.execute(interest_statement.group_by(BookForumInterest.post_id))).all()
+    for post_id, interest_count in interest_rows:
+        book_id = post_to_book.get(post_id)
+        if book_id is None:
+            continue
+        payload[book_id]["discussion_interest_count"] = int(payload[book_id]["discussion_interest_count"]) + int(interest_count or 0)
+
+    return payload
+
+
+async def _visible_character_count_map(
+    db: AsyncSession,
+    *,
+    book_ids: list[uuid.UUID],
+) -> dict[uuid.UUID, int]:
+    if not book_ids:
+        return {}
+    characters = (
+        await db.execute(
+            select(Character).where(Character.book_id.in_(book_ids)).order_by(Character.book_id, Character.mention_count.desc(), Character.name)
+        )
+    ).scalars().all()
+    payload: dict[uuid.UUID, int] = {}
+    for character in characters:
+        if is_displayable_character(character):
+            payload[character.book_id] = payload.get(character.book_id, 0) + 1
+    return payload
+
+
+async def _sample_public_book_text(
+    db: AsyncSession,
+    *,
+    book: Book,
+    max_chapters: int = 3,
+    max_chars: int = 20_000,
+) -> str:
+    chapter_rows = (
+        await db.execute(
+            select(Chapter.s3_key)
+            .where(Chapter.book_id == book.id, Chapter.s3_key.is_not(None))
+            .order_by(Chapter.number.asc())
+            .limit(max_chapters)
+        )
+    ).scalars().all()
+    fragments: list[str] = []
+    for s3_key in chapter_rows:
+        if not s3_key:
+            continue
+        try:
+            stored = deserialize_manuscript_content(await asyncio.to_thread(download_book, s3_key))
+        except Exception:
+            continue
+        fragments.append(str(stored.get("text") or ""))
+        if sum(len(fragment) for fragment in fragments) >= max_chars:
+            break
+    sampled = "\n\n".join(fragment for fragment in fragments if fragment).strip()
+    if sampled:
+        return sampled[:max_chars]
+    return str(getattr(book, "public_description", None) or getattr(book, "title", "") or "")
+
+
+async def _build_public_book_craft_profile(
+    db: AsyncSession,
+    *,
+    book: Book,
+    visible_character_count: int,
+) -> dict[str, Any]:
+    story_health = await build_story_health_payload(db, book)
+    metrics_by_label = {
+        str(metric.label): int(metric.score)
+        for metric in story_health.metrics
+    }
+    sampled_text = await _sample_public_book_text(db, book=book)
+    readability = estimate_readability(sampled_text)
+    grade_level = float(readability.get("grade_level") or 0.0)
+    reading_ease = float(readability.get("reading_ease") or 0.0)
+    average_sentence_length = float(readability.get("average_sentence_length") or 0.0)
+    complexity_score = _safe_average([
+        float(metrics_by_label.get("Timeline clarity", 0)),
+        float(metrics_by_label.get("Worldbuilding consistency", 0)),
+        float(metrics_by_label.get("Plot thread closure", 0)),
+        float(metrics_by_label.get("Dialogue/voice consistency", 0)),
+        min(max((grade_level / 14.0) * 100.0, 0.0), 100.0),
+        min(float(visible_character_count) * 4.5, 100.0),
+    ])
+    well_written_score = _safe_average([
+        float(story_health.score),
+        float(metrics_by_label.get("Continuity", 0)),
+        float(metrics_by_label.get("Dialogue/voice consistency", 0)),
+        float(metrics_by_label.get("Plot thread closure", 0)),
+        float(metrics_by_label.get("Worldbuilding consistency", 0)),
+    ])
+    beginner_friendly_score = _safe_average([
+        min(max(reading_ease, 0.0), 100.0),
+        max(0.0, 100.0 - (grade_level * 6.0)),
+        max(0.0, 100.0 - (average_sentence_length * 2.5)),
+        float(story_health.score),
+    ])
+    return {
+        "story_health_score": float(story_health.score),
+        "story_health_status": story_health.status,
+        "complexity_score": complexity_score,
+        "well_written_score": well_written_score,
+        "beginner_friendly_score": beginner_friendly_score,
+        "visible_character_count": int(visible_character_count),
+        "reading_ease": reading_ease,
+        "grade_level": grade_level,
+        "average_sentence_length": average_sentence_length,
+    }
+
+
+async def _list_open_beta_ranking_books(db: AsyncSession) -> list[tuple[Book, str | None, str]]:
+    rows = (
+        await db.execute(
+            select(BookForumPost.book_id, BookForumPost.id)
+            .where(
+                BookForumPost.book_id.is_not(None),
+                BookForumPost.thread_type == FORUM_THREAD_TYPE_NOVEL,
+                BookForumPost.status == FORUM_POST_OPEN,
+            )
+            .order_by(BookForumPost.updated_at.desc(), BookForumPost.created_at.desc())
+        )
+    ).all()
+    latest_post_ids_by_book: dict[uuid.UUID, str] = {}
+    for book_id, post_id in rows:
+        if book_id is not None and book_id not in latest_post_ids_by_book:
+            latest_post_ids_by_book[book_id] = str(post_id)
+    if not latest_post_ids_by_book:
+        return []
+    book_rows = (
+        await db.execute(
+            select(Book, User.username)
+            .join(User, User.id == Book.user_id)
+            .where(
+                Book.id.in_(list(latest_post_ids_by_book.keys())),
+                Book.hidden_at.is_(None),
+                Book.archived_at.is_(None),
+            )
+        )
+    ).all()
+    return [
+        (book, username, latest_post_ids_by_book[book.id])
+        for book, username in book_rows
+        if book.id in latest_post_ids_by_book
+    ]
+
+
+def _structural_ranking_is_eligible(*, book: Book, window_start: datetime | None) -> bool:
+    if window_start is None:
+        return True
+    activity_timestamp = _book_public_activity_timestamp(book)
+    return activity_timestamp is not None and activity_timestamp >= window_start
+
+
+def _compute_public_ranking_score(
+    *,
+    surface: str,
+    ranking_key: str,
+    book: Book,
+    craft_profile: dict[str, Any],
+    rating_stats: dict[str, Any],
+    view_stats: dict[str, Any],
+    forum_stats: dict[str, Any],
+    window_start: datetime | None,
+) -> tuple[float | None, datetime | None]:
+    latest_activity_at = max(
+        (
+            timestamp
+            for timestamp in (
+                type_cast(datetime | None, forum_stats.get("latest_activity_at")),
+                type_cast(datetime | None, rating_stats.get("latest_rating_at")),
+                _book_public_activity_timestamp(book),
+            )
+            if timestamp is not None
+        ),
+        default=None,
+    )
+    if ranking_key == PUBLIC_RANKING_TOP_RATED:
+        average_rating = float(rating_stats.get("average_rating") or 0.0)
+        rating_count = int(rating_stats.get("rating_count") or 0)
+        positive_rating_count = int(rating_stats.get("positive_rating_count") or 0)
+        negative_rating_count = int(rating_stats.get("negative_rating_count") or 0)
+        score = (
+            (average_rating * 100.0)
+            + (min(rating_count, 25) * 4.0)
+            + (positive_rating_count * 3.0)
+            - (negative_rating_count * 2.0)
+        )
+        return round(score, 2), type_cast(datetime | None, rating_stats.get("latest_rating_at")) or latest_activity_at
+    if ranking_key == PUBLIC_RANKING_MOST_POPULAR:
+        if surface == PUBLIC_RANKING_SURFACE_UPLOADS:
+            score = (
+                (int(view_stats.get("book_view_count") or 0) * 3.0)
+                + (int(view_stats.get("unique_reader_count") or 0) * 6.0)
+                + float(int(view_stats.get("chapter_view_count") or 0))
+                + (int(forum_stats.get("discussion_interest_count") or 0) * 8.0)
+                + (int(forum_stats.get("discussion_comment_count") or 0) * 4.0)
+                + (int(forum_stats.get("open_discussion_count") or 0) * 20.0)
+                + (int(rating_stats.get("rating_count") or 0) * 3.0)
+            )
+        else:
+            score = (
+                (int(forum_stats.get("discussion_interest_count") or 0) * 12.0)
+                + (int(forum_stats.get("discussion_comment_count") or 0) * 5.0)
+                + (int(forum_stats.get("open_discussion_count") or 0) * 20.0)
+                + (int(rating_stats.get("rating_count") or 0) * 5.0)
+                + (float(rating_stats.get("average_rating") or 0.0) * 10.0)
+            )
+        return round(score, 2), latest_activity_at
+    if ranking_key == PUBLIC_RANKING_MOST_COMPLEX:
+        if not _structural_ranking_is_eligible(book=book, window_start=window_start):
+            return None, None
+        return float(craft_profile.get("complexity_score") or 0.0), _book_public_activity_timestamp(book)
+    if ranking_key == PUBLIC_RANKING_BIG_CAST:
+        if not _structural_ranking_is_eligible(book=book, window_start=window_start):
+            return None, None
+        return float(craft_profile.get("visible_character_count") or 0.0), _book_public_activity_timestamp(book)
+    if ranking_key == PUBLIC_RANKING_MOST_WELL_WRITTEN:
+        if not _structural_ranking_is_eligible(book=book, window_start=window_start):
+            return None, None
+        return float(craft_profile.get("well_written_score") or 0.0), _book_public_activity_timestamp(book)
+    if ranking_key == PUBLIC_RANKING_BEGINNER_FRIENDLY:
+        if not _structural_ranking_is_eligible(book=book, window_start=window_start):
+            return None, None
+        return float(craft_profile.get("beginner_friendly_score") or 0.0), _book_public_activity_timestamp(book)
+    if ranking_key == PUBLIC_RANKING_RECENTLY_UPDATED:
+        updated_at = getattr(book, "public_updated_at", None)
+        if updated_at is None or (window_start is not None and updated_at < window_start):
+            return None, updated_at
+        return _timestamp_score(updated_at), updated_at
+    published_at = getattr(book, "published_at", None)
+    if published_at is None or (window_start is not None and published_at < window_start):
+        return None, published_at
+    return _timestamp_score(published_at), published_at
+
+
+async def rebuild_public_book_rankings_snapshot(
+    db: AsyncSession,
+    *,
+    snapshot_at: datetime | None = None,
+) -> dict[str, int]:
+    now = snapshot_at or datetime.now(UTC)
+    snapshot_date = now.date()
+    upload_rows = await list_visible_creator_public_books(db)
+    beta_rows = await _list_open_beta_ranking_books(db)
+    all_books_by_id: dict[uuid.UUID, Book] = {
+        **{book.id: book for book, _username in upload_rows},
+        **{book.id: book for book, _username, _post_id in beta_rows},
+    }
+    all_book_ids = list(all_books_by_id.keys())
+    visible_character_counts = await _visible_character_count_map(db, book_ids=all_book_ids)
+    craft_profiles = {
+        book_id: await _build_public_book_craft_profile(
+            db,
+            book=book,
+            visible_character_count=visible_character_counts.get(book_id, 0),
+        )
+        for book_id, book in all_books_by_id.items()
+    }
+
+    upload_book_ids = [book.id for book, _username in upload_rows]
+    beta_book_ids = [book.id for book, _username, _post_id in beta_rows]
+    await db.execute(delete(PublicBookRanking).where(PublicBookRanking.snapshot_date == snapshot_date))
+
+    created_rows = 0
+    for surface, eligible_book_ids in (
+        (PUBLIC_RANKING_SURFACE_UPLOADS, upload_book_ids),
+        (PUBLIC_RANKING_SURFACE_BETA, beta_book_ids),
+    ):
+        if not eligible_book_ids:
+            continue
+        for time_window in VALID_PUBLIC_RANKING_WINDOWS:
+            window_start = public_ranking_window_start(time_window=time_window, now=now)
+            rating_stats_map = await _book_rating_stats_by_window(db, book_ids=eligible_book_ids, window_start=window_start)
+            forum_stats_map = await _book_forum_activity_by_window(db, book_ids=eligible_book_ids, window_start=window_start)
+            view_stats_map = (
+                await _public_book_view_counts_by_window(db, book_ids=eligible_book_ids, window_start=window_start)
+                if surface == PUBLIC_RANKING_SURFACE_UPLOADS
+                else {}
+            )
+            for ranking_key in VALID_PUBLIC_RANKING_KEYS:
+                scored_rows: list[tuple[uuid.UUID, float, datetime | None]] = []
+                for book_id in eligible_book_ids:
+                    book = all_books_by_id[book_id]
+                    score, primary_timestamp = _compute_public_ranking_score(
+                        surface=surface,
+                        ranking_key=ranking_key,
+                        book=book,
+                        craft_profile=craft_profiles.get(book_id, {}),
+                        rating_stats=rating_stats_map.get(book_id, {}),
+                        view_stats=view_stats_map.get(book_id, {}),
+                        forum_stats=forum_stats_map.get(book_id, {}),
+                        window_start=window_start,
+                    )
+                    if score is None:
+                        continue
+                    scored_rows.append((book_id, float(score), primary_timestamp))
+                scored_rows.sort(
+                    key=lambda item: (
+                        -item[1],
+                        -(item[2].timestamp() if item[2] is not None else 0.0),
+                        all_books_by_id[item[0]].title.lower(),
+                    )
+                )
+                for index, (book_id, score, primary_timestamp) in enumerate(scored_rows, start=1):
+                    db.add(
+                        PublicBookRanking(
+                            book_id=book_id,
+                            surface=surface,
+                            ranking_key=ranking_key,
+                            time_window=time_window,
+                            snapshot_date=snapshot_date,
+                            rank_position=index,
+                            score=round(score, 2),
+                            primary_timestamp=primary_timestamp,
+                        )
+                    )
+                    created_rows += 1
+    await db.flush()
+    profile_user_ids = list(
+        dict.fromkeys(
+            book.user_id
+            for book in all_books_by_id.values()
+            if getattr(book, "user_id", None) is not None
+        )
+    )
+    await cache_del(key_public_books())
+    await cache_set_version_marker(key_public_forum_cache_version())
+    await _invalidate_public_profile_cache_for_users(*profile_user_ids)
+    return {"snapshot_rows": created_rows, "book_count": len(all_book_ids)}
+
+
+async def _latest_public_ranking_snapshot_date(
+    db: AsyncSession,
+    *,
+    surface: str,
+    ranking_key: str,
+    time_window: str,
+) -> date | None:
+    return (
+        await db.execute(
+            select(func.max(PublicBookRanking.snapshot_date)).where(
+                PublicBookRanking.surface == surface,
+                PublicBookRanking.ranking_key == ranking_key,
+                PublicBookRanking.time_window == time_window,
+            )
+        )
+    ).scalar_one_or_none()
+
+
+async def _ensure_public_ranking_snapshot(
+    db: AsyncSession,
+    *,
+    surface: str,
+    ranking_key: str,
+    time_window: str,
+) -> date | None:
+    latest_snapshot_date = await _latest_public_ranking_snapshot_date(
+        db,
+        surface=surface,
+        ranking_key=ranking_key,
+        time_window=time_window,
+    )
+    if latest_snapshot_date is not None:
+        return latest_snapshot_date
+    await rebuild_public_book_rankings_snapshot(db)
+    return await _latest_public_ranking_snapshot_date(
+        db,
+        surface=surface,
+        ranking_key=ranking_key,
+        time_window=time_window,
+    )
+
+
+async def list_ranked_public_uploads(
+    db: AsyncSession,
+    *,
+    ranking_key: str,
+    time_window: str,
+    search: str | None = None,
+    page: int = 1,
+    limit: int = 24,
+) -> PublicRankedBookListOut:
+    normalized_ranking = normalize_public_ranking_key(ranking_key)
+    normalized_window = normalize_public_ranking_window(time_window)
+    latest_snapshot_date = await _ensure_public_ranking_snapshot(
+        db,
+        surface=PUBLIC_RANKING_SURFACE_UPLOADS,
+        ranking_key=normalized_ranking,
+        time_window=normalized_window,
+    )
+    if latest_snapshot_date is None:
+        return PublicRankedBookListOut(
+            items=[],
+            total=0,
+            page=page,
+            limit=limit,
+            has_more=False,
+            ranking_key=normalized_ranking,
+            time_window=normalized_window,
+        )
+    ranking_rows = (
+        await db.execute(
+            select(PublicBookRanking)
+            .where(
+                PublicBookRanking.surface == PUBLIC_RANKING_SURFACE_UPLOADS,
+                PublicBookRanking.ranking_key == normalized_ranking,
+                PublicBookRanking.time_window == normalized_window,
+                PublicBookRanking.snapshot_date == latest_snapshot_date,
+            )
+            .order_by(PublicBookRanking.rank_position.asc(), PublicBookRanking.primary_timestamp.desc(), PublicBookRanking.book_id.asc())
+        )
+    ).scalars().all()
+    if not ranking_rows:
+        return PublicRankedBookListOut(
+            items=[],
+            total=0,
+            page=page,
+            limit=limit,
+            has_more=False,
+            ranking_key=normalized_ranking,
+            time_window=normalized_window,
+        )
+    rows = await list_visible_creator_public_books(db)
+    book_rows_by_id = {book.id: (book, username) for book, username in rows}
+    active_post_ids = await _creator_public_book_forum_stats_map(db, book_ids=[book.id for book, _username in rows])
+    analytics_map = await build_public_book_analytics_map(db, book_ids=[book.id for book, _username in rows])
+    ranked_items: list[PublicBookOut] = []
+    for ranking_row in ranking_rows:
+        if ranking_row.book_id not in book_rows_by_id:
+            continue
+        book, username = book_rows_by_id[ranking_row.book_id]
+        book_out = build_public_book_out(
+            book,
+            author_username=username,
+            active_forum_post_id=active_post_ids.get(book.id, {}).get("active_forum_post_id"),
+            analytics=analytics_map.get(book.id),
+        )
+        book_out.ranking = build_public_ranking_metadata(
+            surface=PUBLIC_RANKING_SURFACE_UPLOADS,
+            ranking_key=normalized_ranking,
+            time_window=normalized_window,
+            position=ranking_row.rank_position,
+            score=ranking_row.score,
+            primary_timestamp=ranking_row.primary_timestamp,
+        )
+        ranked_items.append(book_out)
+    normalized_search = " ".join((search or "").split()).strip().lower()
+    if normalized_search:
+        ranked_items = [item for item in ranked_items if _search_matches_public_book(item, normalized_search)]
+    start = max(page - 1, 0) * limit
+    page_items = ranked_items[start:start + limit]
+    return PublicRankedBookListOut(
+        items=page_items,
+        total=len(ranked_items),
+        page=page,
+        limit=limit,
+        has_more=(start + limit) < len(ranked_items),
+        ranking_key=normalized_ranking,
+        time_window=normalized_window,
+    )
+
+
+async def list_ranked_public_beta_novels(
+    db: AsyncSession,
+    *,
+    ranking_key: str,
+    time_window: str,
+    q: str | None = None,
+    page: int = 1,
+    page_size: int = DEFAULT_PUBLIC_FORUM_PAGE_SIZE,
+    current_user: User | None = None,
+) -> PublicForumPostListOut:
+    normalized_ranking = normalize_public_ranking_key(ranking_key)
+    normalized_window = normalize_public_ranking_window(time_window)
+    latest_snapshot_date = await _ensure_public_ranking_snapshot(
+        db,
+        surface=PUBLIC_RANKING_SURFACE_BETA,
+        ranking_key=normalized_ranking,
+        time_window=normalized_window,
+    )
+    if latest_snapshot_date is None:
+        return PublicForumPostListOut(
+            items=[],
+            total=0,
+            page=page,
+            page_size=page_size,
+            has_more=False,
+            ranking_key=normalized_ranking,
+            time_window=normalized_window,
+            surface=PUBLIC_RANKING_SURFACE_BETA,
+        )
+    ranking_rows = (
+        await db.execute(
+            select(PublicBookRanking)
+            .where(
+                PublicBookRanking.surface == PUBLIC_RANKING_SURFACE_BETA,
+                PublicBookRanking.ranking_key == normalized_ranking,
+                PublicBookRanking.time_window == normalized_window,
+                PublicBookRanking.snapshot_date == latest_snapshot_date,
+            )
+            .order_by(PublicBookRanking.rank_position.asc(), PublicBookRanking.primary_timestamp.desc(), PublicBookRanking.book_id.asc())
+        )
+    ).scalars().all()
+    if not ranking_rows:
+        return PublicForumPostListOut(
+            items=[],
+            total=0,
+            page=page,
+            page_size=page_size,
+            has_more=False,
+            ranking_key=normalized_ranking,
+            time_window=normalized_window,
+            surface=PUBLIC_RANKING_SURFACE_BETA,
+        )
+    open_beta_rows = await _list_open_beta_ranking_books(db)
+    post_id_by_book_id = {book.id: post_id for book, _username, post_id in open_beta_rows}
+    ranked_post_ids: list[uuid.UUID] = []
+    ranking_by_post_id: dict[uuid.UUID, PublicBookRanking] = {}
+    for ranking_row in ranking_rows:
+        post_id = post_id_by_book_id.get(ranking_row.book_id)
+        if not post_id:
+            continue
+        parsed_post_id = uuid.UUID(post_id)
+        ranked_post_ids.append(parsed_post_id)
+        ranking_by_post_id[parsed_post_id] = ranking_row
+    if not ranked_post_ids:
+        return PublicForumPostListOut(
+            items=[],
+            total=0,
+            page=page,
+            page_size=page_size,
+            has_more=False,
+            ranking_key=normalized_ranking,
+            time_window=normalized_window,
+            surface=PUBLIC_RANKING_SURFACE_BETA,
+        )
+    ranked_rows = (
+        await db.execute(
+            _public_forum_post_select_statement(viewer_user_id=getattr(current_user, "id", None)).where(BookForumPost.id.in_(ranked_post_ids))
+        )
+    ).all()
+    row_by_post_id = {post.id: row for row in ranked_rows for post in [row[0]]}
+    ranked_items: list[PublicForumPostOut] = []
+    for post_id in ranked_post_ids:
+        row = row_by_post_id.get(post_id)
+        if row is None:
+            continue
+        (
+            post,
+            book,
+            author_user,
+            comment_count,
+            interest_count,
+            average_rating,
+            rating_count,
+            positive_rating_count,
+            neutral_rating_count,
+            negative_rating_count,
+            viewer_interest_status,
+            viewer_reaction,
+            discoverability_score,
+        ) = row
+        post_out = build_public_forum_post_out(
+            post=post,
+            book=book,
+            author_user=author_user,
+            rating_summary=PublicForumRatingSummaryOut(
+                average_rating=float(average_rating) if average_rating is not None else None,
+                rating_count=int(rating_count or 0),
+                positive_rating_count=int(positive_rating_count or 0),
+                neutral_rating_count=int(neutral_rating_count or 0),
+                negative_rating_count=int(negative_rating_count or 0),
+            ),
+            interest_count=int(interest_count or 0),
+            comment_count=int(comment_count or 0),
+            viewer_interest_status=viewer_interest_status,
+            viewer_reaction=viewer_reaction,
+            discoverability_score=float(discoverability_score or 0.0),
+        )
+        ranking_row = ranking_by_post_id.get(post_id)
+        if ranking_row is not None:
+            post_out.ranking = build_public_ranking_metadata(
+                surface=PUBLIC_RANKING_SURFACE_BETA,
+                ranking_key=normalized_ranking,
+                time_window=normalized_window,
+                position=ranking_row.rank_position,
+                score=ranking_row.score,
+                primary_timestamp=ranking_row.primary_timestamp,
+            )
+        ranked_items.append(post_out)
+    normalized_query = " ".join((q or "").split()).strip().lower()
+    if normalized_query:
+        ranked_items = [
+            item
+            for item in ranked_items
+            if normalized_query in " ".join(
+                str(getattr(item, field) or "")
+                for field in ("title", "genre", "author_username", "headline", "body", "description")
+            ).lower()
+        ]
+    start = max(page - 1, 0) * page_size
+    page_items = ranked_items[start:start + page_size]
+    return PublicForumPostListOut(
+        items=page_items,
+        total=len(ranked_items),
+        page=page,
+        page_size=page_size,
+        has_more=(start + page_size) < len(ranked_items),
+        ranking_key=normalized_ranking,
+        time_window=normalized_window,
+        surface=PUBLIC_RANKING_SURFACE_BETA,
     )
 
 
@@ -1899,9 +2988,10 @@ async def build_public_forum_interest_out(
     db: AsyncSession,
     *,
     interest: BookForumInterest,
+    interested_user: User | None = None,
 ) -> PublicForumInterestOut:
-    interested_user = await db.get(User, interest.interested_user_id)
-    if interested_user is None:
+    resolved_user = interested_user or await db.get(User, interest.interested_user_id)
+    if resolved_user is None:
         raise HTTPException(404, "Interested user not found.")
     return PublicForumInterestOut(
         id=str(interest.id),
@@ -1909,8 +2999,8 @@ async def build_public_forum_interest_out(
         book_id=str(interest.book_id),
         author_user_id=str(interest.author_user_id),
         interested_user_id=str(interest.interested_user_id),
-        interested_username=interested_user.username,
-        interested_email=interested_user.email,
+        interested_username=resolved_user.username,
+        interested_email=resolved_user.email,
         message=interest.message,
         status=interest.status,
         created_at=interest.created_at,
@@ -1989,12 +3079,16 @@ async def list_public_forum_interests_for_author(
         return []
     interests = (
         await db.execute(
-            select(BookForumInterest)
+            select(BookForumInterest, User)
+            .join(User, User.id == BookForumInterest.interested_user_id)
             .where(BookForumInterest.post_id == post.id)
             .order_by(BookForumInterest.created_at.desc())
         )
-    ).scalars().all()
-    return [await build_public_forum_interest_out(db, interest=interest) for interest in interests]
+    ).all()
+    return [
+        await build_public_forum_interest_out(db, interest=interest, interested_user=interested_user)
+        for interest, interested_user in interests
+    ]
 
 
 async def build_public_forum_comment_out(

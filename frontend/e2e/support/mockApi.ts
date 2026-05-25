@@ -1,15 +1,21 @@
 import type { Page, Route } from "@playwright/test"
 import type { Character } from "@/types/character"
 import type { EmailPreferences } from "@/types/email"
+import type { PublicBook } from "@/types/book"
 import type { PublicForumPost } from "@/types/public"
 
 type SessionMode = "authenticated" | "guest"
 type LoginMode = "success" | "unauthorized"
+type AdminMode = "none" | "moderation" | "billing" | "super" | "owner"
 
 type MockOptions = {
   session?: SessionMode
   login?: LoginMode
+  admin?: AdminMode
 }
+
+const ADMIN_TEST_SESSION_COOKIE = "lorevia_admin_test_session"
+const ADMIN_TEST_SESSION_SECRET = process.env.ADMIN_E2E_TEST_SECRET ?? "codex-e2e-admin-secret"
 
 function normalizeMockApiPath(pathname: string) {
   return pathname
@@ -450,7 +456,7 @@ const publicWriterProfiles = {
   },
 }
 
-const publicBooks = [
+const publicBooks: PublicBook[] = [
   {
     id: "public-book-1",
     title: "Ash Gate Sample",
@@ -465,6 +471,20 @@ const publicBooks = [
     copyright_warning: false,
     active_forum_post_id: "forum-post-1",
     created_at: "2026-05-14T08:00:00Z",
+    published_at: "2026-05-14T08:00:00Z",
+    public_updated_at: "2026-05-20T08:00:00Z",
+    analytics: {
+      book_view_count: 128,
+      unique_reader_count_30d: 64,
+      chapter_view_count: 212,
+      published_at: "2026-05-14T08:00:00Z",
+      chapter_count: 1,
+      total_words: 1800,
+      has_open_discussion: true,
+      open_discussion_count: 1,
+      discussion_comment_count: 7,
+      discussion_interest_count: 3,
+    },
   },
 ]
 
@@ -1983,9 +2003,59 @@ function notFound(route: Route) {
   return json(route, { detail: "Not found" }, 404)
 }
 
+function buildAdminSession(admin: AdminMode) {
+  switch (admin) {
+    case "moderation":
+      return {
+        is_admin: true,
+        scopes: ["moderation_admin"],
+        is_owner: false,
+        requires_step_up: true,
+        session_expires_at: null,
+      }
+    case "billing":
+      return {
+        is_admin: true,
+        scopes: ["billing_admin"],
+        is_owner: false,
+        requires_step_up: true,
+        session_expires_at: null,
+      }
+    case "super":
+      return {
+        is_admin: true,
+        scopes: ["super_admin"],
+        is_owner: false,
+        requires_step_up: true,
+        session_expires_at: null,
+      }
+    case "owner":
+      return {
+        is_admin: true,
+        scopes: ["moderation_admin", "billing_admin", "super_admin"],
+        is_owner: true,
+        requires_step_up: true,
+        session_expires_at: null,
+      }
+    default:
+      return null
+  }
+}
+
 export async function installMockApi(page: Page, options: MockOptions = {}) {
   const session = options.session ?? "authenticated"
   const login = options.login ?? "success"
+  const admin = options.admin ?? "none"
+  const adminCookieMode = admin === "none" ? "guest" : admin
+  await page.context().addCookies([
+    {
+      name: ADMIN_TEST_SESSION_COOKIE,
+      value: `${adminCookieMode}:${ADMIN_TEST_SESSION_SECRET}`,
+      url: "http://localhost:3000",
+      httpOnly: true,
+      sameSite: "Lax",
+    },
+  ])
   user.username = defaultUsername
   publicForumPosts = JSON.parse(JSON.stringify(initialPublicForumPosts))
   publicForumComments = JSON.parse(JSON.stringify(initialPublicForumComments))
@@ -2043,6 +2113,145 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
 
     if (path === "/api/v1/auth/logout" && method === "POST") {
       return json(route, { ok: true })
+    }
+
+    if (path === "/api/v1/admin/session" && method === "GET") {
+      const adminSession = buildAdminSession(admin)
+      return adminSession ? json(route, adminSession) : json(route, { detail: "Admin only" }, 403)
+    }
+
+    if (path === "/api/v1/admin/billing/status" && method === "GET") {
+      return json(route, {
+        billing_enabled: true,
+        payments_ready: true,
+        paddle_api_key_present: true,
+        webhook_secret_present: true,
+        default_checkout_url_present: true,
+        recommended_default_checkout_url: "https://getlorevia.com/checkout",
+        resend_api_key_present: true,
+        internal_job_secret_present: true,
+        fully_configured_plan_count: 4,
+        missing_configuration: [],
+        plans: [
+          { code: "author_monthly", display_name: "Author", billing_interval: "monthly", price_usd: 29, configured: true, price_id_present: true },
+          { code: "author_annual", display_name: "Author", billing_interval: "annual", price_usd: 290, configured: true, price_id_present: true },
+          { code: "architect_monthly", display_name: "Architect", billing_interval: "monthly", price_usd: 49, configured: true, price_id_present: true },
+          { code: "architect_annual", display_name: "Architect", billing_interval: "annual", price_usd: 490, configured: true, price_id_present: true },
+        ],
+        webhook_endpoint_path: "/api/v1/webhooks/paddle",
+        supported_webhook_events: ["transaction.completed", "subscription.updated"],
+        trial_email_job_endpoint_path: "/api/v1/internal/jobs/send-due-trial-emails",
+        trial_email_runner_script: "backend/scripts/run_due_trial_emails.py",
+        trial_email_automation_code_ready: true,
+        priority_processing_code_ready: true,
+        priority_queue_names: ["extraction_priority", "analysis_priority"],
+        external_action_items: [],
+      })
+    }
+
+    if (path === "/api/v1/admin/refunds/reviews" && method === "GET") {
+      return json(route, [
+        {
+          id: "refund-review-1",
+          user_id: "user-1",
+          subscription_id: "sub-1",
+          paddle_transaction_id: "txn_123",
+          paddle_adjustment_id: null,
+          charge_at: "2026-05-24T10:00:00Z",
+          plan_code: "author_monthly",
+          billing_interval: "monthly",
+          request_source: "support",
+          support_reference: "SUP-123",
+          request_reason: "Duplicate charge report.",
+          status: "manual_review_required",
+          auto_decision: false,
+          decision_reason: null,
+          eligibility_snapshot_json: {},
+          usage_snapshot_json: {},
+          provider_response_json: {},
+          requested_by_admin_user_id: "owner-1",
+          resolved_by_admin_user_id: null,
+          resolved_at: null,
+          created_at: "2026-05-24T10:05:00Z",
+          updated_at: "2026-05-24T10:05:00Z",
+        },
+      ])
+    }
+
+    if (path === "/api/v1/admin/access" && method === "GET") {
+      return json(route, [
+        {
+          id: "principal-owner-1",
+          user_id: "user-1",
+          status: "active",
+          is_owner: true,
+          scopes: ["moderation_admin", "billing_admin", "super_admin"],
+          grant_reason: "Owner bootstrap.",
+          revoke_reason: null,
+          granted_by_user_id: null,
+          revoked_by_user_id: null,
+          created_at: "2026-05-20T10:00:00Z",
+          updated_at: "2026-05-20T10:00:00Z",
+          revoked_at: null,
+        },
+      ])
+    }
+
+    if (path === "/api/v1/admin/audit" && method === "GET") {
+      return json(route, [
+        {
+          id: "audit-1",
+          actor_user_id: "user-1",
+          target_user_id: "user-2",
+          target_book_id: null,
+          target_report_id: null,
+          target_refund_review_id: null,
+          action_type: "billing_status_viewed",
+          reason: "Viewed billing configuration status.",
+          result: "allowed",
+          request_id: "req-1",
+          ip_address: "127.0.0.1",
+          user_agent: "playwright",
+          scopes_snapshot: ["moderation_admin", "billing_admin", "super_admin"],
+          metadata_json: {},
+          created_at: "2026-05-24T11:00:00Z",
+        },
+      ])
+    }
+
+    if (path === "/api/v1/admin/public-shares/pending" && method === "GET") {
+      return json(route, [
+        {
+          book_id: "book-1",
+          user_id: "user-1",
+          author_username: "author",
+          title: "Sky of Ash",
+          author: "M. Vale",
+          genre: "Epic Fantasy",
+          isbn: null,
+          copyright_warning: false,
+          public_description: book.public_description,
+          requested_at: "2026-05-24T08:00:00Z",
+          created_at: book.created_at,
+        },
+      ])
+    }
+
+    if (path === "/api/v1/admin/reports" && method === "GET") {
+      return json(route, [
+        {
+          id: "report-1",
+          reported_book_id: "book-1",
+          reported_author_user_id: "user-1",
+          reporter_user_id: "reader-1",
+          reporter_email: "reader@example.com",
+          report_type: "copyright",
+          status: "open",
+          reason: "Possible rights issue.",
+          details: "Submitted for smoke coverage.",
+          created_at: "2026-05-24T09:00:00Z",
+        },
+      ])
     }
 
     if (path === "/api/v1/auth/me/username" && method === "PATCH") {
@@ -2812,6 +3021,39 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
       })
     }
 
+    if (path === "/api/v1/public/rankings/beta-novels" && method === "GET") {
+      const url = new URL(route.request().url())
+      const page = Math.max(1, Number.parseInt(url.searchParams.get("page") || "1", 10) || 1)
+      const pageSize = Math.max(1, Number.parseInt(url.searchParams.get("page_size") || "20", 10) || 20)
+      const ranking = url.searchParams.get("ranking") || "most_popular"
+      const timeWindow = url.searchParams.get("time_window") || "monthly"
+      const filteredPosts = filterForumFeedPosts(buildForumFeedPosts().filter((post) => post.thread_type === "novel"), url.searchParams.get("q"))
+      const rankedPosts = filteredPosts.map((post, index) => ({
+        ...post,
+        ranking: {
+          surface: "beta_novels",
+          ranking_key: ranking,
+          time_window: timeWindow,
+          position: index + 1,
+          score: post.discoverability_score,
+          label: `${ranking.replaceAll("_", " ")} ${timeWindow}`.replace(/\b\w/g, (char) => char.toUpperCase()),
+          supporting_note: "Mock ranking feed for local smoke coverage.",
+          primary_timestamp: post.updated_at,
+        },
+      }))
+      const pageItems = rankedPosts.slice((page - 1) * pageSize, page * pageSize)
+      return json(route, {
+        items: pageItems,
+        total: rankedPosts.length,
+        page,
+        page_size: pageSize,
+        has_more: page * pageSize < rankedPosts.length,
+        ranking_key: ranking,
+        time_window: timeWindow,
+        surface: "beta_novels",
+      })
+    }
+
     if (path === "/api/v1/public/forum/my-posts" && method === "GET") {
       return json(route, publicForumPosts.filter((post) => post.author_user_id === "user-1"))
     }
@@ -2889,6 +3131,43 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
 
     if (path === "/api/v1/public/books" && method === "GET") {
       return json(route, publicBooks)
+    }
+
+    if (path === "/api/v1/public/rankings/uploads" && method === "GET") {
+      const url = new URL(route.request().url())
+      const page = Math.max(1, Number.parseInt(url.searchParams.get("page") || "1", 10) || 1)
+      const limit = Math.max(1, Number.parseInt(url.searchParams.get("limit") || "24", 10) || 24)
+      const ranking = url.searchParams.get("ranking") || "most_popular"
+      const timeWindow = url.searchParams.get("time_window") || "monthly"
+      const search = (url.searchParams.get("search") || "").trim().toLowerCase()
+      const filteredBooks = publicBooks.filter((book) => {
+        if (!search) return true
+        return [book.title, book.author, book.author_username, book.genre, book.description].join(" ").toLowerCase().includes(search)
+      })
+      const rankedBooks = filteredBooks.map((book, index) => ({
+        ...book,
+        ranking: {
+          surface: "creator_uploads",
+          ranking_key: ranking,
+          time_window: timeWindow,
+          position: index + 1,
+          score: (book.analytics?.book_view_count ?? 0) + (book.analytics?.chapter_view_count ?? 0),
+          label: `${ranking.replaceAll("_", " ")} ${timeWindow}`.replace(/\b\w/g, (char) => char.toUpperCase()),
+          supporting_note: "Mock ranking feed for local smoke coverage.",
+          primary_timestamp: book.published_at,
+        },
+      }))
+      const pageItems = rankedBooks.slice((page - 1) * limit, page * limit)
+      return json(route, {
+        items: pageItems,
+        total: rankedBooks.length,
+        page,
+        limit,
+        has_more: page * limit < rankedBooks.length,
+        ranking_key: ranking,
+        time_window: timeWindow,
+        surface: "creator_uploads",
+      })
     }
 
     const publicBookMatch = path.match(/^\/api\/v1\/public\/books\/([^/]+)$/)

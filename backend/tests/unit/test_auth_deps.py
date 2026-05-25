@@ -167,9 +167,23 @@ async def test_load_user_from_claims_rejects_stale_token_version():
 
 
 @pytest.mark.asyncio
-async def test_get_admin_rejects_non_admin_users():
+async def test_get_admin_rejects_non_admin_users(monkeypatch):
+    request = Request({"type": "http", "headers": []})
+
+    class _FakeDB:
+        def add(self, _event):
+            return None
+
+        async def commit(self):
+            return None
+
+    async def fake_get_active_admin_principal(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr("app.api.deps.auth.get_active_admin_principal", fake_get_active_admin_principal)
+
     with pytest.raises(HTTPException) as exc_info:
-        await get_admin(current_user=SimpleNamespace(tier="free"))
+        await get_admin(request=request, current_user=SimpleNamespace(id="00000000-0000-0000-0000-000000000001"), db=_FakeDB())
 
     assert exc_info.value.status_code == 403
     assert exc_info.value.detail == "Admin only"

@@ -32,6 +32,7 @@ from app.utils.ingestion_utils import (
 )
 from app.utils.notification_utils import collect_book_ready_stats, upsert_book_ready_notification
 from app.utils.book_utils import build_chapter_title_from_summary, chapter_title_is_placeholder
+from app.utils.logging.errors import public_error_message
 from app.utils.plot_thread_utils import (
     merge_plot_thread_status,
     normalize_plot_thread_status,
@@ -278,7 +279,7 @@ async def analyse_chapter(
             chapter.analysis_state = build_analysis_chapter_state(
                 chapter.analysis_state if isinstance(chapter.analysis_state, dict) else None,
                 status="failed",
-                last_error=str(exc),
+                last_error=public_error_message(500),
             )
             await _refresh_book_analysis_pipeline(db, book)
             await db.commit()

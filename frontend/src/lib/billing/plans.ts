@@ -7,7 +7,7 @@ export type PaidPlanCode =
   | "architect_annual"
 
 export function canUseAuthorFeatures(tier?: UserTier | null) {
-  return tier === "author" || tier === "architect" || tier === "admin"
+  return tier === "author" || tier === "architect"
 }
 
 export function isPaidTier(tier?: UserTier | null) {
@@ -23,8 +23,6 @@ export function tierLabel(tier?: UserTier | null) {
       return "Author"
     case "architect":
       return "Architect"
-    case "admin":
-      return "Admin"
     case "free":
     default:
       return "Free"

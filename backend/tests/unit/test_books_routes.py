@@ -755,10 +755,31 @@ async def test_series_routes_and_user_stats(monkeypatch):
         "book_out",
         _async_value(_book(user_id=user.id, id=book.id, title=book.title, marked_complete_in_series=None)),
     )
+    monkeypatch.setattr(
+        books,
+        "build_book_out_list",
+        _async_value([_book(user_id=user.id, id=book.id, title=book.title, marked_complete_in_series=None)]),
+    )
+    monkeypatch.setattr(
+        books,
+        "build_series_out_list",
+        _async_value(
+            [
+                SimpleNamespace(
+                    id=series.id,
+                    name=series.name,
+                    description=series.description,
+                    created_at=series.created_at,
+                    books=[SimpleNamespace(id=book.id, marked_complete_in_series=False)],
+                )
+            ]
+        ),
+    )
+    monkeypatch.setattr(books, "build_single_series_out", _async_value(SimpleNamespace(id=series.id, name=series.name)))
     monkeypatch.setattr(books, "get_owned_series", _async_value(series))
     monkeypatch.setattr(books, "get_owned_book", _async_value(book))
     monkeypatch.setattr(books, "build_series_bible_payload", _async_value({"series_id": str(series.id)}))
-    monkeypatch.setattr(books, "compute_words_read_for_book", _async_value(1200))
+    monkeypatch.setattr(books, "compute_words_read_for_books", _async_value({book.id: 1200}))
     monkeypatch.setattr(
         books,
         "build_writing_dashboard_stats",
@@ -818,10 +839,6 @@ async def test_series_routes_and_user_stats(monkeypatch):
         await books.add_book_to_series(series.id, book.id, SeriesMembershipBody(position=0), db=db, current_user=user)
     assert exc.value.detail == "Position must be at least 1"
 
-    async def _fake_list_series(_db, current_user):
-        return [SimpleNamespace(id=series.id, name=series.name)]
-
-    monkeypatch.setattr(books, "list_series", _fake_list_series)
     db = _FakeDB(execute_values=[_Result(scalar=None)])
     added = await books.add_book_to_series(series.id, book.id, SeriesMembershipBody(position=3), db=db, current_user=user)
     assert added.id == series.id

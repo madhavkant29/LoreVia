@@ -196,13 +196,16 @@ from app.utils.book_utils import (
     _append_recent_revision_edit,
     as_bool,
     book_out,
+    build_book_out_list,
     build_chapter_consistency_report,
     build_character_card_payload,
     build_emotional_arc_payload,
     build_obsidian_graph,
     build_prewriting_check,
     build_revision_intelligence_payload,
+    build_single_series_out,
     build_series_bible_payload,
+    build_series_out_list,
     build_story_health_payload,
     build_writer_workspace_payload,
     clean_manuscript_html,
@@ -211,7 +214,7 @@ from app.utils.book_utils import (
     collaboration_can_edit,
     collaboration_can_export,
     collaboration_has_resource,
-    compute_words_read_for_book,
+    compute_words_read_for_books,
     delete_book_note,
     delete_obsidian_note,
     deserialize_manuscript_content,
@@ -248,6 +251,7 @@ from app.utils.book_utils import (
     story_unit_name,
     strip_scene_metadata_from_manuscript_text,
     sync_chapter_content_from_novel_scenes,
+    touch_public_book_updated_at,
 )
 
 # ── Utils imports ──────────────────────────────────────────────────────────────
@@ -568,6 +572,7 @@ async def update_book_forum_metadata(
     book.title = normalized_title
     book.genre = normalized_genre
     book.public_description = normalized_description
+    touch_public_book_updated_at(book)
     await db.commit()
     await db.refresh(book)
     await mark_book_cache_dirty(book.id)
@@ -891,6 +896,7 @@ async def import_manuscript_content(
     if resolved_import_format:
         book.format = resolved_import_format
     book.source_kind = "chapter_wise" if len(import_jobs) == 1 and not files else "batch_upload"
+    touch_public_book_updated_at(book)
     if daily_words_added > 0:
         add_daily_word_progress(current_user, daily_words_added)
     await db.commit()
@@ -1051,23 +1057,21 @@ async def list_series(
         .order_by(Series.created_at.desc(), Series.name)
     )
     rows = list(rows_result.scalars().all())
-    output: list[SeriesOut] = []
-    for series in rows:
-        memberships = (
-            await db.execute(
-                select(SeriesBook, Book)
-                .join(Book, Book.id == SeriesBook.book_id)
-                .where(SeriesBook.series_id == series.id, Book.user_id == current_user.id)
-                .order_by(SeriesBook.position, Book.created_at)
-            )
-        ).all()
-        books: list[BookOut] = []
-        for membership, book in memberships:
-            enriched = await book_out(db, book, current_user.id)
-            enriched.marked_complete_in_series = membership.marked_complete
-            books.append(enriched)
-        output.append(SeriesOut(id=series.id, name=series.name, description=series.description, created_at=series.created_at, books=books))
-    return output
+    series_ids = [series.id for series in rows]
+    membership_rows = (
+        await db.execute(
+            select(SeriesBook, Book)
+            .join(Book, Book.id == SeriesBook.book_id)
+            .where(SeriesBook.series_id.in_(series_ids), Book.user_id == current_user.id)
+            .order_by(SeriesBook.series_id, SeriesBook.position, Book.created_at)
+        )
+    ).all() if series_ids else []
+    return await build_series_out_list(
+        db,
+        series_rows=rows,
+        membership_rows=membership_rows,
+        user_id=current_user.id,
+    )
 
 
 @router.get("/series/{series_id}/bible", response_model=SeriesBibleOut)
@@ -1128,7 +1132,7 @@ async def add_book_to_series(
     book.series_name = series.name
     book.series_order = body.position
     await db.commit()
-    return next(item for item in await list_series(db, current_user) if item.id == series.id)
+    return await build_single_series_out(db, series=series, user_id=current_user.id)
 
 
 @router.delete("/series/{series_id}/books/{book_id}", response_model=SeriesOut)
@@ -1152,7 +1156,7 @@ async def remove_book_from_series(
         book.series_name = None
         book.series_order = None
     await db.commit()
-    return next(item for item in await list_series(db, current_user) if item.id == series.id)
+    return await build_single_series_out(db, series=series, user_id=current_user.id)
 
 
 @router.put("/series/{series_id}/books/{book_id}/status", response_model=BookOut)
@@ -1221,8 +1225,14 @@ async def list_books(
     if not include_hidden:
         shared_rows = [row for row in shared_rows if row[0].hidden_at is None]
 
-    owned_payloads = [await book_out(db, book, current_user.id) for book in books]
-    shared_payloads = [await book_out(db, book, current_user.id, collaborator) for book, collaborator in shared_rows]
+    owned_payloads = await build_book_out_list(db, books=books, user_id=current_user.id)
+    shared_books = [book for book, _ in shared_rows]
+    shared_payloads = await build_book_out_list(
+        db,
+        books=shared_books,
+        user_id=current_user.id,
+        collaborators_by_book_id={book.id: collaborator for book, collaborator in shared_rows},
+    )
     return owned_payloads + shared_payloads
 
 
@@ -1242,13 +1252,14 @@ async def get_user_stats(
     total_words_read = 0
     total_chapters_tracked = 0
 
+    words_read_by_book = await compute_words_read_for_books(db, books=books, progress_rows=progress_rows)
     for book in books:
         total_chapters_tracked += book.total_chapters or 0
         progress = progress_by_book.get(book.id)
         read_chapters = sorted(set(progress.chapters_read or [])) if progress and progress.chapters_read else []
         if book.total_chapters and len(read_chapters) >= book.total_chapters:
             total_books_read += 1
-        total_words_read += await compute_words_read_for_book(db, book, progress)
+        total_words_read += words_read_by_book.get(book.id, 0)
 
     total_token_consumption = int(sum(book.total_tokens or 0 for book in books))
     saved_quotes = int(
@@ -1903,7 +1914,7 @@ async def publish_book_publicly(
     book = await db.get(Book, book_id)
     if not book or book.user_id != current_user.id or book.hidden_at is not None or book.archived_at is not None:
         raise HTTPException(404, "Book not found")
-    if getattr(current_user, "email_verified_at", None) is None and current_user.tier != "admin":
+    if getattr(current_user, "email_verified_at", None) is None:
         raise HTTPException(403, "Verify your email before publishing a public book.")
 
     moderation_status = str(getattr(book, "moderation_status", "") or "").strip().lower()
@@ -1955,12 +1966,13 @@ async def publish_book_publicly(
     book.takedown_at = None
     book.takedown_by_user_id = None
     book.published_at = book.published_at or now
+    touch_public_book_updated_at(book, changed_at=now)
     book.public_upload_counted_at = now
     book.is_public = True
     book.public_share_status = PUBLIC_SHARE_STATUS_APPROVED
     book.public_share_requested_at = now
     book.public_share_approved_at = now
-    book.public_share_approved_by_user_id = current_user.id if current_user.tier == "admin" else None
+    book.public_share_approved_by_user_id = None
     await add_moderation_action(
         db,
         action_type="book_published",
@@ -2202,8 +2214,8 @@ async def create_book_character(
             motivations=body.motivations,
             fears=body.fears,
         )
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
+    except ValueError:
+        raise HTTPException(400, "Character data is invalid.")
 
     db.add(character)
     await db.flush()
@@ -2277,8 +2289,8 @@ async def partition_book_character(
             source=character,
             partitions=[{"name": item.name, "aliases": item.aliases} for item in body.partitions],
         )
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
+    except ValueError:
+        raise HTTPException(400, "Character partition request is invalid.")
 
     await refresh_character_duplicate_suggestions(db, book_id=book.id)
     await db.commit()
@@ -2336,8 +2348,8 @@ async def update_book_character(
     if body.graph_visibility is not None:
         try:
             apply_graph_visibility_override(character, body.graph_visibility)
-        except ValueError as exc:
-            raise HTTPException(400, str(exc)) from exc
+        except ValueError:
+            raise HTTPException(400, "Character visibility settings are invalid.")
     mark_character_curated(
         character,
         protected_from_repair=body.protected_from_repair

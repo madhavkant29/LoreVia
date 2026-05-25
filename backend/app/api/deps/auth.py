@@ -7,15 +7,25 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.redis import refresh_session_active
+from app.core.redis import get_redis, key_admin_step_up, refresh_session_active
 from app.core.security import create_access_token, decode_token
 from app.models.user import User
+from app.services.admin_service import (
+    ADMIN_SCOPE_BILLING,
+    ADMIN_SCOPE_MODERATION,
+    ADMIN_SCOPE_SUPER,
+    get_active_admin_principal,
+    principal_has_scope,
+    principal_scope_snapshot,
+    record_admin_audit_event,
+)
 from app.utils.auth_utils import current_token_version
 from app.utils.auth_cookies import (
     REFRESH_TOKEN_COOKIE_NAME,
     get_auth_token,
     set_access_cookie,
 )
+from app.utils.admin_security import validate_admin_csrf_token
 from app.utils.request_context import set_request_user_id
 
 bearer = HTTPBearer(auto_error=False)
@@ -141,7 +151,150 @@ async def get_optional_current_user(
         raise
 
 
-async def get_admin(current_user: User = Depends(get_current_user)) -> User:
-    if current_user.tier != "admin":
+async def get_admin(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    return await require_admin_principal(request=request, current_user=current_user, db=db)
+
+
+async def require_admin_principal(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    principal = await get_active_admin_principal(db, current_user.id)
+    if principal is None:
+        await record_admin_audit_event(
+            db,
+            actor_user_id=current_user.id,
+            action_type="admin_access_denied",
+            result="denied",
+            reason="No active admin principal.",
+            request=request,
+        )
+        await db.commit()
         raise HTTPException(403, "Admin only")
+    request.state.admin_principal = principal
     return current_user
+
+
+async def _require_admin_scope(
+    *,
+    request: Request,
+    current_user: User,
+    db: AsyncSession,
+    required_scope: str,
+) -> User:
+    principal = await get_active_admin_principal(db, current_user.id)
+    if not principal_has_scope(principal, required_scope):
+        await record_admin_audit_event(
+            db,
+            actor_user_id=current_user.id,
+            action_type=f"admin_scope_denied:{required_scope}",
+            result="denied",
+            reason="Missing required admin scope.",
+            request=request,
+            scopes_snapshot=principal_scope_snapshot(principal),
+        )
+        await db.commit()
+        raise HTTPException(403, "Admin only")
+    request.state.admin_principal = principal
+    return current_user
+
+
+async def require_moderation_admin(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    return await _require_admin_scope(
+        request=request,
+        current_user=current_user,
+        db=db,
+        required_scope=ADMIN_SCOPE_MODERATION,
+    )
+
+
+async def require_billing_admin(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    return await _require_admin_scope(
+        request=request,
+        current_user=current_user,
+        db=db,
+        required_scope=ADMIN_SCOPE_BILLING,
+    )
+
+
+async def require_super_admin(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    return await _require_admin_scope(
+        request=request,
+        current_user=current_user,
+        db=db,
+        required_scope=ADMIN_SCOPE_SUPER,
+    )
+
+
+async def require_owner_admin(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    principal = await get_active_admin_principal(db, current_user.id)
+    if principal is None or not principal.is_owner:
+        await record_admin_audit_event(
+            db,
+            actor_user_id=current_user.id,
+            action_type="admin_owner_denied",
+            result="denied",
+            reason="Owner admin access is required.",
+            request=request,
+            scopes_snapshot=principal_scope_snapshot(principal),
+        )
+        await db.commit()
+        raise HTTPException(403, "Admin only")
+    request.state.admin_principal = principal
+    return current_user
+
+
+async def require_admin_csrf(request: Request) -> None:
+    authorization = request.headers.get("authorization", "")
+    if authorization.lower().startswith("bearer "):
+        return
+    validate_admin_csrf_token(request)
+
+
+def _current_admin_session_id(request: Request) -> str:
+    refresh_payload = _decode_refresh_payload(get_auth_token(request, cookie_name=REFRESH_TOKEN_COOKIE_NAME))
+    if refresh_payload and refresh_payload.get("sid"):
+        return str(refresh_payload["sid"])
+    return "access"
+
+
+async def mark_admin_step_up(request: Request, user_id: uuid.UUID, ttl_seconds: int = 10 * 60) -> None:
+    session_id = _current_admin_session_id(request)
+    r = await get_redis()
+    await r.setex(key_admin_step_up(str(user_id), session_id), ttl_seconds, "1")
+
+
+async def admin_step_up_active(request: Request, user_id: uuid.UUID) -> bool:
+    session_id = _current_admin_session_id(request)
+    r = await get_redis()
+    return bool(await r.exists(key_admin_step_up(str(user_id), session_id)))
+
+
+async def require_admin_step_up(
+    request: Request,
+    current_user: User = Depends(require_admin_principal),
+) -> None:
+    if await admin_step_up_active(request, current_user.id):
+        return
+    raise HTTPException(403, "Recent admin verification required.")

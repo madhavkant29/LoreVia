@@ -308,6 +308,10 @@ def key_refresh_session(user_id: str, session_id: str) -> str:
     return f"refresh_session:{user_id}:{session_id}"
 
 
+def key_admin_step_up(user_id: str, session_id: str) -> str:
+    return f"admin_step_up:{user_id}:{session_id}"
+
+
 def key_webhook_event(event_id: str) -> str:
     return f"webhook:event:{event_id}"
 

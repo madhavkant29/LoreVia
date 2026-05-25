@@ -194,10 +194,6 @@ describe("foundation utilities", () => {
     expect(canUseAuthorFeatures("author")).toBe(true)
   })
 
-  it("marks admin tiers as able to use author features", () => {
-    expect(canUseAuthorFeatures("admin")).toBe(true)
-  })
-
   it("does not mark invited beta-reader tiers as able to use author features", () => {
     expect(canUseAuthorFeatures("collaborator")).toBe(false)
   })
@@ -220,10 +216,6 @@ describe("foundation utilities", () => {
 
   it("returns an Architect label", () => {
     expect(tierLabel("architect")).toBe("Architect")
-  })
-
-  it("returns an Admin label", () => {
-    expect(tierLabel("admin")).toBe("Admin")
   })
 
   it("returns a Free label by default", () => {

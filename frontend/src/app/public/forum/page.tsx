@@ -2,7 +2,7 @@ import type { Metadata } from "next"
 import dynamic from "next/dynamic"
 
 import { JsonLdScript } from "@/components/seo/JsonLdScript"
-import { listPublicForumPostsServer } from "@/lib/api/public.server"
+import { listRankedBetaNovelsServer } from "@/lib/api/public.server"
 import {
   DEFAULT_OG_IMAGE,
   SITE_NAME,
@@ -40,7 +40,7 @@ export const metadata: Metadata = {
 
 export default async function PublicForumPage() {
   const initialData = process.env.NODE_ENV === "production"
-    ? await listPublicForumPostsServer().catch(() => undefined)
+    ? await listRankedBetaNovelsServer({ ranking: "most_popular", timeWindow: "monthly" }).catch(() => undefined)
     : undefined
   const collectionJsonLd = buildCollectionPageJsonLd({
     name: "LoreVia Public Forum",

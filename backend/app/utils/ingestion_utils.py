@@ -17,6 +17,7 @@ from app.utils.book_utils import (
     normalize_writer_workspace,
     serialize_manuscript_content,
 )
+from app.utils.logging.errors import redact_sensitive_text
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -277,7 +278,7 @@ def build_analysis_chapter_state(
         "status": " ".join(str(status or "").split()).strip() or "pending",
         "generated_modes": next_modes,
         "attempt_count": attempts + (1 if increment_attempt else 0),
-        "last_error": " ".join(str(last_error or "").split()).strip() or None,
+        "last_error": " ".join((redact_sensitive_text(str(last_error or "")) or "").split()).strip() or None,
         "updated_at": datetime.now(UTC).isoformat(),
     }
     next_source_integrity = source_integrity if isinstance(source_integrity, dict) else current.get("source_integrity")

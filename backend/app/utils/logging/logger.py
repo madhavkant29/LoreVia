@@ -3,6 +3,7 @@ import logging
 from datetime import UTC, datetime
 
 from app.utils.request_context import get_request_id
+from app.utils.logging.errors import scrub_sensitive_data
 
 _STANDARD_RECORD_FIELDS = set(logging.LogRecord("", 0, "", 0, "", (), None).__dict__)
 
@@ -21,7 +22,7 @@ class JSONFormatter(logging.Formatter):
             "ts": datetime.now(UTC).isoformat(),
             "level": record.levelname,
             "logger": record.name,
-            "message": record.getMessage(),
+            "message": scrub_sensitive_data(record.getMessage()),
             "module": record.module,
         }
 
@@ -30,16 +31,16 @@ class JSONFormatter(logging.Formatter):
             payload["request_id"] = request_id
 
         if record.exc_info:
-            payload["exc"] = self.formatException(record.exc_info)
+            payload["exc"] = scrub_sensitive_data(self.formatException(record.exc_info))
 
         if record.stack_info:
-            payload["stack"] = record.stack_info
+            payload["stack"] = scrub_sensitive_data(record.stack_info)
 
         for key, value in record.__dict__.items():
             if key in _STANDARD_RECORD_FIELDS or key in payload or key.startswith("_"):
                 continue
             if value is not None:
-                payload[key] = value
+                payload[key] = scrub_sensitive_data(value, key=key)
 
         return json.dumps(payload, default=str)
 

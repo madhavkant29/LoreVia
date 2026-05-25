@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.models.intelligence import AdvisorJob
+from app.utils.logging.errors import redact_sensitive_text
 
 ADVISOR_SCOPE_BOOK = "book"
 ADVISOR_SCOPE_SERIES = "series"
@@ -103,7 +104,7 @@ async def mark_advisor_job_failed(
         return None
     job.status = ADVISOR_STATUS_FAILED
     job.error_code = error_code
-    job.error_detail = error_detail
+    job.error_detail = redact_sensitive_text(error_detail)
     job.result_json = None
     job.updated_at = datetime.now(UTC)
     await db.commit()

@@ -10,6 +10,7 @@ from sentry_sdk.integrations.celery import CeleryIntegration
 from app.core.config import settings
 from app.core.database import engine
 from app.core.redis import close_all_redis_clients
+from app.utils.logging.errors import scrub_sentry_event
 from app.utils.request_context import get_request_id, set_request_id, set_request_user_id
 from app.utils.worker_async_utils import close_worker_loop, get_worker_loop, has_worker_loop
 from app.workers.queues.queues import TASK_QUEUES
@@ -62,6 +63,7 @@ if settings.SENTRY_DSN and not settings.DEBUG:
     sentry_sdk.init(
         dsn=settings.SENTRY_DSN,
         integrations=[CeleryIntegration()],
+        before_send=scrub_sentry_event,
         traces_sample_rate=0.1,
         profiles_sample_rate=0.1,
     )
@@ -171,6 +173,10 @@ celery_app.conf.update(
             "task": "maintenance_tasks.cleanup_expired_advisor_jobs",
             "schedule": crontab(minute=30),
             "kwargs": {"limit": 1000},
+        },
+        "maintenance-refresh-public-rankings-nightly": {
+            "task": "maintenance_tasks.refresh_public_rankings",
+            "schedule": crontab(minute=10, hour=2),
         },
     },
     task_default_retry_delay=30,

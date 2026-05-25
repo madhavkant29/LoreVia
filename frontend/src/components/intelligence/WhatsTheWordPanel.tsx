@@ -24,6 +24,7 @@ export function WhatsTheWordPanel({
   const [result, setResult] = useState<WhatsTheWordResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [status, setStatus] = useState<string | null>(null)
   const descriptionWordCount = useMemo(
     () => countWhatsTheWordDescriptionWords(description),
     [description]
@@ -34,17 +35,20 @@ export function WhatsTheWordPanel({
     if (!canSubmit) return
     setLoading(true)
     setError(null)
+    setStatus(null)
     try {
-      const nextResult = await intelligenceApi.whatsTheWord(
+      const nextResult = await intelligenceApi.whatsTheWordStream(
         bookId,
         description.trim(),
-        retry ? result?.word ?? null : null
+        retry ? result?.word ?? null : null,
+        { onStage: setStatus }
       )
       setResult(nextResult)
     } catch {
       setError("Couldn't find the word right now. Please try again.")
     } finally {
       setLoading(false)
+      setStatus(null)
     }
   }
 
@@ -125,6 +129,9 @@ export function WhatsTheWordPanel({
               </div>
 
               {error ? <p className="mt-3 text-sm text-rose-500">{error}</p> : null}
+              {loading && status ? (
+                <p className={`mt-3 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>{status}</p>
+              ) : null}
 
               <div className="mt-3 flex flex-wrap gap-2">
                 <button

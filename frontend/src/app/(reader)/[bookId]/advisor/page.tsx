@@ -417,6 +417,7 @@ export default function AdvisorPage() {
   const [editChapter, setEditChapter] = useState<string>("")
   const [editLoading, setEditLoading] = useState(false)
   const [editError, setEditError] = useState<string | null>(null)
+  const [editProgress, setEditProgress] = useState<string | null>(null)
   const [editResult, setEditResult] = useState<EditorialReview | null>(null)
   const [editPassages, setEditPassages] = useState<EditorialReviewPassage[]>([])
   const [importFiles, setImportFiles] = useState<File[]>([])
@@ -482,12 +483,30 @@ export default function AdvisorPage() {
     setError(null)
     setLoading(true)
     try {
-      const res = await intelligenceApi.advisorMessage(
+      const res = await intelligenceApi.advisorMessageStream(
         bookId,
         next,
-        greeting?.stats.total_chapters ?? 9999
+        greeting?.stats.total_chapters ?? 9999,
+        {
+          onDelta: (content) => {
+            if (!content) return
+            setMessages(prev => {
+              const last = prev[prev.length - 1]
+              if (last?.role === "assistant") {
+                return [...prev.slice(0, -1), { ...last, content: `${last.content}${content}` }]
+              }
+              return [...prev, { role: "assistant", content }]
+            })
+          },
+        }
       )
-      setMessages(prev => [...prev, { role: "assistant", content: res.reply }])
+      setMessages(prev => {
+        const last = prev[prev.length - 1]
+        if (last?.role === "assistant") {
+          return [...prev.slice(0, -1), { role: "assistant", content: res.reply }]
+        }
+        return [...prev, { role: "assistant", content: res.reply }]
+      })
       setPassages(res.retrieved_passages)
       setWorldAnalysis(res.world_analysis ?? null)
       setResponseTypes(prev => [...prev, (res.response_type ?? "standard") as ResponseType])
@@ -1156,12 +1175,14 @@ export default function AdvisorPage() {
                           if (!editText.trim()) return
                           setEditLoading(true)
                           setEditError(null)
+                          setEditProgress(null)
                           setEditResult(null)
                           try {
-                            const res = await intelligenceApi.editorialReview(
+                            const res = await intelligenceApi.editorialReviewStream(
                               bookId,
                               editText,
-                              editChapter ? parseInt(editChapter) : undefined
+                              editChapter ? parseInt(editChapter) : undefined,
+                              { onStage: setEditProgress },
                             )
                             setEditResult(res.review)
                             setEditPassages(res.retrieved_passages)
@@ -1169,6 +1190,7 @@ export default function AdvisorPage() {
                             setEditError("Review failed. Check your connection and try again.")
                           } finally {
                             setEditLoading(false)
+                            setEditProgress(null)
                           }
                         }}
                         disabled={!editText.trim() || editLoading}
@@ -1191,6 +1213,10 @@ export default function AdvisorPage() {
                         {editError}
                       </p>
                     )}
+
+                    {editLoading && editProgress ? (
+                      <p className={`mt-3 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>{editProgress}</p>
+                    ) : null}
 
                     {editLoading && (
                       <div className={`mt-4 animate-pulse space-y-2 rounded-[1rem] border p-4 ${isDark ? "border-white/8 bg-white/3" : "border-stone-100 bg-stone-50"}`}>

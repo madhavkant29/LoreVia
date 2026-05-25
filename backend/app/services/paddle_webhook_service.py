@@ -8,8 +8,13 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 
 from app.core.database import AsyncSessionLocal
-from app.models.user import PaddleWebhookEvent, Subscription, User
+from app.models.user import PaddleWebhookEvent, RefundReview, Subscription, User
 from app.services.email_service import send_subscription_confirmation
+from app.services.refund_service import (
+    REFUND_STATUS_APPROVED,
+    REFUND_STATUS_PROVIDER_FOLLOWUP_REQUIRED,
+    apply_adjustment_webhook,
+)
 from app.utils.billing_utils import (
     SUPPORTED_PADDLE_WEBHOOK_EVENTS,
     coerce_user_id,
@@ -21,6 +26,7 @@ from app.utils.billing_utils import (
     subscription_service_is_active,
     tier_from_plan_code,
 )
+from app.utils.logging.errors import public_error_message, redact_sensitive_text
 
 
 logger = logging.getLogger(__name__)
@@ -56,8 +62,8 @@ async def process_paddle_webhook(event: dict[str, Any]) -> dict[str, Any]:
             notification_id=notification_id,
             payload=event,
         )
-    except Exception as exc:
-        await _mark_webhook_failed(event_id=event_id, error_message=str(exc))
+    except Exception:
+        await _mark_webhook_failed(event_id=event_id, error_message=public_error_message(500))
         raise
 
 
@@ -150,14 +156,22 @@ async def _process_claimed_webhook(
                 return {"received": True, "ignored": True}
 
             data = payload.get("data") or {}
-            context = await _resolve_subscription_context(db, event_type=event_type, data=data)
-            email_job = await _apply_subscription_change(
-                db,
-                event_id=event_id,
-                event_type=event_type,
-                data=data,
-                context=context,
-            )
+            email_job = None
+            if event_type.startswith("adjustment."):
+                await apply_adjustment_webhook(
+                    db,
+                    event_type=event_type,
+                    data=data,
+                )
+            else:
+                context = await _resolve_subscription_context(db, event_type=event_type, data=data)
+                email_job = await _apply_subscription_change(
+                    db,
+                    event_id=event_id,
+                    event_type=event_type,
+                    data=data,
+                    context=context,
+                )
 
             webhook_event.processing_status = WEBHOOK_STATUS_PROCESSED
             webhook_event.processed_at = datetime.now(UTC)
@@ -243,6 +257,13 @@ async def _apply_subscription_change(
             paddle_sub_id=subscription.paddle_sub_id,
             metadata={"webhook_event_type": event_type},
         )
+
+    await _resolve_refund_follow_up_if_completed_cancellation(
+        db,
+        event_type=event_type,
+        status=next_status,
+        transaction_id=subscription.paddle_transaction_id,
+    )
 
     if (
         event_type == "transaction.completed"
@@ -384,7 +405,7 @@ async def _mark_webhook_failed(*, event_id: str, error_message: str) -> None:
             return
         webhook_event.processing_status = WEBHOOK_STATUS_FAILED
         webhook_event.processed_at = None
-        webhook_event.last_error = error_message
+        webhook_event.last_error = redact_sensitive_text(error_message)
         await db.commit()
 
 
@@ -489,3 +510,37 @@ def _string_or_none(value: object | None) -> str | None:
         return None
     candidate = str(value).strip()
     return candidate or None
+
+
+async def _resolve_refund_follow_up_if_completed_cancellation(
+    db,
+    *,
+    event_type: str,
+    status: str,
+    transaction_id: str | None,
+) -> None:
+    if event_type != "subscription.canceled" or status not in CANCELED_STATUSES or not transaction_id:
+        return
+
+    review = (
+        await db.execute(
+            select(RefundReview)
+            .where(RefundReview.paddle_transaction_id == transaction_id)
+            .order_by(RefundReview.created_at.desc())
+        )
+    ).scalars().first()
+    if review is None or review.status != REFUND_STATUS_PROVIDER_FOLLOWUP_REQUIRED:
+        return
+    if not review.paddle_adjustment_id or not _review_has_approved_adjustment(review):
+        return
+
+    review.status = REFUND_STATUS_APPROVED
+    review.resolved_at = review.resolved_at or datetime.now(UTC)
+
+
+def _review_has_approved_adjustment(review: RefundReview) -> bool:
+    provider_response = dict(review.provider_response_json or {})
+    adjustment_updated = provider_response.get("adjustment_updated")
+    if not isinstance(adjustment_updated, dict):
+        return False
+    return _normalized_status(adjustment_updated.get("status")) == "approved"

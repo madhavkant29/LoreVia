@@ -73,6 +73,7 @@ export default function SeriesPage() {
   const [continuityBookId, setContinuityBookId] = useState("")
   const [continuityResult, setContinuityResult] = useState<SeriesContinuityResponse | null>(null)
   const [continuityLoading, setContinuityLoading] = useState(false)
+  const [continuityStatus, setContinuityStatus] = useState<string | null>(null)
   const [worldAnalysisBySeriesId, setWorldAnalysisBySeriesId] = useState<Record<string, any>>({})
   const [worldAnalysisLoadingId, setWorldAnalysisLoadingId] = useState<string | null>(null)
 
@@ -137,8 +138,25 @@ export default function SeriesPage() {
     setAskMessages(newMessages)
     setAskQuery("")
     try {
-      const response = await intelligenceApi.seriesAdvisorMessage(seriesId, newMessages)
-      setAskMessages(prev => [...prev, { role: "assistant", content: response.reply }])
+      const response = await intelligenceApi.seriesAdvisorMessageStream(seriesId, newMessages, {
+        onDelta: (content) => {
+          if (!content) return
+          setAskMessages((prev) => {
+            const last = prev[prev.length - 1]
+            if (last?.role === "assistant") {
+              return [...prev.slice(0, -1), { ...last, content: `${last.content}${content}` }]
+            }
+            return [...prev, { role: "assistant", content }]
+          })
+        },
+      })
+      setAskMessages((prev) => {
+        const last = prev[prev.length - 1]
+        if (last?.role === "assistant") {
+          return [...prev.slice(0, -1), { role: "assistant", content: response.reply }]
+        }
+        return [...prev, { role: "assistant", content: response.reply }]
+      })
       setAskResponse(response)
     } catch {
       setAskResponse({ reply: "Failed to get a response. Please try again.", intent: "general", response_type: "standard", retrieved_passages: [], cached: false })
@@ -150,19 +168,22 @@ export default function SeriesPage() {
   async function handleSeriesContinuityCheck(seriesId: string) {
     if (!continuityText.trim() || !continuityBookId) return
     setContinuityLoading(true)
+    setContinuityStatus(null)
     setContinuityResult(null)
     try {
-      const result = await intelligenceApi.seriesContinuityCheck(
+      const result = await intelligenceApi.seriesContinuityCheckStream(
         seriesId,
         continuityBookId,
         continuityText,
-        continuityChapterNum ? parseInt(continuityChapterNum) : undefined
+        continuityChapterNum ? parseInt(continuityChapterNum) : undefined,
+        { onStage: setContinuityStatus },
       )
       setContinuityResult(result as typeof continuityResult)
     } catch {
       setContinuityResult(null)
     } finally {
       setContinuityLoading(false)
+      setContinuityStatus(null)
     }
   }
 
@@ -551,6 +572,10 @@ export default function SeriesPage() {
                     >
                       {continuityLoading ? "Checking across seriesâ€¦" : "Run series continuity check"}
                     </button>
+
+                    {continuityLoading && continuityStatus ? (
+                      <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>{continuityStatus}</p>
+                    ) : null}
 
                     {continuityResult && (
                       <div className="space-y-4">

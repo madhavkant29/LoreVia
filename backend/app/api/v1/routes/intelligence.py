@@ -1,10 +1,13 @@
 """
-Grounded intelligence routes: contextual Q&A + character chat.
+Grounded intelligence routes: contextual Q&A.
 """
+import json
 import uuid
 from typing import Any, Literal, NotRequired, TypedDict, cast
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import StreamingResponse
 from openai import AsyncOpenAI
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,14 +17,13 @@ from app.api.deps.rate_limit import rate_limit_chat
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.redis import cache_get, cache_set, key_grounded_answer
-from app.engine.intelligence.character_chat import chat_as_character
-from app.engine.search.semantic import semantic_search
 from app.models.book import Book, Series, SeriesBook
 from app.models.character import Character
 from app.models.intelligence import WikiEntry
-from app.schemas.intelligence import ChatRequest, GroundedAnswerOut, GroundedCitationOut, QARequest
-from app.utils.llm_usage_utils import create_tracked_chat_completion
+from app.schemas.intelligence import GroundedAnswerOut, GroundedCitationOut, QARequest
+from app.utils.llm_usage_utils import create_tracked_chat_completion, record_llm_usage_counts
 from app.utils.intelligence_utils import build_grounded_qa_context
+from app.utils.logging.errors import public_error_message
 
 router = APIRouter()
 
@@ -39,6 +41,35 @@ def get_client() -> AsyncOpenAI:
     return AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 
 
+def _intelligence_sse(event: str, data: dict[str, Any]) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, default=str)}\n\n"
+
+
+def _grounded_answer_out_from_payload(
+    payload: dict[str, Any],
+    *,
+    cached: bool = False,
+) -> GroundedAnswerOut:
+    citations_payload = cast(list[dict[str, Any]], payload.get("citations") or [])
+    return GroundedAnswerOut(
+        answer=str(payload["answer"]),
+        citations=[
+            GroundedCitationOut(
+                chapter_num=int(cast(Any, citation["chapter_num"])),
+                chapter_title=cast(str | None, citation.get("chapter_title")),
+                excerpt=str(cast(Any, citation["excerpt"])),
+                source_type=cast(
+                    Literal["summary", "passage"],
+                    cast(Any, citation["source_type"]),
+                ),
+                relevance=cast(float | None, citation.get("relevance")),
+            )
+            for citation in citations_payload
+        ],
+        cached=cached,
+    )
+
+
 @router.post("/{book_id}/qa", response_model=GroundedAnswerOut)
 async def qa_endpoint(
     book_id: uuid.UUID,
@@ -53,24 +84,7 @@ async def qa_endpoint(
     cache_key = key_grounded_answer(str(book_id), body.current_chapter, body.question)
     cached = await cache_get(cache_key)
     if cached:
-        cached_payload = cast(dict[str, Any], cached)
-        return GroundedAnswerOut(
-            answer=str(cached_payload["answer"]),
-            citations=[
-                GroundedCitationOut(
-                    chapter_num=int(cast(Any, citation["chapter_num"])),
-                    chapter_title=cast(str | None, citation.get("chapter_title")),
-                    excerpt=str(cast(Any, citation["excerpt"])),
-                    source_type=cast(
-                        Literal["summary", "passage"],
-                        cast(Any, citation["source_type"]),
-                    ),
-                    relevance=cast(float | None, citation.get("relevance")),
-                )
-                for citation in cast(list[dict[str, Any]], cached_payload.get("citations") or [])
-            ],
-            cached=True,
-        )
+        return _grounded_answer_out_from_payload(cast(dict[str, Any], cached), cached=True)
 
     context_blocks, citations = await build_grounded_qa_context(
         db=db,
@@ -112,31 +126,15 @@ async def qa_endpoint(
         answer = (response.choices[0].message.content or "").strip()
         payload = {"answer": answer, "citations": citations}
         await cache_set(cache_key, payload, settings.REDIS_TTL_SUMMARY)
-        return GroundedAnswerOut(
-            answer=answer,
-            citations=[
-                GroundedCitationOut(
-                    chapter_num=int(cast(Any, citation["chapter_num"])),
-                    chapter_title=cast(str | None, citation.get("chapter_title")),
-                    excerpt=str(cast(Any, citation["excerpt"])),
-                    source_type=cast(
-                        Literal["summary", "passage"],
-                        cast(Any, citation["source_type"]),
-                    ),
-                    relevance=cast(float | None, citation.get("relevance")),
-                )
-                for citation in citations
-            ],
-        )
+        return _grounded_answer_out_from_payload(payload)
     finally:
         await client.close()
 
 
-@router.post("/{book_id}/chat/{character_id}")
-async def character_chat(
+@router.post("/{book_id}/qa-stream")
+async def qa_stream_endpoint(
     book_id: uuid.UUID,
-    character_id: uuid.UUID,
-    body: ChatRequest,
+    body: QARequest,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
     _=Depends(rate_limit_chat),
@@ -145,36 +143,101 @@ async def character_chat(
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
 
-    char = await db.get(Character, character_id)
-    if not char or char.book_id != book_id:
-        raise HTTPException(404)
+    cache_key = key_grounded_answer(str(book_id), body.current_chapter, body.question)
+    cached = await cache_get(cache_key)
+    if cached:
+        cached_payload = _grounded_answer_out_from_payload(cast(dict[str, Any], cached), cached=True)
 
-    serialized_messages = [message.model_dump() for message in body.messages]
-    last_user_message = next((msg["content"] for msg in reversed(serialized_messages) if msg.get("role") == "user"), "")
-    semantic_hits = await semantic_search(
-        db,
-        book_id,
-        last_user_message or char.name,
-        body.current_chapter,
-        limit=2,
-        usage_user_id=current_user.id,
-        usage_feature="character_chat_search",
-    )
-    search_context = "\n\n".join(hit["text"][:280] for hit in semantic_hits)
+        async def cached_stream():
+            yield _intelligence_sse("done", cast(dict[str, Any], jsonable_encoder(cached_payload)))
 
-    reply = await chat_as_character(
-        character=char,
-        book_title=book.title,
-        current_chapter=body.current_chapter,
-        context_summary=body.context_summary,
-        search_context=search_context,
-        messages=serialized_messages,
+        return StreamingResponse(
+            cached_stream(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
+    context_blocks, citations = await build_grounded_qa_context(
+        db=db,
+        book=book,
         user_id=current_user.id,
+        question=body.question,
+        current_chapter=body.current_chapter,
     )
-    grounded_hint = None
-    if semantic_hits:
-        grounded_hint = f"Grounded in chapter {semantic_hits[0]['chapter_num']} evidence."
-    return {"reply": reply, "character": char.name, "grounded_hint": grounded_hint}
+
+    system = (
+        f'You answer questions about "{book.title}" using only the provided material.\n'
+        f'The reader has completed up to chapter {body.current_chapter}.\n'
+        "If earlier books in the same series are provided as prior-volume context, you may use them to answer questions about past lore.\n"
+        "Rules:\n"
+        "- Answer only from text and summaries provided.\n"
+        "- Do not predict future events or speculate.\n"
+        "- If the answer is not grounded in the provided material, say so plainly.\n"
+        "- Keep the response concise but useful.\n"
+        "- Prefer 1-3 short sentences.\n"
+        "- When grounded, mention the most relevant chapter number directly in the answer.\n"
+    )
+    llm_messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": f"Question: {body.question}\n\nContext:\n\n" + "\n\n".join(context_blocks)},
+    ]
+
+    async def event_stream():
+        client = get_client()
+        answer_parts: list[str] = []
+        usage_counts: tuple[int, int, int] | None = None
+        try:
+            yield _intelligence_sse("stage", {"message": "Searching grounded context..."})
+            stream = await client.chat.completions.create(
+                model=settings.OPENAI_INTEL_MODEL,
+                temperature=0.2,
+                max_tokens=220,
+                messages=llm_messages,
+                stream=True,
+                stream_options={"include_usage": True},
+            )
+            yield _intelligence_sse("stage", {"message": "Writing grounded answer..."})
+            async for chunk in stream:
+                usage = getattr(chunk, "usage", None)
+                if usage is not None:
+                    usage_counts = (
+                        int(getattr(usage, "prompt_tokens", 0) or 0),
+                        int(getattr(usage, "completion_tokens", 0) or 0),
+                        int(getattr(usage, "total_tokens", 0) or 0),
+                    )
+                for choice in getattr(chunk, "choices", []) or []:
+                    content = getattr(getattr(choice, "delta", None), "content", None)
+                    if content:
+                        answer_parts.append(content)
+                        yield _intelligence_sse("delta", {"content": content})
+
+            if usage_counts is not None:
+                await record_llm_usage_counts(
+                    prompt_tokens=usage_counts[0],
+                    completion_tokens=usage_counts[1],
+                    total_tokens=usage_counts[2],
+                    feature="grounded_qa",
+                    operation="chat_completion_stream",
+                    model=settings.OPENAI_INTEL_MODEL,
+                    db=db,
+                    user_id=current_user.id,
+                    book_id=book.id,
+                )
+
+            payload = {"answer": "".join(answer_parts).strip(), "citations": citations}
+            await cache_set(cache_key, payload, settings.REDIS_TTL_SUMMARY)
+            response_payload = _grounded_answer_out_from_payload(payload)
+            yield _intelligence_sse("done", cast(dict[str, Any], jsonable_encoder(response_payload)))
+        except Exception:
+            yield _intelligence_sse("error", {"error": public_error_message(500)})
+        finally:
+            await client.close()
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/{book_id}/cross-book-intelligence")

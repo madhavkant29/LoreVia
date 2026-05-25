@@ -40,6 +40,7 @@ export default function EditorialReviewPage() {
   const [editChapter, setEditChapter] = useState("")
   const [editLoading, setEditLoading] = useState(false)
   const [editError, setEditError] = useState<string | null>(null)
+  const [editProgress, setEditProgress] = useState<string | null>(null)
   const [editResult, setEditResult] = useState<EditorialReview | null>(null)
   const [editPassages, setEditPassages] = useState<EditorialReviewPassage[]>([])
   const [importFiles, setImportFiles] = useState<File[]>([])
@@ -76,12 +77,14 @@ export default function EditorialReviewPage() {
     if (!editText.trim()) return
     setEditLoading(true)
     setEditError(null)
+    setEditProgress(null)
     setEditResult(null)
     try {
-      const result = await intelligenceApi.editorialReview(
+      const result = await intelligenceApi.editorialReviewStream(
         bookId,
         editText,
-        editChapter ? Number.parseInt(editChapter, 10) : undefined
+        editChapter ? Number.parseInt(editChapter, 10) : undefined,
+        { onStage: setEditProgress }
       )
       setEditResult(result.review)
       setEditPassages(result.retrieved_passages)
@@ -89,6 +92,7 @@ export default function EditorialReviewPage() {
       setEditError("Review failed. Check your connection and try again.")
     } finally {
       setEditLoading(false)
+      setEditProgress(null)
     }
   }
 
@@ -249,6 +253,12 @@ export default function EditorialReviewPage() {
               {editError ? (
                 <p className={`mt-3 rounded-[0.8rem] border px-4 py-2 text-sm ${isDark ? "border-red-500/25 bg-red-500/10 text-red-300" : "border-red-200 bg-red-50 text-red-700"}`}>
                   {editError}
+                </p>
+              ) : null}
+
+              {editLoading && editProgress ? (
+                <p className={`mt-3 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+                  {editProgress}
                 </p>
               ) : null}
 

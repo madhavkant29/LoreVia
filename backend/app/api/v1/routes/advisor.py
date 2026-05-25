@@ -11,12 +11,14 @@ Also provides:
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 import uuid
 from typing import Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import Response
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import Response, StreamingResponse
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
 from sqlalchemy import func, select
@@ -93,6 +95,8 @@ from app.utils.advisor_utils import (
     generate_whats_the_word_result,
     build_series_story_context,
     build_story_context,
+    stream_advisor_reply_payload,
+    stream_series_advisor_reply_payload,
     classify_intent,
     classify_response_type,
     detect_advisor_world_mode,
@@ -110,6 +114,7 @@ from app.utils.book_utils import detect_chapter_continuity_flags
 from app.utils.export_utils import export_filename_base
 from app.utils.intelligence_utils import compute_voice_metrics, extract_dialogue_samples_by_character, score_voice_match
 from app.utils.llm_usage_utils import create_tracked_chat_completion
+from app.utils.logging.errors import public_error_message
 from app.workers.tasks.intelligence_tasks import generate_advisor_reply_task
 from app.workers.tasks.intelligence_tasks import generate_series_advisor_reply_task
 
@@ -146,6 +151,18 @@ def _parse_advisor_job_id(task_id: str) -> uuid.UUID:
         return uuid.UUID(str(task_id))
     except ValueError as exc:
         raise HTTPException(404, detail="advisor task not found") from exc
+
+
+def _advisor_sse(event: str, data: dict[str, Any]) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, default=str)}\n\n"
+
+
+def _advisor_stream_response(event_stream) -> StreamingResponse:
+    return StreamingResponse(
+        event_stream,
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 async def _enqueue_book_advisor_task(
@@ -189,7 +206,7 @@ async def _enqueue_book_advisor_task(
             db,
             job_id=job.id,
             error_code="advisor_enqueue_failed",
-            error_detail=str(exc),
+            error_detail=public_error_message(500),
         )
         raise
     response.status_code = 202
@@ -236,7 +253,7 @@ async def _enqueue_series_advisor_task(
             db,
             job_id=job.id,
             error_code="advisor_enqueue_failed",
-            error_detail=str(exc),
+            error_detail=public_error_message(500),
         )
         raise
     response.status_code = 202
@@ -266,6 +283,41 @@ async def advisor_message(
         body=body,
         current_user_id=current_user.id,
         response=response,
+    )
+
+
+@router.post("/{book_id}/advisor/message-stream")
+async def advisor_message_stream(
+    book_id: uuid.UUID,
+    body: AdvisorRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _=Depends(rate_limit_advisor),
+):
+    book = await db.get(Book, book_id)
+    if not book or book.user_id != current_user.id:
+        raise HTTPException(404)
+
+    if not body.messages:
+        raise HTTPException(400, detail="messages list is empty")
+
+    async def event_stream():
+        try:
+            async for item in stream_advisor_reply_payload(
+                db=db,
+                book=book,
+                user_id=current_user.id,
+                messages=[{"role": msg.role, "content": msg.content} for msg in body.messages],
+                total_chapters=body.total_chapters,
+            ):
+                yield _advisor_sse(item["event"], item["data"])
+        except Exception as exc:
+            yield _advisor_sse("error", {"error": public_error_message(500)})
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 
@@ -325,6 +377,38 @@ async def whats_the_word(
         return WhatsTheWordResponse(**payload)
     finally:
         await client.close()
+
+
+@router.post("/{book_id}/advisor/whats-the-word-stream")
+async def whats_the_word_stream(
+    book_id: uuid.UUID,
+    body: WhatsTheWordRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _=Depends(rate_limit_advisor),
+):
+    book = await db.get(Book, book_id)
+    if not book or book.user_id != current_user.id:
+        raise HTTPException(404)
+
+    async def event_stream():
+        client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+        try:
+            yield _advisor_sse("stage", {"message": "Finding the closest fit..."})
+            payload = await generate_whats_the_word_result(
+                client=client,
+                model=settings.OPENAI_INTEL_MODEL,
+                book_title=book.title,
+                description=body.description,
+                previous_word=body.previous_word,
+            )
+            yield _advisor_sse("done", cast(dict[str, Any], jsonable_encoder(WhatsTheWordResponse(**payload))))
+        except Exception as exc:
+            yield _advisor_sse("error", {"error": public_error_message(500)})
+        finally:
+            await client.close()
+
+    return _advisor_stream_response(event_stream())
 
 
 @router.post("/{book_id}/advisor/message-async")
@@ -1163,6 +1247,33 @@ async def editorial_review(
         await client.close()
 
 
+@router.post("/{book_id}/advisor/editorial-review-stream")
+async def editorial_review_stream(
+    book_id: uuid.UUID,
+    body: EditorialReviewRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _=Depends(rate_limit_continuity_checker),
+):
+    async def event_stream():
+        try:
+            yield _advisor_sse("stage", {"message": "Cross-checking continuity and grammar..."})
+            payload = await editorial_review(
+                book_id=book_id,
+                body=body,
+                db=db,
+                current_user=current_user,
+                _=_,
+            )
+            yield _advisor_sse("done", cast(dict[str, Any], jsonable_encoder(payload)))
+        except HTTPException as exc:
+            yield _advisor_sse("error", {"error": public_error_message(exc.status_code)})
+        except Exception:
+            yield _advisor_sse("error", {"error": public_error_message(500)})
+
+    return _advisor_stream_response(event_stream())
+
+
 @router.post("/{book_id}/advisor/prose-tighten", response_model=ProseTightenResponse)
 async def prose_tighten(
     book_id: uuid.UUID,
@@ -1216,6 +1327,33 @@ async def prose_tighten(
         return ProseTightenResponse(**response_payload)
     finally:
         await client.close()
+
+
+@router.post("/{book_id}/advisor/prose-tighten-stream")
+async def prose_tighten_stream(
+    book_id: uuid.UUID,
+    body: ProseTightenRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _=Depends(rate_limit_continuity_checker),
+):
+    async def event_stream():
+        try:
+            yield _advisor_sse("stage", {"message": "Tightening the selected prose..."})
+            payload = await prose_tighten(
+                book_id=book_id,
+                body=body,
+                db=db,
+                current_user=current_user,
+                _=_,
+            )
+            yield _advisor_sse("done", cast(dict[str, Any], jsonable_encoder(payload)))
+        except HTTPException as exc:
+            yield _advisor_sse("error", {"error": public_error_message(exc.status_code)})
+        except Exception:
+            yield _advisor_sse("error", {"error": public_error_message(500)})
+
+    return _advisor_stream_response(event_stream())
 
 
 @router.post("/{book_id}/advisor/inline-continuity", response_model=InlineContinuityResponse)
@@ -1277,6 +1415,33 @@ async def inline_continuity_check(
         "No hard continuity contradiction surfaced in this inline pass, but keep pressure-testing setup, memory, and scene-to-scene logic before you lock the scene." if not issues else "Inline continuity pass found issues worth checking before you lock the scene."
     )
     return InlineContinuityResponse(issues=issues, memory_bank=memory_bank, overall_verdict=overall_verdict)
+
+
+@router.post("/{book_id}/advisor/inline-continuity-stream")
+async def inline_continuity_check_stream(
+    book_id: uuid.UUID,
+    body: InlineContinuityRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _=Depends(rate_limit_continuity_checker),
+):
+    async def event_stream():
+        try:
+            yield _advisor_sse("stage", {"message": "Checking inline continuity..."})
+            payload = await inline_continuity_check(
+                book_id=book_id,
+                body=body,
+                db=db,
+                current_user=current_user,
+                _=_,
+            )
+            yield _advisor_sse("done", cast(dict[str, Any], jsonable_encoder(payload)))
+        except HTTPException as exc:
+            yield _advisor_sse("error", {"error": public_error_message(exc.status_code)})
+        except Exception:
+            yield _advisor_sse("error", {"error": public_error_message(500)})
+
+    return _advisor_stream_response(event_stream())
 
 
 @router.get("/{book_id}/advisor/synopsis")
@@ -1352,6 +1517,31 @@ async def manuscript_synopsis(
         return normalized
     finally:
         await client.close()
+
+
+@router.get("/{book_id}/advisor/synopsis-stream")
+async def manuscript_synopsis_stream(
+    book_id: uuid.UUID,
+    spoiler_level: str = Query("minimal", pattern="^(minimal|none)$"),
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    async def event_stream():
+        try:
+            yield _advisor_sse("stage", {"message": "Summarizing the manuscript..."})
+            payload = await manuscript_synopsis(
+                book_id=book_id,
+                spoiler_level=spoiler_level,
+                db=db,
+                current_user=current_user,
+            )
+            yield _advisor_sse("done", cast(dict[str, Any], jsonable_encoder(payload)))
+        except HTTPException as exc:
+            yield _advisor_sse("error", {"error": public_error_message(exc.status_code)})
+        except Exception:
+            yield _advisor_sse("error", {"error": public_error_message(500)})
+
+    return _advisor_stream_response(event_stream())
 
 
 @router.post("/{book_id}/advisor/voice-consistency")
@@ -1544,6 +1734,33 @@ async def voice_consistency_review(
         await client.close()
 
 
+@router.post("/{book_id}/advisor/voice-consistency-stream")
+async def voice_consistency_review_stream(
+    book_id: uuid.UUID,
+    body: VoiceConsistencyRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _=Depends(rate_limit_continuity_checker),
+):
+    async def event_stream():
+        try:
+            yield _advisor_sse("stage", {"message": "Comparing the passage to voice baselines..."})
+            payload = await voice_consistency_review(
+                book_id=book_id,
+                body=body,
+                db=db,
+                current_user=current_user,
+                _=_,
+            )
+            yield _advisor_sse("done", cast(dict[str, Any], jsonable_encoder(payload)))
+        except HTTPException as exc:
+            yield _advisor_sse("error", {"error": public_error_message(exc.status_code)})
+        except Exception:
+            yield _advisor_sse("error", {"error": public_error_message(500)})
+
+    return _advisor_stream_response(event_stream())
+
+
 # ─── Continuity report download ───────────────────────────────────────────────
 
 @router.get("/{book_id}/advisor/continuity-report")
@@ -1630,6 +1847,40 @@ async def series_advisor_message(
         body=body,
         current_user_id=current_user.id,
         response=response,
+    )
+
+
+@router.post("/series/{series_id}/advisor/message-stream")
+async def series_advisor_message_stream(
+    series_id: uuid.UUID,
+    body: AdvisorRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _=Depends(rate_limit_advisor),
+):
+    series = await db.get(Series, series_id)
+    if not series or series.user_id != current_user.id:
+        raise HTTPException(404)
+
+    if not body.messages:
+        raise HTTPException(400, detail="messages list is empty")
+
+    async def event_stream():
+        try:
+            async for item in stream_series_advisor_reply_payload(
+                db=db,
+                series=series,
+                user_id=current_user.id,
+                messages=[{"role": msg.role, "content": msg.content} for msg in body.messages],
+            ):
+                yield _advisor_sse(item["event"], item["data"])
+        except Exception as exc:
+            yield _advisor_sse("error", {"error": public_error_message(500)})
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 
@@ -1839,3 +2090,30 @@ async def series_continuity_check(
         return response_payload
     finally:
         await client.close()
+
+
+@router.post("/series/{series_id}/continuity-check-stream")
+async def series_continuity_check_stream(
+    series_id: uuid.UUID,
+    body: SeriesContinuityRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _=Depends(rate_limit_continuity_checker),
+):
+    async def event_stream():
+        try:
+            yield _advisor_sse("stage", {"message": "Comparing this passage to earlier books..."})
+            payload = await series_continuity_check(
+                series_id=series_id,
+                body=body,
+                db=db,
+                current_user=current_user,
+                _=_,
+            )
+            yield _advisor_sse("done", cast(dict[str, Any], jsonable_encoder(payload)))
+        except HTTPException as exc:
+            yield _advisor_sse("error", {"error": public_error_message(exc.status_code)})
+        except Exception:
+            yield _advisor_sse("error", {"error": public_error_message(500)})
+
+    return _advisor_stream_response(event_stream())

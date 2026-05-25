@@ -22,14 +22,3 @@ class GroundedAnswerOut(BaseModel):
     answer: str
     citations: list[GroundedCitationOut] = Field(default_factory=list)
     cached: bool = False
-
-
-class ChatMessage(BaseModel):
-    role: Literal["user", "assistant"]
-    content: str
-
-
-class ChatRequest(BaseModel):
-    messages: list[ChatMessage]
-    current_chapter: int
-    context_summary: str = ""

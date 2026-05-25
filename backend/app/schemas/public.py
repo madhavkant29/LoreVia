@@ -20,6 +20,17 @@ class PublicBookManualIn(BaseModel):
     chapters: list[PublicChapterIn]
 
 
+class PublicRankingMetadataOut(BaseModel):
+    surface: str
+    ranking_key: str
+    time_window: str
+    position: int | None = None
+    score: float | None = None
+    label: str | None = None
+    supporting_note: str | None = None
+    primary_timestamp: datetime | None = None
+
+
 class PublicBookOut(BaseModel):
     id: str
     public_kind: str | None = None
@@ -44,8 +55,10 @@ class PublicBookOut(BaseModel):
     copyright_warning: bool = False
     active_forum_post_id: str | None = None
     analytics: PublicBookAnalyticsOut | None = None
+    ranking: PublicRankingMetadataOut | None = None
     created_at: datetime | None = None
     published_at: datetime | None = None
+    public_updated_at: datetime | None = None
 
 
 class PublicBookAnalyticsOut(BaseModel):
@@ -109,6 +122,12 @@ class PublicBookListOut(BaseModel):
     page: int
     limit: int
     has_more: bool
+
+
+class PublicRankedBookListOut(PublicBookListOut):
+    ranking_key: str
+    time_window: str
+    surface: str = "creator_uploads"
 
 
 class ContentReportCreateBody(BaseModel):
@@ -195,6 +214,7 @@ class PublicForumPostOut(BaseModel):
     dislike_count: int = 0
     rating_summary: PublicForumRatingSummaryOut
     discoverability_score: float
+    ranking: PublicRankingMetadataOut | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -205,6 +225,9 @@ class PublicForumPostListOut(BaseModel):
     page: int = 1
     page_size: int = 20
     has_more: bool = False
+    ranking_key: str | None = None
+    time_window: str | None = None
+    surface: str | None = None
 
 
 class PublicForumInterestCreateBody(BaseModel):

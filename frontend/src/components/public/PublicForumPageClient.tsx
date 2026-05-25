@@ -18,6 +18,23 @@ import type { PublicForumPost, PublicForumPostListResponse } from "@/types/publi
 import type { User } from "@/types/user"
 
 const FORUM_PAGE_SIZE = 20
+const rankingOptions = [
+  { value: "most_popular", label: "Most popular" },
+  { value: "top_rated", label: "Top rated" },
+  { value: "most_complex", label: "Most complex" },
+  { value: "big_cast", label: "Big cast" },
+  { value: "most_well_written", label: "Most well written" },
+  { value: "beginner_friendly", label: "Beginner friendly" },
+  { value: "recently_updated", label: "Recently updated" },
+  { value: "recently_released", label: "Recently released" },
+] as const
+const timeWindowOptions = [
+  { value: "daily", label: "Daily" },
+  { value: "weekly", label: "Weekly" },
+  { value: "monthly", label: "Monthly" },
+  { value: "yearly", label: "Yearly" },
+  { value: "all_time", label: "All time" },
+] as const
 
 export function PublicForumPageClient({
   initialData,
@@ -27,6 +44,8 @@ export function PublicForumPageClient({
   const router = useRouter()
   const [query, setQuery] = useState("")
   const [page, setPage] = useState(initialData?.page ?? 1)
+  const [ranking, setRanking] = useState(initialData?.ranking_key ?? "most_popular")
+  const [timeWindow, setTimeWindow] = useState(initialData?.time_window ?? "monthly")
   const [viewer, setViewer] = useState<User | null>(null)
   const [authorBooks, setAuthorBooks] = useState<Book[]>([])
   const [composerThreadType, setComposerThreadType] = useState<"novel" | "general">("novel")
@@ -51,7 +70,7 @@ export function PublicForumPageClient({
 
   useEffect(() => {
     setPage(1)
-  }, [normalizedQuery])
+  }, [normalizedQuery, ranking, timeWindow])
 
   useEffect(() => {
     if (viewerContextEnabled) return
@@ -142,9 +161,20 @@ export function PublicForumPageClient({
   }, [viewerContextEnabled])
 
   const { data, isLoading: loading, isError } = useQuery<PublicForumPostListResponse>({
-    queryKey: asQueryKey(`public:forum:${normalizedQuery || "all"}:${page}`),
-    queryFn: () => publicApi.listForumPosts(normalizedQuery, page, FORUM_PAGE_SIZE),
-    initialData: normalizedQuery.length === 0 && page === (initialData?.page ?? 1) ? initialData : undefined,
+    queryKey: asQueryKey(`public:forum:ranked:${ranking}:${timeWindow}:${normalizedQuery || "all"}:${page}`),
+    queryFn: () => publicApi.listRankedBetaNovels({
+      ranking,
+      timeWindow,
+      query: normalizedQuery,
+      page,
+      pageSize: FORUM_PAGE_SIZE,
+    }),
+    initialData: (
+      normalizedQuery.length === 0
+      && page === (initialData?.page ?? 1)
+      && ranking === (initialData?.ranking_key ?? "most_popular")
+      && timeWindow === (initialData?.time_window ?? "monthly")
+    ) ? initialData : undefined,
     staleTime: 30_000,
   })
   const posts = data?.items ?? []
@@ -223,13 +253,13 @@ export function PublicForumPageClient({
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em]">
                 <span className={`rounded-full px-2.5 py-1 ${isDark ? "bg-[#1d2631] text-slate-200" : "bg-slate-100 text-slate-700"}`}>LoreVia Forum</span>
-                <span className={isDark ? "text-slate-500" : "text-slate-500"}>Public beta reads</span>
+                <span className={isDark ? "text-slate-500" : "text-slate-500"}>Ranked beta novels</span>
                 <MetaDivider isDark={isDark} />
                 <span className={isDark ? "text-emerald-300" : "text-emerald-700"}>Live</span>
               </div>
-              <h1 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">Manuscript discussions worth opening.</h1>
+              <h1 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">Beta novel rankings worth opening.</h1>
               <p className={`mt-2 max-w-2xl text-sm leading-6 ${isDark ? "text-slate-400" : "text-slate-600"}`}>
-                A forum shaped for serious beta-reading: clearer threads, faster scanning, and stronger signals around what authors want feedback on.
+                A ranking feed for public beta-reading threads, shaped around ratings, craft signals, update cadence, and reader intent.
               </p>
             </div>
 
@@ -241,22 +271,48 @@ export function PublicForumPageClient({
           </div>
 
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <label className={`flex h-11 w-full items-center gap-3 rounded-2xl border px-4 lg:max-w-[420px] ${isDark ? "border-white/10 bg-[#151b22]" : "border-slate-200 bg-white"}`}>
-              <SearchIcon className={isDark ? "text-slate-500" : "text-slate-400"} />
-              <input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search title, genre, author, headline, or body"
-                className={`w-full bg-transparent text-sm outline-none ${isDark ? "placeholder:text-slate-500" : "placeholder:text-slate-400"}`}
-              />
-            </label>
+            <div className="grid w-full gap-3 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.7fr)_minmax(0,0.7fr)]">
+              <label className={`flex h-11 w-full items-center gap-3 rounded-2xl border px-4 ${isDark ? "border-white/10 bg-[#151b22]" : "border-slate-200 bg-white"}`}>
+                <SearchIcon className={isDark ? "text-slate-500" : "text-slate-400"} />
+                <input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Search title, genre, author, headline, or body"
+                  className={`w-full bg-transparent text-sm outline-none ${isDark ? "placeholder:text-slate-500" : "placeholder:text-slate-400"}`}
+                />
+              </label>
+
+              <select
+                value={ranking}
+                onChange={(event) => setRanking(event.target.value)}
+                className={`h-11 rounded-2xl border px-4 text-sm outline-none ${isDark ? "border-white/10 bg-[#151b22] text-slate-100" : "border-slate-200 bg-white text-slate-900"}`}
+              >
+                {rankingOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={timeWindow}
+                onChange={(event) => setTimeWindow(event.target.value)}
+                className={`h-11 rounded-2xl border px-4 text-sm outline-none ${isDark ? "border-white/10 bg-[#151b22] text-slate-100" : "border-slate-200 bg-white text-slate-900"}`}
+              >
+                {timeWindowOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
 
             <div className="flex flex-wrap items-center gap-2 text-xs">
               <ShellChip isDark={isDark} active>
-                Sorted by momentum
+                {posts[0]?.ranking?.label ?? "Ranked beta feed"}
               </ShellChip>
-              <ShellChip isDark={isDark}>Open to reader contact</ShellChip>
-              <ShellChip isDark={isDark}>Ratings and comments</ShellChip>
+              <ShellChip isDark={isDark}>Open novel threads</ShellChip>
+              <ShellChip isDark={isDark}>Ratings and reader notes</ShellChip>
             </div>
           </div>
         </div>
@@ -458,7 +514,7 @@ export function PublicForumPageClient({
                 isDark={isDark}
                 icon={<CompassIcon className={isDark ? "text-amber-300" : "text-orange-600"} />}
                 title="Discovery first"
-                body="Novel threads surface by ratings, interest, and discussion momentum while general threads stay community-driven."
+                body="Novel threads surface through ranking windows like top rated, most popular, big cast, and recently updated."
               />
               <InfoRow
                 isDark={isDark}
@@ -493,6 +549,11 @@ function ForumFeedCard({ isDark, post }: { isDark: boolean, post: PublicForumPos
 
         <div className="min-w-0 flex-1 px-4 py-4 sm:px-5">
           <div className="flex flex-wrap items-center gap-2 text-xs">
+            {post.ranking?.label ? (
+              <span className={`rounded-full px-2 py-1 font-semibold ${isDark ? "bg-amber-400/12 text-amber-200" : "bg-orange-100 text-orange-700"}`}>
+                #{post.ranking.position ?? "?"} {post.ranking.label}
+              </span>
+            ) : null}
             <UserBadge isDark={isDark} username={post.author_username || post.author || "writer"} />
             <MetaText isDark={isDark}>{formatRelativeDay(post.created_at)}</MetaText>
             <MetaDivider isDark={isDark} />
@@ -526,6 +587,9 @@ function ForumFeedCard({ isDark, post }: { isDark: boolean, post: PublicForumPos
           </Link>
 
           <p className={`mt-3 text-sm leading-6 ${isDark ? "text-slate-300" : "text-slate-700"}`}>{truncateBody(post.body)}</p>
+          {post.ranking?.supporting_note ? (
+            <p className={`mt-3 text-xs leading-6 ${isDark ? "text-slate-400" : "text-slate-500"}`}>{post.ranking.supporting_note}</p>
+          ) : null}
 
           <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
             <ActionPill isDark={isDark} icon={<CommentBubbleIcon className="h-3.5 w-3.5" />}>
@@ -567,7 +631,7 @@ function ForumFeedCard({ isDark, post }: { isDark: boolean, post: PublicForumPos
                 Message @{post.author_username}
               </Link>
             ) : null}
-            <MetaText isDark={isDark}>{isNovelThread ? "Feed rank updates with ratings, comments, and reader intent." : "General threads are for broader craft and community discussion."}</MetaText>
+            <MetaText isDark={isDark}>{isNovelThread ? "Rank updates use ratings, comments, reader intent, craft signals, and update cadence." : "General threads are for broader craft and community discussion."}</MetaText>
           </div>
         </div>
       </div>

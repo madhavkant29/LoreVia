@@ -9,11 +9,11 @@ from app.api.v1.routes import public
 from app.core.security import create_access_token
 from app.models.book import Book, Chapter
 from app.models.progress import ReadingProgress
-from app.models.user import User
+from app.models.user import AdminPrincipal, User
 
 
 def _auth_headers(user_id: uuid.UUID) -> dict[str, str]:
-    return {"Cookie": f"lorevia_access_token={create_access_token(str(user_id))}"}
+    return {"Authorization": f"Bearer {create_access_token(str(user_id))}"}
 
 
 async def _create_user(db, *, email: str, tier: str, created_at: datetime | None = None) -> User:
@@ -28,6 +28,19 @@ async def _create_user(db, *, email: str, tier: str, created_at: datetime | None
     await db.commit()
     await db.refresh(user)
     return user
+
+
+async def _grant_moderation_admin(db, user: User) -> None:
+    db.add(
+        AdminPrincipal(
+            user_id=user.id,
+            status="active",
+            is_owner=False,
+            scopes=["moderation_admin"],
+            grant_reason="Test moderation admin grant.",
+        )
+    )
+    await db.commit()
 
 
 async def _create_book(
@@ -442,7 +455,8 @@ async def test_public_profile_requires_public_presence_and_skips_private_only_pr
 @pytest.mark.asyncio
 async def test_public_share_requires_admin_approval_before_author_book_surfaces(client, db):
     author = await _create_user(db, email="share-author@lorevia.test", tier="author")
-    admin = await _create_user(db, email="share-admin@lorevia.test", tier="admin")
+    admin = await _create_user(db, email="share-admin@lorevia.test", tier="author")
+    await _grant_moderation_admin(db, admin)
     book = await _create_book(db, author_id=author.id, title="Approval Gate")
 
     request_response = await client.post(

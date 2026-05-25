@@ -1,12 +1,51 @@
 import pytest
 import uuid
 
-from app.models.user import Subscription
+from app.models.user import AdminPrincipal, Subscription
+from app.models.user import User
+from app.core.security import create_access_token
 from app.utils.billing_utils import create_billing_confirmation_token
 
 
+async def _admin_headers(client, db) -> dict[str, str]:
+    response = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": f"billing-admin-{uuid.uuid4().hex[:8]}@lorevia.app",
+            "username": f"billingadmin{uuid.uuid4().hex[:8]}",
+            "password": "SecurePass456!@#",
+            "accepted_terms": True,
+            "device_id": f"device-{uuid.uuid4().hex}",
+        },
+    )
+    assert response.status_code == 201
+    user = await db.get(User, uuid.UUID(response.json()["id"]))
+    assert user is not None
+    db.add(
+        AdminPrincipal(
+            user_id=user.id,
+            status="active",
+            is_owner=False,
+            scopes=["billing_admin"],
+            grant_reason="Test billing admin grant.",
+        )
+    )
+    await db.commit()
+    token = create_access_token(str(user.id))
+    return {"Authorization": f"Bearer {token}"}
+
+
 @pytest.mark.asyncio
-async def test_billing_status_reports_missing_configuration(auth_headers, client, monkeypatch):
+async def test_billing_status_requires_admin(auth_headers, client):
+    response = await client.get("/api/v1/admin/billing/status", headers=auth_headers)
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Admin only"}
+
+
+@pytest.mark.asyncio
+async def test_billing_status_reports_missing_configuration(client, db, monkeypatch):
+    headers = await _admin_headers(client, db)
     monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_API_KEY", None, raising=False)
     monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_WEBHOOK_SECRET", None, raising=False)
     monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_DEFAULT_CHECKOUT_URL", None, raising=False)
@@ -17,7 +56,7 @@ async def test_billing_status_reports_missing_configuration(auth_headers, client
     monkeypatch.setattr("app.utils.billing_utils.settings.RESEND_API_KEY", "", raising=False)
     monkeypatch.setattr("app.utils.billing_utils.settings.INTERNAL_JOB_SECRET", None, raising=False)
 
-    response = await client.get("/api/v1/billing/status", headers=auth_headers)
+    response = await client.get("/api/v1/admin/billing/status", headers=headers)
 
     assert response.status_code == 200
     payload = response.json()
@@ -54,7 +93,8 @@ async def test_billing_status_reports_missing_configuration(auth_headers, client
 
 
 @pytest.mark.asyncio
-async def test_billing_status_reports_fully_configured_catalog(auth_headers, client, monkeypatch):
+async def test_billing_status_reports_fully_configured_catalog(client, db, monkeypatch):
+    headers = await _admin_headers(client, db)
     monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_API_KEY", "pdl_test_key", raising=False)
     monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_WEBHOOK_SECRET", "whsec_test", raising=False)
     monkeypatch.setattr(
@@ -69,7 +109,7 @@ async def test_billing_status_reports_fully_configured_catalog(auth_headers, cli
     monkeypatch.setattr("app.utils.billing_utils.settings.RESEND_API_KEY", "re_live_test", raising=False)
     monkeypatch.setattr("app.utils.billing_utils.settings.INTERNAL_JOB_SECRET", "internal_job_secret_value", raising=False)
 
-    response = await client.get("/api/v1/billing/status", headers=auth_headers)
+    response = await client.get("/api/v1/admin/billing/status", headers=headers)
 
     assert response.status_code == 200
     payload = response.json()
@@ -84,7 +124,8 @@ async def test_billing_status_reports_fully_configured_catalog(auth_headers, cli
 
 
 @pytest.mark.asyncio
-async def test_billing_status_requires_backend_checkout_url_for_payments_ready(auth_headers, client, monkeypatch):
+async def test_billing_status_requires_backend_checkout_url_for_payments_ready(client, db, monkeypatch):
+    headers = await _admin_headers(client, db)
     monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_API_KEY", "pdl_test_key", raising=False)
     monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_WEBHOOK_SECRET", "whsec_test", raising=False)
     monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_DEFAULT_CHECKOUT_URL", None, raising=False)
@@ -95,7 +136,7 @@ async def test_billing_status_requires_backend_checkout_url_for_payments_ready(a
     monkeypatch.setattr("app.utils.billing_utils.settings.RESEND_API_KEY", "re_live_test", raising=False)
     monkeypatch.setattr("app.utils.billing_utils.settings.INTERNAL_JOB_SECRET", "internal_job_secret_value", raising=False)
 
-    response = await client.get("/api/v1/billing/status", headers=auth_headers)
+    response = await client.get("/api/v1/admin/billing/status", headers=headers)
 
     assert response.status_code == 200
     payload = response.json()
@@ -103,6 +144,15 @@ async def test_billing_status_requires_backend_checkout_url_for_payments_ready(a
     assert payload["payments_ready"] is False
     assert payload["default_checkout_url_present"] is False
     assert "PADDLE_DEFAULT_CHECKOUT_URL" in payload["missing_configuration"]
+
+
+@pytest.mark.asyncio
+async def test_legacy_billing_status_route_is_not_exposed(client, db):
+    headers = await _admin_headers(client, db)
+
+    response = await client.get("/api/v1/billing/status", headers=headers)
+
+    assert response.status_code == 404
 
 
 @pytest.mark.asyncio

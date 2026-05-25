@@ -365,6 +365,31 @@ async def test_advisor_message_async_status_returns_completed_payload(monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_advisor_message_stream_hides_internal_errors(monkeypatch):
+    user_id = uuid.uuid4()
+    book = SimpleNamespace(id=uuid.uuid4(), user_id=user_id, title="Atlas", total_chapters=8)
+    db = _FakeDB(get_values=[book])
+
+    async def _fake_stream_advisor_reply_payload(**_kwargs):
+        raise RuntimeError("openai_api_key=sk-secret")
+        yield
+
+    monkeypatch.setattr(advisor, "stream_advisor_reply_payload", _fake_stream_advisor_reply_payload)
+
+    response = await advisor.advisor_message_stream(
+        book.id,
+        body=_message_body(("user", "Help")),
+        db=db,
+        current_user=SimpleNamespace(id=user_id),
+        _=None,
+    )
+    body = "".join([chunk async for chunk in response.body_iterator])
+
+    assert "Something went wrong. Please try again." in body
+    assert "sk-secret" not in body
+
+
+@pytest.mark.asyncio
 async def test_advisor_greeting_counts_entities():
     book_id = uuid.uuid4()
     user_id = uuid.uuid4()

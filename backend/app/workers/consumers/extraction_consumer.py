@@ -913,6 +913,14 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                         resolver_status="matched_existing",
                         resolver_reasons=["matched_existing_character"],
                     )
+                    await _record_cluster_member_candidates(
+                        db,
+                        book_id=book.id,
+                        chapter_number=chapter_number,
+                        entity=entity,
+                        matched_character_id=existing_id,
+                        reason_code="matched_existing_character",
+                    )
                 continue
 
             if not decision.allowed or manual_review_reason or not _can_auto_save_character(entity):
@@ -1016,6 +1024,14 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                         resolver_status="matched_existing",
                         resolver_reasons=["matched_existing_character_after_cluster"],
                     )
+                    await _record_cluster_member_candidates(
+                        db,
+                        book_id=book.id,
+                        chapter_number=chapter_number,
+                        entity=entity,
+                        matched_character_id=existing_id,
+                        reason_code="matched_existing_character_after_cluster",
+                    )
                 continue
 
             existing_id = await find_similar(
@@ -1050,6 +1066,14 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                         resolver_status="embedding_matched_existing",
                         resolver_reasons=["embedding_matched_existing_character"],
                     )
+                    await _record_cluster_member_candidates(
+                        db,
+                        book_id=book.id,
+                        chapter_number=chapter_number,
+                        entity=entity,
+                        matched_character_id=existing_id,
+                        reason_code="embedding_matched_existing_character",
+                    )
                 continue
 
             promoted = await _promote_new_character_from_entity(
@@ -1073,6 +1097,14 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                 matched_character_id=promoted.id,
                 resolver_status="promoted",
                 resolver_reasons=["new_character_promoted"],
+            )
+            await _record_cluster_member_candidates(
+                db,
+                book_id=book.id,
+                chapter_number=chapter_number,
+                entity=entity,
+                matched_character_id=promoted.id,
+                reason_code="matched_cluster_member",
             )
 
         dialogue_samples = extract_dialogue_samples_by_character(
@@ -1595,6 +1627,58 @@ async def _record_entity_cluster_mentions(
         )
 
 
+async def _record_cluster_member_candidates(
+    db,
+    *,
+    book_id: uuid.UUID,
+    chapter_number: int,
+    entity: dict[str, Any],
+    matched_character_id: uuid.UUID,
+    reason_code: str,
+) -> None:
+    members = entity.get("cluster_members") if isinstance(entity.get("cluster_members"), list) else []
+    if not members:
+        return
+
+    primary_name = normalize_character_name(str(entity.get("name") or ""))
+    primary_source_batch_key = str(entity.get("_source_batch_key") or "") or None
+    seen: set[tuple[str, str | None]] = set()
+    for member in members:
+        raw_name = " ".join(str(member.get("name") or "").split()).strip()
+        normalized_name = normalize_character_name(raw_name)
+        source_batch_key = str(member.get("source_batch_key") or "") or None
+        if not raw_name or not normalized_name:
+            continue
+        if normalized_name == primary_name and source_batch_key == primary_source_batch_key:
+            continue
+        dedupe_key = (normalized_name, source_batch_key)
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        await record_character_candidate(
+            db,
+            book_id=book_id,
+            chapter_number=chapter_number,
+            raw_name=raw_name,
+            proposed_name=raw_name,
+            aliases=member.get("aliases") if isinstance(member.get("aliases"), list) else [],
+            matched_character_id=matched_character_id,
+            status="accepted",
+            confidence=entity.get("confidence"),
+            reason_codes=[reason_code],
+            evidence={
+                **(member.get("evidence") if isinstance(member.get("evidence"), dict) else {}),
+                "entity": {
+                    "name": raw_name,
+                    "canonical_name": entity.get("name"),
+                    "aliases": member.get("aliases") if isinstance(member.get("aliases"), list) else [],
+                    "confidence": entity.get("confidence"),
+                },
+            },
+            source_batch_key=source_batch_key,
+        )
+
+
 def _merge_alias_in_memory(char: Character | None, alias: str | None) -> None:
     if char is None or not is_valid_alias(alias):
         return
@@ -1739,6 +1823,17 @@ def _entity_requires_manual_review(entity: dict) -> str | None:
 
     mention_count = int(evidence.get("mention_count") or 0)
     strong_mentions = int(evidence.get("strong_mention_count") or 0)
+    confidence = float(entity.get("confidence") or 0.0)
+    if (
+        mention_count <= 1
+        and strong_mentions >= 1
+        and confidence >= 0.9
+        and (
+            evidence.get("has_dialogue_or_action")
+            or evidence.get("has_physical_description")
+        )
+    ):
+        return None
     if confidence < 0.45 and strong_mentions <= 1:
         return "low_confidence_requires_review"
     if mention_count <= 1 and strong_mentions <= 1 and not _has_character_profile_signal(entity):

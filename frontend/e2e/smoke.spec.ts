@@ -43,16 +43,13 @@ test("public forum surfaces reputation and writer profile details", async ({ pag
   await installMockApi(page)
   await page.goto("/public/forum")
 
-  await expect(page.getByRole("heading", { name: /manuscript discussions worth opening/i })).toBeVisible()
+  await expect(page.getByRole("heading", { name: /beta novel rankings worth opening/i })).toBeVisible()
   await expect(page.getByRole("link", { name: /back to library/i })).toBeVisible()
-  await expect(page.getByText("Showing 1-20 of 24 threads")).toBeVisible()
-  await page.getByRole("button", { name: "Next", exact: true }).click()
-  await expect(page.getByText("Page 2")).toBeVisible()
-  await expect(page.getByText("Showing 21-24 of 24 threads")).toBeVisible()
-  await page.getByRole("button", { name: "Previous", exact: true }).click()
-  await expect(page.getByText("Showing 1-20 of 24 threads")).toBeVisible()
-  await expect(page.getByText(/novel discussion/i).first()).toBeVisible()
-  await expect(page.getByText(/general discussion/i).first()).toBeVisible()
+  await expect(page.getByText("Showing 1-12 of 12 threads")).toBeVisible()
+  await page.locator("select").nth(0).selectOption("top_rated")
+  await page.locator("select").nth(1).selectOption("weekly")
+  await expect(page.getByText("Top Rated Weekly").first()).toBeVisible()
+  await expect(page.getByText("Showing 1-12 of 12 threads")).toBeVisible()
   await page.getByRole("button", { name: "General discussion" }).click()
   await page.getByPlaceholder(/general discussion headline/i).fill("How do you raise tension without chaos?")
   await page.getByPlaceholder(/what do you want advice or discussion on/i).fill("I want craft advice on building pressure in quiet scenes.")
@@ -77,6 +74,20 @@ test("public forum surfaces reputation and writer profile details", async ({ pag
   await expect(page.getByRole("button", { name: /Comments \(1\)/i })).toBeVisible()
   await page.getByRole("button", { name: /Comments \(1\)/i }).click()
   await expect(page.getByText(/how do you keep second acts from flattening out/i)).toBeVisible()
+})
+
+test("public uploads support ranking and window selection", async ({ page }) => {
+  await installMockApi(page)
+  await page.goto("/public/uploads")
+
+  await expect(page.getByRole("heading", { name: /browse creator-published books from lorevia authors/i })).toBeVisible()
+  await page.getByLabel("Rank by").selectOption("top_rated")
+  await page.getByLabel("Window").selectOption("weekly")
+  await expect(page.getByText("Top Rated Weekly").first()).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Ash Gate Sample" })).toBeVisible()
+  await page.getByLabel("Search creator-published books").fill("ash")
+  await expect(page.getByRole("heading", { name: "Ash Gate Sample" })).toBeVisible()
+  await expect(page.getByText(/mock ranking feed for local smoke coverage/i).first()).toBeVisible()
 })
 
 test("public library cross-links safe samples and writer trust", async ({ page }) => {
@@ -114,6 +125,25 @@ test("login surfaces an invalid-credentials error", async ({ page }) => {
   await page.getByRole("button", { name: /^sign in$/i }).click()
 
   await expect(page.getByText("Invalid email or password.")).toBeVisible()
+})
+
+test("admin route returns 404 when the request is not allowed", async ({ page }) => {
+  await installMockApi(page, { admin: "none" })
+  await page.goto("/admin")
+
+  await expect(page.getByText("This page could not be found.")).toBeVisible()
+})
+
+test("admin route loads the operations console for owner admins", async ({ page }) => {
+  await installMockApi(page, { admin: "owner" })
+  await page.goto("/admin")
+
+  await expect(page.getByRole("heading", { name: "Operations Console" })).toBeVisible()
+  await expect(page.getByText("Billing setup")).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Moderation" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Refunds" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Admin Access" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Audit" })).toBeVisible()
 })
 
 test("library renders a mocked project and opens the upload modal", async ({ page }) => {

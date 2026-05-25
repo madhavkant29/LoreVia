@@ -16,7 +16,7 @@ export function inferDailyCapActionFromRequestPath(requestPath: string): DailyCa
   if (requestPath.includes("/reader/") && (requestPath.endsWith("/search") || requestPath.endsWith("/thematic-search"))) {
     return "search"
   }
-  if (requestPath.includes("/intelligence/") && (requestPath.endsWith("/qa") || requestPath.includes("/chat/"))) {
+  if (requestPath.includes("/intelligence/") && requestPath.endsWith("/qa")) {
     return "prediction"
   }
   if (requestPath.includes("/advisor/")) {

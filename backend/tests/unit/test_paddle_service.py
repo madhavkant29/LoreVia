@@ -149,6 +149,7 @@ async def test_get_transaction_summary_returns_invoice_details(monkeypatch):
                         "custom_data": {"plan": "author_monthly"},
                         "details": {"totals": {"total": 2900}},
                         "customer": {"email": "author@getlorevia.com"},
+                        "billed_at": "2026-05-24T12:00:00Z",
                     }
                 }
             )
@@ -163,7 +164,137 @@ async def test_get_transaction_summary_returns_invoice_details(monkeypatch):
     assert summary.total == "USD 29.00"
     assert summary.invoice_number == "INV-123"
     assert summary.invoice_pdf_url == "https://files.paddle.com/invoice.pdf"
+    assert summary.customer_email == "author@getlorevia.com"
+    assert summary.charge_at is not None
     assert requests == [
         "https://api.paddle.com/transactions/txn_123",
         "https://api.paddle.com/transactions/txn_123/invoice",
     ]
+
+
+@pytest.mark.asyncio
+async def test_get_transaction_summary_derives_annual_interval_from_billing_cycle_when_plan_is_missing(monkeypatch):
+    class FakeResponse:
+        def __init__(self, payload, status_code=200):
+            self._payload = payload
+            self.status_code = status_code
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self._payload
+
+    class FakeAsyncClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, headers=None, params=None):
+            if url.endswith("/invoice"):
+                return FakeResponse({"data": {"url": "https://files.paddle.com/invoice.pdf"}})
+            return FakeResponse(
+                {
+                    "data": {
+                        "id": "txn_annual_123",
+                        "status": "completed",
+                        "currency_code": "USD",
+                        "invoice_number": "INV-ANNUAL-123",
+                        "subscription_id": "sub_annual_123",
+                        "custom_data": {},
+                        "items": [
+                            {
+                                "price": {
+                                    "name": "Author annual",
+                                    "billing_cycle": {"interval": "year"},
+                                }
+                            }
+                        ],
+                        "details": {"totals": {"total": 29000}},
+                        "customer": {"email": "author@getlorevia.com"},
+                        "billed_at": "2026-05-24T12:00:00Z",
+                    }
+                }
+            )
+
+    monkeypatch.setattr("app.services.paddle_service.httpx.AsyncClient", lambda timeout=20.0: FakeAsyncClient())
+    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_API_KEY", "pdl_test_key", raising=False)
+
+    summary = await paddle_service.get_transaction_summary("txn_annual_123")
+
+    assert summary.billing_interval == "annual"
+
+
+@pytest.mark.asyncio
+async def test_create_refund_adjustment_posts_full_refund_request(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"data": {"id": "adj_123", "status": "pending_approval"}}
+
+    class FakeAsyncClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, url, headers=None, json=None):
+            captured["url"] = url
+            captured["headers"] = headers
+            captured["json"] = json
+            return FakeResponse()
+
+    monkeypatch.setattr("app.services.paddle_service.httpx.AsyncClient", lambda timeout=20.0: FakeAsyncClient())
+    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_API_KEY", "pdl_test_key", raising=False)
+
+    payload = await paddle_service.create_refund_adjustment("txn_123", "Accidental monthly renewal")
+
+    assert payload == {"id": "adj_123", "status": "pending_approval"}
+    assert captured["url"] == "https://api.paddle.com/adjustments"
+    assert captured["json"] == {
+        "action": "refund",
+        "transaction_id": "txn_123",
+        "type": "full",
+        "reason": "Accidental monthly renewal",
+    }
+
+
+@pytest.mark.asyncio
+async def test_cancel_subscription_immediately_posts_immediate_effective_date(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"data": {"id": "sub_123", "status": "canceled"}}
+
+    class FakeAsyncClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, url, headers=None, json=None):
+            captured["url"] = url
+            captured["headers"] = headers
+            captured["json"] = json
+            return FakeResponse()
+
+    monkeypatch.setattr("app.services.paddle_service.httpx.AsyncClient", lambda timeout=20.0: FakeAsyncClient())
+    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_API_KEY", "pdl_test_key", raising=False)
+
+    payload = await paddle_service.cancel_subscription_immediately("sub_123")
+
+    assert payload == {"id": "sub_123", "status": "canceled"}
+    assert captured["url"] == "https://api.paddle.com/subscriptions/sub_123/cancel"
+    assert captured["json"] == {"effective_from": "immediately"}

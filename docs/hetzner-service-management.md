@@ -54,6 +54,14 @@ Once the stack is up, use Docker for service-level logs:
 - `docker compose -f docker-compose.yml logs -f worker-intelligence`
 - `docker compose -f docker-compose.yml logs -f celery-beat`
 
+## Advisor streaming
+
+- Production AI streaming uses Server-Sent Events through the `nginx` service.
+- The SSE proxy rule lives in [ops/nginx/nginx.conf](/C:/Users/madha/.vscode/prod/LoreVia2/ops/nginx/nginx.conf) and disables proxy buffering and gzip for every `/api/v1/intelligence/*-stream` route, including Ask LoreVia, advisor tools, and series continuity checks.
+- After changing the Nginx config, redeploy or restart the edge container:
+  - `docker compose -f docker-compose.yml up -d nginx`
+  - or `sudo systemctl restart lorevia-compose.service`
+
 ## Worker tuning
 
 - Production worker concurrency is env-driven through `backend/.env`.

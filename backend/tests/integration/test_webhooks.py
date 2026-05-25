@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import json
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 import uuid
 
 import pytest
@@ -10,7 +11,7 @@ from sqlalchemy import select
 
 from app.core.config import allowed_hosts
 from app.main import app
-from app.models.user import PaddleWebhookEvent, Subscription, SubscriptionEvent, User
+from app.models.user import PaddleWebhookEvent, RefundReview, Subscription, SubscriptionEvent, User
 
 
 def _sign_payload(payload: dict, timestamp: int, secret: str) -> tuple[bytes, str]:
@@ -97,6 +98,27 @@ def _event_payload(
         "event_type": event_type,
         "notification_id": f"ntf_{event_id}",
         "data": data,
+    }
+
+
+def _adjustment_payload(
+    *,
+    event_id: str,
+    transaction_id: str,
+    adjustment_id: str,
+    status: str,
+    action: str = "refund",
+) -> dict:
+    return {
+        "event_id": event_id,
+        "event_type": "adjustment.updated",
+        "notification_id": f"ntf_{event_id}",
+        "data": {
+            "id": adjustment_id,
+            "action": action,
+            "status": status,
+            "transaction_id": transaction_id,
+        },
     }
 
 
@@ -288,7 +310,10 @@ async def test_paddle_webhook_failed_event_can_retry_successfully(client, db, mo
         )
     ).scalars().one()
     assert webhook_event.processing_status == "failed"
-    assert "transient billing write failure" in (webhook_event.last_error or "")
+    assert webhook_event.last_error in {
+        "transient billing write failure",
+        "Something went wrong. Please try again.",
+    }
 
     response = await client.post(
         "/api/v1/webhooks/paddle",
@@ -496,3 +521,267 @@ async def test_transaction_completed_does_not_overwrite_existing_paused_status(c
         )
     ).scalars().one()
     assert refreshed_subscription.status == "paused"
+
+
+@pytest.mark.asyncio
+async def test_paddle_webhook_adjustment_approval_updates_refund_review_status(client, db, monkeypatch):
+    secret = "pdl_secret_test"
+    timestamp = 1_700_000_000
+    user = await _create_user(db)
+    review = RefundReview(
+        user_id=user.id,
+        paddle_transaction_id="txn_refund_123",
+        paddle_adjustment_id="adj_refund_123",
+        charge_at=datetime.now(UTC),
+        plan_code="author_monthly",
+        billing_interval="monthly",
+        request_source="support",
+        request_reason="Approved refund",
+        status="approved_pending_provider",
+        auto_decision=True,
+        eligibility_snapshot_json={},
+        usage_snapshot_json={},
+        provider_response_json={},
+    )
+    db.add(review)
+    await db.commit()
+
+    _patch_service_session(monkeypatch, db)
+    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_WEBHOOK_SECRET", secret, raising=False)
+    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_WEBHOOK_TOLERANCE_SECONDS", 300, raising=False)
+    monkeypatch.setattr("app.services.paddle_service.time.time", lambda: timestamp + 60)
+
+    payload = _adjustment_payload(
+        event_id="evt_adjustment_approved",
+        transaction_id="txn_refund_123",
+        adjustment_id="adj_refund_123",
+        status="approved",
+    )
+    raw_body, signature = _sign_payload(payload, timestamp, secret)
+
+    response = await client.post(
+        "/api/v1/webhooks/paddle",
+        content=raw_body,
+        headers={"Paddle-Signature": signature, "Content-Type": "application/json"},
+    )
+
+    assert response.status_code == 200
+    await db.refresh(review)
+    assert review.status == "approved"
+    assert review.paddle_adjustment_id == "adj_refund_123"
+    assert review.resolved_at is not None
+
+
+@pytest.mark.asyncio
+async def test_paddle_webhook_adjustment_rejection_leaves_entitlements_unchanged(client, db, monkeypatch):
+    secret = "pdl_secret_test"
+    timestamp = 1_700_000_000
+    user = await _create_user(db)
+    user.tier = "author"
+    subscription = Subscription(
+        user_id=user.id,
+        plan="author_monthly",
+        status="active",
+        paddle_sub_id="sub_reject_123",
+        paddle_transaction_id="txn_reject_123",
+    )
+    db.add(subscription)
+    await db.flush()
+    review = RefundReview(
+        user_id=user.id,
+        subscription_id=subscription.id,
+        paddle_transaction_id="txn_reject_123",
+        paddle_adjustment_id="adj_reject_123",
+        charge_at=datetime.now(UTC),
+        plan_code="author_monthly",
+        billing_interval="monthly",
+        request_source="support",
+        request_reason="Refund rejection",
+        status="approved_pending_provider",
+        auto_decision=True,
+        eligibility_snapshot_json={},
+        usage_snapshot_json={},
+        provider_response_json={},
+    )
+    db.add(review)
+    await db.commit()
+
+    _patch_service_session(monkeypatch, db)
+    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_WEBHOOK_SECRET", secret, raising=False)
+    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_WEBHOOK_TOLERANCE_SECONDS", 300, raising=False)
+    monkeypatch.setattr("app.services.paddle_service.time.time", lambda: timestamp + 60)
+
+    payload = _adjustment_payload(
+        event_id="evt_adjustment_rejected",
+        transaction_id="txn_reject_123",
+        adjustment_id="adj_reject_123",
+        status="rejected",
+    )
+    raw_body, signature = _sign_payload(payload, timestamp, secret)
+
+    response = await client.post(
+        "/api/v1/webhooks/paddle",
+        content=raw_body,
+        headers={"Paddle-Signature": signature, "Content-Type": "application/json"},
+    )
+
+    assert response.status_code == 200
+    await db.refresh(user)
+    await db.refresh(review)
+    assert user.tier == "author"
+    assert review.status == "provider_rejected"
+
+
+@pytest.mark.asyncio
+async def test_refund_adjustment_does_not_downgrade_until_subscription_canceled_webhook(client, db, monkeypatch):
+    secret = "pdl_secret_test"
+    timestamp = 1_700_000_000
+    user = await _create_user(db)
+    user.tier = "author"
+    subscription = Subscription(
+        user_id=user.id,
+        plan="author_monthly",
+        status="active",
+        paddle_customer_id="ctm_cancel_123",
+        paddle_sub_id="sub_cancel_123",
+        paddle_transaction_id="txn_cancel_123",
+    )
+    db.add(subscription)
+    await db.flush()
+    review = RefundReview(
+        user_id=user.id,
+        subscription_id=subscription.id,
+        paddle_transaction_id="txn_cancel_123",
+        paddle_adjustment_id="adj_cancel_123",
+        charge_at=datetime.now(UTC),
+        plan_code="author_monthly",
+        billing_interval="monthly",
+        request_source="support",
+        request_reason="Refund and cancel",
+        status="approved_pending_provider",
+        auto_decision=True,
+        eligibility_snapshot_json={},
+        usage_snapshot_json={},
+        provider_response_json={},
+    )
+    db.add(review)
+    await db.commit()
+
+    _patch_service_session(monkeypatch, db)
+    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_WEBHOOK_SECRET", secret, raising=False)
+    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_WEBHOOK_TOLERANCE_SECONDS", 300, raising=False)
+    monkeypatch.setattr("app.services.paddle_service.time.time", lambda: timestamp + 60)
+
+    adjustment_payload = _adjustment_payload(
+        event_id="evt_adjustment_cancel_approved",
+        transaction_id="txn_cancel_123",
+        adjustment_id="adj_cancel_123",
+        status="approved",
+    )
+    adjustment_body, adjustment_signature = _sign_payload(adjustment_payload, timestamp, secret)
+
+    adjustment_response = await client.post(
+        "/api/v1/webhooks/paddle",
+        content=adjustment_body,
+        headers={"Paddle-Signature": adjustment_signature, "Content-Type": "application/json"},
+    )
+
+    assert adjustment_response.status_code == 200
+    await db.refresh(user)
+    await db.refresh(review)
+    assert user.tier == "author"
+    assert review.status == "approved"
+
+    cancel_payload = _event_payload(
+        event_id="evt_subscription_cancel_final",
+        event_type="subscription.canceled",
+        user_id=user.id,
+        customer_id="ctm_cancel_123",
+        subscription_id="sub_cancel_123",
+        transaction_id="txn_cancel_123",
+        status="canceled",
+    )
+    cancel_body, cancel_signature = _sign_payload(cancel_payload, timestamp + 1, secret)
+    monkeypatch.setattr("app.services.paddle_service.time.time", lambda: timestamp + 61)
+
+    cancel_response = await client.post(
+        "/api/v1/webhooks/paddle",
+        content=cancel_body,
+        headers={"Paddle-Signature": cancel_signature, "Content-Type": "application/json"},
+    )
+
+    assert cancel_response.status_code == 200
+    await db.refresh(user)
+    assert user.tier == "free"
+
+
+@pytest.mark.asyncio
+async def test_subscription_canceled_webhook_closes_refund_follow_up_after_adjustment_approval(client, db, monkeypatch):
+    secret = "pdl_secret_test"
+    timestamp = 1_700_000_000
+    user = await _create_user(db)
+    user.tier = "author"
+    subscription = Subscription(
+        user_id=user.id,
+        plan="author_monthly",
+        status="active",
+        paddle_customer_id="ctm_followup_close_123",
+        paddle_sub_id="sub_followup_close_123",
+        paddle_transaction_id="txn_followup_close_123",
+    )
+    db.add(subscription)
+    await db.flush()
+    review = RefundReview(
+        user_id=user.id,
+        subscription_id=subscription.id,
+        paddle_transaction_id="txn_followup_close_123",
+        paddle_adjustment_id="adj_followup_close_123",
+        charge_at=datetime.now(UTC),
+        plan_code="author_monthly",
+        billing_interval="monthly",
+        request_source="support",
+        request_reason="Refund and later cancel",
+        status="provider_followup_required",
+        auto_decision=True,
+        eligibility_snapshot_json={},
+        usage_snapshot_json={},
+        provider_response_json={
+            "adjustment_updated": {
+                "id": "adj_followup_close_123",
+                "action": "refund",
+                "status": "approved",
+                "transaction_id": "txn_followup_close_123",
+            }
+        },
+    )
+    db.add(review)
+    await db.commit()
+
+    _patch_service_session(monkeypatch, db)
+    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_WEBHOOK_SECRET", secret, raising=False)
+    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_WEBHOOK_TOLERANCE_SECONDS", 300, raising=False)
+    monkeypatch.setattr("app.services.paddle_service.time.time", lambda: timestamp + 60)
+
+    cancel_payload = _event_payload(
+        event_id="evt_subscription_cancel_followup_close",
+        event_type="subscription.canceled",
+        user_id=user.id,
+        customer_id="ctm_followup_close_123",
+        subscription_id="sub_followup_close_123",
+        transaction_id="txn_followup_close_123",
+        status="canceled",
+    )
+    cancel_body, cancel_signature = _sign_payload(cancel_payload, timestamp, secret)
+
+    cancel_response = await client.post(
+        "/api/v1/webhooks/paddle",
+        content=cancel_body,
+        headers={"Paddle-Signature": cancel_signature, "Content-Type": "application/json"},
+    )
+
+    assert cancel_response.status_code == 200
+    await db.refresh(user)
+    await db.refresh(review)
+    assert user.tier == "free"
+    assert review.status == "approved"
+    assert review.resolved_at is not None

@@ -77,3 +77,20 @@ def cleanup_expired_advisor_jobs_task(self, *, limit: int = 1000):
         return run_worker_coro(_run())
     except Exception as exc:
         raise self.retry(exc=exc)
+
+
+@celery_app.task(bind=True, name="maintenance_tasks.refresh_public_rankings", queue="intelligence", max_retries=2, ignore_result=True)
+def refresh_public_rankings_task(self):
+    async def _run():
+        from app.core.database import AsyncSessionLocal
+        from app.utils.public_utils import rebuild_public_book_rankings_snapshot
+
+        async with AsyncSessionLocal() as db:
+            result = await rebuild_public_book_rankings_snapshot(db)
+            await db.commit()
+            return result
+
+    try:
+        return run_worker_coro(_run())
+    except Exception as exc:
+        raise self.retry(exc=exc)

@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from fastapi import HTTPException
 from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.models.social import DirectConversation, DirectMessage, FriendRequest
 from app.models.user import User
@@ -193,9 +194,13 @@ async def cancel_outgoing_friend_request(db: AsyncSession, *, request_id: uuid.U
 
 
 async def list_relationships(db: AsyncSession, *, current_user: User) -> SocialRelationshipListOut:
+    requester_user = aliased(User)
+    addressee_user = aliased(User)
     rows = (
         await db.execute(
-            select(FriendRequest)
+            select(FriendRequest, requester_user, addressee_user)
+            .join(requester_user, requester_user.id == FriendRequest.requester_user_id)
+            .join(addressee_user, addressee_user.id == FriendRequest.addressee_user_id)
             .where(
                 or_(
                     FriendRequest.requester_user_id == current_user.id,
@@ -209,11 +214,7 @@ async def list_relationships(db: AsyncSession, *, current_user: User) -> SocialR
     friends: list[FriendSummary] = []
     incoming_requests: list[FriendRequestOut] = []
     outgoing_requests: list[FriendRequestOut] = []
-    for row in rows:
-        requester = await db.get(User, row.requester_user_id)
-        addressee = await db.get(User, row.addressee_user_id)
-        if requester is None or addressee is None:
-            continue
+    for row, requester, addressee in rows:
         item = FriendRequestOut(
             id=row.id,
             requester_user_id=row.requester_user_id,

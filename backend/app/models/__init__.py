@@ -3,6 +3,7 @@ from app.models.book import (
     Book,
     BookCollaborator,
     PublicBookAnalyticsEvent,
+    PublicBookRanking,
     BookForumComment,
     BookForumCommentReaction,
     BookForumInterest,
@@ -50,9 +51,12 @@ from app.models.progress import ReadingProgress, ReadingSession
 from app.models.social import DirectConversation, DirectMessage, FriendRequest
 from app.models.tag import CustomTag
 from app.models.user import (
+    AdminAuditEvent,
+    AdminPrincipal,
     DeviceTrial,
     EmailPreference,
     LlmUsageEvent,
+    RefundReview,
     Subscription,
     SubscriptionEvent,
     TrialEmailEvent,

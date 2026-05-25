@@ -44,6 +44,15 @@ describe("ThemeBrandImage", () => {
     expect(images[0].getAttribute("src")).toBe("/imagelight.png")
     expect(images[1].getAttribute("src")).toBe("/image.png")
   })
+
+  it("renders a single forced asset when a mode is provided", () => {
+    const view = renderComponent(<ThemeBrandImage variant="lockup" mode="dark" className="h-10" />)
+    const images = Array.from(view.querySelectorAll("img"))
+
+    expect(images).toHaveLength(1)
+    expect(images[0].getAttribute("src")).toBe("/logoandtext.png")
+    expect(images[0].className).toBe("h-10")
+  })
 })
 
 function renderComponent(element: React.ReactNode) {
