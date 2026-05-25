@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -31,6 +32,8 @@ class PaddleTransactionSummary:
     invoice_pdf_url: str | None
     subscription_id: str | None
     customer_email: str | None
+    customer_id: str | None
+    charge_at: datetime | None
 
 
 def paddle_is_configured() -> bool:
@@ -123,6 +126,22 @@ async def create_portal_url(customer_id: str, subscription_ids: list[str] | None
         return data["urls"]["general"]["overview"]
 
 
+def _parse_paddle_datetime(value: object | None) -> datetime | None:
+    if not value:
+        return None
+    candidate = str(value).strip()
+    if not candidate:
+        return None
+    normalized = candidate.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
 def _format_transaction_total(data: dict[str, Any]) -> str | None:
     totals = data.get("details", {}).get("totals") or {}
     total = totals.get("total")
@@ -167,7 +186,7 @@ async def get_transaction_summary(transaction_id: str) -> PaddleTransactionSumma
             invoice_pdf_url = None
 
     plan = normalize_plan_code((data.get("custom_data") or {}).get("plan"))
-    interval = "annual" if plan.endswith("_annual") else "monthly"
+    interval = _transaction_billing_interval(data, plan=plan)
     display_name = "Architect" if plan.startswith("architect_") else "Author" if plan.startswith("author_") else plan.replace("_", " ").title()
 
     return PaddleTransactionSummary(
@@ -182,7 +201,57 @@ async def get_transaction_summary(transaction_id: str) -> PaddleTransactionSumma
         invoice_pdf_url=invoice_pdf_url,
         subscription_id=data.get("subscription_id"),
         customer_email=((data.get("customer") or {}).get("email") if isinstance(data.get("customer"), dict) else None),
+        customer_id=((data.get("customer") or {}).get("id") if isinstance(data.get("customer"), dict) else None) or data.get("customer_id"),
+        charge_at=(
+            _parse_paddle_datetime(data.get("billed_at"))
+            or _parse_paddle_datetime(data.get("completed_at"))
+            or _parse_paddle_datetime(data.get("created_at"))
+        ),
     )
+
+
+def _transaction_billing_interval(data: dict[str, Any], *, plan: str) -> str:
+    items = data.get("items") or []
+    for item in items:
+        billing_cycle = (item.get("price") or {}).get("billing_cycle") or {}
+        interval = str(billing_cycle.get("interval") or "").strip().lower()
+        if interval == "month":
+            return "monthly"
+        if interval == "year":
+            return "annual"
+
+    if plan.endswith("_monthly"):
+        return "monthly"
+    if plan.endswith("_annual"):
+        return "annual"
+    return ""
+
+
+async def create_refund_adjustment(transaction_id: str, reason: str) -> dict[str, Any]:
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        response = await client.post(
+            f"{PADDLE_API_BASE}/adjustments",
+            headers=_headers(),
+            json={
+                "action": "refund",
+                "transaction_id": transaction_id,
+                "type": "full",
+                "reason": reason[:250],
+            },
+        )
+        response.raise_for_status()
+        return response.json()["data"]
+
+
+async def cancel_subscription_immediately(subscription_id: str) -> dict[str, Any]:
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        response = await client.post(
+            f"{PADDLE_API_BASE}/subscriptions/{subscription_id}/cancel",
+            headers=_headers(),
+            json={"effective_from": "immediately"},
+        )
+        response.raise_for_status()
+        return response.json()["data"]
 
 
 def verify_webhook_signature(raw_body: bytes, paddle_signature: str | None) -> bool:

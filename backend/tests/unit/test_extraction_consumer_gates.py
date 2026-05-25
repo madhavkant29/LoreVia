@@ -62,6 +62,41 @@ def test_can_auto_save_character_allows_strong_single_mention_with_profile_signa
     assert _can_auto_save_character(entity) is True
 
 
+def test_can_auto_save_character_sends_low_confidence_new_character_to_review():
+    entity = {
+        "name": "Anna",
+        "entity_type": "person",
+        "confidence": 0.32,
+        "arc_summary": "A background character.",
+        "evidence": {
+            "mention_count": 1,
+            "strong_mention_count": 1,
+            "has_dialogue_or_action": True,
+            "has_physical_description": False,
+            "appears_multiple_times": False,
+        },
+    }
+
+    assert _can_auto_save_character(entity) is False
+
+
+def test_can_auto_save_character_blocks_role_only_reference_without_named_cluster_support():
+    entity = {
+        "name": "chief clerk",
+        "entity_type": "person",
+        "confidence": 0.96,
+        "evidence": {
+            "mention_count": 2,
+            "strong_mention_count": 1,
+            "has_dialogue_or_action": True,
+            "appears_multiple_times": True,
+            "cluster_names": ["chief clerk"],
+        },
+    }
+
+    assert _can_auto_save_character(entity) is False
+
+
 def test_should_update_existing_character_allows_borderline_but_supported_updates():
     entity = {
         "name": "Houko-chan",

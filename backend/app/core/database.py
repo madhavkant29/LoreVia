@@ -9,14 +9,28 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+_LOCAL_DEBUG_POOL_SIZE = 5
+_LOCAL_DEBUG_MAX_OVERFLOW = 5
+
 
 def _build_engine_config() -> tuple[str, dict]:
     url = make_url(settings.DATABASE_URL.replace("postgresql://", "postgresql+psycopg://"))
     return url.render_as_string(hide_password=False), {"prepare_threshold": None}
 
 
+def _effective_pool_settings() -> tuple[int, int]:
+    pool_size = max(1, int(settings.DATABASE_POOL_SIZE))
+    max_overflow = max(0, int(settings.DATABASE_MAX_OVERFLOW))
+
+    if settings.DEBUG and pool_size == 1 and max_overflow == 0:
+        return _LOCAL_DEBUG_POOL_SIZE, _LOCAL_DEBUG_MAX_OVERFLOW
+
+    return pool_size, max_overflow
+
+
 engine_url, engine_connect_args = _build_engine_config()
 parsed_engine_url = make_url(engine_url)
+engine_pool_size, engine_max_overflow = _effective_pool_settings()
 
 if settings.DEBUG:
     logger.info(
@@ -30,8 +44,8 @@ if settings.DEBUG:
 
 engine = create_async_engine(
     engine_url,
-    pool_size=settings.DATABASE_POOL_SIZE,
-    max_overflow=settings.DATABASE_MAX_OVERFLOW,
+    pool_size=engine_pool_size,
+    max_overflow=engine_max_overflow,
     pool_pre_ping=True,
     pool_recycle=settings.DATABASE_POOL_RECYCLE_SECONDS,
     echo=settings.DATABASE_SQL_ECHO,

@@ -2,13 +2,13 @@
 
 import { useMemo, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
+import dynamic from "next/dynamic"
 import Link from "next/link"
 import { useParams } from "next/navigation"
 
-import { AuthorToolsNav } from "@/components/layout/AuthorToolsNav"
-import { UploadModal } from "@/components/modals/UploadModal"
 import { betaReadsApi } from "@/lib/api/betaReads"
 import { booksApi } from "@/lib/api/books"
+import { useBookDetail } from "@/lib/hooks/useBookDetail"
 import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { buildAuthorLoopIssueCards, buildAuthorLoopSteps, buildCharacterReviewStats } from "@/lib/utils/authorLoop"
@@ -16,6 +16,22 @@ import { applyRevisionBoardState, buildRevisionTask, todayDateKey } from "@/lib/
 import type { BetaReadAssignment, BetaReadAssignmentDetail, BetaReadFeedbackItem } from "@/types/betaRead"
 import type { Book, GoalCalendarItem, WriterWorkspace } from "@/types/book"
 import type { Character } from "@/types/character"
+
+const AuthorToolsNav = dynamic(
+  () => import("@/components/layout/AuthorToolsNav").then((module) => module.AuthorToolsNav),
+  {
+    ssr: false,
+    loading: () => <div className="rounded-md border border-white/[0.065] bg-[#0d141c] p-4" />,
+  }
+)
+
+const UploadModal = dynamic(
+  () => import("@/components/modals/UploadModal").then((module) => module.UploadModal),
+  {
+    ssr: false,
+    loading: () => <div className="rounded-md border border-white/[0.065] bg-[#0d141c] p-4" />,
+  }
+)
 
 function deadlineFromWindow(windowDays: number) {
   const date = new Date()
@@ -81,13 +97,13 @@ export default function AuthorLoopPage() {
   const [savingIssueId, setSavingIssueId] = useState<string | null>(null)
   const [savingFeedbackId, setSavingFeedbackId] = useState<string | null>(null)
 
-  const { data: book = null } = useQuery<Book | null>({
-    queryKey: asQueryKey(bookCacheKey(bookId, "detail")),
-    queryFn: () => booksApi.get(bookId),
+  const { data: book = null } = useBookDetail(bookId, {
     refetchInterval: (query) => {
       const currentBook = query.state.data as Book | undefined
-      return currentBook && currentBook.status !== "ready" ? 4_000 : false
+      const canPoll = typeof document === "undefined" || document.visibilityState === "visible"
+      return canPoll && currentBook && currentBook.status !== "ready" ? 4_000 : false
     },
+    refetchIntervalInBackground: false,
   })
   const { data: characters = [] } = useQuery<Character[]>({
     queryKey: asQueryKey(bookCacheKey(bookId, "characters")),
@@ -270,6 +286,7 @@ export default function AuthorLoopPage() {
             bookId={bookId}
             active="author-loop"
             isDark={isDark}
+            bookData={book}
             title="Author loop"
             description="Move from manuscript upload to beta feedback without losing citations, edits, or trust."
             mode={book?.mode ?? "author"}

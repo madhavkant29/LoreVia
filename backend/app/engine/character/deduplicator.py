@@ -259,6 +259,51 @@ def names_equivalent(
     return False
 
 
+def resolve_character_match_ids(
+    name: str | None,
+    aliases: Iterable[str] | None,
+    roster: Iterable[tuple[uuid.UUID, str | None, Iterable[str] | None]],
+    *,
+    blocked_ids: Iterable[uuid.UUID] | None = None,
+) -> list[uuid.UUID]:
+    candidate_keys = character_name_keys(name, aliases)
+    if not candidate_keys:
+        return []
+
+    blocked = set(blocked_ids or [])
+    matches: list[uuid.UUID] = []
+    seen: set[uuid.UUID] = set()
+    for char_id, char_name, char_aliases in roster:
+        if char_id in blocked:
+            continue
+        if candidate_keys & character_name_keys(char_name, char_aliases or []):
+            if char_id not in seen:
+                seen.add(char_id)
+                matches.append(char_id)
+            continue
+        if names_equivalent(name, aliases, char_name, char_aliases or []):
+            if char_id not in seen:
+                seen.add(char_id)
+                matches.append(char_id)
+    return matches
+
+
+def resolve_character_match_id(
+    name: str | None,
+    aliases: Iterable[str] | None,
+    roster: Iterable[tuple[uuid.UUID, str | None, Iterable[str] | None]],
+    *,
+    blocked_ids: Iterable[uuid.UUID] | None = None,
+) -> uuid.UUID | None:
+    matches = resolve_character_match_ids(
+        name,
+        aliases,
+        roster,
+        blocked_ids=blocked_ids,
+    )
+    return matches[0] if len(matches) == 1 else None
+
+
 async def find_similar(
     db: AsyncSession,
     book_id: uuid.UUID,
@@ -292,20 +337,10 @@ async def find_by_name_or_alias(
     name: str,
     aliases: Iterable[str] | None = None,
 ) -> uuid.UUID | None:
-    candidate_keys = character_name_keys(name, aliases)
-    if not candidate_keys:
-        return None
-
     result = await db.execute(
         select(Character.id, Character.name, Character.aliases).where(Character.book_id == book_id)
     )
-
-    for char_id, char_name, char_aliases in result.all():
-        if candidate_keys & character_name_keys(char_name, char_aliases or []):
-            return char_id
-        if names_equivalent(name, aliases, char_name, char_aliases or []):
-            return char_id
-    return None
+    return resolve_character_match_id(name, aliases, result.all())
 
 
 async def merge_alias(db: AsyncSession, character_id: uuid.UUID, alias: str) -> None:

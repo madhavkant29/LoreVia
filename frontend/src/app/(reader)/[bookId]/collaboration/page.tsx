@@ -1,10 +1,10 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useMemo, useRef, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
+import dynamic from "next/dynamic"
 import { useParams } from "next/navigation"
 
-import { AuthorToolsNav } from "@/components/layout/AuthorToolsNav"
 import { betaReadsApi } from "@/lib/api/betaReads"
 import { booksApi } from "@/lib/api/books"
 import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
@@ -13,6 +13,14 @@ import { parseQuestionLines } from "@/lib/utils/betaRead"
 import type { BetaReadAssignment } from "@/types/betaRead"
 import type { Book, BookCollaborator, CollaborationPermissions, CollaborationRole, CollaborationScope } from "@/types/book"
 import type { BetaReadAssignmentCreateInput } from "@/types/reader"
+
+const AuthorToolsNav = dynamic(
+  () => import("@/components/layout/AuthorToolsNav").then((module) => module.AuthorToolsNav),
+  {
+    ssr: false,
+    loading: () => <div className="rounded-md border border-white/[0.065] bg-[#0d141c] p-4" />,
+  }
+)
 
 const ROLE_OPTIONS: Array<{ value: CollaborationRole; label: string; detail: string }> = [
   { value: "viewer", label: "Viewer", detail: "Read-only access to the shared draft." },
@@ -198,6 +206,8 @@ export default function CollaborationPage() {
   const [authorQuestionsText, setAuthorQuestionsText] = useState("What confused you most?\nWhich moment landed best?")
   const [status, setStatus] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const emailInputRef = useRef<HTMLInputElement | null>(null)
+  const displayNameInputRef = useRef<HTMLInputElement | null>(null)
 
   const sortedCollaborators = useMemo(
     () => [...collaborators].sort((left, right) => left.email.localeCompare(right.email)),
@@ -220,13 +230,18 @@ export default function CollaborationPage() {
   }
 
   const submit = async () => {
-    if (!email.trim()) return
+    const nextEmail = email.trim() || emailInputRef.current?.value.trim() || ""
+    const nextDisplayName = displayName.trim() || displayNameInputRef.current?.value.trim() || ""
+    if (!nextEmail) {
+      setStatus("Collaborator email is required.")
+      return
+    }
     setSaving(true)
     setStatus(null)
     try {
       await booksApi.createCollaborator(bookId, {
-        email,
-        displayName: displayName || null,
+        email: nextEmail,
+        displayName: nextDisplayName || null,
         role,
         scope,
         permissions,
@@ -294,6 +309,7 @@ export default function CollaborationPage() {
             bookId={bookId}
             active="collaboration"
             isDark={isDark}
+            bookData={book}
             title="Author workspace"
             description="Invite readers, editors, and co-writers into the right slices of the story."
             mode={book?.mode ?? "author"}
@@ -322,12 +338,14 @@ export default function CollaborationPage() {
               <h2 className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>Invite collaborator</h2>
               <div className="mt-5 grid gap-3">
                 <input
+                  ref={emailInputRef}
                   value={email}
                   onChange={(event) => setEmail(event.target.value)}
                   placeholder="reader@example.com"
                   className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 placeholder:text-slate-600 focus:border-violet-400" : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-violet-400"}`}
                 />
                 <input
+                  ref={displayNameInputRef}
                   value={displayName}
                   onChange={(event) => setDisplayName(event.target.value)}
                   placeholder="Display name"
@@ -423,7 +441,7 @@ export default function CollaborationPage() {
 
               <button
                 onClick={() => void submit()}
-                disabled={saving || !email.trim()}
+                disabled={saving || !(email.trim() || emailInputRef.current?.value.trim())}
                 className={`mt-6 inline-flex h-11 w-full items-center justify-center rounded-md px-4 text-sm font-semibold transition ${isDark ? "bg-violet-500 text-white hover:bg-violet-400 disabled:bg-violet-500/40" : "bg-violet-600 text-white hover:bg-violet-500 disabled:bg-violet-300"}`}
               >
                 {saving ? "Saving..." : "Save share"}

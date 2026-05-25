@@ -11,6 +11,7 @@ export const BLOG_RSS_PATH = "/blog/rss.xml"
 
 export const STATIC_PUBLIC_ROUTES = [
   "/",
+  "/compare",
   "/blog",
   "/answers",
   "/compliance",

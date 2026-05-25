@@ -16,6 +16,7 @@ import statistics
 import uuid
 import zipfile
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
@@ -88,6 +89,7 @@ from app.schemas.books import (
     ChapterReportCharacter,
     CollaborationPermissions,
     CollaborationScope,
+    SeriesOut,
     SeriesBibleCanonEntryOut,
     SeriesBibleCharacterOut,
     SeriesBibleEpisodeOut,
@@ -379,6 +381,13 @@ DEFAULT_WRITER_WORKSPACE = {
     "revision_recent_edits": [],
     "processing": None,
 }
+
+
+@dataclass(slots=True)
+class BookRenderContext:
+    progress_by_book_id: dict[uuid.UUID, ReadingProgress]
+    total_words_by_book_id: dict[uuid.UUID, int]
+    cover_url_by_book_id: dict[uuid.UUID, str | None]
 
 BOOK_WORK_TYPES = {"novel", "screenplay", "other"}
 UPLOAD_EXTENSION_TO_FORMAT = {
@@ -743,8 +752,7 @@ def _normalize_processing_state(raw: dict | None) -> dict | None:
         payload["last_error"] = last_error
     if parser_diagnostics:
         payload["parser_diagnostics"] = parser_diagnostics
-    if is_fully_ready:
-        payload["is_fully_ready"] = True
+    payload["is_fully_ready"] = is_fully_ready
     if retry_actions:
         payload["retry_actions"] = retry_actions
     if raw_pipeline:
@@ -918,6 +926,10 @@ def _append_recent_revision_edit(
     ]
     workspace["revision_recent_edits"] = [next_edit, *deduped][:MAX_REVISION_RECENT_EDITS]
     book.writer_workspace = workspace
+
+
+def touch_public_book_updated_at(book: Book, *, changed_at: datetime | None = None) -> None:
+    book.public_updated_at = changed_at or datetime.now(UTC)
 
 
 def normalize_writer_workspace(raw: dict | None) -> dict:
@@ -4565,6 +4577,8 @@ async def sync_chapter_content_from_novel_scenes(
     chapter_number: int,
     increment_content_version: bool = True,
 ) -> dict[str, Any]:
+    from app.utils.advisor_utils import invalidate_advisor_caches_for_book
+
     chapter, chapter_created = await _ensure_syncable_chapter(
         db,
         book=book,
@@ -4613,7 +4627,12 @@ async def sync_chapter_content_from_novel_scenes(
         chapter.content_version = int(chapter.content_version or 1) + 1
     if not chapter.title:
         chapter.title = f"Chapter {chapter_number}"
+    content_changed = chapter_created or previous_text != next_text or previous_html != next_html
+    if content_changed:
+        touch_public_book_updated_at(book)
     await db.flush()
+    if content_changed:
+        await invalidate_advisor_caches_for_book(db, book_id=book.id)
     return {
         "chapter": chapter,
         "text": next_text,
@@ -5661,31 +5680,175 @@ async def build_series_bible_payload(
 
 # ─── BookOut construction ─────────────────────────────────────────────────────
 
+async def preload_book_render_context(
+    db: AsyncSession,
+    *,
+    books: Sequence[Book],
+    user_id: uuid.UUID,
+) -> BookRenderContext:
+    unique_books = list(dict.fromkeys(books))
+    if not unique_books:
+        return BookRenderContext(
+            progress_by_book_id={},
+            total_words_by_book_id={},
+            cover_url_by_book_id={},
+        )
+
+    for book in unique_books:
+        await ensure_book_cover(db, book)
+
+    book_ids = [book.id for book in unique_books]
+    progress_rows = (
+        await db.execute(
+            select(ReadingProgress).where(
+                ReadingProgress.user_id == user_id,
+                ReadingProgress.book_id.in_(book_ids),
+            )
+        )
+    ).scalars().all()
+    total_word_rows = (
+        await db.execute(
+            select(Chapter.book_id, func.coalesce(func.sum(Chapter.word_count), 0))
+            .where(Chapter.book_id.in_(book_ids))
+            .group_by(Chapter.book_id)
+        )
+    ).all()
+    return BookRenderContext(
+        progress_by_book_id={progress.book_id: progress for progress in progress_rows},
+        total_words_by_book_id={book_id: int(total_words or 0) for book_id, total_words in total_word_rows},
+        cover_url_by_book_id={book.id: cover_url_for_book(book) for book in unique_books},
+    )
+
+
+async def build_book_out_list(
+    db: AsyncSession,
+    *,
+    books: Sequence[Book],
+    user_id: uuid.UUID,
+    collaborators_by_book_id: dict[uuid.UUID, BookCollaborator] | None = None,
+) -> list[BookOut]:
+    context = await preload_book_render_context(db, books=books, user_id=user_id)
+    payloads: list[BookOut] = []
+    for book in books:
+        payloads.append(
+            await book_out(
+                db,
+                book,
+                user_id,
+                collaborator=(collaborators_by_book_id or {}).get(book.id),
+                context=context,
+            )
+        )
+    return payloads
+
+
+def _build_series_out_from_grouped_rows(
+    *,
+    series_rows: Sequence[Series],
+    memberships_by_series_id: dict[uuid.UUID, list[tuple[SeriesBook, Book]]],
+    book_payloads_by_id: dict[uuid.UUID, BookOut],
+) -> list[SeriesOut]:
+    output: list[SeriesOut] = []
+    for series in series_rows:
+        books: list[BookOut] = []
+        for membership, book in memberships_by_series_id.get(series.id, []):
+            enriched = book_payloads_by_id[book.id].model_copy(
+                update={"marked_complete_in_series": membership.marked_complete}
+            )
+            books.append(enriched)
+        output.append(
+            SeriesOut(
+                id=series.id,
+                name=series.name,
+                description=series.description,
+                created_at=series.created_at,
+                books=books,
+            )
+        )
+    return output
+
+
+async def build_series_out_list(
+    db: AsyncSession,
+    *,
+    series_rows: Sequence[Series],
+    membership_rows: Sequence[tuple[SeriesBook, Book]],
+    user_id: uuid.UUID,
+) -> list[SeriesOut]:
+    ordered_books: list[Book] = []
+    memberships_by_series_id: dict[uuid.UUID, list[tuple[SeriesBook, Book]]] = {}
+    seen_book_ids: set[uuid.UUID] = set()
+    for membership, book in membership_rows:
+        memberships_by_series_id.setdefault(membership.series_id, []).append((membership, book))
+        if book.id in seen_book_ids:
+            continue
+        seen_book_ids.add(book.id)
+        ordered_books.append(book)
+    book_payloads = await build_book_out_list(db, books=ordered_books, user_id=user_id)
+    book_payloads_by_id = {payload.id: payload for payload in book_payloads}
+    return _build_series_out_from_grouped_rows(
+        series_rows=series_rows,
+        memberships_by_series_id=memberships_by_series_id,
+        book_payloads_by_id=book_payloads_by_id,
+    )
+
+
+async def build_single_series_out(
+    db: AsyncSession,
+    *,
+    series: Series,
+    user_id: uuid.UUID,
+) -> SeriesOut:
+    membership_rows = (
+        await db.execute(
+            select(SeriesBook, Book)
+            .join(Book, Book.id == SeriesBook.book_id)
+            .where(SeriesBook.series_id == series.id, Book.user_id == user_id)
+            .order_by(SeriesBook.position, Book.created_at)
+        )
+    ).all()
+    return (
+        await build_series_out_list(
+            db,
+            series_rows=[series],
+            membership_rows=membership_rows,
+            user_id=user_id,
+        )
+    )[0]
+
+
 async def book_out(
     db: AsyncSession,
     book: Book,
     user_id: uuid.UUID,
     collaborator: BookCollaborator | None = None,
+    *,
+    context: BookRenderContext | None = None,
 ) -> BookOut:
-    await ensure_book_cover(db, book)
-    progress = (
-        await db.execute(
-            select(ReadingProgress).where(
-                ReadingProgress.book_id == book.id,
-                ReadingProgress.user_id == user_id,
+    if context is None:
+        await ensure_book_cover(db, book)
+        progress = (
+            await db.execute(
+                select(ReadingProgress).where(
+                    ReadingProgress.book_id == book.id,
+                    ReadingProgress.user_id == user_id,
+                )
             )
-        )
-    ).scalars().first()
+        ).scalars().first()
+        total_words = (
+            await db.scalar(
+                select(func.coalesce(func.sum(Chapter.word_count), 0)).where(Chapter.book_id == book.id)
+            )
+        ) or 0
+        cover_url = cover_url_for_book(book)
+    else:
+        progress = context.progress_by_book_id.get(book.id)
+        total_words = context.total_words_by_book_id.get(book.id, 0)
+        cover_url = context.cover_url_by_book_id.get(book.id)
     chapters_read_count = len(set(progress.chapters_read or [])) if progress else 0
     total = book.total_chapters or 0
     percent = round((chapters_read_count / total) * 100, 1) if total else 0.0
     chapters_left = max(total - chapters_read_count, 0) if total else None
-    total_words = (
-        await db.scalar(
-            select(func.coalesce(func.sum(Chapter.word_count), 0)).where(Chapter.book_id == book.id)
-        )
-    ) or 0
-    cover_url = cover_url_for_book(book)
     return BookOut(
         id=book.id,
         title=book.title,
@@ -5710,6 +5873,7 @@ async def book_out(
         public_status=getattr(book, "public_status", "draft"),
         public_slug=getattr(book, "public_slug", None),
         published_at=getattr(book, "published_at", None),
+        public_updated_at=getattr(book, "public_updated_at", None),
         public_visibility=getattr(book, "public_visibility", "private"),
         rights_confirmation=bool(getattr(book, "rights_confirmation", False)),
         rights_confirmation_at=getattr(book, "rights_confirmation_at", None),
@@ -5864,6 +6028,9 @@ async def compute_words_read_for_book(
     db: AsyncSession,
     book: Book,
     progress: ReadingProgress | None,
+    *,
+    chapter_word_count_map: dict[tuple[uuid.UUID, int], int] | None = None,
+    allow_content_fallback: bool = True,
 ) -> int:
     if progress is None:
         return 0
@@ -5873,17 +6040,86 @@ async def compute_words_read_for_book(
     counted_chapters = set(read_chapters)
 
     for chapter_number in read_chapters:
-        total_words += await chapter_word_count(db, book.id, chapter_number)
+        total_words += await chapter_word_count(
+            db,
+            book.id,
+            chapter_number,
+            chapter_word_count_map=chapter_word_count_map,
+            allow_content_fallback=allow_content_fallback,
+        )
 
     current_chapter = progress.current_chapter or 0
     if current_chapter > 0 and current_chapter not in counted_chapters:
-        chapter_words = await chapter_word_count(db, book.id, current_chapter)
+        chapter_words = await chapter_word_count(
+            db,
+            book.id,
+            current_chapter,
+            chapter_word_count_map=chapter_word_count_map,
+            allow_content_fallback=allow_content_fallback,
+        )
         total_words += int(round(chapter_words * max(0.0, min(progress.scroll_pct or 0.0, 1.0))))
 
     return total_words
 
 
-async def chapter_word_count(db: AsyncSession, book_id: uuid.UUID, chapter_number: int) -> int:
+async def compute_words_read_for_books(
+    db: AsyncSession,
+    *,
+    books: Sequence[Book],
+    progress_rows: Sequence[ReadingProgress],
+) -> dict[uuid.UUID, int]:
+    if not books or not progress_rows:
+        return {}
+
+    relevant_numbers_by_book: dict[uuid.UUID, set[int]] = {}
+    progress_by_book_id: dict[uuid.UUID, ReadingProgress] = {}
+    for progress in progress_rows:
+        progress_by_book_id[progress.book_id] = progress
+        numbers = relevant_numbers_by_book.setdefault(progress.book_id, set())
+        for chapter_number in progress.chapters_read or []:
+            if chapter_number is not None:
+                numbers.add(int(chapter_number))
+        current_chapter = int(progress.current_chapter or 0)
+        if current_chapter > 0:
+            numbers.add(current_chapter)
+
+    if not relevant_numbers_by_book:
+        return {}
+
+    chapter_rows = (
+        await db.execute(
+            select(Chapter.book_id, Chapter.number, Chapter.word_count).where(
+                Chapter.book_id.in_(list(relevant_numbers_by_book.keys()))
+            )
+        )
+    ).all()
+    chapter_word_counts = {
+        (book_id, int(chapter_number)): int(word_count or 0)
+        for book_id, chapter_number, word_count in chapter_rows
+        if chapter_number is not None
+    }
+    totals: dict[uuid.UUID, int] = {}
+    for book in books:
+        totals[book.id] = await compute_words_read_for_book(
+            db,
+            book,
+            progress_by_book_id.get(book.id),
+            chapter_word_count_map=chapter_word_counts,
+            allow_content_fallback=False,
+        )
+    return totals
+
+
+async def chapter_word_count(
+    db: AsyncSession,
+    book_id: uuid.UUID,
+    chapter_number: int,
+    *,
+    chapter_word_count_map: dict[tuple[uuid.UUID, int], int] | None = None,
+    allow_content_fallback: bool = True,
+) -> int:
+    if chapter_word_count_map is not None:
+        return int(chapter_word_count_map.get((book_id, chapter_number), 0))
     chapter = (
         await db.execute(
             select(Chapter).where(Chapter.book_id == book_id, Chapter.number == chapter_number)
@@ -5893,7 +6129,7 @@ async def chapter_word_count(db: AsyncSession, book_id: uuid.UUID, chapter_numbe
         return 0
     if chapter.word_count:
         return chapter.word_count
-    if not chapter.s3_key:
+    if not chapter.s3_key or not allow_content_fallback:
         return 0
     try:
         stored = deserialize_manuscript_content(download_book(chapter.s3_key))
@@ -7027,6 +7263,7 @@ async def restore_chapter_version(
         processed=False,
     )
     db.add(restored_chapter)
+    touch_public_book_updated_at(book)
     await db.commit()
     await db.refresh(restored_chapter)
     return {

@@ -121,6 +121,75 @@ async def test_resolve_reader_chapter_payload_queues_repair_for_mismatched_sourc
 
 
 @pytest.mark.asyncio
+async def test_resolve_reader_chapter_payload_merges_fallback_media_when_markers_exist(monkeypatch):
+    chapter = SimpleNamespace(
+        id=uuid.uuid4(),
+        number=2,
+        title="Two",
+        s3_key="chapters/atlas/2.json",
+        content_version=1,
+        analysis_state={"status": "queued", "generated_modes": [], "attempt_count": 1},
+    )
+    book = SimpleNamespace(
+        id=uuid.uuid4(),
+        format="pdf",
+        preserve_chapter_numbers=False,
+        preserve_source_chapters=False,
+        work_type="novel",
+        s3_key="books/atlas.pdf",
+    )
+    db = _RepairDB()
+
+    monkeypatch.setattr(chapter_recovery_service, "download_book", lambda _key: b"payload")
+    monkeypatch.setattr(
+        chapter_recovery_service,
+        "deserialize_manuscript_content",
+        lambda _raw: {"text": "[[IMAGE:1]] Stored text", "html": None},
+    )
+    monkeypatch.setattr(
+        chapter_recovery_service,
+        "serialize_chapter_media",
+        _async_empty_media,
+    )
+    monkeypatch.setattr(
+        chapter_recovery_service,
+        "parse_chapter_from_source",
+        lambda *_args, **_kwargs: {
+            "title": "Two",
+            "text": "[[IMAGE:1]] Stored text",
+            "html": None,
+            "images": [{"marker": "[[IMAGE:1]]", "url": "/api/v1/reader/media/demo"}],
+        },
+    )
+    monkeypatch.setattr(
+        chapter_recovery_service,
+        "serialize_inline_images",
+        lambda images: [{"marker": image["marker"], "url": image["url"]} for image in images],
+    )
+    monkeypatch.setattr(
+        chapter_recovery_service,
+        "merge_media_items",
+        lambda stored, fallback: [*stored, *fallback],
+    )
+    monkeypatch.setattr(
+        chapter_recovery_service,
+        "chapter_body_needs_scene_workspace_fallback",
+        lambda *_args, **_kwargs: False,
+    )
+    monkeypatch.setattr(chapter_recovery_service, "queue_chapter_repair_if_needed", _async_true)
+
+    payload = await chapter_recovery_service.resolve_reader_chapter_payload(
+        db,
+        book=book,
+        chapter=chapter,
+        chapter_num=2,
+    )
+
+    assert payload is not None
+    assert payload["media"] == [{"marker": "[[IMAGE:1]]", "url": "/api/v1/reader/media/demo"}]
+
+
+@pytest.mark.asyncio
 async def test_repair_chapter_payload_from_source_persists_recovered_state(monkeypatch):
     chapter = SimpleNamespace(
         id=uuid.uuid4(),
@@ -167,6 +236,10 @@ async def _async_none(*_args, **_kwargs):
     return None
 
 
+async def _async_empty_media(*_args, **_kwargs):
+    return []
+
+
 class _RepairDB(_FakeDB):
     def __init__(self):
         super().__init__()
@@ -174,7 +247,7 @@ class _RepairDB(_FakeDB):
         self.deleted = []
 
     async def execute(self, *_args, **_kwargs):
-        return None
+        return _EmptyResult()
 
     def add(self, value):
         self.added.append(value)
@@ -216,3 +289,8 @@ async def test_queue_chapter_repair_if_needed_marks_state_and_enqueues(monkeypat
 
 async def _async_true(*_args, **_kwargs):
     return True
+
+
+class _EmptyResult:
+    def all(self):
+        return []

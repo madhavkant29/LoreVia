@@ -17,6 +17,7 @@ from app.utils.book_utils import (
     manuscript_text_to_html,
     serialize_manuscript_content,
 )
+from app.utils.advisor_utils import invalidate_advisor_caches_for_book
 from app.utils.ingestion_utils import (
     CHAPTER_RECOVERY_INFLIGHT_TTL_SECONDS,
     build_analysis_chapter_state,
@@ -159,6 +160,7 @@ async def repair_chapter_payload_from_source(
             ),
         )
         await db.commit()
+        await invalidate_advisor_caches_for_book(db, book_id=book.id)
         return True
     finally:
         await cache_del(inflight_key)
@@ -210,12 +212,14 @@ async def resolve_reader_chapter_payload(
             stored_html_content = None
 
     stored_media = await serialize_chapter_media(db, chapter.id)
+    fallback_payload = None
     needs_source_recovery = chapter_needs_source_recovery(
         book=book,
         stored_text_content=stored_text_content,
         stored_media=stored_media,
     )
     if needs_source_recovery:
+        fallback_payload = parse_chapter_from_source(book, chapter_num)
         current_integrity = chapter_source_integrity(chapter) or {}
         await queue_chapter_repair_if_needed(
             db,
@@ -225,9 +229,19 @@ async def resolve_reader_chapter_payload(
             reason="source_integrity_mismatch",
         )
         if not stored_text_content:
-            stored_text_content = ""
+            stored_text_content = str((fallback_payload or {}).get("text") or "")
+        if not stored_html_content:
+            stored_html_content = (fallback_payload or {}).get("html")
+        fallback_media = serialize_inline_images(list((fallback_payload or {}).get("images") or []))
+        stored_media = merge_media_items(stored_media, fallback_media)
         current_integrity["recovery_status"] = "queued"
         current_integrity["last_recovery_error"] = "source_integrity_mismatch"
+    elif not stored_media and stored_text_content and extract_media_markers(stored_text_content):
+        fallback_payload = parse_chapter_from_source(book, chapter_num)
+        stored_media = merge_media_items(
+            stored_media,
+            serialize_inline_images(list((fallback_payload or {}).get("images") or [])),
+        )
 
     if chapter_body_needs_scene_workspace_fallback(
         stored_text_content,

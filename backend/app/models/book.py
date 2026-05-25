@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -49,6 +49,7 @@ class Book(Base):
     public_status: Mapped[str] = mapped_column(String, nullable=False, default="draft", server_default="draft", index=True)
     public_slug: Mapped[str | None] = mapped_column(String, index=True)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    public_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     public_visibility: Mapped[str] = mapped_column(String, nullable=False, default="private", server_default="private", index=True)
     rights_confirmation: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     rights_confirmation_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -130,6 +131,7 @@ class Book(Base):
     custom_tags = relationship("CustomTag", back_populates="book", cascade="all, delete-orphan")
     writing_activities = relationship("UserWritingActivity", back_populates="book")
     public_analytics_events = relationship("PublicBookAnalyticsEvent", back_populates="book", cascade="all, delete-orphan")
+    public_rankings = relationship("PublicBookRanking", back_populates="book", cascade="all, delete-orphan")
 
 
 class PublicBookAnalyticsEvent(Base):
@@ -157,6 +159,42 @@ class PublicBookAnalyticsEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     book = relationship("Book", back_populates="public_analytics_events")
+
+
+class PublicBookRanking(Base):
+    __tablename__ = "public_book_rankings"
+    __table_args__ = (
+        UniqueConstraint(
+            "book_id",
+            "surface",
+            "ranking_key",
+            "time_window",
+            "snapshot_date",
+            name="uq_public_book_rankings_snapshot",
+        ),
+        Index(
+            "ix_public_book_rankings_surface_key_window_snapshot_rank",
+            "surface",
+            "ranking_key",
+            "time_window",
+            "snapshot_date",
+            "rank_position",
+        ),
+        Index("ix_public_book_rankings_book_surface", "book_id", "surface"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    book_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False)
+    surface: Mapped[str] = mapped_column(String, nullable=False)
+    ranking_key: Mapped[str] = mapped_column(String, nullable=False)
+    time_window: Mapped[str] = mapped_column(String, nullable=False)
+    snapshot_date: Mapped[date] = mapped_column(Date, nullable=False)
+    rank_position: Mapped[int] = mapped_column(Integer, nullable=False)
+    score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default="0")
+    primary_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    book = relationship("Book", back_populates="public_rankings")
 
 
 class BookCollaborator(Base):
@@ -247,11 +285,13 @@ class BookForumComment(Base):
     __tablename__ = "book_forum_comments"
     __table_args__ = (
         Index("ix_book_forum_comments_post_created_at", "post_id", "created_at"),
+        Index("ix_book_forum_comments_parent_created_at", "parent_comment_id", "created_at"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     post_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("book_forum_posts.id", ondelete="CASCADE"), nullable=False, index=True)
     book_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), index=True)
+    parent_comment_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("book_forum_comments.id", ondelete="CASCADE"), index=True)
     author_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     body: Mapped[str] = mapped_column(Text, nullable=False)
     like_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
@@ -262,6 +302,8 @@ class BookForumComment(Base):
     post = relationship("BookForumPost", back_populates="comments")
     book = relationship("Book", back_populates="forum_comments")
     author = relationship("User", foreign_keys=[author_user_id], back_populates="forum_comments")
+    parent_comment = relationship("BookForumComment", remote_side=[id], back_populates="replies")
+    replies = relationship("BookForumComment", back_populates="parent_comment", cascade="all, delete-orphan")
     reactions = relationship("BookForumCommentReaction", back_populates="comment", cascade="all, delete-orphan")
 
 

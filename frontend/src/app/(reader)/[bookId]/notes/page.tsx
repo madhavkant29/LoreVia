@@ -1,38 +1,87 @@
 "use client"
 
-import { useState } from "react"
+import { startTransition, useEffect, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
+import dynamic from "next/dynamic"
 import type { Route } from "next"
 import Link from "next/link"
 import { useParams } from "next/navigation"
 
-import { AuthorToolsNav } from "@/components/layout/AuthorToolsNav"
-import { ObsidianNotesEditor } from "@/components/reader/ObsidianNotesEditor"
 import { booksApi } from "@/lib/api/books"
+import { useBookDetail } from "@/lib/hooks/useBookDetail"
 import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
 import { renderRichTextHtml } from "@/lib/utils/richText"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import type { Book, BookNote, ObsidianGraph, ObsidianVaultNote } from "@/types/book"
 
+const ObsidianNotesEditor = dynamic(
+  () => import("@/components/reader/ObsidianNotesEditor").then((module) => module.ObsidianNotesEditor),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="rounded-[1.8rem] border border-dashed py-24 text-center text-sm text-inherit">
+        Loading vault notes workspace...
+      </div>
+    ),
+  }
+)
+
+const AuthorToolsNav = dynamic(
+  () => import("@/components/layout/AuthorToolsNav").then((module) => module.AuthorToolsNav),
+  {
+    ssr: false,
+    loading: () => <div className="rounded-[1.8rem] border border-dashed p-8" />,
+  }
+)
+
+const EMPTY_GRAPH: ObsidianGraph = { nodes: [], edges: [] }
+
 export default function BookNotesPage() {
   const { bookId } = useParams<{ bookId: string }>()
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
-  const { data: book = null } = useQuery<Book | null>({
-    queryKey: asQueryKey(bookCacheKey(bookId, "detail")),
-    queryFn: () => booksApi.get(bookId),
-  })
-  const { data: bookNotes = [] } = useQuery<BookNote[]>({
+  const [secondaryDataEnabled, setSecondaryDataEnabled] = useState(false)
+  const { data: book = null } = useBookDetail(bookId)
+
+  useEffect(() => {
+    if (secondaryDataEnabled) return
+
+    const schedule =
+      typeof window.requestIdleCallback === "function"
+        ? window.requestIdleCallback.bind(window)
+        : ((callback: IdleRequestCallback) =>
+            window.setTimeout(() => callback({ didTimeout: false, timeRemaining: () => 0 } as IdleDeadline), 120))
+    const cancel =
+      typeof window.cancelIdleCallback === "function"
+        ? window.cancelIdleCallback.bind(window)
+        : window.clearTimeout.bind(window)
+
+    const handle = schedule(() => {
+      startTransition(() => setSecondaryDataEnabled(true))
+    })
+
+    return () => cancel(handle)
+  }, [secondaryDataEnabled])
+
+  const {
+    data: bookNotes = [],
+    isLoading: bookNotesLoading,
+  } = useQuery<BookNote[]>({
     queryKey: asQueryKey(bookCacheKey(bookId, "notes")),
     queryFn: () => booksApi.getBookNotes(bookId),
+    enabled: secondaryDataEnabled,
+    staleTime: 30_000,
   })
   const { data: notes = [], isLoading: notesLoading } = useQuery<ObsidianVaultNote[]>({
     queryKey: asQueryKey(bookCacheKey(bookId, "obsidian-notes")),
     queryFn: () => booksApi.listObsidianNotes(bookId),
+    staleTime: 30_000,
   })
-  const { data: graph = { nodes: [], edges: [] } } = useQuery<ObsidianGraph>({
+  const { data: graph = EMPTY_GRAPH } = useQuery<ObsidianGraph>({
     queryKey: asQueryKey(bookCacheKey(bookId, "obsidian-graph")),
     queryFn: () => booksApi.getObsidianGraph(bookId),
+    enabled: secondaryDataEnabled,
+    staleTime: 30_000,
   })
 
   return (
@@ -43,6 +92,7 @@ export default function BookNotesPage() {
             bookId={bookId}
             active="notes"
             isDark={isDark}
+            bookData={book}
             title="Notes workflow"
             description="Keep the vault tree, manuscript, export studio, and continuity tools one click away while you edit."
           />
@@ -91,9 +141,15 @@ export default function BookNotesPage() {
 
               <div className="mt-5 grid gap-4 lg:grid-cols-2">
                 {bookNotes.length === 0 ? (
+                  !secondaryDataEnabled || bookNotesLoading ? (
+                    <div className={`rounded-[1.25rem] border border-dashed px-5 py-10 text-center text-sm ${isDark ? "border-white/10 text-slate-400" : "border-stone-300 text-stone-500"}`}>
+                      Loading chapter-linked notes...
+                    </div>
+                  ) : (
                   <div className={`rounded-[1.25rem] border border-dashed px-5 py-10 text-center text-sm ${isDark ? "border-white/10 text-slate-400" : "border-stone-300 text-stone-500"}`}>
                     No chapter-linked notes saved for this book yet.
                   </div>
+                  )
                 ) : (
                   bookNotes.map((note) => (
                     <article key={note.id} className={`rounded-[1.25rem] border p-5 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50/70"}`}>

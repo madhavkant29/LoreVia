@@ -19,6 +19,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.core.config import allowed_hosts, cors_middleware_options, settings
 from app.core.events import on_shutdown, on_startup
+from app.utils.logging.errors import public_error_message, request_log_context, scrub_sentry_event, sanitize_validation_errors
 from app.utils.security_utils import apply_security_headers
 from app.utils.tunnel.cloudflare import CloudflareTunnelMiddleware
 
@@ -29,11 +30,10 @@ if settings.SENTRY_DSN and not settings.DEBUG:
             FastApiIntegration(),
             CeleryIntegration(),
         ],
+        before_send=scrub_sentry_event,
         traces_sample_rate=0.1,
         profiles_sample_rate=0.1,
     )
-
-from app.utils.logging.errors import public_error_message, request_log_context, sanitize_validation_errors
 from app.utils.logging.logger import configure_logging, get_logger
 
 configure_logging()
@@ -52,7 +52,7 @@ def _install_exception_handlers(target_app: FastAPI) -> None:
             ),
         )
         detail = public_error_message(exc.status_code)
-        if exc.status_code != 404 and isinstance(exc.detail, str) and exc.detail:
+        if 400 <= exc.status_code < 500 and exc.status_code != 404 and isinstance(exc.detail, str) and exc.detail:
             detail = exc.detail
         return JSONResponse(
             status_code=exc.status_code,

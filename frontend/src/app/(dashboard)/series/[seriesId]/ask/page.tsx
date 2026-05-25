@@ -53,8 +53,25 @@ export default function SeriesAskPage() {
     setAskMessages(newMessages)
     setAskQuery("")
     try {
-      const response = await intelligenceApi.seriesAdvisorMessage(seriesId, newMessages)
-      setAskMessages((prev) => [...prev, { role: "assistant", content: response.reply }])
+      const response = await intelligenceApi.seriesAdvisorMessageStream(seriesId, newMessages, {
+        onDelta: (content) => {
+          if (!content) return
+          setAskMessages((prev) => {
+            const last = prev[prev.length - 1]
+            if (last?.role === "assistant") {
+              return [...prev.slice(0, -1), { ...last, content: `${last.content}${content}` }]
+            }
+            return [...prev, { role: "assistant", content }]
+          })
+        },
+      })
+      setAskMessages((prev) => {
+        const last = prev[prev.length - 1]
+        if (last?.role === "assistant") {
+          return [...prev.slice(0, -1), { role: "assistant", content: response.reply }]
+        }
+        return [...prev, { role: "assistant", content: response.reply }]
+      })
       setAskResponse(response)
     } catch {
       setAskResponse({ reply: "Failed to get a response. Please try again.", intent: "general", response_type: "standard", retrieved_passages: [], cached: false })

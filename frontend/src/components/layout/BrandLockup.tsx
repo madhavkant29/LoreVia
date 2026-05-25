@@ -7,6 +7,7 @@ type BrandLockupProps = {
   className?: string
   textClassName?: string
   iconClassName?: string
+  tone?: "auto" | "light" | "dark"
 }
 
 const sizeClasses = {
@@ -31,6 +32,7 @@ const sizeClasses = {
 export function BrandLockup({
   size = "md",
   className = "",
+  tone = "auto",
 }: BrandLockupProps) {
   const classes = sizeClasses[size]
 
@@ -39,6 +41,7 @@ export function BrandLockup({
       <ThemeBrandImage
         variant="lockup"
         alt="LoreVia"
+        mode={tone}
         className={`${classes.image} w-auto object-contain`.trim()}
       />
     </div>

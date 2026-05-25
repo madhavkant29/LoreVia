@@ -1,5 +1,7 @@
 import { defineConfig } from "@playwright/test"
 
+process.env.ADMIN_E2E_TEST_SECRET ??= "codex-e2e-admin-secret"
+
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: false,
@@ -11,7 +13,7 @@ export default defineConfig({
   },
   reporter: "list",
   use: {
-    baseURL: "http://127.0.0.1:3000",
+    baseURL: "http://localhost:3000",
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
     video: "off",
@@ -19,8 +21,12 @@ export default defineConfig({
     headless: true,
   },
   webServer: {
-    command: "npm run dev",
-    url: "http://127.0.0.1:3000",
+    command: "npm run dev -- --hostname localhost",
+    env: {
+      ...process.env,
+      ADMIN_E2E_TEST_SECRET: process.env.ADMIN_E2E_TEST_SECRET,
+    },
+    url: "http://localhost:3000",
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },

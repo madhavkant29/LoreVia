@@ -7,7 +7,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.api.v1.routes import intelligence
-from app.schemas.intelligence import ChatMessage, ChatRequest, QARequest
+from app.schemas.intelligence import QARequest
 
 
 class _ScalarList:
@@ -60,6 +60,50 @@ class _FakeClient:
         return SimpleNamespace(
             choices=[SimpleNamespace(message=SimpleNamespace(content=self._content))]
         )
+
+    async def close(self):
+        self.closed = True
+
+
+class _FakeStream:
+    def __init__(self, parts):
+        self._parts = list(parts)
+
+    def __aiter__(self):
+        self._iter = iter(self._parts)
+        return self
+
+    async def __anext__(self):
+        try:
+            content = next(self._iter)
+        except StopIteration as exc:
+            raise StopAsyncIteration from exc
+        return SimpleNamespace(
+            usage=None,
+            choices=[SimpleNamespace(delta=SimpleNamespace(content=content))],
+        )
+
+
+class _FakeStreamingClient:
+    def __init__(self, parts):
+        self.closed = False
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+        self._parts = list(parts)
+
+    async def _create(self, **_kwargs):
+        return _FakeStream(self._parts)
+
+    async def close(self):
+        self.closed = True
+
+
+class _ExplodingStreamingClient:
+    def __init__(self):
+        self.closed = False
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+
+    async def _create(self, **_kwargs):
+        raise RuntimeError("database_url=postgresql://user:secret@example.com/app")
 
     async def close(self):
         self.closed = True
@@ -149,48 +193,72 @@ async def test_qa_endpoint_builds_answer_and_caches(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_character_chat_validates_book_and_character(monkeypatch):
-    body = ChatRequest(messages=[ChatMessage(role="user", content="Hi")], current_chapter=1)
-    db = _FakeDB(get_values=[None])
-    with pytest.raises(HTTPException):
-        await intelligence.character_chat(uuid.uuid4(), uuid.uuid4(), body=body, db=db, current_user=SimpleNamespace(id=uuid.uuid4()), _=None)
+async def test_qa_stream_endpoint_streams_and_caches(monkeypatch):
+    async def _fake_cache_get(_key):
+        return None
 
-    book_id = uuid.uuid4()
-    user_id = uuid.uuid4()
-    book = SimpleNamespace(id=book_id, user_id=user_id, title="Book")
-    db = _FakeDB(get_values=[book, None])
-    with pytest.raises(HTTPException):
-        await intelligence.character_chat(book_id, uuid.uuid4(), body=body, db=db, current_user=SimpleNamespace(id=user_id), _=None)
+    cached = {}
+
+    async def _fake_cache_set(key, value, ttl):
+        cached["args"] = (key, value, ttl)
+
+    async def _fake_build_grounded_qa_context(**_kwargs):
+        return (
+            ["Context block"],
+            [{"chapter_num": 2, "chapter_title": "Two", "excerpt": "Evidence", "source_type": "passage", "relevance": 0.9}],
+        )
+
+    monkeypatch.setattr(intelligence, "cache_get", _fake_cache_get)
+    monkeypatch.setattr(intelligence, "cache_set", _fake_cache_set)
+    monkeypatch.setattr(intelligence, "build_grounded_qa_context", _fake_build_grounded_qa_context)
+    client = _FakeStreamingClient(["Grounded", " answer"])
+    monkeypatch.setattr(intelligence, "get_client", lambda: client)
+    book = SimpleNamespace(id=uuid.uuid4(), user_id=uuid.uuid4(), title="Lore Book")
+    db = _FakeDB(get_values=[book])
+
+    response = await intelligence.qa_stream_endpoint(
+        book.id,
+        QARequest(question="Who?", current_chapter=2),
+        db=db,
+        current_user=SimpleNamespace(id=book.user_id),
+        _=None,
+    )
+    chunks = [chunk async for chunk in response.body_iterator]
+    body = "".join(chunks)
+
+    assert "event: delta" in body
+    assert "Grounded answer" in body
+    assert cached["args"][1]["answer"] == "Grounded answer"
+    assert client.closed is True
 
 
 @pytest.mark.asyncio
-async def test_character_chat_builds_grounded_hint(monkeypatch):
-    book_id = uuid.uuid4()
-    char_id = uuid.uuid4()
-    user_id = uuid.uuid4()
-    book = SimpleNamespace(id=book_id, user_id=user_id, title="Book")
-    character = SimpleNamespace(id=char_id, book_id=book_id, name="Aoi")
-    async def _fake_semantic_search(*_args, **_kwargs):
-        return [{"chapter_num": 3, "text": "evidence text"}]
+async def test_qa_stream_endpoint_hides_internal_errors(monkeypatch):
+    async def _fake_cache_get(_key):
+        return None
 
-    async def _fake_chat_as_character(**_kwargs):
-        return "In character"
+    async def _fake_build_grounded_qa_context(**_kwargs):
+        return (["Context block"], [])
 
-    monkeypatch.setattr(intelligence, "semantic_search", _fake_semantic_search)
-    monkeypatch.setattr(intelligence, "chat_as_character", _fake_chat_as_character)
-    db = _FakeDB(get_values=[book, character])
+    monkeypatch.setattr(intelligence, "cache_get", _fake_cache_get)
+    monkeypatch.setattr(intelligence, "build_grounded_qa_context", _fake_build_grounded_qa_context)
+    client = _ExplodingStreamingClient()
+    monkeypatch.setattr(intelligence, "get_client", lambda: client)
+    book = SimpleNamespace(id=uuid.uuid4(), user_id=uuid.uuid4(), title="Lore Book")
+    db = _FakeDB(get_values=[book])
 
-    payload = await intelligence.character_chat(
-        book_id,
-        char_id,
-        body=ChatRequest(messages=[ChatMessage(role="user", content="What now?")], current_chapter=3),
+    response = await intelligence.qa_stream_endpoint(
+        book.id,
+        QARequest(question="Who?", current_chapter=2),
         db=db,
-        current_user=SimpleNamespace(id=user_id),
+        current_user=SimpleNamespace(id=book.user_id),
         _=None,
     )
+    body = "".join([chunk async for chunk in response.body_iterator])
 
-    assert payload["reply"] == "In character"
-    assert payload["grounded_hint"] == "Grounded in chapter 3 evidence."
+    assert "Something went wrong. Please try again." in body
+    assert "secret@example.com" not in body
+    assert client.closed is True
 
 
 @pytest.mark.asyncio

@@ -1,10 +1,15 @@
+import uuid
+
+import pytest
+
 from app.utils.advisor_utils import (
-    advisor_response_cache,
+    build_story_context,
     build_advisor_world_context,
     build_fallback_advisor_suggestions,
     detect_advisor_world_mode,
     identify_character_mentions,
     invalidate_advisor_caches,
+    invalidate_advisor_caches_for_book,
     normalize_proactive_scan_result,
 )
 
@@ -110,12 +115,51 @@ def test_identify_character_mentions_matches_punctuation_and_possessives():
     assert [item["name"] for item in matches] == ["Gregor", "Grete"]
 
 
-def test_invalidate_advisor_caches_clears_cached_entries():
-    advisor_response_cache.set("book-key", {"reply": "cached"})
+@pytest.mark.asyncio
+async def test_invalidate_advisor_caches_delegates_to_namespace_invalidator(monkeypatch):
+    captured = {}
 
-    invalidate_advisor_caches()
+    async def _fake_invalidate(*, book_id=None, series_ids=None):
+        captured["book_id"] = book_id
+        captured["series_ids"] = series_ids
 
-    assert advisor_response_cache.get("book-key") is None
+    monkeypatch.setattr(
+        "app.utils.advisor_utils.invalidate_advisor_cache_namespaces",
+        _fake_invalidate,
+    )
+
+    await invalidate_advisor_caches(book_id="book-key", series_ids=["series-a"])
+
+    assert captured == {"book_id": "book-key", "series_ids": ["series-a"]}
+
+
+@pytest.mark.asyncio
+async def test_invalidate_advisor_caches_for_book_expands_series_scope(monkeypatch):
+    captured = {}
+
+    async def _fake_invalidate(*, book_id=None, series_ids=None):
+        captured["book_id"] = book_id
+        captured["series_ids"] = series_ids
+
+    class _FakeResult:
+        def all(self):
+            return [type("Row", (), {"series_id": "series-a"})(), type("Row", (), {"series_id": "series-b"})()]
+
+    class _FakeDB:
+        async def execute(self, *_args, **_kwargs):
+            return _FakeResult()
+
+    monkeypatch.setattr(
+        "app.utils.advisor_utils.invalidate_advisor_caches",
+        _fake_invalidate,
+    )
+
+    await invalidate_advisor_caches_for_book(_FakeDB(), book_id="12345678-1234-5678-1234-567812345678")
+
+    assert captured == {
+        "book_id": "12345678-1234-5678-1234-567812345678",
+        "series_ids": ["series-a", "series-b"],
+    }
 
 
 def test_normalize_proactive_scan_result_keeps_valid_findings():
@@ -133,3 +177,29 @@ def test_normalize_proactive_scan_result_falls_back_on_invalid_json():
 
     assert payload["findings"] == []
     assert "not-json" in payload["overall_note"]
+
+
+@pytest.mark.asyncio
+async def test_build_story_context_returns_cached_payload(monkeypatch):
+    book_id = "12345678-1234-5678-1234-567812345678"
+
+    async def _fake_get_version(_book_id):
+        return 0
+
+    async def _fake_get_cache(_book_id, _version, _total_ch):
+        return "cached-context"
+
+    async def _fake_set_cache(*_args, **_kwargs):
+        raise AssertionError("cache set should not run on cache hit")
+
+    monkeypatch.setattr("app.utils.advisor_utils.get_book_cache_version", _fake_get_version)
+    monkeypatch.setattr("app.utils.advisor_utils.get_story_context_cache", _fake_get_cache)
+    monkeypatch.setattr("app.utils.advisor_utils.set_story_context_cache", _fake_set_cache)
+
+    class _FailingDB:
+        async def execute(self, *_args, **_kwargs):
+            raise AssertionError("db should not be queried on cache hit")
+
+    payload = await build_story_context(_FailingDB(), uuid.UUID(book_id), 12)
+
+    assert payload == "cached-context"

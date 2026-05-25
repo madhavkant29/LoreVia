@@ -29,6 +29,7 @@ export interface Book {
   public_status?: "draft" | "pending_review" | "published" | "hidden" | "removed" | string | null
   public_slug?: string | null
   published_at?: string | null
+  public_updated_at?: string | null
   public_visibility?: string | null
   rights_confirmation?: boolean
   rights_confirmation_at?: string | null
@@ -206,8 +207,10 @@ export interface PublicBook {
   copyright_warning?: boolean
   active_forum_post_id?: string | null
   analytics?: import("./public").PublicBookAnalytics | null
+  ranking?: import("./public").PublicRankingMetadata | null
   created_at?: string
   published_at?: string | null
+  public_updated_at?: string | null
 }
 
 export interface PublicBookDetail extends PublicBook {

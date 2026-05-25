@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from typing import Any
 
 
 DEVICE_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{16,128}$")
@@ -35,3 +36,15 @@ def normalize_device_id(device_id: str) -> str:
 
 def hash_device_id(device_id: str) -> str:
     return hashlib.sha256(normalize_device_id(device_id).encode("utf-8")).hexdigest()
+
+
+def current_token_version(user: Any) -> int:
+    try:
+        version = int(getattr(user, "token_version", 1) or 1)
+    except (TypeError, ValueError):
+        return 1
+    return max(version, 1)
+
+
+def next_token_version(user: Any) -> int:
+    return current_token_version(user) + 1

@@ -4,6 +4,7 @@ import type {
   ContentReportPayload,
   ContentReportResponse,
   PublicUploadsOverview,
+  PublicRankedBookListResponse,
   PublicForumComment,
   PublicForumCommentListResponse,
   PublicForumInterest,
@@ -32,6 +33,16 @@ export const publicApi = {
         ...(options?.limit ? { limit: options.limit } : {}),
       },
     }).then((response) => response.data),
+  listRankedCreatorUploads: (options?: { ranking?: string; timeWindow?: string; search?: string; page?: number; limit?: number }) =>
+    apiClient.get<PublicRankedBookListResponse>("/public/rankings/uploads", {
+      params: {
+        ranking: options?.ranking ?? "most_popular",
+        time_window: options?.timeWindow ?? "monthly",
+        ...(options?.search?.trim() ? { search: options.search.trim() } : {}),
+        ...(options?.page ? { page: options.page } : {}),
+        ...(options?.limit ? { limit: options.limit } : {}),
+      },
+    }).then((response) => response.data),
   getBook: (bookId: string) =>
     apiClient.get<PublicBookDetail>(`/public/books/${bookId}`).then((response) => response.data),
   getUploadsAnalytics: () =>
@@ -49,6 +60,16 @@ export const publicApi = {
         ...(query?.trim() ? { q: query.trim() } : {}),
         page,
         page_size: pageSize,
+      },
+    }).then((response) => response.data),
+  listRankedBetaNovels: (options?: { ranking?: string; timeWindow?: string; query?: string; page?: number; pageSize?: number }) =>
+    apiClient.get<PublicForumPostListResponse>("/public/rankings/beta-novels", {
+      params: {
+        ranking: options?.ranking ?? "most_popular",
+        time_window: options?.timeWindow ?? "monthly",
+        ...(options?.query?.trim() ? { q: options.query.trim() } : {}),
+        page: options?.page ?? 1,
+        page_size: options?.pageSize ?? 20,
       },
     }).then((response) => response.data),
   getForumPost: (postId: string) =>
@@ -93,8 +114,11 @@ export const publicApi = {
     apiClient.get<PublicForumInterestListResponse>(`/public/forum/posts/${postId}/interests`).then((response) => response.data.items),
   createForumInterest: (postId: string, message: string) =>
     apiClient.post<PublicForumInterest>(`/public/forum/posts/${postId}/interests`, { message }).then((response) => response.data),
-  createForumComment: (postId: string, body: string) =>
-    apiClient.post<PublicForumComment>(`/public/forum/posts/${postId}/comments`, { body }).then((response) => response.data),
+  createForumComment: (postId: string, body: string, parentCommentId?: string | null) =>
+    apiClient.post<PublicForumComment>(`/public/forum/posts/${postId}/comments`, {
+      body,
+      ...(parentCommentId ? { parent_comment_id: parentCommentId } : {}),
+    }).then((response) => response.data),
   reactToForumPost: (postId: string, reaction: "like" | "dislike" | "clear") =>
     apiClient.put<PublicForumPost>(`/public/forum/posts/${postId}/reaction`, { reaction }).then((response) => response.data),
   reactToForumComment: (commentId: string, reaction: "like" | "dislike" | "clear") =>

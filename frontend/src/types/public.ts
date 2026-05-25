@@ -1,3 +1,14 @@
+export interface PublicRankingMetadata {
+  surface: string
+  ranking_key: string
+  time_window: string
+  position: number | null
+  score: number | null
+  label: string | null
+  supporting_note: string | null
+  primary_timestamp: string | null
+}
+
 export interface PublicForumRatingSummary {
   average_rating: number | null
   rating_count: number
@@ -17,6 +28,7 @@ export interface PublicForumPost {
   title: string | null
   author: string | null
   genre: string | null
+  description: string | null
   work_type: string | null
   headline: string
   body: string
@@ -31,6 +43,7 @@ export interface PublicForumPost {
   dislike_count: number
   rating_summary: PublicForumRatingSummary
   discoverability_score: number
+  ranking?: PublicRankingMetadata | null
   created_at: string
   updated_at: string
 }
@@ -39,6 +52,7 @@ export interface PublicForumComment {
   id: string
   post_id: string
   book_id: string | null
+  parent_comment_id: string | null
   author_user_id: string
   author_username: string | null
   author_reputation_score: number
@@ -48,6 +62,7 @@ export interface PublicForumComment {
   dislike_count: number
   reaction: "like" | "dislike" | null
   can_edit: boolean
+  replies: PublicForumComment[]
   created_at: string
   updated_at: string
 }
@@ -80,6 +95,9 @@ export interface PublicForumPostListResponse {
   page: number
   page_size: number
   has_more: boolean
+  ranking_key?: string | null
+  time_window?: string | null
+  surface?: string | null
 }
 
 export interface PublicUserProject {
@@ -132,6 +150,17 @@ export interface PublicUploadsOverview {
   genre_breakdown: PublicUploadsBreakdownEntry[]
   work_type_breakdown: PublicUploadsBreakdownEntry[]
   recent_uploads: import("./book").PublicBook[]
+}
+
+export interface PublicRankedBookListResponse {
+  items: import("./book").PublicBook[]
+  total: number
+  page: number
+  limit: number
+  has_more: boolean
+  ranking_key: string
+  time_window: string
+  surface: string
 }
 
 export interface PublicUserActivityPost {

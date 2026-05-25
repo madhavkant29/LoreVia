@@ -6,6 +6,7 @@ from typing import Any, cast
 import uuid
 
 from openai import AsyncOpenAI
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.utils.llm_usage_utils import create_tracked_chat_completion
@@ -25,6 +26,7 @@ async def complete_with_fallback(
     usage_user_id: uuid.UUID | None = None,
     usage_book_id: uuid.UUID | None = None,
     usage_metadata: dict[str, Any] | None = None,
+    usage_db: AsyncSession | None = None,
 ) -> str:
     openai_error: Exception | None = None
 
@@ -48,6 +50,7 @@ async def complete_with_fallback(
                 client=client,
                 feature=usage_feature,
                 model=openai_model,
+                db=usage_db,
                 user_id=usage_user_id,
                 book_id=usage_book_id,
                 metadata=usage_metadata,

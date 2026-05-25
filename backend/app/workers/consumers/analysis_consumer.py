@@ -16,10 +16,12 @@ from app.core.redis import cache_del, cache_set, cache_set_if_absent, key_analys
 from app.engine.analysis.plot_tracker import extract_plot_threads
 from app.engine.analysis.summariser import derive_summary_modes_from_detailed, generate_summary
 from app.models.book import Book, Chapter
+from app.models.character import Character
 from app.models.intelligence import ChapterSummary, Notification, PlotThread
 from app.models.user import User
 from app.services.email_service import send_processing_complete_with_stats
 from app.services.event_linking_service import link_summary_events
+from app.utils.character_utils import resolve_character_reference_from_roster
 from app.utils.ingestion_utils import (
     ANALYSIS_INFLIGHT_TTL_SECONDS,
     build_analysis_chapter_state,
@@ -30,6 +32,7 @@ from app.utils.ingestion_utils import (
 )
 from app.utils.notification_utils import collect_book_ready_stats, upsert_book_ready_notification
 from app.utils.book_utils import build_chapter_title_from_summary, chapter_title_is_placeholder
+from app.utils.logging.errors import public_error_message
 from app.utils.plot_thread_utils import (
     merge_plot_thread_status,
     normalize_plot_thread_status,
@@ -248,6 +251,9 @@ async def analyse_chapter(
 
             db_commit_started = time.perf_counter()
             await db.commit()
+            from app.utils.advisor_utils import invalidate_advisor_caches_for_book
+
+            await invalidate_advisor_caches_for_book(db, book_id=book.id)
             log.info(
                 "analysis_timing stage=db_commit chapter_id=%s elapsed_ms=%s summaries=%s threads=%s",
                 chapter_id,
@@ -273,7 +279,7 @@ async def analyse_chapter(
             chapter.analysis_state = build_analysis_chapter_state(
                 chapter.analysis_state if isinstance(chapter.analysis_state, dict) else None,
                 status="failed",
-                last_error=str(exc),
+                last_error=public_error_message(500),
             )
             await _refresh_book_analysis_pipeline(db, book)
             await db.commit()
@@ -283,6 +289,9 @@ async def analyse_chapter(
 
 
 async def _upsert_plot_threads(db, book: Book, chapter: Chapter, threads: list[dict[str, Any]]) -> None:
+    character_rows = (
+        await db.execute(select(Character).where(Character.book_id == chapter.book_id))
+    ).scalars().all()
     existing_threads = (
         await db.execute(
             select(PlotThread).where(PlotThread.book_id == chapter.book_id)
@@ -308,6 +317,26 @@ async def _upsert_plot_threads(db, book: Book, chapter: Chapter, threads: list[d
         key = plot_thread_lookup_key(title)
         if not key:
             continue
+        thread_context = " ".join(
+            part
+            for part in [
+                title,
+                str(raw_thread.get("description") or "").strip(),
+            ]
+            if part
+        )
+        resolved_character_names_raw: list[str] = []
+        for item in (raw_thread.get("characters_involved") or []):
+            candidate = str(item).strip()
+            if not candidate:
+                continue
+            resolved = resolve_character_reference_from_roster(
+                character_rows,
+                candidate,
+                context_text=thread_context,
+            )
+            resolved_character_names_raw.append(resolved.name if resolved is not None else candidate)
+        resolved_character_names = normalize_related_characters(resolved_character_names_raw)
         bucket = candidate_threads.setdefault(
             key,
             {
@@ -315,7 +344,7 @@ async def _upsert_plot_threads(db, book: Book, chapter: Chapter, threads: list[d
                 "description": str(raw_thread.get("description") or "").strip() or None,
                 "type": normalize_plot_thread_type(raw_thread.get("type")),
                 "status": normalize_plot_thread_status(raw_thread.get("status"), default="introduced"),
-                "characters_involved": normalize_related_characters(raw_thread.get("characters_involved") or []),
+                "characters_involved": resolved_character_names,
                 "importance": int(raw_thread.get("importance") or 5),
             },
         )
@@ -326,7 +355,7 @@ async def _upsert_plot_threads(db, book: Book, chapter: Chapter, threads: list[d
         bucket["status"] = merge_plot_thread_status(bucket.get("status"), raw_thread.get("status"))
         bucket["importance"] = max(int(bucket.get("importance") or 5), int(raw_thread.get("importance") or 5))
         bucket["characters_involved"] = normalize_related_characters(
-            [*(bucket.get("characters_involved") or []), *(raw_thread.get("characters_involved") or [])]
+            [*(bucket.get("characters_involved") or []), *resolved_character_names]
         )
 
     for key, candidate in candidate_threads.items():

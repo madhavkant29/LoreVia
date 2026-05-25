@@ -290,6 +290,70 @@ describe("books api", () => {
     expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:")
   })
 
+  it("maps repair-protection updates onto the character payload", async () => {
+    await booksApi.updateCharacter("book-1", "char-1", {
+      protectedFromRepair: true,
+    })
+
+    expect(putMock).toHaveBeenCalledWith("/books/book-1/characters/char-1", {
+      name: undefined,
+      aliases: undefined,
+      role: undefined,
+      description: undefined,
+      goal: undefined,
+      lie_they_believe: undefined,
+      backstory_wound: undefined,
+      arc_type: undefined,
+      arc_summary: undefined,
+      personality_tags: undefined,
+      motivations: undefined,
+      fears: undefined,
+      graph_visibility: undefined,
+      protected_from_repair: true,
+    })
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("reader:book-1:")
+  })
+
+  it("attaches the left side of a relationship review candidate", async () => {
+    await booksApi.attachRelationshipCandidateA("book-1", "rel-1", "char-1")
+
+    expect(postMock).toHaveBeenCalledWith("/books/book-1/relationship-review/rel-1/attach-a", {
+      character_id: "char-1",
+    })
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:")
+  })
+
+  it("accepts a relationship review candidate with backend field names", async () => {
+    await booksApi.acceptRelationshipCandidate("book-1", "rel-1", {
+      characterAId: "char-a",
+      characterBId: "char-b",
+      relType: "family",
+      sentiment: -0.5,
+      description: "Household strain",
+      fromChapter: 3,
+      toChapter: 5,
+    })
+
+    expect(postMock).toHaveBeenCalledWith("/books/book-1/relationship-review/rel-1/accept", {
+      character_a_id: "char-a",
+      character_b_id: "char-b",
+      rel_type: "family",
+      sentiment: -0.5,
+      description: "Household strain",
+      from_chapter: 3,
+      to_chapter: 5,
+    })
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("reader:book-1:")
+  })
+
+  it("resolves and rejects relationship review candidates", async () => {
+    await booksApi.resolveRelationshipCandidate("book-1", "rel-1")
+    await booksApi.rejectRelationshipCandidate("book-1", "rel-2")
+
+    expect(postMock).toHaveBeenNthCalledWith(1, "/books/book-1/relationship-review/rel-1/resolve")
+    expect(postMock).toHaveBeenNthCalledWith(2, "/books/book-1/relationship-review/rel-2/reject")
+  })
+
   it("saves manuscript annotations with anchor metadata", async () => {
     await booksApi.saveManuscriptAnnotation("book-1", {
       chapterNumber: 2,
@@ -481,6 +545,20 @@ describe("books api", () => {
 
     await expect(booksApi.hide("book-1", true)).rejects.toBe(error)
     expect(deleteMock).not.toHaveBeenCalled()
+  })
+
+  it("updates book forum metadata", async () => {
+    await booksApi.updateForumMetadata("book-1", {
+      title: "Sky of Ash",
+      genre: "Epic Fantasy",
+      description: "An ash-storm fantasy about vows, gates, and the cost of holding a city together.",
+    })
+
+    expect(putMock).toHaveBeenCalledWith("/books/book-1/forum-metadata", {
+      title: "Sky of Ash",
+      genre: "Epic Fantasy",
+      description: "An ash-storm fantasy about vows, gates, and the cost of holding a city together.",
+    })
   })
 
   it("creates series and invalidates series caches", async () => {

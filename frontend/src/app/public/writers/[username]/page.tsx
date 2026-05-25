@@ -1,7 +1,7 @@
 import type { Metadata } from "next"
+import dynamic from "next/dynamic"
 
 import { JsonLdScript } from "@/components/seo/JsonLdScript"
-import { PublicWriterProfilePageClient } from "@/components/public/PublicWriterProfilePageClient"
 import { getPublicUserProfileServer } from "@/lib/api/public.server"
 import {
   DEFAULT_OG_IMAGE,
@@ -9,9 +9,13 @@ import {
   buildProfilePageJsonLd,
 } from "@/lib/seo"
 
+const PublicWriterProfilePageClient = dynamic(
+  () => import("@/components/public/PublicWriterProfilePageClient").then((module) => module.PublicWriterProfilePageClient)
+)
+
 export async function generateMetadata({ params }: { params: Promise<{ username: string }> }): Promise<Metadata> {
   const { username } = await params
-  const profile = await getPublicUserProfileServer(username).catch(() => null)
+  const profile = await getPublicUserProfileServer(username).catch(() => undefined)
 
   if (!profile) {
     return {}
@@ -42,7 +46,9 @@ export async function generateMetadata({ params }: { params: Promise<{ username:
 
 export default async function PublicWriterProfilePage({ params }: { params: Promise<{ username: string }> }) {
   const { username } = await params
-  const profile = await getPublicUserProfileServer(username).catch(() => null)
+  const profile = process.env.NODE_ENV === "production"
+    ? await getPublicUserProfileServer(username).catch(() => undefined)
+    : undefined
   const description = profile
     ? `Public LoreVia profile for @${profile.username}, with visible forum activity, trust signals, and any surfaced manuscript sample or discussion.`
     : null
@@ -59,7 +65,7 @@ export default async function PublicWriterProfilePage({ params }: { params: Prom
       {profile && profileJsonLd ? (
         <JsonLdScript id={`public-writer-jsonld-${profile.username}`} data={profileJsonLd} />
       ) : null}
-      <PublicWriterProfilePageClient username={profile?.username || username} initialProfile={profile} />
+      <PublicWriterProfilePageClient username={profile?.username || username} initialProfile={profile ?? undefined} />
     </>
   )
 }

@@ -8,6 +8,8 @@ const logoutMock = vi.hoisted(() => vi.fn())
 const setThemeMock = vi.hoisted(() => vi.fn())
 const portalMock = vi.hoisted(() => vi.fn())
 const setUsernameMock = vi.hoisted(() => vi.fn())
+const getEmailPreferencesMock = vi.hoisted(() => vi.fn())
+const updateEmailPreferencesMock = vi.hoisted(() => vi.fn())
 const authState = vi.hoisted(() => ({
   user: {
     email: "author@example.com",
@@ -64,6 +66,13 @@ vi.mock("@/lib/api/billing", () => ({
   },
 }))
 
+vi.mock("@/lib/api/email", () => ({
+  emailApi: {
+    getPreferences: getEmailPreferencesMock,
+    updatePreferences: updateEmailPreferencesMock,
+  },
+}))
+
 vi.mock("@/lib/stores/authStore", () => ({
   useAuthStore: () => ({
     user: authState.user,
@@ -102,6 +111,8 @@ describe("SettingsPage billing actions", () => {
     setThemeMock.mockReset()
     portalMock.mockReset()
     setUsernameMock.mockReset()
+    getEmailPreferencesMock.mockReset()
+    updateEmailPreferencesMock.mockReset()
     authState.user = {
       email: "author@example.com",
       username: "author",
@@ -114,6 +125,13 @@ describe("SettingsPage billing actions", () => {
       today_word_count: 250,
       messaging_permission: "anyone",
     }
+    getEmailPreferencesMock.mockResolvedValue({
+      email: "author@example.com",
+      product_updates: true,
+      marketing: true,
+      unsubscribed_all: false,
+      unsubscribed_at: null,
+    })
   })
 
   afterAll(() => {
@@ -137,8 +155,8 @@ describe("SettingsPage billing actions", () => {
     window.location.href = "http://localhost/settings"
   })
 
-  it("shows an explicit cancel subscription action", () => {
-    const view = renderSettingsPage()
+  it("shows an explicit cancel subscription action", async () => {
+    const view = await renderSettingsPage()
 
     expect(view.textContent).toContain("Manage billing / cancel subscription")
     expect(view.textContent).toContain("cancel renewal")
@@ -150,7 +168,7 @@ describe("SettingsPage billing actions", () => {
       portal_url: "https://billing.example.test/session",
     })
 
-    const view = renderSettingsPage()
+    const view = await renderSettingsPage()
     const button = findButton(view, "Manage billing / cancel subscription")
 
     await act(async () => {
@@ -168,7 +186,7 @@ describe("SettingsPage billing actions", () => {
       username: "new-handle",
     })
 
-    const view = renderSettingsPage()
+    const view = await renderSettingsPage()
     expect(view.textContent).toContain("This is your public")
     expect(view.textContent).toContain("separate from the author or pen name")
 
@@ -192,15 +210,49 @@ describe("SettingsPage billing actions", () => {
     expect(setUserMock).toHaveBeenCalledWith(expect.objectContaining({ username: "new-handle" }))
     expect(view.textContent).toContain("Public username updated.")
   })
+
+  it("loads and updates promotional email preferences", async () => {
+    updateEmailPreferencesMock.mockResolvedValue({
+      email: "author@example.com",
+      product_updates: false,
+      marketing: true,
+      unsubscribed_all: false,
+      unsubscribed_at: null,
+    })
+
+    const view = await renderSettingsPage()
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(view.textContent).toContain("Control promotional LoreVia emails")
+    expect(getEmailPreferencesMock).toHaveBeenCalledTimes(1)
+
+    const button = findButton(view, "Product updates")
+    await act(async () => {
+      button?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+      await Promise.resolve()
+    })
+
+    expect(updateEmailPreferencesMock).toHaveBeenCalledWith({
+      product_updates: false,
+      marketing: true,
+    })
+    expect(view.textContent).toContain("Email preferences updated.")
+  })
 })
 
-function renderSettingsPage() {
+async function renderSettingsPage() {
   container = document.createElement("div")
   document.body.appendChild(container)
   root = createRoot(container)
 
   act(() => {
     root?.render(<SettingsPage />)
+  })
+  await act(async () => {
+    await Promise.resolve()
   })
 
   return container

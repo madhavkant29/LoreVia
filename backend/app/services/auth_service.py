@@ -4,7 +4,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import is_local_mode, settings
-from app.core.redis import get_token_version, store_refresh_session
+from app.core.redis import store_refresh_session
 from app.core.security import (
     create_access_token,
     create_refresh_token,
@@ -12,7 +12,7 @@ from app.core.security import (
     verify_password,
 )
 from app.models.user import DeviceTrial, User
-from app.utils.auth_utils import hash_device_id
+from app.utils.auth_utils import current_token_version, hash_device_id
 
 
 class DeviceTrialLimitError(Exception):
@@ -28,7 +28,7 @@ async def register_user(db: AsyncSession, email: str, password: str) -> tuple[Us
     db.add(user)
     await db.commit()
     await db.refresh(user)
-    version = await get_token_version(str(user.id))
+    version = current_token_version(user)
     session_id = str(uuid.uuid4())
     await store_refresh_session(str(user.id), session_id, settings.JWT_REFRESH_EXPIRE_DAYS * 24 * 60 * 60)
     return user, create_access_token(str(user.id), version), create_refresh_token(str(user.id), version, session_id)

@@ -11,13 +11,14 @@ Also provides:
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 import uuid
 from typing import Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import Response
-from celery.states import FAILURE, PENDING, RETRY, STARTED, SUCCESS
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import Response, StreamingResponse
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
 from sqlalchemy import func, select
@@ -28,13 +29,35 @@ from app.api.deps.auth import get_current_user
 from app.api.deps.rate_limit import rate_limit_advisor, rate_limit_continuity_checker
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.redis import cache_del, cache_get, cache_set, key_advisor_task
+from app.core.redis import (
+    get_advisor_response_cache,
+    get_editorial_review_cache,
+    get_proactive_scan_cache,
+    get_prose_tighten_cache,
+    get_series_advisor_response_cache,
+    get_series_continuity_cache,
+    get_voice_consistency_cache,
+    set_advisor_response_cache,
+    set_editorial_review_cache,
+    set_proactive_scan_cache,
+    set_prose_tighten_cache,
+    set_series_advisor_response_cache,
+    set_series_continuity_cache,
+    set_voice_consistency_cache,
+)
 from app.core.storage import download_book
 from app.engine.embeddings.embedder import embed_text
 from app.engine.search.semantic import semantic_search
 from app.models.book import Book, Chapter, Series, SeriesBook
 from app.models.character import Character, CharacterState, CharacterVoiceProfile
-from app.models.intelligence import ChapterSummary, CharacterRelationship, PlotThread, WorldElement
+from app.models.intelligence import AdvisorJob, ChapterSummary, CharacterRelationship, PlotThread, WorldElement
+from app.services.advisor_jobs_service import (
+    ADVISOR_SCOPE_BOOK,
+    ADVISOR_SCOPE_SERIES,
+    create_advisor_job,
+    mark_advisor_job_failed,
+    serialize_advisor_job,
+)
 from app.utils.plot_thread_utils import derive_plot_thread_status, is_plot_thread_open
 from app.schemas.advisor import (
     AdvisorRequest,
@@ -63,7 +86,6 @@ from app.utils.advisor_utils import (
     SYNOPSIS_USER,
     VOICE_CONSISTENCY_SYSTEM,
     VOICE_CONSISTENCY_USER,
-    advisor_response_cache,
     build_advisor_world_analysis,
     build_advisor_world_context,
     build_character_voice_context,
@@ -73,6 +95,8 @@ from app.utils.advisor_utils import (
     generate_whats_the_word_result,
     build_series_story_context,
     build_story_context,
+    stream_advisor_reply_payload,
+    stream_series_advisor_reply_payload,
     classify_intent,
     classify_response_type,
     detect_advisor_world_mode,
@@ -90,6 +114,7 @@ from app.utils.book_utils import detect_chapter_continuity_flags
 from app.utils.export_utils import export_filename_base
 from app.utils.intelligence_utils import compute_voice_metrics, extract_dialogue_samples_by_character, score_voice_match
 from app.utils.llm_usage_utils import create_tracked_chat_completion
+from app.utils.logging.errors import public_error_message
 from app.workers.tasks.intelligence_tasks import generate_advisor_reply_task
 from app.workers.tasks.intelligence_tasks import generate_series_advisor_reply_task
 
@@ -121,8 +146,28 @@ def _best_issue_snippet(text: str, description: str) -> str:
     return ranked[0][:220]
 
 
+def _parse_advisor_job_id(task_id: str) -> uuid.UUID:
+    try:
+        return uuid.UUID(str(task_id))
+    except ValueError as exc:
+        raise HTTPException(404, detail="advisor task not found") from exc
+
+
+def _advisor_sse(event: str, data: dict[str, Any]) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, default=str)}\n\n"
+
+
+def _advisor_stream_response(event_stream) -> StreamingResponse:
+    return StreamingResponse(
+        event_stream,
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 async def _enqueue_book_advisor_task(
     *,
+    db: AsyncSession,
     book: Book,
     body: AdvisorRequest,
     current_user_id: uuid.UUID,
@@ -135,29 +180,42 @@ async def _enqueue_book_advisor_task(
     if not last_user_msg:
         raise HTTPException(400, detail="no user message found")
     cache_key = make_advisor_cache_key(book.id, last_user_msg)
-    cached = advisor_response_cache.get(cache_key)
+    cached = await get_advisor_response_cache(str(book.id), cache_key)
     if cached is not None:
         return {**cached, "cached": True}
 
-    task = generate_advisor_reply_task.apply_async(
-        kwargs={
-            "book_id": str(book.id),
-            "user_id": str(current_user_id),
-            "messages": [{"role": msg.role, "content": msg.content} for msg in body.messages],
-            "total_chapters": body.total_chapters,
-        }
+    job = await create_advisor_job(
+        db,
+        scope=ADVISOR_SCOPE_BOOK,
+        user_id=current_user_id,
+        book_id=book.id,
     )
-    await cache_set(
-        key_advisor_task(task.id),
-        {"scope": "book", "book_id": str(book.id), "user_id": str(current_user_id)},
-        3600,
-    )
+    try:
+        generate_advisor_reply_task.apply_async(
+            task_id=str(job.id),
+            kwargs={
+                "job_id": str(job.id),
+                "book_id": str(book.id),
+                "user_id": str(current_user_id),
+                "messages": [{"role": msg.role, "content": msg.content} for msg in body.messages],
+                "total_chapters": body.total_chapters,
+            },
+        )
+    except Exception as exc:
+        await mark_advisor_job_failed(
+            db,
+            job_id=job.id,
+            error_code="advisor_enqueue_failed",
+            error_detail=public_error_message(500),
+        )
+        raise
     response.status_code = 202
-    return {"task_id": task.id, "status": "queued", "cached": False}
+    return {"task_id": str(job.id), "status": "queued", "cached": False}
 
 
 async def _enqueue_series_advisor_task(
     *,
+    db: AsyncSession,
     series: Series,
     body: AdvisorRequest,
     current_user_id: uuid.UUID,
@@ -170,24 +228,36 @@ async def _enqueue_series_advisor_task(
     if not last_user_msg:
         raise HTTPException(400, detail="no user message found")
     cache_key = make_advisor_cache_key(f"series:{series.id}", last_user_msg)
-    cached = advisor_response_cache.get(cache_key)
+    cached = await get_series_advisor_response_cache(str(series.id), cache_key)
     if cached is not None:
         return {**cached, "cached": True}
 
-    task = generate_series_advisor_reply_task.apply_async(
-        kwargs={
-            "series_id": str(series.id),
-            "user_id": str(current_user_id),
-            "messages": [{"role": msg.role, "content": msg.content} for msg in body.messages],
-        }
+    job = await create_advisor_job(
+        db,
+        scope=ADVISOR_SCOPE_SERIES,
+        user_id=current_user_id,
+        series_id=series.id,
     )
-    await cache_set(
-        key_advisor_task(task.id),
-        {"scope": "series", "series_id": str(series.id), "user_id": str(current_user_id)},
-        3600,
-    )
+    try:
+        generate_series_advisor_reply_task.apply_async(
+            task_id=str(job.id),
+            kwargs={
+                "job_id": str(job.id),
+                "series_id": str(series.id),
+                "user_id": str(current_user_id),
+                "messages": [{"role": msg.role, "content": msg.content} for msg in body.messages],
+            },
+        )
+    except Exception as exc:
+        await mark_advisor_job_failed(
+            db,
+            job_id=job.id,
+            error_code="advisor_enqueue_failed",
+            error_detail=public_error_message(500),
+        )
+        raise
     response.status_code = 202
-    return {"task_id": task.id, "status": "queued", "cached": False}
+    return {"task_id": str(job.id), "status": "queued", "cached": False}
 
 # ─── Main advisor conversation endpoint ──────────────────────────────────────
 
@@ -208,10 +278,46 @@ async def advisor_message(
         raise HTTPException(400, detail="messages list is empty")
 
     return await _enqueue_book_advisor_task(
+        db=db,
         book=book,
         body=body,
         current_user_id=current_user.id,
         response=response,
+    )
+
+
+@router.post("/{book_id}/advisor/message-stream")
+async def advisor_message_stream(
+    book_id: uuid.UUID,
+    body: AdvisorRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _=Depends(rate_limit_advisor),
+):
+    book = await db.get(Book, book_id)
+    if not book or book.user_id != current_user.id:
+        raise HTTPException(404)
+
+    if not body.messages:
+        raise HTTPException(400, detail="messages list is empty")
+
+    async def event_stream():
+        try:
+            async for item in stream_advisor_reply_payload(
+                db=db,
+                book=book,
+                user_id=current_user.id,
+                messages=[{"role": msg.role, "content": msg.content} for msg in body.messages],
+                total_chapters=body.total_chapters,
+            ):
+                yield _advisor_sse(item["event"], item["data"])
+        except Exception as exc:
+            yield _advisor_sse("error", {"error": public_error_message(500)})
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 
@@ -273,6 +379,38 @@ async def whats_the_word(
         await client.close()
 
 
+@router.post("/{book_id}/advisor/whats-the-word-stream")
+async def whats_the_word_stream(
+    book_id: uuid.UUID,
+    body: WhatsTheWordRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _=Depends(rate_limit_advisor),
+):
+    book = await db.get(Book, book_id)
+    if not book or book.user_id != current_user.id:
+        raise HTTPException(404)
+
+    async def event_stream():
+        client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+        try:
+            yield _advisor_sse("stage", {"message": "Finding the closest fit..."})
+            payload = await generate_whats_the_word_result(
+                client=client,
+                model=settings.OPENAI_INTEL_MODEL,
+                book_title=book.title,
+                description=body.description,
+                previous_word=body.previous_word,
+            )
+            yield _advisor_sse("done", cast(dict[str, Any], jsonable_encoder(WhatsTheWordResponse(**payload))))
+        except Exception as exc:
+            yield _advisor_sse("error", {"error": public_error_message(500)})
+        finally:
+            await client.close()
+
+    return _advisor_stream_response(event_stream())
+
+
 @router.post("/{book_id}/advisor/message-async")
 async def advisor_message_async(
     book_id: uuid.UUID,
@@ -290,6 +428,7 @@ async def advisor_message_async(
         raise HTTPException(400, detail="messages list is empty")
 
     return await _enqueue_book_advisor_task(
+        db=db,
         book=book,
         body=body,
         current_user_id=current_user.id,
@@ -308,24 +447,12 @@ async def advisor_message_async_status(
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
 
-    task_meta = await cache_get(key_advisor_task(task_id))
-    if not isinstance(task_meta, dict):
+    job = await db.get(AdvisorJob, _parse_advisor_job_id(task_id))
+    if job is None:
         raise HTTPException(404, detail="advisor task not found")
-    if task_meta.get("book_id") != str(book.id) or task_meta.get("user_id") != str(current_user.id):
+    if job.user_id != current_user.id or job.scope != ADVISOR_SCOPE_BOOK or job.book_id != book.id:
         raise HTTPException(403, detail="advisor task does not belong to this book")
-
-    result = generate_advisor_reply_task.AsyncResult(task_id)
-    if result.state in {PENDING, RETRY}:
-        return {"task_id": task_id, "status": "queued", "result": None, "error": None}
-    if result.state == STARTED:
-        return {"task_id": task_id, "status": "running", "result": None, "error": None}
-    if result.state == SUCCESS:
-        await cache_del(key_advisor_task(task_id))
-        return {"task_id": task_id, "status": "complete", "result": result.result, "error": None}
-    if result.state == FAILURE:
-        await cache_del(key_advisor_task(task_id))
-        return {"task_id": task_id, "status": "failed", "result": None, "error": "advisor_generation_failed"}
-    return {"task_id": task_id, "status": "running", "result": None, "error": None}
+    return serialize_advisor_job(job)
 
 
 # ─── Proactive suggestions scan ──────────────────────────────────────────────
@@ -890,7 +1017,7 @@ async def advisor_suggestions(
             "\n".join(recent_summary_blocks + open_thread_blocks + world_watch_blocks),
             heuristic_count,
         )
-        proactive_result = advisor_response_cache.get(proactive_cache_key)
+        proactive_result = await get_proactive_scan_cache(str(book.id), proactive_cache_key)
         if proactive_result is None:
             if settings.OPENAI_API_KEY and settings.OPENAI_INTEL_MODEL:
                 client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
@@ -925,7 +1052,7 @@ async def advisor_suggestions(
                         ],
                     )
                     proactive_result = normalize_proactive_scan_result(response.choices[0].message.content or "{}")
-                    advisor_response_cache.set(proactive_cache_key, proactive_result)
+                    await set_proactive_scan_cache(str(book.id), proactive_cache_key, proactive_result)
                 except Exception:
                     proactive_result = {
                         "findings": [],
@@ -1038,7 +1165,7 @@ async def editorial_review(
 
     # Cache check
     cache_key = make_editorial_cache_key(book_id, body.text, body.chapter_num)
-    cached = advisor_response_cache.get(cache_key)
+    cached = await get_editorial_review_cache(str(book.id), cache_key)
     if cached is not None:
         return {**cached, "cached": True}
 
@@ -1113,11 +1240,38 @@ async def editorial_review(
             ],
             "cached": False,
         }
-        advisor_response_cache.set(cache_key, response_payload)
+        await set_editorial_review_cache(str(book.id), cache_key, response_payload)
         return response_payload
 
     finally:
         await client.close()
+
+
+@router.post("/{book_id}/advisor/editorial-review-stream")
+async def editorial_review_stream(
+    book_id: uuid.UUID,
+    body: EditorialReviewRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _=Depends(rate_limit_continuity_checker),
+):
+    async def event_stream():
+        try:
+            yield _advisor_sse("stage", {"message": "Cross-checking continuity and grammar..."})
+            payload = await editorial_review(
+                book_id=book_id,
+                body=body,
+                db=db,
+                current_user=current_user,
+                _=_,
+            )
+            yield _advisor_sse("done", cast(dict[str, Any], jsonable_encoder(payload)))
+        except HTTPException as exc:
+            yield _advisor_sse("error", {"error": public_error_message(exc.status_code)})
+        except Exception:
+            yield _advisor_sse("error", {"error": public_error_message(500)})
+
+    return _advisor_stream_response(event_stream())
 
 
 @router.post("/{book_id}/advisor/prose-tighten", response_model=ProseTightenResponse)
@@ -1133,6 +1287,11 @@ async def prose_tighten(
         raise HTTPException(404)
     if not body.text.strip():
         raise HTTPException(400, detail="Selected text is required.")
+
+    cache_key = make_editorial_cache_key(book_id, body.text, body.chapter_num)
+    cached = await get_prose_tighten_cache(str(book.id), cache_key)
+    if cached is not None:
+        return ProseTightenResponse(**{**cached, "cached": True})
 
     client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
     try:
@@ -1163,9 +1322,38 @@ async def prose_tighten(
             ],
         )
         normalized = normalize_prose_tighten_result(response.choices[0].message.content or "{}", body.text)
-        return ProseTightenResponse(**normalized)
+        response_payload = {**normalized, "cached": False}
+        await set_prose_tighten_cache(str(book.id), cache_key, response_payload)
+        return ProseTightenResponse(**response_payload)
     finally:
         await client.close()
+
+
+@router.post("/{book_id}/advisor/prose-tighten-stream")
+async def prose_tighten_stream(
+    book_id: uuid.UUID,
+    body: ProseTightenRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _=Depends(rate_limit_continuity_checker),
+):
+    async def event_stream():
+        try:
+            yield _advisor_sse("stage", {"message": "Tightening the selected prose..."})
+            payload = await prose_tighten(
+                book_id=book_id,
+                body=body,
+                db=db,
+                current_user=current_user,
+                _=_,
+            )
+            yield _advisor_sse("done", cast(dict[str, Any], jsonable_encoder(payload)))
+        except HTTPException as exc:
+            yield _advisor_sse("error", {"error": public_error_message(exc.status_code)})
+        except Exception:
+            yield _advisor_sse("error", {"error": public_error_message(500)})
+
+    return _advisor_stream_response(event_stream())
 
 
 @router.post("/{book_id}/advisor/inline-continuity", response_model=InlineContinuityResponse)
@@ -1227,6 +1415,33 @@ async def inline_continuity_check(
         "No hard continuity contradiction surfaced in this inline pass, but keep pressure-testing setup, memory, and scene-to-scene logic before you lock the scene." if not issues else "Inline continuity pass found issues worth checking before you lock the scene."
     )
     return InlineContinuityResponse(issues=issues, memory_bank=memory_bank, overall_verdict=overall_verdict)
+
+
+@router.post("/{book_id}/advisor/inline-continuity-stream")
+async def inline_continuity_check_stream(
+    book_id: uuid.UUID,
+    body: InlineContinuityRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _=Depends(rate_limit_continuity_checker),
+):
+    async def event_stream():
+        try:
+            yield _advisor_sse("stage", {"message": "Checking inline continuity..."})
+            payload = await inline_continuity_check(
+                book_id=book_id,
+                body=body,
+                db=db,
+                current_user=current_user,
+                _=_,
+            )
+            yield _advisor_sse("done", cast(dict[str, Any], jsonable_encoder(payload)))
+        except HTTPException as exc:
+            yield _advisor_sse("error", {"error": public_error_message(exc.status_code)})
+        except Exception:
+            yield _advisor_sse("error", {"error": public_error_message(500)})
+
+    return _advisor_stream_response(event_stream())
 
 
 @router.get("/{book_id}/advisor/synopsis")
@@ -1304,6 +1519,31 @@ async def manuscript_synopsis(
         await client.close()
 
 
+@router.get("/{book_id}/advisor/synopsis-stream")
+async def manuscript_synopsis_stream(
+    book_id: uuid.UUID,
+    spoiler_level: str = Query("minimal", pattern="^(minimal|none)$"),
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    async def event_stream():
+        try:
+            yield _advisor_sse("stage", {"message": "Summarizing the manuscript..."})
+            payload = await manuscript_synopsis(
+                book_id=book_id,
+                spoiler_level=spoiler_level,
+                db=db,
+                current_user=current_user,
+            )
+            yield _advisor_sse("done", cast(dict[str, Any], jsonable_encoder(payload)))
+        except HTTPException as exc:
+            yield _advisor_sse("error", {"error": public_error_message(exc.status_code)})
+        except Exception:
+            yield _advisor_sse("error", {"error": public_error_message(500)})
+
+    return _advisor_stream_response(event_stream())
+
+
 @router.post("/{book_id}/advisor/voice-consistency")
 async def voice_consistency_review(
     book_id: uuid.UUID,
@@ -1318,6 +1558,11 @@ async def voice_consistency_review(
 
     if not body.text.strip():
         raise HTTPException(400, detail="Passage text is required.")
+
+    cache_key = make_editorial_cache_key(book_id, body.text, body.chapter_num)
+    cached = await get_voice_consistency_cache(str(book.id), cache_key)
+    if cached is not None:
+        return {**cached, "cached": True}
 
     total_ch = book.total_chapters or 9999
     client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
@@ -1467,7 +1712,7 @@ async def voice_consistency_review(
                 }
             )
 
-        return {
+        response_payload = {
             "review": result,
             "retrieved_passages": [
                 {
@@ -1482,8 +1727,38 @@ async def voice_consistency_review(
             "characters_reviewed": [character["name"] for character in relevant_characters],
             "character_matches": character_matches,
         }
+        response_payload["cached"] = False
+        await set_voice_consistency_cache(str(book.id), cache_key, response_payload)
+        return response_payload
     finally:
         await client.close()
+
+
+@router.post("/{book_id}/advisor/voice-consistency-stream")
+async def voice_consistency_review_stream(
+    book_id: uuid.UUID,
+    body: VoiceConsistencyRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _=Depends(rate_limit_continuity_checker),
+):
+    async def event_stream():
+        try:
+            yield _advisor_sse("stage", {"message": "Comparing the passage to voice baselines..."})
+            payload = await voice_consistency_review(
+                book_id=book_id,
+                body=body,
+                db=db,
+                current_user=current_user,
+                _=_,
+            )
+            yield _advisor_sse("done", cast(dict[str, Any], jsonable_encoder(payload)))
+        except HTTPException as exc:
+            yield _advisor_sse("error", {"error": public_error_message(exc.status_code)})
+        except Exception:
+            yield _advisor_sse("error", {"error": public_error_message(500)})
+
+    return _advisor_stream_response(event_stream())
 
 
 # ─── Continuity report download ───────────────────────────────────────────────
@@ -1567,10 +1842,45 @@ async def series_advisor_message(
         raise HTTPException(400, detail="messages list is empty")
 
     return await _enqueue_series_advisor_task(
+        db=db,
         series=series,
         body=body,
         current_user_id=current_user.id,
         response=response,
+    )
+
+
+@router.post("/series/{series_id}/advisor/message-stream")
+async def series_advisor_message_stream(
+    series_id: uuid.UUID,
+    body: AdvisorRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _=Depends(rate_limit_advisor),
+):
+    series = await db.get(Series, series_id)
+    if not series or series.user_id != current_user.id:
+        raise HTTPException(404)
+
+    if not body.messages:
+        raise HTTPException(400, detail="messages list is empty")
+
+    async def event_stream():
+        try:
+            async for item in stream_series_advisor_reply_payload(
+                db=db,
+                series=series,
+                user_id=current_user.id,
+                messages=[{"role": msg.role, "content": msg.content} for msg in body.messages],
+            ):
+                yield _advisor_sse(item["event"], item["data"])
+        except Exception as exc:
+            yield _advisor_sse("error", {"error": public_error_message(500)})
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 
@@ -1585,24 +1895,12 @@ async def series_advisor_message_status(
     if not series or series.user_id != current_user.id:
         raise HTTPException(404)
 
-    task_meta = await cache_get(key_advisor_task(task_id))
-    if not isinstance(task_meta, dict):
+    job = await db.get(AdvisorJob, _parse_advisor_job_id(task_id))
+    if job is None:
         raise HTTPException(404, detail="advisor task not found")
-    if task_meta.get("scope") != "series" or task_meta.get("series_id") != str(series.id) or task_meta.get("user_id") != str(current_user.id):
+    if job.user_id != current_user.id or job.scope != ADVISOR_SCOPE_SERIES or job.series_id != series.id:
         raise HTTPException(403, detail="advisor task does not belong to this series")
-
-    result = generate_series_advisor_reply_task.AsyncResult(task_id)
-    if result.state in {PENDING, RETRY}:
-        return {"task_id": task_id, "status": "queued", "result": None, "error": None}
-    if result.state == STARTED:
-        return {"task_id": task_id, "status": "running", "result": None, "error": None}
-    if result.state == SUCCESS:
-        await cache_del(key_advisor_task(task_id))
-        return {"task_id": task_id, "status": "complete", "result": result.result, "error": None}
-    if result.state == FAILURE:
-        await cache_del(key_advisor_task(task_id))
-        return {"task_id": task_id, "status": "failed", "result": None, "error": "advisor_generation_failed"}
-    return {"task_id": task_id, "status": "running", "result": None, "error": None}
+    return serialize_advisor_job(job)
 
 
 class SeriesContinuityRequest(AdvisorRequest):
@@ -1645,7 +1943,7 @@ async def series_continuity_check(
         body.text,
         body.chapter_num,
     )
-    cached_series = advisor_response_cache.get(series_cache_key)
+    cached_series = await get_series_continuity_cache(str(series.id), str(current_book.id), series_cache_key)
     if cached_series is not None:
         return {**cached_series, "cached": True}
 
@@ -1788,7 +2086,34 @@ async def series_continuity_check(
             ],
             "cached": False,
         }
-        advisor_response_cache.set(series_cache_key, response_payload)
+        await set_series_continuity_cache(str(series.id), str(current_book.id), series_cache_key, response_payload)
         return response_payload
     finally:
         await client.close()
+
+
+@router.post("/series/{series_id}/continuity-check-stream")
+async def series_continuity_check_stream(
+    series_id: uuid.UUID,
+    body: SeriesContinuityRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _=Depends(rate_limit_continuity_checker),
+):
+    async def event_stream():
+        try:
+            yield _advisor_sse("stage", {"message": "Comparing this passage to earlier books..."})
+            payload = await series_continuity_check(
+                series_id=series_id,
+                body=body,
+                db=db,
+                current_user=current_user,
+                _=_,
+            )
+            yield _advisor_sse("done", cast(dict[str, Any], jsonable_encoder(payload)))
+        except HTTPException as exc:
+            yield _advisor_sse("error", {"error": public_error_message(exc.status_code)})
+        except Exception:
+            yield _advisor_sse("error", {"error": public_error_message(500)})
+
+    return _advisor_stream_response(event_stream())

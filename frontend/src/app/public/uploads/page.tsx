@@ -1,8 +1,12 @@
 import type { Metadata } from "next"
+import dynamic from "next/dynamic"
 
-import { PublicUploadsPageClient } from "@/components/public/PublicUploadsPageClient"
-import { getPublicUploadsAnalyticsServer, listCreatorPublicUploadsServer } from "@/lib/api/public.server"
+import { getPublicUploadsAnalyticsServer, listRankedCreatorPublicUploadsServer } from "@/lib/api/public.server"
 import { SITE_NAME, SITE_URL } from "@/lib/seo"
+
+const PublicUploadsPageClient = dynamic(
+  () => import("@/components/public/PublicUploadsPageClient").then((module) => module.PublicUploadsPageClient)
+)
 
 export const metadata: Metadata = {
   title: "Creator Public Uploads",
@@ -19,9 +23,18 @@ export const metadata: Metadata = {
 
 export default async function PublicUploadsPage() {
   const [books, overview] = await Promise.all([
-    listCreatorPublicUploadsServer().catch(() => []),
+    listRankedCreatorPublicUploadsServer({ ranking: "most_popular", timeWindow: "monthly" }).catch(() => ({
+      items: [],
+      total: 0,
+      page: 1,
+      limit: 24,
+      has_more: false,
+      ranking_key: "most_popular",
+      time_window: "monthly",
+      surface: "creator_uploads",
+    })),
     getPublicUploadsAnalyticsServer().catch(() => null),
   ])
 
-  return <PublicUploadsPageClient initialBooks={books} initialOverview={overview} />
+  return <PublicUploadsPageClient initialBooks={books.items} initialRankingData={books} initialOverview={overview} />
 }

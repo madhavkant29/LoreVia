@@ -214,6 +214,31 @@ def _single_token_name(name: str | None) -> str | None:
     return words[0].casefold()
 
 
+def _single_token_has_grounded_support(evidence: dict | None) -> bool:
+    if not isinstance(evidence, dict):
+        return False
+    mention_count = int(evidence.get("mention_count") or 0)
+    strong_mention_count = int(evidence.get("strong_mention_count") or 0)
+    has_dialogue_or_action = bool(evidence.get("has_dialogue_or_action"))
+    has_physical_description = bool(evidence.get("has_physical_description"))
+    appears_multiple_times = bool(evidence.get("appears_multiple_times"))
+    return bool(
+        strong_mention_count >= 2
+        or (
+            mention_count >= 2
+            and has_dialogue_or_action
+            and (appears_multiple_times or has_physical_description)
+        )
+        or (
+            strong_mention_count >= 1
+            and (
+                has_dialogue_or_action
+                or has_physical_description
+            )
+        )
+    )
+
+
 @dataclass(frozen=True)
 class CharacterPersistenceDecision:
     allowed: bool
@@ -282,10 +307,12 @@ def character_persistence_decision(
     if support_score == 0 and profile_score == 0:
         reasons.append("insufficient_passage_support")
 
+    strong_single_token_profile = profile_score >= 2 and _has_meaningful_text(arc_summary)
+
     if _single_token_name(name):
-        if support_score < 2 and profile_score < 2:
+        if not _single_token_has_grounded_support(evidence) and not strong_single_token_profile:
             reasons.append("single_token_needs_stronger_support")
-        if support_score < 3 and profile_score == 0:
+        if support_score < 3 and profile_score == 0 and not strong_single_token_profile:
             reasons.append("single_token_lacks_profile_evidence")
 
     if any(reason == "visibility_score_below_threshold" for reason in reasons):
@@ -298,7 +325,7 @@ def character_persistence_decision(
     if support_score < 2 and profile_score == 0:
         reasons.append("no_profile_or_passage_signal")
 
-    if support_score < 2 and profile_score < 2 and _single_token_name(name):
+    if _single_token_name(name) and not _single_token_has_grounded_support(evidence) and not strong_single_token_profile:
         reasons.append("single_token_requires_more_evidence")
 
     allowed = not reasons

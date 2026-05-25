@@ -9,6 +9,7 @@ from app.api.deps.auth import (
     _claim_version,
     _decode_access_payload,
     _decode_refresh_payload,
+    _load_user_from_claims,
     get_admin,
     get_current_user,
 )
@@ -138,9 +139,51 @@ async def test_get_current_user_rejects_inactive_refresh_sessions_without_resett
 
 
 @pytest.mark.asyncio
-async def test_get_admin_rejects_non_admin_users():
+async def test_load_user_from_claims_uses_database_token_version():
+    user = SimpleNamespace(id="user-id", token_version=4)
+
+    class _FakeDB:
+        async def get(self, _model, _user_id):
+            return user
+
+    result = await _load_user_from_claims("00000000-0000-0000-0000-000000000001", 4, _FakeDB())
+
+    assert result is user
+
+
+@pytest.mark.asyncio
+async def test_load_user_from_claims_rejects_stale_token_version():
+    user = SimpleNamespace(id="user-id", token_version=5)
+
+    class _FakeDB:
+        async def get(self, _model, _user_id):
+            return user
+
     with pytest.raises(HTTPException) as exc_info:
-        await get_admin(current_user=SimpleNamespace(tier="free"))
+        await _load_user_from_claims("00000000-0000-0000-0000-000000000001", 4, _FakeDB())
+
+    assert exc_info.value.status_code == 401
+    assert exc_info.value.detail == "Session expired. Please sign in again."
+
+
+@pytest.mark.asyncio
+async def test_get_admin_rejects_non_admin_users(monkeypatch):
+    request = Request({"type": "http", "headers": []})
+
+    class _FakeDB:
+        def add(self, _event):
+            return None
+
+        async def commit(self):
+            return None
+
+    async def fake_get_active_admin_principal(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr("app.api.deps.auth.get_active_admin_principal", fake_get_active_admin_principal)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await get_admin(request=request, current_user=SimpleNamespace(id="00000000-0000-0000-0000-000000000001"), db=_FakeDB())
 
     assert exc_info.value.status_code == 403
     assert exc_info.value.detail == "Admin only"

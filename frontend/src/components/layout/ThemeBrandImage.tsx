@@ -1,10 +1,12 @@
 type BrandVariant = "icon" | "lockup"
+type BrandMode = "auto" | "light" | "dark"
 
 type ThemeBrandImageProps = {
   variant?: BrandVariant
   alt?: string
   className?: string
   priority?: boolean
+  mode?: BrandMode
 }
 
 const brandAssetMap: Record<BrandVariant, { dark: string; light: string }> = {
@@ -23,8 +25,20 @@ export function ThemeBrandImage({
   alt = "LoreVia",
   className = "",
   priority = false,
+  mode = "auto",
 }: ThemeBrandImageProps) {
   const assets = brandAssetMap[variant]
+
+  if (mode !== "auto") {
+    return (
+      <img
+        src={assets[mode]}
+        alt={alt}
+        className={className.trim()}
+        fetchPriority={priority ? "high" : undefined}
+      />
+    )
+  }
 
   return (
     <>

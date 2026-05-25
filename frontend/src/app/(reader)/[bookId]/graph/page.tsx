@@ -1,13 +1,25 @@
 "use client"
+import dynamic from "next/dynamic"
 import { useEffect, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { useParams, useRouter } from "next/navigation"
 
-import RelationshipGraph from "@/components/intelligence/RelationshipGraph"
-import { booksApi } from "@/lib/api/books"
+import { useBookDetail } from "@/lib/hooks/useBookDetail"
 import { asQueryKey, bookCacheKey, readerCacheKey } from "@/lib/query/cacheKeys"
 import { readerApi } from "@/lib/api/reader"
 import { capture } from "@/lib/analytics/posthog"
+
+const RelationshipGraph = dynamic(
+  () => import("@/components/intelligence/RelationshipGraph"),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex min-h-[32rem] items-center justify-center rounded-2xl border border-dashed text-sm text-inherit">
+        Loading relationship graph...
+      </div>
+    ),
+  }
+)
 
 export default function GraphPage() {
   const { bookId } = useParams<{ bookId: string }>()
@@ -15,10 +27,7 @@ export default function GraphPage() {
   const [chapter, setChapter] = useState(1)
   const [maxChapter, setMaxChapter] = useState(1)
   const [theme, setTheme] = useState<"light" | "dark">("light")
-  const { data: book = null } = useQuery({
-    queryKey: asQueryKey(bookCacheKey(bookId, "detail")),
-    queryFn: () => booksApi.get(bookId),
-  })
+  const { data: book = null } = useBookDetail(bookId)
   const { data: progress = null } = useQuery({
     queryKey: asQueryKey(readerCacheKey(bookId, "progress")),
     queryFn: () => readerApi.getProgress(bookId),

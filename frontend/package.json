@@ -9,7 +9,7 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "lint": "node node_modules/next/dist/bin/next lint",
-    "type-check": "node node_modules/typescript/bin/tsc --noEmit",
+    "type-check": "node node_modules/typescript/bin/tsc --noEmit --incremental false -p tsconfig.typecheck.json",
     "seo:indexnow": "node scripts/notify-indexnow.mjs"
   },
   "dependencies": {

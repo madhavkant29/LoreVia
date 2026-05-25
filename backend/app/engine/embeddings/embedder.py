@@ -1,6 +1,7 @@
 import uuid
 
 from openai import AsyncOpenAI
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.parsers.chunker import count_tokens
@@ -16,6 +17,7 @@ MAX_EMBED_BATCH_TOKENS = 250000
 async def embed_text(
     text: str,
     *,
+    db: AsyncSession | None = None,
     user_id: uuid.UUID | None = None,
     book_id: uuid.UUID | None = None,
     feature: str = "embedding",
@@ -26,6 +28,7 @@ async def embed_text(
             client=client,
             feature=feature,
             model=settings.OPENAI_EMBED_MODEL,
+            db=db,
             user_id=user_id,
             book_id=book_id,
             input=text[:8000],
@@ -38,6 +41,7 @@ async def embed_text(
 async def embed_batch(
     texts: list[str],
     *,
+    db: AsyncSession | None = None,
     user_id: uuid.UUID | None = None,
     book_id: uuid.UUID | None = None,
     feature: str = "embedding_batch",
@@ -60,6 +64,7 @@ async def embed_batch(
                     client=client,
                     feature=feature,
                     model=settings.OPENAI_EMBED_MODEL,
+                    db=db,
                     user_id=user_id,
                     book_id=book_id,
                     metadata={"batch_size": len(batch)},
@@ -77,6 +82,7 @@ async def embed_batch(
                 client=client,
                 feature=feature,
                 model=settings.OPENAI_EMBED_MODEL,
+                db=db,
                 user_id=user_id,
                 book_id=book_id,
                 metadata={"batch_size": len(batch)},
@@ -89,12 +95,42 @@ async def embed_batch(
         await client.close()
 
 
-async def embed_character(name: str, traits: dict) -> list[float]:
+async def embed_character(
+    name: str,
+    traits: dict,
+    *,
+    db: AsyncSession | None = None,
+) -> list[float]:
+    return await embed_text(
+        build_character_embedding_text(name=name, traits=traits),
+        db=db,
+        feature="character_embedding",
+    )
+
+
+def build_character_embedding_text(
+    *,
+    name: str,
+    traits: dict | None,
+    aliases: list[str] | None = None,
+    role: str | None = None,
+    arc_summary: str | None = None,
+    evidence_snippets: list[str] | None = None,
+) -> str:
     parts = [f"Character: {name}"]
+    cleaned_aliases = [str(alias).strip() for alias in aliases or [] if str(alias).strip()]
+    if cleaned_aliases:
+        parts.append(f"Aliases: {', '.join(cleaned_aliases[:6])}")
+    if role:
+        parts.append(f"Role: {role}")
     for key in ["hair", "eyes", "build", "age", "face", "distinguishing"]:
-        t = traits.get(key, {})
+        t = (traits or {}).get(key, {})
         if isinstance(t, dict) and t.get("value"):
             parts.append(f"{key}: {t['value']}")
         elif isinstance(t, str) and t:
             parts.append(f"{key}: {t}")
-    return await embed_text(". ".join(parts), feature="character_embedding")
+    if arc_summary:
+        parts.append(f"Arc: {arc_summary}")
+    for snippet in [str(item).strip() for item in (evidence_snippets or []) if str(item).strip()][:3]:
+        parts.append(f"Evidence: {snippet[:220]}")
+    return ". ".join(parts)

@@ -155,13 +155,13 @@ Notes:
 
 - Do not paste any real secret values into this README.
 - Keep `backend/.env.local` out of version control.
-- Local Docker Compose injects `REDIS_URL`, `CELERY_BROKER_URL`, and `CELERY_RESULT_BACKEND` using the internal `redis` hostname and the `REDIS_PASSWORD` value above.
+- Local Docker Compose reads `REDIS_URL` and `CELERY_BROKER_URL` from `backend/.env.local`; `CELERY_RESULT_BACKEND` can stay empty now that advisor async polling persists state in Postgres.
 - For local development, file storage is mounted to a Docker volume instead of cloud storage.
 - Paddle checkout requires the API key, webhook secret, and plan price IDs to be set together.
 - In Paddle Checkout settings, set the default payment link to your public HTTPS checkout page, such as `https://getlorevia.com/checkout` on the Hetzner deployment or `http://localhost:3000/checkout` in local sandbox testing.
 - Trial lifecycle emails can be run from a scheduler with `python backend/scripts/run_due_trial_emails.py --limit 100` or through the protected internal job endpoint.
 
-Production deployment notes for the Hetzner VPS live in [ops/production-firewall-and-monitoring.md](/C:/Users/madha/.vscode/prod/LoreVia2/ops/production-firewall-and-monitoring.md), [docs/hetzner-redis-operations.md](/C:/Users/madha/.vscode/prod/LoreVia2/docs/hetzner-redis-operations.md), and [docs/hetzner-service-management.md](/C:/Users/madha/.vscode/prod/LoreVia2/docs/hetzner-service-management.md). Production Compose now reads interpolation values from `backend/.env` via `--env-file`.
+Production deployment notes for the Hetzner VPS live in [ops/production-firewall-and-monitoring.md](/C:/Users/madha/.vscode/prod/LoreVia2/ops/production-firewall-and-monitoring.md), [docs/hetzner-redis-operations.md](/C:/Users/madha/.vscode/prod/LoreVia2/docs/hetzner-redis-operations.md), and [docs/hetzner-service-management.md](/C:/Users/madha/.vscode/prod/LoreVia2/docs/hetzner-service-management.md). Production Compose reads runtime variables from `backend/.env` through each service `env_file`, so plain `docker compose -f docker-compose.yml up -d --build` works without extra env export steps.
 
 ### 2. Create frontend environment file
 

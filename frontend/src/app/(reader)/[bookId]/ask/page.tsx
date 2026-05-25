@@ -82,18 +82,46 @@ export default function AskPage() {
     setInput("")
     setError(null)
     setLoading(true)
+    setHistory((previous) => [
+      ...previous,
+      {
+        question,
+        answer: "",
+        citations: [],
+      },
+    ])
     capture("ask_submitted", { book_id: bookId, chapter: currentChapter, question_len: question.length, mode: book?.mode ?? "reader" })
     try {
-      const response = await intelligenceApi.answer(bookId, question, currentChapter)
-      setHistory((previous) => [
-        ...previous,
-        {
-          question,
-          answer: response.answer,
-          citations: response.citations ?? [],
+      const response = await intelligenceApi.answerStream(bookId, question, currentChapter, {
+        onDelta: (content) => {
+          if (!content) return
+          setHistory((previous) => {
+            if (previous.length === 0) return previous
+            const last = previous[previous.length - 1]
+            return [
+              ...previous.slice(0, -1),
+              {
+                ...last,
+                answer: `${last.answer}${content}`,
+              },
+            ]
+          })
         },
-      ])
+      })
+      setHistory((previous) => {
+        if (previous.length === 0) return previous
+        const last = previous[previous.length - 1]
+        return [
+          ...previous.slice(0, -1),
+          {
+            ...last,
+            answer: response.answer,
+            citations: response.citations ?? [],
+          },
+        ]
+      })
     } catch (err: unknown) {
+      setHistory((previous) => previous.slice(0, -1))
       const dailyCap = buildDailyCapEventDetail(err)
       const message = err instanceof Error ? err.message : ""
       if (dailyCap) {

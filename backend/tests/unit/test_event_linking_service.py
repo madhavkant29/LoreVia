@@ -63,3 +63,34 @@ async def test_link_summary_events_matches_characters_and_deduplicates(db):
     )
     betrayal_events = [event for event in (hero.growth_events or []) if event.get("event_title") == "The betrayal"]
     assert len(betrayal_events) == 1
+
+
+@pytest.mark.asyncio
+async def test_link_summary_events_uses_resolver_context_for_family_role_reference(db):
+    user = User(email="event-linking-family@lorevia.app", username="eventlinkingfamily", password_hash="hash")
+    db.add(user)
+    await db.flush()
+    book = Book(user_id=user.id, title="Family Linking", format="pdf", s3_key="family-linking.pdf", status="ready")
+    db.add(book)
+    await db.flush()
+    chapter = Chapter(id=uuid.uuid4(), book_id=book.id, number=3, title="Kitchen", s3_key="chapter-3.txt")
+    grete = Character(book_id=book.id, name="Grete", aliases=[], first_chapter=1, growth_events=[])
+    gregor = Character(book_id=book.id, name="Gregor", aliases=[], first_chapter=1, growth_events=[])
+    db.add_all([chapter, grete, gregor])
+    await db.commit()
+
+    payload = await link_summary_events(
+        db,
+        chapter=chapter,
+        key_events=[
+            {
+                "event_title": "A plea at the door",
+                "description": "Grete, Gregor's sister, begs him to answer.",
+                "importance": 7,
+                "involved_characters": ["Gregor's sister", "Gregor"],
+            }
+        ],
+        char_changes=[],
+    )
+
+    assert payload["major_events"][0]["involved_characters"] == [str(grete.id), str(gregor.id)]

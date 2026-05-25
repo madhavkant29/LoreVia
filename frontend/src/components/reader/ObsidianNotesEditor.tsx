@@ -1,9 +1,9 @@
 "use client"
 
 import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type ReactNode } from "react"
+import dynamic from "next/dynamic"
 
 import { booksApi } from "@/lib/api/books"
-import { WhatsTheWordPanel } from "@/components/intelligence/WhatsTheWordPanel"
 import Link from "next/link"
 import {
   buildUniqueWorkspacePath,
@@ -16,8 +16,27 @@ import {
   type WorkspaceFolderNode,
 } from "@/lib/utils/workspacePaths"
 import type { ManuscriptWorkspaceTree, ObsidianGraph, ObsidianNoteRelations, ObsidianVaultNote } from "@/types/book"
-import { GraphViewer } from "./GraphViewer"
-import { MarkdownPreview } from "./MarkdownPreview"
+
+const WhatsTheWordPanel = dynamic(
+  () => import("@/components/intelligence/WhatsTheWordPanel").then((module) => module.WhatsTheWordPanel),
+  { ssr: false }
+)
+
+const GraphViewer = dynamic(
+  () => import("./GraphViewer").then((module) => module.GraphViewer),
+  {
+    ssr: false,
+    loading: () => <div className="min-h-[34rem] animate-pulse rounded-[1.35rem] bg-black/5" />,
+  }
+)
+
+const MarkdownPreview = dynamic(
+  () => import("./MarkdownPreview").then((module) => module.MarkdownPreview),
+  {
+    ssr: false,
+    loading: () => <div className="min-h-[32rem] animate-pulse rounded-[1.2rem] bg-black/5" />,
+  }
+)
 
 const FAVORITES_STORAGE_KEY = "obsidian-note-favorites:v1"
 const FOLDERS_STORAGE_KEY_PREFIX = "obsidian-note-folders:v1:"
@@ -183,6 +202,7 @@ export function ObsidianNotesEditor({
   const [sceneSending, setSceneSending] = useState(false)
   const [findWithinNote, setFindWithinNote] = useState("")
   const [replaceWithinNote, setReplaceWithinNote] = useState("")
+  const [secondaryPanelsEnabled, setSecondaryPanelsEnabled] = useState(false)
   const deferredQuery = useDeferredValue(query)
   const saveTimersRef = useRef<Record<string, number>>({})
   const latestDraftRef = useRef<Record<string, string>>({})
@@ -206,6 +226,28 @@ export function ObsidianNotesEditor({
   }, [bookId])
 
   useEffect(() => {
+    if (secondaryPanelsEnabled) return
+
+    const schedule =
+      typeof window.requestIdleCallback === "function"
+        ? window.requestIdleCallback.bind(window)
+        : ((callback: IdleRequestCallback) =>
+            window.setTimeout(() => callback({ didTimeout: false, timeRemaining: () => 0 } as IdleDeadline), 150))
+    const cancel =
+      typeof window.cancelIdleCallback === "function"
+        ? window.cancelIdleCallback.bind(window)
+        : window.clearTimeout.bind(window)
+
+    const handle = schedule(() => {
+      startTransition(() => setSecondaryPanelsEnabled(true))
+    })
+
+    return () => cancel(handle)
+  }, [secondaryPanelsEnabled])
+
+  useEffect(() => {
+    if (!secondaryPanelsEnabled) return
+
     let active = true
     void booksApi.getWorkspaceTree(bookId)
       .then((value) => {
@@ -220,7 +262,7 @@ export function ObsidianNotesEditor({
     return () => {
       active = false
     }
-  }, [bookId])
+  }, [bookId, secondaryPanelsEnabled])
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -303,7 +345,7 @@ export function ObsidianNotesEditor({
   }, [availablePaths, selectedPath])
 
   useEffect(() => {
-    if (!selectedNote) {
+    if (!selectedNote || !secondaryPanelsEnabled) {
       setRelations(null)
       return
     }
@@ -327,7 +369,7 @@ export function ObsidianNotesEditor({
     return () => {
       cancelled = true
     }
-  }, [bookId, selectedNote?.path])
+  }, [bookId, secondaryPanelsEnabled, selectedNote?.path])
 
   useEffect(() => {
     if (!selectedNote) {

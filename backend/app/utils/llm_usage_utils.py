@@ -85,6 +85,49 @@ async def record_llm_usage_event(
         await session.commit()
 
 
+async def record_llm_usage_counts(
+    *,
+    prompt_tokens: int,
+    completion_tokens: int,
+    total_tokens: int,
+    feature: str,
+    operation: str,
+    model: str,
+    db: AsyncSession | None = None,
+    user_id: uuid.UUID | None = None,
+    book_id: uuid.UUID | None = None,
+    provider: str = "openai",
+    cached: bool = False,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    resolved_user_id = user_id or get_request_user_id()
+    if resolved_user_id is None:
+        return
+
+    payload = LlmUsageEvent(
+        user_id=resolved_user_id,
+        book_id=book_id,
+        provider=provider,
+        model=model,
+        operation=operation,
+        feature=feature[:120],
+        request_id=get_request_id(),
+        prompt_tokens=max(int(prompt_tokens or 0), 0),
+        completion_tokens=max(int(completion_tokens or 0), 0),
+        total_tokens=max(int(total_tokens or 0), 0),
+        cached=cached,
+        metadata_json=metadata or {},
+    )
+
+    if db is not None:
+        db.add(payload)
+        return
+
+    async with AsyncSessionLocal() as session:
+        session.add(payload)
+        await session.commit()
+
+
 async def create_tracked_chat_completion(
     *,
     client: Any,

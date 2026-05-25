@@ -31,9 +31,9 @@ describe("pricing catalog", () => {
     const freeTier = pricingTiers.find((tier) => tier.name === "Free")
 
     expect(pricingTierPrice(authorTier!, "monthly")).toBe(29)
-    expect(pricingTierPrice(authorTier!, "annual")).toBe(290)
+    expect(pricingTierPrice(authorTier!, "annual")).toBe(249)
     expect(pricingTierPriceSuffix(authorTier!, "monthly")).toBe("/mo")
-    expect(pricingTierPriceSuffix(authorTier!, "annual")).toBe("/yr")
+    expect(pricingTierPriceSuffix(authorTier!, "annual")).toBe("/year")
     expect(pricingTierPriceSuffix(freeTier!, "annual")).toBe("")
   })
 
@@ -42,8 +42,8 @@ describe("pricing catalog", () => {
     const architectTier = pricingTiers.find((tier) => tier.name === "Architect")
     const freeTier = pricingTiers.find((tier) => tier.name === "Free")
 
-    expect(pricingTierAnnualSavings(authorTier!)).toBe(58)
-    expect(pricingTierAnnualSavings(architectTier!)).toBe(98)
+    expect(pricingTierAnnualSavings(authorTier!)).toBe(99)
+    expect(pricingTierAnnualSavings(architectTier!)).toBe(139)
     expect(pricingTierAnnualSavings(freeTier!)).toBe(0)
   })
 })

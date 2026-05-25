@@ -4,6 +4,8 @@ Memory recall - generates a grounded recap for returning readers.
 
 import uuid
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.config import settings
 from app.core.llm import complete_with_fallback
 
@@ -31,6 +33,7 @@ async def generate_recall(
     *,
     user_id: uuid.UUID | None = None,
     book_id: uuid.UUID | None = None,
+    usage_db: AsyncSession | None = None,
 ) -> str:
     context = (
         f"Recent events:\n{recent_summary}\n\n"
@@ -49,6 +52,7 @@ async def generate_recall(
         usage_user_id=user_id,
         usage_book_id=book_id,
         usage_metadata={"last_chapter": last_chapter},
+        usage_db=usage_db,
     )
     return _polish_recall(content)
 

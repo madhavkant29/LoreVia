@@ -8,9 +8,8 @@ import asyncio
 import hashlib
 import json
 import re
-import time
 import uuid
-from collections import OrderedDict
+from collections.abc import AsyncIterator
 from typing import Any
 
 from openai import AsyncOpenAI
@@ -20,11 +19,30 @@ from sqlalchemy import text as sql_text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.redis import (
+    get_advisor_response_cache,
+    get_book_cache_version,
+    get_editorial_review_cache,
+    get_proactive_scan_cache,
+    get_series_cache_version,
+    get_series_advisor_response_cache,
+    get_series_story_context_cache,
+    get_story_context_cache,
+    invalidate_advisor_cache_namespaces,
+    mark_book_cache_dirty,
+    mark_series_cache_dirty,
+    set_advisor_response_cache,
+    set_editorial_review_cache,
+    set_proactive_scan_cache,
+    set_series_advisor_response_cache,
+    set_series_story_context_cache,
+    set_story_context_cache,
+)
 from app.engine.embeddings.embedder import embed_text
 from app.models.book import Book, Chapter, SeriesBook
 from app.models.character import Character
 from app.models.intelligence import ChapterSummary, PlotThread, WorldElement
-from app.utils.llm_usage_utils import create_tracked_chat_completion
+from app.utils.llm_usage_utils import create_tracked_chat_completion, record_llm_usage_counts
 from app.utils.world_building_utils import build_world_logic_response, classify_world_intent
 
 
@@ -32,44 +50,31 @@ from app.utils.world_building_utils import build_world_logic_response, classify_
 # Simple TTL-based LRU in-process cache keyed on sha256(book_id + last_msg).
 # No external dependency — expires automatically in CACHE_TTL_SECONDS.
 
-CACHE_TTL_SECONDS = 600   # 10 minutes
-_CACHE_MAX_SIZE = 512
+async def invalidate_advisor_caches(
+    *,
+    book_id: uuid.UUID | str | None = None,
+    series_ids: list[uuid.UUID | str] | None = None,
+) -> None:
+    """Drop shared advisor/editorial cache namespaces after semantic content changes."""
+    await invalidate_advisor_cache_namespaces(
+        book_id=str(book_id) if book_id is not None else None,
+        series_ids=[str(series_id) for series_id in (series_ids or [])],
+    )
 
 
-class _TTLCache:
-    """OrderedDict-backed LRU cache with per-entry TTL."""
-
-    def __init__(self, maxsize: int = _CACHE_MAX_SIZE) -> None:
-        self._store: OrderedDict[str, tuple[Any, float]] = OrderedDict()
-        self._maxsize = maxsize
-
-    def get(self, key: str) -> Any | None:
-        if key not in self._store:
-            return None
-        value, expires_at = self._store[key]
-        if time.monotonic() > expires_at:
-            del self._store[key]
-            return None
-        self._store.move_to_end(key)
-        return value
-
-    def set(self, key: str, value: Any, ttl: float = CACHE_TTL_SECONDS) -> None:
-        if key in self._store:
-            self._store.move_to_end(key)
-        self._store[key] = (value, time.monotonic() + ttl)
-        while len(self._store) > self._maxsize:
-            self._store.popitem(last=False)
-
-    def clear(self) -> None:
-        self._store.clear()
-
-
-advisor_response_cache = _TTLCache()
-
-
-def invalidate_advisor_caches() -> None:
-    """Drop cached advisor/editorial responses after manuscript content changes."""
-    advisor_response_cache.clear()
+async def invalidate_advisor_caches_for_book(db: AsyncSession, *, book_id: uuid.UUID | str) -> None:
+    series_rows = (
+        await db.execute(
+            select(SeriesBook.series_id).where(SeriesBook.book_id == uuid.UUID(str(book_id)))
+        )
+    ).all()
+    await mark_book_cache_dirty(str(book_id))
+    for row in series_rows:
+        await mark_series_cache_dirty(str(row.series_id))
+    await invalidate_advisor_caches(
+        book_id=book_id,
+        series_ids=[row.series_id for row in series_rows],
+    )
 
 
 def make_advisor_cache_key(book_id: str | uuid.UUID, last_user_message: str) -> str:
@@ -712,6 +717,10 @@ async def classify_response_type(client: AsyncOpenAI, reply: str) -> str:
 # ─── Story context builder ────────────────────────────────────────────────────
 
 async def build_story_context(db: AsyncSession, book_id: uuid.UUID, total_ch: int) -> str:
+    version = await get_book_cache_version(str(book_id))
+    cached = await get_story_context_cache(str(book_id), version, int(total_ch or 0))
+    if cached is not None:
+        return cached
     """Pulls structured story data — characters + plot threads — to give the advisor
     grounding even when passage retrieval returns nothing."""
     lines: list[str] = [f"Total chapters processed: {total_ch}"]
@@ -888,10 +897,12 @@ async def build_story_context(db: AsyncSession, book_id: uuid.UUID, total_ch: in
         lines.append("\nTHEMES (including philosophical subtext):")
         lines.extend(theme_lines)
 
-    return "\n".join(lines)
+    payload = "\n".join(lines)
+    await set_story_context_cache(str(book_id), version, int(total_ch or 0), payload)
+    return payload
 
 
-async def build_advisor_reply_payload(
+async def _prepare_advisor_reply_context(
     *,
     db: AsyncSession,
     book: Book,
@@ -910,9 +921,9 @@ async def build_advisor_reply_payload(
         raise ValueError("no user message found")
 
     cache_key = make_advisor_cache_key(book.id, last_user_msg)
-    cached = advisor_response_cache.get(cache_key)
+    cached = await get_advisor_response_cache(str(book.id), cache_key)
     if cached is not None:
-        return {**cached, "cached": True}
+        return {"cached": {**cached, "cached": True}}
 
     history = messages[-20:]
     client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
@@ -1016,6 +1027,73 @@ async def build_advisor_reply_payload(
             )
         llm_messages.append({"role": "user", "content": augmented_last})
 
+        return {
+            "cached": None,
+            "cache_key": cache_key,
+            "client": client,
+            "intent": intent,
+            "hits": hits,
+            "world_analysis": world_analysis,
+            "llm_messages": llm_messages,
+        }
+    except Exception:
+        await client.close()
+        raise
+
+
+async def _finalize_advisor_reply_payload(
+    *,
+    db: AsyncSession,
+    client: AsyncOpenAI,
+    book: Book,
+    cache_key: str,
+    reply: str,
+    intent: str,
+    hits: list[dict[str, Any]],
+    world_analysis: dict[str, Any] | None,
+) -> dict[str, Any]:
+    response_type = await classify_response_type(client, reply)
+    result = {
+        "reply": reply,
+        "intent": intent,
+        "response_type": response_type,
+        "retrieved_passages": [
+            {
+                "chapter_num": hit["chapter_num"],
+                "chapter_title": hit.get("chapter_title"),
+                "excerpt": hit["text"][:240],
+                "relevance": hit["relevance"],
+            }
+            for hit in hits[:5]
+        ],
+        "world_analysis": world_analysis,
+        "cached": False,
+    }
+    await set_advisor_response_cache(str(book.id), cache_key, result)
+    await db.commit()
+    return result
+
+
+async def build_advisor_reply_payload(
+    *,
+    db: AsyncSession,
+    book: Book,
+    user_id: uuid.UUID,
+    messages: list[dict[str, str]],
+    total_chapters: int,
+) -> dict[str, Any]:
+    prepared = await _prepare_advisor_reply_context(
+        db=db,
+        book=book,
+        user_id=user_id,
+        messages=messages,
+        total_chapters=total_chapters,
+    )
+    if prepared["cached"] is not None:
+        return prepared["cached"]
+
+    client = prepared["client"]
+    try:
         response = await create_tracked_chat_completion(
             client=client,
             feature="advisor_message",
@@ -1025,34 +1103,98 @@ async def build_advisor_reply_payload(
             book_id=book.id,
             temperature=0.55,
             max_tokens=800,
-            messages=llm_messages,
+            messages=prepared["llm_messages"],
         )
         reply = (response.choices[0].message.content or "").strip()
-        response_type = await classify_response_type(client, reply)
-
-        result = {
-            "reply": reply,
-            "intent": intent,
-            "response_type": response_type,
-            "retrieved_passages": [
-                {
-                    "chapter_num": hit["chapter_num"],
-                    "chapter_title": hit.get("chapter_title"),
-                    "excerpt": hit["text"][:240],
-                    "relevance": hit["relevance"],
-                }
-                for hit in hits[:5]
-            ],
-            "world_analysis": world_analysis,
-            "cached": False,
-        }
-        advisor_response_cache.set(cache_key, result)
-        return result
+        return await _finalize_advisor_reply_payload(
+            db=db,
+            client=client,
+            book=book,
+            cache_key=prepared["cache_key"],
+            reply=reply,
+            intent=prepared["intent"],
+            hits=prepared["hits"],
+            world_analysis=prepared["world_analysis"],
+        )
     finally:
         await client.close()
 
 
-async def build_series_advisor_reply_payload(
+async def stream_advisor_reply_payload(
+    *,
+    db: AsyncSession,
+    book: Book,
+    user_id: uuid.UUID,
+    messages: list[dict[str, str]],
+    total_chapters: int,
+) -> AsyncIterator[dict[str, Any]]:
+    prepared = await _prepare_advisor_reply_context(
+        db=db,
+        book=book,
+        user_id=user_id,
+        messages=messages,
+        total_chapters=total_chapters,
+    )
+    if prepared["cached"] is not None:
+        yield {"event": "done", "data": prepared["cached"]}
+        return
+
+    client = prepared["client"]
+    reply_parts: list[str] = []
+    usage_counts: tuple[int, int, int] | None = None
+    try:
+        stream = await client.chat.completions.create(
+            model=settings.OPENAI_INTEL_MODEL,
+            temperature=0.55,
+            max_tokens=800,
+            messages=prepared["llm_messages"],
+            stream=True,
+            stream_options={"include_usage": True},
+        )
+        async for chunk in stream:
+            usage = getattr(chunk, "usage", None)
+            if usage is not None:
+                usage_counts = (
+                    int(getattr(usage, "prompt_tokens", 0) or 0),
+                    int(getattr(usage, "completion_tokens", 0) or 0),
+                    int(getattr(usage, "total_tokens", 0) or 0),
+                )
+            for choice in getattr(chunk, "choices", []) or []:
+                content = getattr(getattr(choice, "delta", None), "content", None)
+                if content:
+                    reply_parts.append(content)
+                    yield {"event": "delta", "data": {"content": content}}
+
+        if usage_counts is not None:
+            await record_llm_usage_counts(
+                prompt_tokens=usage_counts[0],
+                completion_tokens=usage_counts[1],
+                total_tokens=usage_counts[2],
+                feature="advisor_message",
+                operation="chat_completion_stream",
+                model=settings.OPENAI_INTEL_MODEL,
+                db=db,
+                user_id=user_id,
+                book_id=book.id,
+            )
+
+        reply = "".join(reply_parts).strip()
+        result = await _finalize_advisor_reply_payload(
+            db=db,
+            client=client,
+            book=book,
+            cache_key=prepared["cache_key"],
+            reply=reply,
+            intent=prepared["intent"],
+            hits=prepared["hits"],
+            world_analysis=prepared["world_analysis"],
+        )
+        yield {"event": "done", "data": result}
+    finally:
+        await client.close()
+
+
+async def _prepare_series_advisor_reply_context(
     *,
     db: AsyncSession,
     series: Any,
@@ -1070,9 +1212,9 @@ async def build_series_advisor_reply_payload(
         raise ValueError("no user message found")
 
     cache_key = make_advisor_cache_key(f"series:{series.id}", last_user_msg)
-    cached = advisor_response_cache.get(cache_key)
+    cached = await get_series_advisor_response_cache(str(series.id), cache_key)
     if cached is not None:
-        return {**cached, "cached": True}
+        return {"cached": {**cached, "cached": True}}
 
     memberships = (
         await db.execute(
@@ -1118,6 +1260,63 @@ async def build_series_advisor_reply_payload(
 
     client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
     try:
+        intent = await classify_intent(client, last_user_msg)
+        return {
+            "cached": None,
+            "cache_key": cache_key,
+            "client": client,
+            "intent": intent,
+            "book_count": len(book_ids),
+            "llm_messages": llm_messages,
+        }
+    except Exception:
+        await client.close()
+        raise
+
+
+async def _finalize_series_advisor_reply_payload(
+    *,
+    db: AsyncSession,
+    client: AsyncOpenAI,
+    series: Any,
+    cache_key: str,
+    reply: str,
+    intent: str,
+    book_count: int,
+) -> dict[str, Any]:
+    response_type = await classify_response_type(client, reply)
+    result = {
+        "reply": reply,
+        "intent": intent,
+        "response_type": response_type,
+        "series_id": str(series.id),
+        "book_count": book_count,
+        "retrieved_passages": [],
+        "cached": False,
+    }
+    await set_series_advisor_response_cache(str(series.id), cache_key, result)
+    await db.commit()
+    return result
+
+
+async def build_series_advisor_reply_payload(
+    *,
+    db: AsyncSession,
+    series: Any,
+    user_id: uuid.UUID,
+    messages: list[dict[str, str]],
+) -> dict[str, Any]:
+    prepared = await _prepare_series_advisor_reply_context(
+        db=db,
+        series=series,
+        user_id=user_id,
+        messages=messages,
+    )
+    if prepared["cached"] is not None:
+        return prepared["cached"]
+
+    client = prepared["client"]
+    try:
         response = await create_tracked_chat_completion(
             client=client,
             feature="series_advisor_message",
@@ -1126,22 +1325,88 @@ async def build_series_advisor_reply_payload(
             user_id=user_id,
             temperature=0.55,
             max_tokens=900,
-            messages=llm_messages,
+            messages=prepared["llm_messages"],
         )
         reply = (response.choices[0].message.content or "").strip()
-        response_type = await classify_response_type(client, reply)
-        intent = await classify_intent(client, last_user_msg)
-        result = {
-            "reply": reply,
-            "intent": intent,
-            "response_type": response_type,
-            "series_id": str(series.id),
-            "book_count": len(book_ids),
-            "retrieved_passages": [],
-            "cached": False,
-        }
-        advisor_response_cache.set(cache_key, result)
-        return result
+        return await _finalize_series_advisor_reply_payload(
+            db=db,
+            client=client,
+            series=series,
+            cache_key=prepared["cache_key"],
+            reply=reply,
+            intent=prepared["intent"],
+            book_count=prepared["book_count"],
+        )
+    finally:
+        await client.close()
+
+
+async def stream_series_advisor_reply_payload(
+    *,
+    db: AsyncSession,
+    series: Any,
+    user_id: uuid.UUID,
+    messages: list[dict[str, str]],
+) -> AsyncIterator[dict[str, Any]]:
+    prepared = await _prepare_series_advisor_reply_context(
+        db=db,
+        series=series,
+        user_id=user_id,
+        messages=messages,
+    )
+    if prepared["cached"] is not None:
+        yield {"event": "done", "data": prepared["cached"]}
+        return
+
+    client = prepared["client"]
+    reply_parts: list[str] = []
+    usage_counts: tuple[int, int, int] | None = None
+    try:
+        stream = await client.chat.completions.create(
+            model=settings.OPENAI_INTEL_MODEL,
+            temperature=0.55,
+            max_tokens=900,
+            messages=prepared["llm_messages"],
+            stream=True,
+            stream_options={"include_usage": True},
+        )
+        async for chunk in stream:
+            usage = getattr(chunk, "usage", None)
+            if usage is not None:
+                usage_counts = (
+                    int(getattr(usage, "prompt_tokens", 0) or 0),
+                    int(getattr(usage, "completion_tokens", 0) or 0),
+                    int(getattr(usage, "total_tokens", 0) or 0),
+                )
+            for choice in getattr(chunk, "choices", []) or []:
+                content = getattr(getattr(choice, "delta", None), "content", None)
+                if content:
+                    reply_parts.append(content)
+                    yield {"event": "delta", "data": {"content": content}}
+
+        if usage_counts is not None:
+            await record_llm_usage_counts(
+                prompt_tokens=usage_counts[0],
+                completion_tokens=usage_counts[1],
+                total_tokens=usage_counts[2],
+                feature="series_advisor_message",
+                operation="chat_completion_stream",
+                model=settings.OPENAI_INTEL_MODEL,
+                db=db,
+                user_id=user_id,
+            )
+
+        reply = "".join(reply_parts).strip()
+        result = await _finalize_series_advisor_reply_payload(
+            db=db,
+            client=client,
+            series=series,
+            cache_key=prepared["cache_key"],
+            reply=reply,
+            intent=prepared["intent"],
+            book_count=prepared["book_count"],
+        )
+        yield {"event": "done", "data": result}
     finally:
         await client.close()
 
@@ -1733,6 +1998,23 @@ async def build_series_story_context(
     Each book section is labelled with the book title so the LLM can distinguish
     between volumes.  Capped to keep prompt size cost-efficient.
     """
+    series_key_parts = [
+        f"{book_id}:{book_titles.get(book_id, str(book_id))}"
+        for book_id in book_ids
+    ]
+    series_key = hashlib.sha256("||".join(series_key_parts).encode("utf-8")).hexdigest()
+    version = 0
+    for book_id in book_ids:
+        version = max(version, await get_book_cache_version(str(book_id)))
+        series_rows = (
+            await db.execute(select(SeriesBook.series_id).where(SeriesBook.book_id == book_id))
+        ).all()
+        for row in series_rows:
+            version = max(version, await get_series_cache_version(str(row.series_id)))
+    cached = await get_series_story_context_cache(series_key, version)
+    if cached is not None:
+        return cached
+
     lines: list[str] = []
 
     for book_id in book_ids:
@@ -1782,7 +2064,9 @@ async def build_series_story_context(
                 desc = (t.description[:80] + "...") if t.description and len(t.description) > 80 else (t.description or "")
                 lines.append(f"  • [{t.status}] {t.title} (ch.{t.introduced_at}). {desc}")
 
-    return "\n".join(lines)
+    payload = "\n".join(lines)
+    await set_series_story_context_cache(series_key, version, payload)
+    return payload
 
 
 def normalize_series_continuity_result(raw: str) -> dict:

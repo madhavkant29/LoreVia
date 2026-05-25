@@ -1,6 +1,8 @@
 import asyncio
+import json
 import logging
 import uuid
+from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -35,6 +37,21 @@ def _clean_text(value: object | None) -> str:
 def _clean_optional_text(value: str | None) -> str | None:
     cleaned = _clean_text(value)
     return cleaned or None
+
+
+def _book_cache_access_key(current_user_id: uuid.UUID, collaborator: Any | None) -> str:
+    if collaborator is None:
+        return f"owner:{current_user_id}"
+    permissions = collaborator.permissions if isinstance(collaborator.permissions, dict) else {}
+    permissions_key = json.dumps(permissions, sort_keys=True, default=str)
+    return "||".join(
+        [
+            f"user:{current_user_id}",
+            f"role:{collaborator.role}",
+            f"scope:{json.dumps(collaborator.scope, sort_keys=True, default=str)}",
+            f"permissions:{permissions_key}",
+        ]
+    )
 
 
 async def _read_upload_bounded(upload: UploadFile, max_bytes: int, label: str) -> bytes:
@@ -86,6 +103,15 @@ from app.api.deps.subscription import check_upload_limit
 from app.core import storage
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.redis import (
+    get_book_cache_version,
+    get_book_overview_cache,
+    get_writer_workspace_cache,
+    mark_book_cache_dirty,
+    mark_user_dashboard_cache_dirty,
+    set_book_overview_cache,
+    set_writer_workspace_cache,
+)
 from app.core.security import create_asset_token, decode_token
 from app.engine.character.consolidator import consolidate_characters
 from app.models.book import (
@@ -101,12 +127,14 @@ from app.models.character import (
     Character,
     CharacterCandidate,
     CharacterDuplicateSuggestion,
+    CharacterRelationshipCandidate,
     CharacterState,
     CharacterVoiceProfile,
 )
 from app.models.intelligence import ChapterSummary, CharacterRelationship, PlotThread, QuoteEntry
 from app.models.progress import ReadingProgress
 from app.schemas.books import (
+    BookForumMetadataBody,
     BookOverviewOut,
     BookEventsOut,
     BookModeBody,
@@ -119,6 +147,8 @@ from app.schemas.books import (
     CharacterCandidateAttachBody,
     CharacterEventOut,
     CharacterMergeBody,
+    RelationshipCandidateAcceptBody,
+    RelationshipCandidateAttachBody,
     CharacterPartitionBody,
     CharacterShareOut,
     CharacterUpdateBody,
@@ -155,23 +185,27 @@ from app.schemas.books import (
 )
 from app.schemas.public import PublicBookCreateOut, PublicBookShareBody
 from app.schemas.character import CharacterReviewOut
-from app.utils.advisor_utils import invalidate_advisor_caches
+from app.utils.advisor_utils import invalidate_advisor_caches_for_book
 from app.utils.billing_utils import calculate_upload_usage_summary, require_author_access
 from app.services.pipeline_state_service import (
     build_writer_workspace_response,
     build_writer_workspace_update,
+    requeue_stalled_book_processing_if_needed,
 )
 from app.utils.book_utils import (
     _append_recent_revision_edit,
     as_bool,
     book_out,
+    build_book_out_list,
     build_chapter_consistency_report,
     build_character_card_payload,
     build_emotional_arc_payload,
     build_obsidian_graph,
     build_prewriting_check,
     build_revision_intelligence_payload,
+    build_single_series_out,
     build_series_bible_payload,
+    build_series_out_list,
     build_story_health_payload,
     build_writer_workspace_payload,
     clean_manuscript_html,
@@ -180,7 +214,7 @@ from app.utils.book_utils import (
     collaboration_can_edit,
     collaboration_can_export,
     collaboration_has_resource,
-    compute_words_read_for_book,
+    compute_words_read_for_books,
     delete_book_note,
     delete_obsidian_note,
     deserialize_manuscript_content,
@@ -217,13 +251,19 @@ from app.utils.book_utils import (
     story_unit_name,
     strip_scene_metadata_from_manuscript_text,
     sync_chapter_content_from_novel_scenes,
+    touch_public_book_updated_at,
 )
 
 # ── Utils imports ──────────────────────────────────────────────────────────────
 from app.utils.character_utils import (
     CHARACTER_CANDIDATE_PENDING,
     CHARACTER_DUPLICATE_PENDING,
+    CHARACTER_RELATIONSHIP_CANDIDATE_ACCEPTED,
+    CHARACTER_RELATIONSHIP_CANDIDATE_PENDING,
+    CHARACTER_RELATIONSHIP_CANDIDATE_REJECTED,
+    CHARACTER_RELATIONSHIP_CANDIDATE_RESOLVED,
     append_unique_summary,
+    append_character_review_audit_entry,
     apply_graph_visibility_override,
     apply_manual_character_description,
     attach_character_candidate,
@@ -231,9 +271,11 @@ from app.utils.character_utils import (
     build_character_review_payload,
     clean_optional_text,
     clean_string_list,
+    demote_character_to_review_candidate,
     dedupe_preserve_order,
     is_displayable_character,
     list_character_review_data,
+    mark_character_curated,
     mark_character_candidates_merged,
     merge_characters,
     partition_character,
@@ -307,6 +349,7 @@ from app.utils.upload_security_utils import validate_document_upload_bytes
 from app.workers.consumers.analysis_consumer import analyse_chapter
 from app.workers.consumers.extraction_consumer import _process_chapter
 from app.workers.tasks.extraction_tasks import process_book_task
+from scripts.repair_character_bible_book import apply_repair_plan, build_repair_plan
 
 router = APIRouter()
 log = logging.getLogger("lorevia.books")
@@ -498,17 +541,42 @@ async def update_book_mode(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    book = await get_owned_book(db, book_id, current_user.id)
+    book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
     mode = (body.mode or "").strip().lower()
     if mode not in {"reader", "author"}:
         raise HTTPException(400, "Invalid mode")
-    if mode == "author":
-        require_author_access(current_user)
+    if collaborator and not collaboration_can_edit(collaborator):
+        raise HTTPException(403, "This share cannot edit the manuscript.")
     book.mode = mode
     if mode == "author" and not book.source_kind:
         book.source_kind = "single_upload"
     await db.commit()
     await db.refresh(book)
+    await mark_book_cache_dirty(str(book.id))
+    return await book_out(db, book, current_user.id, collaborator)
+
+
+@router.put("/{book_id}/forum-metadata", response_model=BookOut)
+async def update_book_forum_metadata(
+    book_id: uuid.UUID,
+    body: BookForumMetadataBody,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    normalized_title = _clean_text(body.title)
+    normalized_genre = _clean_text(body.genre)
+    normalized_description = _clean_text(body.description)
+    if not normalized_title or not normalized_genre or not normalized_description:
+        raise HTTPException(400, "Novel discussions require a title, genre, and description.")
+    book.title = normalized_title
+    book.genre = normalized_genre
+    book.public_description = normalized_description
+    touch_public_book_updated_at(book)
+    await db.commit()
+    await db.refresh(book)
+    await mark_book_cache_dirty(book.id)
+    await mark_user_dashboard_cache_dirty(current_user.id)
     return await book_out(db, book, current_user.id)
 
 
@@ -828,9 +896,12 @@ async def import_manuscript_content(
     if resolved_import_format:
         book.format = resolved_import_format
     book.source_kind = "chapter_wise" if len(import_jobs) == 1 and not files else "batch_upload"
+    touch_public_book_updated_at(book)
     if daily_words_added > 0:
         add_daily_word_progress(current_user, daily_words_added)
     await db.commit()
+    if daily_words_added > 0:
+        await mark_user_dashboard_cache_dirty(str(current_user.id))
     await db.refresh(book)
 
     # Send processing notification for manuscript import
@@ -901,7 +972,7 @@ async def import_manuscript_content(
                 db.add(risk_notification)
         await db.commit()
 
-    invalidate_advisor_caches()
+    await invalidate_advisor_caches_for_book(db, book_id=book.id)
 
     return ManuscriptImportResult(
         book_id=str(book.id),
@@ -986,23 +1057,21 @@ async def list_series(
         .order_by(Series.created_at.desc(), Series.name)
     )
     rows = list(rows_result.scalars().all())
-    output: list[SeriesOut] = []
-    for series in rows:
-        memberships = (
-            await db.execute(
-                select(SeriesBook, Book)
-                .join(Book, Book.id == SeriesBook.book_id)
-                .where(SeriesBook.series_id == series.id, Book.user_id == current_user.id)
-                .order_by(SeriesBook.position, Book.created_at)
-            )
-        ).all()
-        books: list[BookOut] = []
-        for membership, book in memberships:
-            enriched = await book_out(db, book, current_user.id)
-            enriched.marked_complete_in_series = membership.marked_complete
-            books.append(enriched)
-        output.append(SeriesOut(id=series.id, name=series.name, description=series.description, created_at=series.created_at, books=books))
-    return output
+    series_ids = [series.id for series in rows]
+    membership_rows = (
+        await db.execute(
+            select(SeriesBook, Book)
+            .join(Book, Book.id == SeriesBook.book_id)
+            .where(SeriesBook.series_id.in_(series_ids), Book.user_id == current_user.id)
+            .order_by(SeriesBook.series_id, SeriesBook.position, Book.created_at)
+        )
+    ).all() if series_ids else []
+    return await build_series_out_list(
+        db,
+        series_rows=rows,
+        membership_rows=membership_rows,
+        user_id=current_user.id,
+    )
 
 
 @router.get("/series/{series_id}/bible", response_model=SeriesBibleOut)
@@ -1063,7 +1132,7 @@ async def add_book_to_series(
     book.series_name = series.name
     book.series_order = body.position
     await db.commit()
-    return next(item for item in await list_series(db, current_user) if item.id == series.id)
+    return await build_single_series_out(db, series=series, user_id=current_user.id)
 
 
 @router.delete("/series/{series_id}/books/{book_id}", response_model=SeriesOut)
@@ -1087,7 +1156,7 @@ async def remove_book_from_series(
         book.series_name = None
         book.series_order = None
     await db.commit()
-    return next(item for item in await list_series(db, current_user) if item.id == series.id)
+    return await build_single_series_out(db, series=series, user_id=current_user.id)
 
 
 @router.put("/series/{series_id}/books/{book_id}/status", response_model=BookOut)
@@ -1156,8 +1225,14 @@ async def list_books(
     if not include_hidden:
         shared_rows = [row for row in shared_rows if row[0].hidden_at is None]
 
-    owned_payloads = [await book_out(db, book, current_user.id) for book in books]
-    shared_payloads = [await book_out(db, book, current_user.id, collaborator) for book, collaborator in shared_rows]
+    owned_payloads = await build_book_out_list(db, books=books, user_id=current_user.id)
+    shared_books = [book for book, _ in shared_rows]
+    shared_payloads = await build_book_out_list(
+        db,
+        books=shared_books,
+        user_id=current_user.id,
+        collaborators_by_book_id={book.id: collaborator for book, collaborator in shared_rows},
+    )
     return owned_payloads + shared_payloads
 
 
@@ -1177,13 +1252,14 @@ async def get_user_stats(
     total_words_read = 0
     total_chapters_tracked = 0
 
+    words_read_by_book = await compute_words_read_for_books(db, books=books, progress_rows=progress_rows)
     for book in books:
         total_chapters_tracked += book.total_chapters or 0
         progress = progress_by_book.get(book.id)
         read_chapters = sorted(set(progress.chapters_read or [])) if progress and progress.chapters_read else []
         if book.total_chapters and len(read_chapters) >= book.total_chapters:
             total_books_read += 1
-        total_words_read += await compute_words_read_for_book(db, book, progress)
+        total_words_read += words_read_by_book.get(book.id, 0)
 
     total_token_consumption = int(sum(book.total_tokens or 0 for book in books))
     saved_quotes = int(
@@ -1260,6 +1336,11 @@ async def get_book_overview(
     current_user=Depends(get_current_user),
 ):
     book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
+    cache_version = await get_book_cache_version(str(book.id))
+    access_key = _book_cache_access_key(current_user.id, collaborator)
+    cached = await get_book_overview_cache(str(book.id), str(current_user.id), access_key, cache_version)
+    if cached is not None:
+        return BookOverviewOut(**cached)
     book_payload = await book_out(db, book, current_user.id, collaborator)
     progress_payload = await build_reading_progress_payload(
         db,
@@ -1279,12 +1360,20 @@ async def get_book_overview(
         current_user=current_user,
         collaborator=collaborator,
     )
-    return BookOverviewOut(
+    payload = BookOverviewOut(
         book=book_payload,
         progress=progress_payload,
         chapter_list=chapter_list_payload,
         summary_collection=summary_collection_payload,
     )
+    await set_book_overview_cache(
+        str(book.id),
+        str(current_user.id),
+        access_key,
+        cache_version,
+        payload.model_dump(mode="json"),
+    )
+    return payload
 
 
 @router.get("/{book_id}/notes", response_model=list[BookNoteOut])
@@ -1588,7 +1677,21 @@ async def get_writer_workspace(
         raise HTTPException(403, "This share cannot edit the manuscript.")
     if collaborator is None:
         require_author_access(current_user)
-    return build_writer_workspace_response(book)
+    await requeue_stalled_book_processing_if_needed(db, book=book)
+    cache_version = await get_book_cache_version(str(book.id))
+    access_key = _book_cache_access_key(current_user.id, collaborator)
+    cached = await get_writer_workspace_cache(str(book.id), str(current_user.id), access_key, cache_version)
+    if cached is not None:
+        return WriterWorkspaceOut(**cached)
+    payload = build_writer_workspace_response(book)
+    await set_writer_workspace_cache(
+        str(book.id),
+        str(current_user.id),
+        access_key,
+        cache_version,
+        payload.model_dump(mode="json"),
+    )
+    return payload
 
 
 @router.put("/{book_id}/writer-workspace", response_model=WriterWorkspaceOut)
@@ -1607,6 +1710,7 @@ async def update_writer_workspace(
     book.writer_workspace = next_payload
     await db.commit()
     await db.refresh(book)
+    await mark_book_cache_dirty(str(book.id))
     return build_writer_workspace_response(book)
 
 
@@ -1810,7 +1914,7 @@ async def publish_book_publicly(
     book = await db.get(Book, book_id)
     if not book or book.user_id != current_user.id or book.hidden_at is not None or book.archived_at is not None:
         raise HTTPException(404, "Book not found")
-    if getattr(current_user, "email_verified_at", None) is None and current_user.tier != "admin":
+    if getattr(current_user, "email_verified_at", None) is None:
         raise HTTPException(403, "Verify your email before publishing a public book.")
 
     moderation_status = str(getattr(book, "moderation_status", "") or "").strip().lower()
@@ -1862,12 +1966,13 @@ async def publish_book_publicly(
     book.takedown_at = None
     book.takedown_by_user_id = None
     book.published_at = book.published_at or now
+    touch_public_book_updated_at(book, changed_at=now)
     book.public_upload_counted_at = now
     book.is_public = True
     book.public_share_status = PUBLIC_SHARE_STATUS_APPROVED
     book.public_share_requested_at = now
     book.public_share_approved_at = now
-    book.public_share_approved_by_user_id = current_user.id if current_user.tier == "admin" else None
+    book.public_share_approved_by_user_id = None
     await add_moderation_action(
         db,
         action_type="book_published",
@@ -2037,6 +2142,45 @@ async def get_book_character_review(
     return await list_character_review_data(db, book_id=book.id)
 
 
+@router.get("/{book_id}/character-review/reprocess")
+async def preview_book_character_reprocess(
+    book_id: uuid.UUID,
+    allow_merge_safe_pairs: bool = Query(True),
+    allow_demote_obvious_noise: bool = Query(True),
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
+    if book.mode != "author":
+        raise HTTPException(400, "Character reprocessing is only available in author mode")
+    plan = await build_repair_plan(
+        book.id,
+        allow_merge_safe_pairs=allow_merge_safe_pairs,
+        allow_demote_obvious_noise=allow_demote_obvious_noise,
+    )
+    return asdict(plan)
+
+
+@router.post("/{book_id}/character-review/reprocess")
+async def apply_book_character_reprocess(
+    book_id: uuid.UUID,
+    allow_merge_safe_pairs: bool = Query(True),
+    allow_demote_obvious_noise: bool = Query(True),
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
+    if book.mode != "author":
+        raise HTTPException(400, "Character reprocessing is only available in author mode")
+    return await apply_repair_plan(
+        book.id,
+        allow_merge_safe_pairs=allow_merge_safe_pairs,
+        allow_demote_obvious_noise=allow_demote_obvious_noise,
+    )
+
+
 @router.post("/{book_id}/characters", status_code=201)
 async def create_book_character(
     book_id: uuid.UUID,
@@ -2070,8 +2214,8 @@ async def create_book_character(
             motivations=body.motivations,
             fears=body.fears,
         )
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
+    except ValueError:
+        raise HTTPException(400, "Character data is invalid.")
 
     db.add(character)
     await db.flush()
@@ -2145,8 +2289,8 @@ async def partition_book_character(
             source=character,
             partitions=[{"name": item.name, "aliases": item.aliases} for item in body.partitions],
         )
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
+    except ValueError:
+        raise HTTPException(400, "Character partition request is invalid.")
 
     await refresh_character_duplicate_suggestions(db, book_id=book.id)
     await db.commit()
@@ -2204,8 +2348,15 @@ async def update_book_character(
     if body.graph_visibility is not None:
         try:
             apply_graph_visibility_override(character, body.graph_visibility)
-        except ValueError as exc:
-            raise HTTPException(400, str(exc)) from exc
+        except ValueError:
+            raise HTTPException(400, "Character visibility settings are invalid.")
+    mark_character_curated(
+        character,
+        protected_from_repair=body.protected_from_repair
+        if body.protected_from_repair is not None
+        else None,
+        review_note=body.review_note if body.review_note is not None else None,
+    )
 
     await refresh_character_duplicate_suggestions(db, book_id=book.id)
     await db.commit()
@@ -2277,6 +2428,32 @@ async def delete_book_character(
     return {"deleted": str(character_id)}
 
 
+@router.post("/{book_id}/characters/{character_id}/demote")
+async def demote_book_character(
+    book_id: uuid.UUID,
+    character_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
+    character = await db.get(Character, character_id)
+    if not character or character.book_id != book.id:
+        raise HTTPException(404, "Character not found")
+    if book.mode != "author":
+        raise HTTPException(400, "Character review is only available in author mode")
+
+    candidate = await demote_character_to_review_candidate(
+        db,
+        character=character,
+        reason_codes=["author_requested_review"],
+        review_note=(character.analysis_metadata or {}).get("review_note"),
+    )
+    await refresh_character_duplicate_suggestions(db, book_id=book.id)
+    await db.commit()
+    return {"demoted": str(character_id), "candidate_id": str(candidate.id)}
+
+
 @router.post("/{book_id}/character-review/{candidate_id}/promote")
 async def promote_book_character_candidate(
     book_id: uuid.UUID,
@@ -2336,6 +2513,156 @@ async def reject_book_character_candidate(
     if not candidate or candidate.book_id != book.id:
         raise HTTPException(404, "Candidate not found")
     candidate.status = "rejected"
+    await db.commit()
+    return {"rejected": str(candidate.id)}
+
+
+@router.post("/{book_id}/relationship-review/{candidate_id}/attach-a")
+async def attach_relationship_candidate_a(
+    book_id: uuid.UUID,
+    candidate_id: uuid.UUID,
+    body: RelationshipCandidateAttachBody,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
+    candidate = await db.get(CharacterRelationshipCandidate, candidate_id)
+    character = await db.get(Character, body.character_id)
+    if not candidate or candidate.book_id != book.id:
+        raise HTTPException(404, "Relationship candidate not found")
+    if not character or character.book_id != book.id:
+        raise HTTPException(404, "Character not found")
+    if candidate.status != CHARACTER_RELATIONSHIP_CANDIDATE_PENDING:
+        raise HTTPException(400, "Only pending relationship candidates can be updated")
+    candidate.matched_character_a_id = character.id
+    append_character_review_audit_entry(
+        character,
+        action="relationship_candidate_attached_a",
+        details={"relationship_candidate_id": str(candidate.id)},
+    )
+    await db.commit()
+    return {"attached_a": str(character.id), "relationship_candidate_id": str(candidate.id)}
+
+
+@router.post("/{book_id}/relationship-review/{candidate_id}/attach-b")
+async def attach_relationship_candidate_b(
+    book_id: uuid.UUID,
+    candidate_id: uuid.UUID,
+    body: RelationshipCandidateAttachBody,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
+    candidate = await db.get(CharacterRelationshipCandidate, candidate_id)
+    character = await db.get(Character, body.character_id)
+    if not candidate or candidate.book_id != book.id:
+        raise HTTPException(404, "Relationship candidate not found")
+    if not character or character.book_id != book.id:
+        raise HTTPException(404, "Character not found")
+    if candidate.status != CHARACTER_RELATIONSHIP_CANDIDATE_PENDING:
+        raise HTTPException(400, "Only pending relationship candidates can be updated")
+    candidate.matched_character_b_id = character.id
+    append_character_review_audit_entry(
+        character,
+        action="relationship_candidate_attached_b",
+        details={"relationship_candidate_id": str(candidate.id)},
+    )
+    await db.commit()
+    return {"attached_b": str(character.id), "relationship_candidate_id": str(candidate.id)}
+
+
+@router.post("/{book_id}/relationship-review/{candidate_id}/accept")
+async def accept_relationship_candidate(
+    book_id: uuid.UUID,
+    candidate_id: uuid.UUID,
+    body: RelationshipCandidateAcceptBody,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
+    if book.mode != "author":
+        raise HTTPException(400, "Relationship review is only available in author mode")
+    candidate = await db.get(CharacterRelationshipCandidate, candidate_id)
+    if not candidate or candidate.book_id != book.id:
+        raise HTTPException(404, "Relationship candidate not found")
+    if candidate.status != CHARACTER_RELATIONSHIP_CANDIDATE_PENDING:
+        raise HTTPException(400, "Only pending relationship candidates can be accepted")
+
+    relationship_a = await db.get(Character, body.character_a_id)
+    relationship_b = await db.get(Character, body.character_b_id)
+    if not relationship_a or relationship_a.book_id != book.id or not relationship_b or relationship_b.book_id != book.id:
+        raise HTTPException(404, "Character not found")
+    if relationship_a.id == relationship_b.id:
+        raise HTTPException(400, "Choose two different characters")
+
+    rel_type = _normalize_relationship_type(body.rel_type or candidate.rel_type or "connection")
+    from_chapter = body.from_chapter or int(candidate.chapter_number or 1)
+    _validate_relationship_window(from_chapter, body.to_chapter)
+    if body.sentiment is not None and not -1.0 <= body.sentiment <= 1.0:
+        raise HTTPException(400, "Sentiment must be between -1.0 and 1.0")
+
+    relationship = CharacterRelationship(
+        book_id=book.id,
+        character_a_id=relationship_a.id,
+        character_b_id=relationship_b.id,
+        rel_type=rel_type,
+        sentiment=body.sentiment if body.sentiment is not None else candidate.sentiment,
+        description=clean_optional_text(body.description) if body.description is not None else clean_optional_text(candidate.description),
+        from_chapter=from_chapter,
+        to_chapter=body.to_chapter,
+    )
+    db.add(relationship)
+    candidate.matched_character_a_id = relationship_a.id
+    candidate.matched_character_b_id = relationship_b.id
+    candidate.status = CHARACTER_RELATIONSHIP_CANDIDATE_ACCEPTED
+    append_character_review_audit_entry(
+        relationship_a,
+        action="relationship_candidate_accepted",
+        details={"relationship_candidate_id": str(candidate.id), "side": "a"},
+    )
+    append_character_review_audit_entry(
+        relationship_b,
+        action="relationship_candidate_accepted",
+        details={"relationship_candidate_id": str(candidate.id), "side": "b"},
+    )
+    await db.commit()
+    await db.refresh(relationship)
+    return _serialize_relationship_record(relationship)
+
+
+@router.post("/{book_id}/relationship-review/{candidate_id}/resolve")
+async def resolve_relationship_candidate(
+    book_id: uuid.UUID,
+    candidate_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
+    candidate = await db.get(CharacterRelationshipCandidate, candidate_id)
+    if not candidate or candidate.book_id != book.id:
+        raise HTTPException(404, "Relationship candidate not found")
+    candidate.status = CHARACTER_RELATIONSHIP_CANDIDATE_RESOLVED
+    await db.commit()
+    return {"resolved": str(candidate.id)}
+
+
+@router.post("/{book_id}/relationship-review/{candidate_id}/reject")
+async def reject_relationship_candidate(
+    book_id: uuid.UUID,
+    candidate_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
+    candidate = await db.get(CharacterRelationshipCandidate, candidate_id)
+    if not candidate or candidate.book_id != book.id:
+        raise HTTPException(404, "Relationship candidate not found")
+    candidate.status = CHARACTER_RELATIONSHIP_CANDIDATE_REJECTED
     await db.commit()
     return {"rejected": str(candidate.id)}
 

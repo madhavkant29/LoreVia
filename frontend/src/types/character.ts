@@ -37,6 +37,24 @@ export interface Character {
   is_manual?: boolean
   tags?: string[]
   graph_visibility_override?: "include" | "exclude" | null
+  analysis_metadata?: {
+    persistence_reason?: string | null
+    evidence_count?: number | null
+    summary_quality?: string | null
+    needs_review?: boolean
+    rejected_duplicate_candidates?: string[]
+    quality_flags?: string[]
+    grounding_passage_count?: number
+    confidence_band?: string | null
+    user_curated?: boolean
+    protected_from_repair?: boolean
+    canonical_confidence?: number | null
+    grounding_coverage?: number | null
+    cluster_size?: number
+    cluster_mention_count?: number
+    resolver_status?: string | null
+    review_note?: string | null
+  }
   growth_events?: Array<{
     chapter?: number | null
     chapter_number?: number | null
@@ -121,6 +139,14 @@ export interface CharacterCandidate {
   confidence: number
   reason_codes: string[]
   evidence: Record<string, unknown>
+  cluster_names: string[]
+  cluster_size: number
+  cluster_mention_count: number
+  resolver_status?: string | null
+  resolver_reasons: string[]
+  canonical_confidence?: number | null
+  grounding_coverage?: number | null
+  snippets: string[]
   source_batch_key?: string | null
   created_at: string
   updated_at: string
@@ -134,7 +160,63 @@ export interface CharacterDuplicateSuggestion {
   confidence: number
   reasons: string[]
   shared_evidence: Record<string, unknown>
+  shared_cluster_keys: string[]
+  shared_chapters: number[]
+  embedding_similarity?: number | null
+  primary_is_protected: boolean
+  secondary_is_protected: boolean
+  primary_is_manual: boolean
+  secondary_is_manual: boolean
+  primary_is_curated: boolean
+  secondary_is_curated: boolean
   status: "pending" | "accepted" | "dismissed"
+  created_at: string
+  updated_at: string
+}
+
+export interface CharacterRepairPreview {
+  book_id: string
+  dry_run: boolean
+  allow_merge_safe_pairs: boolean
+  allow_demote_obvious_noise: boolean
+  planned_merges: Array<[string, string]>
+  planned_demotions: string[]
+  skipped_protected_merge_pairs: Array<[string, string]>
+  skipped_protected_demotions: string[]
+  updated_first_chapters: Record<string, number>
+  updated_last_seen_chapters: Record<string, number>
+  pending_duplicate_suggestions: number
+  pending_relationship_candidates: number
+  unresolved_relationship_deltas: Record<string, number>
+}
+
+export interface CharacterRepairApplyResult {
+  book_id: string
+  merged_pairs: Array<[string, string]>
+  demoted_character_ids: string[]
+  skipped_protected_merge_pairs: Array<[string, string]>
+  skipped_protected_demotions: string[]
+  first_chapter_recomputes: Record<string, number>
+  last_seen_chapter_recomputes: Record<string, number>
+  duplicate_suggestion_delta: Record<string, number>
+  unresolved_relationship_deltas: Record<string, number>
+}
+
+export interface CharacterRelationshipCandidate {
+  id: string
+  book_id: string
+  chapter_number: number
+  raw_character_a: string
+  raw_character_b: string
+  matched_character_a_id?: string | null
+  matched_character_b_id?: string | null
+  rel_type?: string | null
+  sentiment?: number | null
+  description?: string | null
+  status: "pending" | "accepted" | "rejected" | "resolved" | "merged"
+  reason_codes: string[]
+  evidence: Record<string, unknown>
+  source_batch_key?: string | null
   created_at: string
   updated_at: string
 }
@@ -142,9 +224,11 @@ export interface CharacterDuplicateSuggestion {
 export interface CharacterReviewResponse {
   candidates: CharacterCandidate[]
   duplicate_suggestions: CharacterDuplicateSuggestion[]
+  relationship_candidates: CharacterRelationshipCandidate[]
   counts: {
     pending_candidates: number
     pending_duplicate_suggestions: number
+    pending_relationship_candidates: number
   }
 }
 

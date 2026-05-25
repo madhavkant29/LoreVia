@@ -3,6 +3,7 @@
 import React from "react"
 import { useState } from "react"
 
+import { resolveAssetUrl } from "@/lib/utils/assetUrls"
 import { cn } from "@/lib/utils/text"
 
 interface SmartBookCoverProps {
@@ -22,7 +23,7 @@ export function SmartBookCover({
 }: SmartBookCoverProps) {
   const [failed, setFailed] = useState(false)
 
-  const activeSrc = !failed ? resolveCoverUrl(src) : null
+  const activeSrc = !failed ? resolveAssetUrl(src) : null
 
   const hasImage = Boolean(activeSrc)
   const imageSrc = activeSrc ?? ""
@@ -56,23 +57,6 @@ export function SmartBookCover({
       )}
     </div>
   )
-}
-
-function resolveCoverUrl(coverUrl: string | null | undefined) {
-  if (!coverUrl) return null
-  if (/^https?:\/\//i.test(coverUrl)) return coverUrl
-  try {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL
-    if (apiUrl) {
-      return new URL(coverUrl, apiUrl).toString()
-    }
-    if (typeof window !== "undefined") {
-      return new URL(coverUrl, window.location.origin).toString()
-    }
-    return coverUrl
-  } catch {
-    return coverUrl
-  }
 }
 
 function titleInitials(title: string) {

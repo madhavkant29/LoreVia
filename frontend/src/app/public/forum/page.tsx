@@ -1,8 +1,8 @@
 import type { Metadata } from "next"
+import dynamic from "next/dynamic"
 
 import { JsonLdScript } from "@/components/seo/JsonLdScript"
-import { PublicForumPageClient } from "@/components/public/PublicForumPageClient"
-import { listPublicForumPostsServer } from "@/lib/api/public.server"
+import { listRankedBetaNovelsServer } from "@/lib/api/public.server"
 import {
   DEFAULT_OG_IMAGE,
   SITE_NAME,
@@ -10,6 +10,10 @@ import {
   buildCollectionPageJsonLd,
   buildItemListJsonLd,
 } from "@/lib/seo"
+
+const PublicForumPageClient = dynamic(
+  () => import("@/components/public/PublicForumPageClient").then((module) => module.PublicForumPageClient)
+)
 
 export const metadata: Metadata = {
   title: "Public Forum",
@@ -35,13 +39,9 @@ export const metadata: Metadata = {
 }
 
 export default async function PublicForumPage() {
-  const initialData = await listPublicForumPostsServer().catch(() => ({
-    items: [],
-    total: 0,
-    page: 1,
-    page_size: 20,
-    has_more: false,
-  }))
+  const initialData = process.env.NODE_ENV === "production"
+    ? await listRankedBetaNovelsServer({ ranking: "most_popular", timeWindow: "monthly" }).catch(() => undefined)
+    : undefined
   const collectionJsonLd = buildCollectionPageJsonLd({
     name: "LoreVia Public Forum",
     description:
@@ -52,7 +52,7 @@ export default async function PublicForumPage() {
   const itemListJsonLd = buildItemListJsonLd({
     name: "LoreVia public forum threads",
     path: "/public/forum",
-    items: initialData.items.slice(0, 12).map((post) => ({
+    items: (initialData?.items ?? []).slice(0, 12).map((post) => ({
       name: post.headline,
       path: `/public/forum/${post.id}`,
     })),

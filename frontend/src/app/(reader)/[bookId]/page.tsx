@@ -7,8 +7,6 @@ import type { Route } from "next"
 import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
 
-import { AuthorToolsNav } from "@/components/layout/AuthorToolsNav"
-import { ReaderOverview } from "@/components/reader/ReaderOverview"
 import { capture } from "@/lib/analytics/posthog"
 import { booksApi } from "@/lib/api/books"
 import { canUseAuthorFeatures } from "@/lib/billing/plans"
@@ -16,6 +14,7 @@ import { asQueryKey, bookCacheKey, booksQuotesCacheKey, readerCacheKey } from "@
 import { useAuthStore } from "@/lib/stores/authStore"
 import { useBookModeStore } from "@/lib/stores/bookModeStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
+import { resolveAssetUrl } from "@/lib/utils/assetUrls"
 import { buildIssueDisplay } from "@/lib/utils/storyFeedback"
 import type { Book, BookNote, BookOverviewPayload, ChapterConsistencyReport, GoalCalendarItem, PreWritingCheck, RevisionIntelligence, SavedQuote, StoryHealth, WriterWorkspace } from "@/types/book"
 import type { Character } from "@/types/character"
@@ -23,6 +22,21 @@ import type { ChapterListResponse, ReadingProgress, SummaryCollectionResponse } 
 
 const AuthorWorkspaceDashboard = dynamic(
   () => import("@/components/reader/AuthorWorkspaceDashboard").then((module) => module.AuthorWorkspaceDashboard),
+  {
+    loading: () => <WorkspacePanelLoadingState />,
+  }
+)
+
+const AuthorToolsNav = dynamic(
+  () => import("@/components/layout/AuthorToolsNav").then((module) => module.AuthorToolsNav),
+  {
+    ssr: false,
+    loading: () => <NavPanelLoadingState />,
+  }
+)
+
+const ReaderOverview = dynamic(
+  () => import("@/components/reader/ReaderOverview").then((module) => module.ReaderOverview),
   {
     loading: () => <WorkspacePanelLoadingState />,
   }
@@ -71,19 +85,6 @@ function storyUnitTitle(workType?: Book["work_type"]) {
 
 function storyUnitPrefix(workType?: Book["work_type"]) {
   return workType === "screenplay" ? "Sc." : "Ch."
-}
-
-function coverSrc(coverUrl: string | null | undefined) {
-  if (!coverUrl) return null
-  if (/^https?:\/\//i.test(coverUrl)) return coverUrl
-  try {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL
-    if (apiUrl) return new URL(coverUrl, apiUrl).toString()
-    if (typeof window !== "undefined") return new URL(coverUrl, window.location.origin).toString()
-    return coverUrl
-  } catch {
-    return coverUrl
-  }
 }
 
 function formatEtaLabel(seconds?: number | null) {
@@ -278,8 +279,12 @@ export default function BookOverviewPage() {
       const currentBook = (query.state.data as BookOverviewPayload | undefined)?.book
       return currentBook && currentBook.status !== "ready" ? 3_000 : false
     },
+    refetchIntervalInBackground: false,
   })
   const resolvedBookMode = overviewQuery.data?.book.mode ?? bookMode
+  const resolvedCollaborationRole = overviewQuery.data?.book.collaboration_role ?? null
+  const resolvedCollaborationPermissions = overviewQuery.data?.book.collaboration_permissions ?? null
+  const canUsePaidAuthorTools = canUseAuthorFeatures(userTier) || Boolean(resolvedCollaborationPermissions?.can_edit_manuscript)
   const bookNotesQuery = useQuery({
     queryKey: asQueryKey(bookCacheKey(bookId, "notes")),
     queryFn: () => booksApi.getBookNotes(bookId),
@@ -296,37 +301,37 @@ export default function BookOverviewPage() {
     queryKey: asQueryKey(bookCacheKey(bookId, "characters")),
     queryFn: () => booksApi.getCharacters(bookId),
     staleTime: 45_000,
-    enabled: secondaryDataEnabled && resolvedBookMode === "author",
+    enabled: secondaryDataEnabled && resolvedBookMode === "author" && canUsePaidAuthorTools,
   })
   const chapterReportsQuery = useQuery({
     queryKey: asQueryKey(bookCacheKey(bookId, "chapter-reports:6")),
     queryFn: () => booksApi.getChapterReports(bookId, 6),
     staleTime: 30_000,
-    enabled: secondaryDataEnabled && resolvedBookMode === "author",
+    enabled: secondaryDataEnabled && resolvedBookMode === "author" && canUsePaidAuthorTools,
   })
   const preWritingCheckQuery = useQuery({
     queryKey: asQueryKey(bookCacheKey(bookId, "pre-writing:auto")),
     queryFn: () => booksApi.getPreWritingCheck(bookId),
     staleTime: 30_000,
-    enabled: secondaryDataEnabled && resolvedBookMode === "author",
+    enabled: secondaryDataEnabled && resolvedBookMode === "author" && canUsePaidAuthorTools,
   })
   const storyHealthQuery = useQuery({
     queryKey: asQueryKey(bookCacheKey(bookId, "story-health")),
     queryFn: () => booksApi.getStoryHealth(bookId),
     staleTime: 30_000,
-    enabled: secondaryDataEnabled && resolvedBookMode === "author",
+    enabled: secondaryDataEnabled && resolvedBookMode === "author" && canUsePaidAuthorTools,
   })
   const writerWorkspaceQuery = useQuery({
     queryKey: writerWorkspaceQueryKey,
     queryFn: () => booksApi.getWriterWorkspace(bookId),
     staleTime: 10_000,
-    enabled: secondaryDataEnabled && resolvedBookMode === "author",
+    enabled: secondaryDataEnabled && resolvedBookMode === "author" && canUsePaidAuthorTools,
   })
   const revisionIntelligenceQuery = useQuery({
     queryKey: asQueryKey(bookCacheKey(bookId, "revision-intelligence")),
     queryFn: () => booksApi.getRevisionIntelligence(bookId),
     staleTime: 20_000,
-    enabled: secondaryDataEnabled && resolvedBookMode === "author",
+    enabled: secondaryDataEnabled && resolvedBookMode === "author" && canUsePaidAuthorTools,
   })
 
   const book = overviewQuery.data?.book ?? null
@@ -438,10 +443,12 @@ export default function BookOverviewPage() {
   const percentComplete = Math.round(progress?.percent_complete ?? book?.progress_pct ?? 0)
   const chaptersLeft = progress?.chapters_left ?? book?.chapters_left ?? 0
   const activeBookMode = book?.mode ?? bookMode
+  const collaborationRole = book?.collaboration_role ?? null
   const collaborationPermissions = book?.collaboration_permissions ?? null
+  const isCollaboratorSession = Boolean(collaborationRole)
   const hasCollaboratorAuthorAccess = Boolean(collaborationPermissions?.can_edit_manuscript)
-  const canUseAuthorWorkspace = canUseAuthorFeatures(userTier) || hasCollaboratorAuthorAccess
-  const canEditSharedManuscript = canUseAuthorWorkspace
+  const canUseAuthorWorkspace = !isCollaboratorSession || hasCollaboratorAuthorAccess
+  const canEditSharedManuscript = !isCollaboratorSession || hasCollaboratorAuthorAccess
   const processingSummary = getProcessingSummary(book)
   const unitTitle = storyUnitTitle(book?.work_type)
   const unitPrefix = storyUnitPrefix(book?.work_type)
@@ -513,6 +520,8 @@ export default function BookOverviewPage() {
   }
 
   const updateMode = async (nextMode: "reader" | "author") => {
+    if (modeSaving) return
+    if (nextMode === activeBookMode) return
     if (nextMode === "author" && !canUseAuthorWorkspace) return
     const previousBook = book
     startTransition(() => setBookMode(bookId, nextMode))
@@ -552,7 +561,20 @@ export default function BookOverviewPage() {
 
   return (
     <div className={`min-h-screen ${isDark ? "bg-[#171b1d] text-slate-100" : "bg-[#f8f4ee] text-slate-950"}`}>
-      <div className="mx-auto grid max-w-[100rem] gap-6 px-4 pb-28 pt-5 sm:px-6 lg:grid-cols-[18rem_minmax(0,1fr)] lg:px-8">
+      <div className="mx-auto grid max-w-[100rem] gap-5 px-4 pb-28 pt-5 sm:px-6 lg:grid-cols-[15.5rem_minmax(0,1fr)] lg:px-8 xl:gap-6">
+        <div className="lg:hidden">
+          <AuthorToolsNav
+            bookId={bookId}
+            active="overview"
+            isDark={isDark}
+            bookData={book}
+            title={activeBookMode === "author" ? "Author workspace" : "Reader workspace"}
+            description={activeBookMode === "author" ? "Drafting and intelligence stay nearby without crowding the book." : "Reading, chapters, and quiet tools stay one hover away."}
+            currentChapter={continueChapter}
+            mode={activeBookMode}
+          />
+        </div>
+
         <div className="hidden lg:block lg:sticky lg:top-5 lg:self-start">
           <AuthorToolsNav
             bookId={bookId}
@@ -564,6 +586,7 @@ export default function BookOverviewPage() {
             currentChapter={continueChapter}
             mode={activeBookMode}
             variant="rail"
+            railSize="compact"
           />
         </div>
 
@@ -1444,7 +1467,7 @@ function GoalCalendarCard({
 
 function BookCover({ book, isDark }: { book: Book; isDark: boolean }) {
   const [failed, setFailed] = useState(false)
-  const src = !failed ? coverSrc(book.cover_url) : null
+  const src = !failed ? resolveAssetUrl(book.cover_url) : null
 
   if (!src) {
     return (
@@ -1603,4 +1626,8 @@ function WorkspacePanelLoadingState() {
       Loading workspace tools...
     </div>
   )
+}
+
+function NavPanelLoadingState() {
+  return <div className="rounded-2xl border border-border bg-card/60 p-4" />
 }

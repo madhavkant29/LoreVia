@@ -17,6 +17,7 @@ from app.utils.book_utils import (
     normalize_writer_workspace,
     serialize_manuscript_content,
 )
+from app.utils.logging.errors import redact_sensitive_text
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -277,7 +278,7 @@ def build_analysis_chapter_state(
         "status": " ".join(str(status or "").split()).strip() or "pending",
         "generated_modes": next_modes,
         "attempt_count": attempts + (1 if increment_attempt else 0),
-        "last_error": " ".join(str(last_error or "").split()).strip() or None,
+        "last_error": " ".join((redact_sensitive_text(str(last_error or "")) or "").split()).strip() or None,
         "updated_at": datetime.now(UTC).isoformat(),
     }
     next_source_integrity = source_integrity if isinstance(source_integrity, dict) else current.get("source_integrity")
@@ -310,6 +311,12 @@ def build_writer_workspace_with_processing(book: Book, processing_state: dict[st
     workspace = dict(book.writer_workspace) if isinstance(book.writer_workspace, dict) else {}
     workspace["processing"] = processing_state
     return normalize_writer_workspace(workspace)
+
+
+def processing_state_for_completed_extraction(*, analysis_complete: bool) -> tuple[str, str]:
+    if analysis_complete:
+        return "ready", "complete"
+    return "processing", "analysis"
 
 
 def _current_processing_progress(book: Book) -> tuple[int, int | None]:
@@ -368,7 +375,7 @@ def update_book_processing_state(
         parser_diagnostics=effective_parser_diagnostics,
     )
     extraction_status = "running"
-    if status == "ready":
+    if status == "ready" or stage == "analysis":
         extraction_status = "succeeded"
     elif status in {"failed", "error"}:
         extraction_status = "failed"

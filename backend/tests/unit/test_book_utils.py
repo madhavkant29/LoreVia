@@ -22,6 +22,7 @@ from app.utils.book_utils import (
     build_emotional_arc_payload,
     build_book_processing_payload,
     build_blank_cover_image,
+    compute_words_read_for_books,
     build_workspace_chapter_text_from_scenes,
     chapter_title_is_placeholder,
     clean_markdown_asterisks_str,
@@ -89,6 +90,14 @@ class _FakeAnnotationDB:
 
     async def refresh(self, _value):
         return None
+
+
+class _RowResult:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def all(self):
+        return list(self._rows)
 
 
 class TestCleanMarkdownAsterisks:
@@ -221,6 +230,28 @@ def test_build_blank_cover_image_renders_title_and_author_placeholder():
     image = Image.open(io.BytesIO(raw))
     assert image.size == (1200, 1800)
     assert image.format == "PNG"
+
+
+@pytest.mark.asyncio
+async def test_compute_words_read_for_books_uses_preloaded_word_counts_without_content_fallback():
+    book_id = uuid.uuid4()
+    book = SimpleNamespace(id=book_id)
+    progress = SimpleNamespace(book_id=book_id, chapters_read=[1, 2], current_chapter=3, scroll_pct=0.5)
+    db = _FakeAnnotationDB(
+        execute_values=[
+            _RowResult(
+                [
+                    (book_id, 1, 1000),
+                    (book_id, 2, 1200),
+                    (book_id, 3, None),
+                ]
+            )
+        ]
+    )
+
+    totals = await compute_words_read_for_books(db, books=[book], progress_rows=[progress])
+
+    assert totals[book_id] == 2200
 
 
 @pytest.mark.asyncio

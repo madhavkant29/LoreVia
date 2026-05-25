@@ -1,18 +1,32 @@
 "use client"
 
 import type { ReactNode } from "react"
-import { useEffect, useState } from "react"
+import dynamic from "next/dynamic"
+import { startTransition, useEffect, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import type { Route } from "next"
 import { useRouter } from "next/navigation"
 
-import { UpcomingBetaReadsCard } from "@/components/library/UpcomingBetaReadsCard"
-import { UploadModal } from "@/components/modals/UploadModal"
 import { booksApi } from "@/lib/api/books"
 import { asQueryKey, booksListCacheKey } from "@/lib/query/cacheKeys"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { getBookHref } from "@/lib/utils/bookRoutes"
 import type { Book, BookStatus } from "@/types/book"
+
+const UpcomingBetaReadsCard = dynamic(
+  () => import("@/components/library/UpcomingBetaReadsCard").then((module) => module.UpcomingBetaReadsCard),
+  {
+    ssr: false,
+    loading: () => <div className="rounded-[1.5rem] border p-6" />,
+  }
+)
+
+const UploadModal = dynamic(
+  () => import("@/components/modals/UploadModal").then((module) => module.UploadModal),
+  {
+    ssr: false,
+  }
+)
 
 type SortOption = "recent" | "title" | "progress"
 type ViewMode = "grid" | "list"
@@ -203,6 +217,7 @@ export default function LibraryPage() {
   const [menuBookId, setMenuBookId] = useState<string | null>(null)
   const [pinnedIds, setPinnedIds] = useState<Record<string, boolean>>({})
   const [pinsReady, setPinsReady] = useState(false)
+  const [showBetaReadsCard, setShowBetaReadsCard] = useState(false)
 
   const {
     data: books = [],
@@ -215,8 +230,10 @@ export default function LibraryPage() {
     refetchInterval: (query) => {
       const items = (query.state.data as Book[] | undefined) ?? []
       const hasProcessingBook = items.some((book) => book.status === "processing" || (!book.cover_url && book.format === "pdf"))
-      return hasProcessingBook ? 5_000 : false
+      const canPoll = typeof document === "undefined" || document.visibilityState === "visible"
+      return canPoll && hasProcessingBook ? 5_000 : false
     },
+    refetchIntervalInBackground: false,
   })
 
   useEffect(() => {
@@ -237,6 +254,26 @@ export default function LibraryPage() {
     if (!pinsReady) return
     window.localStorage.setItem(PINNED_STORAGE_KEY, JSON.stringify(pinnedIds))
   }, [pinnedIds, pinsReady])
+
+  useEffect(() => {
+    if (showBetaReadsCard) return
+
+    const schedule =
+      typeof window.requestIdleCallback === "function"
+        ? window.requestIdleCallback.bind(window)
+        : ((callback: IdleRequestCallback) =>
+            window.setTimeout(() => callback({ didTimeout: false, timeRemaining: () => 0 } as IdleDeadline), 150))
+    const cancel =
+      typeof window.cancelIdleCallback === "function"
+        ? window.cancelIdleCallback.bind(window)
+        : window.clearTimeout.bind(window)
+
+    const handle = schedule(() => {
+      startTransition(() => setShowBetaReadsCard(true))
+    })
+
+    return () => cancel(handle)
+  }, [showBetaReadsCard])
 
   const normalizedSearch = search.trim().toLowerCase()
   const visibleBooks = books.filter((book) => !book.hidden_at)
@@ -540,7 +577,7 @@ export default function LibraryPage() {
             </div>
           </section>
 
-          <UpcomingBetaReadsCard isDark={isDark} />
+          {showBetaReadsCard ? <UpcomingBetaReadsCard isDark={isDark} /> : <div className={`rounded-[1.5rem] border p-6 ${surfaceClass}`} />}
 
           <section className="space-y-4">
             <SectionHeading

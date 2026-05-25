@@ -1,18 +1,26 @@
 "use client"
 
 import axios from "axios"
+import dynamic from "next/dynamic"
 import { useMemo, useRef, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import Link from "next/link"
 import { useParams } from "next/navigation"
 
-import { AuthorToolsNav } from "@/components/layout/AuthorToolsNav"
 import { ObsidianVaultPreview } from "@/components/reader/ObsidianVaultPreview"
 import { booksApi } from "@/lib/api/books"
 import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
 import { worldBuildingApi } from "@/lib/api/worldBuilding"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import type { Book, ObsidianPreview, ObsidianVaultNote } from "@/types/book"
+
+const AuthorToolsNav = dynamic(
+  () => import("@/components/layout/AuthorToolsNav").then((module) => module.AuthorToolsNav),
+  {
+    ssr: false,
+    loading: () => <div className="rounded-[1.8rem] border border-dashed p-8" />,
+  }
+)
 
 type ExportFormat = "md" | "pdf" | "docx" | "obsidian_folder"
 type ManuscriptExportFormat = "pdf" | "docx" | "epub" | "obsidian"
@@ -199,6 +207,7 @@ export default function ExportStudioPage() {
             bookId={bookId}
             active="export"
             isDark={isDark}
+            bookData={book}
             title="Author tools"
             description="Import new material, export structured references, and preview the exact vault files before you leave the page."
           />

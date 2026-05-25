@@ -114,17 +114,36 @@ class _FakeClient:
         self.closed = True
 
 
-class _Cache:
+class _AsyncCache:
     def __init__(self, data=None):
         self.data = dict(data or {})
         self.set_calls = []
 
-    def get(self, key):
-        return self.data.get(key)
+    async def get(self, *key_parts):
+        return self.data.get(tuple(str(part) for part in key_parts))
 
-    def set(self, key, value):
+    async def set(self, *key_parts_and_value):
+        *key_parts, value = key_parts_and_value
+        key = tuple(str(part) for part in key_parts)
         self.data[key] = value
         self.set_calls.append((key, value))
+
+
+def _patch_route_caches(monkeypatch, cache: _AsyncCache) -> None:
+    monkeypatch.setattr(advisor, "get_advisor_response_cache", cache.get)
+    monkeypatch.setattr(advisor, "set_advisor_response_cache", cache.set)
+    monkeypatch.setattr(advisor, "get_editorial_review_cache", cache.get)
+    monkeypatch.setattr(advisor, "set_editorial_review_cache", cache.set)
+    monkeypatch.setattr(advisor, "get_proactive_scan_cache", cache.get)
+    monkeypatch.setattr(advisor, "set_proactive_scan_cache", cache.set)
+    monkeypatch.setattr(advisor, "get_prose_tighten_cache", cache.get)
+    monkeypatch.setattr(advisor, "set_prose_tighten_cache", cache.set)
+    monkeypatch.setattr(advisor, "get_voice_consistency_cache", cache.get)
+    monkeypatch.setattr(advisor, "set_voice_consistency_cache", cache.set)
+    monkeypatch.setattr(advisor, "get_series_advisor_response_cache", cache.get)
+    monkeypatch.setattr(advisor, "set_series_advisor_response_cache", cache.set)
+    monkeypatch.setattr(advisor, "get_series_continuity_cache", cache.get)
+    monkeypatch.setattr(advisor, "set_series_continuity_cache", cache.set)
 
 
 def _message_body(*messages: tuple[str, str], total_chapters: int = 12) -> AdvisorRequest:
@@ -213,9 +232,9 @@ async def test_advisor_message_returns_cached_payload(monkeypatch):
     book_id = uuid.uuid4()
     user_id = uuid.uuid4()
     book = SimpleNamespace(id=book_id, user_id=user_id, title="Atlas", total_chapters=8)
-    cache = _Cache({"cached-key": {"reply": "Cached", "intent": "direction"}})
+    cache = _AsyncCache({(str(book_id), "cached-key"): {"reply": "Cached", "intent": "direction"}})
     monkeypatch.setattr(advisor, "make_advisor_cache_key", lambda *_args: "cached-key")
-    monkeypatch.setattr(advisor, "advisor_response_cache", cache)
+    _patch_route_caches(monkeypatch, cache)
     db = _FakeDB(get_values=[book])
 
     payload = await advisor.advisor_message(
@@ -236,25 +255,23 @@ async def test_advisor_message_enqueues_task_when_not_cached(monkeypatch):
     book_id = uuid.uuid4()
     user_id = uuid.uuid4()
     book = SimpleNamespace(id=book_id, user_id=user_id, title="Atlas", total_chapters=8)
-    cache = _Cache()
+    cache = _AsyncCache()
     db = _FakeDB(get_values=[book])
     captured: dict[str, object] = {}
-
-    class _TaskHandle:
-        id = "task-abc"
+    job_id = uuid.uuid4()
 
     class _Task:
-        def apply_async(self, *, kwargs):
+        def apply_async(self, *, task_id, kwargs):
+            captured["task_id"] = task_id
             captured["kwargs"] = kwargs
-            return _TaskHandle()
 
-    async def _fake_cache_set(key, value, ttl):
-        captured["cache"] = (key, value, ttl)
+    async def _fake_create_job(*_args, **_kwargs):
+        return SimpleNamespace(id=job_id)
 
     monkeypatch.setattr(advisor, "make_advisor_cache_key", lambda *_args: "queued-key")
-    monkeypatch.setattr(advisor, "advisor_response_cache", cache)
+    _patch_route_caches(monkeypatch, cache)
     monkeypatch.setattr(advisor, "generate_advisor_reply_task", _Task())
-    monkeypatch.setattr(advisor, "cache_set", _fake_cache_set)
+    monkeypatch.setattr(advisor, "create_advisor_job", _fake_create_job)
 
     response = Response()
     payload = await advisor.advisor_message(
@@ -267,7 +284,8 @@ async def test_advisor_message_enqueues_task_when_not_cached(monkeypatch):
     )
 
     assert response.status_code == 202
-    assert payload == {"task_id": "task-abc", "status": "queued", "cached": False}
+    assert payload == {"task_id": str(job_id), "status": "queued", "cached": False}
+    assert captured["task_id"] == str(job_id)
 
 
 @pytest.mark.asyncio
@@ -276,24 +294,22 @@ async def test_advisor_message_async_enqueues_task(monkeypatch):
     user_id = uuid.uuid4()
     book = SimpleNamespace(id=book_id, user_id=user_id, title="Atlas {Saga}", total_chapters=12)
     db = _FakeDB(get_values=[book])
-    cache = _Cache()
+    cache = _AsyncCache()
     captured: dict[str, object] = {}
-
-    class _TaskHandle:
-        id = "task-123"
+    job_id = uuid.uuid4()
 
     class _Task:
-        def apply_async(self, *, kwargs):
+        def apply_async(self, *, task_id, kwargs):
+            captured["task_id"] = task_id
             captured["kwargs"] = kwargs
-            return _TaskHandle()
 
-    async def _fake_cache_set(key, value, ttl):
-        captured["cache"] = (key, value, ttl)
+    async def _fake_create_job(*_args, **_kwargs):
+        return SimpleNamespace(id=job_id)
 
     monkeypatch.setattr(advisor, "make_advisor_cache_key", lambda *_args: "advisor-key")
-    monkeypatch.setattr(advisor, "advisor_response_cache", cache)
+    _patch_route_caches(monkeypatch, cache)
     monkeypatch.setattr(advisor, "generate_advisor_reply_task", _Task())
-    monkeypatch.setattr(advisor, "cache_set", _fake_cache_set)
+    monkeypatch.setattr(advisor, "create_advisor_job", _fake_create_job)
 
     response = Response()
     payload = await advisor.advisor_message_async(
@@ -306,8 +322,10 @@ async def test_advisor_message_async_enqueues_task(monkeypatch):
     )
 
     assert response.status_code == 202
-    assert payload == {"task_id": "task-123", "status": "queued", "cached": False}
+    assert payload == {"task_id": str(job_id), "status": "queued", "cached": False}
+    assert captured["task_id"] == str(job_id)
     assert captured["kwargs"] == {
+        "job_id": str(job_id),
         "book_id": str(book_id),
         "user_id": str(user_id),
         "messages": [
@@ -323,36 +341,52 @@ async def test_advisor_message_async_status_returns_completed_payload(monkeypatc
     book_id = uuid.uuid4()
     user_id = uuid.uuid4()
     book = SimpleNamespace(id=book_id, user_id=user_id, title="Atlas", total_chapters=12)
-    db = _FakeDB(get_values=[book])
-
-    async def _fake_cache_get(_key):
-        return {"book_id": str(book_id), "user_id": str(user_id)}
-
-    async def _fake_cache_del(_key):
-        return None
-
-    class _ResultHandle:
-        state = "SUCCESS"
-        result = {"reply": "Advisor reply", "intent": "general", "response_type": "standard", "retrieved_passages": []}
-
-    class _Task:
-        @staticmethod
-        def AsyncResult(_task_id):
-            return _ResultHandle()
-
-    monkeypatch.setattr(advisor, "cache_get", _fake_cache_get)
-    monkeypatch.setattr(advisor, "cache_del", _fake_cache_del)
-    monkeypatch.setattr(advisor, "generate_advisor_reply_task", _Task())
+    job_id = uuid.uuid4()
+    job = SimpleNamespace(
+        id=job_id,
+        user_id=user_id,
+        scope="book",
+        book_id=book_id,
+        status="complete",
+        result_json={"reply": "Advisor reply", "intent": "general", "response_type": "standard", "retrieved_passages": []},
+        error_code=None,
+    )
+    db = _FakeDB(get_values=[book, job])
 
     payload = await advisor.advisor_message_async_status(
         book_id,
-        "task-123",
+        str(job_id),
         db=db,
         current_user=SimpleNamespace(id=user_id),
     )
 
     assert payload["status"] == "complete"
     assert payload["result"]["reply"] == "Advisor reply"
+
+
+@pytest.mark.asyncio
+async def test_advisor_message_stream_hides_internal_errors(monkeypatch):
+    user_id = uuid.uuid4()
+    book = SimpleNamespace(id=uuid.uuid4(), user_id=user_id, title="Atlas", total_chapters=8)
+    db = _FakeDB(get_values=[book])
+
+    async def _fake_stream_advisor_reply_payload(**_kwargs):
+        raise RuntimeError("openai_api_key=sk-secret")
+        yield
+
+    monkeypatch.setattr(advisor, "stream_advisor_reply_payload", _fake_stream_advisor_reply_payload)
+
+    response = await advisor.advisor_message_stream(
+        book.id,
+        body=_message_body(("user", "Help")),
+        db=db,
+        current_user=SimpleNamespace(id=user_id),
+        _=None,
+    )
+    body = "".join([chunk async for chunk in response.body_iterator])
+
+    assert "Something went wrong. Please try again." in body
+    assert "sk-secret" not in body
 
 
 @pytest.mark.asyncio
@@ -536,7 +570,7 @@ async def test_advisor_suggestions_adds_sparse_proactive_audit(monkeypatch):
         description="A deal with the ferryman remains unresolved.",
         importance=6,
     )
-    cache = _Cache()
+    cache = _AsyncCache()
     client = _FakeClient(
         '{"findings":[{"severity":"direction","type":"future_direction","title":"Audit thread pressure point","description":"The ferryman bargain needs a clearer payoff path before the finale.","chapter_ref":8,"action_label":"Plan the payoff","ask_prompt":"How should the ferryman bargain resolve?"}],"overall_note":"Sparse heuristics triggered a deeper audit."}'
     )
@@ -544,7 +578,7 @@ async def test_advisor_suggestions_adds_sparse_proactive_audit(monkeypatch):
     async def _fake_story_context(*_args, **_kwargs):
         return "Story context"
 
-    monkeypatch.setattr(advisor, "advisor_response_cache", cache)
+    _patch_route_caches(monkeypatch, cache)
     monkeypatch.setattr(advisor, "AsyncOpenAI", lambda api_key: client)
     monkeypatch.setattr(advisor, "build_story_context", _fake_story_context)
     monkeypatch.setattr(advisor, "make_editorial_cache_key", lambda *_args: "scan-cache")
@@ -595,9 +629,9 @@ async def test_editorial_review_validates_cache_and_happy_path(monkeypatch):
         )
     assert exc.value.detail == "Passage text is required."
 
-    cache = _Cache({"editorial-key": {"review": {"overall_verdict": "Cached"}, "retrieved_passages": []}})
+    cache = _AsyncCache({(str(book_id), "editorial-key"): {"review": {"overall_verdict": "Cached"}, "retrieved_passages": []}})
     monkeypatch.setattr(advisor, "make_editorial_cache_key", lambda *_args: "editorial-key")
-    monkeypatch.setattr(advisor, "advisor_response_cache", cache)
+    _patch_route_caches(monkeypatch, cache)
     db = _FakeDB(get_values=[book])
     cached_payload = await advisor.editorial_review(
         book_id,
@@ -608,7 +642,7 @@ async def test_editorial_review_validates_cache_and_happy_path(monkeypatch):
     )
     assert cached_payload["cached"] is True
 
-    cache = _Cache()
+    cache = _AsyncCache()
     client = _FakeClient('{"overall_verdict":"Needs polish"}')
 
     async def _fake_semantic_search(*_args, **_kwargs):
@@ -617,7 +651,7 @@ async def test_editorial_review_validates_cache_and_happy_path(monkeypatch):
     async def _fake_story_context(*_args, **_kwargs):
         return "Story context"
 
-    monkeypatch.setattr(advisor, "advisor_response_cache", cache)
+    _patch_route_caches(monkeypatch, cache)
     monkeypatch.setattr(advisor, "make_editorial_cache_key", lambda *_args: "editorial-build")
     monkeypatch.setattr(advisor, "semantic_search", _fake_semantic_search)
     monkeypatch.setattr(advisor, "build_story_context", _fake_story_context)
@@ -874,25 +908,23 @@ async def test_series_advisor_message_enqueues_task(monkeypatch):
     series_id = uuid.uuid4()
     user_id = uuid.uuid4()
     series = SimpleNamespace(id=series_id, user_id=user_id, name="Atlas Saga")
-    cache = _Cache()
+    cache = _AsyncCache()
     db = _FakeDB(get_values=[series])
     captured: dict[str, object] = {}
-
-    class _TaskHandle:
-        id = "series-task-123"
+    job_id = uuid.uuid4()
 
     class _Task:
-        def apply_async(self, *, kwargs):
+        def apply_async(self, *, task_id, kwargs):
+            captured["task_id"] = task_id
             captured["kwargs"] = kwargs
-            return _TaskHandle()
 
-    async def _fake_cache_set(key, value, ttl):
-        captured["cache"] = (key, value, ttl)
+    async def _fake_create_job(*_args, **_kwargs):
+        return SimpleNamespace(id=job_id)
 
-    monkeypatch.setattr(advisor, "advisor_response_cache", cache)
+    _patch_route_caches(monkeypatch, cache)
     monkeypatch.setattr(advisor, "make_advisor_cache_key", lambda *_args: "series-key")
     monkeypatch.setattr(advisor, "generate_series_advisor_reply_task", _Task())
-    monkeypatch.setattr(advisor, "cache_set", _fake_cache_set)
+    monkeypatch.setattr(advisor, "create_advisor_job", _fake_create_job)
 
     response = Response()
     payload = await advisor.series_advisor_message(
@@ -905,8 +937,10 @@ async def test_series_advisor_message_enqueues_task(monkeypatch):
     )
 
     assert response.status_code == 202
-    assert payload == {"task_id": "series-task-123", "status": "queued", "cached": False}
+    assert payload == {"task_id": str(job_id), "status": "queued", "cached": False}
+    assert captured["task_id"] == str(job_id)
     assert captured["kwargs"] == {
+        "job_id": str(job_id),
         "series_id": str(series_id),
         "user_id": str(user_id),
         "messages": [
@@ -921,30 +955,21 @@ async def test_series_advisor_message_status_returns_completed_payload(monkeypat
     series_id = uuid.uuid4()
     user_id = uuid.uuid4()
     series = SimpleNamespace(id=series_id, user_id=user_id, name="Atlas Saga")
-    db = _FakeDB(get_values=[series])
-
-    async def _fake_cache_get(_key):
-        return {"scope": "series", "series_id": str(series_id), "user_id": str(user_id)}
-
-    async def _fake_cache_del(_key):
-        return None
-
-    class _ResultHandle:
-        state = "SUCCESS"
-        result = {"reply": "Series reply", "intent": "direction", "response_type": "standard", "retrieved_passages": []}
-
-    class _Task:
-        @staticmethod
-        def AsyncResult(_task_id):
-            return _ResultHandle()
-
-    monkeypatch.setattr(advisor, "cache_get", _fake_cache_get)
-    monkeypatch.setattr(advisor, "cache_del", _fake_cache_del)
-    monkeypatch.setattr(advisor, "generate_series_advisor_reply_task", _Task())
+    job_id = uuid.uuid4()
+    job = SimpleNamespace(
+        id=job_id,
+        user_id=user_id,
+        scope="series",
+        series_id=series_id,
+        status="complete",
+        result_json={"reply": "Series reply", "intent": "direction", "response_type": "standard", "retrieved_passages": []},
+        error_code=None,
+    )
+    db = _FakeDB(get_values=[series, job])
 
     payload = await advisor.series_advisor_message_status(
         series_id,
-        "series-task-123",
+        str(job_id),
         db=db,
         current_user=SimpleNamespace(id=user_id),
     )
@@ -961,8 +986,8 @@ async def test_series_continuity_check_handles_no_prior_books_and_full_review(mo
     user_id = uuid.uuid4()
     series = SimpleNamespace(id=series_id, user_id=user_id, name="Atlas Saga")
     current_book = SimpleNamespace(id=book_id, user_id=user_id, title="Book Two")
-    cache = _Cache()
-    monkeypatch.setattr(advisor, "advisor_response_cache", cache)
+    cache = _AsyncCache()
+    _patch_route_caches(monkeypatch, cache)
     monkeypatch.setattr(advisor, "make_editorial_cache_key", lambda *_args: "series-cont-key")
 
     body = advisor.SeriesContinuityRequest(

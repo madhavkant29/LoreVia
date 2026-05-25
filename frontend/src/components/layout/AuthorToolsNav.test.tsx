@@ -5,6 +5,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import type { CollaborationPermissions } from "@/types/book"
 
 const useQueryMock = vi.hoisted(() => vi.fn())
+const useQueryClientMock = vi.hoisted(() => vi.fn())
 const useAuthStoreMock = vi.hoisted(() => vi.fn())
 const canUseAuthorFeaturesMock = vi.hoisted(() => vi.fn())
 
@@ -18,6 +19,7 @@ vi.mock("next/link", () => ({
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: useQueryMock,
+  useQueryClient: useQueryClientMock,
 }))
 
 vi.mock("@/components/billing/AuthorFeatureComponent", () => ({
@@ -58,6 +60,7 @@ describe("AuthorToolsNav", () => {
       container.remove()
     }
     useQueryMock.mockReset()
+    useQueryClientMock.mockReset()
     useAuthStoreMock.mockReset()
     canUseAuthorFeaturesMock.mockReset()
     container = null
@@ -109,13 +112,37 @@ describe("AuthorToolsNav", () => {
 
     expect(useQueryMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        staleTime: 60_000,
+        enabled: false,
+        staleTime: Number.POSITIVE_INFINITY,
       })
     )
   })
+
+  it("supports a compact rail size for tighter overview layouts", () => {
+    mockBaseState()
+
+    const view = renderAuthorToolsNav({ railSize: "compact" })
+
+    const nav = view.querySelector('[data-testid="author-tools-nav-rail"]')
+    expect(nav?.className ?? "").toContain("w-[4.35rem]")
+    expect(nav?.className ?? "").toContain("hover:w-[16.5rem]")
+  })
+
+  it("shows author sections for a free owner when the book is in author mode", () => {
+    mockBaseState({
+      tier: "free",
+      hasOwnAuthorAccess: false,
+      collaborationPermissions: null,
+    })
+
+    const view = renderAuthorToolsNav()
+
+    expect(view.querySelector('[data-testid="author-nav-item-manuscript"]')?.textContent).toContain("Manuscript Editor")
+    expect(view.querySelector('[data-testid="author-nav-item-characters"]')?.textContent).toContain("Character Bible")
+  })
 })
 
-function renderAuthorToolsNav() {
+function renderAuthorToolsNav({ railSize }: { railSize?: "default" | "compact" } = {}) {
   container = document.createElement("div")
   document.body.appendChild(container)
   root = createRoot(container)
@@ -129,6 +156,7 @@ function renderAuthorToolsNav() {
         currentChapter={2}
         mode="author"
         variant="rail"
+        railSize={railSize}
       />
     )
   })
@@ -147,6 +175,16 @@ function mockBaseState({
 } = {}) {
   useAuthStoreMock.mockImplementation((selector: (state: { user: { tier: string } | null }) => unknown) => selector({ user: tier ? { tier } : null }))
   canUseAuthorFeaturesMock.mockReturnValue(hasOwnAuthorAccess)
+  useQueryClientMock.mockReturnValue({
+    getQueryData: vi.fn().mockReturnValue(
+      collaborationPermissions
+        ? {
+            collaboration_role: "editor",
+            collaboration_permissions: collaborationPermissions,
+          }
+        : null
+    ),
+  })
   useQueryMock.mockReturnValue({
     data: collaborationPermissions
       ? {

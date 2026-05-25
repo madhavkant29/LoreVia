@@ -208,6 +208,10 @@ def build_character_analysis_metadata(extracted: dict, *, persistence_reason: st
     mention_count = int(evidence.get("mention_count") or 0)
     strong_mentions = int(evidence.get("strong_mention_count") or 0)
     grounding_passage_count = max(mention_count, strong_mentions)
+    cluster_size = int(evidence.get("cluster_size") or 1)
+    cluster_mention_count = int(evidence.get("cluster_mention_count") or mention_count or 0)
+    canonical_confidence = float(extracted.get("canonical_confidence") or extracted.get("confidence") or 0.0)
+    grounding_coverage = round(strong_mentions / max(1, mention_count), 3) if mention_count else 0.0
     quality_flags: list[str] = []
     if not extracted.get("arc_summary") or str(extracted.get("arc_summary")).strip().casefold() in GENERIC_SUMMARY_PHRASES:
         quality_flags.append("generic_summary")
@@ -232,6 +236,11 @@ def build_character_analysis_metadata(extracted: dict, *, persistence_reason: st
         "quality_flags": quality_flags,
         "grounding_passage_count": grounding_passage_count,
         "confidence_band": confidence_band,
+        "canonical_confidence": canonical_confidence,
+        "grounding_coverage": grounding_coverage,
+        "cluster_size": cluster_size,
+        "cluster_mention_count": cluster_mention_count,
+        "resolver_status": str(extracted.get("resolver_status") or evidence.get("resolver_status") or "").strip() or None,
     }
 
 
@@ -239,6 +248,12 @@ def build_character_profile(extracted: dict, book_id: uuid.UUID, first_chapter: 
     raw_traits = _normalize_trait_state(extracted.get("traits"))
     archetype = extracted.get("archetype")
     trait_state = merge_trait_states({}, raw_traits)
+    evidence = extracted.get("evidence") if isinstance(extracted.get("evidence"), dict) else {}
+    mention_weight = max(
+        1,
+        int(evidence.get("cluster_size") or 0),
+        int(extracted.get("cluster_size") or 0),
+    )
 
     return {
         "book_id": book_id,
@@ -247,7 +262,7 @@ def build_character_profile(extracted: dict, book_id: uuid.UUID, first_chapter: 
         "role": extracted.get("role"),
         "first_chapter": first_chapter,
         "last_seen_chapter": first_chapter,   # set on first appearance
-        "mention_count": 1,                    # first mention
+        "mention_count": mention_weight,
         "trait_state": trait_state,
         "hair": flat(trait_state, "hair"),
         "eyes": flat(trait_state, "eyes"),
@@ -293,6 +308,12 @@ def merge_profile_fields(existing, incoming) -> dict:
     incoming_archetype = incoming.get("archetype") if isinstance(incoming, dict) else incoming.archetype
     incoming_last_seen = incoming.get("last_seen_chapter") if isinstance(incoming, dict) else getattr(incoming, "last_seen_chapter", None)
     incoming_growth_events = incoming.get("growth_events") if isinstance(incoming, dict) else getattr(incoming, "growth_events", None)
+    incoming_evidence = incoming.get("evidence") if isinstance(incoming, dict) and isinstance(incoming.get("evidence"), dict) else {}
+    mention_weight = max(
+        1,
+        int(incoming_evidence.get("cluster_size") or 0),
+        int(incoming.get("cluster_size") or 0) if isinstance(incoming, dict) else 0,
+    )
 
     aliases = merge_list_values(existing_aliases, incoming_aliases, [incoming_name] if incoming_name else [])
     aliases = [alias for alias in aliases if alias.lower() != existing.name.lower()]
@@ -306,7 +327,7 @@ def merge_profile_fields(existing, incoming) -> dict:
         "role": existing.role or incoming_role,
         "first_chapter": min(existing.first_chapter, incoming_first_chapter),
         "last_seen_chapter": new_last_seen,
-        "mention_count": (existing.mention_count or 0) + 1,   # increment each time seen
+        "mention_count": (existing.mention_count or 0) + mention_weight,
         "trait_state": merged_traits,
         "hair": flat(merged_traits, "hair"),
         "eyes": flat(merged_traits, "eyes"),

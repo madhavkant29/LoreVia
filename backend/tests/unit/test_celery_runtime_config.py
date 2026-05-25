@@ -11,7 +11,7 @@ def test_resolve_celery_redis_settings_defaults_to_redis_url(monkeypatch):
     broker_url, broker_ssl, backend_url, backend_ssl = celery_app._resolve_celery_redis_settings()
 
     assert broker_url == "redis://:pw@redis:6379/0"
-    assert backend_url == "redis://:pw@redis:6379/0"
+    assert backend_url is None
     assert broker_ssl == {}
     assert backend_ssl == {}
 

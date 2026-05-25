@@ -304,7 +304,7 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
                   </button>
                   {tier.access === "paid" ? (
                     <p className={`mt-3 text-center text-sm ${subCopyClass}`}>
-                      {billingCycle === "annual" ? `Billed yearly at $${price}/yr` : `10 days free, then $${price}/mo`}
+                      {billingCycle === "annual" ? `Billed yearly at $${price}/year` : `10 days free, then $${price}/mo`}
                     </p>
                   ) : null}
                 </div>

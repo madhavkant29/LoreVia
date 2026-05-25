@@ -25,15 +25,16 @@ from app.models.user import SubscriptionEvent, User
 FREE_TIER = "free"
 AUTHOR_TIER = "author"
 ARCHITECT_TIER = "architect"
-ADMIN_TIER = "admin"
 
 TRIAL_DAYS = 10
-VALID_USER_TIERS = {FREE_TIER, AUTHOR_TIER, ARCHITECT_TIER, ADMIN_TIER}
-PAID_READING_TIERS = {AUTHOR_TIER, ARCHITECT_TIER, ADMIN_TIER}
-AUTHORING_SUBSCRIPTION_TIERS = {AUTHOR_TIER, ARCHITECT_TIER, ADMIN_TIER}
-UNLIMITED_OWNER_UPLOAD_TIERS = {ARCHITECT_TIER, ADMIN_TIER}
+VALID_USER_TIERS = {FREE_TIER, AUTHOR_TIER, ARCHITECT_TIER}
+PAID_READING_TIERS = {AUTHOR_TIER, ARCHITECT_TIER}
+AUTHORING_SUBSCRIPTION_TIERS = {AUTHOR_TIER, ARCHITECT_TIER}
+UNLIMITED_OWNER_UPLOAD_TIERS = {ARCHITECT_TIER}
 DAILY_LIMIT_MESSAGE = "Your daily limit refreshes tomorrow. Want higher limits now? Upgrade."
 SUPPORTED_PADDLE_WEBHOOK_EVENTS = (
+    "adjustment.created",
+    "adjustment.updated",
     "transaction.completed",
     "transaction.past_due",
     "transaction.payment_failed",
@@ -304,7 +305,6 @@ def tier_display_label(tier: str, trial_active: bool = False) -> str:
         FREE_TIER: "Free",
         AUTHOR_TIER: "Author",
         ARCHITECT_TIER: "Architect",
-        ADMIN_TIER: "Admin",
     }
     label = labels.get(normalize_tier(tier), "Free")
     return f"{label} (free trial)" if trial_active else label
@@ -796,7 +796,6 @@ def prediction_limit_per_day(user: Any) -> int:
         FREE_TIER: settings.FREE_PREDICTION_PER_DAY,
         AUTHOR_TIER: settings.AUTHOR_PREDICTION_PER_DAY,
         ARCHITECT_TIER: settings.ARCHITECT_PREDICTION_PER_DAY,
-        ADMIN_TIER: 999999,
     }.get(tier, settings.FREE_PREDICTION_PER_DAY)
 
 
@@ -809,7 +808,6 @@ def protected_authoring_limit_per_day(user: Any) -> int:
         FREE_TIER: settings.FREE_ADVISOR_PER_DAY,
         AUTHOR_TIER: settings.AUTHOR_HIGH_COST_TURNS_PER_DAY,
         ARCHITECT_TIER: settings.ARCHITECT_HIGH_COST_TURNS_PER_DAY,
-        ADMIN_TIER: 999999,
     }.get(tier, 0)
 
 
@@ -826,7 +824,6 @@ def continuity_limit_per_day(user: Any) -> int:
         FREE_TIER: settings.FREE_CONTINUITY_PER_DAY,
         AUTHOR_TIER: settings.AUTHOR_HIGH_COST_TURNS_PER_DAY,
         ARCHITECT_TIER: settings.ARCHITECT_HIGH_COST_TURNS_PER_DAY,
-        ADMIN_TIER: 999999,
     }.get(presentation.access_tier, 0)
 
 

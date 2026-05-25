@@ -19,6 +19,7 @@ from app.utils.billing_utils import (
     protected_authoring_limit_per_day,
     recall_limit_per_day,
 )
+from app.utils.email_utils import track_usage_limit_friction_and_maybe_send
 
 
 async def _window(key: str, limit: int, window: int = 60) -> bool:
@@ -62,7 +63,7 @@ def _utc_day_bucket(action: str, now: datetime | None = None) -> tuple[str, int]
 
 async def _bump_daily_bucket(
     db: AsyncSession,
-    user_id: object,
+    user: User | object,
     action: str,
     limit: int,
 ) -> None:
@@ -70,11 +71,14 @@ async def _bump_daily_bucket(
         raise HTTPException(403, DAILY_LIMIT_MESSAGE)
 
     bucket, ttl_seconds = _utc_day_bucket(action)
+    user_id = getattr(user, "id", user)
     key = key_ratelimit(str(user_id), bucket)
     r = await get_redis()
     await r.set(key, "0", ex=ttl_seconds, nx=True)
     count = int(await r.incr(key))
     if count > limit:
+        if isinstance(user, User) or getattr(user, "email", None):
+            await track_usage_limit_friction_and_maybe_send(user, action=action)
         raise HTTPException(429, DAILY_LIMIT_MESSAGE)
 
 
@@ -86,7 +90,7 @@ async def rate_limit_search(
     if limit is None:
         return
     limit = await _limit_for_user(db, current_user.id, "search_per_hour", limit)
-    await _bump_daily_bucket(db, current_user.id, "search", limit)
+    await _bump_daily_bucket(db, current_user, "search", limit)
 
 
 async def rate_limit_summary(current_user: User = Depends(get_current_user)):
@@ -99,7 +103,7 @@ async def rate_limit_chat(
 ):
     daily_limit = prediction_limit_per_day(current_user)
     daily_limit = await _limit_for_user(db, current_user.id, "chat_per_day", daily_limit)
-    await _bump_daily_bucket(db, current_user.id, "prediction", daily_limit)
+    await _bump_daily_bucket(db, current_user, "prediction", daily_limit)
 
 
 async def rate_limit_advisor(
@@ -110,7 +114,7 @@ async def rate_limit_advisor(
     if daily_limit <= 0:
         raise HTTPException(403, "Story Advisor is an authoring feature. Upgrade to Author for access.")
     daily_limit = await _limit_for_user(db, current_user.id, "advisor_per_day", daily_limit)
-    await _bump_daily_bucket(db, current_user.id, "high_cost_authoring", daily_limit)
+    await _bump_daily_bucket(db, current_user, "high_cost_authoring", daily_limit)
 
 
 async def rate_limit_recall(
@@ -120,7 +124,7 @@ async def rate_limit_recall(
     daily_limit = recall_limit_per_day(current_user)
     if daily_limit is None:
         return
-    await _bump_daily_bucket(db, current_user.id, "recall", daily_limit)
+    await _bump_daily_bucket(db, current_user, "recall", daily_limit)
 
 
 async def rate_limit_continuity_checker(
@@ -130,7 +134,7 @@ async def rate_limit_continuity_checker(
     daily_limit = continuity_limit_per_day(current_user)
     if daily_limit <= 0:
         raise HTTPException(403, "Continuity checks are authoring features. Upgrade to Author for access.")
-    await _bump_daily_bucket(db, current_user.id, "continuity", daily_limit)
+    await _bump_daily_bucket(db, current_user, "continuity", daily_limit)
 
 
 async def rate_limit_api(

@@ -140,7 +140,7 @@ class _FakeDB:
 
 
 @pytest.mark.asyncio
-async def test_build_writing_dashboard_stats_rolls_up_periods_and_entries():
+async def test_build_writing_dashboard_stats_rolls_up_periods_and_entries(monkeypatch):
     user = _user_stub(id="user-1", daily_word_goal=1000)
     now = datetime(2026, 5, 14, 12, 0, tzinfo=UTC)
     activities = [
@@ -186,6 +186,23 @@ async def test_build_writing_dashboard_stats_rolls_up_periods_and_entries():
         ),
     ]
 
+    cache_store = {}
+
+    async def _fake_get_version(_user_id):
+        return 0
+
+    async def _fake_get_cache(_user_id, _version, _day_marker):
+        return cache_store.get("payload")
+
+    async def _fake_set_cache(_user_id, _version, _day_marker, payload):
+        cache_store["payload"] = payload
+
+    import app.utils.user_utils as user_utils_module
+
+    monkeypatch.setattr(user_utils_module, "get_user_dashboard_cache_version", _fake_get_version)
+    monkeypatch.setattr(user_utils_module, "get_writing_dashboard_cache", _fake_get_cache)
+    monkeypatch.setattr(user_utils_module, "set_writing_dashboard_cache", _fake_set_cache)
+
     stats = await build_writing_dashboard_stats(_FakeDB(activities), user, now=now)
 
     assert stats["today"]["words"] == 1202
@@ -204,3 +221,28 @@ async def test_build_writing_dashboard_stats_rolls_up_periods_and_entries():
     assert stats["entries_today"][1]["title"] == "Chapter XXXVI"
     assert stats["entries_today"][1]["words"] == 763
     assert len(stats["heatmap"]) == 140
+
+
+@pytest.mark.asyncio
+async def test_build_writing_dashboard_stats_returns_cached_payload(monkeypatch):
+    user = _user_stub(id="user-1", daily_word_goal=1000)
+    cached_payload = {"today": {"words": 42, "target_words": 1000, "progress_pct": 4}}
+
+    async def _fake_get_version(_user_id):
+        return 0
+
+    async def _fake_get_cache(_user_id, _version, _day_marker):
+        return cached_payload
+
+    async def _fake_set_cache(*_args, **_kwargs):
+        raise AssertionError("cache set should not run on a cache hit")
+
+    import app.utils.user_utils as user_utils_module
+
+    monkeypatch.setattr(user_utils_module, "get_user_dashboard_cache_version", _fake_get_version)
+    monkeypatch.setattr(user_utils_module, "get_writing_dashboard_cache", _fake_get_cache)
+    monkeypatch.setattr(user_utils_module, "set_writing_dashboard_cache", _fake_set_cache)
+
+    stats = await build_writing_dashboard_stats(_FakeDB([]), user, now=datetime(2026, 5, 14, 12, 0, tzinfo=UTC))
+
+    assert stats == cached_payload

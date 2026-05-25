@@ -67,6 +67,7 @@ export function RelationshipGraph({
   const containerRef = useRef<HTMLDivElement>(null)
   const cyRef = useRef<cytoscape.Core | null>(null)
   const selectCharacterRef = useRef(onSelectCharacterId)
+  const layoutPersistTimerRef = useRef<number | null>(null)
   const [graphData, setGraphData] = useState<GraphData | null>(null)
   const [selection, setSelection] = useState<Selection>(null)
   const [filterType, setFilterType] = useState<string | null>(null)
@@ -298,7 +299,13 @@ export function RelationshipGraph({
     cy.on("dragfree", "node", () => {
       const positions = Object.fromEntries(cy.nodes().map((node) => [node.id(), node.position()]))
       if (typeof window !== "undefined") {
-        window.localStorage.setItem(graphStorageKey(bookId, upToChapter), JSON.stringify(positions))
+        if (layoutPersistTimerRef.current) {
+          window.clearTimeout(layoutPersistTimerRef.current)
+        }
+        layoutPersistTimerRef.current = window.setTimeout(() => {
+          window.localStorage.setItem(graphStorageKey(bookId, upToChapter), JSON.stringify(positions))
+          layoutPersistTimerRef.current = null
+        }, 180)
       }
     })
     cy.on("zoom", () => {
@@ -306,7 +313,17 @@ export function RelationshipGraph({
     })
 
     cyRef.current = cy
-    return () => cy.destroy()
+    return () => {
+      if (layoutPersistTimerRef.current) {
+        window.clearTimeout(layoutPersistTimerRef.current)
+        layoutPersistTimerRef.current = null
+      }
+      const positions = Object.fromEntries(cy.nodes().map((node) => [node.id(), node.position()]))
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(graphStorageKey(bookId, upToChapter), JSON.stringify(positions))
+      }
+      cy.destroy()
+    }
   }, [bookId, upToChapter, compact, filteredGraph, interactionMode, labelOverrides, theme])
 
   useEffect(() => {

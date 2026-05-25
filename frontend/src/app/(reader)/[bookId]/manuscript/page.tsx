@@ -4,7 +4,7 @@ import type { ReactNode } from "react"
 import type { Route } from "next"
 import axios from "axios"
 import { useQuery } from "@tanstack/react-query"
-import { Suspense, useEffect, useMemo, useRef, useState } from "react"
+import { startTransition, Suspense, useEffect, useMemo, useRef, useState } from "react"
 import dynamic from "next/dynamic"
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
@@ -55,6 +55,34 @@ const ManuscriptPagedPreview = dynamic(
   () => import("@/components/reader/ManuscriptPagedPreview").then((module) => module.ManuscriptPagedPreview),
   {
     loading: () => <DeferredPanelLoadingState label="Preparing preview..." />,
+  }
+)
+
+const ManuscriptPlanWorkspace = dynamic(
+  () => import("@/components/reader/ManuscriptPlanWorkspace").then((module) => module.ManuscriptPlanWorkspace),
+  {
+    loading: () => <DeferredPanelLoadingState label="Loading planning workspace..." />,
+  }
+)
+
+const ManuscriptNonWriteWorkspace = dynamic(
+  () => import("@/components/reader/ManuscriptNonWriteWorkspace").then((module) => module.ManuscriptNonWriteWorkspace),
+  {
+    loading: () => <DeferredPanelLoadingState label="Loading analysis workspace..." />,
+  }
+)
+
+const ManuscriptOverlayDialogs = dynamic(
+  () => import("@/components/reader/ManuscriptOverlayDialogs").then((module) => module.ManuscriptOverlayDialogs),
+  {
+    loading: () => null,
+  }
+)
+
+const ManuscriptWriteRightRail = dynamic(
+  () => import("@/components/reader/ManuscriptWriteRightRail").then((module) => module.ManuscriptWriteRightRail),
+  {
+    loading: () => <DeferredPanelLoadingState label="Loading writing tools..." />,
   }
 )
 
@@ -222,7 +250,6 @@ function ManuscriptPageInner() {
   const [showSearchTools, setShowSearchTools] = useState(false)
   const [notes, setNotes] = useState<BookNote[]>([])
   const [notesLoading, setNotesLoading] = useState(false)
-  const [notesLoaded, setNotesLoaded] = useState(false)
   const [savingNote, setSavingNote] = useState(false)
   const [noteScope, setNoteScope] = useState<"chapter" | "book">("chapter")
   const [noteTitle, setNoteTitle] = useState("")
@@ -274,43 +301,53 @@ function ManuscriptPageInner() {
   const selectionMenuAnchorRef = useRef<ManuscriptSelectionAnchor | null>(null)
   const manuscriptReadyCapturedRef = useRef(false)
   const manuscriptLoadStartedAtRef = useRef<number | null>(typeof performance !== "undefined" ? performance.now() : null)
+  const deferredChecksSeedRef = useRef<{ chapterNumber: number; text: string } | null>(null)
 
   const { data: charactersData = EMPTY_CHARACTERS } = useQuery<Character[]>({
     queryKey: [`manuscript:${bookId}:characters`],
     queryFn: () => booksApi.getCharacters(bookId),
+    staleTime: 60_000,
   })
   const { data: writerWorkspaceData = null, refetch: refetchWriterWorkspace } = useQuery<WriterWorkspace | null>({
     queryKey: [bookCacheKey(bookId, "writer-workspace")],
     queryFn: () => booksApi.getWriterWorkspace(bookId),
+    staleTime: 60_000,
   })
   const { data: emotionalArcData = null, refetch: refetchEmotionalArc } = useQuery<EmotionalArcOverview | null>({
     queryKey: [bookCacheKey(bookId, "emotional-arc")],
     queryFn: () => booksApi.getEmotionalArc(bookId),
+    enabled: workspaceTab === "plan" || activeRightPane === "arcs" || activeRightPane === "insights",
+    staleTime: 60_000,
   })
   const { data: synopsisData = null, refetch: refetchSynopsis } = useQuery<ManuscriptSynopsis | null>({
     queryKey: [`manuscript:${bookId}:synopsis:minimal`],
     queryFn: () => intelligenceApi.synopsis(bookId, "minimal"),
+    enabled: workspaceTab === "analyze" || activeRightPane === "insights",
+    staleTime: 60_000,
   })
   const { data: workspaceTreeData = null, refetch: refetchWorkspaceTree } = useQuery<ManuscriptWorkspaceTree | null>({
     queryKey: [bookCacheKey(bookId, "workspace-tree")],
     queryFn: () => booksApi.getWorkspaceTree(bookId),
+    staleTime: 60_000,
   })
+  const annotationChapterNumber = selectedChapter ?? draftChapterNumber
   const {
     data: annotationsData = EMPTY_ANNOTATIONS,
     isFetching: annotationsQueryLoading,
-    refetch: refetchAnnotations,
   } = useQuery<ManuscriptAnnotation[]>({
-    queryKey: [`manuscript:${bookId}:annotations`],
-    queryFn: () => booksApi.getManuscriptAnnotations(bookId),
+    queryKey: [`manuscript:${bookId}:annotations:${annotationChapterNumber ?? "none"}`],
+    queryFn: () => annotationChapterNumber === null ? Promise.resolve(EMPTY_ANNOTATIONS) : booksApi.getManuscriptAnnotations(bookId, annotationChapterNumber),
+    enabled: annotationChapterNumber !== null && (workspaceTab === "write" || activeRightPane === "notes"),
+    staleTime: 30_000,
   })
   const {
     data: notesData = EMPTY_NOTES,
     isFetching: notesQueryLoading,
-    refetch: refetchNotes,
   } = useQuery<BookNote[]>({
     queryKey: [`manuscript:${bookId}:notes`],
     queryFn: () => booksApi.getBookNotes(bookId),
     enabled: showRightRail && activeRightPane === "notes",
+    staleTime: 30_000,
   })
   const { data: chapterVersionsData = EMPTY_CHAPTER_VERSIONS } = useQuery<ChapterVersion[]>({
     queryKey: selectedChapter !== null ? [`manuscript:${bookId}:chapter-versions:${selectedChapter}`] : [`manuscript:${bookId}:chapter-versions:none`],
@@ -330,7 +367,8 @@ function ManuscriptPageInner() {
   const { data: preWritingCheckData = null } = useQuery<PreWritingCheck | null>({
     queryKey: [`manuscript:${bookId}:prewriting:${activeChapterNumber}`],
     queryFn: () => booksApi.getPreWritingCheck(bookId, activeChapterNumber),
-    enabled: !loading && activeChapterNumber > 0,
+    enabled: workspaceTab !== "write" && !loading && activeChapterNumber > 0,
+    staleTime: 30_000,
   })
   const sceneDraftDirty = useMemo(() => {
     if (!sceneEditorOpen) return false
@@ -953,7 +991,12 @@ function ManuscriptPageInner() {
     setLogicSelectionText(selectedText)
     setTighteningSelection(true)
     try {
-      const payload = await intelligenceApi.proseTighten(bookId, selectedText, activeChapterNumber)
+      const payload = await intelligenceApi.proseTightenStream(
+        bookId,
+        selectedText,
+        activeChapterNumber,
+        { onStage: setStatusMessage },
+      )
       if (!payload.tightened_text || payload.tightened_text === selectedText) {
         setStatusMessage("No tighter rewrite was needed for the selected passage.")
         return
@@ -1063,6 +1106,10 @@ function ManuscriptPageInner() {
         html: chapterHtml,
       })
       const nextDraft = recoveredDraft.draft
+      deferredChecksSeedRef.current = {
+        chapterNumber: initialChapterNumber,
+        text: nextDraft.text.trim(),
+      }
       initialChapterLoadedRef.current = initialChapterNumber
       setDraftChapterNumber(null)
       setChapterTitle(nextDraft.title)
@@ -1095,27 +1142,6 @@ function ManuscriptPageInner() {
       setChapterTitle(chapterMeta?.title || `Chapter ${initialChapterNumber}`)
       setText("")
       setHtml(textToHtml(""))
-    }
-  }
-
-  const loadNotes = async () => {
-    setNotesLoading(true)
-    try {
-      const { data: noteData = [] } = await refetchNotes()
-      setNotes(noteData)
-      setNotesLoaded(true)
-    } finally {
-      setNotesLoading(false)
-    }
-  }
-
-  const loadAnnotations = async () => {
-    setAnnotationsLoading(true)
-    try {
-      const { data: annotationData = [] } = await refetchAnnotations()
-      setAnnotations(annotationData)
-    } finally {
-      setAnnotationsLoading(false)
     }
   }
 
@@ -1172,7 +1198,6 @@ function ManuscriptPageInner() {
   useEffect(() => {
     if (!showRightRail || activeRightPane !== "notes") return
     setNotes(notesData)
-    setNotesLoaded(true)
     setNotesLoading(notesQueryLoading)
   }, [activeRightPane, notesData, notesQueryLoading, showRightRail])
 
@@ -1183,14 +1208,6 @@ function ManuscriptPageInner() {
   useEffect(() => {
     setChapterVersions(chapterVersionsData)
   }, [chapterVersionsData])
-
-  useEffect(() => {
-    if (!showRightRail || activeRightPane !== "notes" || notesLoaded || notesLoading) return
-    loadNotes().catch(() => {
-      setNotes([])
-      setNotesLoaded(true)
-    })
-  }, [activeRightPane, bookId, notesLoaded, notesLoading, showRightRail])
 
   useEffect(() => {
     if (selectedChapter === null) {
@@ -1218,6 +1235,10 @@ function ManuscriptPageInner() {
         html: chapterHtml,
       })
       const nextDraft = recoveredDraft.draft
+      deferredChecksSeedRef.current = {
+        chapterNumber: selectedChapter,
+        text: nextDraft.text.trim(),
+      }
       setDraftChapterNumber(null)
       setChapterTitle(nextDraft.title)
       setText(nextDraft.text)
@@ -1380,50 +1401,52 @@ function ManuscriptPageInner() {
     setFullBookLoading(true)
     Promise.all(missingNumbers.map((number) => readerApi.getChapter(bookId, number)))
       .then((chapters) => {
+        const nextDrafts: BookDraftMap = {}
+        const nextContentVersions: Record<number, number> = {}
         const recoveredAutosaves: Array<{ chapterNumber: number; updatedAt: string }> = []
-        setBookDrafts((current) => {
-          const next = { ...current }
-          for (const chapter of chapters) {
-            const fallbackDraft = {
-              title: chapter.chapter_title || `Chapter ${chapter.chapter_number}`,
-              text: chapter.text_content || "",
-              html: chapter.html_content || textToHtml(chapter.text_content || ""),
-            }
-            const recoveredDraft = getRecoveredDraft(chapter.chapter_number, fallbackDraft)
-            next[chapter.chapter_number] = recoveredDraft.draft
-            if (recoveredDraft.recovered) {
-              recoveredAutosaves.push({
-                chapterNumber: chapter.chapter_number,
-                updatedAt: recoveredDraft.recovered.updatedAt,
-              })
-            }
+
+        for (const chapter of chapters) {
+          const fallbackDraft = {
+            title: chapter.chapter_title || `Chapter ${chapter.chapter_number}`,
+            text: chapter.text_content || "",
+            html: chapter.html_content || textToHtml(chapter.text_content || ""),
           }
-          return next
-        })
-        setContentVersionByChapter((current) => {
-          const next = { ...current }
-          for (const chapter of chapters) {
-            next[chapter.chapter_number] = typeof chapter.content_version === "number" ? chapter.content_version : 1
+          const recoveredDraft = getRecoveredDraft(chapter.chapter_number, fallbackDraft)
+          nextDrafts[chapter.chapter_number] = recoveredDraft.draft
+          nextContentVersions[chapter.chapter_number] = typeof chapter.content_version === "number" ? chapter.content_version : 1
+          if (recoveredDraft.recovered) {
+            recoveredAutosaves.push({
+              chapterNumber: chapter.chapter_number,
+              updatedAt: recoveredDraft.recovered.updatedAt,
+            })
           }
-          return next
-        })
-        if (recoveredAutosaves.length > 0) {
-          setDirtyDrafts((current) => {
-            const next = new Set(current)
-            for (const draft of recoveredAutosaves) next.add(draft.chapterNumber)
-            return Array.from(next)
-          })
-          setAutosaveState((current) => {
-            const next = { ...current }
-            for (const draft of recoveredAutosaves) {
-              next[draft.chapterNumber] = {
-                status: "saved",
-                updatedAt: draft.updatedAt,
-              }
-            }
-            return next
-          })
         }
+
+        startTransition(() => {
+          setBookDrafts((current) => {
+            return { ...current, ...nextDrafts }
+          })
+          setContentVersionByChapter((current) => {
+            return { ...current, ...nextContentVersions }
+          })
+          if (recoveredAutosaves.length > 0) {
+            setDirtyDrafts((current) => {
+              const next = new Set(current)
+              for (const draft of recoveredAutosaves) next.add(draft.chapterNumber)
+              return Array.from(next)
+            })
+            setAutosaveState((current) => {
+              const next = { ...current }
+              for (const draft of recoveredAutosaves) {
+                next[draft.chapterNumber] = {
+                  status: "saved",
+                  updatedAt: draft.updatedAt,
+                }
+              }
+              return next
+            })
+          }
+        })
       })
       .finally(() => setFullBookLoading(false))
   }, [bookDrafts, bookId, chapterList, editorMode])
@@ -1625,6 +1648,13 @@ function ManuscriptPageInner() {
       setInlineContinuity(null)
       setReadabilityLoading(false)
       setContinuityLoading(false)
+      return
+    }
+    if (
+      deferredChecksSeedRef.current?.chapterNumber === activeChapterNumber
+      && deferredChecksSeedRef.current.text === trimmed
+    ) {
+      deferredChecksSeedRef.current = null
       return
     }
     const handle = window.setTimeout(() => {
@@ -2238,8 +2268,6 @@ function ManuscriptPageInner() {
                   {tab === "write" ? "Write" : tab === "plan" ? "Plan" : tab === "analyze" ? "Analyze" : "Characters"}
                 </button>
               ))}
-              <Link href={`/${bookId}/world-gap`} className={`border-b-2 border-transparent pb-2 text-sm font-medium transition ${isDark ? "text-slate-400 hover:text-slate-200" : "text-stone-500 hover:text-stone-800"}`}>Worldbuilding</Link>
-              <Link href={`/${bookId}/export`} className={`border-b-2 border-transparent pb-2 text-sm font-medium transition ${isDark ? "text-slate-400 hover:text-slate-200" : "text-stone-500 hover:text-stone-800"}`}>Export</Link>
               <div className="ml-auto flex flex-wrap items-center gap-2">
                 <div className={`inline-flex rounded-full p-1 ${isDark ? "border border-white/10 bg-black/30" : "border border-stone-200 bg-stone-100/80"}`}>
                   {(["edit", "paged"] as const).map((mode) => (
@@ -2272,182 +2300,38 @@ function ManuscriptPageInner() {
         </div>
 
         {workspaceTab === "plan" ? (
-        <div className="mt-6 grid gap-5 xl:grid-cols-[1.2fr_1fr]">
-          <section className={`rounded-[1.7rem] border p-5 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-white/90"}`}>
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-              <div>
-                <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-emerald-300" : "text-emerald-700"}`}>Writer dashboard</p>
-                <h2 className={`mt-2 text-2xl font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>Goals, templates, and live readability</h2>
-              </div>
-              <button
-                type="button"
-                onClick={() => void tightenSelectedText()}
-                disabled={tighteningSelection}
-                className="rounded-full bg-[linear-gradient(135deg,#0f766e,#115e59)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-              >
-                {tighteningSelection ? "Tightening..." : "Tighten selected text"}
-              </button>
-            </div>
-            <p className={`mt-3 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>
-              {editorMode === "chapter"
-                ? "Highlight a passage inside the active chapter editor to tighten or comment on only that selection. Ctrl/Cmd+S saves, Ctrl/Cmd+Shift+M comments, and local autosave keeps draft changes safe."
-                : "Switch to chapter view to tighten or comment on a selected passage without touching the rest of the manuscript."}
-            </p>
-            <div className="mt-5 grid gap-4 md:grid-cols-3">
-              <MetricCard
-                label="Chapter goal"
-                value={writerWorkspace?.word_count_goals.chapter_target ? `${chapterWordCount.toLocaleString()} / ${writerWorkspace.word_count_goals.chapter_target.toLocaleString()}` : `${chapterWordCount.toLocaleString()} words`}
-                note={chapterGoalProgress !== null ? `${chapterGoalProgress}% of target` : "Set a chapter target below"}
-                isDark={isDark}
-              />
-              <MetricCard
-                label="Book goal"
-                value={writerWorkspace?.word_count_goals.book_target ? `${fullBookWordCount.toLocaleString()} / ${writerWorkspace.word_count_goals.book_target.toLocaleString()}` : `${fullBookWordCount.toLocaleString()} words`}
-                note={bookGoalProgress !== null ? `${bookGoalProgress}% of target` : "Set a manuscript target below"}
-                isDark={isDark}
-              />
-              <MetricCard
-                label="Readability"
-                value={readabilityLoading ? "Scoring..." : readability ? `${readability.label} (${Math.round(readability.reading_ease)})` : "Waiting..."}
-                note={readability ? `${readability.average_sentence_length} words/sentence · grade ${readability.grade_level}` : "Live score updates while you write"}
-                isDark={isDark}
-              />
-            </div>
-            <div className="mt-4 grid gap-3 md:grid-cols-2">
-              <ProgressStrip
-                label="Chapter progress"
-                progress={chapterGoalProgress}
-                fallback={`${chapterApproxPages} page${chapterApproxPages === 1 ? "" : "s"} in the current chapter draft`}
-                isDark={isDark}
-              />
-              <ProgressStrip
-                label="Book progress"
-                progress={bookGoalProgress}
-                fallback={`${fullBookApproxPages.toLocaleString()} estimated manuscript pages`}
-                isDark={isDark}
-              />
-            </div>
-            <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-              <div className={`rounded-[1.2rem] border p-4 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50/80"}`}>
-                <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Word count goals</p>
-                <div className="mt-3 grid gap-3 md:grid-cols-3">
-                  <input
-                    type="number"
-                    value={writerWorkspace?.word_count_goals.chapter_target ?? ""}
-                    onChange={(event) => setWriterWorkspace((current) => current ? { ...current, word_count_goals: { ...current.word_count_goals, chapter_target: Number(event.target.value) || null } } : current)}
-                    placeholder="Chapter"
-                    className={`rounded-[0.95rem] border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
-                  />
-                  <input
-                    type="number"
-                    value={writerWorkspace?.word_count_goals.book_target ?? ""}
-                    onChange={(event) => setWriterWorkspace((current) => current ? { ...current, word_count_goals: { ...current.word_count_goals, book_target: Number(event.target.value) || null } } : current)}
-                    placeholder="Book"
-                    className={`rounded-[0.95rem] border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
-                  />
-                  <input
-                    type="number"
-                    value={writerWorkspace?.word_count_goals.session_target ?? ""}
-                    onChange={(event) => setWriterWorkspace((current) => current ? { ...current, word_count_goals: { ...current.word_count_goals, session_target: Number(event.target.value) || null } } : current)}
-                    placeholder="Session"
-                    className={`rounded-[0.95rem] border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
-                  />
-                </div>
-                <button
-                  type="button"
-                  onClick={() => writerWorkspace && void saveWorkspace({ word_count_goals: writerWorkspace.word_count_goals })}
-                  disabled={!writerWorkspace || workspaceSaving}
-                  className="mt-3 rounded-full bg-[linear-gradient(135deg,#2563eb,#1d4ed8)] px-4 py-2 text-xs font-semibold text-white disabled:opacity-50"
-                >
-                  {workspaceSaving ? "Saving..." : "Save goals"}
-                </button>
-              </div>
-              <div className={`rounded-[1.2rem] border p-4 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50/80"}`}>
-                <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Templates</p>
-                <div className="mt-3 space-y-3">
-                  {(writerWorkspace?.templates ?? []).map((template) => (
-                    <article key={template.id} className={`rounded-[1rem] border p-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-white bg-white"}`}>
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                          <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{template.title}</p>
-                          <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{template.kind} template</p>
-                        </div>
-                        <button onClick={() => applyTemplateToChapter(template)} className={`rounded-full px-3 py-1.5 text-xs font-semibold ${isDark ? "bg-emerald-500/10 text-emerald-200" : "bg-emerald-50 text-emerald-700"}`}>Insert</button>
-                      </div>
-                      <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-700"}`}>{template.description}</p>
-                    </article>
-                  ))}
-                  {chapterVersions.length === 0 ? <p className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>No chapter versions saved yet. Manual versions stay separate from local autosaves.</p> : null}
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <section className={`rounded-[1.7rem] border p-5 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-white/90"}`}>
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-              <div>
-                <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-amber-300" : "text-amber-700"}`}>Planning board</p>
-                <h2 className={`mt-2 text-2xl font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>Corkboard and emotional arc</h2>
-              </div>
-            </div>
-            <div className="mt-4 flex gap-2">
-              <input
-                value={newCorkboardTitle}
-                onChange={(event) => setNewCorkboardTitle(event.target.value)}
-                placeholder="New corkboard card"
-                className={`flex-1 rounded-[1rem] border px-4 py-3 text-sm ${isDark ? "border-white/10 bg-black/30 text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-stone-50 text-stone-900 placeholder:text-stone-400"}`}
-              />
-              <button onClick={() => void addCorkboardCard()} disabled={!writerWorkspace || !newCorkboardTitle.trim()} className="rounded-[1rem] bg-[linear-gradient(135deg,#d97706,#b45309)] px-4 py-3 text-sm font-semibold text-white disabled:opacity-50">Add</button>
-            </div>
-            <div className="mt-4 grid gap-3 md:grid-cols-3">
-              {["ideas", "drafting", "revised"].map((lane) => (
-                <div key={lane} className={`rounded-[1.1rem] border p-3 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50/80"}`}>
-                  <p className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>{lane}</p>
-                  <div className="mt-3 space-y-2">
-                    {(writerWorkspace?.corkboard_cards ?? []).filter((card) => card.lane === lane).map((card) => (
-                      <article key={card.id} className={`rounded-[0.95rem] border p-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-white bg-white"}`}>
-                        <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{card.title}</p>
-                        {card.chapter_number ? <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Chapter {card.chapter_number}</p> : null}
-                        <div className="mt-3 flex gap-2">
-                          {lane !== "ideas" ? <button onClick={() => void updateCardLane(card.id, "ideas")} className={`text-xs ${isDark ? "text-slate-300" : "text-stone-600"}`}>Ideas</button> : null}
-                          {lane !== "drafting" ? <button onClick={() => void updateCardLane(card.id, "drafting")} className={`text-xs ${isDark ? "text-slate-300" : "text-stone-600"}`}>Drafting</button> : null}
-                          {lane !== "revised" ? <button onClick={() => void updateCardLane(card.id, "revised")} className={`text-xs ${isDark ? "text-slate-300" : "text-stone-600"}`}>Revised</button> : null}
-                        </div>
-                      </article>
-                    ))}
-                    {(writerWorkspace?.corkboard_cards ?? []).filter((card) => card.lane === lane).length === 0 ? <p className={`text-sm ${isDark ? "text-slate-500" : "text-stone-500"}`}>No cards yet.</p> : null}
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div className={`mt-5 rounded-[1.2rem] border p-4 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50/80"}`}>
-              <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Emotional arc tracking</p>
-              {emotionalArc?.characters.length ? (
-                <div className="mt-3 space-y-3">
-                  {emotionalArc.characters.slice(0, 4).map((character) => (
-                    <article key={character.character_id} className={`rounded-[1rem] border p-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-white bg-white"}`}>
-                      <div className="flex items-center justify-between gap-3">
-                        <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{character.character_name}</p>
-                        <span className={`text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>trajectory {character.trajectory_score > 0 ? "+" : ""}{character.trajectory_score}</span>
-                      </div>
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        {character.points.slice(-4).map((point) => (
-                          <span key={`${character.character_id}-${point.chapter_number}-${point.label}`} className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${point.sentiment >= 0 ? isDark ? "bg-emerald-500/10 text-emerald-200" : "bg-emerald-50 text-emerald-700" : isDark ? "bg-rose-500/10 text-rose-200" : "bg-rose-50 text-rose-700"}`}>
-                            Ch. {point.chapter_number}: {point.label}
-                          </span>
-                        ))}
-                      </div>
-                    </article>
-                  ))}
-                </div>
-              ) : (
-                <p className={`mt-3 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>Emotional arc tracking will populate as character growth events become available.</p>
-              )}
-            </div>
-          </section>
-        </div>
+          <ManuscriptPlanWorkspace
+            isDark={isDark}
+            editorMode={editorMode}
+            writerWorkspace={writerWorkspace}
+            tighteningSelection={tighteningSelection}
+            onTightenSelectedText={() => void tightenSelectedText()}
+            chapterWordCount={chapterWordCount}
+            fullBookWordCount={fullBookWordCount}
+            chapterGoalProgress={chapterGoalProgress}
+            bookGoalProgress={bookGoalProgress}
+            readabilityLoading={readabilityLoading}
+            readability={readability}
+            chapterApproxPages={chapterApproxPages}
+            fullBookApproxPages={fullBookApproxPages}
+            chapterVersionsCount={chapterVersions.length}
+            workspaceSaving={workspaceSaving}
+            onWordCountGoalChange={(field, value) => {
+              setWriterWorkspace((current) => current ? { ...current, word_count_goals: { ...current.word_count_goals, [field]: value } } : current)
+            }}
+            onSaveGoals={() => {
+              if (writerWorkspace) {
+                void saveWorkspace({ word_count_goals: writerWorkspace.word_count_goals })
+              }
+            }}
+            onApplyTemplate={applyTemplateToChapter}
+            newCorkboardTitle={newCorkboardTitle}
+            onNewCorkboardTitleChange={setNewCorkboardTitle}
+            onAddCorkboardCard={() => void addCorkboardCard()}
+            onUpdateCardLane={(cardId, lane) => void updateCardLane(cardId, lane)}
+            emotionalArc={emotionalArc}
+          />
         ) : null}
-
         {(workspaceTab === "write" || workspaceTab === "analyze" || workspaceTab === "characters") ? (
         <div className={`mt-8 grid gap-5 ${desktopLayoutClass}`}>
           {leftRailVisible ? (
@@ -2800,355 +2684,59 @@ function ManuscriptPageInner() {
           ) : null}
 
           <section ref={manuscriptSectionRef} className={`rounded-[1.8rem] border p-5 ${!leftRailVisible && !rightRailVisible ? "xl:mx-auto xl:max-w-[980px]" : ""} ${isDark ? "border-white/10 bg-black/80" : "border-stone-200 bg-[#faf8f4]"}`}>
-            {preWritingCheck && workspaceTab !== "write" ? (
-              <div className={`mb-5 rounded-[1.3rem] border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-emerald-300" : "text-emerald-700"}`}>Before you start Chapter {preWritingCheck.upcoming_chapter}</p>
-                    <p className={`mt-2 text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>Here’s what’s happening right now in the manuscript.</p>
-                  </div>
-                  <div className="flex gap-2">
-                    <Link href={`/${bookId}/plot-threads`} className={`rounded-full px-3 py-1.5 text-xs font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-white text-stone-700"}`}>Threads</Link>
-                    <Link href={`/${bookId}/timeline`} className={`rounded-full px-3 py-1.5 text-xs font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-white text-stone-700"}`}>Major events</Link>
-                  </div>
-                </div>
-                <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                  <InfoList title="Active characters" isDark={isDark} items={preWritingCheck.active_characters.slice(0, 4).map((character) => character.name)} emptyLabel="No active characters loaded." />
-                  <InfoList title="Unresolved threads" isDark={isDark} items={preWritingCheck.unresolved_threads.slice(0, 3).map((thread) => thread.title)} emptyLabel="No unresolved threads loaded." />
-                  <InfoList title="Last events" isDark={isDark} items={preWritingCheck.recent_events.slice(0, 3).map((event) => `Ch. ${event.chapter_number}: ${event.detail}`)} emptyLabel="No recent events loaded." />
-                  <InfoList title="Ongoing alerts" isDark={isDark} items={preWritingCheck.alerts.slice(0, 3).map((alert) => alert.title)} emptyLabel="No active warnings right now." />
-                </div>
-              </div>
-            ) : null}
-
-            <div className="hidden">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className={`inline-flex rounded-full p-1 ${isDark ? "border border-white/10 bg-black/30" : "border border-stone-200 bg-stone-50"}`}>
-                  {(["chapter", "book"] as const).map((mode) => (
-                    <button
-                      key={mode}
-                      onClick={() => setEditorMode(mode)}
-                      className={`rounded-full px-4 py-2 text-sm font-medium transition ${editorMode === mode ? isDark ? "bg-white text-slate-950" : "bg-stone-900 text-white" : isDark ? "text-slate-300 hover:bg-white/10" : "text-stone-600 hover:bg-stone-100"}`}
-                    >
-                      {mode === "chapter" ? "Chapter" : "Full book"}
-                    </button>
-                  ))}
-                </div>
-                <div className="flex flex-wrap items-center gap-3">
-                  <label className={`text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-                    Font
-                    <select value={fontFamily} onChange={(event) => setFontFamily(event.target.value as "times" | "georgia" | "sans")} className={`ml-2 rounded-lg border px-2 py-1 text-sm ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}>
-                      <option value="times">Times</option>
-                      <option value="georgia">Georgia</option>
-                      <option value="sans">Sans</option>
-                    </select>
-                  </label>
-                  <label className={`text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-                    Font size
-                    <select value={fontSize} onChange={(event) => { setFontSize(Number(event.target.value)); setFontSizeLocked(true) }} className={`ml-2 rounded-lg border px-2 py-1 text-sm ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}>
-                      {[11, 12, 13, 14, 15].map((size) => <option key={size} value={size}>{size}pt</option>)}
-                    </select>
-                  </label>
-                  <label className={`text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-                    Line height
-                    <select value={lineHeight} onChange={(event) => setLineHeight(Number(event.target.value))} className={`ml-2 rounded-lg border px-2 py-1 text-sm ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}>
-                      {[1.6, 1.8, 2].map((value) => <option key={value} value={value}>{value}</option>)}
-                    </select>
-                  </label>
-                  <button onClick={() => setFirstLineIndent((value) => !value)} className={`rounded-full px-3 py-1.5 text-xs font-medium ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}>
-                    {firstLineIndent ? "Indent on" : "Indent off"}
-                  </button>
-                  <button onClick={() => setShowPageGuides((value) => !value)} className={`rounded-full px-3 py-1.5 text-xs font-medium ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}>
-                    {showPageGuides ? "Page guides on" : "Page guides off"}
-                  </button>
-                </div>
-              </div>
-              <div className={`mt-3 flex flex-wrap items-center gap-4 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-                <span>{editorMode === "chapter" ? `${chapterWordCount.toLocaleString()} words` : `${fullBookWordCount.toLocaleString()} words`}</span>
-                <span>{editorMode === "chapter" ? `~${chapterApproxPages} on-screen pages` : `~${fullBookApproxPages} on-screen pages`}</span>
-                <span>{editorMode === "chapter" ? "Single document view" : "Stacked document view"}</span>
-              </div>
-              <div className="mt-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_auto]">
-                <input
-                  type="text"
-                  value={replaceQuery}
-                  onChange={(event) => setReplaceQuery(event.target.value)}
-                  placeholder="Find text"
-                  className={`rounded-[0.9rem] border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
-                />
-                <input
-                  type="text"
-                  value={replaceValue}
-                  onChange={(event) => setReplaceValue(event.target.value)}
-                  placeholder="Replace with"
-                  className={`rounded-[0.9rem] border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
-                />
-                <button onClick={replaceInCurrentChapter} disabled={!replaceQuery} className={`rounded-[0.9rem] px-4 py-2 text-sm font-medium ${isDark ? "bg-white/10 text-slate-200 disabled:opacity-40" : "bg-stone-100 text-stone-700 disabled:opacity-40"}`}>
-                  Replace one
-                </button>
-                <button onClick={replaceEverywhere} disabled={!replaceQuery} className={`rounded-[0.9rem] px-4 py-2 text-sm font-medium ${isDark ? "bg-white/10 text-slate-200 disabled:opacity-40" : "bg-stone-100 text-stone-700 disabled:opacity-40"}`}>
-                  {editorMode === "chapter" ? "Replace all" : "Replace across book"}
-                </button>
-              </div>
-            </div>
-
-            <div className="hidden">
-              <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Find and jump</p>
-              <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>Use continuity retrieval like a manuscript-level Ctrl+F and jump straight into the full-book editor.</p>
-              <input
-                ref={searchInputRef}
-                type="text"
-                value={recallQuery}
-                onChange={(event) => setRecallQuery(event.target.value)}
-                placeholder="Type character name, scene detail, clue, or thread"
-                className={`mt-3 w-full rounded-[0.9rem] border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
-              />
-              {recallResults.length > 0 ? (
-                <div className="mt-3 flex flex-wrap items-center gap-2">
-                  <button onClick={() => jumpToSearchResult((activeFindIndex - 1 + recallResults.length) % recallResults.length)} className={`rounded-full px-3 py-1.5 text-xs font-medium ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}>Previous</button>
-                  <button onClick={() => jumpToSearchResult((activeFindIndex + 1) % recallResults.length)} className={`rounded-full px-3 py-1.5 text-xs font-medium ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}>Next</button>
-                  <span className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{activeFindIndex + 1} of {recallResults.length}</span>
-                </div>
-              ) : null}
-              <div className="mt-3 grid gap-3 lg:grid-cols-2">
-                <div className={`rounded-[1rem] border p-3 ${isDark ? "border-white/10 bg-black/40" : "border-stone-200 bg-white"}`}>
-                  <p className={`text-[11px] font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Instant character info</p>
-                  {recallCharacter ? (
-                    <div className="mt-2 space-y-2">
-                      <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{recallCharacter.name}</p>
-                      <p className={`text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>First seen in chapter {recallCharacter.first_chapter}{recallCharacter.last_seen_chapter ? ` · last seen in chapter ${recallCharacter.last_seen_chapter}` : ""}</p>
-                      {recallCharacter.arc_summary ? <p className={`text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>{recallCharacter.arc_summary}</p> : null}
-                    </div>
-                  ) : (
-                    <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>Type a known character name to get an instant reminder.</p>
-                  )}
-                </div>
-                <div className={`rounded-[1rem] border p-3 ${isDark ? "border-white/10 bg-black/40" : "border-stone-200 bg-white"}`}>
-                  <p className={`text-[11px] font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Quick search hits</p>
-                  <div className="mt-2 space-y-2">
-                    {recallLoading ? <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>Searching...</p> : null}
-                    {!recallLoading && recallResults.map((result, index) => (
-                      <button
-                        key={`${result.chapter_num}-${index}`}
-                        onClick={() => jumpToChapter(result.chapter_num)}
-                        className={`block w-full rounded-[0.85rem] p-2 text-left ${activeFindIndex === index ? isDark ? "bg-emerald-500/15" : "bg-emerald-50" : isDark ? "bg-white/[0.03] hover:bg-white/[0.08]" : "bg-stone-50 hover:bg-stone-100"}`}
-                      >
-                        <p className={`text-xs font-semibold ${isDark ? "text-emerald-300" : "text-emerald-700"}`}>Chapter {result.chapter_num}{result.chapter_title ? ` - ${result.chapter_title}` : ""}</p>
-                        <p className={`mt-1 text-xs ${isDark ? "text-slate-300" : "text-stone-600"}`}>{result.summary}</p>
-                      </button>
-                    ))}
-                    {!recallLoading && recallQuery.trim().length >= 2 && recallResults.length === 0 ? <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>No matches yet.</p> : null}
-                  </div>
-                </div>
-              </div>
-            </div>
-
             {workspaceTab !== "write" ? (
-            <div className={`mb-8 rounded-[1.4rem] border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white/90"}`}>
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex flex-wrap items-center gap-3">
-                  <div className={`inline-flex rounded-full p-1 ${isDark ? "border border-white/10 bg-black/40 shadow-inner" : "border border-stone-200 bg-stone-100 shadow-inner"}`}>
-                    {(["chapter", "book"] as const).map((mode) => (
-                      <button
-                        key={mode}
-                        onClick={() => setEditorMode(mode)}
-                        className={`rounded-full px-5 py-2 text-sm font-medium transition ${editorMode === mode ? isDark ? "bg-white text-slate-950 shadow-sm" : "bg-stone-900 text-white shadow-sm" : isDark ? "text-slate-300 hover:bg-white/10" : "text-stone-600 hover:bg-white"}`}
-                      >
-                        {mode === "chapter" ? "Chapter" : "Full book"}
-                      </button>
-                    ))}
-                  </div>
-                  <div className={`inline-flex rounded-full p-1 ${isDark ? "border border-white/10 bg-black/30 shadow-inner" : "border border-stone-200 bg-stone-50 shadow-inner"}`}>
-                    {(["edit", "paged"] as const).map((mode) => (
-                      <button
-                        key={mode}
-                        type="button"
-                        aria-pressed={draftSurfaceMode === mode}
-                        onClick={() => setDraftSurfaceMode(mode)}
-                        className={`rounded-full px-4 py-2 text-sm font-medium transition ${draftSurfaceMode === mode ? isDark ? "bg-sky-300 text-slate-950 shadow-sm" : "bg-sky-700 text-white shadow-sm" : isDark ? "text-slate-300 hover:bg-white/10" : "text-stone-600 hover:bg-white"}`}
-                      >
-                        {mode === "edit" ? "Draft" : "Paged preview"}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <button onClick={() => setShowPageSetup((value) => !value)} className={`rounded-full px-3 py-1.5 text-xs font-medium ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}>
-                    {showPageSetup ? "Hide page setup" : "Page setup"}
-                  </button>
-                  <button onClick={() => setShowSearchTools((value) => !value)} className={`rounded-full px-3 py-1.5 text-xs font-medium ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}>
-                    {showSearchTools ? "Hide search tools" : "Find and jump"}
-                  </button>
-                  <button onClick={() => setShowLeftRail((value) => !value)} className={`rounded-full px-3 py-1.5 text-xs font-medium ${leftRailVisible ? isDark ? "bg-indigo-400/15 text-white" : "bg-violet-100 text-stone-900" : isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}>
-                    {leftRailVisible ? "Hide chapters" : "Show chapters"}
-                  </button>
-                </div>
-              </div>
-              <div className={`mt-3 flex flex-wrap items-center gap-4 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-                <span>{editorMode === "chapter" ? `${chapterWordCount.toLocaleString()} words` : `${fullBookWordCount.toLocaleString()} words`}</span>
-                <span>{editorMode === "chapter" ? chapterPageSummaryLabel : fullBookPageSummaryLabel}</span>
-                <span>{draftSurfaceSummaryLabel}</span>
-              </div>
-              {showPageSetup ? (
-                <div className="mt-4 grid gap-3 md:grid-cols-[auto_auto_auto_1fr]">
-                  <label className={`text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-                    Font
-                    <select
-                      value={fontFamily}
-                      onChange={(event) => setFontFamily(event.target.value as "times" | "georgia" | "sans")}
-                      disabled={draftSurfaceMode === "paged"}
-                      className={`ml-2 rounded-lg border px-2 py-1 text-sm ${isDark ? "border-white/10 bg-black text-slate-100 disabled:opacity-50" : "border-stone-200 bg-white text-stone-900 disabled:opacity-50"}`}
-                    >
-                      <option value="times">Times</option>
-                      <option value="georgia">Georgia</option>
-                      <option value="sans">Sans</option>
-                    </select>
-                  </label>
-                  <label className={`text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-                    Font size
-                    <select
-                      value={fontSize}
-                      onChange={(event) => { setFontSize(Number(event.target.value)); setFontSizeLocked(true) }}
-                      disabled={draftSurfaceMode === "paged"}
-                      className={`ml-2 rounded-lg border px-2 py-1 text-sm ${isDark ? "border-white/10 bg-black text-slate-100 disabled:opacity-50" : "border-stone-200 bg-white text-stone-900 disabled:opacity-50"}`}
-                    >
-                      {[11, 12, 13, 14, 15].map((size) => <option key={size} value={size}>{size}pt</option>)}
-                    </select>
-                  </label>
-                  <label className={`text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-                    Line height
-                    <select value={lineHeight} onChange={(event) => setLineHeight(Number(event.target.value))} className={`ml-2 rounded-lg border px-2 py-1 text-sm ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}>
-                      {[1.6, 1.8, 2].map((value) => <option key={value} value={value}>{value}</option>)}
-                    </select>
-                  </label>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <button onClick={() => setFirstLineIndent((value) => !value)} className={`rounded-full px-3 py-1.5 text-xs font-medium ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}>
-                      {firstLineIndent ? "Indent on" : "Indent off"}
-                    </button>
-                    <button
-                      onClick={() => setShowPageGuides((value) => !value)}
-                      disabled={draftSurfaceMode === "paged"}
-                      className={`rounded-full px-3 py-1.5 text-xs font-medium ${isDark ? "bg-white/10 text-slate-200 disabled:opacity-50" : "bg-stone-100 text-stone-700 disabled:opacity-50"}`}
-                    >
-                      {showPageGuides ? "Page guides on" : "Page guides off"}
-                    </button>
-                  </div>
-                </div>
-              ) : null}
-              {showPageSetup && draftSurfaceMode === "paged" ? (
-                <p className={`mt-3 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>
-                  Paged preview follows the active export preset for paper size, margins, and base typography.
-                </p>
-              ) : null}
-              {showSearchTools ? (
-                <div className="mt-4 space-y-3">
-                  <input
-                    ref={searchInputRef}
-                    type="text"
-                    value={recallQuery}
-                    onChange={(event) => setRecallQuery(event.target.value)}
-                    placeholder="Search character, scene detail, clue, or thread"
-                    className={`w-full rounded-[0.9rem] border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
-                  />
-                  <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_auto]">
-                    <input
-                      type="text"
-                      value={replaceQuery}
-                      onChange={(event) => setReplaceQuery(event.target.value)}
-                      placeholder="Find text"
-                      className={`rounded-[0.9rem] border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
-                    />
-                    <input
-                      type="text"
-                      value={replaceValue}
-                      onChange={(event) => setReplaceValue(event.target.value)}
-                      placeholder="Replace with"
-                      className={`rounded-[0.9rem] border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
-                    />
-                    <button onClick={replaceInCurrentChapter} disabled={!replaceQuery} className={`rounded-[0.9rem] px-4 py-2 text-sm font-medium ${isDark ? "bg-white/10 text-slate-200 disabled:opacity-40" : "bg-stone-100 text-stone-700 disabled:opacity-40"}`}>
-                      Replace one
-                    </button>
-                    <button onClick={replaceEverywhere} disabled={!replaceQuery} className={`rounded-[0.9rem] px-4 py-2 text-sm font-medium ${isDark ? "bg-white/10 text-slate-200 disabled:opacity-40" : "bg-stone-100 text-stone-700 disabled:opacity-40"}`}>
-                      {editorMode === "chapter" ? "Replace all" : "Replace across book"}
-                    </button>
-                  </div>
-                  <div className="grid gap-3 lg:grid-cols-2">
-                    <div className={`rounded-[1rem] border p-3 ${isDark ? "border-white/10 bg-black/40" : "border-stone-200 bg-stone-50"}`}>
-                      <p className={`text-[11px] font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Instant character info</p>
-                      {recallCharacter ? (
-                        <div className="mt-2 space-y-2">
-                          <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{recallCharacter.name}</p>
-                          <p className={`text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>First seen in chapter {recallCharacter.first_chapter}{recallCharacter.last_seen_chapter ? ` · last seen in chapter ${recallCharacter.last_seen_chapter}` : ""}</p>
-                          {recallCharacter.arc_summary ? <p className={`text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>{recallCharacter.arc_summary}</p> : null}
-                        </div>
-                      ) : (
-                        <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>Type a known character name to get an instant reminder.</p>
-                      )}
-                    </div>
-                    <div className={`rounded-[1rem] border p-3 ${isDark ? "border-white/10 bg-black/40" : "border-stone-200 bg-stone-50"}`}>
-                      <p className={`text-[11px] font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Quick search hits</p>
-                      <div className="mt-2 space-y-2">
-                        {recallLoading ? <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>Searching...</p> : null}
-                        {!recallLoading && recallResults.map((result, index) => (
-                          <button
-                            key={`${result.chapter_num}-${index}`}
-                            onClick={() => jumpToChapter(result.chapter_num)}
-                            className={`block w-full rounded-[0.85rem] p-2 text-left ${activeFindIndex === index ? isDark ? "bg-emerald-500/15" : "bg-emerald-50" : isDark ? "bg-white/[0.03] hover:bg-white/[0.08]" : "bg-white hover:bg-stone-100"}`}
-                          >
-                            <p className={`text-xs font-semibold ${isDark ? "text-emerald-300" : "text-emerald-700"}`}>Chapter {result.chapter_num}{result.chapter_title ? ` - ${result.chapter_title}` : ""}</p>
-                            <p className={`mt-1 text-xs ${isDark ? "text-slate-300" : "text-stone-600"}`}>{result.summary}</p>
-                          </button>
-                        ))}
-                        {!recallLoading && recallQuery.trim().length >= 2 && recallResults.length === 0 ? <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>No matches yet.</p> : null}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ) : null}
-            </div>
+              <ManuscriptNonWriteWorkspace
+                isDark={isDark}
+                bookId={bookId}
+                activeChapterNumber={activeChapterNumber}
+                preWritingCheck={preWritingCheck}
+                editorMode={editorMode}
+                onEditorModeChange={setEditorMode}
+                draftSurfaceMode={draftSurfaceMode}
+                onDraftSurfaceModeChange={setDraftSurfaceMode}
+                leftRailVisible={leftRailVisible}
+                onToggleLeftRail={() => setShowLeftRail((value) => !value)}
+                chapterWordCount={chapterWordCount}
+                fullBookWordCount={fullBookWordCount}
+                chapterPageSummaryLabel={chapterPageSummaryLabel}
+                fullBookPageSummaryLabel={fullBookPageSummaryLabel}
+                draftSurfaceSummaryLabel={draftSurfaceSummaryLabel}
+                showPageSetup={showPageSetup}
+                onTogglePageSetup={() => setShowPageSetup((value) => !value)}
+                showSearchTools={showSearchTools}
+                onToggleSearchTools={() => setShowSearchTools((value) => !value)}
+                fontFamily={fontFamily}
+                onFontFamilyChange={setFontFamily}
+                fontSize={fontSize}
+                onFontSizeChange={(value) => {
+                  setFontSize(value)
+                  setFontSizeLocked(true)
+                }}
+                lineHeight={lineHeight}
+                onLineHeightChange={setLineHeight}
+                firstLineIndent={firstLineIndent}
+                onToggleFirstLineIndent={() => setFirstLineIndent((value) => !value)}
+                showPageGuides={showPageGuides}
+                onToggleShowPageGuides={() => setShowPageGuides((value) => !value)}
+                searchInputRef={searchInputRef}
+                recallQuery={recallQuery}
+                onRecallQueryChange={setRecallQuery}
+                replaceQuery={replaceQuery}
+                onReplaceQueryChange={setReplaceQuery}
+                replaceValue={replaceValue}
+                onReplaceValueChange={setReplaceValue}
+                onReplaceInCurrentChapter={replaceInCurrentChapter}
+                onReplaceEverywhere={replaceEverywhere}
+                recallCharacter={recallCharacter}
+                recallLoading={recallLoading}
+                recallResults={recallResults}
+                activeFindIndex={activeFindIndex}
+                onJumpToChapter={jumpToChapter}
+                inlineContinuity={inlineContinuity}
+                logicSelectionText={logicSelectionText}
+                continuityLoading={continuityLoading}
+              />
             ) : null}
-
-            {inlineContinuity && workspaceTab !== "write" ? (
-              <div className={`mb-8 rounded-[1.4rem] border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white/90"}`}>
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div>
-                    <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-rose-300" : "text-rose-700"}`}>Chapter memory continuity checker</p>
-                    <p className={`mt-2 text-sm ${isDark ? "text-slate-300" : "text-stone-700"}`}>{inlineContinuity.overall_verdict}</p>
-                  </div>
-                  {logicSelectionText ? <p className={`max-w-sm text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Last tightened selection: {logicSelectionText.slice(0, 100)}</p> : null}
-                </div>
-                <div className="mt-4 grid gap-3 lg:grid-cols-2">
-                  <div className={`rounded-[1rem] border p-3 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50"}`}>
-                    <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Inline issues</p>
-                    <div className="mt-3 space-y-3">
-                      {continuityLoading ? <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>Refreshing continuity memory…</p> : null}
-                      {inlineContinuity.issues.length === 0 ? <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>No hard chapter-memory contradiction surfaced in this pass, but this scene still deserves another check for setup, recall, and causal clarity.</p> : null}
-                      {inlineContinuity.issues.slice(0, 6).map((issue, index) => (
-                        <article key={`${issue.title}-${index}`} className={`rounded-[0.95rem] border p-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-white bg-white"}`}>
-                          <div className="flex items-center justify-between gap-3">
-                            <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{issue.title}</p>
-                            <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${issue.severity === "critical" ? isDark ? "bg-rose-500/10 text-rose-200" : "bg-rose-50 text-rose-700" : isDark ? "bg-amber-500/10 text-amber-200" : "bg-amber-50 text-amber-700"}`}>{issue.severity}</span>
-                          </div>
-                          <p className={`mt-2 text-xs italic ${isDark ? "text-slate-400" : "text-stone-500"}`}>"{issue.snippet}"</p>
-                          <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-700"}`}>{issue.explanation}</p>
-                          {issue.suggestion ? <p className={`mt-2 text-xs ${isDark ? "text-emerald-300" : "text-emerald-700"}`}>Fix: {issue.suggestion}</p> : null}
-                        </article>
-                      ))}
-                    </div>
-                  </div>
-                  <div className={`rounded-[1rem] border p-3 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50"}`}>
-                    <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Memory bank</p>
-                    <div className="mt-3 space-y-2">
-                      {inlineContinuity.memory_bank.map((item, index) => (
-                        <p key={`${item}-${index}`} className={`text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-700"}`}>{item}</p>
-                      ))}
-                      {inlineContinuity.memory_bank.length === 0 ? <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>No retrieval notes were needed for this pass.</p> : null}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ) : null}
-
             <WhatsTheWordPanel bookId={bookId} isDark={isDark} className="mb-4" />
 
             {editorMode === "chapter" ? (
@@ -3400,223 +2988,32 @@ function ManuscriptPageInner() {
           </section>
 
           {workspaceTab === "write" && rightRailVisible ? (
-          <aside className="space-y-4">
-            <div className={`rounded-[1.6rem] border p-2 ${isDark ? "border-white/10 bg-[#0d1117]" : "border-stone-200 bg-white/90"}`}>
-              <div className="flex items-center gap-1">
-                {([
-                  ["context", "Context"],
-                  ["advisor", "Advisor"],
-                  ["notes", "Notes"],
-                  ["arcs", "Arcs"],
-                ] as const).map(([pane, label]) => (
-                  <button
-                    key={pane}
-                    type="button"
-                    onClick={() => openRightPane(pane)}
-                    className={`rounded-full px-3 py-2 text-sm font-medium transition ${activeRightPane === pane ? isDark ? "bg-white text-slate-950" : "bg-stone-900 text-white" : isDark ? "text-slate-300 hover:bg-white/10" : "text-stone-600 hover:bg-stone-100"}`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {activeRightPane === "character" && selectedCharCard ? (
-              <div className={`rounded-[1.6rem] border p-4 ${isDark ? "border-white/10 bg-[#0d1117]" : "border-stone-200 bg-white/90"}`}>
-                <button
-                  onClick={() => {
-                    setSelectedCharCard(null)
-                    setActiveRightPane("context")
-                  }}
-                  className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}
-                >
-                  Back to context
-                </button>
-                <div className="mt-4">
-                  <p className={`text-lg font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{selectedCharCard.name}</p>
-                  <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>
-                    {selectedCharCard.role === "mc" ? "POV" : selectedCharCard.role === "sc" ? "Supporting" : "Background"} · Ch. {selectedCharCard.first_chapter}{selectedCharCard.last_seen_chapter ? ` to ${selectedCharCard.last_seen_chapter}` : ""}
-                  </p>
-                  {selectedCharCard.description ? <p className={`mt-4 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-700"}`}>{selectedCharCard.description}</p> : null}
-                  {selectedCharCard.arc_summary ? <p className={`mt-4 text-sm leading-6 ${isDark ? "text-slate-400" : "text-stone-600"}`}>{selectedCharCard.arc_summary}</p> : null}
-                </div>
-              </div>
-            ) : null}
-
-            {activeRightPane === "context" ? (
-              <>
-                <div className={`rounded-[1.6rem] border p-4 ${isDark ? "border-white/10 bg-[#0d1117]" : "border-stone-200 bg-white/90"}`}>
-                  <div className="flex items-center justify-between gap-3">
-                    <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Active characters</p>
-                    <span className={`text-sm font-semibold ${isDark ? "text-slate-300" : "text-stone-700"}`}>{activeChapterContextCharacters.length || Math.min(4, characters.length)}</span>
-                  </div>
-                  <div className="mt-4 space-y-3">
-                    {(activeChapterContextCharacters.length ? activeChapterContextCharacters.map((character) => ({
-                      id: character.id,
-                      name: character.name,
-                      role: character.role,
-                    })) : characters.slice(0, 4).map((character) => ({
-                      id: character.id,
-                      name: character.name,
-                      role: character.role,
-                    }))).map((character) => (
-                      <button key={character.id} onClick={() => {
-                        const match = characters.find((item) => item.id === character.id)
-                        if (match) openCharCard(match)
-                      }} className="flex w-full items-center justify-between gap-3 text-left">
-                        <div className="flex items-center gap-3">
-                          <span className="h-2.5 w-2.5 rounded-full bg-sky-400" />
-                          <span className={`text-sm ${isDark ? "text-slate-100" : "text-stone-900"}`}>{character.name}</span>
-                        </div>
-                        <span className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{character.role === "mc" ? "POV" : character.role === "sc" ? "Major" : "Supporting"}</span>
-                      </button>
-                    ))}
-                    {activeChapterContextCharacters.length === 0 && characters.length === 0 ? <p className={`text-sm ${isDark ? "text-slate-500" : "text-stone-500"}`}>No characters loaded yet.</p> : null}
-                  </div>
-                  <Link href={`/${bookId}/characters`} className={`mt-4 inline-flex text-sm ${isDark ? "text-sky-300" : "text-sky-700"}`}>View all characters →</Link>
-                </div>
-
-                <div className={`rounded-[1.6rem] border p-4 ${isDark ? "border-white/10 bg-[#0d1117]" : "border-stone-200 bg-white/90"}`}>
-                  <div className="flex items-center justify-between gap-3">
-                    <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Unresolved threads</p>
-                    <span className={`text-sm font-semibold ${isDark ? "text-slate-300" : "text-stone-700"}`}>{activeThreadSummary.length || Math.min(3, plotThreads.length)}</span>
-                  </div>
-                  <div className="mt-4 space-y-3">
-                    {(activeThreadSummary.length ? activeThreadSummary.map((thread) => thread.title) : plotThreads.slice(0, 3).map((thread) => thread.title)).map((thread) => (
-                      <div key={thread} className="flex items-start gap-3">
-                        <span className="mt-1.5 h-2 w-2 rounded-full bg-amber-400" />
-                        <p className={`text-sm leading-6 ${isDark ? "text-slate-200" : "text-stone-700"}`}>{thread}</p>
-                      </div>
-                    ))}
-                    {activeThreadSummary.length === 0 && plotThreads.length === 0 ? <p className={`text-sm ${isDark ? "text-slate-500" : "text-stone-500"}`}>No unresolved threads loaded yet.</p> : null}
-                  </div>
-                  <Link href={`/${bookId}/plot-threads`} className={`mt-4 inline-flex text-sm ${isDark ? "text-sky-300" : "text-sky-700"}`}>View all threads →</Link>
-                </div>
-
-                <div className={`rounded-[1.6rem] border p-4 ${isDark ? "border-white/10 bg-[#0d1117]" : "border-stone-200 bg-white/90"}`}>
-                  <div className="flex items-center justify-between gap-3">
-                    <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Recent events</p>
-                    <span className={`text-sm font-semibold ${isDark ? "text-slate-300" : "text-stone-700"}`}>{recentEventSummary.length}</span>
-                  </div>
-                  <div className="mt-4 space-y-3">
-                    {recentEventSummary.map((event) => (
-                      <div key={`${event.chapter_number}-${event.detail}`} className="flex items-start gap-3">
-                        <span className="mt-1.5 h-2 w-2 rounded-full bg-emerald-400" />
-                        <p className={`text-sm leading-6 ${isDark ? "text-slate-200" : "text-stone-700"}`}>{event.detail}</p>
-                      </div>
-                    ))}
-                    {recentEventSummary.length === 0 ? <p className={`text-sm ${isDark ? "text-slate-500" : "text-stone-500"}`}>Recent chapter events will appear here.</p> : null}
-                  </div>
-                  <Link href={`/${bookId}/timeline`} className={`mt-4 inline-flex text-sm ${isDark ? "text-sky-300" : "text-sky-700"}`}>View timeline →</Link>
-                </div>
-
-                <div className={`rounded-[1.6rem] border p-4 ${isDark ? "border-white/10 bg-[#0d1117]" : "border-stone-200 bg-white/90"}`}>
-                  <div className="flex items-center justify-between gap-3">
-                    <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Continuity warnings</p>
-                    <span className={`text-sm font-semibold ${isDark ? "text-slate-300" : "text-stone-700"}`}>{warningSummary.length || review?.continuity_issues.length || 0}</span>
-                  </div>
-                  <div className="mt-4 space-y-3">
-                    {(warningSummary.length ? warningSummary : review?.continuity_issues.slice(0, 3) ?? []).map((warning, index) => (
-                      <div key={`${warning.title}-${index}`} className="flex items-start gap-3">
-                        <span className="mt-1.5 h-2 w-2 rounded-full bg-amber-400" />
-                        <p className={`text-sm leading-6 ${isDark ? "text-slate-200" : "text-stone-700"}`}>{warning.title}</p>
-                      </div>
-                    ))}
-                    {warningSummary.length === 0 && !review?.continuity_issues.length ? <p className={`text-sm ${isDark ? "text-slate-500" : "text-stone-500"}`}>No continuity warnings surfaced for this chapter.</p> : null}
-                  </div>
-                </div>
-
-                <div className={`rounded-[1.6rem] border p-4 ${isDark ? "border-sky-500/30 bg-sky-500/5" : "border-sky-200 bg-sky-50/80"}`}>
-                  <div className="flex items-center justify-between gap-3">
-                    <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Ask LoreVia</p>
-                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${isDark ? "bg-sky-500/15 text-sky-200" : "bg-sky-100 text-sky-700"}`}>Beta</span>
-                  </div>
-                  <div className={`mt-4 rounded-[1rem] border px-3 py-3 text-sm ${isDark ? "border-white/10 bg-black/20 text-slate-500" : "border-stone-200 bg-white text-stone-400"}`}>
-                    Ask anything about your story...
-                  </div>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <button onClick={() => openRightPane("context")} className={`rounded-full px-3 py-1.5 text-xs font-medium ${isDark ? "bg-white/10 text-slate-200" : "bg-white text-stone-700"}`}>Check continuity</button>
-                    <button onClick={() => void tightenSelectedText()} className={`rounded-full px-3 py-1.5 text-xs font-medium ${isDark ? "bg-white/10 text-slate-200" : "bg-white text-stone-700"}`}>Tighten selection</button>
-                    <button onClick={() => openRightPane("advisor")} className={`rounded-full px-3 py-1.5 text-xs font-medium ${isDark ? "bg-white/10 text-slate-200" : "bg-white text-stone-700"}`}>Suggest rewrite</button>
-                  </div>
-                </div>
-              </>
-            ) : null}
-
-            {activeRightPane === "advisor" ? (
-              <div className={`rounded-[1.6rem] border p-4 ${isDark ? "border-white/10 bg-[#0d1117]" : "border-stone-200 bg-white/90"}`}>
-                <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Chapter advisor</p>
-                <p className={`mt-3 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-700"}`}>Use LoreVia while drafting to tighten prose, surface continuity risks, and suggest stronger scene transitions.</p>
-                <div className="mt-4 space-y-3">
-                  {suggestions.slice(0, 3).map((suggestion, index) => (
-                    <div key={`${suggestion.title}-${index}`} className={`rounded-[1rem] border p-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
-                      <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{suggestion.title}</p>
-                      <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-400" : "text-stone-600"}`}>{suggestion.description}</p>
-                    </div>
-                  ))}
-                  {suggestions.length === 0 ? <p className={`text-sm ${isDark ? "text-slate-500" : "text-stone-500"}`}>Advisor suggestions will appear here after review passes run.</p> : null}
-                </div>
-                <Link href={`/${bookId}/advisor`} className={`mt-4 inline-flex text-sm ${isDark ? "text-sky-300" : "text-sky-700"}`}>Open full advisor →</Link>
-              </div>
-            ) : null}
-
-            {activeRightPane === "notes" ? (
-              <>
-                <div className={`rounded-[1.6rem] border p-4 ${isDark ? "border-white/10 bg-[#0d1117]" : "border-stone-200 bg-white/90"}`}>
-                  <div className="flex items-center justify-between gap-3">
-                    <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Chapter notes</p>
-                    <Link href={`/${bookId}/notes`} className={`text-sm ${isDark ? "text-sky-300" : "text-sky-700"}`}>All notes →</Link>
-                  </div>
-                  {chapterAnnotations.length > 0 ? <p className={`mt-2 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{chapterAnnotations.length} annotation{chapterAnnotations.length === 1 ? "" : "s"} anchored to this chapter.</p> : null}
-                  <div className="mt-4 space-y-3">
-                    {chapterManualNotes.slice(0, 4).map((note) => (
-                      <div key={note.id} className={`rounded-[1rem] border p-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
-                        <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{note.title || `Chapter ${activeChapterNumber} note`}</p>
-                        <p className={`mt-2 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{new Date(note.updated_at).toLocaleString()}</p>
-                      </div>
-                    ))}
-                    {chapterManualNotes.length === 0 ? <p className={`text-sm ${isDark ? "text-slate-500" : "text-stone-500"}`}>No notes saved for this chapter yet.</p> : null}
-                  </div>
-                </div>
-                <div className={`rounded-[1.6rem] border p-4 ${isDark ? "border-white/10 bg-[#0d1117]" : "border-stone-200 bg-white/90"}`}>
-                  <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Book notes</p>
-                  <div className="mt-4 space-y-3">
-                    {generalNotes.slice(0, 3).map((note) => (
-                      <div key={note.id} className={`rounded-[1rem] border p-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
-                        <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{note.title || "Book note"}</p>
-                        <p className={`mt-2 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{new Date(note.updated_at).toLocaleString()}</p>
-                      </div>
-                    ))}
-                    {generalNotes.length === 0 ? <p className={`text-sm ${isDark ? "text-slate-500" : "text-stone-500"}`}>No book-level notes saved yet.</p> : null}
-                  </div>
-                </div>
-              </>
-            ) : null}
-
-            {activeRightPane === "arcs" ? (
-              <div className={`rounded-[1.6rem] border p-4 ${isDark ? "border-white/10 bg-[#0d1117]" : "border-stone-200 bg-white/90"}`}>
-                <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Character emotional arc</p>
-                {arcSummaryCharacter ? (
-                  <div className="mt-4">
-                    <p className={`text-lg font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{arcSummaryCharacter.character_name}</p>
-                    <div className="mt-4 space-y-3">
-                      {arcSummaryCharacter.points.slice(-6).map((point) => (
-                        <div key={`${point.chapter_number}-${point.label}`} className="grid grid-cols-[auto_1fr] gap-3">
-                          <span className={`text-xs font-semibold ${isDark ? "text-slate-500" : "text-stone-500"}`}>Ch. {point.chapter_number}</span>
-                          <div className="flex items-center gap-3">
-                            <span className={`h-2 w-full rounded-full ${point.sentiment >= 0 ? "bg-emerald-400/60" : "bg-rose-400/60"}`} />
-                            <span className={`min-w-[7rem] text-sm ${isDark ? "text-slate-200" : "text-stone-700"}`}>{point.label}</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  <p className={`mt-4 text-sm ${isDark ? "text-slate-500" : "text-stone-500"}`}>Character arc tracking will appear once growth events are available.</p>
-                )}
-              </div>
-            ) : null}
-          </aside>
+            <ManuscriptWriteRightRail
+              isDark={isDark}
+              bookId={bookId}
+              activeRightPane={activeRightPane}
+              onOpenRightPane={openRightPane}
+              selectedCharCard={selectedCharCard}
+              onClearSelectedCharCard={() => {
+                setSelectedCharCard(null)
+                setActiveRightPane("context")
+              }}
+              activeChapterContextCharacters={activeChapterContextCharacters}
+              characters={characters}
+              onOpenCharCard={openCharCard}
+              activeThreadSummary={activeThreadSummary}
+              plotThreads={plotThreads}
+              recentEventSummary={recentEventSummary}
+              warningSummary={warningSummary}
+              review={review}
+              onTightenSelectedText={() => void tightenSelectedText()}
+              suggestions={suggestions}
+              chapterAnnotationsCount={chapterAnnotations.length}
+              chapterManualNotes={chapterManualNotes}
+              generalNotes={generalNotes}
+              activeChapterNumber={activeChapterNumber}
+              arcSummaryCharacter={arcSummaryCharacter}
+            />
           ) : null}
 
           {workspaceTab !== "write" && rightRailVisible ? (
@@ -4428,327 +3825,52 @@ function ManuscriptPageInner() {
         </div>
         ) : null}
 
-        {sceneEditorOpen ? (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 px-4 py-8">
-            <div className={`max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-[1.6rem] border p-5 shadow-2xl ${isDark ? "border-white/10 bg-[#0b0f17] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}>
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-emerald-300" : "text-emerald-700"}`}>Scene workspace</p>
-                  <h3 className="mt-2 text-2xl font-semibold">{editingScene ? "Edit chapter scene" : "New chapter scene"}</h3>
-                  <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>Scenes live in the chapter file tree. Rich text, scene breaks, comments, and character mentions now share the same editor foundation as the manuscript.</p>
-                </div>
-                <button onClick={closeSceneEditor} className={`rounded-full px-3 py-1.5 text-sm ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}>Close</button>
-              </div>
-              <div className="mt-5 grid gap-4 md:grid-cols-2">
-                <label className="text-sm">
-                  <span className={`mb-2 block text-xs font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Title</span>
-                  <input
-                    value={sceneTitleDraft}
-                    onChange={(event) => setSceneTitleDraft(event.target.value)}
-                    placeholder="Scene title"
-                    className={`w-full rounded-[0.95rem] border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
-                  />
-                </label>
-                <label className="text-sm">
-                  <span className={`mb-2 block text-xs font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Optional chapter tag</span>
-                  <select
-                    value={sceneChapterDraft ?? ""}
-                    onChange={(event) => setSceneChapterDraft(event.target.value ? Number(event.target.value) : null)}
-                    className={`w-full rounded-[0.95rem] border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
-                  >
-                    <option value="">Unassigned / decide later</option>
-                    {(workspaceTree?.chapters ?? []).map((chapter) => (
-                      <option key={chapter.chapter_number} value={chapter.chapter_number}>Chapter {chapter.chapter_number}</option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-              <label className="mt-4 block text-sm">
-                <span className={`mb-2 block text-xs font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Description</span>
-                <input
-                  value={sceneDescriptionDraft}
-                  onChange={(event) => setSceneDescriptionDraft(event.target.value)}
-                  placeholder="Optional context for later"
-                  className={`w-full rounded-[0.95rem] border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
-                />
-              </label>
-              <label className="mt-4 block text-sm">
-                <span className={`mb-2 block text-xs font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Scene body</span>
-                <div className={`overflow-hidden rounded-[1rem] border ${isDark ? "border-white/10 bg-black" : "border-stone-200 bg-white"}`}>
-                  <EditorToolbar editorKey="scene-editor-modal" isDark={isDark} compact characters={characters} />
-                  <RichTextEditor
-                    editorKey="scene-editor-modal"
-                    html={sceneHtmlDraft}
-                    onChange={(nextHtml, nextText) => {
-                      setSceneHtmlDraft(nextHtml)
-                      setSceneBodyDraft(nextText)
-                    }}
-                    placeholder="Write the scene here..."
-                    className={`min-h-[18rem] px-4 py-3 text-sm leading-7 outline-none ${isDark ? "text-slate-100" : "text-stone-900"}`}
-                  />
-                </div>
-              </label>
-              <p className={`mt-3 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Unsaved scene changes autosave locally and stay separate from manual scene versions.</p>
-              {editingScene?.id ? (
-                <div className={`mt-5 rounded-[1.1rem] border p-4 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50"}`}>
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <p className={`text-[11px] font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Scene versions</p>
-                      <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>Name milestones, compare them with the current scene, or restore an earlier pass.</p>
-                    </div>
-                    <button onClick={() => void createSceneSnapshot()} className={`rounded-full px-3 py-1.5 text-[11px] font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-white text-stone-700"}`}>Save named version</button>
-                  </div>
-                  <input
-                    type="text"
-                    value={sceneVersionNameDraft}
-                    onChange={(event) => setSceneVersionNameDraft(event.target.value)}
-                    placeholder="Example: Before tightening dialogue"
-                    className={`mt-3 w-full rounded-[0.95rem] border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
-                  />
-                  <div className="mt-3 space-y-2">
-                    {sceneVersions.map((version) => (
-                      <div key={version.id} className={`rounded-[0.95rem] border px-3 py-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white"}`}>
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div>
-                            <p className={`text-sm font-medium ${isDark ? "text-white" : "text-stone-900"}`}>{version.note || version.scene_title}</p>
-                            <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-                              {new Date(version.created_at).toLocaleString()} {version.word_count ? `· ${version.word_count} words` : ""}
-                            </p>
-                            <p className={`mt-1 text-[11px] uppercase tracking-[0.12em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>{(version.snapshot_kind || "manual").replaceAll("_", " ")}</p>
-                          </div>
-                          <div className="flex flex-wrap gap-2">
-                            <button
-                              onClick={() => void compareSceneVersion(version.id)}
-                              className={`rounded-full px-3 py-1.5 text-[11px] font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}
-                            >
-                              Compare
-                            </button>
-                            <button
-                              onClick={() => void restoreSceneSnapshot(version.id)}
-                              disabled={restoringSceneVersionId === version.id}
-                              className={`rounded-full px-3 py-1.5 text-[11px] font-semibold ${isDark ? "bg-amber-500/10 text-amber-200 disabled:opacity-50" : "bg-amber-50 text-amber-700 disabled:opacity-50"}`}
-                            >
-                              {restoringSceneVersionId === version.id ? "Restoring..." : "Restore"}
-                            </button>
-                          </div>
-                        </div>
-                        {sceneVersionDetail?.id === version.id ? (
-                          <div className="mt-3 grid gap-3 xl:grid-cols-2">
-                            <div className={`rounded-[0.8rem] border px-3 py-2 ${isDark ? "border-white/10 bg-black/30" : "border-stone-200 bg-stone-50"}`}>
-                              <p className={`text-[11px] font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Saved version</p>
-                              <p className={`mt-2 text-xs leading-5 ${isDark ? "text-slate-300" : "text-stone-700"}`}>{sceneVersionDetail.body || "No scene text stored in this version."}</p>
-                            </div>
-                            <div className={`rounded-[0.8rem] border px-3 py-2 ${isDark ? "border-white/10 bg-black/30" : "border-stone-200 bg-stone-50"}`}>
-                              <p className={`text-[11px] font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Current draft</p>
-                              <p className={`mt-2 text-xs leading-5 ${isDark ? "text-slate-300" : "text-stone-700"}`}>{sceneBodyDraft || "No scene draft yet."}</p>
-                            </div>
-                          </div>
-                        ) : null}
-                      </div>
-                    ))}
-                    {sceneVersions.length === 0 ? <p className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>No scene versions saved yet. The next manual version will appear here.</p> : null}
-                  </div>
-                </div>
-              ) : null}
-              <div className="mt-5 flex flex-wrap justify-end gap-3">
-                <button onClick={closeSceneEditor} className={`rounded-full px-4 py-2 text-sm ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}>Cancel</button>
-                <button onClick={() => void saveScene()} disabled={sceneSaving || !sceneTitleDraft.trim() || !sceneBodyDraft.trim()} className="rounded-full bg-[linear-gradient(135deg,#0f766e,#115e59)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
-                  {sceneSaving ? "Saving..." : editingScene ? "Save scene" : "Create scene"}
-                </button>
-              </div>
-            </div>
-          </div>
-        ) : null}
-
-        {showCompileDialog && writerWorkspace && manuscriptFrontMatter ? (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 py-8">
-            <div className={`max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-[1.7rem] border p-6 shadow-2xl ${isDark ? "border-white/10 bg-[#0b0f17] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}>
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-amber-300" : "text-amber-700"}`}>Compile manuscript</p>
-                  <h3 className="mt-2 text-2xl font-semibold">Front page and submission metadata</h3>
-                  <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>This template feeds the title page, headers, word count line, and export packaging before the manuscript compiles.</p>
-                </div>
-                <button onClick={() => setShowCompileDialog(false)} className={`rounded-full px-3 py-1.5 text-sm ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}>Close</button>
-              </div>
-
-              <div className={`mt-5 rounded-[1.2rem] border p-4 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50"}`}>
-                <div className="flex flex-wrap items-center gap-4 text-sm">
-                  <span>Format: <strong>{compileFormat.toUpperCase()}</strong></span>
-                  <span>Automatic manuscript word count: <strong>{fullBookWordCount.toLocaleString()}</strong></span>
-                  <span>Preset: <strong>{writerWorkspace.publishing.active_preset}</strong></span>
-                </div>
-                <div className={`mt-4 rounded-[1rem] border px-4 py-3 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
-                  <p>
-                    <span className="font-semibold">Author name</span> is the full or legal name you want on submission materials.
-                    <span className="font-semibold"> Pen name</span> is the public byline for this manuscript and export package.
-                  </p>
-                  <p className={`mt-2 text-xs leading-5 ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-                    These manuscript names are separate from your LoreVia account username.
-                  </p>
-                </div>
-                <label className={`mt-4 flex items-start gap-3 rounded-[1rem] border px-4 py-3 text-sm ${isDark ? "border-white/10 bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
-                  <input
-                    type="checkbox"
-                    checked={includeSceneMetadataOnExport}
-                    onChange={(event) => setIncludeSceneMetadataOnExport(event.target.checked)}
-                    className="mt-1 h-4 w-4 rounded border-stone-300"
-                  />
-                  <span>
-                    <span className="block font-semibold">Include scene metadata</span>
-                    <span className={`mt-1 block text-xs leading-5 ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-                      Turn this off for clean submission prose with scene breaks rendered as ***.
-                    </span>
-                  </span>
-                </label>
-              </div>
-
-              <div className="mt-5 grid gap-4 md:grid-cols-2">
-                <Field label="Author name">
-                  <input value={manuscriptFrontMatter.author_name} onChange={(event) => updateFrontMatter("author_name", event.target.value)} className={inputClass(isDark)} />
-                </Field>
-                <Field label="Pen name">
-                  <input value={manuscriptFrontMatter.pen_name} onChange={(event) => updateFrontMatter("pen_name", event.target.value)} className={inputClass(isDark)} />
-                </Field>
-                <Field label="Contact email">
-                  <input value={manuscriptFrontMatter.contact_email} onChange={(event) => updateFrontMatter("contact_email", event.target.value)} className={inputClass(isDark)} />
-                </Field>
-                <Field label="Contact phone">
-                  <input value={manuscriptFrontMatter.contact_phone} onChange={(event) => updateFrontMatter("contact_phone", event.target.value)} className={inputClass(isDark)} />
-                </Field>
-                <Field label="Book title">
-                  <input value={manuscriptFrontMatter.title} onChange={(event) => updateFrontMatter("title", event.target.value)} className={inputClass(isDark)} />
-                </Field>
-                <Field label="Subtitle">
-                  <input value={manuscriptFrontMatter.subtitle} onChange={(event) => updateFrontMatter("subtitle", event.target.value)} className={inputClass(isDark)} />
-                </Field>
-                <Field label="Header last name">
-                  <input value={manuscriptFrontMatter.header_last_name} onChange={(event) => updateFrontMatter("header_last_name", event.target.value)} className={inputClass(isDark)} />
-                </Field>
-                <Field label="Header title">
-                  <input value={manuscriptFrontMatter.header_title} onChange={(event) => updateFrontMatter("header_title", event.target.value)} className={inputClass(isDark)} />
-                </Field>
-              </div>
-
-              <Field label="Contact address" className="mt-4">
-                <textarea value={manuscriptFrontMatter.contact_address} onChange={(event) => updateFrontMatter("contact_address", event.target.value)} rows={3} className={textareaClass(isDark)} />
-              </Field>
-
-              <div className="mt-5 grid gap-4 lg:grid-cols-2">
-                <Field label="Dedication">
-                  <textarea value={manuscriptFrontMatter.dedication} onChange={(event) => updateFrontMatter("dedication", event.target.value)} rows={4} className={textareaClass(isDark)} />
-                  <Toggle checked={manuscriptFrontMatter.include_dedication} onChange={(checked) => updateFrontMatter("include_dedication", checked)} isDark={isDark} label="Include in compile" />
-                </Field>
-                <Field label="Acknowledgments">
-                  <textarea value={manuscriptFrontMatter.acknowledgments} onChange={(event) => updateFrontMatter("acknowledgments", event.target.value)} rows={4} className={textareaClass(isDark)} />
-                  <Toggle checked={manuscriptFrontMatter.include_acknowledgments} onChange={(checked) => updateFrontMatter("include_acknowledgments", checked)} isDark={isDark} label="Include in compile" />
-                </Field>
-                <Field label="Epigraph">
-                  <textarea value={manuscriptFrontMatter.epigraph} onChange={(event) => updateFrontMatter("epigraph", event.target.value)} rows={4} className={textareaClass(isDark)} />
-                  <Toggle checked={manuscriptFrontMatter.include_epigraph} onChange={(checked) => updateFrontMatter("include_epigraph", checked)} isDark={isDark} label="Include in compile" />
-                </Field>
-                <Field label="Prologue page">
-                  <textarea value={manuscriptFrontMatter.prologue} onChange={(event) => updateFrontMatter("prologue", event.target.value)} rows={4} className={textareaClass(isDark)} />
-                  <Toggle checked={manuscriptFrontMatter.include_prologue} onChange={(checked) => updateFrontMatter("include_prologue", checked)} isDark={isDark} label="Include in compile" />
-                </Field>
-              </div>
-
-              <div className="mt-6 flex flex-wrap justify-end gap-3">
-                <button onClick={() => setShowCompileDialog(false)} className={`rounded-full px-4 py-2 text-sm ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}>Cancel</button>
-                <button onClick={() => void compileManuscript()} disabled={!!exporting || workspaceSaving} className="rounded-full bg-[linear-gradient(135deg,#1d4ed8,#1e40af)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
-                  {exporting ? "Compiling..." : `Compile ${compileFormat.toUpperCase()}`}
-                </button>
-              </div>
-            </div>
-          </div>
-        ) : null}
+        <ManuscriptOverlayDialogs
+          isDark={isDark}
+          sceneEditorOpen={sceneEditorOpen}
+          editingScene={editingScene}
+          onCloseSceneEditor={closeSceneEditor}
+          sceneTitleDraft={sceneTitleDraft}
+          onSceneTitleDraftChange={setSceneTitleDraft}
+          sceneChapterDraft={sceneChapterDraft}
+          onSceneChapterDraftChange={setSceneChapterDraft}
+          workspaceTree={workspaceTree}
+          sceneDescriptionDraft={sceneDescriptionDraft}
+          onSceneDescriptionDraftChange={setSceneDescriptionDraft}
+          characters={characters}
+          sceneHtmlDraft={sceneHtmlDraft}
+          onSceneDraftChange={(nextHtml, nextText) => {
+            setSceneHtmlDraft(nextHtml)
+            setSceneBodyDraft(nextText)
+          }}
+          sceneVersions={sceneVersions}
+          sceneVersionNameDraft={sceneVersionNameDraft}
+          onSceneVersionNameDraftChange={setSceneVersionNameDraft}
+          sceneVersionDetail={sceneVersionDetail}
+          restoringSceneVersionId={restoringSceneVersionId}
+          sceneBodyDraft={sceneBodyDraft}
+          onCreateSceneSnapshot={() => void createSceneSnapshot()}
+          onCompareSceneVersion={(versionId) => void compareSceneVersion(versionId)}
+          onRestoreSceneSnapshot={(versionId) => void restoreSceneSnapshot(versionId)}
+          sceneSaving={sceneSaving}
+          onSaveScene={() => void saveScene()}
+          showCompileDialog={showCompileDialog}
+          writerWorkspace={writerWorkspace}
+          manuscriptFrontMatter={manuscriptFrontMatter ?? null}
+          onCloseCompileDialog={() => setShowCompileDialog(false)}
+          compileFormat={compileFormat}
+          fullBookWordCount={fullBookWordCount}
+          includeSceneMetadataOnExport={includeSceneMetadataOnExport}
+          onIncludeSceneMetadataOnExportChange={setIncludeSceneMetadataOnExport}
+          onUpdateFrontMatter={updateFrontMatter}
+          exporting={exporting}
+          workspaceSaving={workspaceSaving}
+          onCompileManuscript={() => void compileManuscript()}
+        />
       </div>
     </div>
   )
 }
-
-function InfoList({
-  title,
-  items,
-  emptyLabel,
-  isDark,
-}: {
-  title: string
-  items: string[]
-  emptyLabel: string
-  isDark: boolean
-}) {
-  return (
-    <div>
-      <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>{title}</p>
-      <div className="mt-2 space-y-2">
-        {items.length > 0 ? items.map((item, index) => (
-          <p key={`${item}-${index}`} className={`text-sm ${isDark ? "text-slate-200" : "text-stone-700"}`}>{item}</p>
-        )) : <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>{emptyLabel}</p>}
-      </div>
-    </div>
-  )
-}
-
-function Field({
-  label,
-  children,
-  className,
-}: {
-  label: string
-  children: ReactNode
-  className?: string
-}) {
-  return (
-    <label className={className}>
-      <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">{label}</span>
-      {children}
-    </label>
-  )
-}
-
-function Toggle({
-  checked,
-  onChange,
-  isDark,
-  label,
-}: {
-  checked: boolean
-  onChange: (checked: boolean) => void
-  isDark: boolean
-  label: string
-}) {
-  return (
-    <button
-      type="button"
-      onClick={() => onChange(!checked)}
-      className={`mt-3 rounded-full px-3 py-1.5 text-xs font-semibold ${checked ? isDark ? "bg-emerald-500/15 text-emerald-200" : "bg-emerald-50 text-emerald-700" : isDark ? "bg-white/10 text-slate-300" : "bg-stone-100 text-stone-700"}`}
-    >
-      {label}: {checked ? "On" : "Off"}
-    </button>
-  )
-}
-
-function MetricCard({
-  label,
-  value,
-  note,
-  isDark,
-}: {
-  label: string
-  value: string
-  note: string
-  isDark: boolean
-}) {
-  return (
-    <div className={`rounded-[1.2rem] border px-4 py-4 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50/80"}`}>
-      <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{label}</p>
-      <p className={`mt-3 text-2xl font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{value}</p>
-      <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>{note}</p>
-    </div>
-  )
-}
-
 function DeferredPanelLoadingState({ label }: { label: string }) {
   return (
     <div className="flex min-h-[12rem] items-center justify-center rounded-[1.2rem] border border-border bg-card/60 p-6 text-sm text-muted-foreground">
@@ -4761,46 +3883,6 @@ function annotationCategoryLabel(category: string) {
   return MANUSCRIPT_ANNOTATION_CATEGORY_LABELS[
     (category in MANUSCRIPT_ANNOTATION_CATEGORY_LABELS ? category : "general") as ManuscriptAnnotationCategory
   ]
-}
-
-function ProgressStrip({
-  label,
-  progress,
-  fallback,
-  isDark,
-}: {
-  label: string
-  progress: number | null
-  fallback: string
-  isDark: boolean
-}) {
-  const fill = Math.max(0, Math.min(100, progress ?? 0))
-
-  return (
-    <div className={`rounded-[1.1rem] border px-4 py-3 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50/80"}`}>
-      <div className="flex items-center justify-between gap-3">
-        <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{label}</p>
-        <p className={`text-xs font-semibold ${isDark ? "text-slate-300" : "text-stone-600"}`}>{progress !== null ? `${fill}%` : "No target"}</p>
-      </div>
-      <div className={`mt-3 h-2 overflow-hidden rounded-full ${isDark ? "bg-white/10" : "bg-stone-200"}`}>
-        <div
-          className="h-full rounded-full bg-[linear-gradient(135deg,#0891b2,#2563eb)] transition-[width]"
-          style={{ width: `${progress !== null ? fill : 18}%` }}
-        />
-      </div>
-      <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-        {progress !== null ? "You are moving toward the active target." : fallback}
-      </p>
-    </div>
-  )
-}
-
-function inputClass(isDark: boolean) {
-  return `w-full rounded-[0.95rem] border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`
-}
-
-function textareaClass(isDark: boolean) {
-  return `w-full rounded-[1rem] border px-4 py-3 text-sm leading-6 ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`
 }
 
 function textToHtml(text: string) {

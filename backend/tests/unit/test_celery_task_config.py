@@ -13,7 +13,9 @@ from app.workers.tasks.intelligence_tasks import (
     generate_wiki_task,
 )
 from app.workers.tasks.maintenance_tasks import (
+    cleanup_expired_advisor_jobs_task,
     process_beta_reads_task,
+    refresh_public_rankings_task,
     send_due_trial_emails_task,
 )
 
@@ -27,8 +29,10 @@ def test_background_tasks_ignore_results_to_reduce_redis_pressure():
     assert generate_wiki_task.ignore_result is True
     assert send_due_trial_emails_task.ignore_result is True
     assert process_beta_reads_task.ignore_result is True
+    assert cleanup_expired_advisor_jobs_task.ignore_result is True
+    assert refresh_public_rankings_task.ignore_result is True
 
 
-def test_advisor_tasks_keep_results_for_async_polling():
-    assert generate_advisor_reply_task.ignore_result is False
-    assert generate_series_advisor_reply_task.ignore_result is False
+def test_advisor_tasks_ignore_results_after_database_polling_migration():
+    assert generate_advisor_reply_task.ignore_result is True
+    assert generate_series_advisor_reply_task.ignore_result is True

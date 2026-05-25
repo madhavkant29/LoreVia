@@ -2,14 +2,35 @@
 
 import Link from "next/link"
 import type { Route } from "next"
-import { useDeferredValue, useState } from "react"
+import { useDeferredValue, useEffect, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 
 import { publicApi } from "@/lib/api/public"
 import { asQueryKey } from "@/lib/query/cacheKeys"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import type { PublicBook } from "@/types/book"
-import type { PublicUploadsOverview } from "@/types/public"
+import type { PublicRankedBookListResponse, PublicUploadsOverview } from "@/types/public"
+
+const UPLOADS_PAGE_SIZE = 24
+
+const rankingOptions = [
+  { value: "most_popular", label: "Most popular" },
+  { value: "top_rated", label: "Top rated" },
+  { value: "most_complex", label: "Most complex" },
+  { value: "big_cast", label: "Big cast" },
+  { value: "most_well_written", label: "Most well written" },
+  { value: "beginner_friendly", label: "Beginner friendly" },
+  { value: "recently_updated", label: "Recently updated" },
+  { value: "recently_released", label: "Recently released" },
+] as const
+
+const timeWindowOptions = [
+  { value: "daily", label: "Daily" },
+  { value: "weekly", label: "Weekly" },
+  { value: "monthly", label: "Monthly" },
+  { value: "yearly", label: "Yearly" },
+  { value: "all_time", label: "All time" },
+] as const
 
 function formatCompactDate(value?: string | null) {
   if (!value) return "Unpublished date hidden"
@@ -32,10 +53,48 @@ function MetricCard({ label, value, note, isDark }: { label: string; value: stri
   )
 }
 
+function RankingSelect({
+  label,
+  value,
+  options,
+  onChange,
+  isDark,
+}: {
+  label: string
+  value: string
+  options: ReadonlyArray<{ value: string; label: string }>
+  onChange: (value: string) => void
+  isDark: boolean
+}) {
+  return (
+    <label className="block">
+      <span className={`text-sm font-medium ${isDark ? "text-slate-300" : "text-stone-700"}`}>{label}</span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className={`mt-3 w-full rounded-2xl border px-4 py-3 text-sm outline-none transition ${isDark ? "border-white/10 bg-white/[0.04] text-white" : "border-stone-200 bg-white text-stone-950"}`}
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  )
+}
+
 function CreatorBookCard({ book, isDark }: { book: PublicBook; isDark: boolean }) {
   return (
     <article className={`rounded-2xl border p-6 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-white"}`}>
-      <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>
+      {book.ranking?.label ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className={`rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "bg-cyan-300/10 text-cyan-200" : "bg-cyan-50 text-cyan-800"}`}>
+            #{book.ranking.position ?? "?"} {book.ranking.label}
+          </span>
+        </div>
+      ) : null}
+      <p className={`mt-3 text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>
         Creator-published original
         {book.genre ? ` - ${book.genre}` : ""}
       </p>
@@ -53,8 +112,11 @@ function CreatorBookCard({ book, isDark }: { book: PublicBook; isDark: boolean }
       <div className={`mt-5 flex flex-wrap gap-2 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>
         <span>{book.total_chapters ?? 0} chapters</span>
         <span>-</span>
-        <span>{formatCompactDate(book.published_at)}</span>
+        <span>{formatCompactDate(book.public_updated_at || book.published_at)}</span>
       </div>
+      {book.ranking?.supporting_note ? (
+        <p className={`mt-4 text-xs leading-6 ${isDark ? "text-slate-400" : "text-stone-500"}`}>{book.ranking.supporting_note}</p>
+      ) : null}
       <div className="mt-6 flex flex-wrap gap-3">
         <Link
           href={`/public/${book.public_slug || book.id}` as Route}
@@ -77,22 +139,47 @@ function CreatorBookCard({ book, isDark }: { book: PublicBook; isDark: boolean }
 
 export function PublicUploadsPageClient({
   initialBooks = [],
+  initialRankingData,
   initialOverview = null,
 }: {
   initialBooks?: PublicBook[]
+  initialRankingData?: PublicRankedBookListResponse
   initialOverview?: PublicUploadsOverview | null
 }) {
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
   const [search, setSearch] = useState("")
+  const [ranking, setRanking] = useState(initialRankingData?.ranking_key ?? "most_popular")
+  const [timeWindow, setTimeWindow] = useState(initialRankingData?.time_window ?? "monthly")
+  const [page, setPage] = useState(initialRankingData?.page ?? 1)
   const deferredSearch = useDeferredValue(search)
 
-  const { data: books = initialBooks, isLoading: booksLoading } = useQuery<PublicBook[]>({
-    queryKey: asQueryKey(`public:uploads:${deferredSearch}`),
-    queryFn: () => publicApi.listCreatorUploads({ search: deferredSearch }),
+  useEffect(() => {
+    setPage(1)
+  }, [deferredSearch, ranking, timeWindow])
+
+  const { data: rankingData, isLoading: booksLoading } = useQuery<PublicRankedBookListResponse>({
+    queryKey: asQueryKey(`public:uploads:ranked:${ranking}:${timeWindow}:${deferredSearch}:${page}`),
+    queryFn: () => publicApi.listRankedCreatorUploads({
+      ranking,
+      timeWindow,
+      search: deferredSearch,
+      page,
+      limit: UPLOADS_PAGE_SIZE,
+    }),
     staleTime: 60_000,
-    initialData: !deferredSearch && initialBooks.length > 0 ? initialBooks : undefined,
+    initialData: (
+      initialRankingData
+      && page === (initialRankingData.page ?? 1)
+      && ranking === initialRankingData.ranking_key
+      && timeWindow === initialRankingData.time_window
+      && deferredSearch.trim().length === 0
+    )
+      ? initialRankingData
+      : undefined,
   })
+
+  const books = rankingData?.items ?? initialBooks
 
   const { data: overview = initialOverview } = useQuery<PublicUploadsOverview | null>({
     queryKey: asQueryKey("public:uploads:overview"),
@@ -131,7 +218,7 @@ export function PublicUploadsPageClient({
           </section>
         ) : null}
 
-        <section className="mt-10">
+        <section className="mt-10 grid gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,0.7fr)_minmax(0,0.7fr)]">
           <label className="block">
             <span className={`text-sm font-medium ${isDark ? "text-slate-300" : "text-stone-700"}`}>Search creator-published books</span>
             <input
@@ -141,7 +228,16 @@ export function PublicUploadsPageClient({
               className={`mt-3 w-full rounded-2xl border px-4 py-3 text-sm outline-none transition ${isDark ? "border-white/10 bg-white/[0.04] text-white placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-950 placeholder:text-stone-400"}`}
             />
           </label>
+          <RankingSelect label="Rank by" value={ranking} options={rankingOptions} onChange={setRanking} isDark={isDark} />
+          <RankingSelect label="Window" value={timeWindow} options={timeWindowOptions} onChange={setTimeWindow} isDark={isDark} />
         </section>
+
+        {rankingData?.items?.[0]?.ranking?.label ? (
+          <div className={`mt-6 rounded-2xl border px-5 py-4 text-sm ${isDark ? "border-white/10 bg-white/[0.04] text-slate-300" : "border-stone-200 bg-white text-stone-700"}`}>
+            <span className="font-semibold">{rankingData.items[0].ranking.label}</span>
+            {rankingData.items[0].ranking.supporting_note ? ` · ${rankingData.items[0].ranking.supporting_note}` : ""}
+          </div>
+        ) : null}
 
         {booksLoading ? (
           <div className={`mt-12 rounded-2xl border px-6 py-12 text-center ${isDark ? "border-white/10 bg-white/5 text-slate-400" : "border-stone-200 bg-white text-stone-500"}`}>
@@ -149,14 +245,43 @@ export function PublicUploadsPageClient({
           </div>
         ) : books.length === 0 ? (
           <div className={`mt-12 rounded-2xl border px-6 py-12 text-center ${isDark ? "border-white/10 bg-white/5 text-slate-400" : "border-stone-200 bg-white text-stone-500"}`}>
-            No creator-published public books matched that search yet.
+            No creator-published public books matched that ranking yet.
           </div>
         ) : (
-          <div className="mt-12 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-            {books.map((book) => (
-              <CreatorBookCard key={book.id} book={book} isDark={isDark} />
-            ))}
-          </div>
+          <>
+            <div className="mt-12 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+              {books.map((book) => (
+                <CreatorBookCard key={book.id} book={book} isDark={isDark} />
+              ))}
+            </div>
+
+            {rankingData && rankingData.total > 0 ? (
+              <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-600"}`}>
+                  Showing {(rankingData.page - 1) * rankingData.limit + 1}-{Math.min(rankingData.page * rankingData.limit, rankingData.total)} of {rankingData.total} ranked uploads
+                </p>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setPage((current) => Math.max(1, current - 1))}
+                    disabled={rankingData.page <= 1}
+                    className={`inline-flex h-10 items-center justify-center rounded-full px-4 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${isDark ? "border border-white/10 bg-white/5 text-slate-100 hover:bg-white/10" : "border border-stone-200 bg-white text-stone-900 hover:bg-stone-50"}`}
+                  >
+                    Previous
+                  </button>
+                  <span className={`text-sm ${isDark ? "text-slate-300" : "text-stone-700"}`}>Page {rankingData.page}</span>
+                  <button
+                    type="button"
+                    onClick={() => setPage((current) => current + 1)}
+                    disabled={!rankingData.has_more}
+                    className={`inline-flex h-10 items-center justify-center rounded-full px-4 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${isDark ? "border border-white/10 bg-white/5 text-slate-100 hover:bg-white/10" : "border border-stone-200 bg-white text-stone-900 hover:bg-stone-50"}`}
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </>
         )}
       </div>
     </main>

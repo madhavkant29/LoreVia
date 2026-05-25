@@ -5,10 +5,11 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.book import Book
 from app.models.user import TrialEmailEvent, User
 from app.services.email_service import send_trial_email
 from app.utils.billing_utils import FREE_TIER, normalize_tier
-from app.utils.trial_email_utils import build_trial_email_schedule
+from app.utils.trial_email_utils import FIRST_MANUSCRIPT_NUDGE, build_trial_email_schedule
 
 
 async def schedule_trial_email_events(db: AsyncSession, user: User) -> None:
@@ -108,6 +109,15 @@ async def send_due_trial_emails(
     ).all()
 
     for event, user in claimed_events:
+        if event.email_type == FIRST_MANUSCRIPT_NUDGE:
+            existing_book = (
+                await db.execute(select(Book.id).where(Book.user_id == user.id).limit(1))
+            ).scalar_one_or_none()
+            if existing_book is not None:
+                event.status = "skipped"
+                event.last_error = "User already created a manuscript workspace before the nudge was due."
+                await db.commit()
+                continue
         delivered = await send_trial_email(user.email, event.email_type)
         if delivered:
             event.status = "sent"

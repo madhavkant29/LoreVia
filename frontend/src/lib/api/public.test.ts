@@ -59,12 +59,24 @@ describe("public api", () => {
 
   it("loads creator uploads and public upload analytics", async () => {
     await publicApi.listCreatorUploads({ search: " ember " })
+    await publicApi.listRankedCreatorUploads({ ranking: "top_rated", timeWindow: "weekly", search: " ember ", page: 2, limit: 12 })
     await publicApi.getUploadsAnalytics()
 
     expect(getMock).toHaveBeenCalledWith("/public/uploads", {
       params: { search: "ember" },
     })
+    expect(getMock).toHaveBeenCalledWith("/public/rankings/uploads", {
+      params: { ranking: "top_rated", time_window: "weekly", search: "ember", page: 2, limit: 12 },
+    })
     expect(getMock).toHaveBeenCalledWith("/public/analytics")
+  })
+
+  it("loads ranked beta novels with ranking and window params", async () => {
+    await publicApi.listRankedBetaNovels({ ranking: "most_complex", timeWindow: "monthly", query: " citadel ", page: 3, pageSize: 10 })
+
+    expect(getMock).toHaveBeenCalledWith("/public/rankings/beta-novels", {
+      params: { ranking: "most_complex", time_window: "monthly", q: "citadel", page: 3, page_size: 10 },
+    })
   })
 
   it("loads public book details and chapters", async () => {
@@ -208,6 +220,15 @@ describe("public api", () => {
 
     expect(postMock).toHaveBeenCalledWith("/public/forum/posts/post-2/comments", {
       body: "Helpful note",
+    })
+  })
+
+  it("creates a forum reply comment", async () => {
+    await publicApi.createForumComment("post-2", "Helpful reply", "comment-8")
+
+    expect(postMock).toHaveBeenCalledWith("/public/forum/posts/post-2/comments", {
+      body: "Helpful reply",
+      parent_comment_id: "comment-8",
     })
   })
 

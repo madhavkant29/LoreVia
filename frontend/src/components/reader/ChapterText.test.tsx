@@ -73,4 +73,88 @@ describe("ChapterText", () => {
 
     expect(onTap).toHaveBeenCalledWith("Nora")
   })
+
+  it("resolves relative chapter media urls against the current origin", () => {
+    container = document.createElement("div")
+    document.body.appendChild(container)
+    root = createRoot(container)
+
+    act(() => {
+      root?.render(
+        <ChapterText
+          bookId="book-1"
+          chapterNum={2}
+          chapterTitle="The Ember Gate"
+          totalChapters={3}
+          textUrl={null}
+          textContent={"[[IMAGE:1]]"}
+          htmlContent={null}
+          media={[{
+            marker: "[[IMAGE:1]]",
+            asset_type: "image",
+            url: "/api/v1/reader/media/demo",
+            content_base64: null,
+            content_type: "image/png",
+            sort_order: 0,
+            caption: "Demo media",
+          }]}
+          characters={[]}
+          onTap={() => {}}
+          onQuoteSelect={() => {}}
+          theme="light"
+          fontSize={20}
+          fontFamily="serif"
+          displayStyle="published"
+          quoteModeEnabled={false}
+          canUseQuoteMode={false}
+          canCopyManuscript
+        />
+      )
+    })
+
+    const image = container.querySelector("img")
+    expect(image?.getAttribute("src")).toBe(new URL("/api/v1/reader/media/demo", window.location.origin).toString())
+  })
+
+  it("renders base64 media when url is unavailable", () => {
+    container = document.createElement("div")
+    document.body.appendChild(container)
+    root = createRoot(container)
+
+    act(() => {
+      root?.render(
+        <ChapterText
+          bookId="book-1"
+          chapterNum={2}
+          chapterTitle="The Ember Gate"
+          totalChapters={3}
+          textUrl={null}
+          textContent={"[[IMAGE:1]]"}
+          htmlContent={null}
+          media={[{
+            marker: "[[IMAGE:1]]",
+            asset_type: "image",
+            url: null,
+            content_base64: "YWJj",
+            content_type: "image/png",
+            sort_order: 0,
+            caption: "Fallback media",
+          }]}
+          characters={[]}
+          onTap={() => {}}
+          onQuoteSelect={() => {}}
+          theme="light"
+          fontSize={20}
+          fontFamily="serif"
+          displayStyle="published"
+          quoteModeEnabled={false}
+          canUseQuoteMode={false}
+          canCopyManuscript
+        />
+      )
+    })
+
+    const image = container.querySelector("img")
+    expect(image?.getAttribute("src")).toBe("data:image/png;base64,YWJj")
+  })
 })

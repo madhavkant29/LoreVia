@@ -6,7 +6,7 @@ from app.api.deps.auth import get_current_user, get_optional_current_user
 from app.api.deps.rate_limit import rate_limit_api
 from app.core.database import get_db
 from app.models.user import Subscription, User
-from app.schemas.billing import BillingConfirmationOut, BillingStatusOut, CheckoutBody
+from app.schemas.billing import BillingConfirmationOut, CheckoutBody
 from app.services.paddle_service import (
     create_checkout_url,
     create_portal_url,
@@ -18,7 +18,6 @@ from app.utils.billing_utils import (
     VALID_PAID_PLAN_CODES,
     append_billing_confirmation_token,
     billing_interval_for_plan,
-    billing_configuration_status,
     create_billing_confirmation_token,
     normalize_plan_code,
     paddle_plan_is_configured,
@@ -28,11 +27,6 @@ from app.utils.logging import get_logger
 
 router = APIRouter()
 log = get_logger("lorevia.billing")
-
-
-@router.get("/status", response_model=BillingStatusOut, dependencies=[Depends(rate_limit_api)])
-async def get_billing_status():
-    return BillingStatusOut(**billing_configuration_status())
 
 
 @router.post("/checkout", dependencies=[Depends(rate_limit_api)])

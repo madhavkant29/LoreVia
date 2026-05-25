@@ -1,14 +1,21 @@
 import type { Page, Route } from "@playwright/test"
 import type { Character } from "@/types/character"
+import type { EmailPreferences } from "@/types/email"
+import type { PublicBook } from "@/types/book"
 import type { PublicForumPost } from "@/types/public"
 
 type SessionMode = "authenticated" | "guest"
 type LoginMode = "success" | "unauthorized"
+type AdminMode = "none" | "moderation" | "billing" | "super" | "owner"
 
 type MockOptions = {
   session?: SessionMode
   login?: LoginMode
+  admin?: AdminMode
 }
+
+const ADMIN_TEST_SESSION_COOKIE = "lorevia_admin_test_session"
+const ADMIN_TEST_SESSION_SECRET = process.env.ADMIN_E2E_TEST_SECRET ?? "codex-e2e-admin-secret"
 
 function normalizeMockApiPath(pathname: string) {
   return pathname
@@ -34,6 +41,7 @@ const user = {
   longest_login_streak_days: 12,
   login_activity_dates: ["2026-05-05", "2026-05-06", "2026-05-07", "2026-05-08"],
   email_verified: true,
+  messaging_permission: "anyone",
   created_at: "2026-04-01T09:00:00Z",
 }
 
@@ -50,7 +58,7 @@ const book = {
   mode: "author",
   source_kind: "upload",
   preserve_chapter_numbers: true,
-  cover_url: null,
+  cover_url: "/api/v1/books/book-1/cover?token=mock-cover",
   total_chapters: 3,
   total_tokens: 42000,
   total_words: 31500,
@@ -59,7 +67,7 @@ const book = {
   series_name: "Ash Cycle",
   series_order: 1,
   is_public: false,
-  public_description: null,
+  public_description: "A storm-lashed fantasy about a gate city, a vanished oath, and the cost of holding the wall.",
   copyright_warning: false,
   archived_at: null,
   hidden_at: null,
@@ -92,10 +100,11 @@ const initialPublicForumPosts: PublicForumPost[] = [
     author_username: "author",
     author_reputation_score: 18,
     author_trust_level: "Trusted",
-    title: "Sky of Ash",
-    author: "M. Vale",
-    genre: "Epic Fantasy",
-    work_type: "novel",
+  title: "Sky of Ash",
+  author: "M. Vale",
+  genre: "Epic Fantasy",
+  description: "A storm-lashed fantasy about a gate city, a vanished oath, and the cost of holding the wall.",
+  work_type: "novel",
     headline: "Looking for sharp beta readers for an ash-storm fantasy.",
     body: "I need readers who can flag pacing drift, trust weak scenes, and tell me where momentum slips before the midpoint.",
     desired_beta_reader_count: 5,
@@ -126,10 +135,11 @@ const initialPublicForumPosts: PublicForumPost[] = [
     author_username: "beta_reader",
     author_reputation_score: 9,
     author_trust_level: "Trusted",
-    title: null,
-    author: null,
-    genre: null,
-    work_type: null,
+  title: null,
+  author: null,
+  genre: null,
+  description: null,
+  work_type: null,
     headline: "How do you keep second acts from flattening out?",
     body: "Looking for practical advice on keeping a long middle section tense without rushing character payoffs.",
     desired_beta_reader_count: null,
@@ -156,10 +166,70 @@ const initialPublicForumPosts: PublicForumPost[] = [
 
 let publicForumPosts: PublicForumPost[] = JSON.parse(JSON.stringify(initialPublicForumPosts))
 
+const supplementalForumPosts: PublicForumPost[] = Array.from({ length: 22 }, (_, index) => ({
+  id: `forum-seed-${index + 1}`,
+  thread_type: index % 2 === 0 ? "general" : "novel",
+  book_id: null,
+  author_user_id: `seed-user-${index + 1}`,
+  author_username: `seed_writer_${index + 1}`,
+  author_reputation_score: 2 + index,
+  author_trust_level: index % 3 === 0 ? "Trusted" : "New member",
+  title: index % 2 === 0 ? null : `Seed Book ${index + 1}`,
+  author: index % 2 === 0 ? null : `Seed Author ${index + 1}`,
+  genre: index % 2 === 0 ? null : "Fantasy",
+  description: index % 2 === 0 ? null : `Seed fantasy project description ${index + 1}.`,
+  work_type: index % 2 === 0 ? null : "novel",
+  headline: `Seed forum headline ${index + 1}`,
+  body: `Supplemental forum discussion ${index + 1} for pagination coverage in the public forum feed.`,
+  desired_beta_reader_count: index % 2 === 0 ? null : 3,
+  allow_contact_requests: index % 2 !== 0,
+  status: "open",
+  viewer_interest_status: null,
+  reaction: null,
+  interest_count: index % 2 === 0 ? 0 : 1,
+  comment_count: index % 4,
+  like_count: 1 + index,
+  dislike_count: 0,
+  rating_summary: {
+    average_rating: index % 2 === 0 ? null : 4.1,
+    rating_count: index % 2 === 0 ? 0 : 2,
+    positive_rating_count: index % 2 === 0 ? 0 : 2,
+    neutral_rating_count: 0,
+    negative_rating_count: 0,
+  },
+  discoverability_score: 15 - (index * 0.25),
+  created_at: `2026-05-${String((index % 9) + 1).padStart(2, "0")}T09:00:00Z`,
+  updated_at: `2026-05-${String((index % 9) + 1).padStart(2, "0")}T10:00:00Z`,
+}))
+
+function buildForumFeedPosts() {
+  return [...publicForumPosts, ...supplementalForumPosts]
+}
+
+function filterForumFeedPosts(posts: PublicForumPost[], query: string | null) {
+  const normalizedQuery = (query || "").trim().toLowerCase()
+  if (!normalizedQuery) {
+    return posts
+  }
+  return posts.filter((post) =>
+    [
+      post.title,
+      post.author,
+      post.author_username,
+      post.genre,
+      post.headline,
+      post.body,
+    ]
+      .filter((value): value is string => typeof value === "string" && value.length > 0)
+      .some((value) => value.toLowerCase().includes(normalizedQuery)),
+  )
+}
+
 const initialPublicForumComments: Array<{
   id: string
   post_id: string
   book_id: string | null
+  parent_comment_id: string | null
   author_user_id: string
   author_username: string | null
   author_reputation_score: number
@@ -169,6 +239,7 @@ const initialPublicForumComments: Array<{
   dislike_count: number
   reaction: "like" | "dislike" | null
   can_edit: boolean
+  replies: Array<unknown>
   created_at: string
   updated_at: string
 }> = [
@@ -176,6 +247,7 @@ const initialPublicForumComments: Array<{
     id: "forum-comment-1",
     post_id: "forum-post-1",
     book_id: "book-1",
+    parent_comment_id: null,
     author_user_id: "reader-1",
     author_username: "beta_reader",
     author_reputation_score: 9,
@@ -185,6 +257,7 @@ const initialPublicForumComments: Array<{
     dislike_count: 0,
     reaction: null,
     can_edit: false,
+    replies: [],
     created_at: "2026-05-14T09:00:00Z",
     updated_at: "2026-05-14T09:00:00Z",
   },
@@ -192,6 +265,7 @@ const initialPublicForumComments: Array<{
     id: "forum-comment-2",
     post_id: "forum-post-1",
     book_id: "book-1",
+    parent_comment_id: null,
     author_user_id: "reader-2",
     author_username: "line_editor",
     author_reputation_score: 4,
@@ -201,6 +275,7 @@ const initialPublicForumComments: Array<{
     dislike_count: 0,
     reaction: null,
     can_edit: false,
+    replies: [],
     created_at: "2026-05-14T09:30:00Z",
     updated_at: "2026-05-14T09:30:00Z",
   },
@@ -208,6 +283,7 @@ const initialPublicForumComments: Array<{
     id: "forum-comment-3",
     post_id: "forum-post-2",
     book_id: null,
+    parent_comment_id: null,
     author_user_id: "user-1",
     author_username: "author",
     author_reputation_score: 18,
@@ -217,6 +293,7 @@ const initialPublicForumComments: Array<{
     dislike_count: 0,
     reaction: null,
     can_edit: true,
+    replies: [],
     created_at: "2026-05-14T11:00:00Z",
     updated_at: "2026-05-14T11:00:00Z",
   },
@@ -226,6 +303,7 @@ let publicForumComments: Array<{
   id: string
   post_id: string
   book_id: string | null
+  parent_comment_id: string | null
   author_user_id: string
   author_username: string | null
   author_reputation_score: number
@@ -235,9 +313,33 @@ let publicForumComments: Array<{
   dislike_count: number
   reaction: "like" | "dislike" | null
   can_edit: boolean
+  replies: Array<unknown>
   created_at: string
   updated_at: string
 }> = JSON.parse(JSON.stringify(initialPublicForumComments))
+
+function buildNestedForumComments(postId: string) {
+  const postComments = publicForumComments
+    .filter((comment) => comment.post_id === postId)
+    .sort((left, right) => left.created_at.localeCompare(right.created_at) || left.id.localeCompare(right.id))
+    .map((comment) => ({ ...comment, replies: [] as typeof publicForumComments }))
+  const commentMap = new Map(postComments.map((comment) => [comment.id, comment]))
+  const roots: typeof postComments = []
+
+  for (const comment of postComments) {
+    if (comment.parent_comment_id && commentMap.has(comment.parent_comment_id)) {
+      commentMap.get(comment.parent_comment_id)?.replies.push(comment)
+      continue
+    }
+    roots.push(comment)
+  }
+
+  return roots
+}
+
+function countForumComments(postId: string) {
+  return publicForumComments.filter((comment) => comment.post_id === postId).length
+}
 
 const publicWriterProfiles = {
   author: {
@@ -354,7 +456,7 @@ const publicWriterProfiles = {
   },
 }
 
-const publicBooks = [
+const publicBooks: PublicBook[] = [
   {
     id: "public-book-1",
     title: "Ash Gate Sample",
@@ -369,6 +471,20 @@ const publicBooks = [
     copyright_warning: false,
     active_forum_post_id: "forum-post-1",
     created_at: "2026-05-14T08:00:00Z",
+    published_at: "2026-05-14T08:00:00Z",
+    public_updated_at: "2026-05-20T08:00:00Z",
+    analytics: {
+      book_view_count: 128,
+      unique_reader_count_30d: 64,
+      chapter_view_count: 212,
+      published_at: "2026-05-14T08:00:00Z",
+      chapter_count: 1,
+      total_words: 1800,
+      has_open_discussion: true,
+      open_discussion_count: 1,
+      discussion_comment_count: 7,
+      discussion_interest_count: 3,
+    },
   },
 ]
 
@@ -932,6 +1048,14 @@ const chapterList = {
   ],
 }
 
+let mockReadingProgress = {
+  current_chapter: 2,
+  scroll_pct: 35,
+  chapters_read_count: 2,
+  percent_complete: 64,
+  chapters_left: 1,
+}
+
 const chapter = {
   chapter_number: 2,
   chapter_title: "The Ember Gate",
@@ -949,7 +1073,26 @@ const chapter = {
     ].join("\n\n"),
   html_content:
     "<p>Nora crossed the ember gate with ash on her sleeves.</p><p>The city bells rang beyond the bridge.</p><p>The courier behind her whispered that the old road remembered every footstep.</p><p>* * *</p><p>Morning came with a hard white sun and the smell of metal in the rain.</p>",
-  media: [],
+  media: [
+    {
+      marker: "[[IMAGE:1]]",
+      asset_type: "image",
+      content_type: "image/png",
+      sort_order: 0,
+      url: "/api/v1/reader/media/media-inline-1?token=inline-token",
+      caption: "Ash bridge sketch",
+      content_base64: null,
+    },
+    {
+      marker: "[[IMAGE:2]]",
+      asset_type: "image",
+      content_type: "image/png",
+      sort_order: 1,
+      url: null,
+      content_base64: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAukB9VE3d2QAAAAASUVORK5CYII=",
+      caption: "Fallback inset",
+    },
+  ],
   characters: [
     {
       id: "char-1",
@@ -1119,7 +1262,17 @@ const chaptersByNumber = {
       "Nora leaves the outer district with a sealed message and no time to second-guess the mission.",
     html_content:
       "<p>Nora leaves the outer district with a sealed message and no time to second-guess the mission.</p>",
-    media: [],
+    media: [
+      {
+        marker: "[[IMAGE:0]]",
+        asset_type: "image",
+        content_type: "image/png",
+        sort_order: 0,
+        url: "/api/v1/reader/media/media-inline-0?token=inline-token",
+        caption: "Cover illustration panel",
+        content_base64: null,
+      },
+    ],
     characters: chapter.characters,
   },
   2: chapter,
@@ -1131,10 +1284,81 @@ const chaptersByNumber = {
     text_url: null,
     text_content: "",
     html_content: "<p></p>",
-    media: [],
+    media: [
+      {
+        marker: "[[IMAGE:3]]",
+        asset_type: "image",
+        content_type: "image/png",
+        sort_order: 0,
+        url: "/api/v1/reader/media/media-inline-3?token=inline-token",
+        caption: "River map",
+        content_base64: null,
+      },
+    ],
     characters: chapter.characters,
   },
 } as const
+
+const characterReviewPayload = {
+  candidates: [
+    {
+      id: "candidate-1",
+      book_id: "book-1",
+      chapter_number: 2,
+      raw_name: "Gregor's sister",
+      proposed_name: "Gregor's sister",
+      normalized_name: "gregor sister",
+      aliases: [],
+      matched_character_id: "char-grete",
+      status: "pending",
+      confidence: 61,
+      reason_codes: ["possible_role_label", "needs_review"],
+      evidence: {},
+      source_batch_key: "batch-1",
+      created_at: "2026-05-14T10:00:00Z",
+      updated_at: "2026-05-14T10:00:00Z",
+    },
+  ],
+  duplicate_suggestions: [
+    {
+      id: "duplicate-1",
+      book_id: "book-1",
+      primary_character_id: "char-grete",
+      secondary_character_id: "char-gregors-sister",
+      confidence: 92,
+      reasons: ["Exact name overlap in scene context"],
+      shared_evidence: {},
+      status: "pending",
+      created_at: "2026-05-14T10:00:00Z",
+      updated_at: "2026-05-14T10:00:00Z",
+    },
+  ],
+  relationship_candidates: [
+    {
+      id: "rel-candidate-1",
+      book_id: "book-1",
+      chapter_number: 3,
+      raw_character_a: "Grete",
+      raw_character_b: "Gregor's father",
+      matched_character_a_id: "char-grete",
+      matched_character_b_id: "char-mr-samsa",
+      rel_type: "family",
+      sentiment: -0.4,
+      description: "Strain grows as the household turns defensive.",
+      status: "pending",
+      reason_codes: ["relationship_unresolved", "character_a_resolved", "character_b_resolved"],
+      evidence: {},
+      source_batch_key: "relationship-batch-1",
+      created_at: "2026-05-14T10:00:00Z",
+      updated_at: "2026-05-14T10:00:00Z",
+    },
+  ],
+  counts: {
+    pending_candidates: 1,
+    pending_duplicate_suggestions: 1,
+    pending_relationship_candidates: 1,
+  },
+}
 
 const storyHealth = {
   score: 82,
@@ -1779,9 +2003,59 @@ function notFound(route: Route) {
   return json(route, { detail: "Not found" }, 404)
 }
 
+function buildAdminSession(admin: AdminMode) {
+  switch (admin) {
+    case "moderation":
+      return {
+        is_admin: true,
+        scopes: ["moderation_admin"],
+        is_owner: false,
+        requires_step_up: true,
+        session_expires_at: null,
+      }
+    case "billing":
+      return {
+        is_admin: true,
+        scopes: ["billing_admin"],
+        is_owner: false,
+        requires_step_up: true,
+        session_expires_at: null,
+      }
+    case "super":
+      return {
+        is_admin: true,
+        scopes: ["super_admin"],
+        is_owner: false,
+        requires_step_up: true,
+        session_expires_at: null,
+      }
+    case "owner":
+      return {
+        is_admin: true,
+        scopes: ["moderation_admin", "billing_admin", "super_admin"],
+        is_owner: true,
+        requires_step_up: true,
+        session_expires_at: null,
+      }
+    default:
+      return null
+  }
+}
+
 export async function installMockApi(page: Page, options: MockOptions = {}) {
   const session = options.session ?? "authenticated"
   const login = options.login ?? "success"
+  const admin = options.admin ?? "none"
+  const adminCookieMode = admin === "none" ? "guest" : admin
+  await page.context().addCookies([
+    {
+      name: ADMIN_TEST_SESSION_COOKIE,
+      value: `${adminCookieMode}:${ADMIN_TEST_SESSION_SECRET}`,
+      url: "http://localhost:3000",
+      httpOnly: true,
+      sameSite: "Lax",
+    },
+  ])
   user.username = defaultUsername
   publicForumPosts = JSON.parse(JSON.stringify(initialPublicForumPosts))
   publicForumComments = JSON.parse(JSON.stringify(initialPublicForumComments))
@@ -1794,6 +2068,13 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
   let mockBetaReadFeedbackItems = JSON.parse(JSON.stringify(initialBetaReadFeedbackItems))
   let mockNotes = JSON.parse(JSON.stringify(notes))
   let mockManuscriptAnnotations = JSON.parse(JSON.stringify(manuscriptAnnotations))
+  let mockEmailPreferences: EmailPreferences = {
+    email: user.email,
+    product_updates: true,
+    marketing: true,
+    unsubscribed_all: false,
+    unsubscribed_at: null,
+  }
 
   const buildBetaReadDetail = (assignmentId: string) => {
     const assignment = mockBetaReads.find((item: typeof mockBetaReads[number]) => item.id === assignmentId)
@@ -1834,6 +2115,145 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
       return json(route, { ok: true })
     }
 
+    if (path === "/api/v1/admin/session" && method === "GET") {
+      const adminSession = buildAdminSession(admin)
+      return adminSession ? json(route, adminSession) : json(route, { detail: "Admin only" }, 403)
+    }
+
+    if (path === "/api/v1/admin/billing/status" && method === "GET") {
+      return json(route, {
+        billing_enabled: true,
+        payments_ready: true,
+        paddle_api_key_present: true,
+        webhook_secret_present: true,
+        default_checkout_url_present: true,
+        recommended_default_checkout_url: "https://getlorevia.com/checkout",
+        resend_api_key_present: true,
+        internal_job_secret_present: true,
+        fully_configured_plan_count: 4,
+        missing_configuration: [],
+        plans: [
+          { code: "author_monthly", display_name: "Author", billing_interval: "monthly", price_usd: 29, configured: true, price_id_present: true },
+          { code: "author_annual", display_name: "Author", billing_interval: "annual", price_usd: 249, configured: true, price_id_present: true },
+          { code: "architect_monthly", display_name: "Architect", billing_interval: "monthly", price_usd: 49, configured: true, price_id_present: true },
+          { code: "architect_annual", display_name: "Architect", billing_interval: "annual", price_usd: 449, configured: true, price_id_present: true },
+        ],
+        webhook_endpoint_path: "/api/v1/webhooks/paddle",
+        supported_webhook_events: ["transaction.completed", "subscription.updated"],
+        trial_email_job_endpoint_path: "/api/v1/internal/jobs/send-due-trial-emails",
+        trial_email_runner_script: "backend/scripts/run_due_trial_emails.py",
+        trial_email_automation_code_ready: true,
+        priority_processing_code_ready: true,
+        priority_queue_names: ["extraction_priority", "analysis_priority"],
+        external_action_items: [],
+      })
+    }
+
+    if (path === "/api/v1/admin/refunds/reviews" && method === "GET") {
+      return json(route, [
+        {
+          id: "refund-review-1",
+          user_id: "user-1",
+          subscription_id: "sub-1",
+          paddle_transaction_id: "txn_123",
+          paddle_adjustment_id: null,
+          charge_at: "2026-05-24T10:00:00Z",
+          plan_code: "author_monthly",
+          billing_interval: "monthly",
+          request_source: "support",
+          support_reference: "SUP-123",
+          request_reason: "Duplicate charge report.",
+          status: "manual_review_required",
+          auto_decision: false,
+          decision_reason: null,
+          eligibility_snapshot_json: {},
+          usage_snapshot_json: {},
+          provider_response_json: {},
+          requested_by_admin_user_id: "owner-1",
+          resolved_by_admin_user_id: null,
+          resolved_at: null,
+          created_at: "2026-05-24T10:05:00Z",
+          updated_at: "2026-05-24T10:05:00Z",
+        },
+      ])
+    }
+
+    if (path === "/api/v1/admin/access" && method === "GET") {
+      return json(route, [
+        {
+          id: "principal-owner-1",
+          user_id: "user-1",
+          status: "active",
+          is_owner: true,
+          scopes: ["moderation_admin", "billing_admin", "super_admin"],
+          grant_reason: "Owner bootstrap.",
+          revoke_reason: null,
+          granted_by_user_id: null,
+          revoked_by_user_id: null,
+          created_at: "2026-05-20T10:00:00Z",
+          updated_at: "2026-05-20T10:00:00Z",
+          revoked_at: null,
+        },
+      ])
+    }
+
+    if (path === "/api/v1/admin/audit" && method === "GET") {
+      return json(route, [
+        {
+          id: "audit-1",
+          actor_user_id: "user-1",
+          target_user_id: "user-2",
+          target_book_id: null,
+          target_report_id: null,
+          target_refund_review_id: null,
+          action_type: "billing_status_viewed",
+          reason: "Viewed billing configuration status.",
+          result: "allowed",
+          request_id: "req-1",
+          ip_address: "127.0.0.1",
+          user_agent: "playwright",
+          scopes_snapshot: ["moderation_admin", "billing_admin", "super_admin"],
+          metadata_json: {},
+          created_at: "2026-05-24T11:00:00Z",
+        },
+      ])
+    }
+
+    if (path === "/api/v1/admin/public-shares/pending" && method === "GET") {
+      return json(route, [
+        {
+          book_id: "book-1",
+          user_id: "user-1",
+          author_username: "author",
+          title: "Sky of Ash",
+          author: "M. Vale",
+          genre: "Epic Fantasy",
+          isbn: null,
+          copyright_warning: false,
+          public_description: book.public_description,
+          requested_at: "2026-05-24T08:00:00Z",
+          created_at: book.created_at,
+        },
+      ])
+    }
+
+    if (path === "/api/v1/admin/reports" && method === "GET") {
+      return json(route, [
+        {
+          id: "report-1",
+          reported_book_id: "book-1",
+          reported_author_user_id: "user-1",
+          reporter_user_id: "reader-1",
+          reporter_email: "reader@example.com",
+          report_type: "copyright",
+          status: "open",
+          reason: "Possible rights issue.",
+          details: "Submitted for smoke coverage.",
+          created_at: "2026-05-24T09:00:00Z",
+        },
+      ])
+    }
+
     if (path === "/api/v1/auth/me/username" && method === "PATCH") {
       const nextUsername = url.searchParams.get("username")?.trim()
       if (!nextUsername || nextUsername.length < 3) {
@@ -1841,6 +2261,22 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
       }
       user.username = nextUsername
       return json(route, user)
+    }
+
+    if (path === "/api/v1/email/preferences" && method === "GET") {
+      return session === "authenticated" ? json(route, mockEmailPreferences) : json(route, { detail: "Unauthorized" }, 401)
+    }
+
+    if (path === "/api/v1/email/preferences" && method === "POST") {
+      const payload = route.request().postDataJSON() as { product_updates?: boolean; marketing?: boolean } | null
+      mockEmailPreferences = {
+        ...mockEmailPreferences,
+        product_updates: Boolean(payload?.product_updates),
+        marketing: Boolean(payload?.marketing),
+      }
+      mockEmailPreferences.unsubscribed_all = !mockEmailPreferences.product_updates && !mockEmailPreferences.marketing
+      mockEmailPreferences.unsubscribed_at = mockEmailPreferences.unsubscribed_all ? "2026-05-23T12:00:00Z" : null
+      return json(route, mockEmailPreferences)
     }
 
     if (path === "/api/v1/notifications" && method === "GET") {
@@ -1882,6 +2318,28 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
     }
 
     if (path === "/api/v1/books/book-1" && method === "GET") {
+      return json(route, book)
+    }
+
+    if (path === "/api/v1/books/book-1/forum-metadata" && method === "PUT") {
+      const payload = route.request().postDataJSON() as {
+        title?: string
+        genre?: string
+        description?: string
+      } | null
+      book.title = payload?.title ?? book.title
+      book.genre = payload?.genre ?? book.genre
+      book.public_description = payload?.description ?? book.public_description
+      publicForumPosts = publicForumPosts.map((post) => (
+        post.book_id === "book-1"
+          ? {
+              ...post,
+              title: book.title,
+              genre: book.genre,
+              description: book.public_description,
+            }
+          : post
+      ))
       return json(route, book)
     }
 
@@ -2024,6 +2482,47 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
 
     if (path === "/api/v1/books/book-1/characters" && method === "GET") {
       return json(route, characterBibleCharacters)
+    }
+
+    if (path === "/api/v1/books/book-1/character-review" && method === "GET") {
+      return json(route, characterReviewPayload)
+    }
+
+    const relationshipReviewMatch = path.match(/^\/api\/v1\/books\/book-1\/relationship-review\/([^/]+)\/(attach-a|attach-b|accept|resolve|reject)$/)
+    if (relationshipReviewMatch && method === "POST") {
+      const [, candidateId, action] = relationshipReviewMatch
+      const candidate = characterReviewPayload.relationship_candidates.find(
+        (item: typeof characterReviewPayload.relationship_candidates[number]) => item.id === candidateId,
+      )
+      if (!candidate) {
+        return notFound(route)
+      }
+
+      if (action === "attach-a" || action === "attach-b") {
+        const payload = route.request().postDataJSON() as { character_id?: string } | null
+        if (action === "attach-a") {
+          candidate.matched_character_a_id = payload?.character_id ?? candidate.matched_character_a_id
+        } else {
+          candidate.matched_character_b_id = payload?.character_id ?? candidate.matched_character_b_id
+        }
+        return json(route, {
+          relationship_candidate_id: candidate.id,
+          [action === "attach-a" ? "attached_a" : "attached_b"]: payload?.character_id ?? null,
+        })
+      }
+
+      candidate.status = action === "accept"
+        ? "accepted"
+        : action === "resolve"
+          ? "resolved"
+          : "rejected"
+      characterReviewPayload.counts.pending_relationship_candidates = characterReviewPayload.relationship_candidates.filter(
+        (item: typeof characterReviewPayload.relationship_candidates[number]) => item.status === "pending",
+      ).length
+
+      return json(route, {
+        [action === "accept" ? "accepted" : action === "resolve" ? "resolved" : "rejected"]: candidate.id,
+      })
     }
 
     if (path === "/api/v1/books/book-1/characters" && method === "POST") {
@@ -2239,13 +2738,25 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
     }
 
     if (path === "/api/v1/reader/book-1/progress" && method === "GET") {
-      return json(route, {
-        current_chapter: 2,
-        scroll_pct: 35,
-        chapters_read_count: 2,
-        percent_complete: 64,
-        chapters_left: 1,
-      })
+      return json(route, mockReadingProgress)
+    }
+
+    if (path === "/api/v1/reader/book-1/progress" && method === "PUT") {
+      const currentChapter = Number.parseInt(url.searchParams.get("current_chapter") ?? "", 10)
+      const scrollPct = Number.parseFloat(url.searchParams.get("scroll_pct") ?? "")
+      if (Number.isFinite(currentChapter) && currentChapter > 0) {
+        mockReadingProgress = {
+          ...mockReadingProgress,
+          current_chapter: currentChapter,
+        }
+      }
+      if (Number.isFinite(scrollPct)) {
+        mockReadingProgress = {
+          ...mockReadingProgress,
+          scroll_pct: scrollPct,
+        }
+      }
+      return json(route, mockReadingProgress)
     }
 
     if (path === "/api/v1/beta-reads/upcoming" && method === "GET") {
@@ -2393,6 +2904,27 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
       return json(route, relationshipGraph)
     }
 
+    if (path === "/api/v1/books/book-1/cover" && method === "GET") {
+      return route.fulfill({
+        status: 200,
+        headers: {
+          "content-type": "image/png",
+        },
+        body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAukB9VE3d2QAAAAASUVORK5CYII=", "base64"),
+      })
+    }
+
+    const readerMediaMatch = path.match(/^\/api\/v1\/reader\/media\/([^/]+)$/)
+    if (readerMediaMatch && method === "GET") {
+      return route.fulfill({
+        status: 200,
+        headers: {
+          "content-type": "image/png",
+        },
+        body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAukB9VE3d2QAAAAASUVORK5CYII=", "base64"),
+      })
+    }
+
     const chapterMatch = path.match(/^\/api\/v1\/reader\/book-1\/chapter\/(\d+)$/)
     if (chapterMatch && method === "GET") {
       const chapterNumber = Number.parseInt(chapterMatch[1] ?? "", 10)
@@ -2475,7 +3007,51 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
     }
 
     if (path === "/api/v1/public/forum/posts" && method === "GET") {
-      return json(route, { items: publicForumPosts, total: publicForumPosts.length, page: 1, page_size: 20, has_more: false })
+      const url = new URL(route.request().url())
+      const page = Math.max(1, Number.parseInt(url.searchParams.get("page") || "1", 10) || 1)
+      const pageSize = Math.max(1, Number.parseInt(url.searchParams.get("page_size") || "20", 10) || 20)
+      const filteredPosts = filterForumFeedPosts(buildForumFeedPosts(), url.searchParams.get("q"))
+      const pageItems = filteredPosts.slice((page - 1) * pageSize, page * pageSize)
+      return json(route, {
+        items: pageItems,
+        total: filteredPosts.length,
+        page,
+        page_size: pageSize,
+        has_more: page * pageSize < filteredPosts.length,
+      })
+    }
+
+    if (path === "/api/v1/public/rankings/beta-novels" && method === "GET") {
+      const url = new URL(route.request().url())
+      const page = Math.max(1, Number.parseInt(url.searchParams.get("page") || "1", 10) || 1)
+      const pageSize = Math.max(1, Number.parseInt(url.searchParams.get("page_size") || "20", 10) || 20)
+      const ranking = url.searchParams.get("ranking") || "most_popular"
+      const timeWindow = url.searchParams.get("time_window") || "monthly"
+      const filteredPosts = filterForumFeedPosts(buildForumFeedPosts().filter((post) => post.thread_type === "novel"), url.searchParams.get("q"))
+      const rankedPosts = filteredPosts.map((post, index) => ({
+        ...post,
+        ranking: {
+          surface: "beta_novels",
+          ranking_key: ranking,
+          time_window: timeWindow,
+          position: index + 1,
+          score: post.discoverability_score,
+          label: `${ranking.replaceAll("_", " ")} ${timeWindow}`.replace(/\b\w/g, (char) => char.toUpperCase()),
+          supporting_note: "Mock ranking feed for local smoke coverage.",
+          primary_timestamp: post.updated_at,
+        },
+      }))
+      const pageItems = rankedPosts.slice((page - 1) * pageSize, page * pageSize)
+      return json(route, {
+        items: pageItems,
+        total: rankedPosts.length,
+        page,
+        page_size: pageSize,
+        has_more: page * pageSize < rankedPosts.length,
+        ranking_key: ranking,
+        time_window: timeWindow,
+        surface: "beta_novels",
+      })
     }
 
     if (path === "/api/v1/public/forum/my-posts" && method === "GET") {
@@ -2495,18 +3071,19 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
       if (threadType === "novel" && payload?.book_id === "book-1" && publicForumPosts.some((post) => post.thread_type === "novel" && post.book_id === "book-1" && post.status === "open")) {
         return route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ detail: "This manuscript already has a beta forum post. Update it instead." }) })
       }
-      const created: PublicForumPost = {
-        id: `forum-post-${publicForumPosts.length + 1}`,
-        thread_type: threadType,
-        book_id: threadType === "novel" ? (payload?.book_id ?? "book-1") : null,
+        const created: PublicForumPost = {
+          id: `forum-post-${publicForumPosts.length + 1}`,
+          thread_type: threadType,
+          book_id: threadType === "novel" ? (payload?.book_id ?? "book-1") : null,
         author_user_id: "user-1",
         author_username: "author",
-        author_reputation_score: 18,
-        author_trust_level: "Trusted",
-        title: threadType === "novel" ? "Sky of Ash" : null,
-        author: threadType === "novel" ? "M. Vale" : null,
-        genre: threadType === "novel" ? "Epic Fantasy" : null,
-        work_type: threadType === "novel" ? "novel" : null,
+          author_reputation_score: 18,
+          author_trust_level: "Trusted",
+          title: threadType === "novel" ? book.title : null,
+          author: threadType === "novel" ? book.author : null,
+          genre: threadType === "novel" ? book.genre : null,
+          description: threadType === "novel" ? book.public_description : null,
+          work_type: threadType === "novel" ? "novel" : null,
         headline: payload?.headline ?? "",
         body: payload?.body ?? "",
         desired_beta_reader_count: threadType === "novel" ? (payload?.desired_beta_reader_count ?? null) : null,
@@ -2556,6 +3133,43 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
       return json(route, publicBooks)
     }
 
+    if (path === "/api/v1/public/rankings/uploads" && method === "GET") {
+      const url = new URL(route.request().url())
+      const page = Math.max(1, Number.parseInt(url.searchParams.get("page") || "1", 10) || 1)
+      const limit = Math.max(1, Number.parseInt(url.searchParams.get("limit") || "24", 10) || 24)
+      const ranking = url.searchParams.get("ranking") || "most_popular"
+      const timeWindow = url.searchParams.get("time_window") || "monthly"
+      const search = (url.searchParams.get("search") || "").trim().toLowerCase()
+      const filteredBooks = publicBooks.filter((book) => {
+        if (!search) return true
+        return [book.title, book.author, book.author_username, book.genre, book.description].join(" ").toLowerCase().includes(search)
+      })
+      const rankedBooks = filteredBooks.map((book, index) => ({
+        ...book,
+        ranking: {
+          surface: "creator_uploads",
+          ranking_key: ranking,
+          time_window: timeWindow,
+          position: index + 1,
+          score: (book.analytics?.book_view_count ?? 0) + (book.analytics?.chapter_view_count ?? 0),
+          label: `${ranking.replaceAll("_", " ")} ${timeWindow}`.replace(/\b\w/g, (char) => char.toUpperCase()),
+          supporting_note: "Mock ranking feed for local smoke coverage.",
+          primary_timestamp: book.published_at,
+        },
+      }))
+      const pageItems = rankedBooks.slice((page - 1) * limit, page * limit)
+      return json(route, {
+        items: pageItems,
+        total: rankedBooks.length,
+        page,
+        limit,
+        has_more: page * limit < rankedBooks.length,
+        ranking_key: ranking,
+        time_window: timeWindow,
+        surface: "creator_uploads",
+      })
+    }
+
     const publicBookMatch = path.match(/^\/api\/v1\/public\/books\/([^/]+)$/)
     if (publicBookMatch && method === "GET") {
       const detail = publicBookDetails[publicBookMatch[1] as keyof typeof publicBookDetails]
@@ -2577,18 +3191,22 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
     const publicForumCommentsMatch = path.match(/^\/api\/v1\/public\/forum\/posts\/([^/]+)\/comments$/)
     if (publicForumCommentsMatch && method === "GET") {
       const postId = publicForumCommentsMatch[1]
-      return json(route, { items: publicForumComments.filter((comment) => comment.post_id === postId) })
+      return json(route, { items: buildNestedForumComments(postId) })
     }
 
     if (publicForumCommentsMatch && method === "POST") {
-      const payload = route.request().postDataJSON() as { body?: string } | null
+      const payload = route.request().postDataJSON() as { body?: string, parent_comment_id?: string | null } | null
       const postId = publicForumCommentsMatch[1]
       const post = publicForumPosts.find((item) => item.id === postId)
       if (!post) return notFound(route)
+      if (payload?.parent_comment_id && !publicForumComments.some((comment) => comment.id === payload.parent_comment_id && comment.post_id === postId)) {
+        return notFound(route)
+      }
       const created = {
         id: `forum-comment-${publicForumComments.length + 1}`,
         post_id: postId,
         book_id: post.book_id,
+        parent_comment_id: payload?.parent_comment_id ?? null,
         author_user_id: "user-1",
         author_username: "author",
         author_reputation_score: 18,
@@ -2598,11 +3216,12 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
         dislike_count: 0,
         reaction: null,
         can_edit: true,
+        replies: [],
         created_at: "2026-05-14T13:00:00Z",
         updated_at: "2026-05-14T13:00:00Z",
       }
       publicForumComments = [...publicForumComments, created]
-      publicForumPosts = publicForumPosts.map((item) => item.id === postId ? { ...item, comment_count: publicForumComments.filter((comment) => comment.post_id === postId).length } : item)
+      publicForumPosts = publicForumPosts.map((item) => item.id === postId ? { ...item, comment_count: countForumComments(postId) } : item)
       return json(route, created, 201)
     }
 

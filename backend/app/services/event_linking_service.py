@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.book import Chapter
 from app.models.character import Character
+from app.utils.character_utils import resolve_character_reference_from_roster
 
 
 def _clean_name(value: str | None) -> str:
@@ -87,8 +88,22 @@ async def link_summary_events(
             continue
         involved = raw_event.get("involved_characters") or []
         matched_characters: list[Character] = []
+        event_context = " ".join(
+            part
+            for part in [
+                str(raw_event.get("description") or "").strip(),
+                str(raw_event.get("event_title") or raw_event.get("event") or "").strip(),
+            ]
+            if part
+        )
         for item in involved:
             candidate = by_lookup.get(_clean_name(str(item)))
+            if candidate is None:
+                candidate = resolve_character_reference_from_roster(
+                    character_rows,
+                    str(item),
+                    context_text=event_context,
+                )
             if candidate and candidate not in matched_characters:
                 matched_characters.append(candidate)
 
@@ -114,7 +129,22 @@ async def link_summary_events(
     for raw_change in char_changes or []:
         if not isinstance(raw_change, dict):
             continue
+        change_context = " ".join(
+            part
+            for part in [
+                str(raw_change.get("character") or "").strip(),
+                str(raw_change.get("change") or raw_change.get("description") or "").strip(),
+                str(raw_change.get("event_title") or "").strip(),
+            ]
+            if part
+        )
         character = by_lookup.get(_clean_name(str(raw_change.get("character"))))
+        if character is None:
+            character = resolve_character_reference_from_roster(
+                character_rows,
+                str(raw_change.get("character") or ""),
+                context_text=change_context,
+            )
         if character is None:
             continue
         event_payload = _normalize_character_event(
