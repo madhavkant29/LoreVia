@@ -1,6 +1,7 @@
 import uuid
 from typing import cast
 
+import numpy as np
 import pytest
 from sqlalchemy import select
 
@@ -131,6 +132,34 @@ def test_score_duplicate_characters_uses_embedding_similarity_signal():
 
     assert suggestion is not None
     assert any(reason in suggestion["reasons"] for reason in ["High embedding similarity", "Related embedding similarity"])
+    assert suggestion["shared_evidence"]["embedding_similarity"] is not None
+
+
+def test_score_duplicate_characters_accepts_numpy_embeddings():
+    primary = Character(
+        id=uuid.UUID("00000000-0000-0000-0000-000000000031"),
+        book_id=uuid.UUID("00000000-0000-0000-0000-000000000010"),
+        name="Anna Sergeyevna",
+        aliases=["Anna"],
+        role="sc",
+        first_chapter=2,
+        mention_count=4,
+        embedding=np.array([0.8, 0.1, 0.2]),
+    )
+    secondary = Character(
+        id=uuid.UUID("00000000-0000-0000-0000-000000000032"),
+        book_id=primary.book_id,
+        name="Anna",
+        aliases=["Anna Sergeyevna"],
+        role="sc",
+        first_chapter=2,
+        mention_count=2,
+        embedding=np.array([0.79, 0.11, 0.19]),
+    )
+
+    suggestion = score_duplicate_characters(primary, secondary)
+
+    assert suggestion is not None
     assert suggestion["shared_evidence"]["embedding_similarity"] is not None
 
 

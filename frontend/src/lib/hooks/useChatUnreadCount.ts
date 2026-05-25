@@ -34,7 +34,7 @@ export function useChatUnreadCount(options: UseChatUnreadCountOptions = {}) {
       return
     }
     try {
-      const payload = await socialApi.listConversations()
+      const payload = await socialApi.getConversationUnreadCount()
       setUnreadCount(payload.unread_count)
     } catch {
       // Keep the last known count if refresh fails.

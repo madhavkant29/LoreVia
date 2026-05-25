@@ -12,11 +12,13 @@ import argparse
 import asyncio
 import json
 import uuid
+from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.database import AsyncSessionLocal
@@ -56,6 +58,16 @@ class RepairPlan:
     pending_duplicate_suggestions: int
     pending_relationship_candidates: int
     unresolved_relationship_deltas: dict[str, int]
+
+
+@asynccontextmanager
+async def _repair_session(db: AsyncSession | None = None):
+    if db is not None:
+        yield db
+        return
+
+    async with AsyncSessionLocal() as session:
+        yield session
 
 
 def _candidate_names(character: Character) -> list[str]:
@@ -182,16 +194,17 @@ async def build_repair_plan(
     *,
     allow_merge_safe_pairs: bool,
     allow_demote_obvious_noise: bool,
+    db: AsyncSession | None = None,
 ) -> RepairPlan:
-    async with AsyncSessionLocal() as db:
-        book = await db.get(Book, book_id)
+    async with _repair_session(db) as session:
+        book = await session.get(Book, book_id)
         if book is None:
             raise SystemExit(f"Book not found: {book_id}")
 
-        characters = await _load_characters(db, book_id)
+        characters = await _load_characters(session, book_id)
         character_map = {character.id: character for character in characters if character.id is not None}
-        suggestions = await refresh_character_duplicate_suggestions(db, book_id=book_id, characters=characters)
-        relationship_candidates = await _load_pending_relationship_candidates(db, book_id)
+        suggestions = await refresh_character_duplicate_suggestions(session, book_id=book_id, characters=characters)
+        relationship_candidates = await _load_pending_relationship_candidates(session, book_id)
         planned_merges: list[tuple[str, str]] = []
         skipped_protected_merge_pairs: list[tuple[str, str]] = []
         for item in suggestions:
@@ -217,14 +230,14 @@ async def build_repair_plan(
             if allow_demote_obvious_noise:
                 planned_demotions.append(str(character.id))
 
-        chapter_rows = await _load_chapter_rows(db, book_id)
+        chapter_rows = await _load_chapter_rows(session, book_id)
         candidates_by_key = {
             character.id: _candidate_names(character)
             for character in characters
             if character.id is not None
         }
         first_chapters = await find_earliest_character_mention_chapters(
-            db,
+            session,
             book_id=book_id,
             candidates_by_key=candidates_by_key,
             upto_chapter=int(book.total_chapters or 0) or None,
@@ -260,19 +273,20 @@ async def apply_repair_plan(
     *,
     allow_merge_safe_pairs: bool,
     allow_demote_obvious_noise: bool,
+    db: AsyncSession | None = None,
 ) -> dict[str, object]:
-    async with AsyncSessionLocal() as db:
-        book = await db.get(Book, book_id)
+    async with _repair_session(db) as session:
+        book = await session.get(Book, book_id)
         if book is None:
             raise SystemExit(f"Book not found: {book_id}")
 
         if not allow_merge_safe_pairs and not allow_demote_obvious_noise:
             raise SystemExit("No repair actions enabled. Pass --allow-merge-safe-pairs and/or --allow-demote-obvious-noise.")
 
-        characters = await _load_characters(db, book_id)
+        characters = await _load_characters(session, book_id)
         character_map = {character.id: character for character in characters if character.id is not None}
-        suggestions = await refresh_character_duplicate_suggestions(db, book_id=book_id, characters=characters)
-        relationship_candidates_before = await _load_pending_relationship_candidates(db, book_id)
+        suggestions = await refresh_character_duplicate_suggestions(session, book_id=book_id, characters=characters)
+        relationship_candidates_before = await _load_pending_relationship_candidates(session, book_id)
         merged_pairs: list[tuple[str, str]] = []
         skipped_protected_merge_pairs: list[tuple[str, str]] = []
         for suggestion in suggestions:
@@ -286,11 +300,11 @@ async def apply_repair_plan(
                 continue
             if not allow_merge_safe_pairs or not primary or not secondary:
                 continue
-            await merge_characters(db, primary.id, secondary.id, book_id)
+            await merge_characters(session, primary.id, secondary.id, book_id)
             merged_pairs.append((str(primary.id), str(secondary.id)))
-        await db.flush()
+        await session.flush()
 
-        characters = await _load_characters(db, book_id)
+        characters = await _load_characters(session, book_id)
         demoted_character_ids: list[str] = []
         skipped_protected_demotions: list[str] = []
         for character in characters:
@@ -303,7 +317,7 @@ async def apply_repair_plan(
             if not allow_demote_obvious_noise:
                 continue
             await record_character_candidate(
-                db,
+                session,
                 book_id=book_id,
                 chapter_number=int(character.first_chapter or 1),
                 raw_name=character.name,
@@ -323,23 +337,23 @@ async def apply_repair_plan(
                 },
                 source_batch_key=f"repair:{book_id}:{character.id}",
             )
-            await db.delete(character)
+            await session.delete(character)
             demoted_character_ids.append(str(character.id))
-        await db.flush()
+        await session.flush()
 
-        characters = await _load_characters(db, book_id)
+        characters = await _load_characters(session, book_id)
         candidates_by_key = {
             character.id: _candidate_names(character)
             for character in characters
             if character.id is not None
         }
         first_chapters = await find_earliest_character_mention_chapters(
-            db,
+            session,
             book_id=book_id,
             candidates_by_key=candidates_by_key,
             upto_chapter=int(book.total_chapters or 0) or None,
         )
-        chapter_rows = await _load_chapter_rows(db, book_id)
+        chapter_rows = await _load_chapter_rows(session, book_id)
         first_chapter_recomputes: dict[str, int] = {}
         last_seen_recomputes: dict[str, int] = {}
         for character in characters:
@@ -360,12 +374,12 @@ async def apply_repair_plan(
             metadata["normalized_name"] = normalize_character_name(character.name)
             character.analysis_metadata = metadata
 
-        refreshed = await refresh_character_duplicate_suggestions(db, book_id=book_id, characters=characters)
-        relationship_candidates_after = await _load_pending_relationship_candidates(db, book_id)
+        refreshed = await refresh_character_duplicate_suggestions(session, book_id=book_id, characters=characters)
+        relationship_candidates_after = await _load_pending_relationship_candidates(session, book_id)
         candidates = (
-            await db.execute(select(CharacterCandidate).where(CharacterCandidate.book_id == book_id))
+            await session.execute(select(CharacterCandidate).where(CharacterCandidate.book_id == book_id))
         ).scalars().all()
-        await db.commit()
+        await session.commit()
         return {
             "book_id": str(book_id),
             "merged_pairs": merged_pairs,

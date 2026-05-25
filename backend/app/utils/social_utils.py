@@ -330,6 +330,21 @@ async def list_conversation_summaries(db: AsyncSession, *, current_user: User) -
     return [await build_conversation_summary(db, current_user=current_user, conversation=row) for row in rows]
 
 
+async def count_unread_direct_messages(db: AsyncSession, *, current_user: User) -> int:
+    return int(
+        (
+            await db.execute(
+                select(func.count())
+                .select_from(DirectMessage)
+                .where(
+                    DirectMessage.recipient_user_id == current_user.id,
+                    DirectMessage.recipient_read_at.is_(None),
+                )
+            )
+        ).scalar_one()
+    )
+
+
 async def list_conversation_messages(
     db: AsyncSession,
     *,

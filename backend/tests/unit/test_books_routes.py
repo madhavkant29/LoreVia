@@ -1656,26 +1656,30 @@ async def test_public_asset_endpoints_respect_public_mode_kill_switch(monkeypatc
 async def test_character_reprocess_routes_delegate_to_repair_workflow(monkeypatch):
     user = _user()
     book = _book(user_id=user.id, mode="author")
+    db = _FakeDB()
 
     monkeypatch.setattr(books, "get_owned_book", _async_value(book))
     monkeypatch.setattr(books, "require_author_access", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(books, "asdict", lambda value: value)
-    monkeypatch.setattr(
-        books,
-        "build_repair_plan",
-        _async_value({"book_id": str(book.id), "dry_run": True, "planned_merges": [], "planned_demotions": []}),
-    )
-    monkeypatch.setattr(
-        books,
-        "apply_repair_plan",
-        _async_value({"book_id": str(book.id), "merged_pairs": [], "demoted_character_ids": []}),
-    )
+
+    async def _fake_build(book_id, **kwargs):
+        assert book_id == book.id
+        assert kwargs["db"] is db
+        return {"book_id": str(book.id), "dry_run": True, "planned_merges": [], "planned_demotions": []}
+
+    async def _fake_apply(book_id, **kwargs):
+        assert book_id == book.id
+        assert kwargs["db"] is db
+        return {"book_id": str(book.id), "merged_pairs": [], "demoted_character_ids": []}
+
+    monkeypatch.setattr(books, "build_repair_plan", _fake_build)
+    monkeypatch.setattr(books, "apply_repair_plan", _fake_apply)
 
     preview = await books.preview_book_character_reprocess(
         book.id,
         allow_merge_safe_pairs=True,
         allow_demote_obvious_noise=True,
-        db=_FakeDB(),
+        db=db,
         current_user=user,
     )
     assert preview["book_id"] == str(book.id)
@@ -1685,7 +1689,7 @@ async def test_character_reprocess_routes_delegate_to_repair_workflow(monkeypatc
         book.id,
         allow_merge_safe_pairs=True,
         allow_demote_obvious_noise=True,
-        db=_FakeDB(),
+        db=db,
         current_user=user,
     )
     assert applied["book_id"] == str(book.id)

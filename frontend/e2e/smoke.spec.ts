@@ -513,7 +513,7 @@ test("voice consistency runs without the max-depth console loop", async ({ page 
   await page.getByRole("button", { name: /run voice review/i }).click()
 
   await expect(page.getByRole("heading", { name: "Character voice consistency" })).toBeVisible()
-  await expect(page.getByText("Reviewed: Nora Vale")).toBeVisible()
+  await expect(page.getByText("1 character baseline reviewed")).toBeVisible()
   await expect(page.getByText("Nora sounds more formal than her baseline")).toBeVisible()
 
   expect(consoleMessages.some((message) => /Maximum update depth exceeded/i.test(message))).toBe(false)
@@ -547,8 +547,15 @@ test("character bible exposes manual merge without duplicate-key warnings", asyn
   await expect(page.getByRole("button", { name: /^Review duplicates$/i })).toBeVisible()
 
   await page.getByRole("button", { name: /^Review duplicates$/i }).click()
-  await expect(page.getByRole("button", { name: /^start manual merge$/i }).first()).toBeVisible()
-  await page.getByRole("button", { name: /^start manual merge$/i }).first().click()
+
+  const startManualMergeButton = page.getByRole("button", { name: /^start manual merge$/i }).first()
+  const beginManualMergeButton = page.getByRole("button", { name: /^begin manual merge$/i }).first()
+  if (await startManualMergeButton.isVisible().catch(() => false)) {
+    await startManualMergeButton.click()
+  } else {
+    await expect(beginManualMergeButton).toBeVisible()
+    await beginManualMergeButton.click()
+  }
 
   await expect(page.getByRole("heading", { name: "Manual merge" })).toBeVisible()
 

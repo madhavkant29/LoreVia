@@ -18,3 +18,29 @@ async def test_semantic_search_spoiler_gate():
         from app.engine.search.semantic import semantic_search
         results = await semantic_search(mock_db, uuid.uuid4(), "test query", max_chapter=5)
         assert isinstance(results, list)
+
+
+@pytest.mark.asyncio
+async def test_semantic_search_passes_request_session_to_embedder():
+    import uuid
+    from unittest.mock import MagicMock
+
+    from app.engine.search.semantic import semantic_search
+
+    mock_db = AsyncMock()
+    mock_result = MagicMock()
+    mock_result.fetchall.return_value = []
+    mock_db.execute = AsyncMock(return_value=mock_result)
+
+    embed_mock = AsyncMock(return_value=[0.1] * 1536)
+    with patch("app.engine.search.semantic.embed_text", embed_mock):
+        await semantic_search(
+            mock_db,
+            uuid.uuid4(),
+            "test query",
+            max_chapter=5,
+            usage_user_id=uuid.uuid4(),
+        )
+
+    assert embed_mock.await_count == 1
+    assert embed_mock.await_args.kwargs["db"] is mock_db

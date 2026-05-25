@@ -1467,7 +1467,9 @@ def _normalize_merge_score_value(value: float) -> int:
 
 
 def _cosine_similarity(left: Sequence[float] | None, right: Sequence[float] | None) -> float:
-    if not left or not right or len(left) != len(right):
+    if left is None or right is None:
+        return 0.0
+    if len(left) == 0 or len(right) == 0 or len(left) != len(right):
         return 0.0
     dot = sum(float(a) * float(b) for a, b in zip(left, right))
     left_norm = math.sqrt(sum(float(value) * float(value) for value in left))
