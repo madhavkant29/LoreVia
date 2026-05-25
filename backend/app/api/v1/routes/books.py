@@ -2158,6 +2158,7 @@ async def preview_book_character_reprocess(
         book.id,
         allow_merge_safe_pairs=allow_merge_safe_pairs,
         allow_demote_obvious_noise=allow_demote_obvious_noise,
+        db=db,
     )
     return asdict(plan)
 
@@ -2178,6 +2179,7 @@ async def apply_book_character_reprocess(
         book.id,
         allow_merge_safe_pairs=allow_merge_safe_pairs,
         allow_demote_obvious_noise=allow_demote_obvious_noise,
+        db=db,
     )
 
 

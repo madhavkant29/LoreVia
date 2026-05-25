@@ -161,7 +161,7 @@ export default function StatsPage() {
                 </div>
               </div>
 
-              <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
+              <div className="mt-6 grid grid-cols-[repeat(auto-fit,minmax(min(100%,220px),1fr))] gap-4">
                 {secondaryStats.map((item) => (
                   <WorkspaceTotalsCard
                     key={item.label}
@@ -417,13 +417,15 @@ function ProgressSummary({
 
 function WorkspaceTotalsCard({ label, value, note }: { label: string; value: string; note: string }) {
   return (
-    <article className="min-w-0 overflow-hidden rounded-[1.25rem] border-2 border-slate-200 bg-[#fcfcfb] p-5 dark:border-slate-700/70 dark:bg-[#121920]">
-      <div className="flex items-start gap-3">
-        <div className="mt-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-2 border-slate-200 bg-[#f4f7f6] text-[#1f615d] dark:border-slate-700/70 dark:bg-[#182028] dark:text-[#69c6b1]">
+    <article className="min-w-0 rounded-[1.25rem] border-2 border-slate-200 bg-[#fcfcfb] p-5 dark:border-slate-700/70 dark:bg-[#121920]">
+      <div className="flex flex-col gap-4">
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-2 border-slate-200 bg-[#f4f7f6] text-[#1f615d] dark:border-slate-700/70 dark:bg-[#182028] dark:text-[#69c6b1]">
           <TotalsIcon />
         </div>
-        <div className="min-w-0">
-          <p className="text-[2rem] font-semibold tracking-[-0.04em] text-stone-950 dark:text-[#f3ede4]">{value}</p>
+        <div className="min-w-0 space-y-2">
+          <p className="break-words text-[clamp(1.8rem,4vw,2.4rem)] font-semibold leading-none tracking-[-0.05em] text-stone-950 dark:text-[#f3ede4]">
+            {value}
+          </p>
           <p className="text-sm font-semibold text-stone-950 dark:text-[#f3ede4]">{label}</p>
           <p className="mt-2 break-words text-sm leading-6 text-stone-600 dark:text-slate-300">{note}</p>
         </div>

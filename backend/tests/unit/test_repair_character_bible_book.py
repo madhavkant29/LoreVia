@@ -1,6 +1,8 @@
 from types import SimpleNamespace
 import uuid
 
+import pytest
+
 from scripts import repair_character_bible_book
 
 
@@ -93,3 +95,11 @@ def test_parse_args_keeps_dry_run_default(monkeypatch):
     assert args.apply is False
     assert args.allow_merge_safe_pairs is False
     assert args.allow_demote_obvious_noise is False
+
+
+@pytest.mark.asyncio
+async def test_repair_session_reuses_injected_db():
+    db = object()
+
+    async with repair_character_bible_book._repair_session(db) as session:
+        assert session is db

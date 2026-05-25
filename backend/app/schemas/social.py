@@ -88,3 +88,6 @@ class DirectConversationListOut(BaseModel):
 class DirectMessageListOut(BaseModel):
     items: list[DirectMessageOut]
 
+
+class UnreadCountOut(BaseModel):
+    unread_count: int

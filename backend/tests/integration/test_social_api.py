@@ -61,6 +61,13 @@ async def test_anyone_permission_allows_direct_messages_without_friendship(clien
     assert recipient_conversations.status_code == 200
     assert recipient_conversations.json()["unread_count"] == 1
 
+    recipient_unread = await client.get(
+        "/api/v1/social/conversations/unread-count",
+        headers=_auth_headers(recipient.id),
+    )
+    assert recipient_unread.status_code == 200
+    assert recipient_unread.json()["unread_count"] == 1
+
     recipient_messages = await client.get(
         f"/api/v1/social/conversations/{conversation_id}/messages",
         headers=_auth_headers(recipient.id),
@@ -80,6 +87,13 @@ async def test_anyone_permission_allows_direct_messages_without_friendship(clien
     )
     assert recipient_conversations_after.status_code == 200
     assert recipient_conversations_after.json()["unread_count"] == 0
+
+    recipient_unread_after = await client.get(
+        "/api/v1/social/conversations/unread-count",
+        headers=_auth_headers(recipient.id),
+    )
+    assert recipient_unread_after.status_code == 200
+    assert recipient_unread_after.json()["unread_count"] == 0
 
 
 @pytest.mark.asyncio

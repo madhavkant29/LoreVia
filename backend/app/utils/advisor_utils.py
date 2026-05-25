@@ -944,6 +944,7 @@ async def _prepare_advisor_reply_context(
         threshold = 0.25 if intent in ("consistency", "plothole") or world_mode else 0.30
         query_emb = await embed_text(
             last_user_msg,
+            db=db,
             user_id=user_id,
             book_id=book.id,
             feature="advisor_message_query_embedding",

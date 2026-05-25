@@ -13,6 +13,7 @@ type UseNotificationsOptions = {
   enabled?: boolean
   pollMs?: number | false
   refreshOnFocus?: boolean
+  syncRevisionDigests?: boolean
 }
 
 function emitNotificationsChanged() {
@@ -35,10 +36,11 @@ export function useNotificationsState(limit = 40, options: UseNotificationsOptio
   const enabled = options.enabled ?? true
   const pollMs = options.pollMs ?? 30_000
   const refreshOnFocus = options.refreshOnFocus ?? false
+  const syncRevisionDigests = options.syncRevisionDigests ?? true
 
   const query = useQuery({
     queryKey,
-    queryFn: () => notificationsApi.list(limit),
+    queryFn: () => notificationsApi.list(limit, { syncRevisionDigests }),
     enabled: Boolean(user) && enabled,
     refetchInterval: user && enabled && pollMs && isDocumentVisible ? pollMs : false,
     refetchIntervalInBackground: false,

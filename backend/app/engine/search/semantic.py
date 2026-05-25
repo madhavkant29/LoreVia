@@ -57,6 +57,7 @@ async def semantic_search(
     """
     query_embedding = await embed_text(
         query,
+        db=db,
         user_id=usage_user_id,
         book_id=book_id,
         feature=usage_feature,

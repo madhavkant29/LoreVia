@@ -49,6 +49,10 @@ export interface DirectConversationListResponse {
   unread_count: number
 }
 
+export interface UnreadCountResponse {
+  unread_count: number
+}
+
 export interface DirectMessage {
   id: string
   conversation_id: string

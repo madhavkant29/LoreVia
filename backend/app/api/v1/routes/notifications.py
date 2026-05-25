@@ -19,10 +19,12 @@ router = APIRouter()
 @router.get("", response_model=NotificationListOut)
 async def list_notifications(
     limit: int = Query(40, ge=1, le=100),
+    sync_revision_digests: bool = Query(True),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    await sync_revision_digest_notifications(db, current_user.id, limit=min(limit, 6))
+    if sync_revision_digests:
+        await sync_revision_digest_notifications(db, current_user.id, limit=min(limit, 6))
     rows = (
         await db.execute(
             select(Notification)

@@ -1999,6 +1999,7 @@ async def series_continuity_check(
     prior_book_id_strs = ", ".join(f"'{bid}'" for bid in prior_book_ids)
     query_emb = await embed_text(
         body.text[:600],
+        db=db,
         user_id=current_user.id,
         book_id=current_book.id,
         feature="series_continuity_query_embedding",

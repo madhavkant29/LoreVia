@@ -17,11 +17,13 @@ from app.schemas.social import (
     FriendRequestCreateBody,
     FriendRequestOut,
     SocialRelationshipListOut,
+    UnreadCountOut,
     UserSearchResponse,
 )
 from app.utils.social_utils import (
     build_conversation_summary,
     cancel_outgoing_friend_request,
+    count_unread_direct_messages,
     create_friend_request,
     get_or_create_direct_conversation,
     list_conversation_messages,
@@ -138,6 +140,14 @@ async def list_conversations(
     return DirectConversationListOut(items=items, unread_count=sum(item.unread_count for item in items))
 
 
+@router.get("/conversations/unread-count", response_model=UnreadCountOut)
+async def get_unread_conversation_count(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return UnreadCountOut(unread_count=await count_unread_direct_messages(db, current_user=current_user))
+
+
 @router.post("/conversations/direct", response_model=DirectConversationListOut)
 async def create_or_get_direct_conversation(
     body: DirectConversationCreateBody,
@@ -200,4 +210,3 @@ async def read_conversation(
 ):
     await mark_conversation_read(db, current_user=current_user, conversation_id=conversation_id)
     return {"ok": True}
-

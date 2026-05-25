@@ -5,6 +5,7 @@ import type {
   DirectMessageListResponse,
   FriendRequestItem,
   SocialRelationshipListResponse,
+  UnreadCountResponse,
   UserSearchResponse,
 } from "@/types/social"
 
@@ -21,6 +22,8 @@ export const socialApi = {
     apiClient.post<FriendRequestItem>(`/social/friend-requests/${requestId}/decline`).then((r) => r.data),
   cancelFriendRequest: (requestId: string) =>
     apiClient.post<FriendRequestItem>(`/social/friend-requests/${requestId}/cancel`).then((r) => r.data),
+  getConversationUnreadCount: () =>
+    apiClient.get<UnreadCountResponse>("/social/conversations/unread-count").then((r) => r.data),
   listConversations: () =>
     apiClient.get<DirectConversationListResponse>("/social/conversations").then((r) => r.data),
   openDirectConversation: (targetUserId: string) =>

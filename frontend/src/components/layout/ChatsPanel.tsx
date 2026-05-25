@@ -50,19 +50,25 @@ export function ChatsPanel({ mode = "sidebar" }: { mode?: "sidebar" | "page" }) 
     [conversations, selectedConversationId],
   )
 
-  const hydrate = async (options?: { keepSelection?: boolean; silent?: boolean }) => {
+  const loadRelationships = async () => {
+    if (!user) return
+    try {
+      const relationshipPayload = await socialApi.listRelationships()
+      setRelationships(relationshipPayload)
+    } catch {
+      // Keep the last known relationship state if the background refresh fails.
+    }
+  }
+
+  const hydrateConversations = async (options?: { keepSelection?: boolean; silent?: boolean }) => {
     if (!user) return
     if (!options?.silent) {
       setLoading(true)
     }
     try {
-      const [conversationPayload, relationshipPayload] = await Promise.all([
-        socialApi.listConversations(),
-        socialApi.listRelationships(),
-      ])
+      const conversationPayload = await socialApi.listConversations()
       setConversations(conversationPayload.items)
       emitChatsChanged()
-      setRelationships(relationshipPayload)
       if (!options?.keepSelection) {
         setSelectedConversationId((current) => current || conversationPayload.items[0]?.id || null)
       }
@@ -116,7 +122,12 @@ export function ChatsPanel({ mode = "sidebar" }: { mode?: "sidebar" | "page" }) 
 
   useEffect(() => {
     if (!user) return
-    void hydrate()
+    void hydrateConversations()
+  }, [user, refreshTick])
+
+  useEffect(() => {
+    if (!user) return
+    void loadRelationships()
   }, [user, refreshTick])
 
   useEffect(() => {
@@ -130,14 +141,14 @@ export function ChatsPanel({ mode = "sidebar" }: { mode?: "sidebar" | "page" }) 
       setMessages([])
       return
     }
-    void loadMessages(selectedConversationId)
+      void loadMessages(selectedConversationId)
   }, [selectedConversationId])
 
   useEffect(() => {
     if (!user) return
     listIntervalRef.current = window.setInterval(() => {
       if (document.visibilityState !== "visible") return
-      void hydrate({ keepSelection: true, silent: true })
+      void hydrateConversations({ keepSelection: true, silent: true })
     }, conversationPollMs)
     return () => {
       if (listIntervalRef.current) window.clearInterval(listIntervalRef.current)
