@@ -435,6 +435,44 @@ def ner_entity_score(name: str) -> int:
     return NER_LABEL_SCORES.get(best.label_, 0) if best else 0
 
 
+@functools.lru_cache(maxsize=4096)
+def contextual_ner_entity_label(text: str, target_name: str) -> str | None:
+    """Return the best-matching NER label for a target mention inside context."""
+    if not text or not target_name:
+        return None
+    nlp = _get_nlp()
+    if nlp is None:
+        return None
+
+    target_norm = normalize_entity_name(target_name)
+    if not target_norm:
+        return None
+
+    doc = nlp(text.strip())
+    best_label: str | None = None
+    best_score = -1
+    for ent in doc.ents:
+        ent_norm = normalize_entity_name(ent.text)
+        if not ent_norm:
+            continue
+
+        score = -1
+        if ent_norm == target_norm:
+            score = 4
+        elif target_norm.startswith(ent_norm) or ent_norm.startswith(target_norm):
+            score = 3
+        elif target_norm in ent_norm or ent_norm in target_norm:
+            score = 2
+        elif set(ent_norm.split()) & set(target_norm.split()):
+            score = 1
+
+        if score > best_score:
+            best_score = score
+            best_label = ent.label_
+
+    return best_label
+
+
 # ─── Composite visibility scoring constants ───────────────────────────────────
 
 STOPWORD_PENALTY = -3       # name is a known common / noise word  (soft — NER can override)

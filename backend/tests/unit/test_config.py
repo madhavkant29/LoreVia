@@ -44,6 +44,8 @@ def test_cors_middleware_options_only_allow_localhost_regex_in_debug(monkeypatch
 
     assert options["allow_origins"] == ["https://getlorevia.com"]
     assert options["allow_origin_regex"] == LOCALHOST_CORS_ORIGIN_REGEX
+    assert "X-CSRF-Token" in options["allow_headers"]
+    assert "X-Admin-CSRF-Token" in options["allow_headers"]
 
 
 def test_cors_middleware_options_exclude_localhost_regex_in_production(monkeypatch):
@@ -58,6 +60,8 @@ def test_cors_middleware_options_exclude_localhost_regex_in_production(monkeypat
 
     assert options["allow_origins"] == ["https://getlorevia.com"]
     assert "allow_origin_regex" not in options
+    assert "X-CSRF-Token" in options["allow_headers"]
+    assert "X-Admin-CSRF-Token" in options["allow_headers"]
 
 
 def test_public_forum_status_defaults_to_public():

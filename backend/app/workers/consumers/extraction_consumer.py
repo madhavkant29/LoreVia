@@ -25,7 +25,7 @@ from app.engine.character.deduplicator import (
     resolve_character_match_id,
     resolve_character_match_ids,
 )
-from app.engine.character.entity_filters import character_persistence_decision
+from app.engine.character.entity_filters import CharacterPersistenceDecision, character_persistence_decision
 from app.engine.character.extractor import extract_characters_and_relationships, fallback_character_mentions
 from app.engine.character.profile_builder import build_character_profile, update_profile
 from app.engine.embeddings.embedder import build_character_embedding_text, embed_batch
@@ -76,6 +76,11 @@ from app.utils.intelligence_utils import (
 )
 from app.utils.notification_utils import collect_book_ready_stats, upsert_book_ready_notification
 from app.utils.queue_utils import queue_for_user
+from app.utils.relationship_utils import (
+    canonical_relationship_pair_key,
+    relationship_state_signature,
+    upsert_relationship_timeline_state,
+)
 
 log = logging.getLogger("lorevia.extraction")
 AUTO_SAVE_CONFIDENCE = 0.78
@@ -87,15 +92,17 @@ def _relationship_signature(
     character_a_id: uuid.UUID,
     character_b_id: uuid.UUID,
     rel_type: str,
+    sentiment: float | None,
     from_chapter: int,
     description: str | None,
-) -> tuple[str, str, str, int, str]:
-    left_id = str(character_a_id)
-    right_id = str(character_b_id)
-    ordered = tuple(sorted((left_id, right_id)))
-    normalized_type = " ".join(str(rel_type or "neutral").split()).strip().lower() or "neutral"
-    normalized_description = " ".join(str(description or "").split()).strip().casefold()
-    return ordered[0], ordered[1], normalized_type, int(from_chapter or 0), normalized_description
+) -> tuple[str, str, str, float | None, str, int]:
+    left_id, right_id = canonical_relationship_pair_key(character_a_id, character_b_id)
+    normalized_type, normalized_sentiment, normalized_description = relationship_state_signature(
+        rel_type=rel_type or "neutral",
+        sentiment=sentiment,
+        description=description,
+    )
+    return left_id, right_id, normalized_type, normalized_sentiment, normalized_description, int(from_chapter or 0)
 
 
 def _relationship_resolution_candidates(
@@ -124,6 +131,14 @@ def _relationship_evidence_payload(
     unresolved_side: str,
     resolution: str,
 ) -> dict[str, Any]:
+    pair_key: list[str] | None = None
+    if rel.get("matched_character_a_id") and rel.get("matched_character_b_id"):
+        pair_key = list(
+            canonical_relationship_pair_key(
+                uuid.UUID(str(rel["matched_character_a_id"])),
+                uuid.UUID(str(rel["matched_character_b_id"])),
+            )
+        )
     return {
         "relationship": {
             "character_a": " ".join(str(rel.get("character_a") or "").split()).strip(),
@@ -138,6 +153,9 @@ def _relationship_evidence_payload(
         "resolution": resolution,
         "counterpart_name": counterpart_name,
         "counterpart_character_id": str(counterpart_character_id) if counterpart_character_id else None,
+        "pair_key": pair_key,
+        "character_a_matches": [str(item) for item in rel.get("character_a_matches", [])[:3]],
+        "character_b_matches": [str(item) for item in rel.get("character_b_matches", [])[:3]],
     }
 
 
@@ -166,7 +184,7 @@ async def _record_relationship_review_candidates(
             raw_character_b=right_name,
             matched_character_a_id=left_matches[0] if len(left_matches) == 1 else None,
             matched_character_b_id=right_matches[0] if len(right_matches) == 1 else None,
-            rel_type=str(rel.get("rel_type") or rel.get("relationship") or "connection").strip() or None,
+            rel_type=str(rel.get("rel_type") or rel.get("type") or rel.get("relationship") or "connection").strip() or None,
             sentiment=rel.get("sentiment"),
             description=str(rel.get("description") or "").strip() or None,
             status=CHARACTER_RELATIONSHIP_CANDIDATE_PENDING,
@@ -199,7 +217,7 @@ async def _persist_relationship_records(
     existing_characters: list[Character],
     relationships: list[dict[str, Any]],
     key_cache: dict[uuid.UUID, set[str]],
-    persisted_signatures: set[tuple[str, str, str, int, str]],
+    persisted_signatures: set[tuple[str, str, str, float | None, str, int]],
 ) -> tuple[int, list[dict[str, Any]], int]:
     persisted = 0
     unresolved: list[dict[str, Any]] = []
@@ -225,24 +243,23 @@ async def _persist_relationship_records(
                 left_matches[0],
                 right_matches[0],
                 str(rel.get("type") or "neutral"),
+                rel.get("sentiment"),
                 chapter_number,
                 str(rel.get("description") or ""),
             )
-            if signature in persisted_signatures:
-                continue
-            persisted_signatures.add(signature)
-            db.add(
-                CharacterRelationship(
-                    book_id=book_id,
-                    character_a_id=left_matches[0],
-                    character_b_id=right_matches[0],
-                    rel_type=str(rel.get("type") or "neutral"),
-                    sentiment=rel.get("sentiment"),
-                    description=rel.get("description"),
-                    from_chapter=chapter_number,
-                )
+            relationship, created = await upsert_relationship_timeline_state(
+                db,
+                book_id=book_id,
+                character_a_id=left_matches[0],
+                character_b_id=right_matches[0],
+                rel_type=str(rel.get("type") or "neutral"),
+                sentiment=rel.get("sentiment"),
+                description=str(rel.get("description") or ""),
+                from_chapter=chapter_number,
             )
-            persisted += 1
+            if created:
+                persisted_signatures.add(signature)
+                persisted += 1
             continue
 
         unresolved_entry = {
@@ -254,6 +271,8 @@ async def _persist_relationship_records(
             "chapter_number": chapter_number,
             "character_a_matches": [str(item) for item in left_matches[:3]],
             "character_b_matches": [str(item) for item in right_matches[:3]],
+            "matched_character_a_id": str(left_matches[0]) if len(left_matches) == 1 else None,
+            "matched_character_b_id": str(right_matches[0]) if len(right_matches) == 1 else None,
         }
         unresolved.append(unresolved_entry)
         review_candidate_count += await _record_relationship_review_candidates(
@@ -730,6 +749,7 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                     CharacterRelationship.character_a_id,
                     CharacterRelationship.character_b_id,
                     CharacterRelationship.rel_type,
+                    CharacterRelationship.sentiment,
                     CharacterRelationship.from_chapter,
                     CharacterRelationship.description,
                 ).where(
@@ -738,11 +758,12 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                 )
             )
         ).all()
-        persisted_relationship_signatures: set[tuple[str, str, str, int, str]] = {
+        persisted_relationship_signatures: set[tuple[str, str, str, float | None, str, int]] = {
             _relationship_signature(
                 row.character_a_id,
                 row.character_b_id,
                 row.rel_type,
+                row.sentiment,
                 row.from_chapter,
                 row.description,
             )
@@ -761,7 +782,7 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                     batch_index,
                     exc_info=result,
                 )
-                result = fallback_character_mentions(batch_text)
+                result = await fallback_character_mentions(batch_text, book_id=book.id)
                 extraction_fallback_batches += 1
                 extraction_fallback_character_count += len(result.get("characters", []))
             result = cast(dict[str, Any], result)
@@ -1760,7 +1781,27 @@ def _blocked_character_ids(
     return blocked_ids
 
 
+def _entity_verifier_summary(entity: dict) -> dict[str, Any]:
+    evidence = _entity_evidence(entity)
+    verifier = evidence.get("verifier") if isinstance(evidence.get("verifier"), dict) else {}
+    final = verifier.get("final") if isinstance(verifier, dict) else {}
+    return final if isinstance(final, dict) else {}
+
+
+def _entity_verifier_band(entity: dict) -> str | None:
+    final = _entity_verifier_summary(entity)
+    band = str(final.get("confidence_band") or "").strip()
+    return band or None
+
+
 def _should_update_existing_character(entity: dict) -> bool:
+    verifier_band = _entity_verifier_band(entity)
+    if verifier_band == "reject":
+        return False
+    if verifier_band == "review":
+        return False
+    if verifier_band == "accept":
+        return True
     confidence = float(entity.get("confidence") or 0.0)
     if confidence >= AUTO_SAVE_CONFIDENCE:
         return True
@@ -1809,6 +1850,12 @@ def _has_character_profile_signal(entity: dict) -> bool:
 
 
 def _entity_requires_manual_review(entity: dict) -> str | None:
+    verifier_band = _entity_verifier_band(entity)
+    if verifier_band == "review":
+        return "mention_verifier_review"
+    if verifier_band == "reject":
+        return "mention_verifier_rejected"
+
     evidence = _entity_evidence(entity)
     cluster_names = [
         str(item).strip()
@@ -1842,6 +1889,8 @@ def _entity_requires_manual_review(entity: dict) -> str | None:
 
 
 def _can_auto_save_character(entity: dict) -> bool:
+    if _entity_verifier_band(entity) != "accept":
+        return False
     if _entity_requires_manual_review(entity):
         return False
     return _character_save_decision(entity).allowed
@@ -1851,7 +1900,7 @@ def _character_save_decision(entity: dict):
     evidence = _entity_evidence(entity)
     traits = entity.get("traits")
     trait_state = traits if isinstance(traits, dict) else {}
-    return character_persistence_decision(
+    decision = character_persistence_decision(
         entity.get("name"),
         role=entity.get("role"),
         aliases=entity.get("aliases") if isinstance(entity.get("aliases"), list) else None,
@@ -1865,6 +1914,32 @@ def _character_save_decision(entity: dict):
         evidence=evidence,
         entity_type=str(entity.get("entity_type") or "person"),
     )
+    verifier_band = _entity_verifier_band(entity)
+    verifier_reasons = [
+        str(reason).strip()
+        for reason in (_entity_verifier_summary(entity).get("reasons") or [])
+        if str(reason).strip()
+    ]
+    if verifier_band == "reject":
+        return CharacterPersistenceDecision(
+            allowed=False,
+            score=decision.score,
+            reasons=tuple(["mention_verifier_rejected", *verifier_reasons]),
+        )
+    if verifier_band == "review":
+        return CharacterPersistenceDecision(
+            allowed=False,
+            score=decision.score,
+            reasons=tuple(["mention_verifier_review", *verifier_reasons]),
+        )
+    if verifier_band == "accept":
+        hard_reasons = tuple(reason for reason in decision.reasons if reason == "entity_type_not_person")
+        return CharacterPersistenceDecision(
+            allowed=not hard_reasons,
+            score=decision.score,
+            reasons=hard_reasons,
+        )
+    return decision
 
 
 def _append_rejected_character_reports(target: list[dict[str, Any]], entries: list[dict[str, Any]] | None) -> None:

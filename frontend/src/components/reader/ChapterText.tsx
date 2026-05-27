@@ -1,6 +1,5 @@
 "use client"
 import React, { useCallback, useEffect, useState } from "react"
-import Link from "next/link"
 import { parsePublishedTextBlocks } from "@/lib/utils/publishedLayout"
 import { resolveReaderFontStack } from "@/lib/utils/readerTypography"
 import { renderRichTextHtml } from "@/lib/utils/richText"
@@ -52,7 +51,6 @@ export function ChapterText({
   canCopyManuscript,
 }: Props) {
   const [text, setText] = useState("")
-  const [selected, setSelected] = useState("")
   const [copyNotice, setCopyNotice] = useState<string | null>(null)
 
   const handleMentionClick = useCallback((event: React.MouseEvent<HTMLElement>) => {
@@ -81,7 +79,6 @@ export function ChapterText({
     const rawSelection = window.getSelection()?.toString() ?? ""
     const next = rawSelection.trim()
     if (next && next.length > 1) {
-      setSelected(next)
       onQuoteSelect(rawSelection)
     }
   }, [canUseQuoteMode, onQuoteSelect, quoteModeEnabled])
@@ -144,17 +141,19 @@ export function ChapterText({
 
   return (
     <div
-      className={`mx-auto w-full px-4 pb-28 pt-8 sm:px-8 lg:px-10 ${isPublishedLayout ? "reader-display-published" : "reader-display-relaxed"}`}
+      className={`mx-auto w-full max-w-[960px] px-1 pb-20 pt-2 sm:px-2 lg:px-3 ${isPublishedLayout ? "reader-display-published" : "reader-display-relaxed"}`}
       onMouseUp={handleMouseUp}
       onCopyCapture={handleProtectedCopy}
       onCutCapture={handleProtectedCopy}
-      style={{ maxWidth: isPublishedLayout ? "920px" : "1000px" }}
     >
-      <div className="grid gap-8 xl:grid-cols-[minmax(0,1fr)] xl:items-start">
-        <section className={`book-layout overflow-hidden rounded-[2rem] border shadow-[0_28px_100px_-68px_rgba(79,70,229,0.38)] ${cardTone.shell}`}>
-          <div className={isPublishedLayout ? "book-layout__page mx-auto px-6 py-10 sm:px-10 sm:py-14" : "mx-auto max-w-[82ch] px-6 py-10 sm:px-10 sm:py-14"}>
-            <p className={`reader-nonprint text-center text-[12px] italic tracking-[0.02em] ${cardTone.helper}`} style={{ fontFamily: "var(--reader-label)" }}>
-              Tap any word or select text for instant context
+      <section className={`book-layout overflow-hidden rounded-[2rem] border shadow-[0_36px_110px_-82px_rgba(15,23,42,0.96)] ${cardTone.shell}`}>
+        <div className={isPublishedLayout ? "book-layout__page mx-auto px-5 py-8 sm:px-10 sm:py-12 lg:px-12 lg:py-14" : "mx-auto max-w-[82ch] px-5 py-8 sm:px-10 sm:py-12"}>
+          <div className="reader-nonprint mb-14 text-center">
+            <p className={`inline-flex items-center gap-2 text-[11px] italic tracking-[0.01em] ${cardTone.helper}`} style={{ fontFamily: "var(--reader-label)" }}>
+              <svg viewBox="0 0 16 16" aria-hidden="true" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.4">
+                <path d="M8 1.75v3.1M8 11.15v3.1M1.75 8h3.1M11.15 8h3.1M3.25 3.25l2.2 2.2M10.55 10.55l2.2 2.2M12.75 3.25l-2.2 2.2M5.45 10.55l-2.2 2.2" />
+              </svg>
+              <span>Tap any word or select text for instant context</span>
             </p>
             {!canCopyManuscript ? (
               <p className={`reader-nonprint mt-3 text-center text-[11px] font-semibold uppercase tracking-[0.18em] ${theme === "dark" ? "text-amber-300" : "text-amber-700"}`} style={{ fontFamily: "var(--reader-label)" }}>
@@ -166,161 +165,82 @@ export function ChapterText({
                 {copyNotice}
               </p>
             ) : null}
-
-            <header className={isPublishedLayout ? "book-layout__chapter-heading chapter-title" : "mb-14 mt-8"}>
-              <p className="text-[11px] uppercase tracking-[0.36em] text-stone-400" style={{ fontFamily: "var(--reader-label)" }}>
-                Chapter {chapterNum}{totalChapters ? ` of ${totalChapters}` : ""}
-              </p>
-              <h1 className={`mt-4 text-5xl font-light leading-tight sm:text-6xl ${cardTone.heading}`} style={{ fontFamily: isPublishedLayout ? fontStack : "var(--reader-display)" }}>
-                {chapterTitle || `Chapter ${chapterNum}`}
-              </h1>
-              <div className={`mt-6 h-[2px] w-16 ${isPublishedLayout ? "book-layout__title-rule" : cardTone.divider}`} />
-            </header>
-
-            {shouldRenderHtml ? (
-              <div
-                className={`reader-text note-rich-content ${isPublishedLayout ? "book-layout__body" : ""} ${cardTone.prose}`}
-                onClick={handleMentionClick}
-                style={{
-                  fontFamily: fontStack,
-                  fontSize: `${fontSize}px`,
-                  lineHeight: isPublishedLayout ? "1.68" : fontFamily === "sans" ? "1.88" : "1.96",
-                  maxWidth: "100%",
-                  wordBreak: "normal",
-                  overflowWrap: "normal",
-                  hyphens: "none",
-                }}
-                dangerouslySetInnerHTML={{ __html: renderRichTextHtml(htmlContent || text) }}
-              />
-            ) : (
-              <div
-                className={`reader-text ${isPublishedLayout ? "book-layout__body" : "whitespace-pre-wrap"} ${cardTone.prose}`}
-                style={{
-                  fontFamily: fontStack,
-                  fontSize: `${fontSize}px`,
-                  lineHeight: isPublishedLayout ? "1.68" : fontFamily === "sans" ? "1.88" : "1.96",
-                  maxWidth: "100%",
-                  wordBreak: "normal",
-                  overflowWrap: "normal",
-                  hyphens: "none",
-                }}
-              >
-                {blocks.map((block, index) =>
-                  block.type === "media" ? (
-                    mediaSrc(block.item) ? (
-                      <figure key={`media-${index}`} className={`my-10 overflow-hidden rounded-[1.5rem] border p-3 ${cardTone.media}`}>
-                        <div className="flex justify-center py-4">
-                          <img
-                            src={mediaSrc(block.item)}
-                            alt={block.item.caption ?? `Inline chapter image ${block.item.sort_order + 1}`}
-                            className="max-h-[28rem] w-auto rounded-[1rem] object-contain"
-                          />
-                        </div>
-                        <figcaption className={`px-3 pb-3 text-center text-xs italic ${cardTone.helper}`} style={{ fontFamily: "var(--reader-label)" }}>
-                          {block.item.caption ?? "Image from the source material, preserved in the reading flow."}
-                        </figcaption>
-                      </figure>
-                    ) : null
-                  ) : (
-                    isPublishedLayout
-                      ? renderPublishedTextBlock(block, index, mentionClass, onTap, fontStack)
-                      : renderRelaxedTextBlock(block, index, mentionClass, onTap)
-                  )
-                )}
-              </div>
-            )}
-
-            <footer
-              className={`reader-nonprint mt-20 flex flex-col gap-3 border-t pt-8 text-sm italic sm:flex-row sm:items-center sm:justify-between ${theme === "dark" ? "border-white/10 text-stone-400" : "border-stone-200 text-stone-500"}`}
-              style={{ fontFamily: "var(--reader-label)" }}
-            >
-              <span>{chapterTitle || `Chapter ${chapterNum}`}</span>
-              <span>{countWords(text).toLocaleString()} words in this chapter</span>
-            </footer>
           </div>
-        </section>
 
-        <div className="reader-nonprint mx-auto mt-8 max-w-[72ch]">
-          <div className={`rounded-[1.5rem] border p-4 ${cardTone.aside}`}>
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${cardTone.helper}`}>Continue reading</p>
-                <p className={`mt-1 text-sm ${cardTone.helper}`}>
-                  {totalChapters ? `Chapter ${chapterNum} of ${totalChapters}` : `Chapter ${chapterNum}`}
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Link prefetch={false} href={`/${bookId}`} className={`rounded-full border px-4 py-2 text-sm font-medium transition ${cardTone.nav}`}>
-                  Back to book
-                </Link>
-                {chapterNum > 1 ? (
-                  <Link prefetch={false} href={`/${bookId}/chapter/${chapterNum - 1}`} className={`rounded-full border px-4 py-2 text-sm font-medium transition ${cardTone.nav}`}>
-                    Previous chapter
-                  </Link>
-                ) : null}
-                {totalChapters === null || chapterNum < totalChapters ? (
-                  <Link prefetch={false} href={`/${bookId}/chapter/${chapterNum + 1}`} className={`rounded-full border px-4 py-2 text-sm font-medium transition ${cardTone.nav}`}>
-                    Next chapter
-                  </Link>
-                ) : null}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className={`reader-nonprint mx-auto mt-8 max-w-[72ch] rounded-[1.5rem] border p-4 xl:hidden ${cardTone.aside}`}>
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${cardTone.helper}`}>Chapter navigation</p>
-              <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${cardTone.helper}`}>Continue reading</p>
-              <p className={`mt-1 text-sm ${cardTone.helper}`}>
-                {totalChapters ? `Chapter ${chapterNum} of ${totalChapters}` : `Chapter ${chapterNum}`}
-              </p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Link prefetch={false} href={`/${bookId}`} className={`rounded-full border px-4 py-2 text-sm font-medium transition ${cardTone.nav}`}>
-                Back to book
-              </Link>
-              {chapterNum > 1 ? (
-                <Link prefetch={false} href={`/${bookId}/chapter/${chapterNum - 1}`} className={`rounded-full border px-4 py-2 text-sm font-medium transition ${cardTone.nav}`}>
-                  Previous chapter
-                </Link>
-              ) : null}
-              {totalChapters === null || chapterNum < totalChapters ? (
-                <Link prefetch={false} href={`/${bookId}/chapter/${chapterNum + 1}`} className={`rounded-full border px-4 py-2 text-sm font-medium transition ${cardTone.nav}`}>
-                  Next chapter
-                </Link>
-              ) : null}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className={`reader-nonprint mx-auto mt-8 max-w-[72ch] rounded-[1.5rem] border p-4 xl:hidden ${cardTone.aside}`}>
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${cardTone.helper}`}>Chapter navigation</p>
-            <p className={`mt-1 text-sm ${cardTone.helper}`}>
-              {totalChapters ? `Chapter ${chapterNum} of ${totalChapters}` : `Chapter ${chapterNum}`}
+          <header className={isPublishedLayout ? "book-layout__chapter-heading chapter-title" : "mb-14 mt-6"}>
+            <p className="text-[11px] uppercase tracking-[0.36em] text-stone-400" style={{ fontFamily: "var(--reader-label)" }}>
+              Chapter {chapterNum}{totalChapters ? ` of ${totalChapters}` : ""}
             </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Link prefetch={false} href={`/${bookId}`} className={`rounded-full border px-4 py-2 text-sm font-medium transition ${cardTone.nav}`}>
-              Back to book
-            </Link>
-            {chapterNum > 1 ? (
-              <Link prefetch={false} href={`/${bookId}/chapter/${chapterNum - 1}`} className={`rounded-full border px-4 py-2 text-sm font-medium transition ${cardTone.nav}`}>
-                Previous
-              </Link>
-            ) : null}
-            {totalChapters === null || chapterNum < totalChapters ? (
-              <Link prefetch={false} href={`/${bookId}/chapter/${chapterNum + 1}`} className={`rounded-full border px-4 py-2 text-sm font-medium transition ${cardTone.nav}`}>
-                Next
-              </Link>
-            ) : null}
-          </div>
+            <h1 className={`mt-4 text-5xl font-light leading-tight sm:text-6xl ${cardTone.heading}`} style={{ fontFamily: isPublishedLayout ? fontStack : "var(--reader-display)" }}>
+              {chapterTitle || `Chapter ${chapterNum}`}
+            </h1>
+            <div className={`mt-6 h-[2px] w-20 ${isPublishedLayout ? "book-layout__title-rule" : cardTone.divider}`} />
+          </header>
+
+          {shouldRenderHtml ? (
+            <div
+              className={`reader-text note-rich-content ${isPublishedLayout ? "book-layout__body" : ""} ${cardTone.prose}`}
+              onClick={handleMentionClick}
+              style={{
+                fontFamily: fontStack,
+                fontSize: `${fontSize}px`,
+                lineHeight: isPublishedLayout ? "1.78" : fontFamily === "sans" ? "1.9" : "1.98",
+                maxWidth: "100%",
+                wordBreak: "normal",
+                overflowWrap: "normal",
+                hyphens: "none",
+              }}
+              dangerouslySetInnerHTML={{ __html: renderRichTextHtml(htmlContent || text) }}
+            />
+          ) : (
+            <div
+              className={`reader-text ${isPublishedLayout ? "book-layout__body" : "whitespace-pre-wrap"} ${cardTone.prose}`}
+              style={{
+                fontFamily: fontStack,
+                fontSize: `${fontSize}px`,
+                lineHeight: isPublishedLayout ? "1.78" : fontFamily === "sans" ? "1.9" : "1.98",
+                maxWidth: "100%",
+                wordBreak: "normal",
+                overflowWrap: "normal",
+                hyphens: "none",
+              }}
+            >
+              {blocks.map((block, index) =>
+                block.type === "media" ? (
+                  mediaSrc(block.item) ? (
+                    <figure key={`media-${index}`} className={`my-12 overflow-hidden rounded-[1.6rem] border p-3 ${cardTone.media}`}>
+                      <div className="flex justify-center py-4">
+                        <img
+                          src={mediaSrc(block.item)}
+                          alt={block.item.caption ?? `Inline chapter image ${block.item.sort_order + 1}`}
+                          loading="lazy"
+                          decoding="async"
+                          className="max-h-[28rem] w-auto rounded-[1rem] object-contain"
+                        />
+                      </div>
+                      <figcaption className={`px-3 pb-3 text-center text-xs italic ${cardTone.helper}`} style={{ fontFamily: "var(--reader-label)" }}>
+                        {block.item.caption ?? "Image from the source material, preserved in the reading flow."}
+                      </figcaption>
+                    </figure>
+                  ) : null
+                ) : (
+                  isPublishedLayout
+                    ? renderPublishedTextBlock(block, index, mentionClass, onTap, fontStack)
+                    : renderRelaxedTextBlock(block, index, mentionClass, onTap)
+                )
+              )}
+            </div>
+          )}
+
+          <footer
+            className={`reader-nonprint mt-20 flex flex-col gap-3 border-t pt-8 text-sm italic sm:flex-row sm:items-center sm:justify-between ${theme === "dark" ? "border-white/10 text-stone-400" : "border-stone-200 text-stone-500"}`}
+            style={{ fontFamily: "var(--reader-label)" }}
+          >
+            <span>{chapterTitle || `Chapter ${chapterNum}`}</span>
+            <span>{countWords(text).toLocaleString()} words in this chapter</span>
+          </footer>
         </div>
-      </div>
+      </section>
     </div>
   )
 }

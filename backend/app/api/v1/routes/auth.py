@@ -69,7 +69,16 @@ from app.utils.auth_cookies import (
     get_auth_token,
     set_auth_cookies,
 )
-from app.utils.auth_utils import current_token_version, next_token_version, normalize_device_id, normalize_email, password_is_valid
+from app.utils.auth_csrf import enforce_cookie_csrf
+from app.utils.auth_utils import (
+    current_token_version,
+    get_user_for_auth_subject,
+    next_token_version,
+    normalize_device_id,
+    normalize_email,
+    parse_auth_subject_uuid,
+    password_is_valid,
+)
 from app.utils.billing_utils import build_tier_presentation
 from app.utils.logging.errors import public_error_message
 from app.utils.user_utils import (
@@ -268,9 +277,17 @@ async def oauth_supabase(
     email = normalize_email(sb_user.get("email", ""))
     if not email:
         raise HTTPException(401, "Invalid Supabase token")
+    try:
+        supabase_auth_id = parse_auth_subject_uuid(sb_user.get("id"))
+    except ValueError:
+        raise HTTPException(401, "Invalid Supabase token")
 
     try:
-        existing = (await db.execute(select(User).where(func.lower(User.email) == email))).scalar()
+        existing = (
+            await db.execute(select(User).where(User.supabase_auth_id == supabase_auth_id))
+        ).scalar_one_or_none()
+        if not existing:
+            existing = (await db.execute(select(User).where(func.lower(User.email) == email))).scalar()
         created = False
         if not existing:
             try:
@@ -286,7 +303,9 @@ async def oauth_supabase(
                 except DeviceTrialLimitError:
                     raise HTTPException(403, f"This device has already used the maximum of {settings.DEVICE_TRIAL_MAX_ACCOUNTS} trial accounts.")
             existing = User(
+                id=supabase_auth_id,
                 email=email,
+                supabase_auth_id=supabase_auth_id,
                 password_hash=hash_password(str(uuid.uuid4())),
                 legal_accepted_at=datetime.now(UTC) if (body.accepted_terms or local_supabase_recovery) else None,
                 legal_version=LEGAL_VERSION,
@@ -304,11 +323,18 @@ async def oauth_supabase(
                 raise HTTPException(403, f"This device has already used the maximum of {settings.DEVICE_TRIAL_MAX_ACCOUNTS} trial accounts.")
             await db.refresh(existing)
             created = True
-        elif not existing.email_verified_at:
-            existing.email_verified_at = datetime.now(UTC)
-            await schedule_trial_email_events(db, existing)
-            await db.commit()
-            await db.refresh(existing)
+        else:
+            mutated = False
+            if existing.supabase_auth_id is None:
+                existing.supabase_auth_id = supabase_auth_id
+                mutated = True
+            if not existing.email_verified_at:
+                existing.email_verified_at = datetime.now(UTC)
+                await schedule_trial_email_events(db, existing)
+                mutated = True
+            if mutated:
+                await db.commit()
+                await db.refresh(existing)
 
         if created:
             await send_onboarding_email(existing.email)
@@ -389,6 +415,8 @@ async def refresh(
     db: AsyncSession = Depends(get_db),
     _: None = Depends(rate_limit_auth_refresh),
 ):
+    if body is None or not body.refresh_token:
+        enforce_cookie_csrf(request)
     refresh_token = body.refresh_token if body and body.refresh_token else get_auth_token(request, cookie_name=REFRESH_TOKEN_COOKIE_NAME)
     if not refresh_token:
         raise HTTPException(401, "Invalid refresh token")
@@ -400,7 +428,10 @@ async def refresh(
     if claimed_version is None or not session_id:
         raise HTTPException(401, "Invalid refresh token")
 
-    user = await db.get(User, uuid.UUID(payload["sub"]))
+    try:
+        user = await get_user_for_auth_subject(db, payload["sub"])
+    except ValueError:
+        raise HTTPException(401, "Invalid refresh token")
     if not user:
         raise HTTPException(401, "User not found")
     current_version = current_token_version(user)

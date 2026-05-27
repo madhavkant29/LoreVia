@@ -281,9 +281,10 @@ export default function BookOverviewPage() {
     },
     refetchIntervalInBackground: false,
   })
-  const resolvedBookMode = overviewQuery.data?.book.mode ?? bookMode
+  const resolvedBookMode = overviewQuery.data?.book.workspace_shell ?? overviewQuery.data?.book.mode ?? bookMode
   const resolvedCollaborationRole = overviewQuery.data?.book.collaboration_role ?? null
   const resolvedCollaborationPermissions = overviewQuery.data?.book.collaboration_permissions ?? null
+  const resolvedCanSwitchWorkspaceMode = overviewQuery.data?.book.can_switch_workspace_mode ?? true
   const canUsePaidAuthorTools = canUseAuthorFeatures(userTier) || Boolean(resolvedCollaborationPermissions?.can_edit_manuscript)
   const bookNotesQuery = useQuery({
     queryKey: asQueryKey(bookCacheKey(bookId, "notes")),
@@ -391,17 +392,18 @@ export default function BookOverviewPage() {
   }, [bookId])
 
   useEffect(() => {
-    if (book?.mode === "reader" || book?.mode === "author") {
-      setBookMode(bookId, book.mode)
+    const nextShell = book?.workspace_shell ?? book?.mode
+    if (nextShell === "reader" || nextShell === "author") {
+      setBookMode(bookId, nextShell)
     }
-  }, [book?.mode, bookId, setBookMode])
+  }, [book?.mode, book?.workspace_shell, bookId, setBookMode])
 
   useEffect(() => {
     if (!overviewQuery.isSuccess || !overviewQuery.data || overviewReadyCaptured.current) return
     overviewReadyCaptured.current = true
     capture("reader_overview_critical_ready", {
       book_id: bookId,
-      active_mode: overviewQuery.data.book.mode,
+      active_mode: overviewQuery.data.book.workspace_shell ?? overviewQuery.data.book.mode,
       critical_request_count: 1,
       duration_ms:
         typeof performance !== "undefined" && overviewLoadStartedAt.current !== null
@@ -442,12 +444,13 @@ export default function BookOverviewPage() {
   const continueChapter = progress?.current_chapter ?? 1
   const percentComplete = Math.round(progress?.percent_complete ?? book?.progress_pct ?? 0)
   const chaptersLeft = progress?.chapters_left ?? book?.chapters_left ?? 0
-  const activeBookMode = book?.mode ?? bookMode
+  const activeBookMode = book?.workspace_shell ?? book?.mode ?? bookMode
   const collaborationRole = book?.collaboration_role ?? null
   const collaborationPermissions = book?.collaboration_permissions ?? null
+  const canSwitchWorkspaceMode = book?.can_switch_workspace_mode ?? resolvedCanSwitchWorkspaceMode
   const isCollaboratorSession = Boolean(collaborationRole)
   const hasCollaboratorAuthorAccess = Boolean(collaborationPermissions?.can_edit_manuscript)
-  const canUseAuthorWorkspace = !isCollaboratorSession || hasCollaboratorAuthorAccess
+  const canUseAuthorWorkspace = activeBookMode === "author" || (!isCollaboratorSession || hasCollaboratorAuthorAccess)
   const canEditSharedManuscript = !isCollaboratorSession || hasCollaboratorAuthorAccess
   const processingSummary = getProcessingSummary(book)
   const unitTitle = storyUnitTitle(book?.work_type)
@@ -522,14 +525,15 @@ export default function BookOverviewPage() {
   const updateMode = async (nextMode: "reader" | "author") => {
     if (modeSaving) return
     if (nextMode === activeBookMode) return
+    if (!canSwitchWorkspaceMode) return
     if (nextMode === "author" && !canUseAuthorWorkspace) return
     const previousBook = book
     startTransition(() => setBookMode(bookId, nextMode))
     setModeSaving(true)
     if (previousBook) {
-      queryClient.setQueryData(bookQueryKey, { ...previousBook, mode: nextMode })
+      queryClient.setQueryData(bookQueryKey, { ...previousBook, workspace_shell: nextMode, mode: nextMode })
       queryClient.setQueryData(overviewQueryKey, (current: BookOverviewPayload | undefined) => (
-        current ? { ...current, book: { ...current.book, mode: nextMode } } : current
+        current ? { ...current, book: { ...current.book, workspace_shell: nextMode, mode: nextMode } } : current
       ))
     }
     try {
@@ -539,7 +543,7 @@ export default function BookOverviewPage() {
         current ? { ...current, book: updated } : current
       ))
     } catch {
-      startTransition(() => setBookMode(bookId, previousBook?.mode ?? "reader"))
+      startTransition(() => setBookMode(bookId, previousBook?.workspace_shell ?? "reader"))
       if (previousBook) {
         queryClient.setQueryData(bookQueryKey, previousBook)
         queryClient.setQueryData(overviewQueryKey, (current: BookOverviewPayload | undefined) => (
@@ -604,7 +608,8 @@ export default function BookOverviewPage() {
               bookmark={bookmark}
               isDark={isDark}
               modeSaving={modeSaving}
-              canUseAuthorMode={canUseAuthorWorkspace}
+              canUseAuthorMode={canUseAuthorWorkspace && canSwitchWorkspaceMode}
+              greetingName={greetingName}
               onModeChange={updateMode}
               onToggleTheme={toggleTheme}
               onNavigate={navigateWithMemory}
@@ -616,7 +621,7 @@ export default function BookOverviewPage() {
               book={book}
               isDark={isDark}
               activeBookMode={activeBookMode}
-              canUseAuthorMode={canUseAuthorWorkspace}
+              canUseAuthorMode={canUseAuthorWorkspace && canSwitchWorkspaceMode}
               modeSaving={modeSaving}
               greetingName={greetingName}
               canOpenManuscript={canEditSharedManuscript}
@@ -670,7 +675,11 @@ export default function BookOverviewPage() {
           <button onClick={continueReading} className="rounded-xl px-2 py-2">Read</button>
           <Link href={`/${bookId}/chapters`} className="rounded-xl px-2 py-2">Chapters</Link>
           <Link href={`/${bookId}/summaries`} className="rounded-xl px-2 py-2">Summary</Link>
-          <button onClick={openRelationships} className="rounded-xl px-2 py-2">Graph</button>
+          {activeBookMode === "author" ? (
+            <button onClick={openRelationships} className="rounded-xl px-2 py-2">Graph</button>
+          ) : (
+            <Link href={`/${bookId}/timeline`} className="rounded-xl px-2 py-2">Timeline</Link>
+          )}
           <Link href="/library" className="rounded-xl px-2 py-2">Library</Link>
         </div>
       </nav>

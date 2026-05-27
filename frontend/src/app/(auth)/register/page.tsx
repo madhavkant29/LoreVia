@@ -236,6 +236,9 @@ export default function RegisterPage() {
               EULA
             </Link>
             .
+            <span className={`mt-2 block text-xs leading-5 ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+              LoreVia uses a device identifier to help prevent fake or abusive repeat signups and may limit account creation to two accounts per device.
+            </span>
           </span>
         </label>
         <button

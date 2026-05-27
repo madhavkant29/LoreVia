@@ -5,6 +5,12 @@ import type { EmotionalArcOverview, ReadabilityMetrics, WriterWorkspace, Writing
 type GoalField = "chapter_target" | "book_target" | "session_target"
 type CorkboardLane = "ideas" | "drafting" | "revised"
 
+const LANE_LABELS: Record<CorkboardLane, string> = {
+  ideas: "Ideas",
+  drafting: "Drafting",
+  revised: "Revised",
+}
+
 type ManuscriptPlanWorkspaceProps = {
   isDark: boolean
   editorMode: "chapter" | "book"
@@ -56,13 +62,15 @@ export function ManuscriptPlanWorkspace({
   onUpdateCardLane,
   emotionalArc,
 }: ManuscriptPlanWorkspaceProps) {
+  const arcChartCharacter = emotionalArc?.characters.find((character) => character.points.length > 0) ?? null
+
   return (
-    <div className="mt-6 grid gap-5 xl:grid-cols-[1.2fr_1fr]">
-      <section className={`rounded-[1.7rem] border p-5 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-white/90"}`}>
+    <div className="mt-4 grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
+      <section className={`rounded-[1.45rem] border p-5 ${isDark ? "border-white/10 bg-[#0c1118]/92" : "border-stone-200 bg-white/90"}`}>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-emerald-300" : "text-emerald-700"}`}>Writer dashboard</p>
-            <h2 className={`mt-2 text-2xl font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>Goals, templates, and live readability</h2>
+            <h2 className={`mt-2 text-2xl font-semibold tracking-tight ${isDark ? "text-white" : "text-stone-950"}`}>Goals, templates, and live readability</h2>
           </div>
           <button
             type="button"
@@ -162,17 +170,18 @@ export function ManuscriptPlanWorkspace({
                   <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-700"}`}>{template.description}</p>
                 </article>
               ))}
+              {(writerWorkspace?.templates ?? []).length === 0 ? <p className={`text-sm ${isDark ? "text-slate-500" : "text-stone-500"}`}>No writing templates are available yet.</p> : null}
               {chapterVersionsCount === 0 ? <p className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>No chapter versions saved yet. Manual versions stay separate from local autosaves.</p> : null}
             </div>
           </div>
         </div>
       </section>
 
-      <section className={`rounded-[1.7rem] border p-5 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-white/90"}`}>
+      <section className={`rounded-[1.45rem] border p-5 ${isDark ? "border-white/10 bg-[#0c1118]/92" : "border-stone-200 bg-white/90"}`}>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-amber-300" : "text-amber-700"}`}>Planning board</p>
-            <h2 className={`mt-2 text-2xl font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>Corkboard and emotional arc</h2>
+            <h2 className={`mt-2 text-2xl font-semibold tracking-tight ${isDark ? "text-white" : "text-stone-950"}`}>Corkboard and emotional arc</h2>
           </div>
         </div>
         <div className="mt-4 flex gap-2">
@@ -180,17 +189,22 @@ export function ManuscriptPlanWorkspace({
             value={newCorkboardTitle}
             onChange={(event) => onNewCorkboardTitleChange(event.target.value)}
             placeholder="New corkboard card"
-            className={`flex-1 rounded-[1rem] border px-4 py-3 text-sm ${isDark ? "border-white/10 bg-black/30 text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-stone-50 text-stone-900 placeholder:text-stone-400"}`}
+            className={`flex-1 rounded-[1rem] border px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400/30 ${isDark ? "border-white/10 bg-black/30 text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-stone-50 text-stone-900 placeholder:text-stone-400"}`}
           />
           <button onClick={onAddCorkboardCard} disabled={!writerWorkspace || !newCorkboardTitle.trim()} className="rounded-[1rem] bg-[linear-gradient(135deg,#d97706,#b45309)] px-4 py-3 text-sm font-semibold text-white disabled:opacity-50">Add</button>
         </div>
         <div className="mt-4 grid gap-3 md:grid-cols-3">
           {(["ideas", "drafting", "revised"] as const).map((lane) => (
-            <div key={lane} className={`rounded-[1.1rem] border p-3 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50/80"}`}>
-              <p className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>{lane}</p>
+            <div key={lane} className={`min-h-[18rem] rounded-[1.1rem] border p-3 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50/80"}`}>
+              <div className="flex items-center justify-between gap-3">
+                <p className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>{LANE_LABELS[lane]}</p>
+                <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${isDark ? "bg-white/10 text-slate-300" : "bg-white text-stone-600"}`}>
+                  {(writerWorkspace?.corkboard_cards ?? []).filter((card) => card.lane === lane).length}
+                </span>
+              </div>
               <div className="mt-3 space-y-2">
                 {(writerWorkspace?.corkboard_cards ?? []).filter((card) => card.lane === lane).map((card) => (
-                  <article key={card.id} className={`rounded-[0.95rem] border p-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-white bg-white"}`}>
+                  <article key={card.id} className={`rounded-[0.95rem] border p-3 transition hover:-translate-y-0.5 ${isDark ? "border-white/10 bg-white/[0.035] hover:border-white/15" : "border-white bg-white hover:border-stone-200"}`}>
                     <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{card.title}</p>
                     {card.chapter_number ? <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Chapter {card.chapter_number}</p> : null}
                     <div className="mt-3 flex gap-2">
@@ -200,13 +214,18 @@ export function ManuscriptPlanWorkspace({
                     </div>
                   </article>
                 ))}
-                {(writerWorkspace?.corkboard_cards ?? []).filter((card) => card.lane === lane).length === 0 ? <p className={`text-sm ${isDark ? "text-slate-500" : "text-stone-500"}`}>No cards yet.</p> : null}
+                {(writerWorkspace?.corkboard_cards ?? []).filter((card) => card.lane === lane).length === 0 ? (
+                  <div className={`rounded-[0.95rem] border border-dashed p-4 text-sm ${isDark ? "border-white/10 text-slate-500" : "border-stone-200 text-stone-500"}`}>
+                    No {LANE_LABELS[lane].toLowerCase()} cards yet. Add a card above, then move it as the idea develops.
+                  </div>
+                ) : null}
               </div>
             </div>
           ))}
         </div>
         <div className={`mt-5 rounded-[1.2rem] border p-4 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50/80"}`}>
           <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Emotional arc tracking</p>
+          {arcChartCharacter ? <EmotionalArcMiniChart character={arcChartCharacter} isDark={isDark} /> : null}
           {emotionalArc?.characters.length ? (
             <div className="mt-3 space-y-3">
               {emotionalArc.characters.slice(0, 4).map((character) => (
@@ -230,6 +249,57 @@ export function ManuscriptPlanWorkspace({
           )}
         </div>
       </section>
+    </div>
+  )
+}
+
+function EmotionalArcMiniChart({
+  character,
+  isDark,
+}: {
+  character: EmotionalArcOverview["characters"][number]
+  isDark: boolean
+}) {
+  const points = character.points.slice(-8)
+  const width = 520
+  const height = 150
+  const chartPoints = points.map((point, index) => {
+    const x = points.length <= 1 ? width / 2 : (index / (points.length - 1)) * width
+    const normalized = Math.max(-1, Math.min(1, point.sentiment / 5))
+    const y = height / 2 - normalized * 52
+    return { ...point, x, y }
+  })
+  const path = chartPoints.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(" ")
+
+  return (
+    <div className={`mt-4 rounded-[1rem] border p-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white"}`}>
+      <div className="flex items-center justify-between gap-3">
+        <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{character.character_name}</p>
+        <span className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>trajectory {character.trajectory_score > 0 ? "+" : ""}{character.trajectory_score}</span>
+      </div>
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${character.character_name} emotional arc`} className="mt-3 h-36 w-full overflow-visible">
+        <defs>
+          <linearGradient id={`arc-${character.character_id}`} x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stopColor="#2dd4bf" stopOpacity="0.28" />
+            <stop offset="100%" stopColor="#2dd4bf" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <line x1="0" x2={width} y1={height / 2} y2={height / 2} stroke={isDark ? "rgba(255,255,255,0.12)" : "rgba(68,64,60,0.16)"} />
+        {path ? (
+          <>
+            <path d={`${path} L ${width} ${height} L 0 ${height} Z`} fill={`url(#arc-${character.character_id})`} />
+            <path d={path} fill="none" stroke="#2dd4bf" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+          </>
+        ) : null}
+        {chartPoints.map((point) => (
+          <circle key={`${point.chapter_number}-${point.label}`} cx={point.x} cy={point.y} r="4.5" fill={point.sentiment >= 0 ? "#38bdf8" : "#fb7185"} />
+        ))}
+      </svg>
+      <div className={`grid gap-2 text-[10px] ${isDark ? "text-slate-500" : "text-stone-500"}`} style={{ gridTemplateColumns: `repeat(${Math.max(1, points.length)}, minmax(0, 1fr))` }}>
+        {points.map((point) => (
+          <span key={`${point.chapter_number}-${point.label}`} className="truncate">Ch. {point.chapter_number}</span>
+        ))}
+      </div>
     </div>
   )
 }

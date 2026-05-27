@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+import uuid
 
 import pytest
 from fastapi import HTTPException
@@ -13,6 +14,7 @@ from app.api.deps.auth import (
     get_admin,
     get_current_user,
 )
+from app.utils.auth_utils import get_user_for_auth_subject
 
 
 @pytest.mark.parametrize("payload", [{}, {"ver": None}, {"ver": "abc"}])
@@ -60,6 +62,7 @@ async def test_get_current_user_falls_back_to_refresh_when_access_user_is_missin
     async def fake_refresh_session_active(*args, **kwargs):
         return True
 
+    monkeypatch.setattr("app.api.deps.auth.enforce_cookie_csrf", lambda _request: None)
     monkeypatch.setattr("app.api.deps.auth.get_auth_token", fake_get_auth_token)
     monkeypatch.setattr("app.api.deps.auth._decode_access_payload", lambda token: {"sub": "stale-user", "ver": 1, "type": "access"} if token == "access-token" else None)
     monkeypatch.setattr("app.api.deps.auth._decode_refresh_payload", lambda token: {"sub": "valid-user", "ver": 1, "sid": "session-1", "type": "refresh"} if token == "refresh-token" else None)
@@ -84,6 +87,7 @@ async def test_get_current_user_rejects_refresh_tokens_without_session_id(monkey
     request = Request({"type": "http", "headers": []})
     response = Response()
 
+    monkeypatch.setattr("app.api.deps.auth.enforce_cookie_csrf", lambda _request: None)
     monkeypatch.setattr(
         "app.api.deps.auth.get_auth_token",
         lambda _request, bearer_token=None, cookie_name="lorevia_access_token": "refresh-token" if cookie_name == "lorevia_refresh_token" else None,
@@ -107,6 +111,7 @@ async def test_get_current_user_rejects_inactive_refresh_sessions_without_resett
     response = Response()
     user = SimpleNamespace(id="user-id", username="inactive")
 
+    monkeypatch.setattr("app.api.deps.auth.enforce_cookie_csrf", lambda _request: None)
     monkeypatch.setattr(
         "app.api.deps.auth.get_auth_token",
         lambda _request, bearer_token=None, cookie_name="lorevia_access_token": "refresh-token" if cookie_name == "lorevia_refresh_token" else None,
@@ -167,6 +172,51 @@ async def test_load_user_from_claims_rejects_stale_token_version():
 
 
 @pytest.mark.asyncio
+async def test_get_user_for_auth_subject_falls_back_to_supabase_auth_id():
+    local_user_id = uuid.uuid4()
+    supabase_auth_id = uuid.uuid4()
+    user = SimpleNamespace(id=local_user_id, supabase_auth_id=supabase_auth_id)
+
+    class _FakeScalarResult:
+        def scalar_one_or_none(self):
+            return user
+
+    class _FakeDB:
+        async def get(self, _model, _user_id):
+            assert _user_id == supabase_auth_id
+            return None
+
+        async def execute(self, _query):
+            return _FakeScalarResult()
+
+    result = await get_user_for_auth_subject(_FakeDB(), str(supabase_auth_id))
+
+    assert result is user
+
+
+@pytest.mark.asyncio
+async def test_load_user_from_claims_accepts_supabase_auth_subject():
+    user = SimpleNamespace(id="local-user", token_version=2)
+    supabase_auth_id = uuid.uuid4()
+
+    class _FakeScalarResult:
+        def scalar_one_or_none(self):
+            return user
+
+    class _FakeDB:
+        async def get(self, _model, _user_id):
+            assert _user_id == supabase_auth_id
+            return None
+
+        async def execute(self, _query):
+            return _FakeScalarResult()
+
+    result = await _load_user_from_claims(str(supabase_auth_id), 2, _FakeDB())
+
+    assert result is user
+
+
+@pytest.mark.asyncio
 async def test_get_admin_rejects_non_admin_users(monkeypatch):
     request = Request({"type": "http", "headers": []})
 
@@ -187,3 +237,27 @@ async def test_get_admin_rejects_non_admin_users(monkeypatch):
 
     assert exc_info.value.status_code == 403
     assert exc_info.value.detail == "Admin only"
+
+
+@pytest.mark.asyncio
+async def test_get_current_user_enforces_csrf_for_cookie_authenticated_writes(monkeypatch):
+    request = Request({"type": "http", "method": "PATCH", "headers": []})
+    response = Response()
+
+    called = {"csrf": False}
+
+    def fake_enforce_cookie_csrf(_request):
+        called["csrf"] = True
+
+    async def fake_load_user_from_claims(*_args, **_kwargs):
+        return SimpleNamespace(id="user-id")
+
+    monkeypatch.setattr("app.api.deps.auth.enforce_cookie_csrf", fake_enforce_cookie_csrf)
+    monkeypatch.setattr("app.api.deps.auth.get_auth_token", lambda *_args, **_kwargs: "access-token")
+    monkeypatch.setattr("app.api.deps.auth._decode_access_payload", lambda _token: {"sub": "user-id", "ver": 2, "type": "access"})
+    monkeypatch.setattr("app.api.deps.auth._load_user_from_claims", fake_load_user_from_claims)
+
+    result = await get_current_user(request, response, credentials=None, db=SimpleNamespace())
+
+    assert result.id == "user-id"
+    assert called["csrf"] is True

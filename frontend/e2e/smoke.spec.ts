@@ -231,7 +231,7 @@ test("book overview opens the manuscript editor", async ({ page }) => {
   await page.goto("/book-1")
 
   await expect(page.getByText("Open Manuscript Editor")).toBeVisible()
-  await expect(page.getByText("Know what your edit breaks before your readers do.")).toBeVisible()
+  await expect(page.getByText("Your author command center.")).toBeVisible()
   await expect(page.getByRole("button", { name: /create revision checklist/i })).toBeVisible()
 
   const sidebarRail = page.locator('[data-testid="author-tools-nav-rail"]')
@@ -520,6 +520,33 @@ test("voice consistency runs without the max-depth console loop", async ({ page 
   expect(pageErrors.some((message) => /Maximum update depth exceeded/i.test(message))).toBe(false)
 })
 
+test("voice consistency can target a selected character", async ({ page }) => {
+  await installMockApi(page)
+  await page.goto("/book-1/voice")
+
+  await expect(page.getByRole("heading", { name: /sky of ash voice consistency/i })).toBeVisible()
+  await page.getByLabel("Character focus").selectOption("char-gregor")
+  await page.getByRole("button", { name: /run voice review/i }).click()
+
+  await expect(page.getByText("Focused review: Gregor")).toBeVisible()
+  await expect(page.getByText("Reviewed: Gregor")).toBeVisible()
+  await expect(page.getByText("Gregor slips into abstract explanation")).toBeVisible()
+  await expect(page.getByText("74% match")).toBeVisible()
+  await expect(page.getByText("Closest alternate voice: Grete (38% match)")).toBeVisible()
+})
+
+test("voice consistency warns when selected-character attribution is weak", async ({ page }) => {
+  await installMockApi(page)
+  await page.goto("/book-1/voice")
+
+  await expect(page.getByRole("heading", { name: /sky of ash voice consistency/i })).toBeVisible()
+  await page.getByLabel("Character focus").selectOption("char-grete")
+  await page.getByRole("button", { name: /run voice review/i }).click()
+
+  await expect(page.getByText("Reviewed: Grete")).toBeVisible()
+  await expect(page.getByText("Dialogue could not be confidently attributed to Grete; the review used the full submitted passage instead.")).toBeVisible()
+})
+
 test("voice consistency surfaces backend errors instead of failing silently", async ({ page }) => {
   await installMockApi(page)
   await page.route("**/api/v1/intelligence/book-1/advisor/voice-consistency", async (route) => {
@@ -582,4 +609,84 @@ test("character bible can add a manual character", async ({ page }) => {
 
   expect(consoleMessages.some((message) => /Maximum update depth exceeded/i.test(message))).toBe(false)
   expect(pageErrors.some((message) => /Maximum update depth exceeded/i.test(message))).toBe(false)
+})
+
+test("character bible review queue workspace renders candidate controls without overflow", async ({ page }) => {
+  await installMockApi(page)
+  await page.goto("/book-1/characters")
+
+  await page.getByRole("button", { name: /^review queue$/i }).click()
+
+  await expect(page.getByRole("heading", { name: "Grounded review workspace" })).toBeVisible()
+  await expect(page.getByText("Candidate summary")).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Gregor's sister" })).toBeVisible()
+  await expect(page.getByRole("button", { name: /^promote candidate$/i })).toBeVisible()
+  await expect(page.getByRole("button", { name: /^attach to selected character$/i })).toBeVisible()
+  await expect(page.getByRole("button", { name: /^reject candidate$/i })).toBeVisible()
+
+  const hasHorizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)
+  expect(hasHorizontalOverflow).toBe(false)
+})
+
+test("relationship graph inspector responds to node and edge selection", async ({ page }) => {
+  const { consoleMessages, pageErrors } = watchBrowserSignals(page)
+  await installMockApi(page)
+  await page.goto("/book-1/graph")
+
+  const dismissCookies = page.getByRole("button", { name: /not now/i })
+  if (await dismissCookies.isVisible().catch(() => false)) {
+    await dismissCookies.click()
+  }
+
+  await expect(page.getByRole("heading", { name: "Relationship Graph", exact: true })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Read the map", exact: true })).toBeVisible()
+
+  await page.waitForFunction(() => {
+    const graph = (window as Window & {
+      __LOREVIA_RELATIONSHIP_GRAPH__?: { selectNode?: (id: string) => void }
+    }).__LOREVIA_RELATIONSHIP_GRAPH__
+    return typeof graph?.selectNode === "function"
+  })
+
+  await page.evaluate(() => {
+    const graph = (window as Window & {
+      __LOREVIA_RELATIONSHIP_GRAPH__?: { selectNode: (id: string) => void }
+    }).__LOREVIA_RELATIONSHIP_GRAPH__
+    graph?.selectNode("char-gregor")
+  })
+
+  await expect(page.getByRole("heading", { name: "Gregor", exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: /center node/i })).toBeVisible()
+  await expect(page.getByText("Protect his family")).toBeVisible()
+
+  await page.evaluate(() => {
+    const graph = (window as Window & {
+      __LOREVIA_RELATIONSHIP_GRAPH__?: { selectEdge: (id: string) => void }
+    }).__LOREVIA_RELATIONSHIP_GRAPH__
+    graph?.selectEdge("edge-gregor-grete-1")
+  })
+
+  await expect(page.getByRole("heading", { name: /family/i })).toBeVisible()
+  await expect(page.getByText("Gregor -> Grete")).toBeVisible()
+  await expect(page.getByRole("textbox", { name: "Relationship note" })).toHaveValue("Sibling bond under pressure.")
+  await expect(page.getByRole("button", { name: /save correction/i })).toBeVisible()
+
+  expect(consoleMessages.some((message) => /Maximum update depth exceeded/i.test(message))).toBe(false)
+  expect(pageErrors.some((message) => /Maximum update depth exceeded/i.test(message))).toBe(false)
+})
+
+test("character bible repair workspace renders preview controls without overflow", async ({ page }) => {
+  await installMockApi(page)
+  await page.goto("/book-1/characters")
+
+  await page.getByRole("button", { name: /^repair workspace$/i }).click()
+
+  await expect(page.getByRole("heading", { name: "Book reprocess preview" })).toBeVisible()
+  await expect(page.getByText("Repair controls")).toBeVisible()
+  await expect(page.getByRole("button", { name: /^refresh preview$/i })).toBeVisible()
+  await expect(page.getByRole("button", { name: /^apply repair plan$/i })).toBeVisible()
+  await expect(page.getByText("Protected skips and chapter refreshes")).toBeVisible()
+
+  const hasHorizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)
+  expect(hasHorizontalOverflow).toBe(false)
 })

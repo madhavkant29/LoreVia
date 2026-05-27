@@ -72,6 +72,10 @@ from app.utils.character_utils import (
 from app.utils.plot_thread_utils import derive_plot_thread_status
 from app.utils.public_utils import ensure_public_mode_enabled
 from app.utils.queue_utils import queue_for_user
+from app.utils.relationship_utils import (
+    canonicalize_relationship_book_rows,
+    relationship_effective_status,
+)
 
 # ── Utils imports ──────────────────────────────────────────────────────────────
 from app.utils.reader_utils import (
@@ -551,7 +555,7 @@ async def get_relationships(
             CharacterRelationship.from_chapter <= chapter,
         )
     )
-    historical_rels = list(rels_result.scalars().all())
+    historical_rels, _ = canonicalize_relationship_book_rows(list(rels_result.scalars().all()))
     relationship_counts: dict[str, int] = {}
     for rel in historical_rels:
         relationship_counts[str(rel.character_a_id)] = relationship_counts.get(str(rel.character_a_id), 0) + 1
@@ -572,9 +576,7 @@ async def get_relationships(
     canonical_ids = {str(char.id) for char in chars}
     char_names = {str(char.id): char.name for char in chars}
     rels = historical_rels if include_inactive else [
-        rel
-        for rel in historical_rels
-        if rel.to_chapter is None or rel.to_chapter >= chapter
+        rel for rel in historical_rels if relationship_effective_status(rel, chapter) == "ongoing"
     ]
     rels = [
         rel for rel in rels
@@ -692,11 +694,11 @@ async def search(
     current_user=Depends(get_current_user),
     _=Depends(rate_limit_search),
 ):
-    book = await db.get(Book, book_id)
-    if not book or book.user_id != current_user.id:
-        raise HTTPException(404)
+    book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
+    if not collaboration_allows_chapter(collaborator, chapter):
+        raise HTTPException(403, "This share does not include that chapter.")
 
-    cache_key = key_search_results(str(book_id), q, chapter)
+    cache_key = key_search_results(f"{current_user.id}:{book_id}", q, chapter)
     cached = await cache_get(cache_key)
     if cached:
         return cached
@@ -775,11 +777,11 @@ async def get_foreshadowing_highlights(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    book = await db.get(Book, book_id)
-    if not book or book.user_id != current_user.id:
-        raise HTTPException(404)
+    book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
 
-    read_set = await summary_visible_chapter_set(db, book, current_user)
+    read_set = await summary_visible_chapter_set(db, book, current_user, collaborator)
+    if collaborator is not None:
+        read_set = {chapter for chapter in read_set if collaboration_allows_chapter(collaborator, chapter)}
     if not read_set:
         return {"items": []}
 
@@ -817,9 +819,7 @@ async def get_timeline(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    book = await db.get(Book, book_id)
-    if not book or book.user_id != current_user.id:
-        raise HTTPException(404)
+    book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
 
     book_version = await get_book_cache_version(str(book_id))
     progress_version = await get_reader_progress_cache_version(str(book_id), str(current_user.id))
@@ -832,7 +832,9 @@ async def get_timeline(
     if cached is not None:
         return cached
 
-    read_set = await timeline_visible_chapter_set(db, book, current_user)
+    read_set = await timeline_visible_chapter_set(db, book, current_user, collaborator)
+    if collaborator is not None:
+        read_set = {chapter for chapter in read_set if collaboration_allows_chapter(collaborator, chapter)}
     if not read_set:
         payload = build_timeline_track_payload([], [], [], [], [])
         await set_reader_timeline_cache(
@@ -988,11 +990,11 @@ async def thematic_search(
     current_user=Depends(get_current_user),
     _=Depends(rate_limit_search),
 ):
-    book = await db.get(Book, book_id)
-    if not book or book.user_id != current_user.id:
-        raise HTTPException(404)
+    book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
 
-    read_set = await summary_visible_chapter_set(db, book, current_user)
+    read_set = await summary_visible_chapter_set(db, book, current_user, collaborator)
+    if collaborator is not None:
+        read_set = {chapter for chapter in read_set if collaboration_allows_chapter(collaborator, chapter)}
     if not read_set:
         return {"results": []}
 
@@ -1051,9 +1053,9 @@ async def get_relationship_evolution(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    book = await db.get(Book, book_id)
-    if not book or book.user_id != current_user.id:
-        raise HTTPException(404)
+    book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
+    if collaborator is not None and not collaboration_allows_chapter(collaborator, chapter):
+        raise HTTPException(403, "This share does not include that chapter.")
     book_version = await get_book_cache_version(str(book_id))
     progress_version = await get_reader_progress_cache_version(str(book_id), str(current_user.id))
     cached = await get_relationship_evolution_cache(
@@ -1072,7 +1074,7 @@ async def get_relationship_evolution(
             CharacterRelationship.from_chapter <= chapter,
         ).order_by(CharacterRelationship.from_chapter, CharacterRelationship.character_a_id, CharacterRelationship.character_b_id)
     )
-    rels = rels_result.scalars().all()
+    rels, _ = canonicalize_relationship_book_rows(rels_result.scalars().all())
 
     chars_result = await db.execute(select(Character).where(Character.book_id == book_id))
     chars = chars_result.scalars().all()
@@ -1088,6 +1090,8 @@ async def get_relationship_evolution(
         grouped.setdefault(key, []).append({
             "chapter": rel.from_chapter, "type": rel.rel_type,
             "description": rel.description, "sentiment": rel.sentiment,
+            "to_chapter": rel.to_chapter,
+            "status": relationship_effective_status(rel, chapter),
         })
 
     payload = {"pairs": [{"characters": list(key), "events": value} for key, value in grouped.items()]}
@@ -1167,6 +1171,7 @@ async def memory_recall(
     book = await db.get(Book, book_id)
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
+    book_title = book.title
 
     cache_key = key_memory_recall(str(current_user.id), str(book_id))
     cached = await cache_get(cache_key)
@@ -1220,7 +1225,7 @@ async def memory_recall(
 
     await db.rollback()
     recall_text = await generate_recall(
-        title=book.title,
+        title=book_title,
         last_chapter=last_chapter,
         recent_summary=recent_summary,
         active_characters=list(chars),

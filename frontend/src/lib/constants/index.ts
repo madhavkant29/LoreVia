@@ -1,4 +1,32 @@
-export const API_BASE = "/api/v1"
+function normalizeApiBase(apiUrl: string) {
+  return apiUrl.replace(/\/+$/, "")
+}
+
+function isLocalDevBrowser() {
+  if (typeof window === "undefined" || !window.location) {
+    return false
+  }
+  const { hostname } = window.location
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]"
+}
+
+export function resolveApiBase() {
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL?.trim()
+  if (apiUrl) {
+    return normalizeApiBase(apiUrl)
+  }
+
+  // During local Next dev, auth responses proxied through rewrites can lose
+  // the backend's HttpOnly auth cookies. Calling the backend directly avoids
+  // that cookie-stripping path while still remaining same-site on localhost.
+  if (isLocalDevBrowser()) {
+    return "http://localhost:8000/api/v1"
+  }
+
+  return "/api/v1"
+}
+
+export const API_BASE = resolveApiBase()
 
 export function resolveApiOrigin() {
   const apiUrl = process.env.NEXT_PUBLIC_API_URL
@@ -8,6 +36,10 @@ export function resolveApiOrigin() {
     } catch {
       // Fall through to browser or local defaults.
     }
+  }
+
+  if (isLocalDevBrowser()) {
+    return "http://localhost:8000"
   }
 
   if (typeof window !== "undefined" && window.location?.origin) {

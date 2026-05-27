@@ -28,6 +28,11 @@ type AdvisorStreamHandlers = {
   signal?: AbortSignal
 }
 
+type VoiceConsistencyOptions = {
+  chapterNum?: number
+  characterId?: string | null
+}
+
 function intelligencePath(bookId: string, suffix = "") {
   return `/intelligence/${normalizeBookRouteId(bookId)}${suffix}`
 }
@@ -235,16 +240,18 @@ export const intelligenceApi = {
         chapter_num: chapterNum ?? null,
       },
     }, handlers),
-  voiceConsistencyReview: (bookId: string, text: string, chapterNum?: number) =>
+  voiceConsistencyReview: (bookId: string, text: string, options?: VoiceConsistencyOptions) =>
     apiClient.post<VoiceConsistencyResponse>(intelligencePath(bookId, "/advisor/voice-consistency"), {
       text: clampAdvisorPassage(text),
-      chapter_num: chapterNum ?? null,
+      chapter_num: options?.chapterNum ?? null,
+      ...(options?.characterId ? { character_id: options.characterId } : {}),
     }).then(r => r.data),
-  voiceConsistencyReviewStream: (bookId: string, text: string, chapterNum?: number, handlers?: AdvisorStreamHandlers) =>
+  voiceConsistencyReviewStream: (bookId: string, text: string, options?: VoiceConsistencyOptions, handlers?: AdvisorStreamHandlers) =>
     requestSse<VoiceConsistencyResponse>(intelligencePath(bookId, "/advisor/voice-consistency-stream"), {
       payload: {
         text: clampAdvisorPassage(text),
-        chapter_num: chapterNum ?? null,
+        chapter_num: options?.chapterNum ?? null,
+        ...(options?.characterId ? { character_id: options.characterId } : {}),
       },
     }, handlers),
   continuityReport: (bookId: string, text: string, format: ContinuityReportFormat, chapterNum?: number) =>

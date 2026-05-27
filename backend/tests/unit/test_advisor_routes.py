@@ -863,6 +863,219 @@ async def test_voice_consistency_review_builds_character_matches(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_voice_consistency_review_respects_selected_character(monkeypatch):
+    book_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    char_id = uuid.uuid4()
+    other_id = uuid.uuid4()
+    book = SimpleNamespace(id=book_id, user_id=user_id, title="Atlas", total_chapters=9)
+    profile = SimpleNamespace(
+        character_id=char_id,
+        sample_dialogue_count=2,
+        sample_word_count=50,
+        avg_sentence_length=8,
+        avg_word_length_x100=420,
+        contraction_rate_x1000=10,
+        question_rate_x1000=20,
+        exclamation_rate_x1000=5,
+        ellipsis_rate_x1000=0,
+        dash_rate_x1000=1,
+        uppercase_rate_x1000=0,
+        formality_score_x1000=500,
+        lexical_complexity_x1000=550,
+        emotional_intensity_x1000=600,
+    )
+    other_profile = SimpleNamespace(
+        character_id=other_id,
+        sample_dialogue_count=3,
+        sample_word_count=60,
+        avg_sentence_length=9,
+        avg_word_length_x100=430,
+        contraction_rate_x1000=11,
+        question_rate_x1000=18,
+        exclamation_rate_x1000=4,
+        ellipsis_rate_x1000=0,
+        dash_rate_x1000=1,
+        uppercase_rate_x1000=0,
+        formality_score_x1000=490,
+        lexical_complexity_x1000=540,
+        emotional_intensity_x1000=590,
+    )
+    db = _FakeDB(
+        get_values=[book],
+        execute_values=[
+            _Result(
+                mappings=[
+                    {"id": char_id, "name": "Iris"},
+                    {"id": other_id, "name": "Milo"},
+                ]
+            ),
+            _Result(scalars=[profile, other_profile]),
+        ],
+    )
+    client = _FakeClient('{"overall_verdict":"steady","issues":[]}')
+
+    async def _fake_semantic_search(*_args, **_kwargs):
+        return []
+
+    async def _fake_story_context(*_args, **_kwargs):
+        return "Story context"
+
+    monkeypatch.setattr(advisor, "semantic_search", _fake_semantic_search)
+    monkeypatch.setattr(advisor, "build_story_context", _fake_story_context)
+    monkeypatch.setattr(advisor, "identify_character_mentions", lambda _text, rows: rows)
+    monkeypatch.setattr(advisor, "extract_dialogue_samples_by_character", lambda *_args: {"Iris": ["Hello there."]})
+    monkeypatch.setattr(advisor, "build_character_voice_context", lambda chars: f"chars:{len(chars)}")
+    monkeypatch.setattr(advisor, "normalize_voice_consistency_result", lambda _raw: {"issues": [], "overall_verdict": "steady"})
+    monkeypatch.setattr(advisor, "compute_voice_metrics", lambda samples: {"sample_dialogue_count": len(samples)})
+    monkeypatch.setattr(advisor, "score_voice_match", lambda _profile, metrics: (87 if metrics["sample_dialogue_count"] else 52, ["cadence"]))
+    monkeypatch.setattr(advisor, "AsyncOpenAI", lambda api_key: client)
+
+    payload = await advisor.voice_consistency_review(
+        book_id,
+        body=VoiceConsistencyRequest(text="Iris says hello.", chapter_num=3, character_id=char_id),
+        db=db,
+        current_user=SimpleNamespace(id=user_id),
+        _=None,
+    )
+
+    assert payload["characters_reviewed"] == ["Iris"]
+    assert [item["character_name"] for item in payload["character_matches"]] == ["Iris"]
+    assert payload["warnings"] == []
+    assert client.closed is True
+
+
+@pytest.mark.asyncio
+async def test_voice_consistency_review_rejects_character_from_another_book(monkeypatch):
+    book_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    selected_id = uuid.uuid4()
+    other_id = uuid.uuid4()
+    book = SimpleNamespace(id=book_id, user_id=user_id, title="Atlas", total_chapters=9)
+    db = _FakeDB(
+        get_values=[book],
+        execute_values=[
+            _Result(mappings=[{"id": other_id, "name": "Milo"}]),
+        ],
+    )
+
+    async def _fake_semantic_search(*_args, **_kwargs):
+        return []
+
+    async def _fake_story_context(*_args, **_kwargs):
+        return "Story context"
+
+    monkeypatch.setattr(advisor, "semantic_search", _fake_semantic_search)
+    monkeypatch.setattr(advisor, "build_story_context", _fake_story_context)
+
+    with pytest.raises(HTTPException) as exc:
+        await advisor.voice_consistency_review(
+            book_id,
+            body=VoiceConsistencyRequest(text="Iris says hello.", chapter_num=3, character_id=selected_id),
+            db=db,
+            current_user=SimpleNamespace(id=user_id),
+            _=None,
+        )
+
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "Selected character does not belong to this book."
+
+
+@pytest.mark.asyncio
+async def test_voice_consistency_review_warns_when_selected_character_needs_full_passage_fallback(monkeypatch):
+    book_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    char_id = uuid.uuid4()
+    other_id = uuid.uuid4()
+    book = SimpleNamespace(id=book_id, user_id=user_id, title="Atlas", total_chapters=9)
+    profile = SimpleNamespace(
+        character_id=char_id,
+        sample_dialogue_count=2,
+        sample_word_count=50,
+        avg_sentence_length=8,
+        avg_word_length_x100=420,
+        contraction_rate_x1000=10,
+        question_rate_x1000=20,
+        exclamation_rate_x1000=5,
+        ellipsis_rate_x1000=0,
+        dash_rate_x1000=1,
+        uppercase_rate_x1000=0,
+        formality_score_x1000=500,
+        lexical_complexity_x1000=550,
+        emotional_intensity_x1000=600,
+    )
+    other_profile = SimpleNamespace(
+        character_id=other_id,
+        sample_dialogue_count=3,
+        sample_word_count=60,
+        avg_sentence_length=9,
+        avg_word_length_x100=430,
+        contraction_rate_x1000=11,
+        question_rate_x1000=18,
+        exclamation_rate_x1000=4,
+        ellipsis_rate_x1000=0,
+        dash_rate_x1000=1,
+        uppercase_rate_x1000=0,
+        formality_score_x1000=490,
+        lexical_complexity_x1000=540,
+        emotional_intensity_x1000=590,
+    )
+    db = _FakeDB(
+        get_values=[book],
+        execute_values=[
+            _Result(
+                mappings=[
+                    {"id": char_id, "name": "Iris"},
+                    {"id": other_id, "name": "Milo"},
+                ]
+            ),
+            _Result(scalars=[profile, other_profile]),
+        ],
+    )
+    client = _FakeClient('{"overall_verdict":"steady","issues":[]}')
+
+    async def _fake_semantic_search(*_args, **_kwargs):
+        return []
+
+    async def _fake_story_context(*_args, **_kwargs):
+        return "Story context"
+
+    monkeypatch.setattr(advisor, "semantic_search", _fake_semantic_search)
+    monkeypatch.setattr(advisor, "build_story_context", _fake_story_context)
+    monkeypatch.setattr(advisor, "extract_dialogue_samples_by_character", lambda *_args: {})
+    monkeypatch.setattr(advisor, "build_character_voice_context", lambda chars: f"chars:{len(chars)}")
+    monkeypatch.setattr(advisor, "normalize_voice_consistency_result", lambda _raw: {"issues": [], "overall_verdict": "steady"})
+    monkeypatch.setattr(advisor, "compute_voice_metrics", lambda samples: {"sample_dialogue_count": len(samples)})
+    monkeypatch.setattr(advisor, "score_voice_match", lambda _profile, metrics: (71 if metrics["sample_dialogue_count"] else 52, ["cadence"]))
+    monkeypatch.setattr(advisor, "AsyncOpenAI", lambda api_key: client)
+
+    payload = await advisor.voice_consistency_review(
+        book_id,
+        body=VoiceConsistencyRequest(text="Iris says hello.", chapter_num=3, character_id=char_id),
+        db=db,
+        current_user=SimpleNamespace(id=user_id),
+        _=None,
+    )
+
+    assert payload["characters_reviewed"] == ["Iris"]
+    assert payload["warnings"] == [
+        "Dialogue could not be confidently attributed to Iris; the review used the full submitted passage instead."
+    ]
+    assert payload["character_matches"][0]["sample_dialogue_count"] == 1
+    assert client.closed is True
+
+
+def test_make_editorial_cache_key_varies_with_character_selection():
+    book_id = uuid.uuid4()
+    text = "Same passage"
+
+    auto_key = advisor.make_editorial_cache_key(book_id, text, 4)
+    selected_key = advisor.make_editorial_cache_key(book_id, text, 4, uuid.uuid4())
+
+    assert auto_key != selected_key
+
+
+@pytest.mark.asyncio
 async def test_continuity_report_supports_markdown_and_pdf(monkeypatch):
     book_id = uuid.uuid4()
     user_id = uuid.uuid4()

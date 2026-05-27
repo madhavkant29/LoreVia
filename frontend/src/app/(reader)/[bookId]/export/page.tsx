@@ -210,6 +210,8 @@ export default function ExportStudioPage() {
             bookData={book}
             title="Author tools"
             description="Import new material, export structured references, and preview the exact vault files before you leave the page."
+            variant="rail"
+            railSize="compact"
           />
 
           <main className="space-y-6">

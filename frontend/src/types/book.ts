@@ -2,6 +2,8 @@ export type BookStatus = "pending" | "processing" | "ready" | "failed"
 export type BookFormat = "pdf" | "epub" | "docx" | "doc" | "fountain" | "txt" | "md" | "manual"
 export type BookWorkType = "novel" | "screenplay" | "other"
 export type RevisionTagTarget = "chapter" | "scene" | "character" | "note" | "comment" | "plot_thread" | "world_note"
+export type WorkspaceShell = "reader" | "author"
+export type BookAccessClass = "owner" | "author_collaborator" | "reader_collaborator"
 
 import type { ChapterListResponse, ReadingProgress, SummaryCollectionResponse } from "./reader"
 
@@ -14,6 +16,9 @@ export interface Book {
   work_type: BookWorkType
   status: BookStatus
   mode: "reader" | "author"
+  workspace_shell: WorkspaceShell
+  access_class: BookAccessClass
+  can_switch_workspace_mode: boolean
   source_kind?: string
   preserve_chapter_numbers?: boolean
   preserve_source_chapters?: boolean

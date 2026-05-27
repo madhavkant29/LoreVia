@@ -1,8 +1,8 @@
 import type { Metadata } from "next"
 import Link from "next/link"
 
-import { PublicContentHeader, ContentArrowIcon } from "@/components/marketing/PublicContentHeader"
-import { Reveal } from "@/components/marketing/Reveal"
+import { ContentArrowIcon } from "@/components/marketing/PublicContentHeader"
+import { PublicContentShell } from "@/components/marketing/PublicContentShell"
 import { JsonLdScript } from "@/components/seo/JsonLdScript"
 import { blogArticles, demoPages, getAnswersByArticleSlug } from "@/lib/content"
 import { BLOG_RSS_PATH, DEFAULT_OG_IMAGE, SITE_NAME, SITE_URL, buildCollectionPageJsonLd } from "@/lib/seo"
@@ -64,22 +64,18 @@ export default function BlogPage() {
   })
 
   return (
-    <main className="app-shell overflow-hidden">
-      <div className="app-shell__mesh" />
-      <div className="absolute inset-x-0 top-0 -z-10 h-[34rem] bg-[radial-gradient(circle_at_top,rgba(15,118,110,0.16),transparent_40%),radial-gradient(circle_at_82%_10%,rgba(180,83,9,0.16),transparent_24%)]" />
+    <PublicContentShell activeSection="blog">
       <JsonLdScript id="blog-collection-jsonld" data={jsonLd} />
 
-      <PublicContentHeader activeSection="blog" />
-
-      <section className="app-container py-16 md:py-24">
-        <div className="grid gap-10 lg:grid-cols-[1.12fr_0.88fr] lg:items-start">
-          <Reveal>
+      <section className="app-container py-10 md:py-14">
+        <div className="app-panel app-panel--strong rounded-[2rem] p-6 md:p-8 lg:p-10">
+          <div className="grid gap-10 lg:grid-cols-[1.12fr_0.88fr] lg:items-start">
             <div className="max-w-3xl">
               <span className="app-chip">Author-focused SEO hub</span>
-              <h1 className="app-title mt-7 max-w-4xl">
+              <h1 className="mt-7 max-w-4xl font-display text-[3rem] leading-[0.94] tracking-[-0.04em] text-foreground sm:text-[3.5rem]">
                 Practical guides for fiction authors, not generic AI fluff.
               </h1>
-              <p className="app-copy mt-6 max-w-2xl text-lg md:text-xl">
+              <p className="mt-6 max-w-2xl text-base leading-8 text-muted-foreground sm:text-[1.1rem]">
                 LoreVia&apos;s blog is structured around the manuscript problems authors actually search for:
                 character tracking, continuity control, story bibles, revision workflow, and software comparisons grounded in fiction writing.
               </p>
@@ -112,14 +108,10 @@ export default function BlogPage() {
                 </div>
               </div>
             </div>
-          </Reveal>
 
-          <Reveal delay={120}>
-            <article className="app-panel app-panel--strong rounded-[2rem] p-6 md:p-8">
+            <article className="rounded-[1.8rem] border border-[rgba(var(--border),0.78)] bg-white/72 p-6 dark:bg-white/[0.04] md:p-8">
               <div className="flex items-center justify-between gap-3">
-                <span className="app-chip bg-[rgba(15,118,110,0.12)] text-[rgb(var(--accent))]">
-                  Featured guide
-                </span>
+                <span className="app-chip">Featured guide</span>
                 <span className="text-xs font-semibold uppercase tracking-[0.24em] text-muted-foreground">
                   {featuredArticle.publishedLabel}
                 </span>
@@ -128,12 +120,12 @@ export default function BlogPage() {
               <p className="mt-6 text-sm font-semibold uppercase tracking-[0.24em] text-[rgb(var(--accent))]">
                 {featuredArticle.category}
               </p>
-              <h2 className="mt-4 font-[var(--font-newsreader)] text-4xl leading-tight tracking-[-0.04em] text-foreground md:text-5xl">
+              <h2 className="mt-4 text-[2.3rem] font-semibold leading-tight tracking-[-0.04em] text-foreground md:text-[2.8rem]">
                 {featuredArticle.title}
               </h2>
-              <p className="app-copy mt-5 text-base md:text-lg">{featuredArticle.description}</p>
+              <p className="mt-5 text-base leading-8 text-muted-foreground">{featuredArticle.description}</p>
 
-              <div className="mt-8 rounded-[1.5rem] border border-[rgba(var(--border),0.8)] bg-white/55 p-5 dark:bg-white/5">
+              <div className="mt-8 rounded-[1.5rem] border border-[rgba(var(--border),0.8)] bg-white/75 p-5 dark:bg-white/5">
                 <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">What this page covers</p>
                 <ul className="mt-4 space-y-3 text-sm leading-7 text-foreground/80">
                   {featuredArticle.highlights.map((item) => (
@@ -152,135 +144,123 @@ export default function BlogPage() {
                 </Link>
               </div>
             </article>
-          </Reveal>
+          </div>
         </div>
       </section>
 
       <section className="app-container pb-8">
-        <Reveal>
-          <div className="app-panel rounded-[2rem] p-6 md:p-8 lg:p-10">
-            <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-              <div className="max-w-2xl">
-                <p className="app-eyebrow">Main SEO articles</p>
-                <h2 className="mt-4 font-[var(--font-newsreader)] text-3xl tracking-[-0.04em] text-foreground md:text-4xl">
-                  Long guides built around author intent.
-                </h2>
-                <p className="app-copy mt-4">
-                  These are the pages meant to rank for the core manuscript problems LoreVia solves, with clear internal links out to answers and demos.
-                </p>
-              </div>
-              <Link href="/demo" className="app-button-secondary">
-                See public demos
-              </Link>
+        <div className="app-panel rounded-[2rem] p-6 md:p-8 lg:p-10">
+          <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+            <div className="max-w-2xl">
+              <p className="app-eyebrow">Main SEO articles</p>
+              <h2 className="mt-4 text-3xl font-semibold tracking-[-0.03em] text-foreground md:text-4xl">
+                Long guides built around author intent.
+              </h2>
+              <p className="mt-4 text-base leading-8 text-muted-foreground">
+                These are the pages meant to rank for the core manuscript problems LoreVia solves, with clear internal links out to answers and demos.
+              </p>
             </div>
-
-            <div className="mt-10 grid gap-5 lg:grid-cols-2">
-              {blogArticles.map((article, index) => (
-                <Reveal key={article.slug} delay={index * 70}>
-                  <article className="h-full rounded-[1.6rem] border border-[rgba(var(--border),0.76)] bg-white/58 p-6 dark:bg-white/[0.04]">
-                    <div className="flex flex-wrap items-center gap-3 text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                      <span>{article.category}</span>
-                      <span>{article.readTime}</span>
-                    </div>
-                    <h3 className="mt-4 text-2xl font-semibold tracking-[-0.03em] text-foreground">
-                      <Link href={`/blog/${article.slug}`} className="hover:text-[rgb(var(--accent))]">
-                        {article.title}
-                      </Link>
-                    </h3>
-                    <p className="app-copy mt-3 text-sm">{article.description}</p>
-                    <div className="mt-5 flex flex-wrap gap-2">
-                      {article.keywords.slice(0, 2).map((keyword) => (
-                        <span key={keyword} className="app-chip px-3 py-2 text-xs">
-                          {keyword}
-                        </span>
-                      ))}
-                    </div>
-                  </article>
-                </Reveal>
-              ))}
-            </div>
+            <Link href="/demo" className="app-button-secondary">
+              See public demos
+            </Link>
           </div>
-        </Reveal>
+
+          <div className="mt-10 grid gap-5 lg:grid-cols-2">
+            {blogArticles.map((article) => (
+              <article key={article.slug} className="h-full rounded-[1.6rem] border border-[rgba(var(--border),0.76)] bg-white/66 p-6 dark:bg-white/[0.04]">
+                <div className="flex flex-wrap items-center gap-3 text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                  <span>{article.category}</span>
+                  <span>{article.readTime}</span>
+                </div>
+                <h3 className="mt-4 text-2xl font-semibold tracking-[-0.03em] text-foreground">
+                  <Link href={`/blog/${article.slug}`} className="hover:text-[rgb(var(--accent))]">
+                    {article.title}
+                  </Link>
+                </h3>
+                <p className="mt-3 text-sm leading-7 text-muted-foreground">{article.description}</p>
+                <div className="mt-5 flex flex-wrap gap-2">
+                  {article.keywords.slice(0, 2).map((keyword) => (
+                    <span key={keyword} className="app-chip px-3 py-2 text-xs">
+                      {keyword}
+                    </span>
+                  ))}
+                </div>
+              </article>
+            ))}
+          </div>
+        </div>
       </section>
 
       <section className="app-container pb-8 pt-8">
-        <Reveal>
-          <div className="app-panel app-panel--subtle rounded-[2rem] p-6 md:p-8 lg:p-10">
-            <div className="max-w-2xl">
-              <p className="app-eyebrow">Question clusters</p>
-              <h2 className="mt-4 font-[var(--font-newsreader)] text-3xl tracking-[-0.04em] text-foreground md:text-4xl">
-                Short answer pages that point readers into deeper guides.
-              </h2>
-              <p className="app-copy mt-4">
-                Each answer page targets a focused search question, gives a useful direct answer, and links back to the stronger guide page for the topic.
-              </p>
-            </div>
-
-            <div className="mt-10 grid gap-5 lg:grid-cols-3">
-              {blogArticles.slice(0, 3).map((article, index) => {
-                const answerPages = getAnswersByArticleSlug(article.slug)
-                return (
-                  <Reveal key={article.slug} delay={index * 80}>
-                    <article className="h-full rounded-[1.6rem] border border-[rgba(var(--border),0.76)] bg-white/58 p-6 dark:bg-white/[0.04]">
-                      <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">
-                        Supports {article.title}
-                      </p>
-                      <ul className="mt-5 space-y-4 text-sm leading-7 text-foreground/85">
-                        {answerPages.slice(0, 3).map((answer) => (
-                          <li key={answer.slug}>
-                            <Link href={`/answers/${answer.slug}`} className="font-medium hover:text-[rgb(var(--accent))]">
-                              {answer.question}
-                            </Link>
-                          </li>
-                        ))}
-                      </ul>
-                    </article>
-                  </Reveal>
-                )
-              })}
-            </div>
+        <div className="app-panel app-panel--subtle rounded-[2rem] p-6 md:p-8 lg:p-10">
+          <div className="max-w-2xl">
+            <p className="app-eyebrow">Question clusters</p>
+            <h2 className="mt-4 text-3xl font-semibold tracking-[-0.03em] text-foreground md:text-4xl">
+              Short answer pages that point readers into deeper guides.
+            </h2>
+            <p className="mt-4 text-base leading-8 text-muted-foreground">
+              Each answer page targets a focused search question, gives a useful direct answer, and links back to the stronger guide page for the topic.
+            </p>
           </div>
-        </Reveal>
+
+          <div className="mt-10 grid gap-5 lg:grid-cols-3">
+            {blogArticles.slice(0, 3).map((article) => {
+              const answerPages = getAnswersByArticleSlug(article.slug)
+              return (
+                <article key={article.slug} className="h-full rounded-[1.6rem] border border-[rgba(var(--border),0.76)] bg-white/66 p-6 dark:bg-white/[0.04]">
+                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">
+                    Supports {article.title}
+                  </p>
+                  <ul className="mt-5 space-y-4 text-sm leading-7 text-foreground/85">
+                    {answerPages.slice(0, 3).map((answer) => (
+                      <li key={answer.slug}>
+                        <Link href={`/answers/${answer.slug}`} className="font-medium hover:text-[rgb(var(--accent))]">
+                          {answer.question}
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                </article>
+              )
+            })}
+          </div>
+        </div>
       </section>
 
       <section className="app-container pb-20 pt-8 md:pb-24">
-        <Reveal>
-          <div className="rounded-[2rem] border border-[rgba(var(--border),0.8)] bg-[linear-gradient(135deg,rgba(15,118,110,0.12),rgba(255,255,255,0.72),rgba(180,83,9,0.12))] p-7 md:p-10 dark:bg-[linear-gradient(135deg,rgba(45,212,191,0.08),rgba(255,255,255,0.03),rgba(251,146,60,0.08))]">
-            <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-              <div className="max-w-3xl">
-                <p className="app-eyebrow">Public-domain examples</p>
-                <h2 className="mt-4 font-[var(--font-newsreader)] text-3xl tracking-[-0.04em] text-foreground md:text-4xl">
-                  Demonstrations that show what LoreVia-style manuscript intelligence looks like in practice.
-                </h2>
-                <p className="app-copy mt-4 text-base md:text-lg">
-                  Instead of generic SEO filler, these pages use public-domain books to show how character tracking, timeline logic, and relationship mapping become visible inside real fiction.
-                </p>
-              </div>
-              <Link href="/answers" className="app-button-secondary">
-                Browse all answers
-              </Link>
+        <div className="app-panel app-panel--strong rounded-[2rem] p-7 md:p-10">
+          <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+            <div className="max-w-3xl">
+              <p className="app-eyebrow">Public-domain examples</p>
+              <h2 className="mt-4 text-3xl font-semibold tracking-[-0.03em] text-foreground md:text-4xl">
+                Demonstrations that show what LoreVia-style manuscript intelligence looks like in practice.
+              </h2>
+              <p className="mt-4 text-base leading-8 text-muted-foreground md:text-lg">
+                Instead of generic SEO filler, these pages use public-domain books to show how character tracking, timeline logic, and relationship mapping become visible inside real fiction.
+              </p>
             </div>
-
-            <div className="mt-8 grid gap-5 lg:grid-cols-3">
-              {demoPages.map((demo, index) => (
-                <Reveal key={demo.slug} delay={index * 70}>
-                  <article className="h-full rounded-[1.6rem] border border-[rgba(var(--border),0.76)] bg-white/58 p-6 dark:bg-white/[0.04]">
-                    <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">
-                      {demo.sourceWork} by {demo.sourceAuthor}
-                    </p>
-                    <h3 className="mt-4 text-2xl font-semibold tracking-[-0.03em] text-foreground">
-                      <Link href={`/demo/${demo.slug}`} className="hover:text-[rgb(var(--accent))]">
-                        {demo.title}
-                      </Link>
-                    </h3>
-                    <p className="app-copy mt-3 text-sm">{demo.featuredInsight}</p>
-                  </article>
-                </Reveal>
-              ))}
-            </div>
+            <Link href="/answers" className="app-button-secondary">
+              Browse all answers
+            </Link>
           </div>
-        </Reveal>
+
+          <div className="mt-8 grid gap-5 lg:grid-cols-3">
+            {demoPages.map((demo) => (
+              <article key={demo.slug} className="h-full rounded-[1.6rem] border border-[rgba(var(--border),0.76)] bg-white/66 p-6 dark:bg-white/[0.04]">
+                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">
+                  {demo.sourceWork} by {demo.sourceAuthor}
+                </p>
+                <h3 className="mt-4 text-2xl font-semibold tracking-[-0.03em] text-foreground">
+                  <Link href={`/demo/${demo.slug}`} className="hover:text-[rgb(var(--accent))]">
+                    {demo.title}
+                  </Link>
+                </h3>
+                <p className="mt-3 text-sm leading-7 text-muted-foreground">{demo.featuredInsight}</p>
+              </article>
+            ))}
+          </div>
+        </div>
       </section>
-    </main>
+    </PublicContentShell>
   )
 }

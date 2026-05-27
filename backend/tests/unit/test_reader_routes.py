@@ -86,6 +86,20 @@ def _book(*, user_id: uuid.UUID, total_chapters: int = 6, mode: str = "reader", 
     )
 
 
+class _RollbackSensitiveBook:
+    def __init__(self, *, book_id: uuid.UUID, user_id: uuid.UUID, db: _FakeDB, title: str = "Atlas"):
+        self.id = book_id
+        self.user_id = user_id
+        self._db = db
+        self._title = title
+
+    @property
+    def title(self):
+        if self._db.rollbacks > 0:
+            raise AssertionError("title was accessed after rollback")
+        return self._title
+
+
 def _async_value(value):
     async def _inner(*_args, **_kwargs):
         return value
@@ -622,6 +636,70 @@ async def test_get_relationships_returns_hidden_nodes_and_inactive_edges_for_aut
 
 
 @pytest.mark.asyncio
+async def test_get_relationships_collapses_reversed_duplicate_pair_rows(monkeypatch):
+    user_id = uuid.uuid4()
+    book = _book(user_id=user_id, mode="author")
+    iris = SimpleNamespace(id=uuid.uuid4(), name="Iris", first_chapter=1, role="mc", aliases=[], arc_summary="Lead", mention_count=4, personality_tags=[], motivations=[], fears=[], archetype=None, trait_state={}, is_manual=False)
+    sol = SimpleNamespace(id=uuid.uuid4(), name="Sol", first_chapter=1, role="sc", aliases=[], arc_summary="Friend", mention_count=3, personality_tags=[], motivations=[], fears=[], archetype=None, trait_state={}, is_manual=False)
+    rel_one = SimpleNamespace(id=uuid.uuid4(), character_a_id=iris.id, character_b_id=sol.id, rel_type="ally", sentiment=0.6, description="Trusted", from_chapter=1, to_chapter=None)
+    rel_two = SimpleNamespace(id=uuid.uuid4(), character_a_id=sol.id, character_b_id=iris.id, rel_type="ally", sentiment=0.6, description="Trusted", from_chapter=3, to_chapter=None)
+
+    monkeypatch.setattr(reader, "cache_get", _async_value(None))
+    monkeypatch.setattr(reader, "cache_set", _async_value(None))
+    monkeypatch.setattr(reader, "collapse_graph_characters", lambda chars: (chars, {str(char.id): str(char.id) for char in chars}))
+    monkeypatch.setattr(reader, "relationship_node_description", lambda c, *_args: c.name)
+    monkeypatch.setattr(reader, "is_graph_character_visible", lambda _char: True)
+    monkeypatch.setattr(
+        reader,
+        "graph_character_visibility_analysis",
+        lambda _char, _count=0: {"visible": True, "score": 4, "override": None, "reasons": ["score_meets_threshold"]},
+    )
+
+    db = _FakeDB(
+        get_values=[book],
+        execute_values=[
+            _Result(scalars=[iris, sol]),
+            _Result(scalars=[rel_one, rel_two]),
+            _Result(scalars=[]),
+        ],
+    )
+
+    relationships = await reader.get_relationships(book.id, chapter=5, db=db, current_user=_user(user_id))
+
+    assert len(relationships["edges"]) == 1
+    assert relationships["edges"][0]["from_chapter"] == 1
+
+
+@pytest.mark.asyncio
+async def test_relationship_evolution_groups_reversed_pairs_into_one_timeline(monkeypatch):
+    user_id = uuid.uuid4()
+    book = _book(user_id=user_id)
+    iris = SimpleNamespace(id=uuid.uuid4(), name="Iris")
+    sol = SimpleNamespace(id=uuid.uuid4(), name="Sol")
+    rel_one = SimpleNamespace(id=uuid.uuid4(), character_a_id=iris.id, character_b_id=sol.id, rel_type="enemy", sentiment=-0.6, description="Hostile", from_chapter=2, to_chapter=2)
+    rel_two = SimpleNamespace(id=uuid.uuid4(), character_a_id=sol.id, character_b_id=iris.id, rel_type="ally", sentiment=0.7, description="Trust", from_chapter=3, to_chapter=None)
+
+    monkeypatch.setattr(reader, "get_book_cache_version", _async_value(1))
+    monkeypatch.setattr(reader, "get_reader_progress_cache_version", _async_value(1))
+    monkeypatch.setattr(reader, "get_relationship_evolution_cache", _async_value(None))
+    monkeypatch.setattr(reader, "set_relationship_evolution_cache", _async_value(None))
+
+    db = _FakeDB(
+        get_values=[book],
+        execute_values=[
+            _Result(scalars=[rel_one, rel_two]),
+            _Result(scalars=[iris, sol]),
+        ],
+    )
+
+    payload = await reader.get_relationship_evolution(book.id, chapter=5, db=db, current_user=_user(user_id))
+
+    assert len(payload["pairs"]) == 1
+    assert payload["pairs"][0]["characters"] == ["Iris", "Sol"]
+    assert [event["type"] for event in payload["pairs"][0]["events"]] == ["enemy", "ally"]
+
+
+@pytest.mark.asyncio
 async def test_reader_highlight_timeline_and_thematic_routes(monkeypatch):
     user_id = uuid.uuid4()
     char_id = uuid.uuid4()
@@ -769,6 +847,49 @@ async def test_reader_crud_progress_and_recall_routes(monkeypatch):
     assert status["read"] is True
     assert task_calls
     assert len(dirty_calls) == 3
+
+
+@pytest.mark.asyncio
+async def test_memory_recall_caches_book_title_before_rollback(monkeypatch):
+    user_id = uuid.uuid4()
+    book_id = uuid.uuid4()
+    progress = SimpleNamespace(current_chapter=2, scroll_pct=0.5, chapters_read=[], last_read=None)
+    chapter = SimpleNamespace(id=uuid.uuid4(), number=2, processed=False)
+    db = _FakeDB(
+        get_values=[],
+        execute_values=[
+            _Result(scalar=progress),
+            _Result(scalar=chapter),
+            _Result(scalar=SimpleNamespace(content="Summary")),
+            _Result(scalars=["Iris"]),
+            _Result(all_rows=[]),
+        ],
+    )
+    book = _RollbackSensitiveBook(book_id=book_id, user_id=user_id, db=db)
+    db._get_values = [book]
+
+    async def _fake_cache_get(_key):
+        return None
+
+    async def _fake_cache_set(*_args, **_kwargs):
+        return None
+
+    generated = {}
+
+    async def _fake_generate_recall(**kwargs):
+        generated.update(kwargs)
+        return "Recall text"
+
+    monkeypatch.setattr(reader, "cache_get", _fake_cache_get)
+    monkeypatch.setattr(reader, "cache_set", _fake_cache_set)
+    monkeypatch.setattr(reader, "generate_recall", _fake_generate_recall)
+    monkeypatch.setattr(reader, "key_memory_recall", lambda *_args: "recall-key")
+
+    payload = await reader.memory_recall(book_id, db=db, current_user=_user(user_id))
+
+    assert payload["recall"] == "Recall text"
+    assert generated["title"] == "Atlas"
+    assert db.rollbacks == 1
 
 
 @pytest.mark.asyncio

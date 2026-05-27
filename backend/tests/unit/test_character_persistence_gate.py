@@ -3,7 +3,7 @@ import pytest
 from app.engine.character.entity_filters import character_persistence_decision
 
 
-@pytest.mark.parametrize("name", ["Well", "Back", "Would", "Come", "Mother"])
+@pytest.mark.parametrize("name", ["Well", "Back", "Would", "Come", "Help", "Mother"])
 def test_character_persistence_gate_rejects_noise_names(name: str):
     decision = character_persistence_decision(
         name,

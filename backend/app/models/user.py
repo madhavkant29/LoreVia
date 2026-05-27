@@ -13,11 +13,13 @@ class User(Base):
     __table_args__ = (
         UniqueConstraint("email", name="uq_users_email"),
         UniqueConstraint("username", name="uq_users_username"),
+        UniqueConstraint("supabase_auth_id", name="uq_users_supabase_auth_id"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     email: Mapped[str] = mapped_column(String, nullable=False)
     username: Mapped[str | None] = mapped_column(String, nullable=True)
+    supabase_auth_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     password_hash: Mapped[str] = mapped_column(String, nullable=False)
     tier: Mapped[str] = mapped_column(String, default="free")   # subscription tier only: free | author | architect | admin (legacy reader/collaborator aliases normalize to free)
     reading_mode: Mapped[str] = mapped_column(String, default="casual")  # casual | analyst | speed

@@ -55,6 +55,20 @@ def is_local_database_url(database_url: str) -> bool:
     return not host or host in LOCAL_DATABASE_HOSTS or host.endswith(".local")
 
 
+def normalized_database_target(database_url: str) -> tuple[str, int | None, str]:
+    parsed = urlsplit(database_url)
+    host = parsed.hostname or ""
+    normalized_host = "local" if not host or host in LOCAL_DATABASE_HOSTS or host.endswith(".local") else host
+    database_name = parsed.path.lstrip("/").lower()
+    return normalized_host, parsed.port, database_name
+
+
+def is_safe_test_database_url(application_database_url: str, test_database_url: str) -> bool:
+    if not is_local_database_url(test_database_url):
+        return False
+    return normalized_database_target(application_database_url) != normalized_database_target(test_database_url)
+
+
 def redact_database_target(database_url: str) -> str:
     parsed = urlsplit(database_url)
     host = parsed.hostname or "<unknown>"
@@ -118,6 +132,51 @@ def destructive_downgrade_revisions(versions_dir: Path) -> list[Path]:
 
 def should_reset_local_alembic_state(existing_tables: set[str]) -> bool:
     return "alembic_version" in existing_tables and not CORE_APPLICATION_TABLES.issubset(existing_tables)
+
+
+def drop_orphan_table_rowtype_if_present(table_name: str, *, schema: str = "public") -> None:
+    """Drop a leftover composite type when the table itself is missing.
+
+    PostgreSQL creates a rowtype with the same name as every table. If a prior
+    local rebuild leaves the type behind without the relation, a later
+    ``CREATE TABLE`` fails with ``pg_type_typname_nsp_index``. This helper is
+    intended for legacy schema bootstrap paths that recreate tables from ORM
+    metadata.
+    """
+
+    op.execute(
+        "\n".join(
+            (
+                "DO $$",
+                "DECLARE",
+                "    target_rel_oid oid;",
+                "    target_type_oid oid;",
+                "BEGIN",
+                "    SELECT c.oid",
+                "    INTO target_rel_oid",
+                "    FROM pg_class c",
+                "    JOIN pg_namespace n ON n.oid = c.relnamespace",
+                f"    WHERE n.nspname = {_quote_literal(schema)}",
+                f"      AND c.relname = {_quote_literal(table_name)}",
+                "      AND c.relkind IN ('r', 'p', 'v', 'm', 'f');",
+                "",
+                "    IF target_rel_oid IS NULL THEN",
+                "        SELECT t.oid",
+                "        INTO target_type_oid",
+                "        FROM pg_type t",
+                "        JOIN pg_namespace n ON n.oid = t.typnamespace",
+                f"        WHERE n.nspname = {_quote_literal(schema)}",
+                f"          AND t.typname = {_quote_literal(table_name)};",
+                "",
+                "        IF target_type_oid IS NOT NULL THEN",
+                f"            EXECUTE 'DROP TYPE ' || {_quote_literal(_qualified_name(schema, table_name))};",
+                "        END IF;",
+                "    END IF;",
+                "END",
+                "$$;",
+            )
+        )
+    )
 
 
 def grant_supabase_data_api_table_access(

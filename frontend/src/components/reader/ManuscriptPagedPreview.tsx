@@ -108,11 +108,19 @@ export function ManuscriptPagedPreview({
     fontSize: `${layout.fontSizePt}pt`,
     lineHeight: String(lineHeight),
   } as CSSProperties
+  const goToPage = (page: number) => {
+    const shell = shellRef.current
+    if (!shell) return
+    const nextPage = Math.min(pageCount, Math.max(1, page))
+    const pageExtent = getManuscriptPreviewPageExtentPx(layout)
+    shell.scrollTo({ left: (nextPage - 1) * pageExtent, behavior: "smooth" })
+    setCurrentPage(nextPage)
+  }
 
   return (
     <div
-      className={`rounded-[1.6rem] border p-4 shadow-[0_24px_80px_-55px_rgba(15,23,42,0.28)] ${
-        isDark ? "border-white/10 bg-[#0d1117]" : "border-[#d8d0c4] bg-[#f8f4ee]"
+      className={`rounded-[1.35rem] border p-4 shadow-[0_24px_80px_-55px_rgba(15,23,42,0.28)] ${
+        isDark ? "border-white/10 bg-[#0c1118]/92" : "border-[#d8d0c4] bg-[#f8f4ee]"
       }`}
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -121,13 +129,35 @@ export function ManuscriptPagedPreview({
             Read-only paged preview
           </p>
           <p className={`mt-2 text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>
-            Browser pagination follows the active export preset more closely than the draft page estimate.
+            {layout.label}
           </p>
         </div>
         <div className={`flex flex-wrap items-center gap-2 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-          <span className={`rounded-full px-3 py-1.5 ${isDark ? "bg-white/8 text-slate-200" : "bg-white text-stone-700"}`}>
-            {layout.label}
-          </span>
+          <select
+            aria-label="Preview fit"
+            defaultValue="fit-page"
+            className={`rounded-xl border px-3 py-2 text-xs font-medium ${isDark ? "border-white/10 bg-black/30 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}
+          >
+            <option value="fit-page">Fit to page</option>
+          </select>
+          <button
+            type="button"
+            onClick={() => goToPage(currentPage - 1)}
+            disabled={currentPage <= 1}
+            aria-label="Previous preview page"
+            className={`rounded-xl border px-3 py-2 font-semibold disabled:opacity-40 ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}
+          >
+            Prev
+          </button>
+          <button
+            type="button"
+            onClick={() => goToPage(currentPage + 1)}
+            disabled={currentPage >= pageCount}
+            aria-label="Next preview page"
+            className={`rounded-xl border px-3 py-2 font-semibold disabled:opacity-40 ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}
+          >
+            Next
+          </button>
           <span className={`rounded-full px-3 py-1.5 ${isDark ? "bg-white/8 text-slate-200" : "bg-white text-stone-700"}`}>
             Page {currentPage} of {pageCount}
           </span>
@@ -138,8 +168,8 @@ export function ManuscriptPagedPreview({
         ref={shellRef}
         data-testid="manuscript-paged-preview-shell"
         data-preview-page-count={pageCount}
-        className={`manuscript-paged-preview-shell mt-4 rounded-[1.25rem] border ${
-          isDark ? "border-white/10 bg-[#06090f]" : "border-[#e7dfd3] bg-[#efe6d8]"
+        className={`manuscript-paged-preview-shell relative mx-auto mt-4 max-w-[980px] rounded-[1.15rem] border ${
+          isDark ? "border-white/10 bg-[#05070a]" : "border-[#e7dfd3] bg-[#efe6d8]"
         }`}
         style={previewStyle}
       >
@@ -160,6 +190,9 @@ export function ManuscriptPagedPreview({
               />
             </section>
           ))}
+        </div>
+        <div className="pointer-events-none absolute bottom-6 left-1/2 -translate-x-1/2 font-serif text-xs text-stone-500">
+          {currentPage}
         </div>
       </div>
     </div>

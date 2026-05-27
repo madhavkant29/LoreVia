@@ -117,7 +117,7 @@ export default function BetaFeedbackPage() {
   }, [authorAssignments, selectedAuthorAssignmentId])
 
   const isAuthorView = useMemo(
-    () => Boolean(book && (!book.collaboration_role || book.mode === "author")),
+    () => Boolean(book && book.workspace_shell === "author" && book.access_class !== "reader_collaborator"),
     [book]
   )
   const canLeaveFeedback = Boolean(book?.collaboration_permissions?.can_comment || book?.collaboration_permissions?.can_edit_manuscript)
@@ -283,6 +283,7 @@ export default function BetaFeedbackPage() {
             description="Close the loop between draft sharing, reader response, and review-gated rewards."
             mode={book?.mode ?? "author"}
             variant="rail"
+            railSize="compact"
           />
         </div>
 

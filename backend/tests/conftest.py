@@ -54,7 +54,7 @@ from app.core.config import allowed_hosts, settings
 from app.core.database import Base, get_db
 from app.core.storage import download_book
 from app.main import app
-from app.utils.migration_utils import is_local_database_url
+from app.utils.migration_utils import is_safe_test_database_url
 
 
 @pytest.fixture(autouse=True)
@@ -339,10 +339,12 @@ async def setup_engine():
 
 @pytest_asyncio.fixture(scope="session")
 async def setup_db(setup_engine):
-    if not is_local_database_url(settings.DATABASE_URL):
+    configured_test_database_url = os.getenv("TEST_DATABASE_URL") or settings.DATABASE_URL
+    if not is_safe_test_database_url(settings.DATABASE_URL, configured_test_database_url):
         raise RuntimeError(
-            "Refusing to reset the test schema against a non-local database URL. "
-            "Point DATABASE_URL at a disposable local test database before running tests."
+            "Refusing to reset the test schema because TEST_DATABASE_URL resolves to the same database as "
+            "DATABASE_URL or is not local. Set TEST_DATABASE_URL to a disposable local test database, "
+            "for example postgresql://postgres:postgres@postgres:5432/lorevia_test, before running tests."
         )
 
     async with engine_test.begin() as conn:
@@ -407,4 +409,4 @@ async def auth_headers(client):
     if r.status_code != 201:
         raise Exception(f"Registration failed: {r.status_code} - {r.text}")
     access_token = create_access_token(str(r.json()["id"]))
-    return {"Cookie": f"lorevia_access_token={access_token}"}
+    return {"Authorization": f"Bearer {access_token}"}

@@ -20,6 +20,7 @@ import {
 } from "@/lib/utils/voiceWorkspace"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import type { Book, ManuscriptWorkspaceTree } from "@/types/book"
+import type { Character } from "@/types/character"
 import type { VoiceConsistencyIssue, VoiceConsistencyMatch, VoiceConsistencyReview } from "@/types/intelligence"
 import type { ChapterListResponse } from "@/types/reader"
 
@@ -48,6 +49,8 @@ export default function VoiceConsistencyPage() {
   const [review, setReview] = useState<VoiceConsistencyReview | null>(null)
   const [voiceCharacters, setVoiceCharacters] = useState<string[]>([])
   const [voiceMatches, setVoiceMatches] = useState<VoiceConsistencyMatch[]>([])
+  const [reviewWarnings, setReviewWarnings] = useState<string[]>([])
+  const [selectedCharacterId, setSelectedCharacterId] = useState<string | null>(null)
 
   const { data: book = null, isLoading: bookLoading } = useQuery<Book | null>({
     queryKey: asQueryKey(bookCacheKey(bookId, "detail")),
@@ -56,6 +59,10 @@ export default function VoiceConsistencyPage() {
   const { data: chapterList = null, isLoading: chapterListLoading } = useQuery<ChapterListResponse | null>({
     queryKey: asQueryKey(readerCacheKey(bookId, "chapters")),
     queryFn: () => readerApi.getChapterList(bookId),
+  })
+  const { data: characters = [], isLoading: charactersLoading } = useQuery<Character[]>({
+    queryKey: asQueryKey(bookCacheKey(bookId, "characters")),
+    queryFn: () => booksApi.getCharacters(bookId),
   })
   const {
     data: workspaceTree = null,
@@ -70,9 +77,13 @@ export default function VoiceConsistencyPage() {
     queryFn: () => readerApi.getChapter(bookId, selectedChapter as number),
     enabled: selectedChapter !== null,
   })
-  const loading = bookLoading || chapterListLoading || workspaceTreeLoading
+  const loading = bookLoading || chapterListLoading || charactersLoading || workspaceTreeLoading
 
   const chapterOptions = useMemo(() => chapterList?.chapters ?? EMPTY_CHAPTERS, [chapterList?.chapters])
+  const selectedCharacter = useMemo(
+    () => characters.find((character) => character.id === selectedCharacterId) ?? null,
+    [characters, selectedCharacterId]
+  )
   const existingScenePaths = useMemo(
     () => (workspaceTree?.scene_groups ?? []).flatMap((group) => group.scenes.map((scene) => scene.path)),
     [workspaceTree]
@@ -85,6 +96,12 @@ export default function VoiceConsistencyPage() {
     () => (workspaceTree?.note_paths ?? []).filter((path) => path.toLowerCase().includes("/voice/") || path.toLowerCase().startsWith("story advisor/voice")),
     [workspaceTree]
   )
+
+  useEffect(() => {
+    if (selectedCharacterId && !characters.some((character) => character.id === selectedCharacterId)) {
+      setSelectedCharacterId(null)
+    }
+  }, [characters, selectedCharacterId])
 
   useEffect(() => {
     const preferredChapter = chapterList?.current_chapter
@@ -108,6 +125,7 @@ export default function VoiceConsistencyPage() {
       setReviewError(null)
       setVoiceCharacters([])
       setVoiceMatches([])
+      setReviewWarnings([])
       return
     }
 
@@ -124,6 +142,7 @@ export default function VoiceConsistencyPage() {
     setReviewError(null)
     setVoiceCharacters([])
     setVoiceMatches([])
+    setReviewWarnings([])
     setSaveStatus(null)
   }, [chapterData, chapterLoading, chapterOptions, selectedChapter])
 
@@ -139,15 +158,20 @@ export default function VoiceConsistencyPage() {
       const result = await intelligenceApi.voiceConsistencyReview(
         targetBookId,
         trimmed,
-        selectedChapter ?? undefined,
+        {
+          chapterNum: selectedChapter ?? undefined,
+          characterId: selectedCharacterId,
+        },
       )
       setReview(result.review)
       setVoiceCharacters(result.characters_reviewed)
       setVoiceMatches(result.character_matches ?? [])
+      setReviewWarnings(result.warnings ?? [])
     } catch (error) {
       setReview(null)
       setVoiceCharacters([])
       setVoiceMatches([])
+      setReviewWarnings([])
       setReviewError(getApiErrorDetail(error) ?? "Could not run the voice review right now. Please try again.")
     } finally {
       setReviewLoading(false)
@@ -219,6 +243,8 @@ export default function VoiceConsistencyPage() {
             bookData={book}
             title="Voice consistency"
             description="Run a dedicated voice pass, then save the results back into your shared notes and scene workspaces."
+            variant="rail"
+            railSize="compact"
           />
 
           <div className="space-y-6">
@@ -261,6 +287,24 @@ export default function VoiceConsistencyPage() {
                       ))}
                     </select>
                   </label>
+                  <label className="mt-4 block text-sm">
+                    <span className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>Character focus</span>
+                    <select
+                      value={selectedCharacterId ?? ""}
+                      onChange={(event) => setSelectedCharacterId(event.target.value || null)}
+                      className={`mt-3 w-full rounded-[0.95rem] border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-[#0b1220] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
+                    >
+                      <option value="">Auto-detect from passage</option>
+                      {characters.map((character) => (
+                        <option key={character.id} value={character.id}>
+                          {character.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <p className={`mt-3 text-xs leading-5 ${isDark ? "text-slate-500" : "text-stone-500"}`}>
+                    Leave this on auto-detect to review whoever is active in the passage. Pick a character to limit the review and match scores to that voice only.
+                  </p>
 
                   <div className="mt-5 space-y-3">
                     <div className={`rounded-[1rem] border px-4 py-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white"}`}>
@@ -292,6 +336,9 @@ export default function VoiceConsistencyPage() {
                     <div>
                       <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Source passage</p>
                       <h2 className={`mt-2 text-2xl font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{chapterTitle || "Custom passage"}</h2>
+                      {selectedCharacter ? (
+                        <p className={`mt-2 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>Focused review: {selectedCharacter.name}</p>
+                      ) : null}
                     </div>
                     <button
                       type="button"
@@ -351,6 +398,13 @@ export default function VoiceConsistencyPage() {
                         <p className={`mt-2 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Reviewed: {voiceCharacters.join(", ")}</p>
                       ) : null}
                     </div>
+                    {reviewWarnings.length > 0 ? (
+                      <div className={`rounded-[1.2rem] border px-4 py-3 text-sm ${isDark ? "border-amber-500/30 bg-amber-500/10 text-amber-100" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
+                        {reviewWarnings.map((warning, index) => (
+                          <p key={`${warning}-${index}`}>{warning}</p>
+                        ))}
+                      </div>
+                    ) : null}
 
                     {review.issues.length > 0 ? review.issues.map((issue, index) => (
                       <div key={`${issue.character_name}-${issue.title}-${index}`} className={`rounded-[1.2rem] border p-4 ${isDark ? "border-rose-500/20 bg-rose-500/10" : "border-rose-200 bg-rose-50"}`}>

@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 from fastapi import HTTPException, Request, Response
 
 from app.core.config import settings
-from app.utils.auth_cookies import auth_cookie_secure
+from app.utils.cookie_utils import auth_cookie_secure, delete_cookie, get_request_cookie_values, set_cookie
 
 
 ADMIN_CSRF_COOKIE_NAME = "lorevia_admin_csrf"
@@ -26,7 +26,9 @@ def create_admin_csrf_token() -> str:
 
 def set_admin_csrf_cookie(response: Response, token: str | None = None) -> str:
     resolved_token = token or create_admin_csrf_token()
-    response.set_cookie(
+    delete_cookie(response, ADMIN_CSRF_COOKIE_NAME, path="/")
+    set_cookie(
+        response,
         ADMIN_CSRF_COOKIE_NAME,
         resolved_token,
         max_age=60 * 60,
@@ -39,16 +41,11 @@ def set_admin_csrf_cookie(response: Response, token: str | None = None) -> str:
 
 
 def validate_admin_csrf_token(request: Request) -> None:
-    cookie_token = request.cookies.get(ADMIN_CSRF_COOKIE_NAME)
     header_token = request.headers.get(ADMIN_CSRF_HEADER_NAME)
-    if not cookie_token or not header_token or not hmac.compare_digest(cookie_token, header_token):
+    cookie_tokens = get_request_cookie_values(request, ADMIN_CSRF_COOKIE_NAME)
+    if not header_token:
         raise HTTPException(403, "Invalid admin CSRF token.")
-
-    try:
-        nonce, signature = cookie_token.rsplit(".", 1)
-    except ValueError:
-        raise HTTPException(403, "Invalid admin CSRF token.")
-    if not nonce or not hmac.compare_digest(signature, _csrf_signature(nonce)):
+    if not any(_admin_csrf_token_matches(header_token, cookie_token) for cookie_token in cookie_tokens):
         raise HTTPException(403, "Invalid admin CSRF token.")
 
     _validate_same_origin_admin_request(request)
@@ -77,3 +74,13 @@ def _validate_same_origin_admin_request(request: Request) -> None:
 
     if request_origin.rstrip("/") not in allowed_origins:
         raise HTTPException(403, "Invalid admin request origin.")
+
+
+def _admin_csrf_token_matches(header_token: str, cookie_token: str) -> bool:
+    if not hmac.compare_digest(cookie_token, header_token):
+        return False
+    try:
+        nonce, signature = cookie_token.rsplit(".", 1)
+    except ValueError:
+        return False
+    return bool(nonce) and hmac.compare_digest(signature, _csrf_signature(nonce))

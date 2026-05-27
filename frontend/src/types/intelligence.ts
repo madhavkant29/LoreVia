@@ -254,6 +254,7 @@ export interface VoiceConsistencyResponse {
   retrieved_passages: EditorialReviewPassage[]
   characters_reviewed: string[]
   character_matches?: VoiceConsistencyMatch[]
+  warnings: string[]
 }
 
 export interface ProseTightenResponse {

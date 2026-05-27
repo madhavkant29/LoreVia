@@ -46,6 +46,7 @@ Notes:
 
 - Prefer Docker Compose Local so tests run against the repo's pinned app image, Postgres, Redis, and extensions.
 - Some backend tests are DB-backed and require a safe local test database plus required extensions such as `pgvector`.
+- Local Docker Compose now reserves `lorevia` for the running app and `lorevia_test` for pytest via `TEST_DATABASE_URL`.
 - Backend tests are intended to pass in non-production environments; do not point them at production infrastructure.
 - Use `scripts/schema_drift_audit.sql` against dev or prod when you need a quick schema/head consistency check.
 

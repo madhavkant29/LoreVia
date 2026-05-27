@@ -107,6 +107,51 @@ async def test_persist_relationship_records_quarantines_ambiguous_matches(monkey
 
 
 @pytest.mark.asyncio
+async def test_persist_relationship_records_does_not_count_duplicate_same_state_batches(monkeypatch):
+    left_id = uuid.uuid4()
+    right_id = uuid.uuid4()
+    characters = [
+        SimpleNamespace(id=left_id, name="Aikawa Jun", aliases=["Aikawa"]),
+        SimpleNamespace(id=right_id, name="Ii", aliases=["Ii-chan"]),
+    ]
+    db = _FakeDB()
+
+    async def _fake_upsert(*_args, **_kwargs):
+        return CharacterRelationship(
+            book_id=uuid.uuid4(),
+            character_a_id=left_id,
+            character_b_id=right_id,
+            rel_type="ally",
+            description="Talk together",
+            from_chapter=3,
+        ), False
+
+    monkeypatch.setattr(extraction_consumer, "upsert_relationship_timeline_state", _fake_upsert)
+
+    persisted, unresolved, review_count = await extraction_consumer._persist_relationship_records(
+        db,
+        book_id=uuid.uuid4(),
+        chapter_number=3,
+        existing_characters=characters,
+        relationships=[
+            {
+                "character_a": "Aikawa",
+                "character_b": "Ii-chan",
+                "type": "ally",
+                "description": "Talk together",
+                "source_batch_key": "batch-1",
+            }
+        ],
+        key_cache={},
+        persisted_signatures=set(),
+    )
+
+    assert persisted == 0
+    assert unresolved == []
+    assert review_count == 0
+
+
+@pytest.mark.asyncio
 async def test_embed_new_character_candidates_reuses_active_db_session(monkeypatch):
     observed: dict[str, object] = {}
 

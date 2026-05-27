@@ -268,7 +268,7 @@ async def test_upload_pipeline_rejects_noise_characters_and_records_diagnostics(
             return None
 
     chapters = [
-        {"number": 1, "title": "One", "text": "Well, Gregor watched the room while Grete spoke softly."},
+        {"number": 1, "title": "One", "text": "Well, Gregor watched the room while Grete spoke softly. Help, he shouted toward the pier."},
     ]
 
     async def _fake_extract(_text: str, **_kwargs) -> dict:
@@ -278,6 +278,23 @@ async def test_upload_pipeline_rejects_noise_characters_and_records_diagnostics(
                     "name": "Well",
                     "entity_type": "unknown",
                     "confidence": 0.96,
+                    "traits": {},
+                    "personality_tags": [],
+                    "motivations": [],
+                    "fears": [],
+                    "arc_summary": "is a character",
+                    "evidence": {
+                        "mention_count": 1,
+                        "strong_mention_count": 0,
+                        "has_dialogue_or_action": False,
+                        "has_physical_description": False,
+                        "appears_multiple_times": False,
+                    },
+                },
+                {
+                    "name": "Help",
+                    "entity_type": "unknown",
+                    "confidence": 0.95,
                     "traits": {},
                     "personality_tags": [],
                     "motivations": [],
@@ -355,11 +372,11 @@ async def test_upload_pipeline_rejects_noise_characters_and_records_diagnostics(
     extraction_diagnostics = (processing.get("parser_diagnostics") or {}).get("character_extraction") or {}
     rejected = extraction_diagnostics.get("rejected_characters") or []
     rejected_reported = any(
-        item["name"] == "Well"
-        and item["stage"] in {"candidate_augmentation", "llm_clean"}
+        item["name"] in {"Well", "Help"}
+        and item["stage"] in {"candidate_augmentation", "llm_clean", "mention_verifier"}
         and any(
             reason in str(item.get("reason") or "")
-            for reason in {"save_gate", "visibility_score_below_threshold", "single_token_lacks_profile_evidence"}
+            for reason in {"save_gate", "visibility_score_below_threshold", "single_token_lacks_profile_evidence", "interjection_like_usage", "sentence_start_capitalization_only"}
         )
         for item in rejected
     )

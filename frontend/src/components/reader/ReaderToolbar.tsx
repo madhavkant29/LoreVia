@@ -1,5 +1,5 @@
 "use client"
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 import Link from "next/link"
 import type { ReaderFontFamily } from "@/lib/utils/readerTypography"
 import type { ReaderDisplayStyle } from "@/types/reader"
@@ -11,6 +11,7 @@ interface Props {
   totalChapters: number | null
   wordsRead: number
   totalWords: number
+  progressPercent: number | null
   onSummary: () => void
   theme: "light" | "dark"
   onToggleTheme: () => void
@@ -32,6 +33,7 @@ export function ReaderToolbar({
   totalChapters,
   wordsRead,
   totalWords,
+  progressPercent,
   onSummary,
   theme,
   onToggleTheme,
@@ -47,28 +49,45 @@ export function ReaderToolbar({
 }: Props) {
   const [mobileToolsOpen, setMobileToolsOpen] = useState(false)
   const atLastChapter = totalChapters !== null && chapterNum >= totalChapters
+  const progressWidth = progressPercent !== null ? `${Math.max(0, Math.min(100, progressPercent))}%` : "0%"
+  const chapterMeta = `${chapterTitle || `Chapter ${chapterNum}`} | ${wordsRead.toLocaleString()} of ${totalWords.toLocaleString()} words`
+  const breadcrumbLabel = `Chapter ${chapterNum}${totalChapters ? ` of ${totalChapters}` : ""}`
 
   const toneClass = theme === "dark"
     ? {
-      shell: "border-white/10 bg-[#0f1320]/92 text-stone-100",
-      subShell: "border-white/10 bg-[#121828]/88",
-      text: "text-stone-300",
-      muted: "text-stone-400 hover:bg-white/6 hover:text-white",
-      active: "bg-indigo-500 text-white hover:bg-indigo-400",
-      pill: "border-white/10 bg-white/5 text-stone-300",
-      border: "border-white/10",
-      heading: "text-white",
-    }
+        shell: "border-white/8 bg-[#070d18]/96 text-slate-100",
+        subShell: "border-white/8 bg-[#0b1120]/94",
+        meta: "text-slate-400",
+        subtle: "text-slate-500",
+        heading: "text-white",
+        ui: "text-slate-200",
+        border: "border-white/10",
+        card: "border-white/10 bg-[#0f1627]/92",
+        divider: "bg-white/10",
+        navLink: "text-slate-300 hover:text-white",
+        ghost: "border-white/10 bg-[#11192b] text-slate-200 hover:bg-[#162036] hover:text-white",
+        primary: "border-white/10 bg-[#151f35] text-white hover:bg-[#1a2741]",
+        active: "border-[#7f86ff]/40 bg-[#353f71] text-white",
+        progressTrack: "bg-white/8",
+        progressFill: "bg-[linear-gradient(90deg,#7c7ff6_0%,#9ca6ff_100%)]",
+      }
     : {
-      shell: "border-stone-200/80 bg-[#fcfaf4]/92 text-stone-950",
-      subShell: "border-stone-200/80 bg-white/72",
-      text: "text-stone-500",
-      muted: "text-stone-500 hover:bg-stone-100 hover:text-stone-900",
-      active: "bg-[linear-gradient(135deg,#4f46e5,#4338ca)] text-white hover:opacity-95",
-      pill: "border-stone-200 bg-white text-stone-600",
-      border: "border-stone-200",
-      heading: "text-stone-900",
-    }
+        shell: "border-stone-200/80 bg-[#faf7f0]/94 text-stone-950",
+        subShell: "border-stone-200/70 bg-white/88",
+        meta: "text-stone-500",
+        subtle: "text-stone-400",
+        heading: "text-stone-950",
+        ui: "text-stone-700",
+        border: "border-stone-200",
+        card: "border-stone-200 bg-white/92",
+        divider: "bg-stone-200",
+        navLink: "text-stone-600 hover:text-stone-950",
+        ghost: "border-stone-200 bg-white text-stone-700 hover:bg-stone-50 hover:text-stone-950",
+        primary: "border-violet-300/60 bg-white text-stone-950 hover:border-violet-400",
+        active: "border-violet-400 bg-violet-50 text-violet-900",
+        progressTrack: "bg-stone-200/90",
+        progressFill: "bg-[linear-gradient(90deg,#2dd4bf_0%,#7c3aed_100%)]",
+      }
 
   const increaseFont = () => onSetFontSize(Math.min(fontSize + 2, 32))
   const decreaseFont = () => onSetFontSize(Math.max(fontSize - 2, 12))
@@ -76,206 +95,278 @@ export function ReaderToolbar({
   return (
     <header className="reader-app-chrome sticky top-0 z-20 shrink-0">
       <div className={`border-b backdrop-blur-xl ${toneClass.shell}`}>
-        <div className="flex items-center justify-between gap-4 px-4 py-4 sm:px-8">
-          <div className="min-w-0">
-            <div className="flex items-center gap-4">
-              <Link
-                prefetch={false}
-                href="/library"
-                className={theme === "dark" ? "text-2xl italic text-indigo-200" : "text-2xl italic text-violet-700"}
-                style={{ fontFamily: "var(--reader-display)" }}
-              >
-                LoreVia
+        <div className="mx-auto flex w-full max-w-[1620px] flex-col gap-4 px-4 py-4 sm:px-6 lg:px-8 xl:px-10">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex min-w-0 items-center gap-4">
+              <Link prefetch={false} href="/library" className="shrink-0">
+                <img src="/logoandtext.png" alt="LoreVia" className="h-10 w-[154px] object-contain object-left" fetchPriority="high" />
               </Link>
-              <nav className="hidden items-center gap-6 text-sm lg:flex" style={{ fontFamily: "var(--reader-label)" }}>
-                <Link prefetch={false} href="/library" className={theme === "dark" ? "font-medium text-indigo-200" : "font-medium text-violet-700"}>
+              <nav className="hidden items-center gap-6 lg:flex" style={{ fontFamily: "var(--reader-label)" }}>
+                <Link prefetch={false} href="/library" className={`text-[15px] font-medium transition ${toneClass.navLink}`}>
                   Library
                 </Link>
-                <Link prefetch={false} href="/settings" className={toneClass.muted}>
+                <Link prefetch={false} href="/settings" className={`text-[15px] font-medium transition ${toneClass.navLink}`}>
                   Settings
                 </Link>
-                <button onClick={onToggleTheme} className={`rounded-full px-3 py-1.5 transition-colors ${toneClass.muted}`}>
+                <button
+                  type="button"
+                  onClick={onToggleTheme}
+                  className={`rounded-2xl border px-4 py-2 text-[15px] font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${toneClass.ghost}`}
+                >
                   {theme === "dark" ? "Light" : "Dark"}
                 </button>
               </nav>
             </div>
-            <p className={`mt-2 hidden text-sm lg:block ${toneClass.text}`}>
-              {chapterTitle || `Chapter ${chapterNum}`} | {wordsRead.toLocaleString()} of {totalWords.toLocaleString()} words
-            </p>
-          </div>
 
-          <div className="hidden items-center gap-2 md:flex" style={{ fontFamily: "var(--reader-label)" }}>
-            <Link prefetch={false} href={`/${bookId}`} className={`rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] transition ${toneClass.active}`}>
-              Back to book
-            </Link>
-            <button onClick={onSummary} className={`rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] transition ${toneClass.muted}`}>
-              Summary
-            </button>
-            <Link prefetch={false} href={`/${bookId}/graph`} className={`rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] transition ${toneClass.muted}`}>
-              Graph
-            </Link>
-            <Link prefetch={false} href={`/${bookId}/ask`} className={`rounded-full border px-4 py-2 text-xs transition ${toneClass.pill}`}>
-              Ask with citations
-            </Link>
-            <Link prefetch={false} href={`/${bookId}/search`} className={`rounded-full border px-4 py-2 text-xs transition ${toneClass.pill}`}>
-              Search passages
-            </Link>
-          </div>
-
-          <button
-            onClick={() => setMobileToolsOpen((current) => !current)}
-            className={`rounded-full px-3 py-2 text-xs md:hidden ${toneClass.muted}`}
-          >
-            {mobileToolsOpen ? "Close" : "Menu"}
-          </button>
-        </div>
-      </div>
-
-      <div className={`border-b backdrop-blur-xl ${toneClass.subShell}`}>
-        <div className="hidden items-center justify-between gap-4 px-6 py-3 md:flex" style={{ fontFamily: "var(--reader-label)" }}>
-          <div className="flex items-center gap-4">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-violet-500">Overview</p>
-            <p className={`text-[11px] uppercase tracking-[0.28em] ${toneClass.text}`}>
-              Chapter {chapterNum}{totalChapters ? ` of ${totalChapters}` : ""}
-            </p>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <div className={`flex items-center gap-1 rounded-full border px-1.5 py-1 ${toneClass.pill}`}>
-              <button onClick={decreaseFont} className={`rounded-full px-2 py-1 text-xs transition ${toneClass.muted}`} title="Decrease font size">
-                A-
-              </button>
-              <span className="min-w-8 text-center text-xs">{fontSize}</span>
-              <button onClick={increaseFont} className={`rounded-full px-2 py-1 text-xs transition ${toneClass.muted}`} title="Increase font size">
-                A+
-              </button>
-              <div className={`mx-1 h-3 w-px ${toneClass.border}`} />
-              {(["serif", "sans", "mono"] as const).map((option) => (
-                <button
-                  key={option}
-                  onClick={() => onSetFontFamily(option)}
-                  className={`rounded-full px-2 py-1 text-[10px] font-bold uppercase tracking-[0.18em] transition ${fontFamily === option ? toneClass.active : toneClass.muted
-                    }`}
-                >
-                  {option}
-                </button>
-              ))}
-            </div>
-
-            <div className={`flex items-center gap-1 rounded-full border px-1.5 py-1 ${toneClass.pill}`}>
-              {(["published", "relaxed"] as const).map((option) => (
-                <button
-                  key={option}
-                  onClick={() => onSetDisplayStyle(option)}
-                  className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] transition ${displayStyle === option ? toneClass.active : toneClass.muted}`}
-                  aria-pressed={displayStyle === option}
-                >
-                  {option === "published" ? "Published" : "Relaxed"}
-                </button>
-              ))}
-            </div>
-
-            {canUseQuoteMode ? (
-              <button
-                onClick={onToggleQuoteMode}
-                className={`rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] transition ${quoteModeEnabled ? toneClass.active : toneClass.muted
-                  }`}
+            <div className="hidden flex-wrap items-center justify-end gap-3 md:flex" style={{ fontFamily: "var(--reader-label)" }}>
+              <Link
+                prefetch={false}
+                href={`/${bookId}`}
+                className={`inline-flex min-h-11 items-center rounded-[1.1rem] border px-4 py-2 text-[15px] font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${toneClass.primary}`}
               >
-                {quoteModeEnabled ? "Quote mode" : "Quote select"}
+                Back to book
+              </Link>
+              <button
+                type="button"
+                onClick={onSummary}
+                className={`inline-flex min-h-11 items-center rounded-[1.1rem] border px-4 py-2 text-[15px] font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${toneClass.ghost}`}
+              >
+                Summary
               </button>
-            ) : null}
-
-            {chapterNum > 1 ? (
-              <Link prefetch={false} href={`/${bookId}/chapter/${chapterNum - 1}`} className={`rounded-full border px-4 py-2 text-xs transition ${toneClass.pill}`}>
-                Prev
+              <Link
+                prefetch={false}
+                href={`/${bookId}/graph`}
+                className={`inline-flex min-h-11 items-center rounded-[1.1rem] border px-4 py-2 text-[15px] font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${toneClass.ghost}`}
+              >
+                Graph
               </Link>
-            ) : null}
-            {!atLastChapter ? (
-              <Link prefetch={false} href={`/${bookId}/chapter/${chapterNum + 1}`} className={`rounded-full border px-4 py-2 text-xs transition ${toneClass.pill}`}>
-                Next
+              <Link
+                prefetch={false}
+                href={`/${bookId}/ask`}
+                className={`inline-flex min-h-11 items-center rounded-[1.1rem] border px-4 py-2 text-[15px] font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${toneClass.ghost}`}
+              >
+                Ask with citations
               </Link>
-            ) : null}
-          </div>
-        </div>
-
-        <div className="space-y-3 px-4 py-3 md:hidden" style={{ fontFamily: "var(--reader-label)" }}>
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-[11px] uppercase tracking-[0.28em] text-violet-500">Chapter {chapterNum}</p>
-              <p className={`mt-1 truncate text-lg font-semibold ${toneClass.heading}`}>
-                {chapterTitle || `Chapter ${chapterNum}`}
-              </p>
-              <p className={`mt-1 text-xs ${toneClass.text}`}>
-                {totalChapters ? `${chapterNum} of ${totalChapters}` : "Reader"} | {wordsRead.toLocaleString()} / {totalWords.toLocaleString()} words
-              </p>
+              <Link
+                prefetch={false}
+                href={`/${bookId}/search`}
+                className={`inline-flex min-h-11 items-center rounded-[1.1rem] border px-4 py-2 text-[15px] font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${toneClass.ghost}`}
+              >
+                Search passages
+              </Link>
             </div>
-            <div className="flex items-center gap-2">
-              {chapterNum > 1 ? (
-                <Link prefetch={false} href={`/${bookId}/chapter/${chapterNum - 1}`} className={`rounded-full border px-3 py-2 text-xs transition ${toneClass.pill}`}>
-                  Prev
-                </Link>
-              ) : null}
-              {!atLastChapter ? (
-                <Link prefetch={false} href={`/${bookId}/chapter/${chapterNum + 1}`} className={`rounded-full border px-3 py-2 text-xs transition ${toneClass.pill}`}>
-                  Next
-                </Link>
-              ) : null}
-            </div>
-          </div>
 
-          <div className="flex flex-wrap gap-2">
-            <Link prefetch={false} href={`/${bookId}`} className={`rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] transition ${toneClass.active}`}>
-              Back to book
-            </Link>
-            <button onClick={onSummary} className={`rounded-full px-4 py-2 text-xs transition ${toneClass.muted}`}>
-              Summary
+            <button
+              type="button"
+              onClick={() => setMobileToolsOpen((current) => !current)}
+              className={`rounded-2xl border px-4 py-2 text-[15px] font-medium transition md:hidden ${toneClass.ghost}`}
+            >
+              {mobileToolsOpen ? "Close" : "Menu"}
             </button>
-            <Link prefetch={false} href={`/${bookId}/graph`} className={`rounded-full px-4 py-2 text-xs transition ${toneClass.muted}`}>
-              Graph
-            </Link>
-            <Link prefetch={false} href={`/${bookId}/ask`} className={`rounded-full px-4 py-2 text-xs transition ${toneClass.muted}`}>
-              Ask
-            </Link>
-            {canUseQuoteMode ? (
-              <button onClick={onToggleQuoteMode} className={`rounded-full px-4 py-2 text-xs transition ${quoteModeEnabled ? toneClass.active : toneClass.muted}`}>
-                {quoteModeEnabled ? "Quote on" : "Quote"}
-              </button>
-            ) : null}
+          </div>
+
+          <div className="min-w-0">
+            <p className={`text-[13px] ${toneClass.meta}`} style={{ fontFamily: "var(--reader-label)" }}>
+              {chapterMeta}
+            </p>
+            <div className="mt-2.5 flex items-center gap-4">
+              <div className={`h-[4px] flex-1 overflow-hidden rounded-full ${toneClass.progressTrack}`}>
+                <div className={`h-full rounded-full ${toneClass.progressFill}`} style={{ width: progressWidth }} />
+              </div>
+              {progressPercent !== null ? (
+                <span className={`w-9 text-right text-sm font-medium ${toneClass.ui}`} style={{ fontFamily: "var(--reader-label)" }}>
+                  {progressPercent}%
+                </span>
+              ) : null}
+            </div>
           </div>
 
           {mobileToolsOpen ? (
-            <div className={`rounded-[1.2rem] border p-3 ${toneClass.pill}`}>
-              <div className="flex flex-wrap items-center gap-2">
-                <button onClick={decreaseFont} className={`rounded-full px-3 py-2 text-xs transition ${toneClass.muted}`}>A-</button>
-                <span className="text-xs">{fontSize}px</span>
-                <button onClick={increaseFont} className={`rounded-full px-3 py-2 text-xs transition ${toneClass.muted}`}>A+</button>
-                {(["serif", "sans", "mono"] as const).map((option) => (
-                  <button
-                    key={option}
-                    onClick={() => onSetFontFamily(option)}
-                    className={`rounded-full px-3 py-2 text-[11px] uppercase tracking-[0.18em] transition ${fontFamily === option ? toneClass.active : toneClass.muted
-                      }`}
-                  >
-                    {option}
-                  </button>
-                ))}
+            <div className={`grid gap-3 rounded-[1.5rem] border p-3 md:hidden ${toneClass.card}`} style={{ fontFamily: "var(--reader-label)" }}>
+              <div className="flex flex-wrap gap-2">
+                <Link prefetch={false} href="/library" className={`rounded-[1rem] border px-4 py-2 text-sm font-medium transition ${toneClass.ghost}`}>
+                  Library
+                </Link>
+                <Link prefetch={false} href="/settings" className={`rounded-[1rem] border px-4 py-2 text-sm font-medium transition ${toneClass.ghost}`}>
+                  Settings
+                </Link>
+                <button type="button" onClick={onToggleTheme} className={`rounded-[1rem] border px-4 py-2 text-sm font-medium transition ${toneClass.ghost}`}>
+                  {theme === "dark" ? "Light" : "Dark"}
+                </button>
               </div>
-              <div className={`mt-3 flex flex-wrap items-center gap-2 border-t pt-3 ${toneClass.border}`}>
-                {(["published", "relaxed"] as const).map((option) => (
-                  <button
-                    key={option}
-                    onClick={() => onSetDisplayStyle(option)}
-                    className={`rounded-full px-3 py-2 text-[11px] uppercase tracking-[0.18em] transition ${displayStyle === option ? toneClass.active : toneClass.muted}`}
-                    aria-pressed={displayStyle === option}
-                  >
-                    {option === "published" ? "Published layout" : "Relaxed layout"}
+              <div className={`grid gap-2 border-t pt-3 ${toneClass.border}`}>
+                <div className="flex flex-wrap gap-2">
+                  <Link prefetch={false} href={`/${bookId}`} className={`rounded-[1rem] border px-4 py-2 text-sm font-medium transition ${toneClass.primary}`}>
+                    Back to book
+                  </Link>
+                  <button type="button" onClick={onSummary} className={`rounded-[1rem] border px-4 py-2 text-sm font-medium transition ${toneClass.ghost}`}>
+                    Summary
                   </button>
-                ))}
+                  <Link prefetch={false} href={`/${bookId}/graph`} className={`rounded-[1rem] border px-4 py-2 text-sm font-medium transition ${toneClass.ghost}`}>
+                    Graph
+                  </Link>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Link prefetch={false} href={`/${bookId}/ask`} className={`rounded-[1rem] border px-4 py-2 text-sm font-medium transition ${toneClass.ghost}`}>
+                    Ask with citations
+                  </Link>
+                  <Link prefetch={false} href={`/${bookId}/search`} className={`rounded-[1rem] border px-4 py-2 text-sm font-medium transition ${toneClass.ghost}`}>
+                    Search passages
+                  </Link>
+                </div>
               </div>
             </div>
           ) : null}
         </div>
       </div>
+
+      <div className={`border-b backdrop-blur-xl ${toneClass.subShell}`}>
+        <div className="mx-auto flex w-full max-w-[1620px] flex-col gap-3 px-4 py-3 sm:px-6 lg:px-8 xl:px-10" style={{ fontFamily: "var(--reader-label)" }}>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <p className={`text-[11px] font-semibold uppercase tracking-[0.28em] ${theme === "dark" ? "text-[#9ba4ff]" : "text-violet-700"}`}>
+              Overview
+            </p>
+            <span className={toneClass.subtle}>&gt;</span>
+            <p className={`text-[11px] uppercase tracking-[0.28em] ${toneClass.ui}`}>
+              {breadcrumbLabel}
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 lg:gap-3">
+            <SegmentGroup label="Font size" toneClass={toneClass}>
+              <SegmentButton label="A-" onClick={decreaseFont} toneClass={toneClass} />
+              <span className={`min-w-9 text-center text-sm ${toneClass.ui}`}>{fontSize}</span>
+              <SegmentButton label="A+" onClick={increaseFont} toneClass={toneClass} />
+            </SegmentGroup>
+
+            <SegmentGroup label="Font family" toneClass={toneClass}>
+              {(["serif", "sans", "mono"] as const).map((option) => (
+                <SegmentToggle
+                  key={option}
+                  label={option}
+                  selected={fontFamily === option}
+                  onClick={() => onSetFontFamily(option)}
+                  toneClass={toneClass}
+                />
+              ))}
+            </SegmentGroup>
+
+            <SegmentGroup label="Reading mode" toneClass={toneClass}>
+              {(["published", "relaxed"] as const).map((option) => (
+                <SegmentToggle
+                  key={option}
+                  label={option === "published" ? "Published" : "Relaxed"}
+                  selected={displayStyle === option}
+                  onClick={() => onSetDisplayStyle(option)}
+                  toneClass={toneClass}
+                />
+              ))}
+            </SegmentGroup>
+
+            {canUseQuoteMode ? (
+              <SegmentGroup label="Selection" toneClass={toneClass}>
+                <SegmentToggle
+                  label={quoteModeEnabled ? "Quote mode" : "Quote select"}
+                  selected={quoteModeEnabled}
+                  onClick={onToggleQuoteMode}
+                  toneClass={toneClass}
+                />
+              </SegmentGroup>
+            ) : null}
+
+            <SegmentGroup label="Navigation" toneClass={toneClass}>
+              {chapterNum > 1 ? (
+                <Link
+                  prefetch={false}
+                  href={`/${bookId}/chapter/${chapterNum - 1}`}
+                  className={`inline-flex min-h-10 items-center rounded-[0.95rem] border px-3 py-2 text-sm font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${toneClass.ghost}`}
+                >
+                  Prev
+                </Link>
+              ) : null}
+              {!atLastChapter ? (
+                <Link
+                  prefetch={false}
+                  href={`/${bookId}/chapter/${chapterNum + 1}`}
+                  className={`inline-flex min-h-10 items-center rounded-[0.95rem] border px-3 py-2 text-sm font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${toneClass.ghost}`}
+                >
+                  Next
+                </Link>
+              ) : null}
+            </SegmentGroup>
+          </div>
+        </div>
+      </div>
     </header>
+  )
+}
+
+type ToneClass = {
+  card: string
+  divider: string
+  subtle: string
+  ui: string
+  ghost: string
+  active: string
+}
+
+function SegmentGroup({
+  label,
+  toneClass,
+  children,
+}: {
+  label: string
+  toneClass: ToneClass
+  children: ReactNode
+}) {
+  return (
+    <div className={`flex min-h-11 items-center gap-1 rounded-[1.2rem] border px-1.5 py-1 ${toneClass.card}`}>
+      <span className={`px-2 text-[10px] uppercase tracking-[0.22em] ${toneClass.subtle}`}>{label}</span>
+      <div className={`mx-1 h-4 w-px ${toneClass.divider}`} />
+      {children}
+    </div>
+  )
+}
+
+function SegmentButton({
+  label,
+  onClick,
+  toneClass,
+}: {
+  label: string
+  onClick: () => void
+  toneClass: ToneClass
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-[0.95rem] border px-3 py-2 text-sm font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${toneClass.ghost}`}
+    >
+      {label}
+    </button>
+  )
+}
+
+function SegmentToggle({
+  label,
+  selected,
+  onClick,
+  toneClass,
+}: {
+  label: string
+  selected: boolean
+  onClick: () => void
+  toneClass: ToneClass
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={selected}
+      onClick={onClick}
+      className={`rounded-[0.95rem] border px-3 py-2 text-sm font-medium capitalize transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${selected ? toneClass.active : toneClass.ghost}`}
+    >
+      {label}
+    </button>
   )
 }

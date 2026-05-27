@@ -242,6 +242,7 @@ from app.utils.book_utils import (
     parse_book_upload_for_ingestion,
     parse_screenplay_upload,
     refresh_screenplay_scene_rows,
+    require_book_owner_access,
     replace_chapter_novel_scenes,
     resolve_owned_series_ids,
     resolve_upload_format_and_work_type,
@@ -307,6 +308,12 @@ from app.utils.reader_utils import (
     build_chapter_list_payload,
     build_reading_progress_payload,
     build_summary_collection_payload,
+    chapter_intelligence_map,
+)
+from app.utils.relationship_utils import (
+    canonical_relationship_pair_ids,
+    repair_relationship_timelines,
+    upsert_relationship_timeline_state,
 )
 from app.utils.export_utils import (
     build_character_bible_obsidian_context,
@@ -393,10 +400,14 @@ def _validate_relationship_window(from_chapter: int | None, to_chapter: int | No
 
 
 def _serialize_relationship_record(relationship: CharacterRelationship) -> dict[str, Any]:
+    left_id, right_id = canonical_relationship_pair_ids(
+        relationship.character_a_id,
+        relationship.character_b_id,
+    )
     return {
         "id": str(relationship.id),
-        "character_a_id": str(relationship.character_a_id),
-        "character_b_id": str(relationship.character_b_id),
+        "character_a_id": str(left_id),
+        "character_b_id": str(right_id),
         "rel_type": relationship.rel_type,
         "sentiment": relationship.sentiment,
         "description": relationship.description,
@@ -542,11 +553,10 @@ async def update_book_mode(
     current_user=Depends(get_current_user),
 ):
     book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
+    require_book_owner_access(book, current_user, collaborator)
     mode = (body.mode or "").strip().lower()
     if mode not in {"reader", "author"}:
         raise HTTPException(400, "Invalid mode")
-    if collaborator and not collaboration_can_edit(collaborator):
-        raise HTTPException(403, "This share cannot edit the manuscript.")
     book.mode = mode
     if mode == "author" and not book.source_kind:
         book.source_kind = "single_upload"
@@ -680,6 +690,7 @@ async def import_manuscript_content(
     preserve_exact_structure = bool(book.preserve_chapter_numbers or book.preserve_source_chapters)
     resolved_book_work_type = normalize_book_work_type(work_type, default=book.work_type or "novel")
     resolved_import_format: str | None = None
+    first_pdf_raw_for_cover: bytes | None = None
 
     cleaned_html = clean_manuscript_html(html) if html else None
     
@@ -735,6 +746,8 @@ async def import_manuscript_content(
         )
         validate_document_upload_bytes(upload.filename, raw, fmt)
         resolved_import_format = resolved_import_format or fmt
+        if fmt == "pdf" and first_pdf_raw_for_cover is None:
+            first_pdf_raw_for_cover = raw
         parsed_payload = await parse_book_upload_for_ingestion(
             format_name=fmt,
             work_type=upload_work_type,
@@ -747,10 +760,12 @@ async def import_manuscript_content(
         if upload_work_type != "screenplay" and not split_flag:
             merged_text = "\n\n".join(str(chapter.get("text") or "").strip() for chapter in parsed if chapter.get("text"))
             merged_html_parts = [str(chapter.get("html") or "").strip() for chapter in parsed if chapter.get("html")]
+            merged_images = [image for chapter in parsed for image in list(chapter.get("images") or [])]
             parsed = [{
                 "title": normalized_title or (upload.filename.rsplit(".", 1)[0] if "." in upload.filename else upload.filename),
                 "text": merged_text,
                 "html": clean_manuscript_html("\n".join(part for part in merged_html_parts if part)) if merged_html_parts else None,
+                "images": merged_images,
                 "number": 1,
             }]
         base_number = chapter_number if replace_flag and chapter_number else next_number
@@ -847,7 +862,7 @@ async def import_manuscript_content(
                 "text": next_text,
                 "html": job.get("html"),
                 "description": job.get("description"),
-                "images": [],
+                "images": list(job.get("images") or []),
                 "content_version": int(job.get("content_version") or 1),
             },
         )
@@ -895,6 +910,21 @@ async def import_manuscript_content(
     book.work_type = resolved_book_work_type
     if resolved_import_format:
         book.format = resolved_import_format
+    if first_pdf_raw_for_cover and not book.cover_s3_key:
+        try:
+            from app.parsers.pdf_parser import extract_first_page_cover
+
+            cover = await asyncio.to_thread(extract_first_page_cover, first_pdf_raw_for_cover)
+            if cover:
+                cover_bytes, content_type = cover
+                book.cover_s3_key = await asyncio.to_thread(
+                    storage.upload_binary,
+                    f"covers/{book.user_id}/{uuid.uuid4()}.png",
+                    cover_bytes,
+                    content_type,
+                )
+        except Exception:
+            log.warning("manuscript_import_cover_extraction_failed book_id=%s", book.id, exc_info=True)
     book.source_kind = "chapter_wise" if len(import_jobs) == 1 and not files else "batch_upload"
     touch_public_book_updated_at(book)
     if daily_words_added > 0:
@@ -1341,24 +1371,38 @@ async def get_book_overview(
     cached = await get_book_overview_cache(str(book.id), str(current_user.id), access_key, cache_version)
     if cached is not None:
         return BookOverviewOut(**cached)
-    book_payload = await book_out(db, book, current_user.id, collaborator)
+    progress = (
+        await db.execute(
+            select(ReadingProgress).where(
+                ReadingProgress.book_id == book.id,
+                ReadingProgress.user_id == current_user.id,
+            )
+        )
+    ).scalars().first()
+    intelligence_map = await chapter_intelligence_map(db, book, current_user)
+    book_payload = await book_out(db, book, current_user.id, collaborator, progress=progress)
     progress_payload = await build_reading_progress_payload(
         db,
         book=book,
         current_user=current_user,
         collaborator=collaborator,
+        progress=progress,
     )
     chapter_list_payload = await build_chapter_list_payload(
         db,
         book=book,
         current_user=current_user,
         collaborator=collaborator,
+        progress=progress,
+        intelligence_map=intelligence_map,
     )
     summary_collection_payload = await build_summary_collection_payload(
         db,
         book=book,
         current_user=current_user,
         collaborator=collaborator,
+        progress=progress,
+        intelligence_map=intelligence_map,
     )
     payload = BookOverviewOut(
         book=book_payload,
@@ -2265,6 +2309,7 @@ async def merge_book_characters(
     )
     await refresh_character_duplicate_suggestions(db, book_id=book.id)
     await db.commit()
+    await mark_book_cache_dirty(str(book.id))
     await db.refresh(merged)
     return {"merged": str(merged.id)}
 
@@ -2296,6 +2341,7 @@ async def partition_book_character(
 
     await refresh_character_duplicate_suggestions(db, book_id=book.id)
     await db.commit()
+    await mark_book_cache_dirty(str(book.id))
     return {
         "replaced": str(character_id),
         "created": [str(item.id) for item in created],
@@ -2606,7 +2652,8 @@ async def accept_relationship_candidate(
     if body.sentiment is not None and not -1.0 <= body.sentiment <= 1.0:
         raise HTTPException(400, "Sentiment must be between -1.0 and 1.0")
 
-    relationship = CharacterRelationship(
+    relationship, _ = await upsert_relationship_timeline_state(
+        db,
         book_id=book.id,
         character_a_id=relationship_a.id,
         character_b_id=relationship_b.id,
@@ -2616,7 +2663,6 @@ async def accept_relationship_candidate(
         from_chapter=from_chapter,
         to_chapter=body.to_chapter,
     )
-    db.add(relationship)
     candidate.matched_character_a_id = relationship_a.id
     candidate.matched_character_b_id = relationship_b.id
     candidate.status = CHARACTER_RELATIONSHIP_CANDIDATE_ACCEPTED
@@ -2631,6 +2677,7 @@ async def accept_relationship_candidate(
         details={"relationship_candidate_id": str(candidate.id), "side": "b"},
     )
     await db.commit()
+    await mark_book_cache_dirty(str(book.id))
     await db.refresh(relationship)
     return _serialize_relationship_record(relationship)
 
@@ -2697,6 +2744,7 @@ async def accept_character_duplicate_suggestion(
     )
     await refresh_character_duplicate_suggestions(db, book_id=book.id)
     await db.commit()
+    await mark_book_cache_dirty(str(book.id))
     return {"merged": str(merged.id), "suggestion_id": str(suggestion.id)}
 
 
@@ -2741,7 +2789,8 @@ async def create_book_relationship(
     if body.sentiment is not None and not -1.0 <= body.sentiment <= 1.0:
         raise HTTPException(400, "Sentiment must be between -1.0 and 1.0")
 
-    relationship = CharacterRelationship(
+    relationship, _ = await upsert_relationship_timeline_state(
+        db,
         book_id=book.id,
         character_a_id=relationship_a.id,
         character_b_id=relationship_b.id,
@@ -2751,8 +2800,8 @@ async def create_book_relationship(
         from_chapter=body.from_chapter,
         to_chapter=body.to_chapter,
     )
-    db.add(relationship)
     await db.commit()
+    await mark_book_cache_dirty(str(book.id))
     await db.refresh(relationship)
     return _serialize_relationship_record(relationship)
 
@@ -2778,17 +2827,40 @@ async def update_book_relationship(
         raise HTTPException(400, "Sentiment must be between -1.0 and 1.0")
     _validate_relationship_window(body.from_chapter, body.to_chapter)
 
-    cast(Any, relationship).rel_type = rel_type
-    relationship.sentiment = body.sentiment
-    relationship.description = clean_optional_text(body.description)
-    if body.from_chapter is not None:
-        relationship.from_chapter = body.from_chapter
-    relationship.to_chapter = body.to_chapter
-
+    relationship, _ = await upsert_relationship_timeline_state(
+        db,
+        book_id=book.id,
+        character_a_id=relationship.character_a_id,
+        character_b_id=relationship.character_b_id,
+        rel_type=rel_type,
+        sentiment=body.sentiment,
+        description=clean_optional_text(body.description),
+        from_chapter=body.from_chapter or relationship.from_chapter,
+        to_chapter=body.to_chapter,
+        relationship_id=relationship.id,
+    )
     await db.commit()
+    await mark_book_cache_dirty(str(book.id))
     await db.refresh(relationship)
 
     return _serialize_relationship_record(relationship)
+
+
+@router.post("/{book_id}/relationships/repair")
+async def repair_book_relationship_timelines(
+    book_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
+    if book.mode != "author":
+        raise HTTPException(400, "Relationship repair is only available in author mode")
+
+    payload = await repair_relationship_timelines(db, book_id=book.id)
+    await db.commit()
+    await mark_book_cache_dirty(str(book.id))
+    return payload
 
 
 @router.delete("/{book_id}/relationships/{relationship_id}")
@@ -2808,6 +2880,7 @@ async def delete_book_relationship(
 
     await db.delete(relationship)
     await db.commit()
+    await mark_book_cache_dirty(str(book.id))
     return {"deleted": str(relationship_id)}
 
 

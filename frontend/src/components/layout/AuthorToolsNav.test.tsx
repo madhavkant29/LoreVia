@@ -77,8 +77,8 @@ describe("AuthorToolsNav", () => {
 
     const overviewHelper = view.querySelector('[data-testid="author-nav-helper-overview"]')
     expect(overviewHelper?.textContent).toContain("progress, next steps")
-    expect(overviewHelper?.className ?? "").toContain("group-hover/rail:max-h-20")
-    expect(overviewHelper?.className ?? "").toContain("group-focus-within/rail:opacity-100")
+    expect(overviewHelper?.className ?? "").toContain("group-hover/navwrap:max-h-20")
+    expect(overviewHelper?.className ?? "").toContain("group-focus-within/navwrap:opacity-100")
   })
 
   it("does not leak helper copy for collaborator-restricted items", () => {
@@ -124,8 +124,8 @@ describe("AuthorToolsNav", () => {
     const view = renderAuthorToolsNav({ railSize: "compact" })
 
     const nav = view.querySelector('[data-testid="author-tools-nav-rail"]')
-    expect(nav?.className ?? "").toContain("w-[4.35rem]")
-    expect(nav?.className ?? "").toContain("hover:w-[16.5rem]")
+    expect(nav?.className ?? "").toContain("xl:w-[4.35rem]")
+    expect(nav?.className ?? "").toContain("xl:group-hover/navwrap:w-[16.5rem]")
   })
 
   it("shows author sections for a free owner when the book is in author mode", () => {
@@ -140,9 +140,47 @@ describe("AuthorToolsNav", () => {
     expect(view.querySelector('[data-testid="author-nav-item-manuscript"]')?.textContent).toContain("Manuscript Editor")
     expect(view.querySelector('[data-testid="author-nav-item-characters"]')?.textContent).toContain("Character Bible")
   })
+
+  it("renders the author lens entry in the shared author rail", () => {
+    mockBaseState()
+
+    const view = renderAuthorToolsNav()
+
+    expect(view.querySelector('[data-testid="author-nav-item-author-loop"]')?.textContent).toContain("Author Lens")
+  })
+
+  it("keeps reader-shell collaborators on reader navigation only", () => {
+    mockBaseState({
+      collaborationRole: "beta_reader",
+      workspaceShell: "reader",
+      collaborationPermissions: {
+        can_edit_manuscript: false,
+        can_run_ai_scans: false,
+        can_view_story_bible: false,
+        can_comment: true,
+        can_export: false,
+        can_view_selected_chapters_only: true,
+      },
+    })
+
+    const view = renderAuthorToolsNav({ mode: "reader" })
+
+    expect(view.querySelector('[data-testid="author-nav-item-beta-feedback"]')?.textContent).toContain("Feedback")
+    expect(view.querySelector('[data-testid="author-nav-item-manuscript"]')).toBeNull()
+    expect(view.querySelector('[data-testid="author-nav-item-collaboration"]')).toBeNull()
+    expect(view.querySelector('[data-testid="author-nav-item-analysis"]')).toBeNull()
+  })
+
+  it("renders a chevron toggle for pinning the shared rail open", () => {
+    mockBaseState()
+
+    const view = renderAuthorToolsNav()
+
+    expect(view.querySelector('[data-testid="author-nav-rail-toggle"]')).not.toBeNull()
+  })
 })
 
-function renderAuthorToolsNav({ railSize }: { railSize?: "default" | "compact" } = {}) {
+function renderAuthorToolsNav({ railSize, mode = "author" }: { railSize?: "default" | "compact"; mode?: "reader" | "author" } = {}) {
   container = document.createElement("div")
   document.body.appendChild(container)
   root = createRoot(container)
@@ -154,7 +192,7 @@ function renderAuthorToolsNav({ railSize }: { railSize?: "default" | "compact" }
         active="overview"
         isDark={false}
         currentChapter={2}
-        mode="author"
+        mode={mode}
         variant="rail"
         railSize={railSize}
       />
@@ -168,10 +206,14 @@ function mockBaseState({
   tier = "pro",
   hasOwnAuthorAccess = true,
   collaborationPermissions = null,
+  collaborationRole = collaborationPermissions ? "editor" : null,
+  workspaceShell = "author",
 }: {
   tier?: string
   hasOwnAuthorAccess?: boolean
   collaborationPermissions?: CollaborationPermissions | null
+  collaborationRole?: string | null
+  workspaceShell?: "reader" | "author"
 } = {}) {
   useAuthStoreMock.mockImplementation((selector: (state: { user: { tier: string } | null }) => unknown) => selector({ user: tier ? { tier } : null }))
   canUseAuthorFeaturesMock.mockReturnValue(hasOwnAuthorAccess)
@@ -179,7 +221,8 @@ function mockBaseState({
     getQueryData: vi.fn().mockReturnValue(
       collaborationPermissions
         ? {
-            collaboration_role: "editor",
+            collaboration_role: collaborationRole,
+            workspace_shell: workspaceShell,
             collaboration_permissions: collaborationPermissions,
           }
         : null
@@ -188,7 +231,8 @@ function mockBaseState({
   useQueryMock.mockReturnValue({
     data: collaborationPermissions
       ? {
-          collaboration_role: "editor",
+          collaboration_role: collaborationRole,
+          workspace_shell: workspaceShell,
           collaboration_permissions: collaborationPermissions,
         }
       : null,

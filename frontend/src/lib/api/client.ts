@@ -9,22 +9,31 @@ export const apiClient = axios.create({
 })
 
 let refreshPromise: Promise<boolean> | null = null
+const AUTH_CSRF_COOKIE_NAME = "lorevia_csrf"
+const AUTH_CSRF_HEADER_NAME = "X-CSRF-Token"
 const ADMIN_CSRF_COOKIE_NAME = "lorevia_admin_csrf"
+const ADMIN_CSRF_HEADER_NAME = "X-Admin-CSRF-Token"
+const SAFE_HTTP_METHODS = new Set(["get", "head", "options"])
 
 function readCookie(name: string) {
   if (typeof document === "undefined") return null
   const prefix = `${name}=`
-  const cookie = document.cookie
+  const cookies = document.cookie
     .split(";")
     .map((part) => part.trim())
-    .find((part) => part.startsWith(prefix))
+    .filter((part) => part.startsWith(prefix))
+  const cookie = cookies.at(-1)
   return cookie ? decodeURIComponent(cookie.slice(prefix.length)) : null
 }
 
 async function refreshAccessToken(): Promise<boolean> {
+  const csrfToken = readCookie(AUTH_CSRF_COOKIE_NAME)
   if (!refreshPromise) {
     refreshPromise = axios
-      .post(`${API_BASE}/auth/refresh`, null, { withCredentials: true })
+      .post(`${API_BASE}/auth/refresh`, null, {
+        withCredentials: true,
+        headers: csrfToken ? { [AUTH_CSRF_HEADER_NAME]: csrfToken } : undefined,
+      })
       .then(() => true)
       .catch(() => {
         return false
@@ -49,12 +58,21 @@ apiClient.interceptors.request.use((config) => {
   }
   const method = String(config.method ?? "get").toLowerCase()
   const url = String(config.url ?? "")
-  if (url.startsWith("/admin/") && !["get", "head", "options"].includes(method)) {
+  if (!SAFE_HTTP_METHODS.has(method)) {
+    const csrfToken = readCookie(AUTH_CSRF_COOKIE_NAME)
+    if (csrfToken) {
+      config.headers.set?.(AUTH_CSRF_HEADER_NAME, csrfToken)
+      if (!config.headers.set) {
+        config.headers[AUTH_CSRF_HEADER_NAME] = csrfToken
+      }
+    }
+  }
+  if (url.startsWith("/admin/") && !SAFE_HTTP_METHODS.has(method)) {
     const csrfToken = readCookie(ADMIN_CSRF_COOKIE_NAME)
     if (csrfToken) {
-      config.headers.set?.("X-Admin-CSRF-Token", csrfToken)
+      config.headers.set?.(ADMIN_CSRF_HEADER_NAME, csrfToken)
       if (!config.headers.set) {
-        config.headers["X-Admin-CSRF-Token"] = csrfToken
+        config.headers[ADMIN_CSRF_HEADER_NAME] = csrfToken
       }
     }
   }

@@ -185,6 +185,12 @@ async def remove_manuscript_annotation(
     book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
     if collaborator and not collaboration_can_comment(collaborator):
         raise HTTPException(403, "This share cannot remove manuscript comments.")
+    if collaborator is not None:
+        annotation = await db.get(ManuscriptAnnotation, annotation_id)
+        if annotation is None or annotation.book_id != book.id:
+            raise HTTPException(404, "Annotation not found")
+        if not collaboration_allows_chapter(collaborator, annotation.chapter_number):
+            raise HTTPException(403, "This share cannot remove comments from that chapter.")
     if collaborator is None:
         require_author_access(current_user)
     await delete_manuscript_annotation(

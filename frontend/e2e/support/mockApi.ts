@@ -1978,6 +1978,7 @@ const voiceConsistency = {
   },
   retrieved_passages: [],
   characters_reviewed: ["Nora Vale"],
+  warnings: [],
   character_matches: [
     {
       character_name: "Nora Vale",
@@ -1987,6 +1988,58 @@ const voiceConsistency = {
       strongest_signals: ["more formal phrasing", "heavier exposition"],
       closest_other_character: "Kael",
       closest_other_score: 44,
+    },
+  ],
+}
+
+const selectedCharacterVoiceConsistency = {
+  review: {
+    overall_verdict: "Gregor's voice holds together, but one beat drifts toward explanation over reaction.",
+    issues: [
+      {
+        character_name: "Gregor",
+        severity: "moderate",
+        title: "Gregor slips into abstract explanation",
+        description: "The passage briefly trades Gregor's self-effacing immediacy for a cooler, more analytical sentence.",
+        evidence: "Gregor usually sounds careful and inward, even when he is rationalizing what the family needs from him.",
+        suggestion: "Keep the line closer to Gregor's anxious interior voice and shorten the explanatory phrasing.",
+        intentionality_prompt: "If the shift is intentional, add a clearer cue that Gregor is distancing himself from the moment.",
+      },
+    ],
+  },
+  retrieved_passages: [],
+  characters_reviewed: ["Gregor"],
+  warnings: [],
+  character_matches: [
+    {
+      character_name: "Gregor",
+      match_score: 74,
+      baseline_sample_size: 5,
+      sample_dialogue_count: 2,
+      strongest_signals: ["careful cadence", "self-effacing phrasing"],
+      closest_other_character: "Grete",
+      closest_other_score: 38,
+    },
+  ],
+}
+
+const weakAttributionVoiceConsistency = {
+  review: {
+    overall_verdict: "Grete's emotional line still reads coherently, but the attribution signal is thin in this excerpt.",
+    issues: [],
+  },
+  retrieved_passages: [],
+  characters_reviewed: ["Grete"],
+  warnings: ["Dialogue could not be confidently attributed to Grete; the review used the full submitted passage instead."],
+  character_matches: [
+    {
+      character_name: "Grete",
+      match_score: 61,
+      baseline_sample_size: 4,
+      sample_dialogue_count: 1,
+      strongest_signals: ["higher emotional pressure", "broader phrasing"],
+      closest_other_character: "Gregor",
+      closest_other_score: 41,
     },
   ],
 }
@@ -2975,6 +3028,13 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
     }
 
     if (path === "/api/v1/intelligence/book-1/advisor/voice-consistency" && method === "POST") {
+      const payload = route.request().postDataJSON() as { character_id?: string } | null
+      if (payload?.character_id === "char-gregor") {
+        return json(route, selectedCharacterVoiceConsistency)
+      }
+      if (payload?.character_id === "char-grete") {
+        return json(route, weakAttributionVoiceConsistency)
+      }
       return json(route, voiceConsistency)
     }
 

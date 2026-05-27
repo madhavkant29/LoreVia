@@ -36,12 +36,13 @@ describe("AuthorWorkspaceDashboard", () => {
     root = null
   })
 
-  it("renders the hero, compact story pulse, and revision hub by default", () => {
+  it("renders the hero, compact story pulse, and author overview by default", () => {
     const view = renderDashboard()
 
     expect(view.textContent).toContain("Current project")
     expect(view.textContent).toContain("Story pulse")
-    expect(view.textContent).toContain("Revision hub full")
+    expect(view.textContent).toContain("Revision preview")
+    expect(view.textContent).toContain("Your author command center")
     expect(view.textContent).not.toContain("Add planning item")
   })
 
@@ -70,7 +71,7 @@ describe("AuthorWorkspaceDashboard", () => {
     const reportLink = Array.from(view.querySelectorAll("a")).find((link) => link.textContent?.includes("View full report"))
     expect(reportLink?.getAttribute("href")).toBe("/book-1/analysis")
 
-    await clickButton(view, "Open manuscript editor")
+    await clickButton(view, "Open Manuscript Editor")
     expect(onOpenManuscript).toHaveBeenCalledOnce()
 
     await clickButton(view, "Open relationship map")

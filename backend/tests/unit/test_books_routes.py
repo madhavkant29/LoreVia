@@ -416,7 +416,7 @@ async def test_update_mode_and_events_routes(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_update_mode_allows_editor_collaborator_and_blocks_read_only_share(monkeypatch):
+async def test_update_mode_blocks_all_collaborators(monkeypatch):
     owner = uuid.uuid4()
     collaborator_user = _user(tier="free")
     book = _book(user_id=owner, mode="reader", source_kind=None)
@@ -436,12 +436,11 @@ async def test_update_mode_allows_editor_collaborator_and_blocks_read_only_share
     monkeypatch.setattr(books, "mark_book_cache_dirty", lambda book_id: cache_dirty["calls"].append(book_id) or _async_value(None)())
 
     monkeypatch.setattr(books, "get_book_with_collaboration_access", _async_value((book, editor_share)))
-    payload = await books.update_book_mode(book.id, BookModeBody(mode="author"), db=db, current_user=collaborator_user)
-    assert payload["mode"] == "author"
-    assert payload["collaboration_role"] == "coauthor"
-    assert book.mode == "author"
-    assert book.source_kind == "single_upload"
-    assert cache_dirty["calls"] == [str(book.id)]
+    with pytest.raises(HTTPException) as exc:
+        await books.update_book_mode(book.id, BookModeBody(mode="author"), db=db, current_user=collaborator_user)
+    assert exc.value.status_code == 403
+    assert exc.value.detail == "Only the book owner can use this route."
+    assert cache_dirty["calls"] == []
 
     book.mode = "reader"
     book.source_kind = None
@@ -449,7 +448,7 @@ async def test_update_mode_allows_editor_collaborator_and_blocks_read_only_share
     with pytest.raises(HTTPException) as exc:
         await books.update_book_mode(book.id, BookModeBody(mode="author"), db=db, current_user=collaborator_user)
     assert exc.value.status_code == 403
-    assert exc.value.detail == "This share cannot edit the manuscript."
+    assert exc.value.detail == "Only the book owner can use this route."
 
 
 @pytest.mark.asyncio
@@ -743,6 +742,106 @@ async def test_import_manuscript_content_preserves_source_chapter_count_for_long
 
 
 @pytest.mark.asyncio
+async def test_import_manuscript_content_preserves_images_and_extracts_pdf_cover(monkeypatch):
+    user = _user()
+    book = _book(user_id=user.id, mode="reader", total_chapters=0, cover_s3_key=None)
+    chapter = SimpleNamespace(id=uuid.uuid4(), s3_key="chapters/1.json", title="Opening")
+    processed_payloads: list[dict] = []
+    uploaded_cover: dict[str, object] = {}
+
+    async def _fake_process(_db, _book, payload):
+        processed_payloads.append(payload)
+        return None
+
+    async def _fake_replace(*_args, **_kwargs):
+        return None
+
+    async def _fake_analyse(*_args, **_kwargs):
+        return None
+
+    async def _fake_report(_db, _book, chapter_number):
+        return ChapterConsistencyReport(
+            chapter_number=chapter_number,
+            chapter_title=f"Chapter {chapter_number}",
+            summary="Good",
+            new_characters=[],
+            relationship_changes=[],
+            plot_threads_opened=[],
+            plot_threads_resolved=[],
+            continuity_flags=[],
+        )
+
+    monkeypatch.setattr(books, "get_owned_book", _async_value(book))
+    monkeypatch.setattr(books, "require_author_access", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(books, "next_chapter_number", _async_value(1))
+    monkeypatch.setattr(books, "normalize_book_work_type", lambda *_args, **_kwargs: "novel")
+    monkeypatch.setattr(
+        books,
+        "parse_book_upload_for_ingestion",
+        _async_value(
+            {
+                "chapters": [{
+                    "number": 1,
+                    "title": "Opening",
+                    "text": "Start [[IMAGE:img-1]] End",
+                    "images": [{"marker": "[[IMAGE:img-1]]", "bytes": b"img-bytes", "content_type": "image/png"}],
+                }],
+                "screenplay_payload": None,
+                "parser_diagnostics": None,
+            }
+        ),
+    )
+    monkeypatch.setattr(books, "_process_chapter", _fake_process)
+    monkeypatch.setattr(books, "extract_novel_scene_candidates", lambda **_kwargs: [])
+    monkeypatch.setattr(books, "replace_chapter_novel_scenes", _fake_replace)
+    monkeypatch.setattr(books, "add_daily_word_progress", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(books.storage, "download_book", lambda _key: b"stored text")
+    monkeypatch.setattr(books, "deserialize_manuscript_content", lambda _raw: {"text": "stored chapter text"})
+    monkeypatch.setattr(books, "analyse_chapter", _fake_analyse)
+    monkeypatch.setattr(books, "build_chapter_consistency_report", _fake_report)
+    monkeypatch.setattr(books, "build_chapter_report_notification", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(books, "build_continuity_risk_notifications", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(books, "sync_chapter_content_from_novel_scenes", _fake_replace)
+    monkeypatch.setattr(books, "invalidate_advisor_caches_for_book", _async_value(None))
+    monkeypatch.setattr("app.parsers.pdf_parser.extract_first_page_cover", lambda _raw: (b"cover-bytes", "image/png"))
+    monkeypatch.setattr(
+        books.storage,
+        "upload_binary",
+        lambda key, raw, content_type=None: uploaded_cover.setdefault("payload", (key, raw, content_type)) or key,
+    )
+
+    db = _FakeDB(
+        execute_values=[
+            _Result(scalar=None),
+            _Result(scalar=chapter),
+            _Result(all_rows=[]),
+        ],
+        scalar_values=[1],
+    )
+    payload = await books.import_manuscript_content(
+        book.id,
+        text=None,
+        html=None,
+        title=None,
+        files=[_upload("story.pdf", b"%PDF-1.4\nmock body\n%%EOF")],
+        work_type=None,
+        chapter_number=None,
+        replace_existing="false",
+        chunk_long_documents="false",
+        split_into_chapters="true",
+        db=db,
+        current_user=user,
+        _=None,
+    )
+
+    assert payload.imported_chapters == [1]
+    assert processed_payloads[0]["images"][0]["marker"] == "[[IMAGE:img-1]]"
+    assert uploaded_cover["payload"][1] == b"cover-bytes"
+    assert uploaded_cover["payload"][2] == "image/png"
+    assert book.cover_s3_key == uploaded_cover["payload"][0]
+
+
+@pytest.mark.asyncio
 async def test_series_routes_and_user_stats(monkeypatch):
     user = _user()
     book = _book(user_id=user.id)
@@ -1010,6 +1109,9 @@ async def test_get_book_overview_and_writer_workspace_use_cache(monkeypatch):
                 work_type=book.work_type,
                 status=book.status,
                 mode=book.mode,
+                workspace_shell=book.mode,
+                access_class="owner",
+                can_switch_workspace_mode=True,
                 source_kind=book.source_kind,
                 preserve_chapter_numbers=False,
                 preserve_source_chapters=False,

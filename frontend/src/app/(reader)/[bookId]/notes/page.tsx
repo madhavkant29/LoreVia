@@ -95,6 +95,8 @@ export default function BookNotesPage() {
             bookData={book}
             title="Notes workflow"
             description="Keep the vault tree, manuscript, export studio, and continuity tools one click away while you edit."
+            variant="rail"
+            railSize="compact"
           />
 
           <div className="space-y-8">

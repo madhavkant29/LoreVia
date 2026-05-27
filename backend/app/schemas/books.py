@@ -36,6 +36,8 @@ CollaborationRoleLiteral = Literal[
     "reader_only",
     "co_writer",
 ]
+BookAccessClassLiteral = Literal["owner", "author_collaborator", "reader_collaborator"]
+WorkspaceShellLiteral = Literal["author", "reader"]
 TagTargetLiteral = Literal[
     "chapter",
     "scene",
@@ -58,6 +60,9 @@ class BookOut(BaseModel):
     work_type: str
     status: str
     mode: str
+    workspace_shell: WorkspaceShellLiteral = "reader"
+    access_class: BookAccessClassLiteral = "owner"
+    can_switch_workspace_mode: bool = True
     source_kind: str
     preserve_chapter_numbers: bool = False
     preserve_source_chapters: bool = False

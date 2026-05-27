@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import re
+import uuid
 from typing import Any
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.user import User
 
 
 DEVICE_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{16,128}$")
@@ -10,6 +16,25 @@ DEVICE_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{16,128}$")
 
 def normalize_email(email: str) -> str:
     return email.strip().lower()
+
+
+def parse_auth_subject_uuid(subject: str) -> uuid.UUID:
+    try:
+        return uuid.UUID(str(subject))
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise ValueError("Invalid auth subject") from exc
+
+
+async def get_user_for_auth_subject(db: AsyncSession, subject: str) -> User | None:
+    auth_subject_id = parse_auth_subject_uuid(subject)
+    user = await db.get(User, auth_subject_id)
+    if user is not None:
+        return user
+    return (
+        await db.execute(
+            select(User).where(User.supabase_auth_id == auth_subject_id)
+        )
+    ).scalar_one_or_none()
 
 
 def password_is_valid(password: str, email: str) -> bool:

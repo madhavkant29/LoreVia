@@ -91,7 +91,7 @@ class Settings(BaseSettings):
     # Auth
     JWT_SECRET: str
     JWT_ALGORITHM: str = "HS256"
-    JWT_EXPIRE_MINUTES: int = 1440
+    JWT_EXPIRE_MINUTES: int = 15
     JWT_REFRESH_EXPIRE_DAYS: int = 30
 
     # Paddle
@@ -218,7 +218,14 @@ def cors_middleware_options() -> dict[str, Any]:
         "allow_origins": cors_origins(),
         "allow_credentials": True,
         "allow_methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        "allow_headers": ["Authorization", "Content-Type", "Accept", "Origin"],
+        "allow_headers": [
+            "Authorization",
+            "Content-Type",
+            "Accept",
+            "Origin",
+            "X-CSRF-Token",
+            "X-Admin-CSRF-Token",
+        ],
     }
     if settings.DEBUG:
         options["allow_origin_regex"] = LOCALHOST_CORS_ORIGIN_REGEX

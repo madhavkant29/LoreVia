@@ -23,7 +23,8 @@ from sqlalchemy.orm import selectinload
 
 from app.core.database import AsyncSessionLocal
 from app.models.book import Book, Chapter
-from app.models.character import Character, CharacterCandidate, CharacterRelationshipCandidate
+from app.models.character import Character, CharacterCandidate, CharacterMention, CharacterRelationshipCandidate
+from app.engine.character.extractor import verify_character_candidate_personhood
 from app.utils.character_utils import (
     CHARACTER_CANDIDATE_PENDING,
     CHARACTER_DUPLICATE_PENDING,
@@ -189,6 +190,103 @@ async def _load_pending_relationship_candidates(db, book_id: uuid.UUID) -> list[
     ).scalars().all()
 
 
+async def _load_character_mentions(db, book_id: uuid.UUID) -> dict[uuid.UUID, list[CharacterMention]]:
+    rows = (
+        await db.execute(
+            select(CharacterMention)
+            .where(CharacterMention.book_id == book_id, CharacterMention.matched_character_id.is_not(None))
+            .order_by(CharacterMention.chapter_number.asc(), CharacterMention.created_at.asc())
+        )
+    ).scalars().all()
+    grouped: dict[uuid.UUID, list[CharacterMention]] = {}
+    for row in rows:
+        if row.matched_character_id is None:
+            continue
+        grouped.setdefault(row.matched_character_id, []).append(row)
+    return grouped
+
+
+def _chapter_excerpt(text: str, names: list[str]) -> str | None:
+    from app.utils.character_utils import _find_name_occurrences
+
+    for candidate in names:
+        occurrences = _find_name_occurrences(text, candidate)
+        if occurrences <= 0:
+            continue
+        index = text.casefold().find(candidate.casefold())
+        if index < 0:
+            index = 0
+        excerpt = " ".join(text[max(0, index - 90): min(len(text), index + 180)].split()).strip()
+        if excerpt:
+            return excerpt
+    return None
+
+
+async def _repair_verification(
+    character: Character,
+    *,
+    mention_rows: list[CharacterMention],
+    chapter_rows: list[tuple[int, str]],
+) -> dict[str, Any]:
+    names = _candidate_names(character)
+    snippets: list[tuple[int, str, CharacterMention | None]] = []
+    for row in mention_rows:
+        text = " ".join(str(row.mention_text or "").split()).strip()
+        if text:
+            snippets.append((int(row.chapter_number or 0), text, row))
+    if not snippets:
+        for chapter_number, text in chapter_rows:
+            excerpt = _chapter_excerpt(text, names)
+            if excerpt:
+                snippets.append((int(chapter_number or 0), excerpt, None))
+            if len(snippets) >= 6:
+                break
+
+    accepted_chapters: list[int] = []
+    review_chapters: list[int] = []
+    rejected_chapters: list[int] = []
+    row_results: list[dict[str, Any]] = []
+    for chapter_number, snippet, row in snippets[:8]:
+        verifier = await verify_character_candidate_personhood(
+            snippet,
+            character.name,
+            aliases=list(character.aliases or []),
+            entity_type="person",
+        )
+        final = verifier.get("final") if isinstance(verifier, dict) else {}
+        band = str(final.get("confidence_band") or "").strip() if isinstance(final, dict) else ""
+        row_results.append(
+            {
+                "chapter_number": chapter_number,
+                "snippet": snippet,
+                "band": band,
+                "verifier": verifier,
+                "row": row,
+            }
+        )
+        if band == "accept":
+            accepted_chapters.append(chapter_number)
+        elif band == "review":
+            review_chapters.append(chapter_number)
+        else:
+            rejected_chapters.append(chapter_number)
+
+    if accepted_chapters and not rejected_chapters:
+        overall_band = "accept"
+    elif accepted_chapters or review_chapters:
+        overall_band = "review"
+    else:
+        overall_band = "reject" if row_results else "review"
+
+    return {
+        "overall_band": overall_band,
+        "accepted_chapters": sorted({chapter for chapter in accepted_chapters if chapter > 0}),
+        "review_chapters": sorted({chapter for chapter in review_chapters if chapter > 0}),
+        "rejected_chapters": sorted({chapter for chapter in rejected_chapters if chapter > 0}),
+        "rows": row_results,
+    }
+
+
 async def build_repair_plan(
     book_id: uuid.UUID,
     *,
@@ -220,9 +318,16 @@ async def build_repair_plan(
 
         planned_demotions: list[str] = []
         skipped_protected_demotions: list[str] = []
+        mention_rows_by_character = await _load_character_mentions(session, book_id)
+        chapter_rows = await _load_chapter_rows(session, book_id)
         for character in characters:
+            verification = await _repair_verification(
+                character,
+                mention_rows=mention_rows_by_character.get(character.id, []),
+                chapter_rows=chapter_rows,
+            )
             is_noise, _reasons = _is_obvious_noise_character(character)
-            if not is_noise:
+            if verification["overall_band"] != "reject" and not is_noise:
                 continue
             if _is_protected_character(character):
                 skipped_protected_demotions.append(str(character.id))
@@ -230,7 +335,6 @@ async def build_repair_plan(
             if allow_demote_obvious_noise:
                 planned_demotions.append(str(character.id))
 
-        chapter_rows = await _load_chapter_rows(session, book_id)
         candidates_by_key = {
             character.id: _candidate_names(character)
             for character in characters
@@ -242,8 +346,19 @@ async def build_repair_plan(
             candidates_by_key=candidates_by_key,
             upto_chapter=int(book.total_chapters or 0) or None,
         )
+        first_chapter_updates: dict[str, int] = {str(key): int(value) for key, value in first_chapters.items()}
         last_seen_updates: dict[str, int] = {}
         for character in characters:
+            verification = await _repair_verification(
+                character,
+                mention_rows=mention_rows_by_character.get(character.id, []),
+                chapter_rows=chapter_rows,
+            )
+            verified_hits = verification["accepted_chapters"] or verification["review_chapters"]
+            if verified_hits:
+                first_chapter_updates[str(character.id)] = verified_hits[0]
+                last_seen_updates[str(character.id)] = verified_hits[-1]
+                continue
             chapter_hits = _chapter_mentions(chapter_rows, _candidate_names(character))
             if chapter_hits:
                 last_seen_updates[str(character.id)] = chapter_hits[-1]
@@ -257,7 +372,7 @@ async def build_repair_plan(
             planned_demotions=planned_demotions,
             skipped_protected_merge_pairs=skipped_protected_merge_pairs,
             skipped_protected_demotions=skipped_protected_demotions,
-            updated_first_chapters={str(key): int(value) for key, value in first_chapters.items()},
+            updated_first_chapters=first_chapter_updates,
             updated_last_seen_chapters=last_seen_updates,
             pending_duplicate_suggestions=sum(1 for item in suggestions if item.status == CHARACTER_DUPLICATE_PENDING),
             pending_relationship_candidates=len(relationship_candidates),
@@ -305,11 +420,18 @@ async def apply_repair_plan(
         await session.flush()
 
         characters = await _load_characters(session, book_id)
+        mention_rows_by_character = await _load_character_mentions(session, book_id)
+        chapter_rows = await _load_chapter_rows(session, book_id)
         demoted_character_ids: list[str] = []
         skipped_protected_demotions: list[str] = []
         for character in characters:
+            verification = await _repair_verification(
+                character,
+                mention_rows=mention_rows_by_character.get(character.id, []),
+                chapter_rows=chapter_rows,
+            )
             is_noise, reasons = _is_obvious_noise_character(character)
-            if not is_noise:
+            if verification["overall_band"] != "reject" and not is_noise:
                 continue
             if _is_protected_character(character):
                 skipped_protected_demotions.append(str(character.id))
@@ -328,6 +450,14 @@ async def apply_repair_plan(
                 confidence=0,
                 reason_codes=["repair_demoted_noise", *list(reasons)],
                 evidence={
+                    "verifier": {
+                        "final": {
+                            "confidence_band": verification["overall_band"],
+                            "accepted_chapters": verification["accepted_chapters"],
+                            "review_chapters": verification["review_chapters"],
+                            "rejected_chapters": verification["rejected_chapters"],
+                        }
+                    },
                     "repair_source": {
                         "character_id": str(character.id),
                         "mention_count": int(character.mention_count or 0),
@@ -342,6 +472,7 @@ async def apply_repair_plan(
         await session.flush()
 
         characters = await _load_characters(session, book_id)
+        mention_rows_by_character = await _load_character_mentions(session, book_id)
         candidates_by_key = {
             character.id: _candidate_names(character)
             for character in characters
@@ -353,15 +484,20 @@ async def apply_repair_plan(
             candidates_by_key=candidates_by_key,
             upto_chapter=int(book.total_chapters or 0) or None,
         )
-        chapter_rows = await _load_chapter_rows(session, book_id)
         first_chapter_recomputes: dict[str, int] = {}
         last_seen_recomputes: dict[str, int] = {}
         for character in characters:
-            first = first_chapters.get(character.id)
+            verification = await _repair_verification(
+                character,
+                mention_rows=mention_rows_by_character.get(character.id, []),
+                chapter_rows=chapter_rows,
+            )
+            verified_hits = verification["accepted_chapters"] or verification["review_chapters"]
+            first = verified_hits[0] if verified_hits else first_chapters.get(character.id)
             if first and first < int(character.first_chapter or first):
                 character.first_chapter = int(first)
                 first_chapter_recomputes[str(character.id)] = int(first)
-            hits = _chapter_mentions(chapter_rows, _candidate_names(character))
+            hits = verified_hits or _chapter_mentions(chapter_rows, _candidate_names(character))
             if hits:
                 character.last_seen_chapter = hits[-1]
                 last_seen_recomputes[str(character.id)] = hits[-1]
@@ -372,7 +508,21 @@ async def apply_repair_plan(
             metadata = dict(character.analysis_metadata or {})
             metadata["repair_status"] = "recomputed"
             metadata["normalized_name"] = normalize_character_name(character.name)
+            metadata["repair_verifier"] = {
+                "confidence_band": verification["overall_band"],
+                "accepted_chapters": verification["accepted_chapters"],
+                "review_chapters": verification["review_chapters"],
+                "rejected_chapters": verification["rejected_chapters"],
+            }
             character.analysis_metadata = metadata
+
+            for item in verification["rows"]:
+                row = item.get("row")
+                if row is None:
+                    continue
+                merged_evidence = dict(row.evidence or {})
+                merged_evidence["repair_verifier"] = item.get("verifier")
+                row.evidence = merged_evidence
 
         refreshed = await refresh_character_duplicate_suggestions(session, book_id=book_id, characters=characters)
         relationship_candidates_after = await _load_pending_relationship_candidates(session, book_id)

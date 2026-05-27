@@ -36,24 +36,24 @@ const ROLE_OPTIONS: Array<{ value: CollaborationRole; label: string; detail: str
 const ROLE_PRESETS: Record<CollaborationRole, CollaborationPermissions> = {
   viewer: {
     can_edit_manuscript: false,
-    can_view_story_bible: true,
-    can_run_ai_scans: true,
+    can_view_story_bible: false,
+    can_run_ai_scans: false,
     can_export: false,
     can_comment: false,
     can_view_selected_chapters_only: true,
   },
   reader_only: {
     can_edit_manuscript: false,
-    can_view_story_bible: true,
-    can_run_ai_scans: true,
+    can_view_story_bible: false,
+    can_run_ai_scans: false,
     can_export: false,
     can_comment: false,
     can_view_selected_chapters_only: true,
   },
   commenter: {
     can_edit_manuscript: false,
-    can_view_story_bible: true,
-    can_run_ai_scans: true,
+    can_view_story_bible: false,
+    can_run_ai_scans: false,
     can_export: false,
     can_comment: true,
     can_view_selected_chapters_only: true,
@@ -123,6 +123,18 @@ const DEFAULT_SCOPE: CollaborationScope = {
   reader_confusion_report: true,
 }
 
+function scopeForRole(role: CollaborationRole, currentScope: CollaborationScope): CollaborationScope {
+  if (role === "viewer" || role === "reader_only" || role === "commenter" || role === "beta_reader") {
+    return {
+      ...currentScope,
+      character_bible: false,
+      continuity_report: false,
+      reader_confusion_report: false,
+    }
+  }
+  return currentScope
+}
+
 function roleMeta(role: CollaborationRole | string) {
   return ROLE_OPTIONS.find((option) => option.value === role)
 }
@@ -187,7 +199,7 @@ export default function CollaborationPage() {
   const [email, setEmail] = useState("")
   const [displayName, setDisplayName] = useState("")
   const [role, setRole] = useState<CollaborationRole>("beta_reader")
-  const [scope, setScope] = useState<CollaborationScope>(DEFAULT_SCOPE)
+  const [scope, setScope] = useState<CollaborationScope>(scopeForRole("beta_reader", DEFAULT_SCOPE))
   const [permissions, setPermissions] = useState<CollaborationPermissions>({ ...ROLE_PRESETS.beta_reader })
   const [betaForm, setBetaForm] = useState<BetaReadAssignmentCreateInput>({
     readerEmail: "",
@@ -215,6 +227,7 @@ export default function CollaborationPage() {
   )
 
   const activeRoleDetail = roleMeta(role)?.detail ?? ""
+  const readerShellRole = role === "viewer" || role === "reader_only" || role === "commenter" || role === "beta_reader"
 
   const updateScope = (patch: Partial<CollaborationScope>) => {
     setScope((current) => ({ ...current, ...patch }))
@@ -227,6 +240,7 @@ export default function CollaborationPage() {
   const onRoleChange = (nextRole: CollaborationRole) => {
     setRole(nextRole)
     setPermissions({ ...ROLE_PRESETS[nextRole] })
+    setScope((current) => scopeForRole(nextRole, current))
   }
 
   const submit = async () => {
@@ -312,8 +326,9 @@ export default function CollaborationPage() {
             bookData={book}
             title="Author workspace"
             description="Invite readers, editors, and co-writers into the right slices of the story."
-            mode={book?.mode ?? "author"}
+            mode={book?.workspace_shell ?? "author"}
             variant="rail"
+            railSize="compact"
           />
         </div>
 
@@ -430,9 +445,10 @@ export default function CollaborationPage() {
                       <span className={isDark ? "text-slate-200" : "text-slate-700"}>{label}</span>
                       <input
                         type="checkbox"
+                        disabled={readerShellRole}
                         checked={Boolean(scope[key as keyof CollaborationScope])}
                         onChange={(event) => updateScope({ [key]: event.target.checked } as Partial<CollaborationScope>)}
-                        className="h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
+                        className="h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500 disabled:cursor-not-allowed disabled:opacity-50"
                       />
                     </label>
                   ))}

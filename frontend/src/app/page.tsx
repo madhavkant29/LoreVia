@@ -505,16 +505,13 @@ export default function HomePage() {
             <div className="grid gap-10 lg:grid-cols-[0.85fr_1.25fr] lg:items-center">
               <Reveal>
                 <div>
-                  <p className="inline-flex rounded-full border border-white/8 bg-white/5 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.26em] text-[#8fcdbc]">
-                    AI-native writing workspace for fiction authors
-                  </p>
+                  
                   <h1 className="mt-8 max-w-2xl font-display text-5xl font-semibold leading-[0.95] tracking-[-0.045em] text-white md:text-[5.5rem]">
-                    Keep the manuscript coherent while you revise.
-                    <br />
-                    LoreVia <span className="text-[#67c6b4]">remembers every thread.</span>
+                    Revise coherently.                  <br />
+                     <span className="text-[#67c6b4]">LoreVia remembers every thread.</span>
                   </h1>
                   <p className="mt-6 max-w-xl text-lg leading-8 text-[#aeb9b3]">
-                    Draft chapters, organize scenes, export manuscripts, and let LoreVia build editable story memory for characters, relationships, timelines, continuity issues, and grounded answers from your draft.
+                    Draft, organize, export, and let LoreVia track your story’s characters, timelines, relationships, and continuity.
                   </p>
 
                   <div className="mt-8 flex flex-col gap-3 sm:flex-row">

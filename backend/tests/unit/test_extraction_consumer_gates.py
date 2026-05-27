@@ -4,6 +4,7 @@ from app.models.character import Character
 from app.workers.consumers.extraction_consumer import (
     _blocked_character_ids,
     _can_auto_save_character,
+    _character_save_decision,
     _should_update_existing_character,
 )
 
@@ -36,6 +37,13 @@ def test_can_auto_save_character_allows_multi_mention_person():
             "has_dialogue_or_action": True,
             "has_physical_description": False,
             "appears_multiple_times": True,
+            "verifier": {
+                "final": {
+                    "confidence_band": "accept",
+                    "is_person_like": True,
+                    "reasons": ["local_person_context"],
+                }
+            },
         },
     }
 
@@ -56,6 +64,13 @@ def test_can_auto_save_character_allows_strong_single_mention_with_profile_signa
             "has_dialogue_or_action": False,
             "has_physical_description": False,
             "appears_multiple_times": False,
+            "verifier": {
+                "final": {
+                    "confidence_band": "accept",
+                    "is_person_like": True,
+                    "reasons": ["single_token_has_grounded_action_context"],
+                }
+            },
         },
     }
 
@@ -95,6 +110,57 @@ def test_can_auto_save_character_blocks_role_only_reference_without_named_cluste
     }
 
     assert _can_auto_save_character(entity) is False
+
+
+def test_character_save_decision_rejects_review_band_from_mention_verifier():
+    entity = {
+        "name": "Mother",
+        "entity_type": "person",
+        "confidence": 0.88,
+        "evidence": {
+            "mention_count": 1,
+            "strong_mention_count": 1,
+            "has_dialogue_or_action": True,
+            "appears_multiple_times": False,
+            "verifier": {
+                "final": {
+                    "confidence_band": "review",
+                    "is_person_like": False,
+                    "reasons": ["ambiguous_single_token_mention"],
+                }
+            },
+        },
+    }
+
+    decision = _character_save_decision(entity)
+
+    assert decision.allowed is False
+    assert "mention_verifier_review" in decision.reasons
+
+
+def test_can_auto_save_character_allows_accept_band_from_mention_verifier():
+    entity = {
+        "name": "Grete",
+        "entity_type": "person",
+        "confidence": 0.94,
+        "evidence": {
+            "mention_count": 1,
+            "strong_mention_count": 1,
+            "has_dialogue_or_action": True,
+            "has_physical_description": False,
+            "appears_multiple_times": False,
+            "verifier": {
+                "final": {
+                    "confidence_band": "accept",
+                    "is_person_like": True,
+                    "reasons": ["llm_confirmed_person"],
+                }
+            },
+        },
+    }
+
+    assert _can_auto_save_character(entity) is True
+    assert _should_update_existing_character(entity) is True
 
 
 def test_should_update_existing_character_allows_borderline_but_supported_updates():

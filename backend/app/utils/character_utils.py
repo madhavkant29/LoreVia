@@ -55,6 +55,7 @@ from app.models.intelligence import (
     QuoteEntry,
     WikiEntry,
 )
+from app.utils.relationship_utils import repair_relationship_timelines
 
 BLEACH_EMPTY_TAGS: Any = frozenset()
 CHARACTER_CANDIDATE_PENDING = "pending"
@@ -640,6 +641,47 @@ def _character_entity_matches_cluster(candidate: Mapping[str, Any], cluster: Map
     return bool(candidate_keys & cluster_keys)
 
 
+def _cluster_verifier_summary(cluster: Sequence[Mapping[str, Any]]) -> dict[str, Any] | None:
+    verdicts: list[str] = []
+    reasons: list[str] = []
+    for item in cluster:
+        evidence = item.get("evidence") if isinstance(item.get("evidence"), dict) else {}
+        verifier = evidence.get("verifier") if isinstance(evidence, dict) else {}
+        final = verifier.get("final") if isinstance(verifier, dict) else {}
+        if not isinstance(final, dict):
+            continue
+        verdict = str(final.get("confidence_band") or "").strip()
+        if verdict:
+            verdicts.append(verdict)
+        for reason in final.get("reasons") or []:
+            cleaned = str(reason or "").strip()
+            if cleaned and cleaned not in reasons:
+                reasons.append(cleaned)
+    if not verdicts:
+        return None
+    unique = set(verdicts)
+    if unique == {"accept"}:
+        band = "accept"
+        is_person_like = True
+    elif unique == {"reject"}:
+        band = "reject"
+        is_person_like = False
+    else:
+        band = "review"
+        is_person_like = False
+    return {
+        "local_summary": {
+            "member_verdicts": verdicts,
+        },
+        "llm": {"used": any("llm_" in reason for reason in reasons)},
+        "final": {
+            "confidence_band": band,
+            "is_person_like": is_person_like,
+            "reasons": reasons,
+        },
+    }
+
+
 def cluster_character_entities(entities: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     clusters: list[list[dict[str, Any]]] = []
     for raw in entities:
@@ -700,6 +742,9 @@ def cluster_character_entities(entities: Sequence[Mapping[str, Any]]) -> list[di
                 "snippets": clean_string_list(passages)[:6],
             }
         )
+        verifier_summary = _cluster_verifier_summary(cluster)
+        if verifier_summary is not None:
+            evidence["verifier"] = verifier_summary
         primary["evidence"] = evidence
         primary["resolver_status"] = str(evidence.get("resolver_status") or "single")
         primary["canonical_confidence"] = max(
@@ -2753,23 +2798,7 @@ async def merge_characters(
 
 
 async def _dedupe_relationships(db: AsyncSession, book_id: uuid.UUID) -> None:
-    rels_result = await db.execute(select(CharacterRelationship).where(CharacterRelationship.book_id == book_id))
-    rels = rels_result.scalars().all()
-    seen: set[tuple[str, str, str, int | None, int | None, str]] = set()
-    for rel in rels:
-        pair = sorted([str(rel.character_a_id), str(rel.character_b_id)])
-        key = (
-            pair[0],
-            pair[1],
-            rel.rel_type or "",
-            rel.from_chapter,
-            rel.to_chapter,
-            (rel.description or "").strip().lower(),
-        )
-        if key in seen:
-            await db.delete(rel)
-            continue
-        seen.add(key)
+    await repair_relationship_timelines(db, book_id=book_id)
 
 
 def _clean_tracker_text(value: object | None) -> str | None:

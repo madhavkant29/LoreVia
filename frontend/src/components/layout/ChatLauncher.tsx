@@ -3,7 +3,7 @@
 import Link from "next/link"
 import dynamic from "next/dynamic"
 import React from "react"
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 
 import { useChatUnreadCount } from "@/lib/hooks/useChatUnreadCount"
 import { useAuthStore } from "@/lib/stores/authStore"
@@ -19,6 +19,8 @@ const ChatsPanel = dynamic(
 
 export function ChatLauncher({ enabled = true }: { enabled?: boolean }) {
   const [open, setOpen] = useState(false)
+  const toggleButtonRef = useRef<HTMLButtonElement | null>(null)
+  const panelRef = useRef<HTMLElement | null>(null)
   const { theme } = usePreferencesStore()
   const { user } = useAuthStore()
   const { unreadCount } = useChatUnreadCount({
@@ -37,6 +39,37 @@ export function ChatLauncher({ enabled = true }: { enabled?: boolean }) {
     return null
   }
 
+  useEffect(() => {
+    if (!open) {
+      return
+    }
+
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target
+      if (!(target instanceof Node)) {
+        return
+      }
+      if (toggleButtonRef.current?.contains(target) || panelRef.current?.contains(target)) {
+        return
+      }
+      setOpen(false)
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpen(false)
+      }
+    }
+
+    document.addEventListener("mousedown", handlePointerDown)
+    document.addEventListener("keydown", handleKeyDown)
+
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown)
+      document.removeEventListener("keydown", handleKeyDown)
+    }
+  }, [open])
+
   return (
     <>
       <Link
@@ -53,6 +86,7 @@ export function ChatLauncher({ enabled = true }: { enabled?: boolean }) {
       </Link>
 
       <button
+        ref={toggleButtonRef}
         type="button"
         onClick={() => setOpen((current) => !current)}
         className={`relative hidden h-10 w-10 items-center justify-center rounded-xl border transition-colors lg:flex ${buttonTone}`}
@@ -68,13 +102,11 @@ export function ChatLauncher({ enabled = true }: { enabled?: boolean }) {
 
       {open ? (
         <>
-          <button
-            type="button"
-            onClick={() => setOpen(false)}
-            className="fixed inset-0 z-40 hidden bg-black/30 lg:block"
-            aria-label="Close chats"
-          />
-          <aside className={`fixed right-0 top-0 z-50 hidden h-screen w-[min(50vw,56rem)] border-l shadow-[-24px_0_70px_-38px_rgba(0,0,0,0.5)] lg:block ${isDark ? "border-white/10 bg-[#05070a]" : "border-slate-200 bg-white"}`}>
+          <div className="fixed inset-0 z-40 hidden bg-black/30 lg:block" aria-hidden="true" />
+          <aside
+            ref={panelRef}
+            className={`fixed right-0 top-0 z-50 hidden h-screen w-[min(50vw,56rem)] border-l shadow-[-24px_0_70px_-38px_rgba(0,0,0,0.5)] lg:block ${isDark ? "border-white/10 bg-[#05070a]" : "border-slate-200 bg-white"}`}
+          >
             <ChatsPanel mode="sidebar" />
           </aside>
         </>

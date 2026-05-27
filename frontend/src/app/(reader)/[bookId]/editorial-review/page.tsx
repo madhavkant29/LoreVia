@@ -1,6 +1,7 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import type { ChangeEvent, ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import dynamic from "next/dynamic"
 import Link from "next/link"
@@ -14,13 +15,31 @@ import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { saveContextualVaultNote } from "@/lib/utils/notes"
 import type { Book } from "@/types/book"
-import type { EditorialContinuityIssue, EditorialGrammarIssue, EditorialReview, EditorialReviewPassage } from "@/types/intelligence"
+import type { EditorialReview, EditorialReviewPassage } from "@/types/intelligence"
+
+const EDITORIAL_ACCEPT = ".pdf,.epub,.docx,.txt,.md"
 
 const AuthorToolsNav = dynamic(
   () => import("@/components/layout/AuthorToolsNav").then((module) => module.AuthorToolsNav),
   {
     ssr: false,
     loading: () => <div className="rounded-[1.8rem] border border-dashed p-8" />,
+  }
+)
+
+const EditorialReviewResults = dynamic(
+  () => import("@/components/reader/EditorialReviewResults").then((module) => module.EditorialReviewResults),
+  {
+    ssr: false,
+    loading: () => (
+      <section className="space-y-4">
+        <div className="rounded-[1.5rem] border border-white/10 bg-white/[0.03] p-6">
+          <div className="h-3 w-28 animate-pulse rounded-full bg-white/10" />
+          <div className="mt-4 h-4 w-3/4 animate-pulse rounded-full bg-white/10" />
+          <div className="mt-2 h-4 w-1/2 animate-pulse rounded-full bg-white/10" />
+        </div>
+      </section>
+    ),
   }
 )
 
@@ -53,17 +72,26 @@ export default function EditorialReviewPage() {
 
   useEffect(() => {
     if (!book) return
-    setBookMode(book.mode ?? "author")
+    setBookMode(book.workspace_shell ?? book.mode ?? "author")
   }, [book])
 
-  const saveNote = useCallback(async (title: string, body: string, chapterNumber: number | null) => {
+  const fileNames = useMemo(
+    () => (importFiles.length > 0 ? importFiles.map((file) => file.name).join(", ") : "No file chosen"),
+    [importFiles]
+  )
+  const chapterNumber = editChapter ? Number.parseInt(editChapter, 10) : null
+  const textCharacterCount = useMemo(() => editText.length.toLocaleString(), [editText])
+  const canImport = Boolean(editText.trim() || importFiles.length > 0)
+  const canReview = Boolean(editText.trim()) && !editLoading
+
+  const saveNote = useCallback(async (title: string, body: string, targetChapterNumber: number | null) => {
     try {
       const saved = await saveContextualVaultNote({
         bookId,
         title,
         content: body,
         context: "story_advisor",
-        folderSegments: chapterNumber ? ["Editorial Review", `Chapter ${chapterNumber}`] : ["Editorial Review"],
+        folderSegments: targetChapterNumber ? ["Editorial Review", `Chapter ${targetChapterNumber}`] : ["Editorial Review"],
       })
       setSaveStatus(`Saved note to ${saved.path}`)
     } catch {
@@ -119,9 +147,10 @@ export default function EditorialReviewPage() {
   }
 
   return (
-    <div className={`min-h-screen ${isDark ? "bg-[linear-gradient(180deg,#05030a_0%,#0a0f18_55%,#111827_100%)] text-slate-100" : "bg-[linear-gradient(180deg,#faf3ea_0%,#f2f1fb_45%,#eef5fb_100%)] text-stone-950"}`}>
-      <div className="mx-auto max-w-[108rem] px-4 pb-20 pt-6 sm:px-6 lg:px-8">
-        <div className="grid gap-6 xl:grid-cols-[17rem_minmax(0,1fr)]">
+    <div className={`min-h-screen ${isDark ? "bg-[#050914] text-slate-100" : "bg-[linear-gradient(180deg,#faf3ea_0%,#f2f1fb_45%,#eef5fb_100%)] text-stone-950"}`}>
+      <div className={`min-h-screen ${isDark ? "bg-[radial-gradient(circle_at_top_left,rgba(45,212,191,0.08),transparent_28%),radial-gradient(circle_at_top_right,rgba(139,92,246,0.1),transparent_24%),linear-gradient(180deg,#050914_0%,#09101b_55%,#0d1420_100%)]" : ""}`}>
+      <div className="mx-auto max-w-[110rem] px-4 pb-16 pt-5 sm:px-6 lg:px-7">
+        <div className="grid gap-5 xl:grid-cols-[16.75rem_minmax(0,1fr)]">
           <AuthorToolsNav
             bookId={bookId}
             active="editorial-review"
@@ -129,41 +158,48 @@ export default function EditorialReviewPage() {
             bookData={book}
             title="Editorial review"
             description="Run a focused editorial pass with continuity, grammar, formatting, and theme checks in one place."
+            variant="rail"
+            railSize="compact"
           />
 
-          <main className="space-y-6">
-            <section className={`rounded-[1.8rem] border p-6 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-white/70 bg-white/88"}`}>
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-                <div className="max-w-3xl">
-                  <p className={`text-[11px] font-semibold uppercase tracking-[0.28em] ${isDark ? "text-indigo-300" : "text-indigo-700"}`}>Editorial workspace</p>
-                  <h1 className={`mt-2 font-serif text-4xl ${isDark ? "text-white" : "text-stone-950"}`}>{book?.title || "Book"} editorial review</h1>
-                  <p className={`mt-3 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
+          <main className="min-w-0 space-y-5">
+            <section className={shellCardClass(isDark, "px-5 py-6 sm:px-7 sm:py-6")}>
+              <div className="flex flex-col gap-6 xl:flex-row xl:items-center xl:justify-between">
+                <div className="max-w-4xl">
+                  <p className={`text-[11px] font-semibold uppercase tracking-[0.32em] ${isDark ? "text-violet-300" : "text-violet-700"}`}>Editorial workspace</p>
+                  <h1 className={`mt-3 font-serif text-4xl tracking-[-0.035em] sm:text-[3.15rem] ${isDark ? "text-white" : "text-stone-950"}`}>
+                    {book?.title || "Book"} editorial review
+                  </h1>
+                  <p className={`mt-4 max-w-3xl text-sm leading-7 sm:text-[15px] ${isDark ? "text-slate-300" : "text-stone-600"}`}>
                     Paste a scene, passage, or full chapter to cross-check continuity, tighten presentation, and save review notes back into the shared workspace.
                   </p>
                 </div>
-                <div className="flex flex-wrap gap-3">
-                  <Link href={`/${bookId}/advisor`} className={`rounded-full px-4 py-2 text-sm font-semibold ${isDark ? "bg-white/10 text-slate-100" : "bg-white text-stone-800"}`}>
+
+                <div className="flex flex-wrap gap-3 xl:max-w-[25rem] xl:justify-end">
+                  <HeaderActionLink href={`/${bookId}/advisor`} isDark={isDark}>
                     Open story advisor
-                  </Link>
-                  <Link href={`/${bookId}/notes`} className={`rounded-full px-4 py-2 text-sm font-semibold ${isDark ? "bg-white/10 text-slate-100" : "bg-white text-stone-800"}`}>
+                  </HeaderActionLink>
+                  <HeaderActionLink href={`/${bookId}/notes`} isDark={isDark}>
                     Open notes
-                  </Link>
-                  <Link href={`/${bookId}/manuscript`} className={`rounded-full px-4 py-2 text-sm font-semibold ${isDark ? "bg-indigo-500 text-white" : "bg-stone-900 text-white"}`}>
+                  </HeaderActionLink>
+                  <HeaderActionLink href={`/${bookId}/manuscript`} isDark={isDark} primary>
                     Open manuscript
-                  </Link>
+                  </HeaderActionLink>
                 </div>
               </div>
             </section>
 
-            <section className={`rounded-[1.8rem] border p-6 ${isDark ? "border-white/10 bg-black/45" : "border-stone-200 bg-white/90"}`}>
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <p className={`text-[11px] font-semibold uppercase tracking-[0.26em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Manuscript import</p>
-                  <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+            <section className={surfaceCardClass(isDark, "px-5 py-6 sm:px-6")}>
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="max-w-3xl">
+                  <p className={`text-[11px] font-semibold uppercase tracking-[0.32em] ${isDark ? "text-teal-300" : "text-teal-700"}`}>Manuscript import</p>
+                  <p className={`mt-3 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
                     Paste a chapter, upload replacements, or import smaller source files directly from this page before you review them.
                   </p>
                 </div>
+
                 <button
+                  type="button"
                   onClick={async () => {
                     if (!canUseAuthorMode || bookMode === "author") return
                     try {
@@ -175,362 +211,277 @@ export default function EditorialReviewPage() {
                     }
                   }}
                   disabled={!canUseAuthorMode || bookMode === "author"}
-                  className={`rounded-[0.8rem] border px-4 py-2 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-55 ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-stone-200 bg-stone-50 text-stone-700 hover:bg-white"}`}
+                  className={`inline-flex items-center gap-2 rounded-full border px-3.5 py-2 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-70 ${
+                    bookMode === "author"
+                      ? isDark
+                        ? "border-emerald-400/20 bg-emerald-500/10 text-emerald-200"
+                        : "border-emerald-200 bg-emerald-50 text-emerald-700"
+                      : isDark
+                        ? "border-white/10 bg-white/[0.04] text-slate-200 hover:bg-white/[0.08]"
+                        : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"
+                  }`}
                 >
-                  {bookMode === "author" ? "Author mode active" : canUseAuthorMode ? "Convert reader upload to author upload" : "Author mode locked"}
+                  <span className={`h-2 w-2 rounded-full ${bookMode === "author" ? "bg-emerald-400" : isDark ? "bg-slate-500" : "bg-stone-400"}`} />
+                  {bookMode === "author" ? "Author mode active" : canUseAuthorMode ? "Convert to author mode" : "Author mode locked"}
                 </button>
               </div>
 
-              <div className="mt-5 flex flex-col gap-4">
-                <input
-                  type="file"
-                  multiple
-                  accept=".pdf,.epub,.docx,.txt,.md"
-                  onChange={(event) => setImportFiles(Array.from(event.target.files ?? []))}
-                  className={`rounded-[0.9rem] border px-3 py-3 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-stone-50 text-stone-700"}`}
-                />
-                <div className="flex flex-wrap gap-3">
-                  <label className={`flex items-center gap-2 text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>
-                    <input type="checkbox" checked={replaceExisting} onChange={(event) => setReplaceExisting(event.target.checked)} />
-                    Update current chapter
+              <div className="mt-6 space-y-5">
+                <div className={`overflow-hidden rounded-[1.05rem] border ${isDark ? "border-white/10 bg-[#08101a]" : "border-stone-200 bg-stone-50/80"}`}>
+                  <label
+                    htmlFor="editorial-review-files"
+                    className={`flex cursor-pointer flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between ${isDark ? "hover:bg-white/[0.03]" : "hover:bg-white/70"}`}
+                  >
+                    <div className="flex min-w-0 items-center gap-3">
+                      <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border ${isDark ? "border-white/10 bg-white/[0.04] text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+                        <UploadIcon />
+                      </span>
+                      <span className="min-w-0">
+                        <span className={`block text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>Choose files</span>
+                        <span className={`mt-1 block truncate text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>{fileNames}</span>
+                      </span>
+                    </div>
+                    <span className={`text-xs font-medium uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>PDF, EPUB, DOCX, TXT, MD</span>
                   </label>
-                  <label className={`flex items-center gap-2 text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>
-                    <input type="checkbox" checked={splitIntoChapters} onChange={(event) => setSplitIntoChapters(event.target.checked)} />
-                    Split PDFs into chapters
-                  </label>
-                  <label className={`flex items-center gap-2 text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>
-                    <input type="checkbox" checked={chunkLongDocuments} onChange={(event) => setChunkLongDocuments(event.target.checked)} />
-                    Chunk long documents
-                  </label>
+                  <input
+                    id="editorial-review-files"
+                    type="file"
+                    multiple
+                    accept={EDITORIAL_ACCEPT}
+                    onChange={(event) => setImportFiles(Array.from(event.target.files ?? []))}
+                    className="sr-only"
+                  />
                 </div>
-                <div className="flex flex-wrap gap-3">
+
+                <fieldset className="space-y-3">
+                  <legend className="sr-only">Manuscript import options</legend>
+                  <div className="flex flex-wrap gap-x-6 gap-y-3">
+                    <CheckboxField
+                      checked={replaceExisting}
+                      isDark={isDark}
+                      label="Update current chapter"
+                      onChange={(event) => setReplaceExisting(event.target.checked)}
+                    />
+                    <CheckboxField
+                      checked={splitIntoChapters}
+                      isDark={isDark}
+                      label="Split POVs into chapters"
+                      onChange={(event) => setSplitIntoChapters(event.target.checked)}
+                    />
+                    <CheckboxField
+                      checked={chunkLongDocuments}
+                      isDark={isDark}
+                      label="Chunk long documents"
+                      onChange={(event) => setChunkLongDocuments(event.target.checked)}
+                    />
+                  </div>
+                </fieldset>
+
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                   <button
+                    type="button"
                     onClick={() => void importManuscript()}
-                    disabled={importLoading || (!editText.trim() && importFiles.length === 0)}
-                    className="rounded-[0.8rem] bg-[linear-gradient(135deg,#0f766e,#115e59)] px-5 py-2.5 text-sm font-semibold text-white transition disabled:opacity-40"
+                    disabled={importLoading || !canImport}
+                    className={`inline-flex items-center justify-center rounded-[0.95rem] px-4 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-45 ${
+                      isDark
+                        ? "border border-teal-400/30 bg-teal-500/12 text-teal-100 hover:bg-teal-500/18"
+                        : "border border-teal-200 bg-teal-700 text-white hover:bg-teal-800"
+                    }`}
                   >
                     {importLoading ? "Importing..." : replaceExisting ? "Update current upload" : "Add to current upload"}
                   </button>
-                  {importMessage ? (
-                    <p className={`self-center text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>{importMessage}</p>
-                  ) : null}
+                  {importMessage ? <StatusBanner isDark={isDark} message={importMessage} tone={inferStatusTone(importMessage)} /> : null}
                 </div>
               </div>
             </section>
 
-            <section className={`rounded-[1.8rem] border p-6 ${isDark ? "border-white/10 bg-black/45" : "border-stone-200 bg-white/90"}`}>
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:gap-3">
-                <div className="w-full sm:max-w-[11rem]">
-                  <label className={`block text-[11px] font-semibold uppercase tracking-[0.26em] mb-2 ${isDark ? "text-slate-400" : "text-stone-400"}`}>
-                    Chapter number
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    value={editChapter}
-                    onChange={(event) => setEditChapter(event.target.value)}
-                    placeholder="e.g. 42"
-                    className="w-full rounded-[0.95rem] border border-stone-300 bg-stone-50 px-3 py-2 text-sm text-stone-900 outline-none transition placeholder:text-stone-500 focus:border-indigo-400"
-                  />
+            <section className={surfaceCardClass(isDark, "px-5 py-6 sm:px-6")}>
+              <div className="flex flex-col gap-5">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                  <div className="grid gap-4 sm:grid-cols-[minmax(0,11.5rem)_auto] sm:items-end">
+                    <label className="block">
+                      <span className={`block text-[11px] font-semibold uppercase tracking-[0.32em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Chapter number</span>
+                      <input
+                        type="number"
+                        min={1}
+                        value={editChapter}
+                        onChange={(event) => setEditChapter(event.target.value)}
+                        placeholder="e.g. 42"
+                        className={`mt-3 w-full rounded-[0.95rem] border px-3.5 py-3 text-sm outline-none transition ${
+                          isDark
+                            ? "border-white/10 bg-[#08101a] text-slate-100 placeholder:text-slate-500 focus:border-violet-400/60 focus:bg-[#0a1420]"
+                            : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-500 focus:border-violet-400"
+                        }`}
+                      />
+                    </label>
+
+                    <button
+                      type="button"
+                      onClick={() => void runEditorialReview()}
+                      disabled={!canReview}
+                      className={`inline-flex min-h-[3rem] items-center justify-center rounded-[0.95rem] px-5 py-3 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-45 ${
+                        isDark
+                          ? "bg-[linear-gradient(135deg,rgba(109,40,217,0.92),rgba(79,70,229,0.92))] text-white shadow-[0_18px_38px_-24px_rgba(109,40,217,0.55)] hover:translate-y-[-1px]"
+                          : "bg-violet-700 text-white hover:bg-violet-800"
+                      }`}
+                    >
+                      {editLoading ? "Reviewing..." : "Run Editorial Review"}
+                    </button>
+                  </div>
+
+                  <div className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>
+                    {editLoading ? "Review in progress" : "Ready for continuity and presentation checks"}
+                  </div>
                 </div>
-                <button
-                  onClick={() => void runEditorialReview()}
-                  disabled={!editText.trim() || editLoading}
-                  className="rounded-[0.8rem] bg-[linear-gradient(135deg,#4f46e5,#4338ca)] px-5 py-2.5 text-sm font-semibold text-white shadow-[0_8px_24px_-12px_rgba(79,70,229,0.7)] transition disabled:opacity-40 hover:-translate-y-[1px]"
-                >
-                  {editLoading ? "Reviewing..." : "Run Editorial Review"}
-                </button>
+
+                <label className="block">
+                  <span className="sr-only">Passage text</span>
+                  <div className={`overflow-hidden rounded-[1.05rem] border ${isDark ? "border-white/10 bg-[#08101a]" : "border-stone-200 bg-white"}`}>
+                    <textarea
+                      value={editText}
+                      onChange={(event) => setEditText(event.target.value)}
+                      placeholder="Paste your passage here: a paragraph, a scene, or a full chapter section."
+                      rows={18}
+                      className={`block min-h-[22rem] w-full resize-y border-0 bg-transparent px-4 py-4 text-sm leading-7 outline-none ring-0 placeholder:text-slate-500 focus:ring-0 ${
+                        isDark ? "text-slate-100" : "text-stone-900 placeholder:text-stone-500"
+                      }`}
+                    />
+                    <div className={`flex items-center justify-between gap-3 border-t px-4 py-3 text-xs ${isDark ? "border-white/8 text-slate-500" : "border-stone-200 text-stone-500"}`}>
+                      <span>{chapterNumber ? `Review target: Chapter ${chapterNumber}` : "Review target: custom passage"}</span>
+                      <span>{textCharacterCount} characters</span>
+                    </div>
+                  </div>
+                </label>
+
+                {editError ? <StatusBanner isDark={isDark} message={editError} tone="error" /> : null}
+                {editLoading && editProgress ? <StatusBanner isDark={isDark} message={editProgress} tone="info" /> : null}
+                {saveStatus ? <StatusBanner isDark={isDark} message={saveStatus} tone={inferStatusTone(saveStatus)} /> : null}
+
+                {editLoading ? (
+                  <div className={`space-y-3 rounded-[1.1rem] border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50/80"}`}>
+                    <div className={`h-2.5 w-40 animate-pulse rounded-full ${isDark ? "bg-white/10" : "bg-stone-200"}`} />
+                    <div className={`h-2.5 w-full animate-pulse rounded-full ${isDark ? "bg-white/8" : "bg-stone-200/80"}`} />
+                    <div className={`h-2.5 w-3/4 animate-pulse rounded-full ${isDark ? "bg-white/6" : "bg-stone-200/70"}`} />
+                  </div>
+                ) : null}
               </div>
-
-              <textarea
-                value={editText}
-                onChange={(event) => setEditText(event.target.value)}
-                placeholder="Paste your passage here: a paragraph, a scene, or a full chapter section."
-                rows={14}
-                className="mt-4 w-full resize-y rounded-[1rem] border border-stone-300 bg-[#f8f6f1] px-4 py-3 text-sm leading-7 text-stone-900 outline-none transition placeholder:text-stone-500 focus:border-indigo-400"
-              />
-
-              {editError ? (
-                <p className={`mt-3 rounded-[0.8rem] border px-4 py-2 text-sm ${isDark ? "border-red-500/25 bg-red-500/10 text-red-300" : "border-red-200 bg-red-50 text-red-700"}`}>
-                  {editError}
-                </p>
-              ) : null}
-
-              {editLoading && editProgress ? (
-                <p className={`mt-3 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-                  {editProgress}
-                </p>
-              ) : null}
-
-              {saveStatus ? (
-                <p className={`mt-3 rounded-[0.8rem] border px-4 py-2 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-stone-50 text-stone-700"}`}>
-                  {saveStatus}
-                </p>
-              ) : null}
-
-              {editLoading ? (
-                <div className={`mt-4 animate-pulse space-y-2 rounded-[1rem] border p-4 ${isDark ? "border-white/8 bg-white/3" : "border-stone-100 bg-stone-50"}`}>
-                  <div className={`h-2.5 w-40 rounded-full ${isDark ? "bg-white/10" : "bg-stone-200"}`} />
-                  <div className={`h-2.5 w-full rounded-full ${isDark ? "bg-white/8" : "bg-stone-100"}`} />
-                  <div className={`h-2.5 w-3/4 rounded-full ${isDark ? "bg-white/6" : "bg-stone-100"}`} />
-                </div>
-              ) : null}
             </section>
 
             {editResult ? (
-              <section className="space-y-5">
-                <div className={`rounded-[1.5rem] border px-6 py-5 ${isDark ? "border-indigo-500/25 bg-indigo-500/8" : "border-violet-100 bg-violet-50"}`}>
-                  <p className={`mb-2 text-[11px] font-bold uppercase tracking-[0.28em] ${isDark ? "text-indigo-200" : "text-indigo-700"}`}>Overall Verdict</p>
-                  <p className={`text-base leading-7 font-medium ${isDark ? "text-slate-100" : "text-stone-900"}`}>{editResult.overall_verdict}</p>
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    <button
-                      onClick={async () => {
-                        const chapterNumber = editChapter ? Number.parseInt(editChapter, 10) : null
-                        await saveNote(
-                          chapterNumber ? `Editorial Review - Chapter ${chapterNumber}` : "Editorial Review",
-                          editResult.overall_verdict,
-                          chapterNumber
-                        )
-                      }}
-                      className={`rounded-[0.8rem] border px-4 py-2 text-xs font-semibold ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`}
-                    >
-                      Save summary note
-                    </button>
-                    <button
-                      onClick={async () => {
-                        const blob = await intelligenceApi.continuityReport(
-                          bookId,
-                          editText,
-                          "pdf",
-                          editChapter ? Number.parseInt(editChapter, 10) : undefined
-                        )
-                        const url = URL.createObjectURL(blob)
-                        const link = document.createElement("a")
-                        link.href = url
-                        link.download = "continuity-report.pdf"
-                        link.click()
-                        URL.revokeObjectURL(url)
-                      }}
-                      className={`rounded-[0.8rem] border px-4 py-2 text-xs font-semibold ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`}
-                    >
-                      Download continuity report
-                    </button>
-                  </div>
-                </div>
-
-                <div className={`rounded-[1.5rem] border px-5 py-4 ${
-                  editResult.thematic_fit.score === "strong"
-                    ? isDark ? "border-teal-500/25 bg-teal-500/8" : "border-teal-200 bg-teal-50"
-                    : editResult.thematic_fit.score === "weak"
-                      ? isDark ? "border-red-500/25 bg-red-500/8" : "border-red-200 bg-red-50"
-                      : isDark ? "border-amber-500/25 bg-amber-500/8" : "border-amber-100 bg-amber-50"
-                }`}>
-                  <div className="mb-2 flex items-center gap-2">
-                    <p className={`text-[11px] font-bold uppercase tracking-[0.28em] ${isDark ? "text-slate-300" : "text-stone-500"}`}>Thematic Fit</p>
-                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.18em] ${
-                      editResult.thematic_fit.score === "strong"
-                        ? isDark ? "bg-teal-500/20 text-teal-300" : "bg-teal-100 text-teal-700"
-                        : editResult.thematic_fit.score === "weak"
-                          ? isDark ? "bg-red-500/20 text-red-300" : "bg-red-100 text-red-700"
-                          : isDark ? "bg-amber-500/20 text-amber-300" : "bg-amber-100 text-amber-700"
-                    }`}>
-                      {editResult.thematic_fit.score}
-                    </span>
-                  </div>
-                  <p className={`text-sm leading-6 ${isDark ? "text-slate-200" : "text-stone-700"}`}>{editResult.thematic_fit.notes}</p>
-                </div>
-
-                {editResult.continuity_issues.length > 0 ? (
-                  <IssueList
-                    isDark={isDark}
-                    chapterNumber={editChapter ? Number.parseInt(editChapter, 10) : null}
-                    issues={editResult.continuity_issues}
-                    onSave={async (issue) => {
-                      await saveNote(
-                        `Continuity: ${issue.title}`.slice(0, 120),
-                        [
-                          `Continuity issue: ${issue.title}`,
-                          `Severity: ${issue.severity}`,
-                          `Type: ${issue.type.replace(/_/g, " ")}`,
-                          "",
-                          issue.description,
-                          issue.suggestion ? `Suggestion: ${issue.suggestion}` : "",
-                        ].filter(Boolean).join("\n"),
-                        editChapter ? Number.parseInt(editChapter, 10) : null
-                      )
-                    }}
-                  />
-                ) : null}
-
-                {editResult.grammar_issues.length > 0 ? (
-                  <GrammarList
-                    isDark={isDark}
-                    chapterNumber={editChapter ? Number.parseInt(editChapter, 10) : null}
-                    issues={editResult.grammar_issues}
-                    onSave={async (issue) => {
-                      await saveNote(
-                        `Grammar: ${issue.issue}`.slice(0, 120),
-                        [
-                          `Grammar issue: ${issue.issue}`,
-                          "",
-                          `Original: "${issue.original}"`,
-                          `Fix: "${issue.fix}"`,
-                        ].join("\n"),
-                        editChapter ? Number.parseInt(editChapter, 10) : null
-                      )
-                    }}
-                  />
-                ) : null}
-
-                {editResult.formatting_notes.length > 0 ? (
-                  <div>
-                    <p className={`mb-3 text-[11px] font-bold uppercase tracking-[0.28em] ${isDark ? "text-slate-300" : "text-stone-500"}`}>
-                      Formatting Notes
-                    </p>
-                    <div className={`space-y-2 rounded-[1.2rem] border px-5 py-4 ${isDark ? "border-white/8 bg-white/4" : "border-stone-100 bg-stone-50"}`}>
-                      {editResult.formatting_notes.map((note, index) => (
-                        <div key={`${note}-${index}`} className="flex items-start gap-2.5">
-                          <span className={`mt-0.5 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>•</span>
-                          <div className="flex-1">
-                            <p className={`text-sm leading-6 ${isDark ? "text-slate-200" : "text-stone-700"}`}>{note}</p>
-                            <button
-                              type="button"
-                              onClick={() => void saveNote("Formatting note", `Formatting note:\n${note}`, editChapter ? Number.parseInt(editChapter, 10) : null)}
-                              className={`mt-2 rounded-full px-3 py-1 text-[11px] font-semibold transition ${isDark ? "bg-white/10 text-slate-200 hover:bg-white/15" : "bg-white text-stone-700 hover:bg-stone-50"}`}
-                            >
-                              Save note
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-
-                {editPassages.length > 0 ? (
-                  <div>
-                    <p className={`mb-3 text-[11px] font-bold uppercase tracking-[0.28em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-                      Cross-referenced passages
-                    </p>
-                    <div className="grid gap-2 sm:grid-cols-2">
-                      {editPassages.map((passage, index) => (
-                        <div key={`${passage.chapter_num}-${index}`} className={`rounded-[1rem] border p-4 ${isDark ? "border-white/8 bg-white/3" : "border-stone-100 bg-stone-50"}`}>
-                          <p className={`mb-1 text-[10px] font-bold uppercase tracking-[0.22em] ${isDark ? "text-indigo-200" : "text-indigo-700"}`}>
-                            Ch. {passage.chapter_num}{passage.chapter_title ? `: ${passage.chapter_title}` : ""}
-                          </p>
-                          <p className={`text-xs leading-5 ${isDark ? "text-slate-300" : "text-stone-700"}`}>{passage.excerpt}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-
-                {editResult.continuity_issues.length === 0 && editResult.grammar_issues.length === 0 ? (
-                  <div className={`rounded-[1.5rem] border p-6 text-center ${isDark ? "border-teal-500/20 bg-teal-500/8" : "border-teal-200 bg-teal-50"}`}>
-                    <p className="mb-2 text-sm font-semibold uppercase tracking-[0.24em]">Clear</p>
-                    <p className={`font-semibold ${isDark ? "text-teal-200" : "text-teal-800"}`}>No continuity or grammar issues found</p>
-                    <p className={`mt-1 text-xs ${isDark ? "text-teal-300" : "text-teal-700"}`}>The passage looks consistent with the existing manuscript context.</p>
-                  </div>
-                ) : null}
-              </section>
+              <EditorialReviewResults
+                bookId={bookId}
+                chapterNumber={chapterNumber}
+                editText={editText}
+                editPassages={editPassages}
+                editResult={editResult}
+                isDark={isDark}
+                onSaveNote={saveNote}
+              />
             ) : null}
           </main>
         </div>
       </div>
-    </div>
-  )
-}
-
-function IssueList({
-  chapterNumber,
-  isDark,
-  issues,
-  onSave,
-}: {
-  chapterNumber: number | null
-  isDark: boolean
-  issues: EditorialContinuityIssue[]
-  onSave: (issue: EditorialContinuityIssue) => Promise<void>
-}) {
-  return (
-    <div>
-      <p className={`mb-3 text-[11px] font-bold uppercase tracking-[0.28em] ${isDark ? "text-amber-300" : "text-amber-700"}`}>
-        Continuity Issues ({issues.length})
-      </p>
-      <div className="space-y-3">
-        {issues.map((issue, index) => (
-          <div key={`${issue.title}-${index}`} className={`rounded-[1.2rem] border px-5 py-4 ${
-            issue.severity === "critical"
-              ? isDark ? "border-red-500/30 bg-red-500/10" : "border-red-200 bg-red-50"
-              : issue.severity === "moderate"
-                ? isDark ? "border-amber-500/30 bg-amber-500/8" : "border-amber-200 bg-amber-50"
-                : isDark ? "border-white/10 bg-white/4" : "border-stone-100 bg-stone-50"
-          }`}>
-            <div className="mb-2 flex items-center gap-2 flex-wrap">
-              <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.22em] ${
-                issue.severity === "critical"
-                  ? isDark ? "bg-red-500/20 text-red-300" : "bg-red-100 text-red-700"
-                  : issue.severity === "moderate"
-                    ? isDark ? "bg-amber-500/20 text-amber-300" : "bg-amber-100 text-amber-700"
-                    : isDark ? "bg-white/10 text-slate-300" : "bg-stone-100 text-stone-600"
-              }`}>
-                {issue.severity}
-              </span>
-              <span className={`text-[10px] font-medium ${isDark ? "text-slate-400" : "text-stone-500"}`}>{issue.type.replace(/_/g, " ")}</span>
-              <button
-                type="button"
-                onClick={() => void onSave(issue)}
-                className={`ml-auto rounded-full px-3 py-1 text-[11px] font-semibold transition ${isDark ? "bg-white/10 text-slate-200 hover:bg-white/15" : "bg-white text-stone-700 hover:bg-stone-50"}`}
-              >
-                Save note{chapterNumber ? ` (Ch. ${chapterNumber})` : ""}
-              </button>
-            </div>
-            <p className={`mb-1 text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{issue.title}</p>
-            <p className={`text-sm leading-6 ${isDark ? "text-slate-200" : "text-stone-700"}`}>{issue.description}</p>
-            {issue.suggestion ? (
-              <p className={`mt-2 text-xs leading-5 font-medium ${isDark ? "text-indigo-200" : "text-indigo-700"}`}>
-                → {issue.suggestion}
-              </p>
-            ) : null}
-          </div>
-        ))}
       </div>
     </div>
   )
 }
 
-function GrammarList({
-  chapterNumber,
+function HeaderActionLink({
+  children,
+  href,
   isDark,
-  issues,
-  onSave,
+  primary = false,
 }: {
-  chapterNumber: number | null
+  children: ReactNode
+  href: string
   isDark: boolean
-  issues: EditorialGrammarIssue[]
-  onSave: (issue: EditorialGrammarIssue) => Promise<void>
+  primary?: boolean
 }) {
   return (
-    <div>
-      <p className={`mb-3 text-[11px] font-bold uppercase tracking-[0.28em] ${isDark ? "text-slate-300" : "text-stone-500"}`}>
-        Grammar & Spelling ({issues.length})
-      </p>
-      <div className="space-y-2.5">
-        {issues.map((issue, index) => (
-          <div key={`${issue.issue}-${index}`} className={`rounded-[1.1rem] border px-4 py-4 ${isDark ? "border-white/8 bg-white/4" : "border-stone-100 bg-stone-50"}`}>
-            <p className={`mb-1 text-[10px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>{issue.issue}</p>
-            <p className={`mb-1 text-sm line-through opacity-70 ${isDark ? "text-slate-300" : "text-stone-600"}`}>"{issue.original}"</p>
-            <p className={`text-sm font-medium ${isDark ? "text-teal-300" : "text-teal-700"}`}>→ "{issue.fix}"</p>
-            <button
-              type="button"
-              onClick={() => void onSave(issue)}
-              className={`mt-3 rounded-full px-3 py-1 text-[11px] font-semibold transition ${isDark ? "bg-white/10 text-slate-200 hover:bg-white/15" : "bg-white text-stone-700 hover:bg-stone-50"}`}
-            >
-              Save note{chapterNumber ? ` (Ch. ${chapterNumber})` : ""}
-            </button>
-          </div>
-        ))}
-      </div>
-    </div>
+    <Link
+      href={href}
+      className={`inline-flex min-h-[2.9rem] items-center justify-center rounded-[1rem] border px-4 py-2.5 text-sm font-semibold transition ${
+        primary
+          ? isDark
+            ? "border-violet-400/30 bg-[linear-gradient(135deg,rgba(109,40,217,0.95),rgba(79,70,229,0.95))] text-white shadow-[0_18px_38px_-24px_rgba(109,40,217,0.55)] hover:translate-y-[-1px]"
+            : "border-violet-700 bg-violet-700 text-white hover:bg-violet-800"
+          : isDark
+            ? "border-white/10 bg-white/[0.04] text-slate-100 hover:bg-white/[0.08]"
+            : "border-stone-200 bg-white text-stone-800 hover:bg-stone-50"
+      }`}
+    >
+      {children}
+    </Link>
   )
+}
+
+function CheckboxField({
+  checked,
+  isDark,
+  label,
+  onChange,
+}: {
+  checked: boolean
+  isDark: boolean
+  label: string
+  onChange: (event: ChangeEvent<HTMLInputElement>) => void
+}) {
+  return (
+    <label className={`inline-flex items-center gap-3 text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={onChange}
+        className={`h-4 w-4 rounded border ${isDark ? "border-white/20 bg-[#08101a] text-violet-400" : "border-stone-300 text-violet-700"}`}
+      />
+      <span>{label}</span>
+    </label>
+  )
+}
+
+function StatusBanner({
+  isDark,
+  message,
+  tone,
+}: {
+  isDark: boolean
+  message: string
+  tone: "error" | "success" | "info"
+}) {
+  const toneClass = tone === "error"
+    ? isDark ? "border-red-500/25 bg-red-500/10 text-red-200" : "border-red-200 bg-red-50 text-red-700"
+    : tone === "success"
+      ? isDark ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-200" : "border-emerald-200 bg-emerald-50 text-emerald-700"
+      : isDark ? "border-white/10 bg-white/[0.04] text-slate-300" : "border-stone-200 bg-stone-50 text-stone-700"
+
+  return (
+    <p aria-live="polite" className={`rounded-[0.95rem] border px-4 py-2.5 text-sm ${toneClass}`}>
+      {message}
+    </p>
+  )
+}
+
+function UploadIcon() {
+  return (
+    <svg aria-hidden="true" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 15V4" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="m7.5 8.5 4.5-4.5 4.5 4.5" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M5 16.5v1A2.5 2.5 0 0 0 7.5 20h9a2.5 2.5 0 0 0 2.5-2.5v-1" />
+    </svg>
+  )
+}
+
+function inferStatusTone(message: string): "error" | "success" | "info" {
+  const lower = message.toLowerCase()
+  if (lower.includes("failed") || lower.includes("could not")) return "error"
+  if (lower.includes("saved") || lower.includes("imported") || lower.includes("active")) return "success"
+  return "info"
+}
+
+function shellCardClass(isDark: boolean, extra = "") {
+  return `rounded-[1.75rem] border ${isDark ? "border-white/10 bg-[rgba(8,14,24,0.82)]" : "border-white/70 bg-white/88"} ${extra}`
+}
+
+function surfaceCardClass(isDark: boolean, extra = "") {
+  return `rounded-[1.55rem] border ${isDark ? "border-white/10 bg-[rgba(8,14,22,0.9)] shadow-[0_18px_70px_-46px_rgba(0,0,0,0.72)]" : "border-stone-200 bg-white/92"} ${extra}`
 }

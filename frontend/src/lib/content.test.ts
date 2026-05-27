@@ -9,6 +9,7 @@ import {
   getAnswerPageBySlug,
   getAnswersByArticleSlug,
   getBlogArticleBySlug,
+  getContentWordCount,
   getDemoPageBySlug,
   getLatestContentPublishedAt,
 } from "./content"
@@ -85,5 +86,13 @@ describe("content helpers", () => {
         type: "hub",
       }),
     )
+  })
+
+  it("keeps each public content entry above the editorial depth floor", () => {
+    const allEntries = [...blogArticles, ...answerPages, ...demoPages]
+
+    for (const entry of allEntries) {
+      expect(getContentWordCount(entry)).toBeGreaterThanOrEqual(200)
+    }
   })
 })

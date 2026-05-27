@@ -212,11 +212,11 @@ export function EditorToolbar({
   const editor = currentEditor(editorKey)
 
   const shellClass = compact
-    ? `border-b px-3 py-2 ${isDark ? "border-white/10 bg-[#0f131a]/85 backdrop-blur" : "border-stone-200 bg-[#f6f1e8]/90 backdrop-blur"}`
+    ? `rounded-[1rem] border px-2 py-2 ${isDark ? "border-white/10 bg-black/25 backdrop-blur" : "border-stone-200 bg-white/80 backdrop-blur"}`
     : ""
-  const groupClass = "flex flex-wrap items-center gap-1.5"
-  const buttonClass = `rounded-md px-2.5 py-2 text-[11px] font-medium transition ${isDark ? "text-slate-200 hover:bg-white/8" : "text-stone-700 hover:bg-white"}`
-  const selectClass = `rounded-md border px-2 py-2 text-[11px] ${isDark ? "border-white/10 bg-black text-slate-200" : "border-stone-200 bg-white text-stone-700"}`
+  const groupClass = "flex flex-wrap items-center gap-1"
+  const buttonClass = `rounded-lg px-2.5 py-2 text-[11px] font-semibold transition focus:outline-none focus:ring-2 focus:ring-sky-400/40 ${isDark ? "text-slate-200 hover:bg-white/10" : "text-stone-700 hover:bg-stone-100"}`
+  const selectClass = `rounded-lg border px-2 py-2 text-[11px] focus:outline-none focus:ring-2 focus:ring-sky-400/40 ${isDark ? "border-white/10 bg-[#090d13] text-slate-200" : "border-stone-200 bg-white text-stone-700"}`
   const dividerClass = isDark ? "h-5 w-px bg-white/10" : "h-5 w-px bg-stone-200"
   const mentionableCharacters = characters.slice(0, 8)
 
@@ -246,10 +246,10 @@ export function EditorToolbar({
         }}
       />
       <div className={groupClass}>
-        <select className={selectClass} defaultValue="Times New Roman" onChange={(event) => run((instance) => instance.chain().focus().setFontFamily(event.target.value).run())}>
+        <select aria-label="Font family" className={selectClass} defaultValue="Times New Roman" onChange={(event) => run((instance) => instance.chain().focus().setFontFamily(event.target.value).run())}>
           {FONT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
         </select>
-        <select className={selectClass} defaultValue="12" onChange={(event) => run((instance) => instance.chain().focus().setFontSize(`${event.target.value}px`).run())}>
+        <select aria-label="Font size" className={selectClass} defaultValue="12" onChange={(event) => run((instance) => instance.chain().focus().setFontSize(`${event.target.value}px`).run())}>
           {FONT_SIZE_OPTIONS.map((size) => <option key={size} value={size}>{size} pt</option>)}
         </select>
         <button type="button" title="Heading 2" onClick={() => run((instance) => instance.chain().focus().toggleHeading({ level: 2 }).run())} className={buttonClass}>H2</button>
@@ -258,35 +258,12 @@ export function EditorToolbar({
         <button type="button" title="Italic" onClick={() => run((instance) => instance.chain().focus().toggleItalic().run())} className={`${buttonClass} italic`}>I</button>
         <button type="button" title="Underline" onClick={() => run((instance) => instance.chain().focus().toggleUnderline().run())} className={buttonClass}>U</button>
         <button type="button" title="Strikethrough" onClick={() => run((instance) => instance.chain().focus().toggleStrike().run())} className={`${buttonClass} line-through`}>S</button>
-        <button type="button" title="Clear formatting" onClick={() => run((instance) => instance.chain().focus().unsetAllMarks().clearNodes().run())} className={buttonClass}>Clear</button>
-        <span className={dividerClass} />
-        <select className={selectClass} defaultValue={COLOR_OPTIONS[0]} onChange={(event) => run((instance) => instance.chain().focus().setColor(colorValue(event.target.value)).run())}>
-          {COLOR_OPTIONS.map((color) => <option key={color} value={color}>{color}</option>)}
-        </select>
-        <select className={selectClass} defaultValue={HIGHLIGHT_OPTIONS[0]} onChange={(event) => run((instance) => instance.chain().focus().toggleHighlight({ color: colorValue(event.target.value) }).run())}>
-          {HIGHLIGHT_OPTIONS.map((color) => <option key={color} value={color}>{color}</option>)}
-        </select>
         <span className={dividerClass} />
         <button type="button" title="Bulleted list" onClick={() => run((instance) => instance.chain().focus().toggleBulletList().run())} className={buttonClass}>List</button>
         <button type="button" title="Numbered list" onClick={() => run((instance) => instance.chain().focus().toggleOrderedList().run())} className={buttonClass}>1.</button>
-        <button type="button" title="Checklist" onClick={() => run((instance) => instance.chain().focus().toggleTaskList().run())} className={buttonClass}>[ ]</button>
-        <button type="button" title="Quote" onClick={() => run((instance) => instance.chain().focus().toggleBlockquote().run())} className={buttonClass}>Quote</button>
-        <button type="button" title="Divider" onClick={() => run((instance) => instance.chain().focus().setHorizontalRule().run())} className={buttonClass}>Rule</button>
-        <button type="button" title="Scene break" onClick={() => run((instance) => instance.chain().focus().insertContent({ type: "sceneBreak" }).run())} className={buttonClass}>***</button>
-        <button type="button" title="Page break" onClick={() => run((instance) => instance.chain().focus().insertContent({ type: "pageBreak" }).run())} className={buttonClass}>Page</button>
-      </div>
-      <div className={groupClass}>
-        <select className={selectClass} defaultValue="1.8" onChange={(event) => run((instance) => (instance.chain() as any).focus().setLineHeight(event.target.value).run())}>
-          {LINE_HEIGHT_OPTIONS.map((value) => <option key={value} value={value}>{value} lh</option>)}
-        </select>
-        <select className={selectClass} defaultValue="0.8rem" onChange={(event) => run((instance) => (instance.chain() as any).focus().setParagraphSpacing(event.target.value).run())}>
-          {PARAGRAPH_SPACING_OPTIONS.map((value) => <option key={value} value={value}>{value} gap</option>)}
-        </select>
-        <button type="button" title="First-line indent" onClick={() => run((instance) => (instance.chain() as any).focus().setFirstLineIndent("1.5em").run())} className={buttonClass}>Indent</button>
         <button type="button" title="Align left" onClick={() => run((instance) => instance.chain().focus().setTextAlign("left").run())} className={buttonClass}>Left</button>
         <button type="button" title="Align center" onClick={() => run((instance) => instance.chain().focus().setTextAlign("center").run())} className={buttonClass}>Center</button>
         <button type="button" title="Align right" onClick={() => run((instance) => instance.chain().focus().setTextAlign("right").run())} className={buttonClass}>Right</button>
-        <button type="button" title="Justify" onClick={() => run((instance) => instance.chain().focus().setTextAlign("justify").run())} className={buttonClass}>Justify</button>
         <span className={dividerClass} />
         <button type="button" title="Insert link" onClick={() => {
           const href = window.prompt("Enter a URL")
@@ -319,6 +296,35 @@ export function EditorToolbar({
         <span className={dividerClass} />
         <button type="button" title="Undo" onClick={() => run((instance) => instance.chain().focus().undo().run())} className={buttonClass}>Undo</button>
         <button type="button" title="Redo" onClick={() => run((instance) => instance.chain().focus().redo().run())} className={buttonClass}>Redo</button>
+        <details className="relative">
+          <summary className={`${buttonClass} list-none cursor-pointer`}>More</summary>
+          <div className={`absolute right-0 top-full z-30 mt-2 grid w-64 gap-2 rounded-2xl border p-3 shadow-[0_24px_70px_-34px_rgba(15,23,42,0.55)] ${isDark ? "border-white/10 bg-[#0d1117]" : "border-stone-200 bg-white"}`}>
+            <div className="grid grid-cols-2 gap-2">
+              <select aria-label="Text color" className={selectClass} defaultValue={COLOR_OPTIONS[0]} onChange={(event) => run((instance) => instance.chain().focus().setColor(colorValue(event.target.value)).run())}>
+                {COLOR_OPTIONS.map((color) => <option key={color} value={color}>{color}</option>)}
+              </select>
+              <select aria-label="Highlight color" className={selectClass} defaultValue={HIGHLIGHT_OPTIONS[0]} onChange={(event) => run((instance) => instance.chain().focus().toggleHighlight({ color: colorValue(event.target.value) }).run())}>
+                {HIGHLIGHT_OPTIONS.map((color) => <option key={color} value={color}>{color}</option>)}
+              </select>
+              <select aria-label="Line height" className={selectClass} defaultValue="1.8" onChange={(event) => run((instance) => (instance.chain() as any).focus().setLineHeight(event.target.value).run())}>
+                {LINE_HEIGHT_OPTIONS.map((value) => <option key={value} value={value}>{value} lh</option>)}
+              </select>
+              <select aria-label="Paragraph spacing" className={selectClass} defaultValue="0.8rem" onChange={(event) => run((instance) => (instance.chain() as any).focus().setParagraphSpacing(event.target.value).run())}>
+                {PARAGRAPH_SPACING_OPTIONS.map((value) => <option key={value} value={value}>{value} gap</option>)}
+              </select>
+            </div>
+            <div className="flex flex-wrap gap-1">
+              <button type="button" title="Clear formatting" onClick={() => run((instance) => instance.chain().focus().unsetAllMarks().clearNodes().run())} className={buttonClass}>Clear</button>
+              <button type="button" title="Checklist" onClick={() => run((instance) => instance.chain().focus().toggleTaskList().run())} className={buttonClass}>[ ]</button>
+              <button type="button" title="Quote" onClick={() => run((instance) => instance.chain().focus().toggleBlockquote().run())} className={buttonClass}>Quote</button>
+              <button type="button" title="Justify" onClick={() => run((instance) => instance.chain().focus().setTextAlign("justify").run())} className={buttonClass}>Justify</button>
+              <button type="button" title="Divider" onClick={() => run((instance) => instance.chain().focus().setHorizontalRule().run())} className={buttonClass}>Rule</button>
+              <button type="button" title="Scene break" onClick={() => run((instance) => instance.chain().focus().insertContent({ type: "sceneBreak" }).run())} className={buttonClass}>***</button>
+              <button type="button" title="Page break" onClick={() => run((instance) => instance.chain().focus().insertContent({ type: "pageBreak" }).run())} className={buttonClass}>Page</button>
+              <button type="button" title="First-line indent" onClick={() => run((instance) => (instance.chain() as any).focus().setFirstLineIndent("1.5em").run())} className={buttonClass}>Indent</button>
+            </div>
+          </div>
+        </details>
       </div>
     </div>
   )

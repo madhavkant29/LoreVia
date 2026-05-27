@@ -291,6 +291,7 @@ export default function AuthorLoopPage() {
             description="Move from manuscript upload to beta feedback without losing citations, edits, or trust."
             mode={book?.mode ?? "author"}
             variant="rail"
+            railSize="compact"
           />
         </div>
 

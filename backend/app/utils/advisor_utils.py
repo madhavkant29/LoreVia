@@ -83,9 +83,14 @@ def make_advisor_cache_key(book_id: str | uuid.UUID, last_user_message: str) -> 
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
-def make_editorial_cache_key(book_id: str | uuid.UUID, text: str, chapter_num: int | None) -> str:
+def make_editorial_cache_key(
+    book_id: str | uuid.UUID,
+    text: str,
+    chapter_num: int | None,
+    discriminator: str | uuid.UUID | None = None,
+) -> str:
     """SHA-256 key for editorial review (book, text, chapter)."""
-    payload = f"{book_id}||{text.strip()[:500]}||{chapter_num or 0}"
+    payload = f"{book_id}||{text.strip()[:500]}||{chapter_num or 0}||{discriminator or ''}"
     return hashlib.sha256(payload.encode()).hexdigest()
 
 

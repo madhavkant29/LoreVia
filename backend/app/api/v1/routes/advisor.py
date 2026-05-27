@@ -1559,10 +1559,14 @@ async def voice_consistency_review(
     if not body.text.strip():
         raise HTTPException(400, detail="Passage text is required.")
 
-    cache_key = make_editorial_cache_key(book_id, body.text, body.chapter_num)
+    cache_key = make_editorial_cache_key(book_id, body.text, body.chapter_num, body.character_id)
     cached = await get_voice_consistency_cache(str(book.id), cache_key)
     if cached is not None:
-        return {**cached, "cached": True}
+        return {
+            **cached,
+            "warnings": list(cached.get("warnings") or []),
+            "cached": True,
+        }
 
     total_ch = book.total_chapters or 9999
     client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
@@ -1599,19 +1603,35 @@ async def voice_consistency_review(
                 )
                 .where(Character.book_id == book_id)
                 .order_by(Character.mention_count.desc(), Character.first_chapter, Character.name)
-                .limit(80)
             )
         ).mappings().all()
-        relevant_characters = identify_character_mentions(body.text, [dict(row) for row in character_rows])
+        character_payloads = [dict(row) for row in character_rows]
+        selected_character = None
+        if body.character_id is not None:
+            selected_character = next(
+                (row for row in character_payloads if str(row["id"]) == str(body.character_id)),
+                None,
+            )
+            if selected_character is None:
+                raise HTTPException(400, detail="Selected character does not belong to this book.")
+            relevant_characters = [selected_character]
+        else:
+            relevant_characters = identify_character_mentions(body.text, character_payloads)
         all_voice_profiles = (
             await db.execute(
                 select(CharacterVoiceProfile).where(CharacterVoiceProfile.book_id == book_id)
             )
         ).scalars().all()
         profiles_by_character_id = {profile.character_id: profile for profile in all_voice_profiles}
-        attributed_dialogue = extract_dialogue_samples_by_character(body.text, [dict(row) for row in character_rows])
+        attributed_dialogue = extract_dialogue_samples_by_character(body.text, character_payloads)
+        warnings: list[str] = []
         if len(relevant_characters) == 1 and not attributed_dialogue.get(relevant_characters[0]["name"]):
             attributed_dialogue[relevant_characters[0]["name"]] = [body.text[:4000]]
+            if body.character_id is not None:
+                warnings.append(
+                    f"Dialogue could not be confidently attributed to {relevant_characters[0]['name']}; "
+                    "the review used the full submitted passage instead."
+                )
         character_context = build_character_voice_context(relevant_characters)
         chapter_hint = (
             f"This passage will appear in Chapter {body.chapter_num}."
@@ -1673,8 +1693,9 @@ async def voice_consistency_review(
             score, signals = score_voice_match(profile_payload, sample_metrics)
             closest_other_character = None
             closest_other_score = -1
+            character_uuid = uuid.UUID(str(char_id)) if char_id else None
             for candidate_profile in all_voice_profiles:
-                if profile is not None and candidate_profile.character_id == profile.character_id:
+                if character_uuid is not None and candidate_profile.character_id == character_uuid:
                     continue
                 candidate_score, _ = score_voice_match(
                     {
@@ -1726,6 +1747,7 @@ async def voice_consistency_review(
             ],
             "characters_reviewed": [character["name"] for character in relevant_characters],
             "character_matches": character_matches,
+            "warnings": warnings,
         }
         response_payload["cached"] = False
         await set_voice_consistency_cache(str(book.id), cache_key, response_payload)

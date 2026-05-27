@@ -26,6 +26,7 @@ const sections = [
     ],
     bullets: [
       "Account and profile data, including name, email, and organization",
+      "A device identifier stored or derived on your device to help recognize repeat signups from the same device",
       "Manuscripts, content, metadata, and derived outputs",
       "Usage and activity data, including features used and device information",
       "Support communications and preferences",
@@ -43,6 +44,7 @@ const sections = [
       "Personalize features and remember preferences",
       "Communicate with you about your account or updates",
       "Detect, investigate, and prevent abuse and security risks",
+      "Limit repeated account creation from the same device, including enforcing a maximum of two accounts per device where that limit applies",
     ],
   },
   {

@@ -105,6 +105,29 @@ describe("ChatLauncher", () => {
     expect(view.querySelector('[data-testid="chats-panel"]')).not.toBeNull()
   })
 
+  it("closes the chats sidebar when clicking outside it", async () => {
+    useAuthStoreMock.mockReturnValue({ user: { id: "user-1" } })
+    usePreferencesStoreMock.mockReturnValue({ theme: "light" })
+    useChatUnreadCountMock.mockReturnValue({ unreadCount: 0, hydrated: true })
+
+    const view = renderChatLauncher()
+    const toggleButton = view.querySelector("button")
+
+    await act(async () => {
+      toggleButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+      await Promise.resolve()
+    })
+
+    expect(view.querySelector('[data-testid="chats-panel"]')).not.toBeNull()
+
+    await act(async () => {
+      document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }))
+      await Promise.resolve()
+    })
+
+    expect(view.querySelector('[data-testid="chats-panel"]')).toBeNull()
+  })
+
   it("defers unread queries until the launcher is enabled or opened", async () => {
     useAuthStoreMock.mockReturnValue({ user: { id: "user-1" } })
     usePreferencesStoreMock.mockReturnValue({ theme: "light" })
