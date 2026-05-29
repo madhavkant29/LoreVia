@@ -37,14 +37,14 @@ export default function RelationshipEvolutionPage() {
         <h1 className={`mt-4 font-serif text-5xl ${isDark ? "text-white" : "text-stone-950"}`}>Relationship Evolution</h1>
         <p className={`mt-3 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>See how alliances and tensions shift over time, and which event changed the relationship.</p>
         <p className={`mt-4 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>Showing relationship events through chapter {chapter}.</p>
-        {error ? <div className={`mt-6 rounded-[1.5rem] border p-5 text-sm ${isDark ? "border-amber-400/30 bg-amber-500/10 text-amber-200" : "border-amber-300 bg-amber-50 text-amber-800"}`}>{error}</div> : null}
+        {error ? <div className={`mt-6 rounded-lg border p-5 text-sm ${isDark ? "border-amber-400/30 bg-amber-500/10 text-amber-200" : "border-amber-300 bg-amber-50 text-amber-800"}`}>{error}</div> : null}
         <div className="mt-8 space-y-4">
           {pairs.map((pair) => (
-            <div key={pair.characters.join("-")} className={`rounded-[1.6rem] border p-5 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200/80 bg-white/90"}`}>
+            <div key={pair.characters.join("-")} className={`rounded-lg border p-5 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200/80 bg-white/90"}`}>
               <h2 className={`font-serif text-2xl ${isDark ? "text-white" : "text-stone-950"}`}>{pair.characters.join(" ↔ ")}</h2>
               <div className="mt-4 space-y-3">
                 {pair.events.map((event, index) => (
-                  <div key={index} className={`rounded-[1.2rem] border p-4 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-stone-50"}`}>
+                  <div key={index} className={`rounded-md border p-4 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-stone-50"}`}>
                     <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-indigo-300" : "text-violet-600"}`}>Chapter {event.chapter} · {event.type}</p>
                     {event.description ? <p className={`mt-2 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-700"}`}>{event.description}</p> : null}
                   </div>

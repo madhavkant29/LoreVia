@@ -16,7 +16,7 @@ const RelationshipGraph = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="flex min-h-[36rem] items-center justify-center rounded-[2rem] border border-white/10 bg-[#070912] text-sm text-slate-300 shadow-[0_24px_80px_rgba(0,0,0,0.35)]">
+      <div className="flex min-h-[36rem] items-center justify-center rounded-lg border border-white/10 bg-[#070912] text-sm text-slate-300 shadow-[0_24px_80px_rgba(0,0,0,0.35)]">
         Loading relationship graph...
       </div>
     ),
@@ -69,12 +69,12 @@ export default function GraphPage() {
             </button>
 
             <div className="min-w-0">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-violet-300/80">Character Network</p>
+              <p className="text-3xs font-semibold uppercase tracking-[0.28em] text-violet-300/80">Character Network</p>
               <h1 className="mt-2 text-3xl font-semibold tracking-tight text-white sm:text-[2rem]">Relationship Graph</h1>
             </div>
           </div>
 
-          <label className="flex w-full max-w-full items-center justify-between gap-3 rounded-[1.25rem] border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-slate-300 shadow-[0_18px_48px_rgba(0,0,0,0.24)] lg:w-auto lg:min-w-[280px]">
+          <label className="flex w-full max-w-full items-center justify-between gap-3 rounded-md border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-slate-300 shadow-[0_18px_48px_rgba(0,0,0,0.24)] lg:w-auto lg:min-w-[280px]">
             <span className="min-w-0 truncate">{chapterLabel}</span>
             <input
               type="number"

@@ -18,7 +18,7 @@ const AuthorToolsNav = dynamic(
   () => import("@/components/layout/AuthorToolsNav").then((module) => module.AuthorToolsNav),
   {
     ssr: false,
-    loading: () => <div className="rounded-[1.8rem] border border-dashed p-8" />,
+    loading: () => <div className="rounded-lg border border-dashed p-8" />,
   }
 )
 
@@ -108,7 +108,7 @@ export default function ChapterListPage() {
             />
 
             {chapterListError ? (
-              <div className={`rounded-[1.3rem] border px-5 py-4 text-sm ${isDark ? "border-red-500/25 bg-red-500/10 text-red-300" : "border-red-200 bg-red-50 text-red-700"}`}>
+              <div className={`rounded-lg border px-5 py-4 text-sm ${isDark ? "border-red-500/25 bg-red-500/10 text-red-300" : "border-red-200 bg-red-50 text-red-700"}`}>
                 {chapterListError}
               </div>
             ) : null}
@@ -118,8 +118,8 @@ export default function ChapterListPage() {
             ) : null}
 
             {!chapterListLoading && !chapterListError && chapterCount === 0 ? (
-              <section className={`rounded-[1.5rem] border border-dashed px-6 py-14 text-center ${isDark ? "border-white/10 bg-white/[0.03] text-slate-400" : "border-stone-300 bg-white/80 text-stone-500"}`}>
-                <p className={`text-[11px] font-semibold uppercase tracking-[0.28em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>Chapters</p>
+              <section className={`rounded-lg border border-dashed px-6 py-14 text-center ${isDark ? "border-white/10 bg-white/[0.03] text-slate-400" : "border-stone-300 bg-white/80 text-stone-500"}`}>
+                <p className={`text-3xs font-semibold uppercase tracking-[0.28em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>Chapters</p>
                 <h2 className={`mt-3 text-xl font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>No chapters processed yet</h2>
                 <p className="mt-2 text-sm">This manuscript will show processed and queued chapters here as they become available.</p>
               </section>
@@ -145,16 +145,16 @@ export default function ChapterListPage() {
 function LoadingChapterList({ unitLabel, isDark }: { unitLabel: string; isDark: boolean }) {
   return (
     <section aria-label={`Loading ${unitLabel.toLowerCase()} list`} className="space-y-4">
-      <div className={`text-[11px] font-semibold uppercase tracking-[0.3em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>Chapters</div>
-      <div className={`space-y-3 rounded-[1.65rem] border p-3 sm:p-4 ${isDark ? "border-white/10 bg-[#091018]/58" : "border-stone-200 bg-white/78"}`}>
+      <div className={`text-3xs font-semibold uppercase tracking-[0.3em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>Chapters</div>
+      <div className={`space-y-3 rounded-lg border p-3 sm:p-4 ${isDark ? "border-white/10 bg-[#091018]/58" : "border-stone-200 bg-white/78"}`}>
         {Array.from({ length: 3 }, (_, index) => (
           <div
             key={index}
-            className={`animate-pulse rounded-[1.3rem] border px-5 py-5 ${isDark ? "border-white/10 bg-[#0b1118]/78" : "border-stone-200 bg-white/85"}`}
+            className={`animate-pulse rounded-lg border px-5 py-5 ${isDark ? "border-white/10 bg-[#0b1118]/78" : "border-stone-200 bg-white/85"}`}
           >
             <div className="flex flex-col gap-5 xl:grid xl:grid-cols-[minmax(0,1.15fr)_minmax(16rem,0.8fr)_auto] xl:items-center">
               <div className="flex items-start gap-4">
-                <div className={`h-12 w-12 rounded-[1rem] ${isDark ? "bg-white/[0.08]" : "bg-stone-200"}`} />
+                <div className={`h-12 w-12 rounded-md ${isDark ? "bg-white/[0.08]" : "bg-stone-200"}`} />
                 <div className="min-w-0 flex-1 space-y-3">
                   <div className={`h-3 w-24 rounded-full ${isDark ? "bg-white/[0.08]" : "bg-stone-200"}`} />
                   <div className={`h-7 w-44 rounded-full ${isDark ? "bg-white/[0.08]" : "bg-stone-200"}`} />
@@ -172,8 +172,8 @@ function LoadingChapterList({ unitLabel, isDark }: { unitLabel: string; isDark: 
                   <div className={`h-7 w-24 rounded-full ${isDark ? "bg-white/[0.08]" : "bg-stone-200"}`} />
                 </div>
                 <div className="flex flex-wrap gap-2 xl:justify-end">
-                  <div className={`h-10 w-24 rounded-[0.95rem] ${isDark ? "bg-white/[0.08]" : "bg-stone-200"}`} />
-                  <div className={`h-10 w-32 rounded-[0.95rem] ${isDark ? "bg-white/[0.08]" : "bg-stone-200"}`} />
+                  <div className={`h-10 w-24 rounded-md ${isDark ? "bg-white/[0.08]" : "bg-stone-200"}`} />
+                  <div className={`h-10 w-32 rounded-md ${isDark ? "bg-white/[0.08]" : "bg-stone-200"}`} />
                 </div>
               </div>
             </div>

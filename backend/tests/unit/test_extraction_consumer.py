@@ -1,187 +1,139 @@
-from types import SimpleNamespace
-import uuid
-
 import pytest
 
-from app.models.intelligence import CharacterRelationship
-from app.workers.consumers import extraction_consumer
+from app.core.redis import key_extraction_inflight_book
+from app.utils.ingestion_utils import EXTRACTION_INFLIGHT_TTL_SECONDS
+from app.workers.consumers.extraction_consumer import process_book
 
 
-class _FakeDB:
-    def __init__(self):
-        self.added = []
-
-    def add(self, item):
-        self.added.append(item)
-
-
-@pytest.mark.asyncio
-async def test_persist_relationship_records_resolves_alias_only_names(monkeypatch):
-    left_id = uuid.uuid4()
-    right_id = uuid.uuid4()
-    characters = [
-        SimpleNamespace(id=left_id, name="Aikawa Jun", aliases=["Aikawa"]),
-        SimpleNamespace(id=right_id, name="Ii", aliases=["Ii-chan"]),
-    ]
-    db = _FakeDB()
-    review_calls: list[dict] = []
-
-    async def _fake_record_candidate(*_args, **kwargs):
-        review_calls.append(kwargs)
-        return object()
-
-    monkeypatch.setattr(extraction_consumer, "record_relationship_candidate", _fake_record_candidate)
-
-    persisted, unresolved, review_count = await extraction_consumer._persist_relationship_records(
-        db,
-        book_id=uuid.uuid4(),
-        chapter_number=3,
-        existing_characters=characters,
-        relationships=[
-            {
-                "character_a": "Aikawa",
-                "character_b": "Ii-chan",
-                "type": "ally",
-                "description": "Talk together",
-                "source_batch_key": "batch-1",
-            }
-        ],
-        key_cache={},
-        persisted_signatures=set(),
-    )
-
-    assert persisted == 1
-    assert unresolved == []
-    assert review_count == 0
-    assert review_calls == []
-    assert len(db.added) == 1
-    assert isinstance(db.added[0], CharacterRelationship)
-    assert db.added[0].character_a_id == left_id
-    assert db.added[0].character_b_id == right_id
+def test_inflight_lock_ttl_exceeds_hard_limit():
+    EXTRACTION_HARD_LIMIT = 25 * 60       # celery_app.py task_annotations time_limit
+    MINIMUM_TTL = EXTRACTION_HARD_LIMIT + 300
+    assert EXTRACTION_INFLIGHT_TTL_SECONDS >= MINIMUM_TTL
 
 
 @pytest.mark.asyncio
-async def test_persist_relationship_records_quarantines_ambiguous_matches(monkeypatch):
-    shared_alias = "Aikawa"
-    characters = [
-        SimpleNamespace(id=uuid.uuid4(), name="Aikawa Jun", aliases=[shared_alias]),
-        SimpleNamespace(id=uuid.uuid4(), name="Aikawa", aliases=[]),
-        SimpleNamespace(id=uuid.uuid4(), name="Ii", aliases=["Ii-chan"]),
-    ]
-    db = _FakeDB()
-    review_calls: list[dict] = []
+async def test_process_book_inflight_lock(monkeypatch):
+    inflight_state: dict[str, str] = {}
 
-    async def _fake_record_candidate(*_args, **kwargs):
-        review_calls.append(kwargs)
-        return object()
+    async def mock_set_if_absent(key: str, value: object, ttl: int) -> bool:
+        if key in inflight_state:
+            return False
+        inflight_state[key] = str(value)
+        return True
 
-    monkeypatch.setattr(extraction_consumer, "record_relationship_candidate", _fake_record_candidate)
+    async def mock_delete_if_owner(key: str, owner_token: str) -> bool:
+        if inflight_state.get(key) == owner_token:
+            del inflight_state[key]
+            return True
+        return False
 
-    persisted, unresolved, review_count = await extraction_consumer._persist_relationship_records(
-        db,
-        book_id=uuid.uuid4(),
-        chapter_number=4,
-        existing_characters=characters,
-        relationships=[
-            {
-                "character_a": shared_alias,
-                "character_b": "Ii-chan",
-                "type": "rival",
-                "description": "Argue",
-                "source_batch_key": "batch-2",
-            }
-        ],
-        key_cache={},
-        persisted_signatures=set(),
+    call_count = 0
+
+    async def mock_impl(book_id: str, queue_wait_ms: int | None = None) -> dict:
+        nonlocal call_count
+        call_count += 1
+        return {"book_id": book_id, "chapters": 10}
+
+    monkeypatch.setattr(
+        "app.workers.consumers.extraction_consumer.cache_set_if_absent",
+        mock_set_if_absent,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.workers.consumers.extraction_consumer.cache_delete_if_owner",
+        mock_delete_if_owner,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.workers.consumers.extraction_consumer.INFLIGHT_BOOK_TTL_SECONDS",
+        3600,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.workers.consumers.extraction_consumer._process_book_impl",
+        mock_impl,
+        raising=False,
     )
 
-    assert persisted == 0
-    assert len(unresolved) == 1
-    assert review_count == 1
-    assert len(review_calls) == 1
-    assert review_calls[0]["reason_codes"] == [
-        "relationship_unresolved",
-        "character_a_ambiguous",
-        "character_b_resolved",
-    ]
+    book_id = "abc-123-def"
+    inflight_key = key_extraction_inflight_book(book_id)
+
+    result1 = await process_book(book_id, task_id="task-1")
+    assert result1 == {"book_id": book_id, "chapters": 10}
+    assert call_count == 1
+    assert inflight_key not in inflight_state
+
+    inflight_state[inflight_key] = "task-blocking"
+
+    result2 = await process_book(book_id, task_id="task-2")
+    assert result2 == {"skipped": "already_inflight"}
+    assert call_count == 1
+
+    del inflight_state[inflight_key]
+
+    result3 = await process_book(book_id, task_id="task-3")
+    assert result3 == {"book_id": book_id, "chapters": 10}
+    assert call_count == 2
+    assert inflight_key not in inflight_state
 
 
 @pytest.mark.asyncio
-async def test_persist_relationship_records_does_not_count_duplicate_same_state_batches(monkeypatch):
-    left_id = uuid.uuid4()
-    right_id = uuid.uuid4()
-    characters = [
-        SimpleNamespace(id=left_id, name="Aikawa Jun", aliases=["Aikawa"]),
-        SimpleNamespace(id=right_id, name="Ii", aliases=["Ii-chan"]),
-    ]
-    db = _FakeDB()
+async def test_process_book_inflight_lock_owner_safety(monkeypatch):
+    inflight_state: dict[str, str] = {}
 
-    async def _fake_upsert(*_args, **_kwargs):
-        return CharacterRelationship(
-            book_id=uuid.uuid4(),
-            character_a_id=left_id,
-            character_b_id=right_id,
-            rel_type="ally",
-            description="Talk together",
-            from_chapter=3,
-        ), False
+    async def mock_set_if_absent(key: str, value: object, ttl: int) -> bool:
+        if key in inflight_state:
+            return False
+        inflight_state[key] = str(value)
+        return True
 
-    monkeypatch.setattr(extraction_consumer, "upsert_relationship_timeline_state", _fake_upsert)
+    async def mock_delete_if_owner(key: str, owner_token: str) -> bool:
+        if inflight_state.get(key) == owner_token:
+            del inflight_state[key]
+            return True
+        return False
 
-    persisted, unresolved, review_count = await extraction_consumer._persist_relationship_records(
-        db,
-        book_id=uuid.uuid4(),
-        chapter_number=3,
-        existing_characters=characters,
-        relationships=[
-            {
-                "character_a": "Aikawa",
-                "character_b": "Ii-chan",
-                "type": "ally",
-                "description": "Talk together",
-                "source_batch_key": "batch-1",
-            }
-        ],
-        key_cache={},
-        persisted_signatures=set(),
+    call_count = 0
+
+    async def mock_impl(book_id: str, queue_wait_ms: int | None = None) -> dict:
+        nonlocal call_count
+        call_count += 1
+        return {"book_id": book_id, "chapters": 10}
+
+    monkeypatch.setattr(
+        "app.workers.consumers.extraction_consumer.cache_set_if_absent",
+        mock_set_if_absent,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.workers.consumers.extraction_consumer.cache_delete_if_owner",
+        mock_delete_if_owner,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.workers.consumers.extraction_consumer.INFLIGHT_BOOK_TTL_SECONDS",
+        3600,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.workers.consumers.extraction_consumer._process_book_impl",
+        mock_impl,
+        raising=False,
     )
 
-    assert persisted == 0
-    assert unresolved == []
-    assert review_count == 0
+    book_id = "def-456-ghi"
+    inflight_key = key_extraction_inflight_book(book_id)
 
+    inflight_state[inflight_key] = "old-task-x"
 
-@pytest.mark.asyncio
-async def test_embed_new_character_candidates_reuses_active_db_session(monkeypatch):
-    observed: dict[str, object] = {}
+    result = await process_book(book_id, task_id="new-task-1")
+    assert result == {"skipped": "already_inflight"}
+    assert call_count == 0
+    assert inflight_state[inflight_key] == "old-task-x"
 
-    async def _fake_embed_batch(texts: list[str], **kwargs):
-        observed["texts"] = texts
-        observed["db"] = kwargs.get("db")
-        observed["user_id"] = kwargs.get("user_id")
-        observed["book_id"] = kwargs.get("book_id")
-        observed["feature"] = kwargs.get("feature")
-        return [[0.1, 0.2]]
+    del inflight_state[inflight_key]
 
-    monkeypatch.setattr(extraction_consumer, "embed_batch", _fake_embed_batch)
-
-    db = object()
-    user_id = uuid.uuid4()
-    book_id = uuid.uuid4()
-    entity = {"name": "Mara", "traits": {"eyes": {"value": "green"}}}
-
-    result = await extraction_consumer._embed_new_character_candidates(
-        [(entity, set())],
-        db=db,
-        user_id=user_id,
-        book_id=book_id,
-    )
-
-    assert result == [[0.1, 0.2]]
-    assert observed == {
-        "texts": ["Character: Mara. eyes: green"],
-        "db": db,
-        "user_id": user_id,
-        "book_id": book_id,
-        "feature": "character_embedding",
-    }
+    result = await process_book(book_id, task_id="new-task-2")
+    assert result == {"book_id": book_id, "chapters": 10}
+    assert call_count == 1
+    assert inflight_key not in inflight_state

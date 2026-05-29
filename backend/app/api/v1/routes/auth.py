@@ -84,8 +84,10 @@ from app.utils.logging.errors import public_error_message
 from app.utils.user_utils import (
     current_daily_word_count,
     current_daily_word_goal,
+    get_login_activity_dates_from_table,
     login_activity_dates,
     record_login_activity,
+    record_login_activity_row,
 )
 
 router = APIRouter()
@@ -101,7 +103,7 @@ def _validate_password(password: str, email: str) -> None:
         )
 
 
-async def _mint_token_pair(user: User) -> tuple[UserOut, str, str]:
+async def _mint_token_pair(user: User, db: AsyncSession | None = None) -> tuple[UserOut, str, str]:
     user_id = str(user.id)
     version = current_token_version(user)
     session_id = str(uuid.uuid4())
@@ -111,7 +113,7 @@ async def _mint_token_pair(user: User) -> tuple[UserOut, str, str]:
         settings.JWT_REFRESH_EXPIRE_DAYS * 24 * 60 * 60,
     )
     return (
-        _build_user_out(user),
+        await _build_user_out(user, db),
         create_access_token(user_id, version),
         create_refresh_token(user_id, version, session_id),
     )
@@ -122,9 +124,13 @@ def _user_response_with_cookies(response: Response, user_out: UserOut | None, ac
     return user_out
 
 
-def _build_user_out(user: User) -> UserOut:
+async def _build_user_out(user: User, db: AsyncSession | None = None) -> UserOut:
     tier = build_tier_presentation(user)
     created_at = user.created_at or datetime.now(UTC)
+    if db is not None:
+        activity_dates = await get_login_activity_dates_from_table(db, str(user.id))
+    else:
+        activity_dates = login_activity_dates(user)
     return UserOut(
         id=user.id,
         email=user.email,
@@ -140,15 +146,31 @@ def _build_user_out(user: User) -> UserOut:
         last_login_at=user.last_login_at,
         login_streak_days=max(int(user.login_streak_days or 0), 0),
         longest_login_streak_days=max(int(user.longest_login_streak_days or 0), 0),
-        login_activity_dates=login_activity_dates(user),
+        login_activity_dates=activity_dates,
         email_verified=bool(user.email_verified_at),
         messaging_permission=(user.messaging_permission or "anyone"),
         created_at=created_at,
     )
 
 
-async def _record_login_activity(db: AsyncSession, user: User) -> None:
-    record_login_activity(user)
+async def _record_login_activity(
+    db: AsyncSession,
+    user: User,
+    *,
+    ip_hash: str | None = None,
+    device_id: str | None = None,
+) -> None:
+    from datetime import UTC, datetime
+
+    now = datetime.now(UTC)
+    record_login_activity(user, now=now)
+    await record_login_activity_row(
+        db,
+        str(user.id),
+        now.date(),
+        ip_hash=ip_hash,
+        device_id=device_id,
+    )
     await mark_user_dashboard_cache_dirty(str(user.id))
 
 
@@ -236,7 +258,7 @@ async def login(
     await _record_login_activity(db, user)
     await db.commit()
     await db.refresh(user)
-    user_out, access_token, refresh_token = await _mint_token_pair(user)
+    user_out, access_token, refresh_token = await _mint_token_pair(user, db)
     return _user_response_with_cookies(response, user_out, access_token, refresh_token)
 
 
@@ -342,7 +364,7 @@ async def oauth_supabase(
         await _record_login_activity(db, existing)
         await db.commit()
         await db.refresh(existing)
-        user_out, access_token, refresh_token = await _mint_token_pair(existing)
+        user_out, access_token, refresh_token = await _mint_token_pair(existing, db)
         return _user_response_with_cookies(response, user_out, access_token, refresh_token)
     except HTTPException:
         raise
@@ -445,7 +467,7 @@ async def refresh(
     await _record_login_activity(db, user)
     await db.commit()
     await db.refresh(user)
-    user_out, access_token, refresh_token = await _mint_token_pair(user)
+    user_out, access_token, refresh_token = await _mint_token_pair(user, db)
     return _user_response_with_cookies(response, user_out, access_token, refresh_token)
 
 
@@ -476,7 +498,7 @@ async def verify_email(
     await _record_login_activity(db, user)
     await db.commit()
     await db.refresh(user)
-    user_out, access_token, refresh_token = await _mint_token_pair(user)
+    user_out, access_token, refresh_token = await _mint_token_pair(user, db)
     return _user_response_with_cookies(response, user_out, access_token, refresh_token)
 
 
@@ -519,7 +541,7 @@ async def me(
     await _record_login_activity(db, current_user)
     await db.commit()
     await db.refresh(current_user)
-    return _build_user_out(current_user)
+    return await _build_user_out(current_user, db)
 
 
 @router.patch("/me/reading-mode")
@@ -544,7 +566,7 @@ async def set_daily_word_goal(
     current_user.daily_word_goal = body.daily_word_goal
     await db.commit()
     await db.refresh(current_user)
-    return _build_user_out(current_user)
+    return await _build_user_out(current_user, db)
 
 
 @router.patch("/me/messaging-permission", response_model=UserOut)
@@ -556,7 +578,7 @@ async def set_messaging_permission(
     current_user.messaging_permission = body.messaging_permission
     await db.commit()
     await db.refresh(current_user)
-    return _build_user_out(current_user)
+    return await _build_user_out(current_user, db)
 
 
 @router.get("/tier-limits", response_model=TierLimitsOut)
@@ -616,4 +638,4 @@ async def set_username(
     current_user.username = username
     await db.commit()
     await db.refresh(current_user)
-    return _build_user_out(current_user)
+    return await _build_user_out(current_user, db)

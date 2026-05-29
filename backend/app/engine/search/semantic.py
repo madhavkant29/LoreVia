@@ -48,6 +48,8 @@ async def semantic_search(
     max_chapter: int,
     limit: int = settings.SEARCH_MAX_CONTEXT_CHUNKS,
     *,
+    candidate_limit: int | None = None,
+    similarity_threshold: float | None = None,
     usage_user_id: uuid.UUID | None = None,
     usage_feature: str = "semantic_search_query",
 ) -> list[dict]:
@@ -61,6 +63,12 @@ async def semantic_search(
         user_id=usage_user_id,
         book_id=book_id,
         feature=usage_feature,
+    )
+
+    final_limit = max(1, int(limit))
+    retrieval_limit = max(final_limit, int(candidate_limit or final_limit))
+    threshold = float(
+        settings.SEARCH_SIMILARITY_THRESHOLD if similarity_threshold is None else similarity_threshold
     )
 
     rows = await db.execute(
@@ -84,8 +92,8 @@ async def semantic_search(
             "emb": str(query_embedding),
             "bid": str(book_id),
             "max_ch": max_chapter,
-            "thr": settings.SEARCH_SIMILARITY_THRESHOLD,
-            "lim": limit,
+            "thr": threshold,
+            "lim": retrieval_limit,
         },
     )
 
@@ -100,7 +108,7 @@ async def semantic_search(
                 relevance=row.relevance,
             )
         )
-    return results
+    return results[:final_limit]
 
 
 async def find_context_for_tap(

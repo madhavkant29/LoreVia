@@ -73,7 +73,7 @@ function controlButtonClass(active = false) {
 }
 
 function panelClass() {
-  return "rounded-[1.9rem] border border-white/10 bg-[linear-gradient(180deg,rgba(10,14,24,0.98),rgba(6,8,14,0.98))] shadow-[0_24px_80px_rgba(0,0,0,0.36)]"
+  return "rounded-lg border border-white/10 bg-[linear-gradient(180deg,rgba(10,14,24,0.98),rgba(6,8,14,0.98))] shadow-[0_24px_80px_rgba(0,0,0,0.36)]"
 }
 
 function GraphToolbarButton({
@@ -171,8 +171,8 @@ function InspectorSection({
   title: string
 }) {
   return (
-    <section className="rounded-[1.2rem] border border-white/10 bg-black/20 p-4">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">{title}</p>
+    <section className="rounded-md border border-white/10 bg-black/20 p-4">
+      <p className="text-3xs font-semibold uppercase tracking-[0.24em] text-slate-500">{title}</p>
       <div className="mt-3">{children}</div>
     </section>
   )
@@ -188,7 +188,7 @@ function EmptyInspector({
   return (
     <div className="space-y-5">
       <div>
-        <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-violet-300/85">Inspector</p>
+        <p className="text-3xs font-semibold uppercase tracking-[0.28em] text-violet-300/85">Inspector</p>
         <h3 className="mt-3 text-[2rem] font-semibold tracking-tight text-white">Read the map</h3>
       </div>
 
@@ -203,7 +203,7 @@ function EmptyInspector({
         </div>
       </InspectorSection>
 
-      <div className="flex min-h-[220px] flex-col items-center justify-center rounded-[1.4rem] border border-dashed border-white/10 bg-[radial-gradient(circle_at_top,rgba(139,92,246,0.18),transparent_38%),rgba(255,255,255,0.02)] px-6 text-center">
+      <div className="flex min-h-[220px] flex-col items-center justify-center rounded-lg border border-dashed border-white/10 bg-[radial-gradient(circle_at_top,rgba(139,92,246,0.18),transparent_38%),rgba(255,255,255,0.02)] px-6 text-center">
         <div className="flex h-16 w-16 items-center justify-center rounded-full border border-violet-400/40 bg-violet-500/8 text-violet-200">
           <CursorIcon className="h-7 w-7" />
         </div>
@@ -808,7 +808,7 @@ export function RelationshipGraph({
 
   if (loading) {
     return (
-      <div className="rounded-[1.9rem] border border-white/10 bg-white/[0.03] p-8 text-sm text-slate-300 shadow-[0_24px_80px_rgba(0,0,0,0.32)]">
+      <div className="rounded-lg border border-white/10 bg-white/[0.03] p-8 text-sm text-slate-300 shadow-[0_24px_80px_rgba(0,0,0,0.32)]">
         Building the relationship graph...
       </div>
     )
@@ -816,7 +816,7 @@ export function RelationshipGraph({
 
   if (compact) {
     return (
-      <section className="rounded-[1.4rem] border border-white/10 bg-[#060915] p-3 text-slate-100 shadow-[0_16px_50px_rgba(0,0,0,0.24)]">
+      <section className="rounded-lg border border-white/10 bg-[#060915] p-3 text-slate-100 shadow-[0_16px_50px_rgba(0,0,0,0.24)]">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 className="text-base font-semibold text-white">Relationship graph</h2>
@@ -847,7 +847,7 @@ export function RelationshipGraph({
         </div>
 
         {filteredGraph && filteredGraph.nodes.length > 0 ? (
-          <div className="relative mt-3 overflow-hidden rounded-[1.2rem] border border-white/10 bg-[#050814]">
+          <div className="relative mt-3 overflow-hidden rounded-md border border-white/10 bg-[#050814]">
             <div
               aria-hidden="true"
               className={cn(
@@ -871,7 +871,7 @@ export function RelationshipGraph({
             />
           </div>
         ) : (
-          <div className="mt-3 flex min-h-[220px] items-center justify-center rounded-[1.2rem] border border-white/10 bg-[linear-gradient(180deg,#050814_0%,#03050b_100%)] text-center text-slate-400">
+          <div className="mt-3 flex min-h-[220px] items-center justify-center rounded-md border border-white/10 bg-[linear-gradient(180deg,#050814_0%,#03050b_100%)] text-center text-slate-400">
             <div className="max-w-sm space-y-2 px-6">
               <p className="text-base font-semibold text-white">No graphable relationships yet</p>
               <p className="text-sm leading-6">Read further or clear the active filter to see more of the character network.</p>
@@ -879,7 +879,7 @@ export function RelationshipGraph({
           </div>
         )}
 
-        <div className="mt-3 rounded-[1rem] border border-white/10 bg-white/[0.03] p-3 text-xs leading-5 text-slate-300">
+        <div className="mt-3 rounded-md border border-white/10 bg-white/[0.03] p-3 text-xs leading-5 text-slate-300">
           <CompactSelectionSummary selectedNode={selectedNode} selectedEdge={selectedEdge} />
         </div>
       </section>
@@ -892,7 +892,7 @@ export function RelationshipGraph({
         <div className="flex flex-col gap-5">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div className="max-w-2xl">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-violet-300/85">Relationship graph</p>
+              <p className="text-3xs font-semibold uppercase tracking-[0.28em] text-violet-300/85">Relationship graph</p>
               <h2 className="mt-3 text-2xl font-semibold tracking-tight text-white">Relationship graph</h2>
               <p className="mt-2 text-sm leading-7 text-slate-400">
                 Arrange the map to match how you read it. Drag nodes, zoom the canvas, and keep a saved layout on this device.
@@ -956,7 +956,7 @@ export function RelationshipGraph({
           </div>
 
           {filteredGraph && filteredGraph.nodes.length > 0 ? (
-            <div className="relative overflow-hidden rounded-[1.55rem] border border-white/10 bg-[#040712]">
+            <div className="relative overflow-hidden rounded-lg border border-white/10 bg-[#040712]">
               <div
                 aria-hidden="true"
                 className={cn(
@@ -1020,7 +1020,7 @@ export function RelationshipGraph({
               </div>
             </div>
           ) : (
-            <div className="flex h-[40vh] min-h-[340px] items-center justify-center rounded-[1.55rem] border border-white/10 bg-[linear-gradient(180deg,#050814_0%,#03050b_100%)] text-center text-slate-400">
+            <div className="flex h-[40vh] min-h-[340px] items-center justify-center rounded-lg border border-white/10 bg-[linear-gradient(180deg,#050814_0%,#03050b_100%)] text-center text-slate-400">
               <div className="max-w-sm space-y-2 px-6">
                 <p className="text-lg font-semibold text-white">No graphable relationships yet</p>
                 <p className="text-sm leading-6">Read further or clear the active filter to see more of the character network.</p>
@@ -1038,20 +1038,20 @@ export function RelationshipGraph({
                 {nodeInitial(selectedNode.name)}
               </div>
               <div className="min-w-0">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-violet-300/85">Character</p>
+                <p className="text-3xs font-semibold uppercase tracking-[0.28em] text-violet-300/85">Character</p>
                 <h3 className="mt-2 truncate text-[1.9rem] font-semibold tracking-tight text-white">{selectedNode.name}</h3>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {selectedNode.role ? (
-                    <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-[11px] text-slate-200">{selectedNode.role}</span>
+                    <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-3xs text-slate-200">{selectedNode.role}</span>
                   ) : null}
                   {selectedNode.is_manual ? (
-                    <span className="rounded-full border border-amber-400/20 bg-amber-500/12 px-3 py-1 text-[11px] text-amber-100">manual</span>
+                    <span className="rounded-full border border-amber-400/20 bg-amber-500/12 px-3 py-1 text-3xs text-amber-100">manual</span>
                   ) : null}
                   {selectedNode.graph_visibility_override === "include" ? (
-                    <span className="rounded-full border border-teal-400/20 bg-teal-500/12 px-3 py-1 text-[11px] text-teal-100">forced visible</span>
+                    <span className="rounded-full border border-teal-400/20 bg-teal-500/12 px-3 py-1 text-3xs text-teal-100">forced visible</span>
                   ) : null}
                   {typeof selectedNode.visibility_score === "number" ? (
-                    <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-[11px] text-slate-300">score {selectedNode.visibility_score}</span>
+                    <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-3xs text-slate-300">score {selectedNode.visibility_score}</span>
                   ) : null}
                 </div>
               </div>
@@ -1156,7 +1156,7 @@ export function RelationshipGraph({
         ) : selectedEdge ? (
           <div className="space-y-5">
             <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-violet-300/85">Connection</p>
+              <p className="text-3xs font-semibold uppercase tracking-[0.28em] text-violet-300/85">Connection</p>
               <h3 className="mt-3 text-[1.9rem] font-semibold tracking-tight text-white">{relationshipLabel(selectedEdge.type)}</h3>
               {selectedEdgeParticipants ? (
                 <p className="mt-3 text-sm leading-7 text-slate-400">

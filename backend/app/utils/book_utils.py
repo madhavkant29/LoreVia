@@ -26,7 +26,7 @@ from fastapi import HTTPException
 from PIL import Image, ImageDraw, ImageFont
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import aliased
+from sqlalchemy.orm import aliased, selectinload
 
 from app.core.config import settings
 from app.core.security import create_asset_token
@@ -2713,8 +2713,16 @@ async def get_book_with_collaboration_access(
     db: AsyncSession,
     book_id: uuid.UUID,
     user: User,
+    *,
+    options: tuple | None = None,
 ) -> tuple[Book, BookCollaborator | None]:
-    book = await db.get(Book, book_id)
+    if options:
+        result = await db.execute(
+            select(Book).where(Book.id == book_id).options(*options)
+        )
+        book = result.scalars().first()
+    else:
+        book = await db.get(Book, book_id)
     if not book:
         raise HTTPException(404, "Book not found")
     if book.user_id == user.id:
@@ -2872,8 +2880,20 @@ async def delete_book_collaborator(db: AsyncSession, book: Book, collaboration_i
     await db.commit()
 
 
-async def get_owned_book(db: AsyncSession, book_id: uuid.UUID, user_id: uuid.UUID) -> Book:
-    book = await db.get(Book, book_id)
+async def get_owned_book(
+    db: AsyncSession,
+    book_id: uuid.UUID,
+    user_id: uuid.UUID,
+    *,
+    options: tuple | None = None,
+) -> Book:
+    if options:
+        result = await db.execute(
+            select(Book).where(Book.id == book_id, Book.user_id == user_id).options(*options)
+        )
+        book = result.scalars().first()
+    else:
+        book = await db.get(Book, book_id)
     if not book or book.user_id != user_id:
         raise HTTPException(404, "Book not found")
     return book
@@ -7282,6 +7302,11 @@ async def get_chapter_version_content(
         "word_count": version.word_count,
         "note": version.note,
         "snapshot_kind": version.snapshot_kind,
+        "restore_status": version.restore_status,
+        "restore_error": version.restore_error,
+        "restore_task_id": version.restore_task_id,
+        "restore_started_at": version.restore_started_at,
+        "restore_completed_at": version.restore_completed_at,
         "created_at": version.created_at,
         "text": str(stored.get("text") or ""),
         "html": cast(str | None, stored.get("html")),
@@ -7403,6 +7428,11 @@ async def list_chapter_versions(
             "word_count": version.word_count,
             "note": version.note,
             "snapshot_kind": version.snapshot_kind,
+            "restore_status": version.restore_status,
+            "restore_error": version.restore_error,
+            "restore_task_id": version.restore_task_id,
+            "restore_started_at": version.restore_started_at,
+            "restore_completed_at": version.restore_completed_at,
             "created_at": version.created_at,
         }
         for version in versions

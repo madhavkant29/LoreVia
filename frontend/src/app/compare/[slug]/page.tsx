@@ -84,12 +84,12 @@ export default async function CompetitorComparisonPage({ params }: ComparisonPag
         <section className="mx-auto max-w-7xl px-5 py-12 md:px-8">
           <div className="grid gap-10 lg:grid-cols-[0.82fr_1.18fr]">
             <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-[#6fae9f]">
+              <p className="text-3xs font-semibold uppercase tracking-[0.32em] text-[#6fae9f]">
                 Where LoreVia is different
               </p>
               <div className="mt-6 space-y-4">
                 {page.differentiators.map((item) => (
-                  <article key={item.title} className="rounded-[1.4rem] border border-white/10 bg-[#0d1715] p-5">
+                  <article key={item.title} className="rounded-lg border border-white/10 bg-[#0d1715] p-5">
                     <h2 className="text-xl font-semibold text-white">{item.title}</h2>
                     <p className="mt-3 text-base leading-8 text-[#aeb9b3]">{item.body}</p>
                   </article>
@@ -105,16 +105,16 @@ export default async function CompetitorComparisonPage({ params }: ComparisonPag
 
         <section className="mx-auto max-w-7xl px-5 py-12 md:px-8">
           <div className="grid gap-5 lg:grid-cols-2">
-            <article className="rounded-[1.6rem] border border-[#17514a] bg-[#0f2320] p-6">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-[#7ad3c1]">Choose LoreVia if...</p>
+            <article className="rounded-lg border border-[#17514a] bg-[#0f2320] p-6">
+              <p className="text-3xs font-semibold uppercase tracking-[0.28em] text-[#7ad3c1]">Choose LoreVia if...</p>
               <ul className="mt-5 space-y-3 text-base leading-8 text-[#d9e0db]">
                 {page.chooseLoreVia.map((item) => (
                   <li key={item}>- {item}</li>
                 ))}
               </ul>
             </article>
-            <article className="rounded-[1.6rem] border border-white/10 bg-[#0d1715] p-6">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-[#6fae9f]">
+            <article className="rounded-lg border border-white/10 bg-[#0d1715] p-6">
+              <p className="text-3xs font-semibold uppercase tracking-[0.28em] text-[#6fae9f]">
                 Choose {page.competitorName} if...
               </p>
               <ul className="mt-5 space-y-3 text-base leading-8 text-[#d9e0db]">
@@ -127,8 +127,8 @@ export default async function CompetitorComparisonPage({ params }: ComparisonPag
         </section>
 
         <section className="mx-auto max-w-7xl px-5 py-12 md:px-8">
-          <div className="rounded-[1.7rem] border border-white/10 bg-[#0d1715] p-6">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-[#6fae9f]">More comparisons</p>
+          <div className="rounded-lg border border-white/10 bg-[#0d1715] p-6">
+            <p className="text-3xs font-semibold uppercase tracking-[0.32em] text-[#6fae9f]">More comparisons</p>
             <div className="mt-5">
               <CompareNav activeSlug={page.slug} />
             </div>

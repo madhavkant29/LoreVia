@@ -14,10 +14,10 @@ export default function WorldGapPage() {
   return (
     <div className={`min-h-screen ${isDark ? "bg-[#040912] text-slate-100" : "bg-[#f3eee6] text-stone-950"}`}>
       <div className="mx-auto max-w-[1480px] px-4 pb-10 pt-4 sm:px-6 lg:px-8">
-        <div className={`rounded-[1.85rem] border px-5 py-5 shadow-[0_24px_70px_-56px_rgba(15,23,42,0.42)] ${isDark ? "border-white/10 bg-[#08111d]" : "border-white/80 bg-white/92"}`}>
+        <div className={`rounded-lg border px-5 py-5 shadow-[0_24px_70px_-56px_rgba(15,23,42,0.42)] ${isDark ? "border-white/10 bg-[#08111d]" : "border-white/80 bg-white/92"}`}>
           <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
             <div className="max-w-3xl">
-              <p className={`text-[11px] font-semibold uppercase tracking-[0.32em] ${isDark ? "text-teal-300" : "text-teal-700"}`}>World gap detection</p>
+              <p className={`text-3xs font-semibold uppercase tracking-[0.32em] ${isDark ? "text-teal-300" : "text-teal-700"}`}>World gap detection</p>
               <h1 className={`mt-2 font-serif text-[2.25rem] leading-[1.1] sm:text-[2.55rem] ${isDark ? "text-white" : "text-stone-950"}`}>Worldbuilding corpus vs. story manuscript</h1>
               <p className={`mt-3 max-w-[46rem] text-sm leading-6 ${isDark ? "text-slate-400" : "text-stone-500"}`}>
                 Keep reference lore independent from the manuscript. Compare your world corpus to the story manuscript to find gaps, inconsistencies, and opportunities.

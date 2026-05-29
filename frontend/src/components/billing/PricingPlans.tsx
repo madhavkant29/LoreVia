@@ -191,7 +191,7 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
           </div>
         </div>
 
-        <div className={`mt-7 rounded-[1.1rem] border px-5 py-4 ${noticeClass}`}>
+        <div className={`mt-7 rounded-md border px-5 py-4 ${noticeClass}`}>
           <div className="flex items-start gap-3">
             <span className={`mt-0.5 ${isDark ? "text-slate-300" : "text-[#1f615d]"}`} aria-hidden="true">
               <InfoIcon />
@@ -206,7 +206,7 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
         </div>
 
         {message ? (
-          <div className={`mt-6 rounded-[1rem] border px-4 py-3 text-sm leading-6 ${messageClass}`}>
+          <div className={`mt-6 rounded-md border px-4 py-3 text-sm leading-6 ${messageClass}`}>
             {message}
           </div>
         ) : null}
@@ -238,11 +238,11 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
             return (
               <article
                 key={tier.name}
-                className={`relative flex min-h-[42rem] flex-col rounded-[1.35rem] border p-6 ${cardClass} ${highlightClass}`.trim()}
+                className={`relative flex min-h-[42rem] flex-col rounded-lg border p-6 ${cardClass} ${highlightClass}`.trim()}
               >
                 {tier.highlight ? (
                   <div className="absolute inset-x-0 -top-0.5 flex justify-center">
-                    <span className={`rounded-b-xl px-5 py-1.5 text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "bg-[#24544d] text-[#d3f2ec]" : "bg-[#1f615d] text-white"}`}>
+                    <span className={`rounded-b-xl px-5 py-1.5 text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "bg-[#24544d] text-[#d3f2ec]" : "bg-[#1f615d] text-white"}`}>
                       Recommended
                     </span>
                   </div>
@@ -250,17 +250,17 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
 
                 <div className={`flex items-start justify-between gap-4 ${tier.highlight ? "pt-4" : ""}`}>
                   <div>
-                    <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-[#7ec8b7]" : "text-[#1f615d]"}`}>{tier.badge}</p>
+                    <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-[#7ec8b7]" : "text-[#1f615d]"}`}>{tier.badge}</p>
                     <h3 className={`mt-4 font-display text-[2.15rem] tracking-[-0.04em] ${priceCopyClass}`}>{tier.name}</h3>
                   </div>
                   {tier.highlight ? (
-                    <span className={`pt-7 text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-[#7ec8b7]" : "text-[#1f615d]"}`}>
+                    <span className={`pt-7 text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-[#7ec8b7]" : "text-[#1f615d]"}`}>
                       Core plan
                     </span>
                   ) : null}
                 </div>
 
-                <p className={`mt-4 text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-[#7ec8b7]" : "text-[#1f615d]"}`}>
+                <p className={`mt-4 text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-[#7ec8b7]" : "text-[#1f615d]"}`}>
                   {pricingTierAccessLabel(tier)}
                 </p>
 
@@ -298,7 +298,7 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
                     type="button"
                     onClick={() => void handlePlanClick(tier)}
                     disabled={isBusy}
-                    className={`inline-flex w-full items-center justify-center rounded-[0.9rem] border px-4 py-3.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${buttonClass}`}
+                    className={`inline-flex w-full items-center justify-center rounded-sm border px-4 py-3.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${buttonClass}`}
                   >
                     {isBusy ? "Opening checkout..." : buttonLabel}
                   </button>

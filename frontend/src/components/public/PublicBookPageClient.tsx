@@ -147,19 +147,19 @@ export function PublicBookPageClient({
           {analytics ? (
             <div className={`mt-6 grid gap-3 sm:grid-cols-3 xl:grid-cols-4`}>
               <div className={`rounded-2xl border px-4 py-4 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-white"}`}>
-                <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Views</p>
+                <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Views</p>
                 <p className="mt-2 text-2xl font-semibold">{analytics.book_view_count.toLocaleString()}</p>
               </div>
               <div className={`rounded-2xl border px-4 py-4 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-white"}`}>
-                <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Readers 30d</p>
+                <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Readers 30d</p>
                 <p className="mt-2 text-2xl font-semibold">{analytics.unique_reader_count_30d.toLocaleString()}</p>
               </div>
               <div className={`rounded-2xl border px-4 py-4 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-white"}`}>
-                <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Chapter opens</p>
+                <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Chapter opens</p>
                 <p className="mt-2 text-2xl font-semibold">{analytics.chapter_view_count.toLocaleString()}</p>
               </div>
               <div className={`rounded-2xl border px-4 py-4 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-white"}`}>
-                <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Published</p>
+                <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Published</p>
                 <p className="mt-2 text-base font-semibold">{analytics.published_at ? new Date(analytics.published_at).toLocaleDateString() : "Not dated"}</p>
               </div>
             </div>
@@ -286,7 +286,7 @@ export function PublicBookPageClient({
 function AnalyticsMetricCard({ isDark, label, value, note }: { isDark: boolean; label: string; value: string; note: string }) {
   return (
     <article className={`rounded-2xl border p-4 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50"}`}>
-      <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>{label}</p>
+      <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>{label}</p>
       <p className="mt-3 text-2xl font-semibold">{value}</p>
       <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-400" : "text-stone-600"}`}>{note}</p>
     </article>

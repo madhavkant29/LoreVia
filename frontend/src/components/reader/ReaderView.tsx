@@ -208,7 +208,7 @@ export function ReaderView({ bookId, chapterNum }: Props) {
   if (loading) {
     return (
       <div className="reader-display-shell flex min-h-[100dvh] items-center justify-center bg-[#080d17] px-6 text-slate-300">
-        <div className="w-full max-w-md rounded-[2rem] border border-white/10 bg-white/[0.03] px-8 py-10 text-center shadow-[0_24px_80px_-56px_rgba(45,212,191,0.35)]">
+        <div className="w-full max-w-md rounded-lg border border-white/10 bg-white/[0.03] px-8 py-10 text-center shadow-[0_24px_80px_-56px_rgba(45,212,191,0.35)]">
           <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-teal-300/40 border-t-teal-200" />
           <p className="mt-5 text-sm uppercase tracking-[0.22em] text-slate-500">Reader</p>
           <p className="mt-3 text-lg text-slate-100">Loading chapter...</p>
@@ -220,7 +220,7 @@ export function ReaderView({ bookId, chapterNum }: Props) {
   if (error || !data) {
     return (
       <div className="reader-display-shell flex min-h-[100dvh] items-center justify-center bg-[#080d17] px-6 text-slate-300">
-        <div className="w-full max-w-md rounded-[2rem] border border-white/10 bg-white/[0.03] px-8 py-10 text-center shadow-[0_24px_80px_-56px_rgba(79,70,229,0.4)]">
+        <div className="w-full max-w-md rounded-lg border border-white/10 bg-white/[0.03] px-8 py-10 text-center shadow-[0_24px_80px_-56px_rgba(79,70,229,0.4)]">
           <p className="text-sm uppercase tracking-[0.22em] text-slate-500">Reader</p>
           <p className="mt-3 text-lg text-slate-100">{error ?? "Chapter not found"}</p>
         </div>
@@ -294,7 +294,14 @@ export function ReaderView({ bookId, chapterNum }: Props) {
                 totalWords={totalWords}
               />
             </div>
-            {showFeedbackPanel ? <ReaderChapterFeedback bookId={bookId} chapterNum={chapterNum} theme={theme} /> : null}
+            {showFeedbackPanel ? (
+              <ReaderChapterFeedback
+                bookId={bookId}
+                chapterNum={chapterNum}
+                theme={theme}
+                chapterFeedback={data.beta_feedback ?? []}
+              />
+            ) : null}
           </div>
         </div>
       </div>

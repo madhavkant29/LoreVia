@@ -67,13 +67,13 @@ export function DailyCapPrompt() {
   return (
     <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/55 px-4 py-6 backdrop-blur-sm">
       <div
-        className={`w-full max-w-xl rounded-[1.8rem] border p-6 shadow-[0_30px_80px_-24px_rgba(0,0,0,0.45)] ${
+        className={`w-full max-w-xl rounded-lg border p-6 shadow-[0_30px_80px_-24px_rgba(0,0,0,0.45)] ${
           isDark ? "border-white/10 bg-[#0b0f14] text-slate-100" : "border-stone-200 bg-[#fffaf2] text-stone-900"
         }`}
       >
         <div className="flex items-start justify-between gap-4">
           <div>
-            <p className={`text-[11px] font-semibold uppercase tracking-[0.28em] ${isDark ? "text-amber-300" : "text-amber-700"}`}>
+            <p className={`text-3xs font-semibold uppercase tracking-[0.28em] ${isDark ? "text-amber-300" : "text-amber-700"}`}>
               Daily cap reached
             </p>
             <h2 className="mt-3 text-2xl font-semibold">{copy.title}</h2>
@@ -89,7 +89,7 @@ export function DailyCapPrompt() {
 
         <p className={`mt-4 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{copy.body}</p>
 
-        <div className={`mt-5 rounded-[1.4rem] border p-5 ${isDark ? "border-white/8 bg-white/[0.04]" : "border-stone-200 bg-white/85"}`}>
+        <div className={`mt-5 rounded-lg border p-5 ${isDark ? "border-white/8 bg-white/[0.04]" : "border-stone-200 bg-white/85"}`}>
           <p className="text-sm leading-7">
             Paid plans are the only upgrade path exposed in the main author workspace.
           </p>

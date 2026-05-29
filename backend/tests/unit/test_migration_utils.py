@@ -7,6 +7,8 @@ from app.utils.migration_utils import (
     destructive_downgrade_revisions,
     destructive_upgrade_revisions,
     drop_orphan_table_rowtype_if_present,
+    drop_orphan_table_rowtype_if_present_on_connection,
+    drop_orphan_table_rowtype_if_present_sql,
     enable_row_level_security,
     grant_sequence_privileges,
     grant_supabase_data_api_sequence_access,
@@ -330,3 +332,29 @@ def test_drop_orphan_table_rowtype_if_present_executes_expected_do_block(monkeyp
     assert "t.typname = 'users'" in executed[0]
     assert "DROP TYPE " in executed[0]
     assert '"public"."users"' in executed[0]
+
+
+def test_drop_orphan_table_rowtype_if_present_sql_returns_expected_do_block() -> None:
+    sql = drop_orphan_table_rowtype_if_present_sql("users")
+
+    assert "FROM pg_class c" in sql
+    assert "FROM pg_type t" in sql
+    assert "c.relkind IN ('r', 'p', 'v', 'm', 'f')" in sql
+    assert "c.relname = 'users'" in sql
+    assert "t.typname = 'users'" in sql
+    assert "DROP TYPE " in sql
+    assert '"public"."users"' in sql
+
+
+def test_drop_orphan_table_rowtype_if_present_on_connection_executes_expected_sql() -> None:
+    executed: list[object] = []
+
+    class FakeConnection:
+        def execute(self, statement: object) -> None:
+            executed.append(statement)
+
+    drop_orphan_table_rowtype_if_present_on_connection(FakeConnection(), "users")
+
+    assert len(executed) == 1
+    statement = executed[0]
+    assert getattr(statement, "text", "") == drop_orphan_table_rowtype_if_present_sql("users")

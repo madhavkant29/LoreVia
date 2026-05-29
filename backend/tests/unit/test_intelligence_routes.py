@@ -18,6 +18,12 @@ class _ScalarList:
         return list(self._items)
 
 
+class _Row:
+    def __init__(self, **kwargs):
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+
+
 class _Result:
     def __init__(self, *, scalar=None, all_rows=None, scalars=None):
         self._scalar = scalar
@@ -32,6 +38,14 @@ class _Result:
 
     def scalars(self):
         return _ScalarList(self._scalars)
+
+    def one(self):
+        if self._all_rows:
+            return self._all_rows[0]
+        return None
+
+    def fetchall(self):
+        return list(self._all_rows)
 
 
 class _FakeDB:
@@ -110,10 +124,11 @@ class _ExplodingStreamingClient:
 
 
 def test_cosine_similarity_handles_edge_cases():
-    assert intelligence._cosine_similarity(None, [1.0]) == 0.0
-    assert intelligence._cosine_similarity([1.0], [1.0, 2.0]) == 0.0
-    assert intelligence._cosine_similarity([0.0, 0.0], [1.0, 1.0]) == 0.0
-    assert intelligence._cosine_similarity([1.0, 0.0], [1.0, 0.0]) == 1.0
+    from app.utils.intelligence_utils import _cosine_similarity
+    assert _cosine_similarity(None, [1.0]) == 0.0
+    assert _cosine_similarity([1.0], [1.0, 2.0]) == 0.0
+    assert _cosine_similarity([0.0, 0.0], [1.0, 1.0]) == 0.0
+    assert _cosine_similarity([1.0, 0.0], [1.0, 0.0]) == 1.0
 
 
 @pytest.mark.asyncio
@@ -270,29 +285,102 @@ async def test_cross_book_intelligence_validates_book(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_cross_book_intelligence_returns_series_matches():
+async def test_cross_book_intelligence_returns_series_matches(monkeypatch):
     user_id = uuid.uuid4()
     series_id = uuid.uuid4()
     book_id = uuid.uuid4()
     other_book_id = uuid.uuid4()
+
     book = SimpleNamespace(id=book_id, user_id=user_id, primary_series_id=series_id)
     series = SimpleNamespace(id=series_id, name="Saga")
     other_book = SimpleNamespace(id=other_book_id)
-    char_a = SimpleNamespace(book_id=book_id, name="Aoi", embedding=[1.0, 0.0])
-    char_b = SimpleNamespace(book_id=other_book_id, name="Aoi Prime", embedding=[1.0, 0.0])
-    wiki_a = SimpleNamespace(book_id=book_id, name="Archive", embedding=[1.0, 0.0], entry_type="location")
-    wiki_b = SimpleNamespace(book_id=other_book_id, name="Grand Archive", embedding=[1.0, 0.0], entry_type=None)
+
+    async def _fake_snapshot_hash(_db, _book_ids):
+        return "abc123"
+
+    async def _fake_cache_get(_books_hash, _snapshot_hash):
+        return None
+
+    async def _fake_cache_set(_books_hash, _snapshot_hash, _payload):
+        pass
+
+    async def _fake_char_matches(_db, _book_ids, threshold=0.9, limit=20):
+        return [
+            {
+                "left_book_id": str(book_id),
+                "left_name": "Aoi",
+                "right_book_id": str(other_book_id),
+                "right_name": "Aoi Prime",
+                "similarity": 1.0,
+            }
+        ]
+
+    async def _fake_wiki_matches(_db, _book_ids, threshold=0.9, limit=20):
+        return [
+            {
+                "left_book_id": str(book_id),
+                "left_name": "Archive",
+                "right_book_id": str(other_book_id),
+                "right_name": "Grand Archive",
+                "similarity": 1.0,
+                "entry_type": "location",
+            }
+        ]
+
+    monkeypatch.setattr(intelligence, "compute_cross_book_snapshot_hash", _fake_snapshot_hash)
+    monkeypatch.setattr(intelligence, "get_cross_book_intelligence_cache", _fake_cache_get)
+    monkeypatch.setattr(intelligence, "set_cross_book_intelligence_cache", _fake_cache_set)
+    monkeypatch.setattr(intelligence, "get_cross_book_character_matches", _fake_char_matches)
+    monkeypatch.setattr(intelligence, "get_cross_book_wiki_matches", _fake_wiki_matches)
+
     db = _FakeDB(
         get_values=[book, series],
         execute_values=[
             _Result(scalars=[book, other_book]),
-            _Result(scalars=[char_a, char_b]),
-            _Result(scalars=[wiki_a, wiki_b]),
         ],
     )
 
     payload = await intelligence.cross_book_intelligence(book_id, db=db, current_user=SimpleNamespace(id=user_id))
 
-    assert payload["series_name"] == "Saga"
-    assert payload["character_matches"][0]["left_name"] == "Aoi"
-    assert payload["wiki_matches"][0]["entry_type"] == "location"
+    assert payload.series_name == "Saga"
+    assert payload.character_matches[0].left_name == "Aoi"
+    assert payload.wiki_matches[0].entry_type == "location"
+    assert payload.cached is False
+
+
+@pytest.mark.asyncio
+async def test_cross_book_intelligence_returns_cached_result(monkeypatch):
+    user_id = uuid.uuid4()
+    series_id = uuid.uuid4()
+    book_id = uuid.uuid4()
+    other_book_id = uuid.uuid4()
+
+    book = SimpleNamespace(id=book_id, user_id=user_id, primary_series_id=series_id)
+    series = SimpleNamespace(id=series_id, name="Saga")
+    other_book = SimpleNamespace(id=other_book_id)
+
+    async def _fake_snapshot_hash(_db, _book_ids):
+        return "abc123"
+
+    async def _fake_cache_get(_books_hash, _snapshot_hash):
+        return {
+            "series_name": "Saga",
+            "comparison_book_ids": sorted([str(book_id), str(other_book_id)]),
+            "character_matches": [],
+            "wiki_matches": [],
+        }
+
+    monkeypatch.setattr(intelligence, "compute_cross_book_snapshot_hash", _fake_snapshot_hash)
+    monkeypatch.setattr(intelligence, "get_cross_book_intelligence_cache", _fake_cache_get)
+
+    db = _FakeDB(
+        get_values=[book, series],
+        execute_values=[
+            _Result(scalars=[book, other_book]),
+        ],
+    )
+
+    payload = await intelligence.cross_book_intelligence(book_id, db=db, current_user=SimpleNamespace(id=user_id))
+
+    assert payload.cached is True
+    assert payload.series_name == "Saga"

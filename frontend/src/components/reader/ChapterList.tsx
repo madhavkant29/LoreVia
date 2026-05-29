@@ -25,13 +25,13 @@ export function ChapterList({
       <div className="flex items-center justify-between gap-3">
         <h2
           id="chapters-section-heading"
-          className={`text-[11px] font-semibold uppercase tracking-[0.3em] ${isDark ? "text-slate-500" : "text-stone-500"}`}
+          className={`text-3xs font-semibold uppercase tracking-[0.3em] ${isDark ? "text-slate-500" : "text-stone-500"}`}
         >
           Chapters
         </h2>
       </div>
 
-      <div className={`space-y-3 rounded-[1.65rem] border p-3 sm:p-4 ${isDark ? "border-white/10 bg-[#091018]/58" : "border-stone-200 bg-white/78"}`}>
+      <div className={`space-y-3 rounded-lg border p-3 sm:p-4 ${isDark ? "border-white/10 bg-[#091018]/58" : "border-stone-200 bg-white/78"}`}>
         {chapters.map((chapter) => (
           <ChapterRow
             key={chapter.number}

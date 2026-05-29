@@ -40,7 +40,7 @@ export function ChapterStatusChip({ label, tone, isDark }: ChapterStatusChipProp
 
   return (
     <span
-      className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold tracking-[0.01em] ${isDark ? palette.dark : palette.light}`}
+      className={`inline-flex items-center rounded-full px-3 py-1 text-3xs font-semibold tracking-[0.01em] ${isDark ? palette.dark : palette.light}`}
     >
       {label}
     </span>

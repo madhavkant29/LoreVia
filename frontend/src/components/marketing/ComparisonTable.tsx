@@ -11,7 +11,7 @@ type ComparisonTableProps = {
 
 export function ComparisonTable({ competitorName, rows }: ComparisonTableProps) {
   return (
-    <div className="overflow-hidden rounded-[1.75rem] border border-white/10 bg-[#0d1715] shadow-[0_24px_70px_-48px_rgba(0,0,0,0.72)]">
+    <div className="overflow-hidden rounded-lg border border-white/10 bg-[#0d1715] shadow-[0_24px_70px_-48px_rgba(0,0,0,0.72)]">
       <div className="overflow-x-auto">
         <table className="w-full min-w-[680px] border-separate border-spacing-0 text-left text-sm">
           <thead>

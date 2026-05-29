@@ -317,7 +317,7 @@ function ResourceCard({ relatedLinks }: { relatedLinks: ReturnType<typeof TRUST_
 
   return (
     <section className={`${surfaceClassName} rounded-lg p-6`}>
-      <p className="text-[11px] font-semibold uppercase tracking-[0.34em] text-[#9fbfff]/80">Resources</p>
+      <p className="text-3xs font-semibold uppercase tracking-[0.34em] text-[#9fbfff]/80">Resources</p>
       <div className="mt-5 divide-y divide-white/10">
         {resourceLinks.map((link) => (
           <Link key={link.href} href={link.href} className="flex items-center justify-between gap-5 py-5 first:pt-0 last:pb-0">

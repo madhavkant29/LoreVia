@@ -1,35 +1,25 @@
-import { useState, useEffect, useCallback, useRef } from "react"
+import { useState, useCallback, useEffect } from "react"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { readerApi } from "@/lib/api/reader"
-import type { ChapterData, ContextResult, SummaryMode } from "@/types/reader"
+import { readerCacheKey } from "@/lib/query/cacheKeys"
+import type { ContextResult } from "@/types/reader"
 
 export function useReader(bookId: string, chapterNum: number) {
-  const [data, setData] = useState<ChapterData | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const queryClient = useQueryClient()
+  const cacheKey = readerCacheKey(bookId, chapterNum)
+
+  const {
+    data: chapterData,
+    isLoading: loading,
+    error: queryError,
+  } = useQuery({
+    queryKey: cacheKey,
+    queryFn: () => readerApi.getChapter(bookId, chapterNum),
+    staleTime: 60_000,
+  })
+
   const [contextResult, setContextResult] = useState<ContextResult | null>(null)
   const [contextLoading, setContextLoading] = useState(false)
-
-  useEffect(() => {
-    let active = true
-    setLoading(true)
-    setError(null)
-    readerApi.getChapter(bookId, chapterNum)
-      .then((chapter) => {
-        if (!active) return
-        setData(chapter)
-      })
-      .catch(() => {
-        if (!active) return
-        setError("Failed to load chapter")
-      })
-      .finally(() => {
-        if (active) setLoading(false)
-      })
-
-    return () => {
-      active = false
-    }
-  }, [bookId, chapterNum])
 
   const tap = useCallback(async (word: string) => {
     setContextLoading(true)
@@ -49,13 +39,30 @@ export function useReader(bookId: string, chapterNum: number) {
   )
 
   useEffect(() => {
-    const totalChapters = data?.total_chapters ?? 0
+    const totalChapters = chapterData?.total_chapters ?? 0
     if (!totalChapters) return
-    const neighbors = [chapterNum - 1, chapterNum + 1].filter((chapter) => chapter > 0 && chapter <= totalChapters)
+    const neighbors = [chapterNum - 1, chapterNum + 1].filter(
+      (chapter) => chapter > 0 && chapter <= totalChapters
+    )
     for (const chapter of neighbors) {
-      void readerApi.getChapter(bookId, chapter)
+      queryClient.prefetchQuery({
+        queryKey: readerCacheKey(bookId, chapter),
+        queryFn: () => readerApi.getChapter(bookId, chapter),
+        staleTime: 60_000,
+      })
     }
-  }, [bookId, chapterNum, data?.total_chapters])
+  }, [bookId, chapterNum, chapterData?.total_chapters, queryClient])
 
-  return { data, loading, error, tap, contextResult, contextLoading, clearContext, saveProgress }
+  const error = queryError ? "Failed to load chapter" : null
+
+  return {
+    data: chapterData ?? null,
+    loading,
+    error,
+    tap,
+    contextResult,
+    contextLoading,
+    clearContext,
+    saveProgress,
+  }
 }

@@ -94,6 +94,12 @@ describe("books api", () => {
     expect(getMock).toHaveBeenCalledWith("/books/book-1/annotations", { params: { chapter_number: 2 } })
   })
 
+  it("loads collaborator activity", async () => {
+    await booksApi.getCollaboratorActivity("book-1", "collab-7")
+
+    expect(getMock).toHaveBeenCalledWith("/books/book-1/collaborators/collab-7/activity")
+  })
+
   it("creates story-scoped collaborators with backend field names", async () => {
     await booksApi.createCollaborator("book-1", {
       email: "editor@example.com",

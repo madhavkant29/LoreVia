@@ -8,6 +8,8 @@ import type {
   AdvisorResponse,
   AdvisorGreeting,
   AdvisorSuggestionsResponse,
+  AdvisorSuggestionScanResponse,
+  AdvisorSuggestionJobStatusResponse,
   AdvisorTaskStatusResponse,
   AdvisorAsyncAccepted,
   EditorialReviewResponse,
@@ -191,6 +193,14 @@ export const intelligenceApi = {
 
   advisorSuggestions: (bookId: string) =>
     apiClient.get<AdvisorSuggestionsResponse>(intelligencePath(bookId, "/advisor/suggestions")).then(r => r.data),
+
+  advisorSuggestionsScan: (bookId: string) =>
+    apiClient.post<AdvisorSuggestionScanResponse>(intelligencePath(bookId, "/advisor/suggestions/scan")).then(r => r.data),
+
+  advisorSuggestionsJobStatus: (bookId: string, jobId: string) =>
+    apiClient.get<AdvisorSuggestionJobStatusResponse>(
+      intelligencePath(bookId, `/advisor/suggestions/jobs/${jobId}`),
+    ).then(r => r.data),
 
   editorialReview: (bookId: string, text: string, chapterNum?: number) =>
     apiClient.post<EditorialReviewResponse>(intelligencePath(bookId, "/advisor/editorial-review"), {

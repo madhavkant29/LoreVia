@@ -12,6 +12,8 @@ from typing import cast
 from app.core.config import settings
 from app.core.llm import complete_with_fallback
 from app.engine.character.entity_filters import (
+    COMMON_NON_NAME_WORDS,
+    SINGLE_TOKEN_DISCOURSE_WORDS,
     contextual_ner_entity_label,
     looks_like_person_entity_name,
     person_name_shape_score,
@@ -413,7 +415,7 @@ def _mention_window(text: str, start: int, end: int) -> str:
 def _looks_like_interjection_clause(after: str) -> bool:
     lowered = after.casefold()
     return bool(
-        re.match(r"^[,!?]\s+(?:he|she|they|it|i|we|the|a|an)\b", lowered)
+        re.match(r"^[,!?]\s+(?:he|she|they|it|i|we|you|the|a|an)\b", lowered)
         or re.match(r"^[,!?]\s+(?:was|were|is|are|had|has|have)\b", lowered)
         or re.match(r"^[,!?]\s+(?:said|asked|replied|shouted|whispered|muttered)\b", lowered)
     )
@@ -424,6 +426,16 @@ def _single_token_starts_like_interjection(name: str, after: str) -> bool:
     if len(words) != 1:
         return False
     return _looks_like_interjection_clause(after)
+
+
+def _single_token_subject_action(after: str) -> bool:
+    lowered = after.casefold()
+    return bool(
+        re.match(
+            r"^\s+(?:said|asked|replied|called|told|whispered|shouted|muttered|smiled|laughed|sighed|nodded|stared|looked|turned|answered|cried|screamed|warned|snapped|grinned|awoke|woke|watched|walked|stepped|moved|stood|sat|rose|opened|closed|reached|grabbed|held|took|came|went|ran|hurried|followed|glanced|noticed|saw|heard|felt)\b",
+            lowered,
+        )
+    )
 
 
 def _clean_verifier_reason(value: object | None) -> str | None:
@@ -447,6 +459,7 @@ def _local_mention_verifier(
     person_ner_mentions = 0
     non_person_ner_mentions = 0
     interjection_like_mentions = 0
+    subject_action_mentions = 0
 
     for candidate in targets:
         for start, end in _find_name_mentions(source_text, candidate):
@@ -455,6 +468,7 @@ def _local_mention_verifier(
             window = _mention_window(source_text, start, end)
             is_sentence_start = _mention_is_sentence_start(source_text, start)
             interjection_like = is_sentence_start and _single_token_starts_like_interjection(candidate, after)
+            subject_action = is_sentence_start and not interjection_like and _single_token_subject_action(after)
             has_person_context = _mention_has_person_context(before, after) and not interjection_like
             ner_label = contextual_ner_entity_label(window, candidate)
             if has_person_context:
@@ -463,6 +477,8 @@ def _local_mention_verifier(
                 sentence_start_mentions += 1
             else:
                 mid_sentence_mentions += 1
+            if subject_action:
+                subject_action_mentions += 1
             if ner_label == "PERSON":
                 person_ner_mentions += 1
             elif ner_label in {"ORG", "GPE", "LOC", "FAC", "PRODUCT", "EVENT", "WORK_OF_ART", "LAW", "LANGUAGE", "NORP"}:
@@ -485,6 +501,8 @@ def _local_mention_verifier(
     has_description = any(isinstance(value, dict) and value.get("value") for value in (traits or {}).values())
     allowed_entity_type = str(entity_type or "person").strip().casefold() in {"person", "alias", "unknown"}
     non_person_tokens = [token for token in normalized.split() if token in NON_CHARACTER_TOKENS or token in ENTITY_NON_PERSON_TOKENS]
+    suspicious_single_token = bool(len(words) == 1 and words[0].casefold() in COMMON_NON_NAME_WORDS)
+    title_like_single_token = bool(len(words) == 1 and words[0].casefold() in TITLE_ONLY_WORDS)
 
     reasons: list[str] = []
     positive_signals: list[str] = []
@@ -505,16 +523,22 @@ def _local_mention_verifier(
         reasons.append("context_contains_non_person_tokens")
         band = "reject"
     elif len(words) == 1:
-        if person_context_mentions >= 2 or person_ner_mentions >= 1:
+        if person_ner_mentions >= 1:
+            positive_signals.append("single_token_grounded_by_person_ner")
+            band = "accept"
+            is_person_like = True
+        elif title_like_single_token and person_context_mentions >= 1:
+            reasons.append("role_title_single_token_requires_review")
+        elif subject_action_mentions >= 1 and not suspicious_single_token:
+            positive_signals.append("single_token_subject_action_grounding")
+            band = "accept"
+            is_person_like = True
+        elif person_context_mentions >= 2 and (mid_sentence_mentions >= 1 or mention_count >= 2) and not suspicious_single_token:
             positive_signals.append("single_token_grounded_by_context")
             band = "accept"
             is_person_like = True
-        elif person_context_mentions >= 1 and (mid_sentence_mentions >= 1 or has_description):
+        elif person_context_mentions >= 1 and (mid_sentence_mentions >= 1 or has_description) and not suspicious_single_token:
             positive_signals.append("single_token_has_mid_sentence_grounding")
-            band = "accept"
-            is_person_like = True
-        elif person_context_mentions >= 1 and interjection_like_mentions == 0:
-            positive_signals.append("single_token_has_grounded_action_context")
             band = "accept"
             is_person_like = True
         elif non_person_ner_mentions >= 1 and person_context_mentions == 0 and person_ner_mentions == 0:
@@ -529,6 +553,8 @@ def _local_mention_verifier(
             negative_signals.append("single_token_sentence_start_only")
             reasons.append("sentence_start_capitalization_only")
             band = "reject"
+        elif suspicious_single_token and person_context_mentions >= 1:
+            reasons.append("single_token_common_word_requires_review")
         else:
             reasons.append("ambiguous_single_token_mention")
     else:
@@ -562,6 +588,7 @@ def _local_mention_verifier(
         "person_context_mentions": person_context_mentions,
         "mid_sentence_mentions": mid_sentence_mentions,
         "sentence_start_mentions": sentence_start_mentions,
+        "subject_action_mentions": subject_action_mentions,
         "person_ner_mentions": person_ner_mentions,
         "non_person_ner_mentions": non_person_ner_mentions,
         "interjection_like_mentions": interjection_like_mentions,
@@ -933,7 +960,7 @@ def _candidate_names(text: str, *, allow_review_singletons: bool = False) -> lis
     singles = [
         token
         for token in SINGLE_NAME_RE.findall(text)
-        if token not in NAME_STOPWORDS and token.lower() not in {"the", "this", "that"}
+        if token not in NAME_STOPWORDS and token.casefold() not in COMMON_NON_NAME_WORDS and token.lower() not in {"the", "this", "that"}
     ]
     single_counts = Counter(singles)
     candidates.extend(
@@ -1137,7 +1164,11 @@ def _looks_like_character_name(name: str, source_text: str) -> bool:
     words = re.findall(r"[A-Za-z][A-Za-z'-]*", cleaned)
     if not words:
         return False
-    if len(words) == 1 and (words[0] in SINGLE_NAME_DISCOURSE_MARKERS or words[0] in SINGLE_NAME_TIME_WORDS):
+    if len(words) == 1 and (
+        words[0] in SINGLE_NAME_DISCOURSE_MARKERS
+        or words[0] in SINGLE_NAME_TIME_WORDS
+        or words[0].casefold() in SINGLE_TOKEN_DISCOURSE_WORDS
+    ):
         return False
     if len(words) == 1 and words[0].isupper() and len(words[0]) > 1:
         return False
@@ -1380,10 +1411,26 @@ def _allow_auto_augmentation(
             strong_mentions += 1
     if len(words) == 1:
         viability_band = _candidate_viability_band(text, name, allow_review=allow_review_singletons)
+        normalized = words[0].casefold()
+        subject_action_mentions = sum(
+            1
+            for start, end in mentions
+            if _mention_is_sentence_start(text, start)
+            and not _single_token_starts_like_interjection(name, text[end:min(len(text), end + 48)])
+            and _single_token_subject_action(text[end:min(len(text), end + 48)])
+        )
         if viability_band == "accept":
-            return True
+            if normalized in SINGLE_TOKEN_DISCOURSE_WORDS:
+                return strong_mentions >= 2 and non_sentence_start_mentions >= 1
+            return bool(
+                subject_action_mentions >= 1
+                or strong_mentions >= 2
+                or (strong_mentions >= 1 and non_sentence_start_mentions >= 1)
+            )
         if viability_band == "review":
-            return True
+            return allow_review_singletons and normalized not in SINGLE_TOKEN_DISCOURSE_WORDS and (
+                strong_mentions >= 1 or non_sentence_start_mentions >= 1
+            )
         # Single-token names are noisy, but named mid-sentence with grounded
         # person context ("his sister Grete called") should still recover.
         return strong_mentions >= 2 or (strong_mentions >= 1 and non_sentence_start_mentions >= 1)

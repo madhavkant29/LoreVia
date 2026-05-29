@@ -77,6 +77,21 @@ def test_local_mention_verifier_accepts_grounded_single_name_with_action_context
     assert result["is_person_like"] is True
 
 
+@pytest.mark.parametrize("noise_name", ["Actually", "Maybe", "Sure", "Wait", "Okay", "However", "Though", "Please", "Thanks"])
+def test_local_mention_verifier_routes_discourse_markers_to_reject_or_review(noise_name: str):
+    result = _local_mention_verifier(f"{noise_name}, he said toward the doorway.", noise_name)
+
+    assert result["confidence_band"] in {"reject", "review"}
+    assert result["is_person_like"] is False
+
+
+def test_local_mention_verifier_keeps_role_only_singletons_in_review():
+    result = _local_mention_verifier("Mother paused in the doorway and looked back once.", "Mother")
+
+    assert result["confidence_band"] == "review"
+    assert result["is_person_like"] is False
+
+
 def test_local_mention_verifier_distinguishes_sentence_start_noise_from_real_name():
     noise = _local_mention_verifier("Well, the room stayed quiet.", "Well")
     person = _local_mention_verifier("Gregor woke before dawn and watched the door.", "Gregor")
@@ -139,6 +154,15 @@ def test_candidate_names_include_grounded_sentence_start_singletons():
     candidates = _candidate_names(source_text)
 
     assert "Gregor" in candidates
+
+
+def test_candidate_names_excludes_discourse_singletons_with_action_nearby():
+    source_text = "Actually, he said nothing. Maybe, she looked away."
+
+    candidates = _candidate_names(source_text)
+
+    assert "Actually" not in candidates
+    assert "Maybe" not in candidates
 
 
 @pytest.mark.asyncio

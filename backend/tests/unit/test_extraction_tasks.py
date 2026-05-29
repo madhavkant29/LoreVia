@@ -92,7 +92,7 @@ def test_process_chapter_task_fails_cleanly_when_payload_missing(monkeypatch):
 def test_process_book_task_uses_shared_worker_runner(monkeypatch):
     calls: list[object] = []
 
-    async def _fake_process_book(book_id: str, queue_wait_ms: int | None = None):
+    async def _fake_process_book(book_id: str, queue_wait_ms: int | None = None, task_id: str | None = None):
         calls.append((book_id, queue_wait_ms))
         return {"book_id": book_id}
 

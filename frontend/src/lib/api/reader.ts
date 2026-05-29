@@ -21,9 +21,9 @@ export const readerApi = {
     apiClient.get<ContextResult>(readerPath(bookId, "/context"), { params: { q, chapter } }).then(r => r.data),
   getSummary: (bookId: string, chapter: number, mode: SummaryMode) =>
     apiClient.get<ChapterSummary>(readerPath(bookId, `/summary/${chapter}`), { params: { mode } }).then(r => r.data),
-  getRelationships: (bookId: string, chapter: number, options?: { includeInactive?: boolean }) =>
+  getRelationships: (bookId: string, chapter: number, options?: { includeInactive?: boolean; limit?: number; offset?: number }) =>
     apiClient.get<RelationshipGraph>(readerPath(bookId, "/relationships"), {
-      params: { chapter, include_inactive: options?.includeInactive ?? false },
+      params: { chapter, include_inactive: options?.includeInactive ?? false, limit: options?.limit ?? 100, offset: options?.offset ?? 0 },
     }).then(r => r.data),
   search: (bookId: string, q: string, chapter: number) =>
     apiClient.get(readerPath(bookId, "/search"), { params: { q, chapter } }).then(r => r.data),
@@ -33,8 +33,8 @@ export const readerApi = {
     apiClient.get<SummaryCollectionResponse>(readerPath(bookId, "/summary-collection")).then(r => r.data),
   getForeshadowing: (bookId: string) =>
     apiClient.get<{ items: ForeshadowingItem[] }>(readerPath(bookId, "/foreshadowing")).then(r => r.data),
-  getTimeline: (bookId: string) =>
-    apiClient.get<TimelineResponse>(readerPath(bookId, "/timeline")).then(r => r.data),
+  getTimeline: (bookId: string, options?: { limit?: number; offset?: number }) =>
+    apiClient.get<TimelineResponse>(readerPath(bookId, "/timeline"), { params: { limit: options?.limit ?? 100, offset: options?.offset ?? 0 } }).then(r => r.data),
   thematicSearch: (bookId: string, q: string) =>
     apiClient.get<{ results: ThematicSearchResult[] }>(readerPath(bookId, "/thematic-search"), { params: { q } }).then(r => r.data),
   getRelationshipEvolution: (bookId: string, chapter: number) =>

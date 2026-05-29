@@ -42,7 +42,7 @@ export function ChapterRow({ chapter, unitLabel, isDark, readBusy, onOpen, onTog
   return (
     <article
       style={{ contentVisibility: "auto", containIntrinsicSize: "180px" }}
-      className={`group rounded-[1.35rem] border px-5 py-5 transition-colors focus-within:border-teal-300/30 ${
+      className={`group rounded-lg border px-5 py-5 transition-colors focus-within:border-teal-300/30 ${
         isDark
           ? "border-white/10 bg-[#0b1118]/78 hover:border-white/15 hover:bg-[#0d141d]"
           : "border-stone-200 bg-white/92 hover:bg-white"
@@ -52,7 +52,7 @@ export function ChapterRow({ chapter, unitLabel, isDark, readBusy, onOpen, onTog
         <div className="flex items-start gap-4">
           <div
             aria-hidden="true"
-            className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-[1rem] border shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] ${
+            className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-md border shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] ${
               isDark ? "border-white/10 bg-[linear-gradient(180deg,#131d28_0%,#101822_100%)] text-teal-200" : "border-stone-200 bg-stone-50 text-teal-700"
             }`}
           >
@@ -60,7 +60,7 @@ export function ChapterRow({ chapter, unitLabel, isDark, readBusy, onOpen, onTog
           </div>
 
           <div className="min-w-0">
-            <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-sky-300/80" : "text-stone-500"}`}>
+            <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-sky-300/80" : "text-stone-500"}`}>
               {unitLabel} {chapter.number}
             </p>
             <h2 className={`mt-2 truncate font-serif text-[2rem] leading-none tracking-[-0.03em] ${isDark ? "text-white" : "text-stone-950"}`}>{title}</h2>
@@ -70,7 +70,7 @@ export function ChapterRow({ chapter, unitLabel, isDark, readBusy, onOpen, onTog
         <dl className={`grid gap-2 border-l pl-5 text-sm ${isDark ? "border-white/10 text-slate-300" : "border-stone-200 text-stone-600"}`}>
           {metadata.map((item) => (
             <div key={item.label} className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-              <dt className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>{item.label}</dt>
+              <dt className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>{item.label}</dt>
               <dd>{item.value}</dd>
             </div>
           ))}
@@ -91,7 +91,7 @@ export function ChapterRow({ chapter, unitLabel, isDark, readBusy, onOpen, onTog
             <button
               type="button"
               onClick={onOpen}
-              className={`inline-flex min-w-[10.5rem] items-center justify-center rounded-[0.95rem] border px-4 py-2.5 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-300/60 ${
+              className={`inline-flex min-w-[10.5rem] items-center justify-center rounded-md border px-4 py-2.5 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-300/60 ${
                 isDark
                   ? "border-white/10 bg-white/[0.04] text-slate-100 hover:bg-white/[0.08]"
                   : "border-stone-200 bg-white text-stone-800 hover:bg-stone-50"
@@ -107,7 +107,7 @@ export function ChapterRow({ chapter, unitLabel, isDark, readBusy, onOpen, onTog
               type="button"
               onClick={onToggleRead}
               disabled={readBusy}
-              className={`inline-flex min-w-[12rem] items-center justify-center rounded-[0.95rem] border px-4 py-2.5 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-300/60 disabled:cursor-not-allowed disabled:opacity-50 ${
+              className={`inline-flex min-w-[12rem] items-center justify-center rounded-md border px-4 py-2.5 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-300/60 disabled:cursor-not-allowed disabled:opacity-50 ${
                 chapter.read
                   ? isDark
                     ? "border-white/10 bg-transparent text-slate-300 hover:bg-white/[0.05]"

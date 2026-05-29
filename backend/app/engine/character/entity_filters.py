@@ -34,6 +34,17 @@ NUMBER_WORDS = {
     "first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth",
 }
 
+SINGLE_TOKEN_DISCOURSE_WORDS = frozenset({
+    "absolutely", "actually", "again", "aha", "ahaha", "about", "according",
+    "also", "clean", "dammit", "during", "fine", "flatly", "good", "hadn",
+    "having", "heh", "hmph", "hunh", "however", "language", "looking",
+    "maybe", "moreover", "neither", "next", "nothing", "okay", "optimistic",
+    "parent", "please", "really", "scary", "send", "setting", "sheesh",
+    "someone", "staring", "still", "stop", "sure", "sunday", "swings",
+    "take", "thanks", "though", "true", "understood", "unfortunately",
+    "very", "wait", "whether",
+})
+
 COMMON_NON_NAME_WORDS = {
     # High-frequency English words that often appear capitalized at sentence start
     # and should almost never be treated as character entities.
@@ -45,7 +56,7 @@ COMMON_NON_NAME_WORDS = {
     "their", "them", "then", "there", "these", "they", "this", "those", "to",
     "too", "up", "us", "was", "we", "were", "what", "when", "where", "which",
     "who", "why", "well", "would", "with", "without", "you", "your",
-}
+} | set(SINGLE_TOKEN_DISCOURSE_WORDS)
 
 NON_NAME_PATTERNS = (
     re.compile(r"^(on|in|at|by|for|of|to|from)\s+\w+$", re.IGNORECASE),
@@ -214,9 +225,16 @@ def _single_token_name(name: str | None) -> str | None:
     return words[0].casefold()
 
 
-def _single_token_has_grounded_support(evidence: dict | None) -> bool:
+def _single_token_has_grounded_support(
+    name: str | None,
+    evidence: dict | None,
+    *,
+    stopwords: frozenset[str] = frozenset(COMMON_NON_NAME_WORDS),
+) -> bool:
     if not isinstance(evidence, dict):
         return False
+    single_token = _single_token_name(name)
+    is_common_word = bool(single_token and single_token in stopwords)
     mention_count = int(evidence.get("mention_count") or 0)
     strong_mention_count = int(evidence.get("strong_mention_count") or 0)
     has_dialogue_or_action = bool(evidence.get("has_dialogue_or_action"))
@@ -225,12 +243,14 @@ def _single_token_has_grounded_support(evidence: dict | None) -> bool:
     return bool(
         strong_mention_count >= 2
         or (
-            mention_count >= 2
+            not is_common_word
+            and mention_count >= 2
             and has_dialogue_or_action
             and (appears_multiple_times or has_physical_description)
         )
         or (
-            strong_mention_count >= 1
+            not is_common_word
+            and strong_mention_count >= 1
             and (
                 has_dialogue_or_action
                 or has_physical_description
@@ -310,7 +330,7 @@ def character_persistence_decision(
     strong_single_token_profile = profile_score >= 2 and _has_meaningful_text(arc_summary)
 
     if _single_token_name(name):
-        if not _single_token_has_grounded_support(evidence) and not strong_single_token_profile:
+        if not _single_token_has_grounded_support(name, evidence, stopwords=stopwords) and not strong_single_token_profile:
             reasons.append("single_token_needs_stronger_support")
         if support_score < 3 and profile_score == 0 and not strong_single_token_profile:
             reasons.append("single_token_lacks_profile_evidence")
@@ -325,7 +345,7 @@ def character_persistence_decision(
     if support_score < 2 and profile_score == 0:
         reasons.append("no_profile_or_passage_signal")
 
-    if _single_token_name(name) and not _single_token_has_grounded_support(evidence) and not strong_single_token_profile:
+    if _single_token_name(name) and not _single_token_has_grounded_support(name, evidence, stopwords=stopwords) and not strong_single_token_profile:
         reasons.append("single_token_requires_more_evidence")
 
     allowed = not reasons

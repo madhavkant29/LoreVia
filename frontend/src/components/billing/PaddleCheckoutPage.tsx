@@ -109,8 +109,8 @@ export function PaddleCheckoutPage({ nonce }: { nonce?: string }) {
         onError={() => setMessage("Paddle checkout could not be loaded. Refresh and try again.")}
       />
       <section className="mx-auto flex min-h-[70vh] w-full max-w-3xl flex-col justify-center px-6 py-16">
-        <div className="rounded-[2rem] border border-white/[0.08] bg-[#0B0F14] p-8 text-[#F2F4F7] shadow-[0_30px_120px_rgba(0,0,0,0.35)]">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-[#C9A86A]">Secure billing</p>
+        <div className="rounded-lg border border-white/[0.08] bg-[#0B0F14] p-8 text-[#F2F4F7] shadow-[0_30px_120px_rgba(0,0,0,0.35)]">
+          <p className="text-3xs font-semibold uppercase tracking-[0.28em] text-[#C9A86A]">Secure billing</p>
           <h1 className="mt-4 text-3xl font-semibold tracking-[-0.03em]">
             LoreVia checkout opens here for payment links, invoice links, and payment-method updates.
           </h1>

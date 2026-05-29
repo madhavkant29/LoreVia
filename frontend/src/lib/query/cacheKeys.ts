@@ -4,8 +4,14 @@ export function bookCacheKey(bookId: string, scope: string) {
   return `book:${normalizeBookRouteId(bookId)}:${scope}`
 }
 
-export function readerCacheKey(bookId: string, scope: string) {
-  return `reader:${normalizeBookRouteId(bookId)}:${scope}`
+export function readerCacheKey(bookId: string, chapterNumber: number): readonly [string, string, string]
+export function readerCacheKey(bookId: string, scope: string): string
+export function readerCacheKey(bookId: string, scopeOrChapter: string | number): string | readonly [string, string, string] {
+  const normalized = normalizeBookRouteId(bookId)
+  if (typeof scopeOrChapter === "number") {
+    return ["reader", normalized, String(scopeOrChapter)] as const
+  }
+  return `reader:${normalized}:${scopeOrChapter}`
 }
 
 export function booksListCacheKey(includeHidden = false) {

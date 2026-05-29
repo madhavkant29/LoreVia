@@ -17,6 +17,9 @@ class _ScalarList:
     def all(self):
         return list(self._items)
 
+    def first(self):
+        return self._items[0] if self._items else None
+
 
 class _Result:
     def __init__(self, *, scalar=None, all_rows=None, scalars=None):
@@ -105,6 +108,39 @@ def _async_value(value):
         return value
 
     return _inner
+
+
+@pytest.mark.asyncio
+async def test_search_uses_reader_specific_retrieval_settings(monkeypatch):
+    user_id = uuid.uuid4()
+    book = _book(user_id=user_id, total_chapters=8)
+    captured: dict[str, object] = {}
+
+    async def _fake_access(*_args, **_kwargs):
+        return book, None
+
+    async def _fake_cache_get(_key):
+        return None
+
+    async def _fake_cache_set(*_args, **_kwargs):
+        return None
+
+    async def _fake_semantic_search(*_args, **kwargs):
+        captured.update(kwargs)
+        return [{"chapter_num": 3, "chapter_title": "Storm", "text": "Result", "relevance": 0.9}]
+
+    monkeypatch.setattr(reader, "get_book_with_collaboration_access", _fake_access)
+    monkeypatch.setattr(reader, "collaboration_allows_chapter", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(reader, "cache_get", _fake_cache_get)
+    monkeypatch.setattr(reader, "cache_set", _fake_cache_set)
+    monkeypatch.setattr(reader, "semantic_search", _fake_semantic_search)
+
+    payload = await reader.search(book.id, q="storm clue", chapter=3, db=_FakeDB(), current_user=_user(user_id), _=None)
+
+    assert payload[0]["chapter_num"] == 3
+    assert captured["limit"] == 4
+    assert captured["candidate_limit"] == 10
+    assert captured["similarity_threshold"] == 0.55
 
 
 def test_reader_route_helpers_normalize_payloads():
@@ -220,7 +256,7 @@ async def test_get_chapter_supports_fallback_and_stored_content(monkeypatch):
     state = SimpleNamespace(character_id=character.id, trait_snapshot={"eyes": "green"})
     db = _FakeDB(
         get_values=[book],
-        execute_values=[_Result(scalar=chapter), _Result(scalars=[character]), _Result(scalars=[state])],
+        execute_values=[_Result(scalar=chapter), _Result(scalars=[character]), _Result(scalars=[state]), _Result(all_rows=[])],
     )
     async def _fake_resolve_stored(*_args, **_kwargs):
         return {
@@ -576,7 +612,7 @@ async def test_reader_collection_routes_cover_events_relationships_search_and_ch
     chapters = await reader.get_chapter_list(book.id, db=db, current_user=_user(user_id))
     summaries = await reader.get_summary_collection(book.id, db=db, current_user=_user(user_id))
 
-    assert events.major_events[0].event_title == "Key Falls"
+    assert events["items"][0]["event_title"] == "Key Falls"
     assert relationships["nodes"][0]["name"] == "Iris"
     assert search[0]["chapter_num"] == 3
     assert chapters["chapters"][0]["read"] is True
@@ -959,6 +995,6 @@ async def test_reader_events_timeline_and_relationship_evolution_return_cached_p
     timeline = await reader.get_timeline(book.id, db=_FakeDB(get_values=[book]), current_user=_user(user_id))
     evolution = await reader.get_relationship_evolution(book.id, chapter=2, db=_FakeDB(get_values=[book]), current_user=_user(user_id))
 
-    assert events.major_events[0].event_title == "Key Falls"
+    assert events["items"][0]["event_title"] == "Key Falls"
     assert timeline["chapters"][0]["title"] == "One"
     assert evolution["pairs"][0]["characters"] == ["Iris", "Milo"]

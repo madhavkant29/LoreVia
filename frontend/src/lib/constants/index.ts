@@ -6,6 +6,9 @@ function isLocalDevBrowser() {
   if (typeof window === "undefined" || !window.location) {
     return false
   }
+  if (process.env.VITEST) {
+    return false
+  }
   const { hostname } = window.location
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]"
 }

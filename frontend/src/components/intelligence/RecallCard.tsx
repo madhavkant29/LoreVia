@@ -17,7 +17,7 @@ export function RecallCard({ recall, lastChapter, onDismiss, onContinue }: Props
 
   return (
     <section
-      className={`relative overflow-hidden rounded-[2rem] border p-6 shadow-[0_26px_100px_-55px_rgba(15,23,42,0.45)] ${
+      className={`relative overflow-hidden rounded-lg border p-6 shadow-[0_26px_100px_-55px_rgba(15,23,42,0.45)] ${
         isDark
           ? "border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(79,70,229,0.18),transparent_24%),radial-gradient(circle_at_88%_12%,rgba(96,165,250,0.16),transparent_28%),linear-gradient(145deg,rgba(10,20,38,0.98),rgba(9,18,34,0.96)_55%,rgba(11,35,68,0.92))] text-white"
           : "border-indigo-100 bg-[linear-gradient(145deg,#eef2ff,#ffffff_55%,#ecfeff)] text-stone-900"

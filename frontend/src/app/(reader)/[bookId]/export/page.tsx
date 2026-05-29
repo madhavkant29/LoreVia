@@ -18,7 +18,7 @@ const AuthorToolsNav = dynamic(
   () => import("@/components/layout/AuthorToolsNav").then((module) => module.AuthorToolsNav),
   {
     ssr: false,
-    loading: () => <div className="rounded-[1.8rem] border border-dashed p-8" />,
+    loading: () => <div className="rounded-lg border border-dashed p-8" />,
   }
 )
 
@@ -215,10 +215,10 @@ export default function ExportStudioPage() {
           />
 
           <main className="space-y-6">
-            <section className={`rounded-[2rem] border p-6 ${isDark ? "border-white/10 bg-[linear-gradient(180deg,rgba(8,12,24,0.96),rgba(12,20,34,0.9))]" : "border-white/70 bg-white/88"}`}>
+            <section className={`rounded-lg border p-6 ${isDark ? "border-white/10 bg-[linear-gradient(180deg,rgba(8,12,24,0.96),rgba(12,20,34,0.9))]" : "border-white/70 bg-white/88"}`}>
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div>
-                  <p className={`text-[11px] font-semibold uppercase tracking-[0.32em] ${isDark ? "text-violet-300" : "text-violet-700"}`}>Import & Export</p>
+                  <p className={`text-3xs font-semibold uppercase tracking-[0.32em] ${isDark ? "text-violet-300" : "text-violet-700"}`}>Import & Export</p>
                   <h1 className={`mt-3 font-serif text-4xl ${isDark ? "text-white" : "text-stone-950"}`}>{book.title}</h1>
                   <p className={`mt-3 max-w-3xl text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
                     Keep imports and exports separate, keep the vault structure visible, and ship the exact files you want instead of bouncing through modal dialogs.
@@ -236,8 +236,8 @@ export default function ExportStudioPage() {
             </section>
 
             <div className="grid gap-6 2xl:grid-cols-2">
-              <section className={`rounded-[2rem] border p-6 ${isDark ? "border-white/10 bg-black/20" : "border-white/70 bg-white/85"}`}>
-                <p className={`text-[11px] font-semibold uppercase tracking-[0.28em] ${isDark ? "text-emerald-300" : "text-emerald-700"}`}>Import</p>
+              <section className={`rounded-lg border p-6 ${isDark ? "border-white/10 bg-black/20" : "border-white/70 bg-white/85"}`}>
+                <p className={`text-3xs font-semibold uppercase tracking-[0.28em] ${isDark ? "text-emerald-300" : "text-emerald-700"}`}>Import</p>
                 <h2 className={`mt-3 font-serif text-3xl ${isDark ? "text-white" : "text-stone-950"}`}>Bring material into this book</h2>
                 <div className="mt-6 grid gap-4">
                   <ImportCard
@@ -298,12 +298,12 @@ export default function ExportStudioPage() {
                 </div>
               </section>
 
-              <section className={`rounded-[2rem] border p-6 ${isDark ? "border-white/10 bg-black/20" : "border-white/70 bg-white/85"}`}>
-                <p className={`text-[11px] font-semibold uppercase tracking-[0.28em] ${isDark ? "text-sky-300" : "text-sky-700"}`}>Export</p>
+              <section className={`rounded-lg border p-6 ${isDark ? "border-white/10 bg-black/20" : "border-white/70 bg-white/85"}`}>
+                <p className={`text-3xs font-semibold uppercase tracking-[0.28em] ${isDark ? "text-sky-300" : "text-sky-700"}`}>Export</p>
                 <h2 className={`mt-3 font-serif text-3xl ${isDark ? "text-white" : "text-stone-950"}`}>Ship clean outputs</h2>
 
                 <div className="mt-6 space-y-5">
-                  <div className={`rounded-[1.4rem] border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50/80"}`}>
+                  <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50/80"}`}>
                     <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>Character bible export</p>
                     <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                       {formatCards.map((item) => (
@@ -311,7 +311,7 @@ export default function ExportStudioPage() {
                           key={item.value}
                           type="button"
                           onClick={() => setBibleFormat(item.value)}
-                          className={`rounded-[1.1rem] border px-4 py-3 text-left transition ${
+                          className={`rounded-md border px-4 py-3 text-left transition ${
                             bibleFormat === item.value
                               ? isDark
                                 ? "border-violet-400/40 bg-violet-500/10"
@@ -331,7 +331,7 @@ export default function ExportStudioPage() {
                         type="button"
                         onClick={() => void exportCharacterBible()}
                         disabled={exporting !== null}
-                        className="rounded-[1rem] bg-[linear-gradient(135deg,#6d28d9,#4f46e5)] px-5 py-3 text-sm font-semibold text-white disabled:opacity-60"
+                        className="rounded-md bg-[linear-gradient(135deg,#6d28d9,#4f46e5)] px-5 py-3 text-sm font-semibold text-white disabled:opacity-60"
                       >
                         {exporting === "character-bible" ? "Preparing..." : "Export character bible"}
                       </button>
@@ -339,14 +339,14 @@ export default function ExportStudioPage() {
                         type="button"
                         onClick={() => void openPreview()}
                         disabled={previewLoading}
-                        className={`rounded-[1rem] border px-5 py-3 text-sm font-semibold ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}
+                        className={`rounded-md border px-5 py-3 text-sm font-semibold ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}
                       >
                         {previewLoading ? "Loading preview..." : "Preview export files"}
                       </button>
                     </div>
                     {bibleNotes.length > 0 ? (
-                      <div className={`mt-4 rounded-[1rem] border px-4 py-3 text-sm ${isDark ? "border-white/10 bg-black/20 text-slate-300" : "border-stone-200 bg-white text-stone-600"}`}>
-                        <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Saved bible note overrides</p>
+                      <div className={`mt-4 rounded-md border px-4 py-3 text-sm ${isDark ? "border-white/10 bg-black/20 text-slate-300" : "border-stone-200 bg-white text-stone-600"}`}>
+                        <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Saved bible note overrides</p>
                         <div className="mt-2 flex flex-wrap gap-2">
                           {bibleNotes.slice(0, 8).map((note) => (
                             <span key={note.id} className={`rounded-full px-2.5 py-1 text-xs ${isDark ? "bg-white/8 text-slate-200" : "bg-stone-100 text-stone-700"}`}>
@@ -358,7 +358,7 @@ export default function ExportStudioPage() {
                     ) : null}
                   </div>
 
-                  <div className={`rounded-[1.4rem] border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50/80"}`}>
+                  <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50/80"}`}>
                     <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>Manuscript export</p>
                     <div className="mt-3 flex flex-wrap gap-2">
                       {(["docx", "pdf", "epub", "obsidian"] as ManuscriptExportFormat[]).map((format) => (
@@ -380,7 +380,7 @@ export default function ExportStudioPage() {
                         </button>
                       ))}
                     </div>
-                    <label className={`mt-4 flex items-start gap-3 rounded-[1rem] border px-4 py-3 text-sm ${isDark ? "border-white/10 bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+                    <label className={`mt-4 flex items-start gap-3 rounded-md border px-4 py-3 text-sm ${isDark ? "border-white/10 bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
                       <input
                         type="checkbox"
                         checked={includeSceneMetadata}
@@ -398,13 +398,13 @@ export default function ExportStudioPage() {
                       type="button"
                       onClick={() => void exportManuscript()}
                       disabled={exporting !== null}
-                      className="mt-4 rounded-[1rem] bg-[linear-gradient(135deg,#f59e0b,#d97706)] px-5 py-3 text-sm font-semibold text-white disabled:opacity-60"
+                      className="mt-4 rounded-md bg-[linear-gradient(135deg,#f59e0b,#d97706)] px-5 py-3 text-sm font-semibold text-white disabled:opacity-60"
                     >
                       {exporting === "manuscript" ? "Preparing..." : "Export manuscript"}
                     </button>
                   </div>
 
-                  <div className={`rounded-[1.4rem] border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50/80"}`}>
+                  <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50/80"}`}>
                     <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>Notes workspace export</p>
                     <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
                       Download the editable vault notes separately from the generated character bible files.
@@ -413,7 +413,7 @@ export default function ExportStudioPage() {
                       type="button"
                       onClick={() => void exportNotesZip()}
                       disabled={exporting !== null}
-                      className="mt-4 rounded-[1rem] bg-[linear-gradient(135deg,#0f766e,#2563eb)] px-5 py-3 text-sm font-semibold text-white disabled:opacity-60"
+                      className="mt-4 rounded-md bg-[linear-gradient(135deg,#0f766e,#2563eb)] px-5 py-3 text-sm font-semibold text-white disabled:opacity-60"
                     >
                       {exporting === "notes" ? "Preparing..." : "Export notes ZIP"}
                     </button>
@@ -423,7 +423,7 @@ export default function ExportStudioPage() {
             </div>
 
             {status ? (
-              <div className={`rounded-[1.4rem] border px-4 py-3 text-sm ${isDark ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-200" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}>
+              <div className={`rounded-lg border px-4 py-3 text-sm ${isDark ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-200" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}>
                 {status}
               </div>
             ) : null}
@@ -458,17 +458,17 @@ function ImportCard({
   disabled: boolean
 }) {
   return (
-    <article className={`rounded-[1.4rem] border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50/80"}`}>
+    <article className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50/80"}`}>
       <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{title}</p>
       <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{description}</p>
-      <div className={`mt-3 rounded-[1rem] border border-dashed px-4 py-3 text-sm ${isDark ? "border-white/10 text-slate-400" : "border-stone-300 text-stone-500"}`}>
+      <div className={`mt-3 rounded-md border border-dashed px-4 py-3 text-sm ${isDark ? "border-white/10 text-slate-400" : "border-stone-300 text-stone-500"}`}>
         {files.length ? files.map((file) => file.name).join(", ") : "No files selected yet."}
       </div>
       <div className="mt-4 flex flex-wrap gap-3">
-        <button type="button" onClick={onChoose} className={`rounded-[1rem] border px-4 py-2.5 text-sm font-semibold ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+        <button type="button" onClick={onChoose} className={`rounded-md border px-4 py-2.5 text-sm font-semibold ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
           Choose files
         </button>
-        <button type="button" onClick={onRun} disabled={disabled} className="rounded-[1rem] bg-[linear-gradient(135deg,#059669,#0f766e)] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60">
+        <button type="button" onClick={onRun} disabled={disabled} className="rounded-md bg-[linear-gradient(135deg,#059669,#0f766e)] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60">
           {buttonLabel}
         </button>
       </div>

@@ -160,6 +160,7 @@ describe("VoiceConsistencyPage", () => {
     renderPage()
     await flushUi()
     await flushUi()
+    await flushUi()
 
     expect(container?.textContent).toContain("Auto-detect from passage")
 

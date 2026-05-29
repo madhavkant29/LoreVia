@@ -105,7 +105,7 @@ function LoginInner() {
 
   return (
     <main>
-      <div className={`rounded-[2rem] border p-8 shadow-[0_28px_90px_-55px_rgba(15,23,42,0.28)] ${
+      <div className={`rounded-lg border p-8 shadow-[0_28px_90px_-55px_rgba(15,23,42,0.28)] ${
         isDark ? "border-white/10 bg-white/5" : "border-white/80 bg-white/92"
       }`}>
         <div className="mb-8 text-center">
@@ -133,7 +133,7 @@ function LoginInner() {
 
         <div className="relative my-6 flex items-center">
           <div className={`h-px flex-1 ${isDark ? "bg-white/[0.07]" : "bg-stone-200"}`} />
-          <span className={`px-3 text-[11px] font-medium uppercase tracking-[0.18em] ${isDark ? "text-slate-600" : "text-stone-400"}`}>
+          <span className={`px-3 text-3xs font-medium uppercase tracking-[0.18em] ${isDark ? "text-slate-600" : "text-stone-400"}`}>
             or
           </span>
           <div className={`h-px flex-1 ${isDark ? "bg-white/[0.07]" : "bg-stone-200"}`} />

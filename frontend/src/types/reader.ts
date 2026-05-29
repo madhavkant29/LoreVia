@@ -15,7 +15,25 @@ export interface ChapterData {
   html_content?: string | null
   media?: ChapterMedia[]
   tags?: string[]
+  beta_feedback?: ChapterBetaFeedback[]
   characters: ChapterCharacter[]
+}
+
+export interface ChapterBetaFeedback {
+  id: string
+  assignment_id: string
+  collaborator_id: string | null
+  reader_user_id: string | null
+  reader_email: string
+  reader_display_name: string
+  task_label: string
+  kind: string
+  chapter_number: number | null
+  anchor_text?: string | null
+  body?: string | null
+  author_status: string
+  created_at: string
+  updated_at: string
 }
 
 export interface ChapterMedia {
@@ -244,6 +262,10 @@ export interface TimelineResponse {
   character_tracks: CharacterTimelineTrack[]
   thread_tracks: PlotThreadTimelineTrack[]
   relationship_markers: RelationshipTimelineMarker[]
+  total_events?: number
+  limit?: number
+  offset?: number
+  has_more?: boolean
 }
 
 export interface ThematicSearchResult {

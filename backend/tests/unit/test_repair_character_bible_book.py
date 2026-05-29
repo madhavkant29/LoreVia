@@ -7,6 +7,7 @@ from sqlalchemy import select
 from app.models.book import Book
 from app.models.character import Character, CharacterCandidate, CharacterMention
 from app.models.user import User
+from scripts import backfill_character_bible_noise
 from scripts import repair_character_bible_book
 
 
@@ -171,8 +172,27 @@ async def test_apply_repair_plan_demotes_characters_rejected_by_repair_verifier(
         await db.execute(select(CharacterCandidate).where(CharacterCandidate.book_id == book.id))
     ).scalars().all()
 
-    assert persisted_character is None
+    assert persisted_character is not None
+    assert persisted_character.visibility_state == "quarantined"
+    assert persisted_character.approval_state == "pending_review"
     assert result["demoted_character_ids"] == [str(character.id)]
+    assert result["character_labels"][str(character.id)] == "Help"
     assert len(candidate_rows) == 1
+    assert candidate_rows[0].matched_character_id == character.id
     assert candidate_rows[0].reason_codes[0] == "repair_demoted_noise"
     assert candidate_rows[0].evidence["verifier"]["final"]["confidence_band"] == "reject"
+
+
+def test_backfill_marks_book_state_with_version_and_summary():
+    book = SimpleNamespace(writer_workspace={})
+
+    backfill_character_bible_noise._mark_backfill_state(
+        book,
+        status="applied",
+        payload={"demoted_character_ids": ["a"]},
+    )
+
+    state = book.writer_workspace["character_noise_backfill"]
+    assert state["version"] == backfill_character_bible_noise.BACKFILL_VERSION
+    assert state["status"] == "applied"
+    assert state["summary"] == {"demoted_character_ids": ["a"]}

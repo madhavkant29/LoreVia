@@ -55,16 +55,16 @@ export function ChaptersPageHeader({
 
       <div className="mt-8 flex flex-col gap-8 xl:flex-row xl:items-start xl:justify-between">
         <div className="max-w-[46rem]">
-          <p className={`text-[11px] font-semibold uppercase tracking-[0.3em] ${isDark ? "text-teal-300" : "text-teal-700"}`}>Manuscript</p>
+          <p className={`text-3xs font-semibold uppercase tracking-[0.3em] ${isDark ? "text-teal-300" : "text-teal-700"}`}>Manuscript</p>
           <h1 className={`mt-3 font-serif text-[2.9rem] leading-none tracking-[-0.04em] sm:text-[4.4rem] ${isDark ? "text-white" : "text-stone-950"}`}>{title}</h1>
-          <p className={`mt-4 max-w-2xl text-[15px] leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{subtitle}</p>
+          <p className={`mt-4 max-w-2xl text-base leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{subtitle}</p>
 
           <div className="mt-7">
             <button
               type="button"
               onClick={onPrimaryAction}
               disabled={primaryActionBusy || primaryActionDisabled}
-              className={`inline-flex items-center justify-center rounded-[0.95rem] border px-5 py-3 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-300/60 disabled:cursor-not-allowed disabled:opacity-50 ${
+              className={`inline-flex items-center justify-center rounded-md border px-5 py-3 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-300/60 disabled:cursor-not-allowed disabled:opacity-50 ${
                 isDark
                   ? "border-emerald-400/20 bg-emerald-400/14 text-emerald-50 hover:bg-emerald-400/20"
                   : "border-teal-200 bg-teal-600 text-white hover:bg-teal-700"
@@ -85,7 +85,7 @@ export function ChaptersPageHeader({
           </div>
         </div>
 
-        <div className={`min-w-[13rem] self-start rounded-[1.35rem] border px-5 py-4 ${isDark ? "border-white/10 bg-[#0c1219]/90 text-slate-200" : "border-stone-200 bg-stone-50 text-stone-700"}`}>
+        <div className={`min-w-[13rem] self-start rounded-lg border px-5 py-4 ${isDark ? "border-white/10 bg-[#0c1219]/90 text-slate-200" : "border-stone-200 bg-stone-50 text-stone-700"}`}>
           <div className="flex items-center gap-3">
             <span className={`inline-flex h-8 w-8 items-center justify-center rounded-full border ${isDark ? "border-teal-400/20 bg-teal-400/10 text-teal-200" : "border-teal-200 bg-teal-50 text-teal-700"}`}>
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

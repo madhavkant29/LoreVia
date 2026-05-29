@@ -140,6 +140,22 @@ export interface AdvisorSuggestionsResponse {
   total: number
   book_title: string
   meta: AdvisorScanMeta
+  cached?: boolean
+}
+
+
+export interface AdvisorSuggestionScanResponse {
+  job_id: string
+  status: "queued"
+  cached: boolean
+}
+
+
+export interface AdvisorSuggestionJobStatusResponse {
+  job_id: string
+  status: "queued" | "running" | "complete" | "failed"
+  result: AdvisorSuggestionsResponse | null
+  error: string | null
 }
 
 // ─── Editorial Review types ───────────────────────────────────────────────────

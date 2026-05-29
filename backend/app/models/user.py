@@ -81,6 +81,7 @@ class User(Base):
     direct_conversations_as_a = relationship("DirectConversation", foreign_keys="DirectConversation.participant_a_user_id", back_populates="participant_a", cascade="all, delete-orphan")
     direct_conversations_as_b = relationship("DirectConversation", foreign_keys="DirectConversation.participant_b_user_id", back_populates="participant_b", cascade="all, delete-orphan")
     direct_messages_sent = relationship("DirectMessage", foreign_keys="DirectMessage.sender_user_id", back_populates="sender", cascade="all, delete-orphan")
+    login_activities = relationship("UserLoginActivity", back_populates="user", cascade="all, delete-orphan")
     email_preferences = relationship("EmailPreference", back_populates="user", cascade="all, delete-orphan", uselist=False)
 
 
@@ -348,3 +349,19 @@ class LlmUsageEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
     user = relationship("User", back_populates="llm_usage_events")
+
+
+class UserLoginActivity(Base):
+    __tablename__ = "user_login_activity"
+    __table_args__ = (
+        Index("ix_user_login_activity_user_date", "user_id", "login_date"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    login_date: Mapped[date] = mapped_column(Date, nullable=False)
+    ip_hash: Mapped[str | None] = mapped_column(String, nullable=True)
+    device_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    user = relationship("User", back_populates="login_activities")

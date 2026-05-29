@@ -139,7 +139,7 @@ export function MarkdownPreview({
 
   return (
     <div
-      className={`note-rich-content min-h-[24rem] rounded-[1.25rem] border px-5 py-4 text-sm leading-7 ${
+      className={`note-rich-content min-h-[24rem] rounded-md border px-5 py-4 text-sm leading-7 ${
         isDark ? "border-white/10 bg-[#07111f] text-slate-100" : "border-stone-200 bg-white text-stone-800"
       }`}
       onClick={(event) => {

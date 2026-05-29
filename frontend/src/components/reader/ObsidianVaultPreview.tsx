@@ -202,10 +202,10 @@ export function ObsidianVaultPreview({
   }
 
   return (
-    <div className={`rounded-[2rem] border p-4 shadow-[0_30px_80px_-44px_rgba(15,23,42,0.75)] ${isDark ? "border-white/10 bg-[linear-gradient(180deg,rgba(10,10,12,0.95),rgba(17,24,39,0.9))]" : "border-stone-200 bg-[linear-gradient(180deg,rgba(255,255,255,0.94),rgba(248,250,252,0.9))]"}`}>
+    <div className={`rounded-lg border p-4 shadow-modal ${isDark ? "border-white/10 bg-[linear-gradient(180deg,rgba(10,10,12,0.95),rgba(17,24,39,0.9))]" : "border-stone-200 bg-[linear-gradient(180deg,rgba(255,255,255,0.94),rgba(248,250,252,0.9))]"}`}>
       <div className="flex flex-col gap-4 border-b border-white/10 pb-4 lg:flex-row lg:items-end lg:justify-between">
         <div className="max-w-3xl">
-            <p className={`text-[11px] font-semibold uppercase tracking-[0.34em] ${isDark ? "text-sky-300" : "text-sky-600"}`}>Vault export</p>
+            <p className={`text-3xs font-semibold uppercase tracking-[0.34em] ${isDark ? "text-sky-300" : "text-sky-600"}`}>Vault export</p>
             <h3 className={`mt-2 font-serif text-3xl tracking-tight ${isDark ? "text-white" : "text-stone-950"}`}>Vault preview and editor</h3>
             <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-400" : "text-stone-600"}`}>
               Browse every exported note, edit the markdown in-app, and export a fresh vault ZIP when you're done.
@@ -220,10 +220,10 @@ export function ObsidianVaultPreview({
       </div>
 
       <div className="mt-4 grid gap-4 xl:grid-cols-[20rem_minmax(0,1fr)]">
-        <aside className={`rounded-[1.5rem] border p-3 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-white/80"}`}>
+        <aside className={`rounded-lg border p-3 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-white/80"}`}>
           <div className="flex items-center justify-between gap-3 px-1 py-1.5">
             <div>
-              <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Vault Map</p>
+              <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Vault Map</p>
               <p className={`mt-1 text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>{filteredFiles.length} notes visible</p>
             </div>
             <button
@@ -235,7 +235,7 @@ export function ObsidianVaultPreview({
             </button>
           </div>
 
-          <label className={`mt-3 flex items-center gap-2 rounded-[1rem] border px-3 py-2 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white"}`}>
+          <label className={`mt-3 flex items-center gap-2 rounded-md border px-3 py-2 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white"}`}>
             <svg className={`h-4 w-4 ${isDark ? "text-slate-500" : "text-stone-400"}`} viewBox="0 0 20 20" fill="none">
               <path d="M8.5 15a6.5 6.5 0 1 1 4.56-11.1A6.5 6.5 0 0 1 8.5 15Z" stroke="currentColor" strokeWidth="1.6" />
               <path d="m13.5 13.5 3 3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
@@ -250,7 +250,7 @@ export function ObsidianVaultPreview({
 
           <div className="mt-3 max-h-[34rem] space-y-2 overflow-auto pr-1">
             {filteredFiles.length === 0 ? (
-              <div className={`rounded-[1rem] border border-dashed px-4 py-8 text-center text-sm ${isDark ? "border-white/10 text-slate-400" : "border-stone-300 text-stone-500"}`}>
+              <div className={`rounded-md border border-dashed px-4 py-8 text-center text-sm ${isDark ? "border-white/10 text-slate-400" : "border-stone-300 text-stone-500"}`}>
                 No notes match that search.
               </div>
             ) : filteredFiles.map((file) => {
@@ -262,7 +262,7 @@ export function ObsidianVaultPreview({
                   key={file.path}
                   type="button"
                   onClick={() => handleSelect(file.path)}
-                  className={`group w-full rounded-[1.15rem] border px-4 py-3 text-left transition ${
+                  className={`group w-full rounded-md border px-4 py-3 text-left transition ${
                     active
                       ? isDark
                         ? "border-sky-400/35 bg-sky-500/10 shadow-[0_10px_30px_-18px_rgba(56,189,248,0.8)]"
@@ -278,22 +278,22 @@ export function ObsidianVaultPreview({
                       <p className={`mt-1 truncate text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{file.path.replace(`${preview.root_folder}/`, "")}</p>
                     </div>
                     {changed ? (
-                      <span className={`rounded-full px-2 py-1 text-[10px] font-bold uppercase tracking-[0.16em] ${isDark ? "bg-amber-500/15 text-amber-300" : "bg-amber-100 text-amber-700"}`}>Edited</span>
+                      <span className={`rounded-full px-2 py-1 text-3xs font-bold uppercase tracking-[0.16em] ${isDark ? "bg-amber-500/15 text-amber-300" : "bg-amber-100 text-amber-700"}`}>Edited</span>
                     ) : null}
                   </div>
-                  <p className={`mt-2 text-[11px] ${isDark ? "text-slate-600" : "text-stone-400"}`}>{folderLabel(file, preview.root_folder)}</p>
+                  <p className={`mt-2 text-3xs ${isDark ? "text-slate-600" : "text-stone-400"}`}>{folderLabel(file, preview.root_folder)}</p>
                 </button>
               )
             })}
           </div>
         </aside>
 
-        <section className={`rounded-[1.5rem] border p-4 ${isDark ? "border-white/10 bg-black/25" : "border-stone-200 bg-white"}`}>
+        <section className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-black/25" : "border-stone-200 bg-white"}`}>
           {selectedFile ? (
             <div className="flex h-full min-h-[42rem] flex-col">
               <div className="flex flex-col gap-4 border-b border-white/10 pb-4 lg:flex-row lg:items-end lg:justify-between">
                 <div className="min-w-0">
-                  <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Editing</p>
+                  <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Editing</p>
                   <h4 className={`mt-2 truncate font-serif text-2xl ${isDark ? "text-white" : "text-stone-950"}`}>{noteTitle(selectedFile)}</h4>
                   <p className={`mt-1 truncate text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>{selectedFile.path.replace(`${preview.root_folder}/`, "")}</p>
                 </div>
@@ -306,7 +306,7 @@ export function ObsidianVaultPreview({
 
               <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_15rem]">
                 <div className="space-y-3">
-                  <div className={`rounded-[1.25rem] border p-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
+                  <div className={`rounded-md border p-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div className={`text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>
                         {selectedHasChanges ? "You have unsaved edits for this note." : "This note matches the exported file."}
@@ -357,13 +357,13 @@ export function ObsidianVaultPreview({
                       setStatus(null)
                     }}
                     spellCheck={false}
-                    className={`min-h-[30rem] w-full resize-y rounded-[1.2rem] border px-4 py-4 font-mono text-sm leading-7 outline-none transition ${isDark ? "border-white/10 bg-[#050816] text-slate-100 placeholder:text-slate-600 focus:border-sky-400/40" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400 focus:border-sky-300"}`}
+                    className={`min-h-[30rem] w-full resize-y rounded-md border px-4 py-4 font-mono text-sm leading-7 outline-none transition ${isDark ? "border-white/10 bg-[#050816] text-slate-100 placeholder:text-slate-600 focus:border-sky-400/40" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400 focus:border-sky-300"}`}
                   />
                 </div>
 
                 <div className="space-y-3">
-                  <div className={`rounded-[1.25rem] border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
-                    <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Note Info</p>
+                  <div className={`rounded-md border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
+                    <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Note Info</p>
                     <div className="mt-3 space-y-3 text-sm">
                       <InfoRow label="Folder" value={folderLabel(selectedFile, preview.root_folder)} isDark={isDark} />
                       <InfoRow label="Path" value={selectedFile.path.replace(`${preview.root_folder}/`, "")} isDark={isDark} />
@@ -371,8 +371,8 @@ export function ObsidianVaultPreview({
                     </div>
                   </div>
 
-                  <div className={`rounded-[1.25rem] border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
-                      <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Notes</p>
+                  <div className={`rounded-md border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
+                      <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Notes</p>
                       <ul className={`mt-3 space-y-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
                         <li>Use the search box to jump between any exported note.</li>
                         <li>Edit notes directly here, then export the updated vault ZIP.</li>
@@ -381,7 +381,7 @@ export function ObsidianVaultPreview({
                   </div>
 
                   {status ? (
-                    <div className={`rounded-[1.25rem] border px-4 py-3 text-sm ${isDark ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-200" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}>
+                    <div className={`rounded-md border px-4 py-3 text-sm ${isDark ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-200" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}>
                       {status}
                     </div>
                   ) : null}
@@ -389,7 +389,7 @@ export function ObsidianVaultPreview({
               </div>
             </div>
           ) : (
-            <div className={`flex min-h-[42rem] items-center justify-center rounded-[1.5rem] border border-dashed ${isDark ? "border-white/10 text-slate-400" : "border-stone-300 text-stone-500"}`}>
+            <div className={`flex min-h-[42rem] items-center justify-center rounded-lg border border-dashed ${isDark ? "border-white/10 text-slate-400" : "border-stone-300 text-stone-500"}`}>
               <p>Select a note to start editing.</p>
             </div>
           )}
@@ -422,8 +422,8 @@ function StatPill({
   wide?: boolean
 }) {
   return (
-    <div className={`rounded-[1rem] border px-3 py-2 ${wide ? "min-w-[12rem]" : ""} ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white"}`}>
-      <p className={`text-[10px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{label}</p>
+    <div className={`rounded-md border px-3 py-2 ${wide ? "min-w-[12rem]" : ""} ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white"}`}>
+      <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{label}</p>
       <p className={`${compact ? "mt-1 text-xs" : "mt-1.5 text-sm"} truncate font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{value}</p>
     </div>
   )

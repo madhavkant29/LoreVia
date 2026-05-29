@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import dynamic from "next/dynamic"
 import { useParams } from "next/navigation"
@@ -11,7 +11,7 @@ import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { parseQuestionLines } from "@/lib/utils/betaRead"
 import type { BetaReadAssignment } from "@/types/betaRead"
-import type { Book, BookCollaborator, CollaborationPermissions, CollaborationRole, CollaborationScope } from "@/types/book"
+import type { Book, BookCollaborator, CollaboratorActivity, CollaborationPermissions, CollaborationRole, CollaborationScope } from "@/types/book"
 import type { BetaReadAssignmentCreateInput } from "@/types/reader"
 
 const AuthorToolsNav = dynamic(
@@ -218,6 +218,7 @@ export default function CollaborationPage() {
   const [authorQuestionsText, setAuthorQuestionsText] = useState("What confused you most?\nWhich moment landed best?")
   const [status, setStatus] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [selectedCollaboratorId, setSelectedCollaboratorId] = useState<string | null>(null)
   const emailInputRef = useRef<HTMLInputElement | null>(null)
   const displayNameInputRef = useRef<HTMLInputElement | null>(null)
 
@@ -225,6 +226,26 @@ export default function CollaborationPage() {
     () => [...collaborators].sort((left, right) => left.email.localeCompare(right.email)),
     [collaborators]
   )
+  const selectedCollaborator = useMemo(
+    () => sortedCollaborators.find((collaborator) => collaborator.id === selectedCollaboratorId) ?? null,
+    [selectedCollaboratorId, sortedCollaborators]
+  )
+
+  useEffect(() => {
+    if (!selectedCollaboratorId && sortedCollaborators.length > 0) {
+      setSelectedCollaboratorId(sortedCollaborators[0].id)
+      return
+    }
+    if (selectedCollaboratorId && !sortedCollaborators.some((collaborator) => collaborator.id === selectedCollaboratorId)) {
+      setSelectedCollaboratorId(sortedCollaborators[0]?.id ?? null)
+    }
+  }, [selectedCollaboratorId, sortedCollaborators])
+
+  const collaboratorActivityQuery = useQuery<CollaboratorActivity | null>({
+    queryKey: selectedCollaboratorId ? asQueryKey(`collaboration:${bookId}:collaborator-activity:${selectedCollaboratorId}`) : ["collaboration:activity:none"],
+    queryFn: () => selectedCollaboratorId ? booksApi.getCollaboratorActivity(bookId, selectedCollaboratorId) : Promise.resolve(null),
+    enabled: Boolean(selectedCollaboratorId),
+  })
 
   const activeRoleDetail = roleMeta(role)?.detail ?? ""
   const readerShellRole = role === "viewer" || role === "reader_only" || role === "commenter" || role === "beta_reader"
@@ -384,7 +405,7 @@ export default function CollaborationPage() {
               <div className="mt-6">
                 <div className="flex items-center justify-between gap-3">
                   <h3 className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Permissions</h3>
-                  <span className={`text-[11px] ${isDark ? "text-slate-500" : "text-slate-400"}`}>{permissionSummary(permissions)}</span>
+                  <span className={`text-3xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>{permissionSummary(permissions)}</span>
                 </div>
                 <div className="mt-3 grid gap-2">
                   {PERMISSION_OPTIONS.map((option) => (
@@ -407,7 +428,7 @@ export default function CollaborationPage() {
               <div className="mt-6">
                 <div className="flex items-center justify-between gap-3">
                   <h3 className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Story scope</h3>
-                  <span className={`text-[11px] ${isDark ? "text-slate-500" : "text-slate-400"}`}>{scopeSummary(scope, permissions)}</span>
+                  <span className={`text-3xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>{scopeSummary(scope, permissions)}</span>
                 </div>
 
                 <div className="mt-3 grid gap-3 sm:grid-cols-2">
@@ -477,15 +498,26 @@ export default function CollaborationPage() {
                         <p className={`truncate text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{collaborator.display_name || collaborator.email}</p>
                         <p className={`mt-1 truncate text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>{collaborator.email}</p>
                       </div>
-                      <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold capitalize ${collaborator.invite_status === "active" ? "bg-emerald-500/10 text-emerald-400" : "bg-slate-500/10 text-slate-400"}`}>
+                      <span className={`rounded-full px-2.5 py-1 text-3xs font-semibold capitalize ${collaborator.invite_status === "active" ? "bg-emerald-500/10 text-emerald-400" : "bg-slate-500/10 text-slate-400"}`}>
                         {collaborator.invite_status}
                       </span>
                     </div>
                     <div className="mt-4 grid gap-2 text-sm">
-                      <p className={isDark ? "text-slate-300" : "text-slate-700"}>Role · {roleLabel(collaborator.role)}</p>
+                      <p className={isDark ? "text-slate-300" : "text-slate-700"}>Role - {roleLabel(collaborator.role)}</p>
                       <p className={isDark ? "text-slate-400" : "text-slate-600"}>{permissionSummary(collaborator.permissions)}</p>
                       <p className={isDark ? "text-slate-500" : "text-slate-500"}>{scopeSummary(collaborator.scope, collaborator.permissions)}</p>
                     </div>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedCollaboratorId(collaborator.id)}
+                      className={`mt-4 text-xs font-semibold ${
+                        selectedCollaboratorId === collaborator.id
+                          ? isDark ? "text-teal-300" : "text-teal-700"
+                          : isDark ? "text-slate-300" : "text-slate-700"
+                      }`}
+                    >
+                      {selectedCollaboratorId === collaborator.id ? "Viewing activity" : "View activity"}
+                    </button>
                     {collaborator.invite_status === "active" ? (
                       <button onClick={() => void revoke(collaborator)} className="mt-4 text-xs font-semibold text-rose-400">
                         Revoke
@@ -497,6 +529,77 @@ export default function CollaborationPage() {
                     No collaborators yet.
                   </div>
                 )}
+              </div>
+
+              <div className={`mt-5 rounded-md border p-4 ${isDark ? "border-white/[0.06] bg-[#101720]" : "border-slate-200 bg-slate-50"}`}>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <h3 className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>Collaborator activity</h3>
+                    <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>
+                      {selectedCollaborator
+                        ? `Recent activity from ${selectedCollaborator.display_name || selectedCollaborator.email}.`
+                        : "Select a collaborator to inspect their chapter comments and feedback history."}
+                    </p>
+                  </div>
+                  {collaboratorActivityQuery.data?.latest_activity_at ? (
+                    <span className={`text-xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>
+                      Last active {new Date(collaboratorActivityQuery.data.latest_activity_at).toLocaleString()}
+                    </span>
+                  ) : null}
+                </div>
+
+                {selectedCollaboratorId && collaboratorActivityQuery.isLoading ? (
+                  <p className={`mt-4 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>Loading activity...</p>
+                ) : null}
+
+                {selectedCollaboratorId && !collaboratorActivityQuery.isLoading && collaboratorActivityQuery.data ? (
+                  <div className="mt-4 space-y-4">
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <div className={`rounded-md border px-3 py-3 ${isDark ? "border-white/[0.08] bg-[#0d141c]" : "border-slate-200 bg-white"}`}>
+                        <p className={`text-3xs uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Assignments</p>
+                        <p className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{collaboratorActivityQuery.data.assignments.length}</p>
+                      </div>
+                      <div className={`rounded-md border px-3 py-3 ${isDark ? "border-white/[0.08] bg-[#0d141c]" : "border-slate-200 bg-white"}`}>
+                        <p className={`text-3xs uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Chapter comments</p>
+                        <p className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{collaboratorActivityQuery.data.chapter_comment_count}</p>
+                      </div>
+                      <div className={`rounded-md border px-3 py-3 ${isDark ? "border-white/[0.08] bg-[#0d141c]" : "border-slate-200 bg-white"}`}>
+                        <p className={`text-3xs uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Annotations</p>
+                        <p className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{collaboratorActivityQuery.data.annotation_count}</p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-3">
+                      {collaboratorActivityQuery.data.items.length > 0 ? collaboratorActivityQuery.data.items.map((item) => (
+                        <article
+                          key={item.id}
+                          className={`rounded-md border px-4 py-4 ${isDark ? "border-white/[0.06] bg-[#0d141c]" : "border-slate-200 bg-white"}`}
+                        >
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                            <div>
+                              <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{item.title}</p>
+                              <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>
+                                {item.chapter_number ? `Chapter ${item.chapter_number}${item.chapter_title ? ` - ${item.chapter_title}` : ""}` : item.kind.replace(/_/g, " ")}
+                              </p>
+                            </div>
+                            <span className={`text-xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>
+                              {new Date(item.created_at).toLocaleString()}
+                            </span>
+                          </div>
+                          {item.body ? (
+                            <p className={`mt-3 whitespace-pre-wrap text-sm leading-6 ${isDark ? "text-slate-300" : "text-slate-700"}`}>{item.body}</p>
+                          ) : null}
+                        </article>
+                      )) : (
+                        <p className={`text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>No activity recorded yet.</p>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+
+                {!selectedCollaboratorId ? (
+                  <p className={`mt-4 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>No collaborator selected.</p>
+                ) : null}
               </div>
             </div>
           </section>
@@ -666,7 +769,7 @@ export default function CollaborationPage() {
                         <p className={`truncate text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{assignment.reader_email}</p>
                         <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>{assignment.task_label}</p>
                       </div>
-                      <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${assignment.view_bucket === "missed" ? "bg-rose-500/10 text-rose-300" : assignment.view_bucket === "completed" ? "bg-emerald-500/10 text-emerald-400" : "bg-amber-500/10 text-amber-300"}`}>
+                      <span className={`rounded-full px-2.5 py-1 text-3xs font-semibold ${assignment.view_bucket === "missed" ? "bg-rose-500/10 text-rose-300" : assignment.view_bucket === "completed" ? "bg-emerald-500/10 text-emerald-400" : "bg-amber-500/10 text-amber-300"}`}>
                         {assignment.status_label}
                       </span>
                     </div>

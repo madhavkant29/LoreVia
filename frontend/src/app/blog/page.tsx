@@ -68,7 +68,7 @@ export default function BlogPage() {
       <JsonLdScript id="blog-collection-jsonld" data={jsonLd} />
 
       <section className="app-container py-10 md:py-14">
-        <div className="app-panel app-panel--strong rounded-[2rem] p-6 md:p-8 lg:p-10">
+        <div className="app-panel app-panel--strong rounded-lg p-6 md:p-8 lg:p-10">
           <div className="grid gap-10 lg:grid-cols-[1.12fr_0.88fr] lg:items-start">
             <div className="max-w-3xl">
               <span className="app-chip">Author-focused SEO hub</span>
@@ -109,7 +109,7 @@ export default function BlogPage() {
               </div>
             </div>
 
-            <article className="rounded-[1.8rem] border border-[rgba(var(--border),0.78)] bg-white/72 p-6 dark:bg-white/[0.04] md:p-8">
+            <article className="rounded-lg border border-[rgba(var(--border),0.78)] bg-white/72 p-6 dark:bg-white/[0.04] md:p-8">
               <div className="flex items-center justify-between gap-3">
                 <span className="app-chip">Featured guide</span>
                 <span className="text-xs font-semibold uppercase tracking-[0.24em] text-muted-foreground">
@@ -125,7 +125,7 @@ export default function BlogPage() {
               </h2>
               <p className="mt-5 text-base leading-8 text-muted-foreground">{featuredArticle.description}</p>
 
-              <div className="mt-8 rounded-[1.5rem] border border-[rgba(var(--border),0.8)] bg-white/75 p-5 dark:bg-white/5">
+              <div className="mt-8 rounded-lg border border-[rgba(var(--border),0.8)] bg-white/75 p-5 dark:bg-white/5">
                 <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">What this page covers</p>
                 <ul className="mt-4 space-y-3 text-sm leading-7 text-foreground/80">
                   {featuredArticle.highlights.map((item) => (
@@ -149,7 +149,7 @@ export default function BlogPage() {
       </section>
 
       <section className="app-container pb-8">
-        <div className="app-panel rounded-[2rem] p-6 md:p-8 lg:p-10">
+        <div className="app-panel rounded-lg p-6 md:p-8 lg:p-10">
           <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
             <div className="max-w-2xl">
               <p className="app-eyebrow">Main SEO articles</p>
@@ -167,7 +167,7 @@ export default function BlogPage() {
 
           <div className="mt-10 grid gap-5 lg:grid-cols-2">
             {blogArticles.map((article) => (
-              <article key={article.slug} className="h-full rounded-[1.6rem] border border-[rgba(var(--border),0.76)] bg-white/66 p-6 dark:bg-white/[0.04]">
+              <article key={article.slug} className="h-full rounded-lg border border-[rgba(var(--border),0.76)] bg-white/66 p-6 dark:bg-white/[0.04]">
                 <div className="flex flex-wrap items-center gap-3 text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
                   <span>{article.category}</span>
                   <span>{article.readTime}</span>
@@ -192,7 +192,7 @@ export default function BlogPage() {
       </section>
 
       <section className="app-container pb-8 pt-8">
-        <div className="app-panel app-panel--subtle rounded-[2rem] p-6 md:p-8 lg:p-10">
+        <div className="app-panel app-panel--subtle rounded-lg p-6 md:p-8 lg:p-10">
           <div className="max-w-2xl">
             <p className="app-eyebrow">Question clusters</p>
             <h2 className="mt-4 text-3xl font-semibold tracking-[-0.03em] text-foreground md:text-4xl">
@@ -207,7 +207,7 @@ export default function BlogPage() {
             {blogArticles.slice(0, 3).map((article) => {
               const answerPages = getAnswersByArticleSlug(article.slug)
               return (
-                <article key={article.slug} className="h-full rounded-[1.6rem] border border-[rgba(var(--border),0.76)] bg-white/66 p-6 dark:bg-white/[0.04]">
+                <article key={article.slug} className="h-full rounded-lg border border-[rgba(var(--border),0.76)] bg-white/66 p-6 dark:bg-white/[0.04]">
                   <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">
                     Supports {article.title}
                   </p>
@@ -228,7 +228,7 @@ export default function BlogPage() {
       </section>
 
       <section className="app-container pb-20 pt-8 md:pb-24">
-        <div className="app-panel app-panel--strong rounded-[2rem] p-7 md:p-10">
+        <div className="app-panel app-panel--strong rounded-lg p-7 md:p-10">
           <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
             <div className="max-w-3xl">
               <p className="app-eyebrow">Public-domain examples</p>
@@ -246,7 +246,7 @@ export default function BlogPage() {
 
           <div className="mt-8 grid gap-5 lg:grid-cols-3">
             {demoPages.map((demo) => (
-              <article key={demo.slug} className="h-full rounded-[1.6rem] border border-[rgba(var(--border),0.76)] bg-white/66 p-6 dark:bg-white/[0.04]">
+              <article key={demo.slug} className="h-full rounded-lg border border-[rgba(var(--border),0.76)] bg-white/66 p-6 dark:bg-white/[0.04]">
                 <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">
                   {demo.sourceWork} by {demo.sourceAuthor}
                 </p>

@@ -81,9 +81,9 @@ export function AudienceSection() {
 
   return (
     <section id="audiences" className="mx-auto max-w-7xl px-5 py-20 md:px-8">
-      <div className="rounded-[2rem] border border-white/8 bg-[linear-gradient(180deg,rgba(12,22,20,0.98),rgba(8,17,15,0.98))] p-6 md:p-8">
+      <div className="rounded-lg border border-white/8 bg-[linear-gradient(180deg,rgba(12,22,20,0.98),rgba(8,17,15,0.98))] p-6 md:p-8">
         <div className="border-b border-white/8 pb-6">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-[#6fae9f]">
+          <p className="text-3xs font-semibold uppercase tracking-[0.32em] text-[#6fae9f]">
             Built for every kind of author
           </p>
           <div className="mt-5 flex flex-wrap gap-3">
@@ -123,7 +123,7 @@ export function AudienceSection() {
           </Reveal>
 
           <Reveal delay={90}>
-            <div className="relative min-h-[420px] overflow-hidden rounded-[1.75rem] border border-white/10 bg-[#0d1715] p-6 xl:min-h-[360px]">
+            <div className="relative min-h-[420px] overflow-hidden rounded-lg border border-white/10 bg-[#0d1715] p-6 xl:min-h-[360px]">
               <div className="absolute inset-x-12 top-14 h-px border-t border-dashed border-[#20443f]" />
               <div className="absolute left-1/2 top-16 h-[58%] w-px -translate-x-1/2 border-l border-dashed border-[#20443f]" />
               <div className="absolute inset-x-16 bottom-24 h-px border-t border-dashed border-[#20443f]" />
@@ -131,7 +131,7 @@ export function AudienceSection() {
               {active.nodes.map((node) => (
                 <article
                   key={node.name}
-                  className="absolute w-[min(10.75rem,calc(100%-2rem))] rounded-[1.2rem] border border-white/8 bg-[#111d1a] p-4 shadow-[0_18px_36px_-30px_rgba(0,0,0,0.7)] xl:w-[min(11.5rem,calc(100%-2rem))]"
+                  className="absolute w-[min(10.75rem,calc(100%-2rem))] rounded-md border border-white/8 bg-[#111d1a] p-4 shadow-[0_18px_36px_-30px_rgba(0,0,0,0.7)] xl:w-[min(11.5rem,calc(100%-2rem))]"
                   style={{ left: node.x, top: node.y, transform: "translate(-50%, -50%)" }}
                 >
                   <p className="text-sm font-semibold text-white">{node.name}</p>

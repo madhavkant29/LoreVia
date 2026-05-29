@@ -19,7 +19,7 @@ function watchBrowserSignals(page: Page) {
 test("marketing home page renders the core value proposition", async ({ page }) => {
   await page.goto("/")
 
-  await expect(page.getByRole("heading", { name: /keep the manuscript coherent while you revise/i })).toBeVisible()
+  await expect(page.getByRole("heading", { name: /revise coherently/i })).toBeVisible()
   await expect(page.getByRole("link", { name: /^sign in$/i })).toBeVisible()
   await expect(page.getByRole("link", { name: /^start free$/i }).first()).toBeVisible()
   await expect(page.getByText("Start with the draft you already have.")).toBeVisible()
@@ -345,10 +345,9 @@ test("manuscript workspace surfaces chapter annotations in the notes rail", asyn
   await page.getByRole("button", { name: /Chapter 2 The Ember Gate/i }).click()
   await expect(page.locator('[data-editor-key="chapter-2"]')).toBeVisible()
 
-  const notesPane = page.locator("aside")
-  await notesPane.getByRole("button", { name: /^Notes$/ }).click()
-  await expect(notesPane.getByText("1 annotation anchored to this chapter.")).toBeVisible()
-  await expect(notesPane.getByText("Gate imagery")).toBeVisible()
+  await page.getByTitle("Open notes").click()
+  await expect(page.getByText("1 annotation anchored to this chapter.")).toBeVisible()
+  await expect(page.getByText("Gate imagery")).toBeVisible()
 })
 
 test("collaboration workspace creates a story-scoped share", async ({ page }) => {
@@ -525,10 +524,11 @@ test("voice consistency can target a selected character", async ({ page }) => {
   await page.goto("/book-1/voice")
 
   await expect(page.getByRole("heading", { name: /sky of ash voice consistency/i })).toBeVisible()
-  await page.getByLabel("Character focus").selectOption("char-gregor")
+  await expect(page.locator("textarea")).toContainText("Nora crossed the ember gate")
+  await page.locator('label:has-text("Character focus") select').selectOption({ label: "Gregor" })
+  await expect(page.getByText("Focused review: Gregor")).toBeVisible()
   await page.getByRole("button", { name: /run voice review/i }).click()
 
-  await expect(page.getByText("Focused review: Gregor")).toBeVisible()
   await expect(page.getByText("Reviewed: Gregor")).toBeVisible()
   await expect(page.getByText("Gregor slips into abstract explanation")).toBeVisible()
   await expect(page.getByText("74% match")).toBeVisible()
@@ -540,7 +540,8 @@ test("voice consistency warns when selected-character attribution is weak", asyn
   await page.goto("/book-1/voice")
 
   await expect(page.getByRole("heading", { name: /sky of ash voice consistency/i })).toBeVisible()
-  await page.getByLabel("Character focus").selectOption("char-grete")
+  await expect(page.locator("textarea")).toContainText("Nora crossed the ember gate")
+  await page.locator("select").nth(1).selectOption("char-grete")
   await page.getByRole("button", { name: /run voice review/i }).click()
 
   await expect(page.getByText("Reviewed: Grete")).toBeVisible()

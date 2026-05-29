@@ -224,9 +224,9 @@ export default function SettingsPage() {
     <div className={`min-h-screen ${isDark ? "bg-[#0d1318] text-slate-100" : "bg-[#f4f5f7] text-stone-950"}`}>
       <div className="mx-auto max-w-[1220px] px-4 py-8 sm:px-6 lg:px-8">
         <div className="space-y-5 pb-12">
-          <section className={`overflow-hidden rounded-[1.55rem] border-2 ${isDark ? "border-slate-700/70 bg-[#11171d]" : "border-slate-200 bg-[#fcfcfb]"}`}>
+          <section className={`overflow-hidden rounded-lg border-2 ${isDark ? "border-slate-700/70 bg-[#11171d]" : "border-slate-200 bg-[#fcfcfb]"}`}>
             <div className="px-6 py-8 sm:px-8 sm:py-10 lg:px-12 lg:py-12">
-              <p className={`text-[11px] font-semibold uppercase tracking-[0.28em] ${isDark ? "text-[#6fc7b3]" : "text-[#1f615d]"}`}>Settings</p>
+              <p className={`text-3xs font-semibold uppercase tracking-[0.28em] ${isDark ? "text-[#6fc7b3]" : "text-[#1f615d]"}`}>Settings</p>
               <h1 className={`mt-4 max-w-[780px] font-display text-[2.85rem] leading-[0.96] tracking-[-0.06em] ${isDark ? "text-[#f2ece3]" : "text-stone-950"} sm:text-[4.1rem]`}>
                 Make LoreVia feel stable,
                 <br className="hidden sm:block" />
@@ -258,7 +258,7 @@ export default function SettingsPage() {
                   <InfoItem isDark={isDark} label="Email" value={stableUser?.email ?? "No email available"} />
                   <InfoItem isDark={isDark} label="Plan status" value={displayTier} />
                 </div>
-                <div className={`min-w-0 overflow-hidden rounded-[1rem] border-2 p-4 ${isDark ? "border-slate-700/70 bg-[#121921]" : "border-slate-200 bg-[#fbfcfd]"}`}>
+                <div className={`min-w-0 overflow-hidden rounded-md border-2 p-4 ${isDark ? "border-slate-700/70 bg-[#121921]" : "border-slate-200 bg-[#fbfcfd]"}`}>
                   {stableUser?.trial_active ? (
                     <p className={`max-w-2xl break-words text-sm leading-6 [overflow-wrap:anywhere] ${isDark ? "text-emerald-100" : "text-emerald-900"}`}>
                       You are currently seeing Author (free trial). Your purchased plan is {purchasedTier}, so access will revert when the trial ends{trialEndsLabel ? ` on ${trialEndsLabel}` : ""} unless you upgrade.
@@ -296,8 +296,8 @@ export default function SettingsPage() {
               <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_260px]">
                 <div className="min-w-0 space-y-3">
                   <label className="block">
-                    <span className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>Public username</span>
-                    <div className={`mt-3 flex min-w-0 items-center gap-3 overflow-hidden rounded-[1rem] border-2 px-4 py-3 ${isDark ? "border-slate-700/70 bg-[#121921]" : "border-slate-200 bg-white"}`}>
+                    <span className={`text-3xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>Public username</span>
+                    <div className={`mt-3 flex min-w-0 items-center gap-3 overflow-hidden rounded-md border-2 px-4 py-3 ${isDark ? "border-slate-700/70 bg-[#121921]" : "border-slate-200 bg-white"}`}>
                       <input
                         type="text"
                         minLength={3}
@@ -317,8 +317,8 @@ export default function SettingsPage() {
                   {usernameMessage ? <InlineMessage isDark={isDark} message={usernameMessage} tone="neutral" /> : null}
                 </div>
 
-                <div className={`min-w-0 overflow-hidden rounded-[1rem] border-2 p-4 ${isDark ? "border-slate-700/70 bg-[#121921]" : "border-slate-200 bg-[#fbfcfd]"}`}>
-                  <p className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>Current public handle</p>
+                <div className={`min-w-0 overflow-hidden rounded-md border-2 p-4 ${isDark ? "border-slate-700/70 bg-[#121921]" : "border-slate-200 bg-[#fbfcfd]"}`}>
+                  <p className={`text-3xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>Current public handle</p>
                   <p className={`mt-4 truncate text-lg font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>
                     {stableUser?.username ? `@${stableUser.username}` : "No username set yet"}
                   </p>
@@ -471,22 +471,22 @@ export default function SettingsPage() {
             sideNote="This goal feeds the overview page and tracks progress from manuscript saves across your workspace."
           >
             <div className="grid grid-cols-1 gap-3 2xl:grid-cols-[240px_minmax(0,1fr)_180px]">
-              <label className={`min-w-0 overflow-hidden rounded-[1.15rem] border-2 p-4 ${isDark ? "border-slate-700/70 bg-[#121921]" : "border-slate-200 bg-[#fbfcfd]"}`}>
-                <span className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>Words per day</span>
+              <label className={`min-w-0 overflow-hidden rounded-md border-2 p-4 ${isDark ? "border-slate-700/70 bg-[#121921]" : "border-slate-200 bg-[#fbfcfd]"}`}>
+                <span className={`text-3xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>Words per day</span>
                 <input
                   type="number"
                   min={1}
                   value={goalDraft}
                   onChange={(event) => setGoalDraft(event.target.value)}
-                  className={`mt-3 w-full rounded-[0.95rem] border px-4 py-3 text-base font-semibold outline-none ${isDark ? "border-white/[0.12] bg-[#0f151c] text-white" : "border-[#d6dce3] bg-white text-stone-900"}`}
+                  className={`mt-3 w-full rounded-md border px-4 py-3 text-base font-semibold outline-none ${isDark ? "border-white/[0.12] bg-[#0f151c] text-white" : "border-[#d6dce3] bg-white text-stone-900"}`}
                 />
                 <button onClick={saveDailyGoal} disabled={goalSaving} className={`${primaryActionClass(isDark, false)} mt-4`}>
                   {goalSaving ? "Saving..." : "Save daily goal"}
                 </button>
               </label>
 
-              <div className={`min-w-0 overflow-hidden rounded-[1.15rem] border-2 p-4 ${isDark ? "border-slate-700/70 bg-[#121921]" : "border-slate-200 bg-[#fbfcfd]"}`}>
-                <p className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>Today</p>
+              <div className={`min-w-0 overflow-hidden rounded-md border-2 p-4 ${isDark ? "border-slate-700/70 bg-[#121921]" : "border-slate-200 bg-[#fbfcfd]"}`}>
+                <p className={`text-3xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>Today</p>
                 <p className={`mt-3 text-[1.8rem] font-semibold tracking-[-0.03em] ${isDark ? "text-white" : "text-stone-950"}`}>
                   {todayWords.toLocaleString()} / {dailyGoal.toLocaleString()} words
                 </p>
@@ -496,27 +496,27 @@ export default function SettingsPage() {
                 {goalMessage ? <InlineMessage isDark={isDark} message={goalMessage} tone="neutral" className="mt-4" /> : null}
               </div>
 
-              <div className={`min-w-0 overflow-hidden flex flex-col items-center justify-center rounded-[1.15rem] border-2 p-4 ${isDark ? "border-slate-700/70 bg-[#121921]" : "border-slate-200 bg-[#fbfcfd]"}`}>
+              <div className={`min-w-0 overflow-hidden flex flex-col items-center justify-center rounded-md border-2 p-4 ${isDark ? "border-slate-700/70 bg-[#121921]" : "border-slate-200 bg-[#fbfcfd]"}`}>
                 <GoalRing progress={goalProgress} isDark={isDark} />
               </div>
             </div>
           </SettingsCard>
 
-          <section className={`rounded-[1.35rem] border-2 p-5 ${isDark ? "border-slate-700/70 bg-[#111820]" : "border-slate-200 bg-white"}`}>
+          <section className={`rounded-lg border-2 p-5 ${isDark ? "border-slate-700/70 bg-[#111820]" : "border-slate-200 bg-white"}`}>
             <div className="flex items-center justify-between gap-4">
               <div className="flex items-start gap-4">
                 <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full border ${isDark ? "border-rose-400/20 bg-rose-400/8 text-rose-300" : "border-rose-200 bg-rose-50 text-rose-600"}`}>
                   <SignOutIcon />
                 </div>
                 <div>
-                  <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>Sign out</p>
+                  <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>Sign out</p>
                   <h2 className={`mt-2 text-[1.45rem] font-semibold tracking-[-0.02em] ${isDark ? "text-[#f3ede4]" : "text-stone-950"}`}>Sign out</h2>
                   <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-stone-600"}`}>You&apos;ll be signed out of this workspace on this device.</p>
                 </div>
               </div>
               <button
                 onClick={handleLogout}
-                className={`inline-flex items-center justify-center rounded-[0.95rem] border px-5 py-2.5 text-sm font-semibold transition ${
+                className={`inline-flex items-center justify-center rounded-md border px-5 py-2.5 text-sm font-semibold transition ${
                   isDark ? "border-rose-400/30 text-rose-300 hover:bg-rose-500/10" : "border-rose-200 text-rose-600 hover:bg-rose-50"
                 }`}
               >
@@ -535,7 +535,7 @@ function modeLabel(mode: string) {
 }
 
 function primaryActionClass(isDark: boolean, wide = false) {
-  return `inline-flex items-center justify-center rounded-[0.8rem] px-4 py-2.5 text-sm font-semibold transition disabled:opacity-60 ${
+  return `inline-flex items-center justify-center rounded-sm px-4 py-2.5 text-sm font-semibold transition disabled:opacity-60 ${
     wide ? "sm:px-5" : ""
   } ${isDark ? "bg-[#165c52] text-white hover:bg-[#1a695e]" : "bg-[#1f615d] text-white hover:bg-[#174c49]"}`
 }
@@ -560,14 +560,14 @@ function SettingsCard({
   children: ReactNode
 }) {
   return (
-    <section className={`min-w-0 rounded-[1.2rem] border-2 p-5 ${isDark ? "border-slate-700/70 bg-[#11171d]" : "border-slate-200 bg-white"}`}>
+    <section className={`min-w-0 rounded-md border-2 p-5 ${isDark ? "border-slate-700/70 bg-[#11171d]" : "border-slate-200 bg-white"}`}>
       <div className={stacked ? "grid gap-5" : "grid gap-5 xl:grid-cols-[180px_minmax(0,1fr)] 2xl:grid-cols-[220px_minmax(0,1fr)]"}>
         <div className="min-w-0 flex items-start gap-4">
           <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full border-2 ${isDark ? "border-slate-700/70 bg-[#182028] text-[#7fd2bf]" : "border-slate-200 bg-[#edf6f4] text-[#1f615d]"}`}>
             {icon}
           </div>
           <div>
-            <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>{eyebrow}</p>
+            <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>{eyebrow}</p>
             <h2 className={`mt-2 text-[1.3rem] font-semibold tracking-[-0.025em] ${isDark ? "text-[#f3ede4]" : "text-stone-950"}`}>{title}</h2>
             <div className={`mt-3 text-sm leading-7 ${isDark ? "text-slate-400" : "text-stone-600"}`}>{description}</div>
           </div>
@@ -584,7 +584,7 @@ function SettingsCard({
 
 function SummaryCard({ isDark, icon, label, value, note }: { isDark: boolean; icon: ReactNode; label: string; value: string; note: string }) {
   return (
-    <div className={`min-w-0 overflow-hidden rounded-[1.15rem] border-2 p-5 ${isDark ? "border-slate-700/70 bg-[#11171d]" : "border-slate-200 bg-white"}`}>
+    <div className={`min-w-0 overflow-hidden rounded-md border-2 p-5 ${isDark ? "border-slate-700/70 bg-[#11171d]" : "border-slate-200 bg-white"}`}>
       <div className="flex items-center justify-between gap-3">
         <div className={`flex h-12 w-12 items-center justify-center rounded-full border-2 ${isDark ? "border-slate-700/70 bg-[#172029] text-[#7fd2bf]" : "border-slate-200 bg-[#edf6f4] text-[#1f615d]"}`}>
           {icon}
@@ -593,7 +593,7 @@ function SummaryCard({ isDark, icon, label, value, note }: { isDark: boolean; ic
           <ChevronRightIcon />
         </span>
       </div>
-      <p className={`mt-4 text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>{label}</p>
+      <p className={`mt-4 text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>{label}</p>
       <p className={`mt-2 text-[1.55rem] font-semibold tracking-[-0.03em] ${isDark ? "text-white" : "text-stone-950"}`}>{value}</p>
       <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-stone-600"}`}>{note}</p>
     </div>
@@ -602,8 +602,8 @@ function SummaryCard({ isDark, icon, label, value, note }: { isDark: boolean; ic
 
 function InfoItem({ isDark, label, value }: { isDark: boolean; label: string; value: string }) {
   return (
-    <div className={`min-w-0 overflow-hidden rounded-[1rem] border-2 p-4 ${isDark ? "border-slate-700/70 bg-[#121921]" : "border-slate-200 bg-[#fbfcfd]"}`}>
-      <p className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>{label}</p>
+    <div className={`min-w-0 overflow-hidden rounded-md border-2 p-4 ${isDark ? "border-slate-700/70 bg-[#121921]" : "border-slate-200 bg-[#fbfcfd]"}`}>
+      <p className={`text-3xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>{label}</p>
       <p className={`mt-3 truncate text-base font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{value}</p>
     </div>
   )
@@ -630,7 +630,7 @@ function SelectableCard({
     <button
       onClick={onClick}
       disabled={disabled}
-      className={`min-w-0 rounded-[1rem] border-2 p-4 text-left transition disabled:opacity-60 ${
+      className={`min-w-0 rounded-md border-2 p-4 text-left transition disabled:opacity-60 ${
         active
           ? isDark
             ? "border-[#3a9d89] bg-[#14211f]"
@@ -666,7 +666,7 @@ function InlineMessage({ isDark, message, tone, className = "" }: { isDark: bool
         ? "border-white/[0.08] bg-white/[0.03] text-slate-300"
         : "border-[#dde2e8] bg-[#f8fafb] text-stone-700"
 
-  return <div className={`rounded-[1rem] border px-4 py-3 text-sm ${classes} ${className}`.trim()}>{message}</div>
+  return <div className={`rounded-md border px-4 py-3 text-sm ${classes} ${className}`.trim()}>{message}</div>
 }
 
 function GoalRing({ progress, isDark }: { progress: number; isDark: boolean }) {

@@ -93,7 +93,7 @@ export function AskLoreViaWorkspace({
 
           <div
             className={cn(
-              "inline-flex items-center gap-2 self-start rounded-full border px-3.5 py-2 text-[11px] font-semibold uppercase tracking-[0.24em] sm:self-auto",
+              "inline-flex items-center gap-2 self-start rounded-full border px-3.5 py-2 text-3xs font-semibold uppercase tracking-[0.24em] sm:self-auto",
               isDark
                 ? "border-cyan-300/15 bg-white/[0.04] text-cyan-200/85"
                 : "border-stone-200 bg-white/90 text-stone-500"
@@ -106,7 +106,7 @@ export function AskLoreViaWorkspace({
 
         <main className="mx-auto flex w-full max-w-[62rem] flex-1 flex-col gap-8 pt-10 sm:gap-10 sm:pt-14">
           <section className="mx-auto max-w-3xl text-center">
-            <p className={cn("text-[11px] font-semibold uppercase tracking-[0.34em]", isDark ? "text-indigo-300" : "text-violet-500")}>
+            <p className={cn("text-3xs font-semibold uppercase tracking-[0.34em]", isDark ? "text-indigo-300" : "text-violet-500")}>
               Natural Language Query
             </p>
             <h1
@@ -118,7 +118,7 @@ export function AskLoreViaWorkspace({
             >
               Ask LoreVia
             </h1>
-            <p className={cn("mx-auto mt-5 max-w-2xl text-sm leading-7 sm:text-[15px]", isDark ? "text-slate-300" : "text-stone-600")}>
+            <p className={cn("mx-auto mt-5 max-w-2xl text-sm leading-7 sm:text-base", isDark ? "text-slate-300" : "text-stone-600")}>
               {description}
             </p>
           </section>
@@ -159,7 +159,7 @@ export function AskLoreViaWorkspace({
               <div
                 role="alert"
                 className={cn(
-                  "rounded-[1.35rem] border px-4 py-3 text-sm",
+                  "rounded-lg border px-4 py-3 text-sm",
                   isDark ? "border-red-400/20 bg-red-500/10 text-red-200" : "border-red-200 bg-red-50 text-red-700"
                 )}
               >
@@ -185,7 +185,7 @@ export function AskLoreViaWorkspace({
           {history.length >= 3 ? (
             <section
               className={cn(
-                "rounded-[1.7rem] border px-5 py-5 sm:px-6",
+                "rounded-lg border px-5 py-5 sm:px-6",
                 isDark ? "border-indigo-400/15 bg-indigo-400/[0.06]" : "border-violet-100 bg-violet-50"
               )}
             >
@@ -225,13 +225,13 @@ function SuggestedQuestionsCard({
   return (
     <section
       className={cn(
-        "rounded-[1.9rem] border px-5 py-5 sm:px-7 sm:py-6",
+        "rounded-lg border px-5 py-5 sm:px-7 sm:py-6",
         isDark ? "border-white/10 bg-white/[0.035]" : "border-stone-200 bg-white/90"
       )}
     >
       <div className="flex items-center gap-2">
         <SparkIcon className={cn("h-4 w-4", isDark ? "text-indigo-300" : "text-violet-500")} />
-        <p className={cn("text-[11px] font-semibold uppercase tracking-[0.3em]", isDark ? "text-indigo-300" : "text-violet-500")}>
+        <p className={cn("text-3xs font-semibold uppercase tracking-[0.3em]", isDark ? "text-indigo-300" : "text-violet-500")}>
           Try Asking
         </p>
       </div>
@@ -245,7 +245,7 @@ function SuggestedQuestionsCard({
             type="button"
             onClick={() => onPromptClick(prompt)}
             className={cn(
-              "group flex min-h-14 items-center gap-3 rounded-[1.15rem] border px-4 py-3 text-left text-sm font-medium transition focus-visible:outline-none",
+              "group flex min-h-14 items-center gap-3 rounded-md border px-4 py-3 text-left text-sm font-medium transition focus-visible:outline-none",
               isDark
                 ? "border-white/10 bg-white/[0.03] text-slate-100 hover:border-cyan-300/30 hover:bg-white/[0.06]"
                 : "border-stone-200 bg-stone-50 text-stone-800 hover:border-violet-200 hover:bg-white"
@@ -283,7 +283,7 @@ function AskQuestionCard({
   return (
     <section
       className={cn(
-        "rounded-[1.9rem] border px-4 py-4 shadow-[0_18px_60px_-34px_rgba(0,0,0,0.55)] sm:px-6 sm:py-5",
+        "rounded-lg border px-4 py-4 shadow-[0_18px_60px_-34px_rgba(0,0,0,0.55)] sm:px-6 sm:py-5",
         isDark ? "border-white/10 bg-[#0b1020]/88" : "border-stone-200 bg-white/95"
       )}
     >
@@ -301,7 +301,7 @@ function AskQuestionCard({
         disabled={loading}
         aria-label="Ask LoreVia a grounded question about the story"
         className={cn(
-          "min-h-[10rem] w-full resize-none bg-transparent text-[15px] leading-7 outline-none",
+          "min-h-[10rem] w-full resize-none bg-transparent text-base leading-7 outline-none",
           isDark ? "text-slate-100 placeholder:text-slate-500" : "text-stone-900 placeholder:text-stone-400"
         )}
       />
@@ -316,7 +316,7 @@ function AskQuestionCard({
           onClick={onSubmit}
           disabled={!currentValue.trim() || loading}
           className={cn(
-            "inline-flex min-w-28 items-center justify-center gap-2 self-start rounded-[1rem] px-5 py-3 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-40 sm:self-auto",
+            "inline-flex min-w-28 items-center justify-center gap-2 self-start rounded-md px-5 py-3 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-40 sm:self-auto",
             isDark
               ? "bg-[linear-gradient(135deg,#5564ff,#4b4be8)] shadow-[0_18px_36px_-24px_rgba(85,100,255,0.95)] hover:-translate-y-[1px]"
               : "bg-[linear-gradient(135deg,#6d5efc,#5747ea)] shadow-[0_18px_36px_-24px_rgba(87,71,234,0.75)] hover:-translate-y-[1px]"
@@ -342,7 +342,7 @@ function AskResultCard({
   return (
     <article
       className={cn(
-        "rounded-[1.9rem] border px-5 py-5 sm:px-6 sm:py-6",
+        "rounded-lg border px-5 py-5 sm:px-6 sm:py-6",
         isDark ? "border-white/10 bg-white/[0.035]" : "border-stone-200 bg-white/95"
       )}
     >
@@ -350,7 +350,7 @@ function AskResultCard({
         <div className="flex justify-end">
           <div
             className={cn(
-              "max-w-3xl rounded-[1.25rem] border px-4 py-3 sm:px-5",
+              "max-w-3xl rounded-md border px-4 py-3 sm:px-5",
               isDark ? "border-indigo-400/20 bg-indigo-500/[0.12]" : "border-violet-200 bg-violet-50"
             )}
           >
@@ -364,17 +364,17 @@ function AskResultCard({
         </div>
 
         <div>
-          <p className={cn("text-[11px] font-semibold uppercase tracking-[0.26em]", isDark ? "text-cyan-200/85" : "text-cyan-700")}>
+          <p className={cn("text-3xs font-semibold uppercase tracking-[0.26em]", isDark ? "text-cyan-200/85" : "text-cyan-700")}>
             {answerLabel}
           </p>
-          <p className={cn("mt-3 whitespace-pre-wrap text-sm leading-7 sm:text-[15px]", isDark ? "text-slate-200" : "text-stone-700")}>
+          <p className={cn("mt-3 whitespace-pre-wrap text-sm leading-7 sm:text-base", isDark ? "text-slate-200" : "text-stone-700")}>
             {entry.answer}
           </p>
         </div>
 
         {entry.citations.length > 0 ? (
           <div className="space-y-3">
-            <p className={cn("text-[11px] font-semibold uppercase tracking-[0.24em]", isDark ? "text-slate-500" : "text-stone-400")}>
+            <p className={cn("text-3xs font-semibold uppercase tracking-[0.24em]", isDark ? "text-slate-500" : "text-stone-400")}>
               Citations
             </p>
             <div className="flex flex-wrap gap-2">
@@ -396,7 +396,7 @@ function AskResultCard({
                 <div
                   key={`${citation.chapter_num}-${citation.source_type}-detail-${index}`}
                   className={cn(
-                    "rounded-[1.2rem] border px-4 py-4",
+                    "rounded-md border px-4 py-4",
                     isDark ? "border-white/10 bg-black/25" : "border-stone-200 bg-stone-50"
                   )}
                 >
@@ -407,7 +407,7 @@ function AskResultCard({
                     </p>
                     <span
                       className={cn(
-                        "rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em]",
+                        "rounded-full px-2.5 py-1 text-3xs font-semibold uppercase tracking-[0.18em]",
                         isDark ? "bg-white/8 text-slate-300" : "bg-white text-stone-500"
                       )}
                     >
@@ -431,7 +431,7 @@ function LoadingResultCard({ isDark }: { isDark: boolean }) {
   return (
     <div
       className={cn(
-        "animate-pulse rounded-[1.9rem] border px-5 py-5 sm:px-6",
+        "animate-pulse rounded-lg border px-5 py-5 sm:px-6",
         isDark ? "border-white/8 bg-white/[0.03]" : "border-stone-200 bg-white/90"
       )}
     >

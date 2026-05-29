@@ -1,7 +1,6 @@
 "use client"
 
-import React from "react"
-import { useState } from "react"
+import React, { useState } from "react"
 
 import { RecallCard } from "@/components/intelligence/RecallCard"
 import { SmartBookCover } from "@/components/ui/SmartBookCover"
@@ -63,7 +62,6 @@ export function ReaderOverview({
   onContinueReading,
 }: ReaderOverviewProps) {
   const [searchQuery, setSearchQuery] = useState("")
-  const [activeReaderTab, setActiveReaderTab] = useState<ReaderWorkspaceTab>("overview")
   const { recall, lastChapter, show: showRecall, dismiss: dismissRecall } = useRecall(bookId)
   const chapters = chapterList?.chapters ?? []
   const continueChapter = progress?.current_chapter ?? bookmark?.chapter ?? 1
@@ -110,24 +108,24 @@ export function ReaderOverview({
 
   return (
     <div className="relative isolate space-y-5">
-      <div className={cn("pointer-events-none absolute inset-x-0 top-0 -z-10 h-64 blur-3xl", isDark ? "bg-[radial-gradient(circle_at_20%_0%,rgba(13,148,136,0.2),transparent_48%),radial-gradient(circle_at_80%_0%,rgba(148,163,184,0.12),transparent_42%)]" : "bg-[radial-gradient(circle_at_20%_0%,rgba(13,148,136,0.12),transparent_48%),radial-gradient(circle_at_80%_0%,rgba(120,113,108,0.08),transparent_42%)]")} />
+      <div className={cn("pointer-events-none absolute inset-x-0 top-0 -z-10 h-52 blur-3xl", isDark ? "bg-[radial-gradient(circle_at_18%_0%,rgba(13,148,136,0.16),transparent_42%),radial-gradient(circle_at_82%_0%,rgba(148,163,184,0.08),transparent_38%)]" : "bg-[radial-gradient(circle_at_18%_0%,rgba(13,148,136,0.1),transparent_42%),radial-gradient(circle_at_82%_0%,rgba(120,113,108,0.06),transparent_38%)]")} />
 
-      <section className={cn("relative overflow-hidden rounded-[1.9rem] border p-4 sm:p-5", isDark ? "border-white/[0.07] bg-[#0b1018]" : "border-slate-200 bg-white")}>
-        <div className={cn("pointer-events-none absolute right-0 top-0 h-40 w-40 rounded-full blur-3xl", isDark ? "bg-teal-500/12" : "bg-teal-100/70")} />
+      <section className={cn("relative overflow-hidden rounded-lg border p-4 sm:p-5", isDark ? "border-white/[0.07] bg-[#0b1018]" : "border-slate-200 bg-white")}>
+        <div className={cn("pointer-events-none absolute right-0 top-0 h-32 w-32 rounded-full blur-3xl", isDark ? "bg-teal-500/10" : "bg-teal-100/55")} />
         <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div className="min-w-0">
-            <p className={cn("text-[11px] font-semibold uppercase tracking-[0.24em]", isDark ? "text-teal-300" : "text-teal-800")}>Reader workspace</p>
+            <p className={cn("text-3xs font-semibold uppercase tracking-[0.24em]", isDark ? "text-teal-300" : "text-teal-800")}>Reader workspace</p>
             <h1 className={cn("mt-2 font-serif text-3xl leading-none sm:text-4xl", isDark ? "text-white" : "text-slate-950")}>Welcome back, {greetingName}.</h1>
             <p className={cn("mt-3 max-w-3xl text-sm leading-6", isDark ? "text-slate-400" : "text-slate-600")}>
-              Fall back into the story. Track your progress, explore the world, and keep the workspace spoiler-safe.
+              Fall back into the story. Track your progress, keep your place, and stay spoiler-safe.
             </p>
             <div className="mt-4 flex flex-wrap items-center gap-2">
-              <span className={cn("inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em]", isDark ? "border-emerald-400/18 bg-emerald-500/10 text-emerald-300" : "border-emerald-200 bg-emerald-50 text-emerald-700")}>
+              <span className={cn("inline-flex items-center gap-2 rounded-full border px-3 py-1 text-3xs font-semibold uppercase tracking-[0.18em]", isDark ? "border-emerald-400/18 bg-emerald-500/10 text-emerald-300" : "border-emerald-200 bg-emerald-50 text-emerald-700")}>
                 <span className="h-2 w-2 rounded-full bg-current" />
                 Reader mode active
               </span>
               {bookmark ? (
-                <span className={cn("inline-flex rounded-full border px-3 py-1 text-[11px] font-semibold", isDark ? "border-white/10 bg-white/[0.04] text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600")}>
+                <span className={cn("inline-flex rounded-full border px-3 py-1 text-3xs font-semibold", isDark ? "border-white/10 bg-white/[0.04] text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600")}>
                   Bookmark saved in {chapterUnit.toLowerCase()} {bookmark.chapter}
                 </span>
               ) : null}
@@ -136,25 +134,12 @@ export function ReaderOverview({
 
           <div className="flex flex-wrap items-center gap-2">
             {canUseAuthorMode ? (
-              <div className={cn("inline-flex h-11 overflow-hidden rounded-full border", isDark ? "border-white/10 bg-white/[0.04]" : "border-slate-200 bg-slate-50")}>
-                {(["reader", "author"] as const).map((mode) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    onClick={() => onModeChange(mode)}
-                    disabled={modeSaving}
-                    className={cn(
-                      "px-4 text-xs font-semibold uppercase tracking-[0.18em] transition",
-                      mode === "reader" ? "rounded-l-full" : "rounded-r-full",
-                      activeBookMode === mode
-                        ? isDark ? "bg-teal-800 text-white" : "bg-teal-800 text-white"
-                        : isDark ? "text-slate-300 hover:bg-white/[0.06]" : "text-slate-600 hover:bg-white",
-                    )}
-                  >
-                    {mode}
-                  </button>
-                ))}
-              </div>
+              <ModeToggle
+                isDark={isDark}
+                activeMode={activeBookMode}
+                modeSaving={modeSaving}
+                onModeChange={onModeChange}
+              />
             ) : null}
 
             <button
@@ -178,19 +163,19 @@ export function ReaderOverview({
         </div>
 
         <div className="mt-5 grid gap-3 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-center">
-          <label className={cn("flex min-h-[3.35rem] items-center gap-3 rounded-2xl border px-4", isDark ? "border-white/[0.08] bg-[#090c14] text-slate-200" : "border-slate-200 bg-slate-50 text-slate-800")}>
+          <label className={cn("flex min-h-[3.2rem] items-center gap-3 rounded-2xl border px-4", isDark ? "border-white/[0.08] bg-[#090c14] text-slate-200" : "border-slate-200 bg-slate-50 text-slate-800")}>
             <ReaderIcon name="search" className={isDark ? "h-5 w-5 text-slate-500" : "h-5 w-5 text-slate-400"} />
             <input
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
               onKeyDown={(event) => event.key === "Enter" && submitSearch()}
-              placeholder="Search books, authors, or notes..."
+              placeholder="Search this book, notes, or summaries..."
               className={cn("w-full bg-transparent text-sm outline-none", isDark ? "placeholder:text-slate-600" : "placeholder:text-slate-400")}
             />
             <button
               type="button"
               onClick={submitSearch}
-              className={cn("rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] transition", isDark ? "bg-white/[0.05] text-slate-400 hover:bg-white/[0.08]" : "bg-white text-slate-500 hover:bg-slate-100")}
+              className={cn("rounded-full px-2 py-1 text-3xs font-semibold uppercase tracking-[0.18em] transition", isDark ? "bg-white/[0.05] text-slate-400 hover:bg-white/[0.08]" : "bg-white text-slate-500 hover:bg-slate-100")}
             >
               Search
             </button>
@@ -227,14 +212,14 @@ export function ReaderOverview({
       ) : null}
 
       <section className="grid gap-5 xl:grid-cols-[minmax(0,1.58fr)_minmax(20rem,0.72fr)]">
-        <article className={cn("relative overflow-hidden rounded-[1.9rem] border p-5 sm:p-6", isDark ? "border-white/[0.07] bg-[#0d121b]" : "border-slate-200 bg-white")}>
+        <article className={cn("relative overflow-hidden rounded-lg border p-5 sm:p-6", isDark ? "border-white/[0.07] bg-[#0d121b]" : "border-slate-200 bg-white")}>
           <div className={cn("pointer-events-none absolute -left-8 top-6 h-32 w-32 rounded-full blur-3xl", isDark ? "bg-teal-500/10" : "bg-teal-100/70")} />
           <div className="grid gap-6 lg:grid-cols-[12rem_minmax(0,1fr)]">
             <SmartBookCover
               src={book.cover_url}
               title={book.title}
               isDark={isDark}
-              className={cn("aspect-[0.72] overflow-hidden rounded-[1.5rem] border shadow-[0_28px_70px_-38px_rgba(15,23,42,0.82)]", isDark ? "border-white/10 bg-[#0a0d13]" : "border-slate-200 bg-slate-50")}
+              className={cn("aspect-[0.72] overflow-hidden rounded-lg border shadow-[0_28px_70px_-38px_rgba(15,23,42,0.82)]", isDark ? "border-white/10 bg-[#0a0d13]" : "border-slate-200 bg-slate-50")}
             />
 
             <div className="min-w-0">
@@ -298,9 +283,9 @@ export function ReaderOverview({
           </div>
         </article>
 
-        <article className={cn("rounded-[1.9rem] border p-5 sm:p-6", isDark ? "border-white/[0.07] bg-[#0d121b]" : "border-slate-200 bg-white")}>
+        <article className={cn("rounded-lg border p-5 sm:p-6", isDark ? "border-white/[0.07] bg-[#0d121b]" : "border-slate-200 bg-white")}>
           <div className="flex items-center justify-between gap-3">
-            <span className={cn("inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em]", isDark ? "border-emerald-400/15 bg-emerald-500/10 text-emerald-300" : "border-emerald-200 bg-emerald-50 text-emerald-700")}>
+            <span className={cn("inline-flex items-center gap-2 rounded-full border px-3 py-1 text-3xs font-semibold uppercase tracking-[0.18em]", isDark ? "border-emerald-400/15 bg-emerald-500/10 text-emerald-300" : "border-emerald-200 bg-emerald-50 text-emerald-700")}>
               <span className="h-2 w-2 rounded-full bg-current" />
               Reading details
             </span>
@@ -340,7 +325,7 @@ export function ReaderOverview({
                 >
                   <div className="min-w-0">
                     <p className={cn("text-xs font-semibold uppercase tracking-[0.18em]", isCurrent ? "text-teal-400" : isDark ? "text-slate-500" : "text-slate-400")}>{chapterUnit} {chapter.number}</p>
-                    <p className="mt-1 truncate text-sm font-semibold">{chapter.title || `${chapterUnit} ${chapter.number}`}</p>
+                    <p className="mt-1 break-words text-sm font-semibold leading-6">{chapter.title || `${chapterUnit} ${chapter.number}`}</p>
                   </div>
                   <span className={cn("text-xs font-semibold", isCurrent ? "text-teal-400" : chapter.read ? "text-emerald-400" : isDark ? "text-slate-500" : "text-slate-400")}>
                     {isCurrent ? "Reading" : chapter.read ? "Complete" : "Unread"}
@@ -359,7 +344,7 @@ export function ReaderOverview({
         <article className={readerPanelClass(isDark)}>
           <div className="flex items-start justify-between gap-3">
             <SectionTitle isDark={isDark} icon="spark">Story Pulse</SectionTitle>
-            <span className={cn("rounded-full px-3 py-1 text-[11px] font-semibold", isDark ? "bg-white/[0.06] text-slate-300" : "bg-slate-100 text-slate-600")}>Spoiler-safe</span>
+            <span className={cn("rounded-full px-3 py-1 text-3xs font-semibold", isDark ? "bg-white/[0.06] text-slate-300" : "bg-slate-100 text-slate-600")}>Spoiler-safe</span>
           </div>
           <div className="mt-5 flex items-center gap-4">
             <div
@@ -368,7 +353,7 @@ export function ReaderOverview({
             >
               <div className={cn("flex h-[4.6rem] w-[4.6rem] flex-col items-center justify-center rounded-full", isDark ? "bg-[#0d121b]" : "bg-white")}>
                 <span className={cn("text-2xl font-semibold", isDark ? "text-white" : "text-slate-950")}>{spoilerSafePulseScore}</span>
-                <span className={cn("text-[10px]", isDark ? "text-slate-500" : "text-slate-400")}>/100</span>
+                <span className={cn("text-3xs", isDark ? "text-slate-500" : "text-slate-400")}>/100</span>
               </div>
             </div>
             <p className={cn("text-sm leading-6", isDark ? "text-slate-300" : "text-slate-600")}>
@@ -454,7 +439,7 @@ export function ReaderOverview({
                       <span className={cn("h-1.5 w-1.5 rounded-full", isCurrent ? "bg-teal-400" : chapter.read ? "bg-emerald-400" : isDark ? "bg-slate-600" : "bg-slate-300")} />
                       {chapterUnit} {chapter.number}
                     </p>
-                    <p className="mt-1 truncate text-sm font-medium">{chapter.title || `${chapterUnit} ${chapter.number}`}</p>
+                    <p className="mt-1 break-words text-sm font-medium leading-6">{chapter.title || `${chapterUnit} ${chapter.number}`}</p>
                   </div>
                   <div className="shrink-0 text-right text-xs">
                     {isCurrent ? (
@@ -610,41 +595,31 @@ export function ReaderOverview({
         </article>
       </section>
 
-      <section className={cn("rounded-[1.75rem] border p-5 sm:p-6", isDark ? "border-white/[0.07] bg-[#0d121b]" : "border-slate-200 bg-white")}>
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,0.65fr)_minmax(0,1fr)] lg:items-end">
+      <section className={cn("rounded-lg border p-5 sm:p-6", isDark ? "border-white/[0.07] bg-[#0d121b]" : "border-slate-200 bg-white")}>
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,0.65fr)_auto] lg:items-end">
           <div>
-            <p className={cn("text-[11px] font-semibold uppercase tracking-[0.24em]", isDark ? "text-slate-500" : "text-slate-400")}>Reader workspace</p>
+            <p className={cn("text-3xs font-semibold uppercase tracking-[0.24em]", isDark ? "text-slate-500" : "text-slate-400")}>Reader workspace</p>
             <h2 className={cn("mt-2 font-serif text-3xl leading-none", isDark ? "text-white" : "text-slate-950")}>Your reading command center.</h2>
             <p className={cn("mt-2 text-sm leading-6", isDark ? "text-slate-400" : "text-slate-600")}>Track your journey, set goals, and stay immersed.</p>
           </div>
-          <div role="tablist" aria-label="Reader workspace tabs" className={cn("grid gap-1 rounded-2xl border p-1 sm:grid-cols-3 xl:grid-cols-6", isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-slate-50")}>
-            {readerWorkspaceTabs.map((tab) => (
-              <button
-                key={tab.value}
-                type="button"
-                role="tab"
-                aria-selected={activeReaderTab === tab.value}
-                onClick={() => setActiveReaderTab(tab.value)}
-                className={cn(
-                  "rounded-xl px-3 py-2.5 text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-teal-500/60",
-                  activeReaderTab === tab.value ? "bg-teal-800 text-white" : isDark ? "text-slate-300 hover:bg-white/[0.06]" : "text-slate-600 hover:bg-white",
-                )}
-              >
-                {tab.label}
-              </button>
-            ))}
+          <div className="flex justify-start lg:justify-end">
+            <span className={cn("inline-flex rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em]", isDark ? "border-teal-500/20 bg-teal-500/10 text-teal-200" : "border-teal-200 bg-teal-50 text-teal-800")}>
+              Reader Overview
+            </span>
           </div>
         </div>
         <ReaderWorkspaceContent
           isDark={isDark}
-          tab={activeReaderTab}
           percentComplete={percentComplete}
           progress={progress}
+          chapterUnit={chapterUnit}
+          continueChapter={continueChapter}
           chapterCount={chapterCount}
           bookmarkCount={bookmarkCount}
           savedQuotesCount={savedQuotes.length}
           notesCount={bookNotes.length}
           onNavigate={onNavigate}
+          onContinueReading={onContinueReading}
           bookId={bookId}
         />
       </section>
@@ -673,7 +648,7 @@ function DetailRow({ isDark, label, value }: { isDark: boolean; label: string; v
 function HeroMetric({ isDark, label, value, note }: { isDark: boolean; label: string; value: string; note: string }) {
   return (
     <div className={cn("rounded-2xl border px-4 py-3", isDark ? "border-white/[0.06] bg-white/[0.025]" : "border-slate-200/80 bg-slate-50/70")}>
-      <p className={cn("text-[11px] font-semibold uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-400")}>{label}</p>
+      <p className={cn("text-3xs font-semibold uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-400")}>{label}</p>
       <p className={cn("mt-2 text-lg font-semibold", isDark ? "text-white" : "text-slate-900")}>{value}</p>
       <p className={cn("mt-1 text-xs", isDark ? "text-slate-400" : "text-slate-500")}>{note}</p>
     </div>
@@ -707,76 +682,157 @@ function ReaderMetricRow({ isDark, label, value }: { isDark: boolean; label: str
 
 function ReaderWorkspaceContent({
   isDark,
-  tab,
   percentComplete,
   progress,
+  chapterUnit,
+  continueChapter,
   chapterCount,
   bookmarkCount,
   savedQuotesCount,
   notesCount,
   onNavigate,
+  onContinueReading,
   bookId,
 }: {
   isDark: boolean
-  tab: ReaderWorkspaceTab
   percentComplete: number
   progress: ReadingProgress | null
+  chapterUnit: string
+  continueChapter: number
   chapterCount: number
   bookmarkCount: number
   savedQuotesCount: number
   notesCount: number
   onNavigate: (href: string) => void
+  onContinueReading: () => void
   bookId: string
 }) {
   const chaptersRead = progress?.chapters_read_count ?? 0
+  const sessionGoal = 45
+  const sessionProgress = clamp(Math.round(progress?.scroll_pct ? progress.scroll_pct * 100 : percentComplete), 0, 100)
+  const savedItems = bookmarkCount + savedQuotesCount + notesCount
 
   return (
-    <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,0.88fr)_minmax(0,0.9fr)_minmax(0,1fr)]">
+    <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,0.96fr)_minmax(0,0.92fr)_minmax(0,1fr)] xl:auto-rows-fr">
       <div className={cn("rounded-2xl border p-5", isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-slate-50")}>
-        <p className={cn("text-[11px] font-semibold uppercase tracking-[0.22em]", isDark ? "text-slate-500" : "text-slate-400")}>{tab === "overview" ? "Reading progress" : readerWorkspaceTabs.find((item) => item.value === tab)?.label}</p>
-        <div className="mt-5 flex items-center gap-5">
+        <p className={cn("text-3xs font-semibold uppercase tracking-[0.22em]", isDark ? "text-slate-500" : "text-slate-400")}>Reading progress</p>
+        <div className="mt-5 flex flex-col gap-5 sm:flex-row sm:items-center">
           <div
             className="flex h-28 w-28 shrink-0 items-center justify-center rounded-full"
             style={{ background: `conic-gradient(#2dd4bf 0 ${percentComplete}%, ${isDark ? "#1b2430" : "#edf0f5"} ${percentComplete}% 100%)` }}
           >
             <div className={cn("flex h-20 w-20 flex-col items-center justify-center rounded-full", isDark ? "bg-[#0d121b]" : "bg-white")}>
               <span className={cn("text-2xl font-semibold", isDark ? "text-white" : "text-slate-950")}>{percentComplete}%</span>
-              <span className={cn("text-[10px]", isDark ? "text-slate-500" : "text-slate-400")}>overall</span>
+              <span className={cn("text-3xs", isDark ? "text-slate-500" : "text-slate-400")}>overall</span>
             </div>
           </div>
-          <div className="space-y-2 text-sm">
+          <div className="min-w-0 space-y-2 text-sm">
             <p className={isDark ? "text-slate-300" : "text-slate-600"}>{chaptersRead} / {chapterCount} chapters completed</p>
             <p className={isDark ? "text-slate-500" : "text-slate-400"}>{progress?.chapters_left ?? 0} chapters left</p>
             <p className={isDark ? "text-slate-500" : "text-slate-400"}>Estimated time left updates from reading progress.</p>
+            <button
+              type="button"
+              onClick={() => onNavigate(`/${bookId}/chapters`)}
+              className={cn("inline-flex items-center gap-2 text-sm font-semibold transition", isDark ? "text-teal-300 hover:text-teal-200" : "text-teal-800 hover:text-teal-900")}
+            >
+              View all chapters
+              <ReaderIcon name="arrow" className="h-4 w-4" />
+            </button>
           </div>
         </div>
       </div>
-      <div className={cn("rounded-2xl border p-5", isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-slate-50")}>
-        <p className={cn("text-[11px] font-semibold uppercase tracking-[0.22em]", isDark ? "text-slate-500" : "text-slate-400")}>Session goal</p>
-        <p className={cn("mt-4 text-3xl font-semibold", isDark ? "text-white" : "text-slate-950")}>45 pages</p>
-        <p className={cn("mt-1 text-sm", isDark ? "text-slate-400" : "text-slate-500")}>Daily reading goal</p>
-        <ReaderMetricRow isDark={isDark} label="Session progress" value={Math.min(100, Math.max(0, percentComplete))} />
+      <div className="grid gap-5">
+        <div className={cn("rounded-2xl border p-5", isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-slate-50")}>
+          <p className={cn("text-3xs font-semibold uppercase tracking-[0.22em]", isDark ? "text-slate-500" : "text-slate-400")}>Session goal</p>
+          <p className={cn("mt-4 text-3xl font-semibold", isDark ? "text-white" : "text-slate-950")}>{sessionGoal} pages</p>
+          <p className={cn("mt-1 text-sm", isDark ? "text-slate-400" : "text-slate-500")}>Daily reading goal</p>
+          <ReaderMetricRow isDark={isDark} label="Session progress" value={sessionProgress} />
+          <button
+            type="button"
+            onClick={onContinueReading}
+            className={cn("mt-4 inline-flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-semibold transition", isDark ? "bg-teal-800 text-white hover:bg-teal-700" : "bg-teal-800 text-white hover:bg-teal-700")}
+          >
+            Continue reading
+            <ReaderIcon name="arrow" className="h-4 w-4" />
+          </button>
+        </div>
+        <div className={cn("rounded-2xl border p-5", isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-slate-50")}>
+          <p className={cn("text-3xs font-semibold uppercase tracking-[0.22em]", isDark ? "text-slate-500" : "text-slate-400")}>Saved items</p>
+          <p className={cn("mt-3 text-3xl font-semibold", isDark ? "text-white" : "text-slate-950")}>{savedItems}</p>
+          <div className="mt-4 space-y-3">
+            <DetailRow isDark={isDark} label="Bookmarks" value={String(bookmarkCount)} />
+            <DetailRow isDark={isDark} label="Quotes saved" value={String(savedQuotesCount)} />
+            <DetailRow isDark={isDark} label="Notes" value={String(notesCount)} />
+          </div>
+        </div>
       </div>
-      <div className="grid gap-5 md:grid-cols-3 xl:grid-cols-1">
-        <ReaderMiniCard isDark={isDark} label="Bookmarks" value={bookmarkCount} onClick={() => onNavigate(`/${bookId}/notes`)} />
-        <ReaderMiniCard isDark={isDark} label="Quotes saved" value={savedQuotesCount} onClick={() => onNavigate("/quotes")} />
-        <ReaderMiniCard isDark={isDark} label="Notes" value={notesCount} onClick={() => onNavigate(`/${bookId}/notes`)} />
+      <div className="grid gap-5">
+        <div className={cn("rounded-2xl border p-5", isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-slate-50")}>
+          <p className={cn("text-3xs font-semibold uppercase tracking-[0.22em]", isDark ? "text-slate-500" : "text-slate-400")}>Up next</p>
+          <div className="mt-4 space-y-3">
+            <ReaderMiniCard isDark={isDark} label={`Continue ${chapterUnit.toLowerCase()} ${continueChapter}`} value={percentComplete} suffix="%" onClick={onContinueReading} />
+            <ReaderMiniCard isDark={isDark} label="Open notes hub" value={notesCount} onClick={() => onNavigate(`/${bookId}/notes`)} />
+            <ReaderMiniCard isDark={isDark} label="Review summaries" value={chapterCount} onClick={() => onNavigate(`/${bookId}/summaries`)} />
+          </div>
+        </div>
       </div>
     </div>
   )
 }
 
-function ReaderMiniCard({ isDark, label, value, onClick }: { isDark: boolean; label: string; value: number; onClick: () => void }) {
+function ReaderMiniCard({ isDark, label, value, onClick, suffix = "" }: { isDark: boolean; label: string; value: number; onClick: () => void; suffix?: string }) {
   return (
-    <button type="button" onClick={onClick} className={cn("rounded-2xl border p-5 text-left transition", isDark ? "border-white/[0.06] bg-white/[0.03] hover:bg-white/[0.06]" : "border-slate-200 bg-slate-50 hover:bg-white")}>
-      <p className={cn("text-3xl font-semibold", isDark ? "text-white" : "text-slate-950")}>{value}</p>
-      <p className={cn("mt-1 text-sm", isDark ? "text-slate-500" : "text-slate-500")}>{label}</p>
+    <button type="button" onClick={onClick} className={cn("rounded-2xl border p-4 text-left transition", isDark ? "border-white/[0.06] bg-white/[0.03] hover:bg-white/[0.06]" : "border-slate-200 bg-slate-50 hover:bg-white")}>
+      <p className={cn("text-2xl font-semibold", isDark ? "text-white" : "text-slate-950")}>{value}{suffix}</p>
+      <p className={cn("mt-1 text-sm leading-6", isDark ? "text-slate-500" : "text-slate-500")}>{label}</p>
     </button>
   )
 }
 
+function ModeToggle({
+  isDark,
+  activeMode,
+  modeSaving,
+  onModeChange,
+}: {
+  isDark: boolean
+  activeMode: "reader" | "author"
+  modeSaving: boolean
+  onModeChange: (nextMode: "reader" | "author") => void
+}) {
+  const thumbClass = activeMode === "author" ? "translate-x-full" : "translate-x-0"
+
+  return (
+    <div
+      role="group"
+      aria-label="Workspace mode"
+      className={cn("relative inline-grid h-11 grid-cols-2 rounded-full border p-1", isDark ? "border-white/10 bg-white/[0.04]" : "border-slate-200 bg-slate-50")}
+    >
+      <span
+        aria-hidden="true"
+        className={cn("pointer-events-none absolute inset-y-1 left-1 w-[calc(50%-0.25rem)] rounded-full bg-teal-800 shadow-[0_10px_24px_-16px_rgba(13,148,136,0.8)] transition-transform duration-300 ease-out", thumbClass)}
+      />
+      {(["reader", "author"] as const).map((mode) => (
+        <button
+          key={mode}
+          type="button"
+          onClick={() => onModeChange(mode)}
+          disabled={modeSaving}
+          aria-pressed={activeMode === mode}
+          className={cn(
+            "relative z-10 min-w-[5.8rem] rounded-full px-4 text-xs font-semibold uppercase tracking-[0.18em] transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-teal-500/60",
+            activeMode === mode ? "text-white" : isDark ? "text-slate-300 hover:text-white" : "text-slate-600 hover:text-slate-900",
+          )}
+        >
+          {mode}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 function readerPanelClass(isDark: boolean) {
-  return cn("rounded-[1.75rem] border p-5 sm:p-6", isDark ? "border-white/[0.07] bg-[#0d121b]" : "border-slate-200 bg-white")
+  return cn("rounded-lg border p-5 sm:p-6", isDark ? "border-white/[0.07] bg-[#0d121b]" : "border-slate-200 bg-white")
 }
 
 function softButtonClass(isDark: boolean) {
@@ -789,6 +845,10 @@ function readerFooterLinkClass(isDark: boolean) {
 
 function mutedClass(isDark: boolean) {
   return isDark ? "text-slate-500" : "text-slate-500"
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value))
 }
 
 function stripMarkup(value: string) {
@@ -823,17 +883,7 @@ function formatRecentDateLabel(value: string) {
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric" })
 }
 
-type ReaderWorkspaceTab = "overview" | "progress" | "world" | "characters" | "timeline" | "settings"
 type IconName = "arrow" | "bookmark" | "book" | "list" | "moon" | "note" | "progress" | "quote" | "search" | "spark" | "summary" | "sun"
-
-const readerWorkspaceTabs: Array<{ value: ReaderWorkspaceTab; label: string }> = [
-  { value: "overview", label: "Reader Overview" },
-  { value: "progress", label: "Progress Tracker" },
-  { value: "world", label: "World Explorer" },
-  { value: "characters", label: "Character Guide" },
-  { value: "timeline", label: "Timeline" },
-  { value: "settings", label: "Settings" },
-]
 
 function ReaderIcon({ name, className = "h-4 w-4" }: { name: IconName; className?: string }) {
   const common = { className, fill: "none", viewBox: "0 0 24 24", stroke: "currentColor", strokeWidth: 1.8 }

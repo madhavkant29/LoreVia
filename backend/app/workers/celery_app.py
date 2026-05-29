@@ -1,3 +1,4 @@
+import logging
 import ssl
 import time
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -14,6 +15,8 @@ from app.utils.logging.errors import scrub_sentry_event
 from app.utils.request_context import get_request_id, set_request_id, set_request_user_id
 from app.utils.worker_async_utils import close_worker_loop, get_worker_loop, has_worker_loop
 from app.workers.queues.queues import TASK_QUEUES
+
+logger = logging.getLogger(__name__)
 
 
 def _normalize_celery_redis_url(raw_url: str) -> tuple[str, dict]:
@@ -174,6 +177,14 @@ celery_app.conf.update(
             "schedule": crontab(minute=30),
             "kwargs": {"limit": 1000},
         },
+        "maintenance-cleanup-expired-webhook-events-weekly": {
+            "task": "maintenance_tasks.cleanup_expired_webhook_events",
+            "schedule": crontab(minute=0, hour=3, day_of_week=0),
+        },
+        "maintenance-cleanup-expired-subscription-events-weekly": {
+            "task": "maintenance_tasks.cleanup_expired_subscription_events",
+            "schedule": crontab(minute=0, hour=3, day_of_week=0),
+        },
         "maintenance-refresh-public-rankings-nightly": {
             "task": "maintenance_tasks.refresh_public_rankings",
             "schedule": crontab(minute=10, hour=2),
@@ -229,6 +240,32 @@ def _worker_process_shutdown(**kwargs):
         return
     finally:
         close_worker_loop()
+
+
+@signals.worker_ready.connect
+def _worker_ready_health_log(sender=None, **kwargs):
+    try:
+        worker_name = getattr(sender, "hostname", "unknown")
+        queues = list(getattr(sender, "queues", []) or [])
+        if not queues:
+            queue_names = "none"
+        else:
+            queue_names = ",".join(str(q) for q in queues)
+        logger.info(
+            "celery_worker_ready worker=%s pid=%s queues=%s",
+            worker_name,
+            kwargs.get("pid", "?"),
+            queue_names,
+        )
+        priority_queues = [q for q in TASK_QUEUES if q.name.endswith("_priority")]
+        if priority_queues:
+            logger.info(
+                "celery_priority_queues_configured count=%s queues=%s",
+                len(priority_queues),
+                ",".join(q.name for q in priority_queues),
+            )
+    except Exception:
+        return
 
 
 async def _shutdown_worker_async_resources() -> None:

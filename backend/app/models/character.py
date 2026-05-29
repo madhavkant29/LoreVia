@@ -59,6 +59,11 @@ class Character(Base):
     character_type_score: Mapped[int | None] = mapped_column(Integer)  # 0-10 score for main type
     subtype_scores: Mapped[dict | None] = mapped_column(JSONB, default=dict)  # {"stoic": 7, "broken": 3, ...}
     analysis_metadata: Mapped[dict | None] = mapped_column(JSONB, default=dict)
+    visibility_state: Mapped[str] = mapped_column(String, nullable=False, default="visible", server_default="visible")
+    approval_state: Mapped[str] = mapped_column(String, nullable=False, default="approved", server_default="approved")
+    approval_source: Mapped[str | None] = mapped_column(String)
+    approval_reason_codes: Mapped[list[str] | None] = mapped_column(ARRAY(String))
+    approval_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # pgvector identity anchor
     embedding: Mapped[list[float] | None] = mapped_column(Vector(1536))
@@ -102,6 +107,12 @@ class Character(Base):
         "CharacterMention",
         foreign_keys="CharacterMention.matched_character_id",
         back_populates="matched_character",
+    )
+    decision_events = relationship(
+        "CharacterDecisionEvent",
+        foreign_keys="CharacterDecisionEvent.character_id",
+        back_populates="character",
+        cascade="all, delete-orphan",
     )
 
 
@@ -223,6 +234,28 @@ class CharacterMention(Base):
     )
 
     matched_character = relationship("Character", back_populates="mention_records")
+
+
+class CharacterDecisionEvent(Base):
+    __tablename__ = "character_decision_events"
+    __table_args__ = (
+        Index("ix_character_decision_events_book_created_at", "book_id", "created_at"),
+        Index("ix_character_decision_events_character_id", "character_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    book_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False)
+    character_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("characters.id", ondelete="CASCADE"), nullable=False)
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    action: Mapped[str] = mapped_column(String, nullable=False)
+    visibility_state: Mapped[str | None] = mapped_column(String)
+    approval_state: Mapped[str | None] = mapped_column(String)
+    approval_source: Mapped[str | None] = mapped_column(String)
+    reason_codes: Mapped[list[str] | None] = mapped_column(ARRAY(String))
+    evidence: Mapped[dict | None] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    character = relationship("Character", back_populates="decision_events")
 
 
 class CharacterDuplicateSuggestion(Base):

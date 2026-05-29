@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from app.models.book import Book
+from app.models.book import Book, Chapter
 from app.core.storage import download_book, upload_text
 from app.utils.book_utils import (
     deserialize_manuscript_content,
@@ -25,8 +25,8 @@ MEDIA_MARKER_RE = re.compile(r"\[\[IMAGE:[^\]]+\]\]")
 READING_CHAPTER_TARGET_WORDS = 7000
 READING_CHAPTER_MIN_WORDS = 1200
 READING_CHAPTER_MIN_TAIL_WORDS = 2000
-ANALYSIS_INFLIGHT_TTL_SECONDS = 15 * 60
-EXTRACTION_INFLIGHT_TTL_SECONDS = 20 * 60
+ANALYSIS_INFLIGHT_TTL_SECONDS = 20 * 60      # Must exceed analysis time_limit (15 min) by >= 5 min
+EXTRACTION_INFLIGHT_TTL_SECONDS = 30 * 60    # Must exceed extraction time_limit (25 min) by >= 5 min
 CHAPTER_RECOVERY_INFLIGHT_TTL_SECONDS = 15 * 60
 
 
@@ -138,6 +138,34 @@ async def load_processing_chapter_payload(
         "title": " ".join(str(chapter_title or "").split()).strip() or None,
         "text": chapter_text,
         "html": stored_payload.get("html"),
+    }
+
+
+async def load_analysis_chapter_payload(
+    db: AsyncSession,
+    chapter_id: str,
+    *,
+    book_id: str | None = None,
+) -> dict[str, Any] | None:
+    """Load stored chapter text/title for analysis task execution."""
+    chapter = await db.get(Chapter, uuid.UUID(str(chapter_id)))
+    if chapter is None:
+        return None
+    if book_id and str(chapter.book_id) != str(book_id):
+        return None
+
+    payload = await load_processing_chapter_payload(
+        chapter.book_id,
+        chapter.number,
+        chapter_s3_key=chapter.s3_key,
+        chapter_title=chapter.title,
+    )
+    if payload is None:
+        return None
+    return {
+        "chapter_id": str(chapter.id),
+        "text": payload["text"],
+        "title": payload.get("title") or "",
     }
 
 

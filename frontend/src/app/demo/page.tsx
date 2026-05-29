@@ -62,7 +62,7 @@ export default function DemoIndexPage() {
       <JsonLdScript id="demo-collection-jsonld" data={jsonLd} />
 
       <section className="app-container py-10 md:py-14">
-        <div className="app-panel app-panel--strong rounded-[2rem] p-6 md:p-8 lg:p-10">
+        <div className="app-panel app-panel--strong rounded-lg p-6 md:p-8 lg:p-10">
           <div className="grid gap-10 lg:grid-cols-[1.05fr_0.95fr] lg:items-start">
             <div className="max-w-3xl">
               <span className="app-chip">Public-domain examples</span>
@@ -84,7 +84,7 @@ export default function DemoIndexPage() {
               </div>
             </div>
 
-            <div className="rounded-[1.8rem] border border-[rgba(var(--border),0.76)] bg-white/72 p-6 dark:bg-white/[0.04] md:p-8">
+            <div className="rounded-lg border border-[rgba(var(--border),0.76)] bg-white/72 p-6 dark:bg-white/[0.04] md:p-8">
               <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">Why these pages matter</p>
               <ul className="mt-6 space-y-4 text-sm leading-7 text-foreground/85">
                 <li className="flex gap-3">
@@ -106,7 +106,7 @@ export default function DemoIndexPage() {
       </section>
 
       <section className="app-container pb-20 md:pb-24">
-        <div className="app-panel rounded-[2rem] p-6 md:p-8 lg:p-10">
+        <div className="app-panel rounded-lg p-6 md:p-8 lg:p-10">
           <div className="max-w-2xl">
             <p className="app-eyebrow">All demos</p>
             <h2 className="mt-4 text-3xl font-semibold tracking-[-0.03em] text-foreground md:text-4xl">
@@ -118,7 +118,7 @@ export default function DemoIndexPage() {
             {demoPages.map((demo) => {
               const article = getBlogArticleBySlug(demo.articleSlug)
               return (
-                <article key={demo.slug} className="h-full rounded-[1.6rem] border border-[rgba(var(--border),0.76)] bg-white/66 p-6 dark:bg-white/[0.04]">
+                <article key={demo.slug} className="h-full rounded-lg border border-[rgba(var(--border),0.76)] bg-white/66 p-6 dark:bg-white/[0.04]">
                   <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
                     {demo.sourceWork} by {demo.sourceAuthor}
                   </p>

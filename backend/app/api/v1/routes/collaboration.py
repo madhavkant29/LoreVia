@@ -5,7 +5,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps.auth import get_current_user
 from app.core.database import get_db
-from app.schemas.books import BookCollaboratorCreateBody, BookCollaboratorOut, BookCollaboratorUpdateBody
+from app.schemas.books import (
+    BookCollaboratorCreateBody,
+    BookCollaboratorOut,
+    BookCollaboratorUpdateBody,
+    CollaboratorActivityOut,
+)
+from app.utils.beta_read_utils import get_book_collaborator_activity
 from app.utils.book_utils import (
     create_book_collaborator,
     delete_book_collaborator,
@@ -27,6 +33,22 @@ async def list_collaborators(
     book = await get_owned_book(db, book_id, current_user.id)
     require_author_access(current_user)
     return await list_book_collaborators(db, book)
+
+
+@router.get("/{book_id}/collaborators/{collaboration_id}/activity", response_model=CollaboratorActivityOut)
+async def get_collaborator_activity(
+    book_id: uuid.UUID,
+    collaboration_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
+    return await get_book_collaborator_activity(
+        db,
+        book=book,
+        collaborator_id=collaboration_id,
+    )
 
 
 @router.post("/{book_id}/collaborators", response_model=BookCollaboratorOut, status_code=201)

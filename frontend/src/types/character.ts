@@ -54,7 +54,19 @@ export interface Character {
     cluster_mention_count?: number
     resolver_status?: string | null
     review_note?: string | null
+    visibility_state?: "visible" | "quarantined" | "noise" | null
+    approval_state?: "approved" | "pending_review" | "rejected" | "protected" | null
+    approval_source?: "manual_review" | "deterministic_auto" | "backfill_review" | "legacy_import" | null
+    approval_reason_codes?: string[]
+    dossier_summary?: Record<string, unknown> | null
+    trust_tier?: "visible" | "review_only" | "repaired_noise" | null
+    trust_reasons?: string[]
   }
+  visibility_state?: "visible" | "quarantined" | "noise" | null
+  approval_state?: "approved" | "pending_review" | "rejected" | "protected" | null
+  approval_source?: "manual_review" | "deterministic_auto" | "backfill_review" | "legacy_import" | null
+  approval_reason_codes?: string[]
+  approval_updated_at?: string | null
   growth_events?: Array<{
     chapter?: number | null
     chapter_number?: number | null
@@ -146,6 +158,7 @@ export interface CharacterCandidate {
   resolver_reasons: string[]
   canonical_confidence?: number | null
   grounding_coverage?: number | null
+  dossier_summary?: Record<string, unknown>
   snippets: string[]
   source_batch_key?: string | null
   created_at: string
@@ -185,6 +198,7 @@ export interface CharacterRepairPreview {
   skipped_protected_demotions: string[]
   updated_first_chapters: Record<string, number>
   updated_last_seen_chapters: Record<string, number>
+  character_labels: Record<string, string>
   pending_duplicate_suggestions: number
   pending_relationship_candidates: number
   unresolved_relationship_deltas: Record<string, number>
@@ -198,8 +212,22 @@ export interface CharacterRepairApplyResult {
   skipped_protected_demotions: string[]
   first_chapter_recomputes: Record<string, number>
   last_seen_chapter_recomputes: Record<string, number>
+  character_labels: Record<string, string>
   duplicate_suggestion_delta: Record<string, number>
   unresolved_relationship_deltas: Record<string, number>
+}
+
+export interface CharacterShadowRecord {
+  id: string
+  book_id: string
+  name: string
+  aliases: string[]
+  role: "mc" | "sc" | "background" | null
+  first_chapter: number
+  last_seen_chapter?: number | null
+  mention_count?: number | null
+  analysis_metadata?: Character["analysis_metadata"]
+  is_manual?: boolean
 }
 
 export interface CharacterRelationshipCandidate {
@@ -225,6 +253,20 @@ export interface CharacterReviewResponse {
   candidates: CharacterCandidate[]
   duplicate_suggestions: CharacterDuplicateSuggestion[]
   relationship_candidates: CharacterRelationshipCandidate[]
+  shadow_characters: CharacterShadowRecord[]
+  decision_events: Array<{
+    id: string
+    book_id: string
+    character_id: string
+    actor_user_id?: string | null
+    action: string
+    visibility_state?: "visible" | "quarantined" | "noise" | null
+    approval_state?: "approved" | "pending_review" | "rejected" | "protected" | null
+    approval_source?: "manual_review" | "deterministic_auto" | "backfill_review" | "legacy_import" | null
+    reason_codes: string[]
+    evidence: Record<string, unknown>
+    created_at: string
+  }>
   counts: {
     pending_candidates: number
     pending_duplicate_suggestions: number
@@ -274,4 +316,8 @@ export interface RelationshipGraph {
     visibility_reasons: string[]
     connected_relationship_count: number
   }>
+  total_edges?: number
+  limit?: number
+  offset?: number
+  has_more?: boolean
 }

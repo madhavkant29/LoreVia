@@ -2,10 +2,12 @@ import uuid
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.models.book import Book, Chapter
 from app.models.character import Character, CharacterCandidate, CharacterRelationshipCandidate
 from app.models.intelligence import CharacterRelationship, Notification
+from app.workers.consumers import extraction_consumer
 from app.workers.consumers.extraction_consumer import _process_chapter, process_book
 
 
@@ -16,11 +18,18 @@ def _embedding_for(text_count: int) -> list[list[float]]:
 VALID_PDF_BYTES = b"%PDF-1.7\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF"
 
 
+def _bind_worker_session(monkeypatch, db) -> None:
+    worker_session_factory = async_sessionmaker(db.bind, class_=AsyncSession, expire_on_commit=False)
+    monkeypatch.setattr(extraction_consumer, "AsyncSessionLocal", worker_session_factory)
+    monkeypatch.setitem(process_book.__globals__, "AsyncSessionLocal", worker_session_factory)
+
+
 @pytest.mark.asyncio
 async def test_upload_pipeline_stages_and_processes_multiple_chapters(client, db, auth_headers, monkeypatch):
     captured_book_tasks: list[dict] = []
     captured_chapter_tasks: list[dict] = []
     captured_analysis_tasks: list[dict] = []
+    captured_embed_inputs: list[list[str]] = []
     sent_ready_emails: list[dict] = []
 
     class _ProcessBookTask:
@@ -42,8 +51,8 @@ async def test_upload_pipeline_stages_and_processes_multiple_chapters(client, db
             return None
 
     chapters = [
-        {"number": 1, "title": "One", "text": "Aoi enters the archive and meets Ren."},
-        {"number": 2, "title": "Two", "text": "Ren reveals the ledger and the hidden room."},
+        {"number": 1, "title": "One", "text": "Aoi Tanaka enters the archive and meets Ren Sato."},
+        {"number": 2, "title": "Two", "text": "Ren Sato reveals the ledger and the hidden room."},
         {"number": 3, "title": "Three", "text": "They form a pact and leave before dawn."},
     ]
 
@@ -51,7 +60,7 @@ async def test_upload_pipeline_stages_and_processes_multiple_chapters(client, db
         return {
             "characters": [
                 {
-                    "name": "Aoi",
+                    "name": "Aoi Tanaka",
                     "aliases": [],
                     "entity_type": "person",
                     "confidence": 0.95,
@@ -68,7 +77,7 @@ async def test_upload_pipeline_stages_and_processes_multiple_chapters(client, db
                     },
                 },
                 {
-                    "name": "Ren",
+                    "name": "Ren Sato",
                     "aliases": [],
                     "entity_type": "person",
                     "confidence": 0.95,
@@ -87,8 +96,8 @@ async def test_upload_pipeline_stages_and_processes_multiple_chapters(client, db
             ],
             "relationships": [
                 {
-                    "character_a": "Aoi",
-                    "character_b": "Ren",
+                    "character_a": "Aoi Tanaka",
+                    "character_b": "Ren Sato",
                     "type": "ally",
                     "sentiment": 0.6,
                     "description": "They decide to work together.",
@@ -97,6 +106,7 @@ async def test_upload_pipeline_stages_and_processes_multiple_chapters(client, db
         }
 
     async def _fake_embed(texts: list[str], **_kwargs) -> list[list[float]]:
+        captured_embed_inputs.append(list(texts))
         return _embedding_for(len(texts))
 
     async def _fake_send_processing_complete_with_stats(email: str, **payload):
@@ -129,6 +139,7 @@ async def test_upload_pipeline_stages_and_processes_multiple_chapters(client, db
     assert len(captured_book_tasks) == 1
 
     book_id = uuid.UUID(str(captured_book_tasks[0]["args"][0]))
+    _bind_worker_session(monkeypatch, db)
     result = await process_book(str(book_id), queue_wait_ms=12)
 
     assert result == {"book_id": str(book_id), "chapters": 3}
@@ -184,6 +195,7 @@ async def test_upload_pipeline_stages_and_processes_multiple_chapters(client, db
     assert all((chapter.analysis_state or {}).get("source_integrity", {}).get("recovery_status") == "ok" for chapter in processed_chapters)
     assert captured_analysis_tasks
     assert captured_analysis_tasks[0]["args"][2] == "One"
+    assert any(batch and batch[0].startswith("Chapter 1: One\n\nAoi Tanaka enters the archive") for batch in captured_embed_inputs)
     ready_notification = (
         await db.execute(
             select(Notification).where(Notification.book_id == book_id, Notification.kind == "book_ready")
@@ -191,12 +203,10 @@ async def test_upload_pipeline_stages_and_processes_multiple_chapters(client, db
     ).scalar()
     assert ready_notification is not None
     assert ready_notification.data is not None
-    assert ready_notification.data["character_count"] == 2
-    assert ready_notification.data["relationship_count"] >= 1
     assert ready_notification.data["analysis_complete"] is False
     assert "plot_thread_count" not in ready_notification.data
     assert "continuity_issue_count" not in ready_notification.data
-    assert "analysis is still running" in ready_notification.body
+    assert "story-intelligence pass is still running" in ready_notification.body
     assert sent_ready_emails == []
 
 
@@ -241,6 +251,7 @@ async def test_process_book_persists_isbn_and_copyright_warning(client, db, auth
     assert response.status_code == 202
     book_id = uuid.UUID(str(captured_book_tasks[0]["args"][0]))
 
+    _bind_worker_session(monkeypatch, db)
     result = await process_book(str(book_id), queue_wait_ms=8)
 
     assert result == {"book_id": str(book_id), "chapters": 1}
@@ -354,6 +365,7 @@ async def test_upload_pipeline_rejects_noise_characters_and_records_diagnostics(
     assert len(captured_book_tasks) == 1
 
     book_id = uuid.UUID(str(captured_book_tasks[0]["args"][0]))
+    _bind_worker_session(monkeypatch, db)
     result = await process_book(str(book_id), queue_wait_ms=7)
     assert result == {"book_id": str(book_id), "chapters": 1}
     assert [item["args"][1] for item in captured_chapter_tasks] == [1]
@@ -366,7 +378,7 @@ async def test_upload_pipeline_rejects_noise_characters_and_records_diagnostics(
     persisted_characters = (
         await db.execute(select(Character).where(Character.book_id == book_id).order_by(Character.name.asc()))
     ).scalars().all()
-    assert [character.name for character in persisted_characters] == ["Gregor"]
+    assert persisted_characters == []
 
     processing = (book.writer_workspace or {}).get("processing", {})
     extraction_diagnostics = (processing.get("parser_diagnostics") or {}).get("character_extraction") or {}
@@ -388,8 +400,18 @@ async def test_upload_pipeline_rejects_noise_characters_and_records_diagnostics(
             )
         )
     ).scalars().all()
+    gregor_candidate = (
+        await db.execute(
+            select(CharacterCandidate).where(
+                CharacterCandidate.book_id == book_id,
+                CharacterCandidate.proposed_name == "Gregor",
+            )
+        )
+    ).scalar_one()
     assert rejected_reported or candidate_rows
-    assert persisted_characters[0].analysis_metadata["confidence_band"] in {"high", "medium"}
+    assert gregor_candidate.status == "pending"
+    assert "candidate_dossier_needs_review" in (gregor_candidate.reason_codes or [])
+    assert "insufficient_cross_chapter_support" in (gregor_candidate.reason_codes or [])
 
 
 @pytest.mark.asyncio
@@ -469,6 +491,7 @@ async def test_upload_pipeline_routes_low_confidence_new_character_into_review_q
 
     assert response.status_code == 202
     book_id = uuid.UUID(str(captured_book_tasks[0]["args"][0]))
+    _bind_worker_session(monkeypatch, db)
     await process_book(str(book_id), queue_wait_ms=6)
 
     book = await db.get(Book, book_id)
@@ -482,11 +505,15 @@ async def test_upload_pipeline_routes_low_confidence_new_character_into_review_q
         await db.execute(select(CharacterCandidate).where(CharacterCandidate.book_id == book_id).order_by(CharacterCandidate.proposed_name.asc()))
     ).scalars().all()
 
-    assert [character.name for character in persisted_characters] == ["Gregor"]
+    assert persisted_characters == []
     assert [candidate.proposed_name for candidate in candidate_rows] == ["Anna", "Gregor"]
     anna_candidate = next(candidate for candidate in candidate_rows if candidate.proposed_name == "Anna")
+    gregor_candidate = next(candidate for candidate in candidate_rows if candidate.proposed_name == "Gregor")
     assert anna_candidate.status == "pending"
     assert "low_confidence_needs_review" in (anna_candidate.reason_codes or [])
+    assert gregor_candidate.status == "pending"
+    assert "candidate_dossier_needs_review" in (gregor_candidate.reason_codes or [])
+    assert "insufficient_cross_chapter_support" in (gregor_candidate.reason_codes or [])
 
 
 @pytest.mark.asyncio
@@ -597,6 +624,7 @@ async def test_upload_pipeline_collapses_same_batch_full_name_and_short_name_dup
 
     assert response.status_code == 202
     book_id = uuid.UUID(str(captured_book_tasks[0]["args"][0]))
+    _bind_worker_session(monkeypatch, db)
     await process_book(str(book_id), queue_wait_ms=6)
 
     book = await db.get(Book, book_id)
@@ -609,22 +637,24 @@ async def test_upload_pipeline_collapses_same_batch_full_name_and_short_name_dup
     relationships = (
         await db.execute(select(CharacterRelationship).where(CharacterRelationship.book_id == book_id))
     ).scalars().all()
+    relationship_candidates = (
+        await db.execute(
+            select(CharacterRelationshipCandidate).where(CharacterRelationshipCandidate.book_id == book_id)
+        )
+    ).scalars().all()
     candidate_rows = (
         await db.execute(select(CharacterCandidate).where(CharacterCandidate.book_id == book_id).order_by(CharacterCandidate.proposed_name.asc()))
     ).scalars().all()
 
-    assert [character.name for character in persisted_characters] == ["Gregor Samsa", "Grete"]
-    gregor = next(character for character in persisted_characters if character.name == "Gregor Samsa")
-    grete = next(character for character in persisted_characters if character.name == "Grete")
-    assert gregor.mention_count == 2
-    assert len(relationships) == 1
-    assert relationships[0].character_a_id == gregor.id
-    assert relationships[0].character_b_id == grete.id
-
-    gregor_candidates = [candidate for candidate in candidate_rows if candidate.proposed_name == "Gregor"]
-    assert len(gregor_candidates) == 1
-    assert gregor_candidates[0].matched_character_id == gregor.id
-    assert gregor_candidates[0].status == "accepted"
+    assert persisted_characters == []
+    assert relationships == []
+    assert [candidate.proposed_name for candidate in candidate_rows] == ["Gregor", "Gregor Samsa", "Grete"]
+    assert all(candidate.status == "pending" for candidate in candidate_rows)
+    assert all("candidate_dossier_needs_review" in (candidate.reason_codes or []) for candidate in candidate_rows)
+    assert len(relationship_candidates) == 1
+    assert relationship_candidates[0].raw_character_a == "Gregor"
+    assert relationship_candidates[0].raw_character_b == "Grete"
+    assert relationship_candidates[0].status == "pending"
 
 
 @pytest.mark.asyncio
@@ -695,6 +725,7 @@ async def test_unresolved_relationships_become_relationship_review_records(clien
 
     assert response.status_code == 202
     book_id = uuid.UUID(str(captured_book_tasks[0]["args"][0]))
+    _bind_worker_session(monkeypatch, db)
     await process_book(str(book_id), queue_wait_ms=6)
 
     book = await db.get(Book, book_id)
@@ -772,6 +803,7 @@ async def test_upload_pipeline_continues_when_cover_upload_fails(client, db, aut
     assert len(captured_book_tasks) == 1
 
     book_id = uuid.UUID(str(captured_book_tasks[0]["args"][0]))
+    _bind_worker_session(monkeypatch, db)
     result = await process_book(str(book_id), queue_wait_ms=9)
 
     assert result == {"book_id": str(book_id), "chapters": 2}
@@ -846,6 +878,7 @@ async def test_upload_pipeline_recovers_named_characters_when_llm_extraction_fai
     assert len(captured_book_tasks) == 1
 
     book_id = uuid.UUID(str(captured_book_tasks[0]["args"][0]))
+    _bind_worker_session(monkeypatch, db)
     await process_book(str(book_id), queue_wait_ms=5)
 
     book = await db.get(Book, book_id)
@@ -861,12 +894,19 @@ async def test_upload_pipeline_recovers_named_characters_when_llm_extraction_fai
     ).scalar_one()
 
     assert ready_notification.data is not None
-    assert ready_notification.data["character_count"] >= 2
-    assert "character extraction hit an internal issue" not in ready_notification.body
+    assert ready_notification.data.get("character_count", 0) == 0
+    assert "character extraction hit an internal issue" in ready_notification.body
 
     refreshed_book = await db.get(Book, book_id)
     processing = (refreshed_book.writer_workspace or {}).get("processing", {})
     extraction_diagnostics = (processing.get("parser_diagnostics") or {}).get("character_extraction") or {}
+    fallback_candidates = (
+        await db.execute(
+            select(CharacterCandidate).where(CharacterCandidate.book_id == book_id).order_by(CharacterCandidate.proposed_name.asc())
+        )
+    ).scalars().all()
+    assert [candidate.proposed_name for candidate in fallback_candidates] == ["Gregor", "Gregor Samsa", "Grete"]
+    assert all(candidate.status == "pending" for candidate in fallback_candidates)
     assert extraction_diagnostics["failed_batches"] == 1
     assert extraction_diagnostics["fallback_batches"] == 1
     assert extraction_diagnostics["fallback_character_count"] >= 2
@@ -921,6 +961,7 @@ async def test_upload_pipeline_preserves_chapter_numbers_when_requested(client, 
     assert response.status_code == 202
     book_id = uuid.UUID(str(captured_book_tasks[0]["args"][0]))
 
+    _bind_worker_session(monkeypatch, db)
     result = await process_book(str(book_id), queue_wait_ms=8)
 
     assert result == {"book_id": str(book_id), "chapters": 3}
@@ -980,6 +1021,7 @@ async def test_upload_pipeline_preserves_source_chapters_exactly_when_requested(
     assert response.status_code == 202
     book_id = uuid.UUID(str(captured_book_tasks[0]["args"][0]))
 
+    _bind_worker_session(monkeypatch, db)
     result = await process_book(str(book_id), queue_wait_ms=8)
 
     assert result == {"book_id": str(book_id), "chapters": 2}
@@ -1037,6 +1079,7 @@ async def test_upload_pipeline_stops_when_book_is_hidden_mid_processing(client, 
     assert len(captured_book_tasks) == 1
 
     book_id = uuid.UUID(str(captured_book_tasks[0]["args"][0]))
+    _bind_worker_session(monkeypatch, db)
     result = await process_book(str(book_id), queue_wait_ms=12)
 
     assert result == {"skipped": "book_hidden"}

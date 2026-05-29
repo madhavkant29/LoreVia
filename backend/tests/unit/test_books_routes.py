@@ -43,6 +43,9 @@ class _ScalarList:
     def all(self):
         return list(self._items)
 
+    def first(self):
+        return self._items[0] if self._items else None
+
 
 class _Result:
     def __init__(self, *, scalar=None, all_rows=None, scalars=None):
@@ -482,16 +485,6 @@ async def test_import_manuscript_content_text_flow_updates_progress_and_reports(
     user = _user()
     book = _book(user_id=user.id, mode="reader", total_chapters=0)
     chapter = SimpleNamespace(id=uuid.uuid4(), s3_key="chapters/1.json", title="Chapter 1")
-    report = ChapterConsistencyReport(
-        chapter_number=1,
-        chapter_title="Chapter 1",
-        summary="Good",
-        new_characters=[],
-        relationship_changes=[],
-        plot_threads_opened=[],
-        plot_threads_resolved=[],
-        continuity_flags=[],
-    )
     added_words = {}
     cache_invalidated = {"called": 0}
 
@@ -499,9 +492,6 @@ async def test_import_manuscript_content_text_flow_updates_progress_and_reports(
         return None
 
     async def _fake_replace(*_args, **_kwargs):
-        return None
-
-    async def _fake_analyse(*_args, **_kwargs):
         return None
 
     monkeypatch.setattr(books, "get_owned_book", _async_value(book))
@@ -522,11 +512,15 @@ async def test_import_manuscript_content_text_flow_updates_progress_and_reports(
     monkeypatch.setattr(books, "add_daily_word_progress", lambda _user, words: added_words.setdefault("count", words))
     monkeypatch.setattr(books.storage, "download_book", lambda _key: b"stored text")
     monkeypatch.setattr(books, "deserialize_manuscript_content", lambda _raw: {"text": "stored chapter text"})
-    monkeypatch.setattr(books, "analyse_chapter", _fake_analyse)
-    monkeypatch.setattr(books, "build_chapter_consistency_report", _async_value(report))
-    monkeypatch.setattr(books, "build_chapter_report_notification", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(books, "build_continuity_risk_notifications", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(books, "sync_chapter_content_from_novel_scenes", _fake_replace)
+    dispatched_tasks: list[dict] = []
+
+    def _fake_apply_async(*_args, **kwargs):
+        dispatched_tasks.append(kwargs)
+        return SimpleNamespace(id="analysis-task-1")
+
+    monkeypatch.setattr(books.analyse_chapter_task, "apply_async", _fake_apply_async)
+
     async def _fake_invalidate(*_args, **_kwargs):
         cache_invalidated["called"] += 1
 
@@ -559,9 +553,26 @@ async def test_import_manuscript_content_text_flow_updates_progress_and_reports(
     )
 
     assert payload.imported_chapters == [1]
+    assert payload.status == "imported"
+    assert payload.chapters_created == 1
+    assert payload.analysis_dispatched == 1
+    assert payload.analysis_tasks == [
+        {
+            "chapter_id": str(chapter.id),
+            "chapter_number": 1,
+            "task_id": "analysis-task-1",
+        }
+    ]
     assert payload.chapter_content_versions == {1: 1}
     assert payload.mode == "author"
-    assert payload.chapter_reports[0].chapter_title == "Chapter 1"
+    assert payload.chapter_reports == []
+    assert dispatched_tasks == [
+        {
+            "args": [str(chapter.id), str(book.id)],
+            "kwargs": {"is_reprocessing": False},
+            "queue": "analysis",
+        }
+    ]
     assert added_words["count"] == 3
     assert cache_invalidated["called"] == 1
     assert any(item.__class__.__name__ == "ReadingProgress" for item in db.added)
@@ -675,21 +686,6 @@ async def test_import_manuscript_content_preserves_source_chapter_count_for_long
     async def _fake_replace(*_args, **_kwargs):
         return None
 
-    async def _fake_analyse(*_args, **_kwargs):
-        return None
-
-    async def _fake_report(_db, _book, chapter_number):
-        return ChapterConsistencyReport(
-            chapter_number=chapter_number,
-            chapter_title=f"Chapter {chapter_number}",
-            summary="Good",
-            new_characters=[],
-            relationship_changes=[],
-            plot_threads_opened=[],
-            plot_threads_resolved=[],
-            continuity_flags=[],
-        )
-
     monkeypatch.setattr(books, "get_owned_book", _async_value(book))
     monkeypatch.setattr(books, "require_author_access", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(books, "next_chapter_number", _async_value(1))
@@ -705,12 +701,9 @@ async def test_import_manuscript_content_preserves_source_chapter_count_for_long
     monkeypatch.setattr(books, "add_daily_word_progress", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(books.storage, "download_book", lambda _key: b"stored text")
     monkeypatch.setattr(books, "deserialize_manuscript_content", lambda _raw: {"text": "stored chapter text"})
-    monkeypatch.setattr(books, "analyse_chapter", _fake_analyse)
-    monkeypatch.setattr(books, "build_chapter_consistency_report", _fake_report)
-    monkeypatch.setattr(books, "build_chapter_report_notification", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(books, "build_continuity_risk_notifications", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(books, "sync_chapter_content_from_novel_scenes", _fake_replace)
     monkeypatch.setattr(books, "invalidate_advisor_caches_for_book", _async_value(None))
+    monkeypatch.setattr(books.analyse_chapter_task, "apply_async", lambda *_args, **_kwargs: None)
 
     db = _FakeDB(
         execute_values=[
@@ -756,21 +749,6 @@ async def test_import_manuscript_content_preserves_images_and_extracts_pdf_cover
     async def _fake_replace(*_args, **_kwargs):
         return None
 
-    async def _fake_analyse(*_args, **_kwargs):
-        return None
-
-    async def _fake_report(_db, _book, chapter_number):
-        return ChapterConsistencyReport(
-            chapter_number=chapter_number,
-            chapter_title=f"Chapter {chapter_number}",
-            summary="Good",
-            new_characters=[],
-            relationship_changes=[],
-            plot_threads_opened=[],
-            plot_threads_resolved=[],
-            continuity_flags=[],
-        )
-
     monkeypatch.setattr(books, "get_owned_book", _async_value(book))
     monkeypatch.setattr(books, "require_author_access", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(books, "next_chapter_number", _async_value(1))
@@ -797,17 +775,19 @@ async def test_import_manuscript_content_preserves_images_and_extracts_pdf_cover
     monkeypatch.setattr(books, "add_daily_word_progress", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(books.storage, "download_book", lambda _key: b"stored text")
     monkeypatch.setattr(books, "deserialize_manuscript_content", lambda _raw: {"text": "stored chapter text"})
-    monkeypatch.setattr(books, "analyse_chapter", _fake_analyse)
-    monkeypatch.setattr(books, "build_chapter_consistency_report", _fake_report)
-    monkeypatch.setattr(books, "build_chapter_report_notification", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(books, "build_continuity_risk_notifications", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(books, "sync_chapter_content_from_novel_scenes", _fake_replace)
     monkeypatch.setattr(books, "invalidate_advisor_caches_for_book", _async_value(None))
+    monkeypatch.setattr(books.analyse_chapter_task, "apply_async", lambda *_args, **_kwargs: None)
     monkeypatch.setattr("app.parsers.pdf_parser.extract_first_page_cover", lambda _raw: (b"cover-bytes", "image/png"))
+
+    def _fake_upload_binary(key, raw, content_type=None):
+        uploaded_cover.setdefault("payload", (key, raw, content_type))
+        return key
+
     monkeypatch.setattr(
         books.storage,
         "upload_binary",
-        lambda key, raw, content_type=None: uploaded_cover.setdefault("payload", (key, raw, content_type)) or key,
+        _fake_upload_binary,
     )
 
     db = _FakeDB(
@@ -928,7 +908,7 @@ async def test_series_routes_and_user_stats(monkeypatch):
 
     db = _FakeDB(execute_values=[_Result(scalars=[series]), _Result(all_rows=[(membership, book)])])
     listed = await books.list_series(db=db, current_user=user)
-    assert listed[0].books[0].marked_complete_in_series is False
+    assert listed["items"][0].books[0].marked_complete_in_series is False
 
     bible = await books.get_series_bible(series.id, db=_FakeDB(), current_user=user)
     assert bible["series_id"] == str(series.id)
@@ -1166,7 +1146,7 @@ async def test_get_book_overview_and_writer_workspace_use_cache(monkeypatch):
     )
     monkeypatch.setattr(books, "build_writer_workspace_response", lambda _current_book: books.WriterWorkspaceOut(**_workspace_payload()))
 
-    overview_first = await books.get_book_overview(book.id, db=_FakeDB(), current_user=user)
+    overview_first = await books.get_book_overview(book.id, db=_FakeDB(execute_values=[_Result(scalar=None), _Result(all_rows=[])]), current_user=user)
     overview_second = await books.get_book_overview(book.id, db=_FakeDB(), current_user=user)
     workspace_first = await books.get_writer_workspace(book.id, db=_FakeDB(), current_user=user)
     workspace_second = await books.get_writer_workspace(book.id, db=_FakeDB(), current_user=user)
@@ -1295,6 +1275,31 @@ async def test_character_routes_cover_crud_and_exports(monkeypatch):
         character_type_score=5,
         subtype_scores={},
     )
+    hidden_character = SimpleNamespace(
+        id=uuid.uuid4(),
+        book_id=book.id,
+        name="Actually",
+        aliases=[],
+        role=None,
+        first_chapter=1,
+        last_seen_chapter=1,
+        mention_count=1,
+        trait_state={},
+        personality_tags=[],
+        goal=None,
+        motivations=[],
+        fears=[],
+        lie_they_believe=None,
+        backstory_wound=None,
+        arc_type=None,
+        archetype=None,
+        arc_summary=None,
+        growth_events=[],
+        character_type="normal",
+        character_type_score=1,
+        subtype_scores={},
+        analysis_metadata={"quality_flags": ["generic_summary", "light_grounding"], "grounding_passage_count": 1},
+    )
     secondary = SimpleNamespace(id=other_id, book_id=book.id, analysis_metadata={})
     relationship = SimpleNamespace(
         id=uuid.uuid4(),
@@ -1408,13 +1413,14 @@ async def test_character_routes_cover_crud_and_exports(monkeypatch):
     db = _FakeDB(
         get_values=[book],
         execute_values=[
-            _Result(scalars=[character, other_character]),
+            _Result(scalars=[character, other_character, hidden_character]),
             _Result(scalars=[relationship]),
             _Result(scalars=[]),
             _Result(scalars=[]),
         ],
     )
     payload = await books.get_book_characters(book.id, db=db, current_user=user)
+    assert [item["name"] for item in payload] == ["Iris", "Vale"]
     assert payload[0]["description"] == "hero:green|1"
     assert payload[0]["goal"] == "Protect the city"
     assert payload[0]["arc_tracker"]["goal"] == "Protect the city"
@@ -1594,7 +1600,7 @@ async def test_character_routes_cover_crud_and_exports(monkeypatch):
             description=" Trusts ",
             from_chapter=2,
         ),
-        db=_FakeDB(get_values=[character, secondary]),
+        db=_FakeDB(get_values=[character, secondary], execute_values=[_Result(scalars=[])]),
         current_user=user,
     )
     assert created_rel["rel_type"] == "ally"
@@ -1614,7 +1620,7 @@ async def test_character_routes_cover_crud_and_exports(monkeypatch):
         book.id,
         relationship.id,
         RelationshipUpdateBody(rel_type="family", sentiment=0.8, description=" Strong ", from_chapter=2, to_chapter=3),
-        db=_FakeDB(get_values=[relationship]),
+        db=_FakeDB(get_values=[relationship, relationship], execute_values=[_Result(scalars=[])]),
         current_user=user,
     )
     assert updated_rel["rel_type"] == "family"
@@ -1669,7 +1675,7 @@ async def test_character_routes_cover_crud_and_exports(monkeypatch):
             description="Household strain",
             from_chapter=3,
         ),
-        db=_FakeDB(get_values=[accepted_candidate, character, secondary]),
+        db=_FakeDB(get_values=[accepted_candidate, character, secondary], execute_values=[_Result(scalars=[])]),
         current_user=user,
     )
     assert accepted["rel_type"] == "family"
@@ -1795,3 +1801,66 @@ async def test_character_reprocess_routes_delegate_to_repair_workflow(monkeypatc
         current_user=user,
     )
     assert applied["book_id"] == str(book.id)
+
+
+@pytest.mark.asyncio
+async def test_get_book_characters_hides_low_trust_rows_in_author_mode(monkeypatch):
+    user = _user()
+    book = _book(user_id=user.id, mode="author")
+    visible = SimpleNamespace(
+        id=uuid.uuid4(),
+        book_id=book.id,
+        name="Grete",
+        aliases=[],
+        role="sc",
+        first_chapter=1,
+        last_seen_chapter=2,
+        mention_count=2,
+        trait_state={},
+        personality_tags=["watchful"],
+        motivations=[],
+        fears=[],
+        archetype="ally",
+        arc_summary="A grounded supporting character.",
+        analysis_metadata={"grounding_passage_count": 2, "quality_flags": []},
+        is_manual=False,
+    )
+    hidden = SimpleNamespace(
+        id=uuid.uuid4(),
+        book_id=book.id,
+        name="Actually",
+        aliases=[],
+        role=None,
+        first_chapter=1,
+        last_seen_chapter=1,
+        mention_count=1,
+        trait_state={},
+        personality_tags=[],
+        motivations=[],
+        fears=[],
+        archetype=None,
+        arc_summary=None,
+        analysis_metadata={"grounding_passage_count": 1, "quality_flags": ["generic_summary", "light_grounding"]},
+        is_manual=False,
+    )
+
+    monkeypatch.setattr(books, "get_book_with_collaboration_access", _async_value((book, None)))
+    monkeypatch.setattr(books, "collaboration_has_resource", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(books, "list_custom_tags_for_entity_ids", _async_value({}))
+    monkeypatch.setattr(books, "relationship_summary_for_character", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(books, "serialize_book_character", lambda char, **_kwargs: {"id": str(char.id), "name": char.name})
+
+    payload = await books.get_book_characters(
+        book.id,
+        db=_FakeDB(
+            execute_values=[
+                _Result(scalars=[visible, hidden]),
+                _Result(scalars=[]),
+                _Result(scalars=[]),
+                _Result(scalars=[]),
+            ],
+        ),
+        current_user=user,
+    )
+
+    assert payload == [{"id": str(visible.id), "name": "Grete"}]

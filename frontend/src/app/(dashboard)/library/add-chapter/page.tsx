@@ -11,7 +11,7 @@ const UploadModal = dynamic(
   () => import("@/components/modals/UploadModal").then((module) => module.UploadModal),
   {
     ssr: false,
-    loading: () => <div className="rounded-[2rem] border p-8" />,
+    loading: () => <div className="rounded-lg border p-8" />,
   }
 )
 
@@ -40,7 +40,7 @@ function AddChapterPageInner() {
     >
       <div className="mx-auto w-full px-3 pb-16 pt-6 sm:px-6 lg:px-8 xl:max-w-7xl">
         <section
-          className={`overflow-hidden rounded-[2rem] border ${
+          className={`overflow-hidden rounded-lg border ${
             isDark
               ? "border-white/10 bg-[#0D0D0D]"
               : "border-white/70 bg-[radial-gradient(circle_at_top,#eef2ff,transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.92),rgba(255,255,255,0.76))]"
@@ -48,7 +48,7 @@ function AddChapterPageInner() {
         >
           <div className="flex flex-col gap-6 px-6 py-7 sm:px-8 lg:flex-row lg:items-end lg:justify-between lg:px-10 lg:py-10">
             <div className="max-w-3xl">
-              <p className={`text-[11px] font-semibold uppercase tracking-[0.34em] ${isDark ? "text-[#A0A0A0]" : "text-indigo-600"}`}>Author Workflow</p>
+              <p className={`text-3xs font-semibold uppercase tracking-[0.34em] ${isDark ? "text-[#A0A0A0]" : "text-indigo-600"}`}>Author Workflow</p>
               <h1 className={`mt-3 font-serif text-4xl tracking-tight sm:text-5xl ${isDark ? "text-[#E0E0E0]" : "text-stone-950"}`}>Add New Chapter</h1>
               <p className={`mt-4 max-w-2xl text-base leading-7 ${isDark ? "text-[#A0A0A0]" : "text-stone-600"}`}>
                 Drop into LoreVia&apos;s incremental ingest flow, update character memory and plot threads, then review fresh continuity flags before you move on.
@@ -61,7 +61,7 @@ function AddChapterPageInner() {
             <div className="flex flex-wrap gap-3">
               <Link
                 href="/library"
-                className={`inline-flex items-center justify-center rounded-[1.1rem] px-5 py-3 text-sm font-semibold transition ${
+                className={`inline-flex items-center justify-center rounded-md px-5 py-3 text-sm font-semibold transition ${
                   isDark
                     ? "border border-white/12 bg-[#111111] text-[#E0E0E0] hover:bg-[#171717]"
                     : "border border-stone-200 bg-white text-stone-800 hover:bg-stone-50"
@@ -74,7 +74,7 @@ function AddChapterPageInner() {
                 onClick={() => {
                   window.location.href = initialBookId ? `/library/add-chapter?book=${initialBookId}` : "/library/add-chapter"
                 }}
-                className={`inline-flex items-center justify-center rounded-[1.1rem] px-5 py-3 text-sm font-semibold transition ${
+                className={`inline-flex items-center justify-center rounded-md px-5 py-3 text-sm font-semibold transition ${
                   isDark
                     ? "border border-white/12 bg-white/5 text-[#E0E0E0] hover:bg-white/10"
                     : "border border-stone-200 bg-stone-50 text-stone-800 hover:bg-stone-100"
@@ -85,7 +85,7 @@ function AddChapterPageInner() {
               {initialBookId ? (
                 <Link
                   href={`/${initialBookId}/manuscript`}
-                  className={`inline-flex items-center justify-center rounded-[1.1rem] px-5 py-3 text-sm font-semibold transition ${
+                  className={`inline-flex items-center justify-center rounded-md px-5 py-3 text-sm font-semibold transition ${
                     isDark
                       ? "border border-emerald-400/20 bg-emerald-500/10 text-emerald-100 hover:bg-emerald-500/15"
                       : "border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100"

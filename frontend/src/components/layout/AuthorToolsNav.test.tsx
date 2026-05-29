@@ -124,8 +124,9 @@ describe("AuthorToolsNav", () => {
     const view = renderAuthorToolsNav({ railSize: "compact" })
 
     const nav = view.querySelector('[data-testid="author-tools-nav-rail"]')
-    expect(nav?.className ?? "").toContain("xl:w-[4.35rem]")
-    expect(nav?.className ?? "").toContain("xl:group-hover/navwrap:w-[16.5rem]")
+    const aside = nav?.querySelector("aside")
+    expect(aside?.className ?? "").toContain("xl:w-[4.35rem]")
+    expect(aside?.className ?? "").toContain("xl:group-hover/navwrap:w-[16.5rem]")
   })
 
   it("shows author sections for a free owner when the book is in author mode", () => {

@@ -1,3 +1,6 @@
+import dotenv from "dotenv"
+
+dotenv.config({ path: ".env.local" })
 const SITE_URL = "https://getlorevia.com"
 const INDEXNOW_KEY_PATH = "/indexnow-key.txt"
 const STATIC_PUBLIC_ROUTES = [

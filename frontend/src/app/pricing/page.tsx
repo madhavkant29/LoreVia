@@ -80,7 +80,7 @@ export default async function PricingPage() {
         <section className="app-container relative max-w-[1160px] px-4 pb-16 pt-10 sm:px-6 lg:px-8 lg:pt-14">
           <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_240px] lg:items-start">
             <div className="max-w-3xl">
-              <p className="text-[12px] font-semibold uppercase tracking-[0.28em] text-[#1f615d]">Pricing</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.28em] text-[#1f615d]">Pricing</p>
               <h1 className="mt-4 font-display text-[3rem] leading-[0.94] tracking-[-0.05em] text-foreground sm:text-[4rem]">
                 Choose the plan that
                 <br className="hidden sm:block" />

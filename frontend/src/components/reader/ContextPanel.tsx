@@ -223,7 +223,7 @@ export function ContextPanel({
         <div className="px-5 py-3 md:py-4">
           <div className="flex items-center justify-between gap-4">
             <div>
-              <p className={`text-[10px] font-medium uppercase tracking-[0.2em] ${shell.muted}`}>Character</p>
+              <p className={`text-3xs font-medium uppercase tracking-[0.2em] ${shell.muted}`}>Character</p>
               <h2 className={`mt-1 text-2xl font-medium leading-tight ${shell.title}`} style={{ fontFamily: "var(--reader-display)" }}>
                 Details
               </h2>
@@ -241,17 +241,17 @@ export function ContextPanel({
 
       <div className="reader-scrollbar app-scroll min-h-0 flex-1 overflow-y-auto px-5 pb-[max(env(safe-area-inset-bottom),1rem)] pt-4 md:pt-5">
         {selectedQuote?.trim() ? (
-          <div className={`mb-5 rounded-[1.5rem] border p-4 ${shell.card}`}>
-            <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${shell.accent}`}>Selected passage</p>
+          <div className={`mb-5 rounded-lg border p-4 ${shell.card}`}>
+            <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${shell.accent}`}>Selected passage</p>
             <p className={`mt-3 whitespace-pre-wrap text-sm leading-7 ${shell.body}`}>{selectedQuote.trim()}</p>
             <div className="mt-4 space-y-3">
-              <div className={`rounded-[1rem] border px-3 py-2 text-xs ${shell.card}`}>
+              <div className={`rounded-md border px-3 py-2 text-xs ${shell.card}`}>
                 <span className="font-medium">Chapter:</span> {chapterTitle ? `${chapterNumber} - ${chapterTitle}` : `Chapter ${chapterNumber}`}
               </div>
               <select
                 value={quoteCharacter}
                 onChange={(event) => setQuoteCharacter(event.target.value)}
-                className={`w-full rounded-[1rem] border px-3 py-2 text-sm ${shell.input}`}
+                className={`w-full rounded-md border px-3 py-2 text-sm ${shell.input}`}
               >
                 <option value="">Who said it? (optional)</option>
                 {characterOptions.map((name) => (
@@ -265,9 +265,9 @@ export function ContextPanel({
                 onChange={(event) => setQuoteNote(event.target.value)}
                 placeholder="Why does this line matter?"
                 rows={3}
-                className={`w-full rounded-[1rem] border px-3 py-2 text-sm ${shell.input}`}
+                className={`w-full rounded-md border px-3 py-2 text-sm ${shell.input}`}
               />
-              <button onClick={saveSelectedQuote} className={`w-full rounded-[1rem] px-4 py-3 text-sm font-semibold transition ${shell.button}`}>
+              <button onClick={saveSelectedQuote} className={`w-full rounded-md px-4 py-3 text-sm font-semibold transition ${shell.button}`}>
                 {savingQuote ? "Saving..." : "Save line bookmark"}
               </button>
             </div>
@@ -397,14 +397,14 @@ export function ContextPanel({
                     <p className={`text-xs font-medium uppercase tracking-[0.15em] ${shell.muted}`}>Traits</p>
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       {(traitsExpanded ? activeCharacter.personality_tags : activeCharacter.personality_tags.slice(0, 3)).map((tag: string) => (
-                        <span key={tag} className={`rounded-md px-2 py-0.5 text-[11px] capitalize ${shell.chip}`}>
+                        <span key={tag} className={`rounded-md px-2 py-0.5 text-3xs capitalize ${shell.chip}`}>
                           {tag}
                         </span>
                       ))}
                       {activeCharacter.personality_tags.length > 3 && !traitsExpanded ? (
                         <span 
                           onClick={() => setTraitsExpanded(true)}
-                          className={`rounded-md px-2 py-0.5 text-[11px] cursor-pointer ${shell.muted} hover:underline`}
+                          className={`rounded-md px-2 py-0.5 text-3xs cursor-pointer ${shell.muted} hover:underline`}
                         >
                           +{activeCharacter.personality_tags.length - 3} more
                         </span>
@@ -412,7 +412,7 @@ export function ContextPanel({
                       {traitsExpanded && activeCharacter.personality_tags.length > 3 ? (
                         <span 
                           onClick={() => setTraitsExpanded(false)}
-                          className={`rounded-md px-2 py-0.5 text-[11px] cursor-pointer ${shell.muted} hover:underline`}
+                          className={`rounded-md px-2 py-0.5 text-3xs cursor-pointer ${shell.muted} hover:underline`}
                         >
                           Show less
                         </span>
@@ -507,7 +507,7 @@ export function ContextPanel({
           <div className="flex flex-col gap-3">
             {(result.results ?? []).length === 0 ? <p className={`text-sm ${shell.muted}`}>No relevant passages found.</p> : null}
             {(result.results ?? []).map((searchResult, index) => (
-              <div key={index} className={`rounded-[1.35rem] border p-4 ${shell.card}`}>
+              <div key={index} className={`rounded-lg border p-4 ${shell.card}`}>
                 <div className="mb-1 flex items-center justify-between gap-3">
                   <p className={`text-xs font-semibold uppercase tracking-[0.16em] ${shell.accent}`}>Chapter {searchResult.chapter_num}</p>
                 </div>
@@ -518,7 +518,7 @@ export function ContextPanel({
         ) : null}
 
         {!loading && !selectedQuote && !activeCharacter && result?.type !== "search" ? (
-          <div className={`rounded-[1.5rem] border p-5 ${shell.card}`}>
+          <div className={`rounded-lg border p-5 ${shell.card}`}>
             <p className={`text-sm leading-7 ${shell.body}`}>
               Tap a highlighted character name to open a profile here. On mobile, this panel opens as a clean bottom sheet so the reading page stays visible behind it without collapsing the content.
             </p>

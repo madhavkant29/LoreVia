@@ -91,7 +91,7 @@ async def test_refresh_route_uses_canonical_local_user_for_supabase_subject(monk
 
     captured: dict[str, str] = {}
 
-    async def fake_mint_token_pair(resolved_user):
+    async def fake_mint_token_pair(resolved_user, db=None):
         assert resolved_user is user
         return (
             {"id": str(resolved_user.id)},

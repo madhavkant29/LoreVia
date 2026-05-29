@@ -146,17 +146,17 @@ export function ChapterText({
       onCopyCapture={handleProtectedCopy}
       onCutCapture={handleProtectedCopy}
     >
-      <section className={`book-layout overflow-hidden rounded-[2rem] border shadow-[0_36px_110px_-82px_rgba(15,23,42,0.96)] ${cardTone.shell}`}>
+      <section className={`book-layout overflow-hidden rounded-lg border shadow-[0_36px_110px_-82px_rgba(15,23,42,0.96)] ${cardTone.shell}`}>
         <div className={isPublishedLayout ? "book-layout__page mx-auto px-5 py-8 sm:px-10 sm:py-12 lg:px-12 lg:py-14" : "mx-auto max-w-[82ch] px-5 py-8 sm:px-10 sm:py-12"}>
           <div className="reader-nonprint mb-14 text-center">
-            <p className={`inline-flex items-center gap-2 text-[11px] italic tracking-[0.01em] ${cardTone.helper}`} style={{ fontFamily: "var(--reader-label)" }}>
+            <p className={`inline-flex items-center gap-2 text-3xs italic tracking-[0.01em] ${cardTone.helper}`} style={{ fontFamily: "var(--reader-label)" }}>
               <svg viewBox="0 0 16 16" aria-hidden="true" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.4">
                 <path d="M8 1.75v3.1M8 11.15v3.1M1.75 8h3.1M11.15 8h3.1M3.25 3.25l2.2 2.2M10.55 10.55l2.2 2.2M12.75 3.25l-2.2 2.2M5.45 10.55l-2.2 2.2" />
               </svg>
               <span>Tap any word or select text for instant context</span>
             </p>
             {!canCopyManuscript ? (
-              <p className={`reader-nonprint mt-3 text-center text-[11px] font-semibold uppercase tracking-[0.18em] ${theme === "dark" ? "text-amber-300" : "text-amber-700"}`} style={{ fontFamily: "var(--reader-label)" }}>
+              <p className={`reader-nonprint mt-3 text-center text-3xs font-semibold uppercase tracking-[0.18em] ${theme === "dark" ? "text-amber-300" : "text-amber-700"}`} style={{ fontFamily: "var(--reader-label)" }}>
                 Private share: copying disabled
               </p>
             ) : null}
@@ -168,7 +168,7 @@ export function ChapterText({
           </div>
 
           <header className={isPublishedLayout ? "book-layout__chapter-heading chapter-title" : "mb-14 mt-6"}>
-            <p className="text-[11px] uppercase tracking-[0.36em] text-stone-400" style={{ fontFamily: "var(--reader-label)" }}>
+            <p className="text-3xs uppercase tracking-[0.36em] text-stone-400" style={{ fontFamily: "var(--reader-label)" }}>
               Chapter {chapterNum}{totalChapters ? ` of ${totalChapters}` : ""}
             </p>
             <h1 className={`mt-4 text-5xl font-light leading-tight sm:text-6xl ${cardTone.heading}`} style={{ fontFamily: isPublishedLayout ? fontStack : "var(--reader-display)" }}>
@@ -208,14 +208,14 @@ export function ChapterText({
               {blocks.map((block, index) =>
                 block.type === "media" ? (
                   mediaSrc(block.item) ? (
-                    <figure key={`media-${index}`} className={`my-12 overflow-hidden rounded-[1.6rem] border p-3 ${cardTone.media}`}>
+                    <figure key={`media-${index}`} className={`my-12 overflow-hidden rounded-lg border p-3 ${cardTone.media}`}>
                       <div className="flex justify-center py-4">
                         <img
                           src={mediaSrc(block.item)}
                           alt={block.item.caption ?? `Inline chapter image ${block.item.sort_order + 1}`}
                           loading="lazy"
                           decoding="async"
-                          className="max-h-[28rem] w-auto rounded-[1rem] object-contain"
+                          className="max-h-[28rem] w-auto rounded-md object-contain"
                         />
                       </div>
                       <figcaption className={`px-3 pb-3 text-center text-xs italic ${cardTone.helper}`} style={{ fontFamily: "var(--reader-label)" }}>

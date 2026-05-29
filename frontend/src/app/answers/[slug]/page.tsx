@@ -90,7 +90,7 @@ export default async function AnswerPage({ params }: { params: Promise<{ slug: s
       <JsonLdScript id={`answers-breadcrumbs-jsonld-${answer.slug}`} data={breadcrumbJsonLd} />
 
       <section className="app-container py-10 md:py-14">
-        <div className="app-panel app-panel--strong rounded-[2rem] p-6 md:p-8 lg:p-10">
+        <div className="app-panel app-panel--strong rounded-lg p-6 md:p-8 lg:p-10">
           <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
             <Link href="/answers" className="hover:text-foreground">
               Answers
@@ -128,16 +128,16 @@ export default async function AnswerPage({ params }: { params: Promise<{ slug: s
         
         <div className="mt-8 grid gap-8 lg:grid-cols-[1.15fr_0.85fr]">
           <article className="space-y-6">
-            <section className="app-panel app-panel--strong rounded-[2rem] p-6 md:p-8">
+            <section className="app-panel app-panel--strong rounded-lg p-6 md:p-8">
               <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">Direct answer</p>
               <p className="mt-4 text-base leading-8 text-muted-foreground md:text-lg">{answer.shortAnswer}</p>
-              <div className="mt-6 rounded-[1.4rem] border border-[rgba(var(--border),0.78)] bg-white/70 p-5 dark:bg-white/[0.03]">
+              <div className="mt-6 rounded-lg border border-[rgba(var(--border),0.78)] bg-white/70 p-5 dark:bg-white/[0.03]">
                 <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">Why it matters</p>
                 <p className="mt-3 text-sm leading-7 text-muted-foreground md:text-base">{answer.whyItMatters}</p>
               </div>
             </section>
 
-            <section className="app-panel rounded-[2rem] p-6 md:p-8">
+            <section className="app-panel rounded-lg p-6 md:p-8">
               <h2 className="text-3xl font-semibold tracking-[-0.03em] text-foreground">
                 A simple way to handle it
               </h2>
@@ -152,7 +152,7 @@ export default async function AnswerPage({ params }: { params: Promise<{ slug: s
             </section>
 
             {answer.sections.map((section) => (
-              <section key={section.heading} className="app-panel rounded-[2rem] p-6 md:p-8">
+              <section key={section.heading} className="app-panel rounded-lg p-6 md:p-8">
                 <h2 className="text-[2rem] font-semibold tracking-[-0.03em] text-foreground md:text-[2.2rem]">
                   {section.heading}
                 </h2>
@@ -180,7 +180,7 @@ export default async function AnswerPage({ params }: { params: Promise<{ slug: s
 
           <aside className="space-y-6 lg:sticky lg:top-28">
             {article ? (
-              <div className="app-panel app-panel--strong rounded-[2rem] p-6 md:p-8">
+              <div className="app-panel app-panel--strong rounded-lg p-6 md:p-8">
                 <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">Read the main guide</p>
                 <h2 className="mt-4 text-2xl font-semibold tracking-[-0.03em] text-foreground">{article.title}</h2>
                 <p className="mt-3 text-sm leading-7 text-muted-foreground">{article.description}</p>
@@ -192,7 +192,7 @@ export default async function AnswerPage({ params }: { params: Promise<{ slug: s
             ) : null}
 
             {demoPage ? (
-              <div className="app-panel rounded-[2rem] p-6 md:p-8">
+              <div className="app-panel rounded-lg p-6 md:p-8">
                 <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">See a public-domain example</p>
                 <h2 className="mt-4 text-2xl font-semibold tracking-[-0.03em] text-foreground">{demoPage.title}</h2>
                 <p className="mt-3 text-sm leading-7 text-muted-foreground">{demoPage.featuredInsight}</p>
@@ -203,7 +203,7 @@ export default async function AnswerPage({ params }: { params: Promise<{ slug: s
               </div>
             ) : null}
 
-            <div className="app-panel rounded-[2rem] p-6 md:p-8">
+            <div className="app-panel rounded-lg p-6 md:p-8">
               <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">Editorial use</p>
               <p className="mt-4 text-sm leading-7 text-muted-foreground">
                 These answer pages are designed to give authors a direct response while still preserving enough context to support real revision decisions, internal linking, and follow-up reading.
@@ -214,7 +214,7 @@ export default async function AnswerPage({ params }: { params: Promise<{ slug: s
       </section>
 
       <section className="app-container pb-20 pt-8 md:pb-24">
-        <div className="app-panel app-panel--strong rounded-[2rem] p-7 md:p-10">
+        <div className="app-panel app-panel--strong rounded-lg p-7 md:p-10">
           <div className="max-w-3xl">
             <p className="app-eyebrow">Try LoreVia</p>
             <h2 className="mt-4 text-3xl font-semibold tracking-[-0.03em] text-foreground md:text-4xl">

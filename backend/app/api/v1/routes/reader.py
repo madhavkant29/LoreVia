@@ -10,6 +10,7 @@ import bleach  # type: ignore[import-untyped]
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import and_, delete, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.api.deps.auth import get_current_user
 from app.api.deps.rate_limit import rate_limit_recall, rate_limit_search, rate_limit_summary
@@ -56,7 +57,7 @@ from app.schemas.reader import (
 )
 from app.services.chapter_recovery_service import resolve_reader_chapter_payload
 from app.services.summary_service import get_or_generate_summary
-from app.utils.beta_read_utils import sync_beta_assignments_for_reader_book
+from app.utils.beta_read_utils import list_chapter_beta_feedback, sync_beta_assignments_for_reader_book
 from app.utils.billing_utils import summary_mode_allowed
 from app.utils.book_utils import (
     collaboration_allows_chapter,
@@ -143,6 +144,28 @@ def _normalize_reader_character_event(character: Character, event: dict) -> dict
         "growth_direction": str(event.get("growth_direction") or "neutral"),
         "growth_magnitude": int(event.get("growth_magnitude") or event.get("impact_score") or 0),
         "is_major": bool(event.get("is_major", False)),
+    }
+
+
+def _build_combined_events(major_events: list[MajorEventOut], character_events: list[CharacterEventOut]) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    for e in major_events:
+        events.append({"type": "major", **e.model_dump(mode="json")})
+    for e in character_events:
+        events.append({"type": "character", **e.model_dump(mode="json")})
+    events.sort(key=lambda item: (item.get("chapter_number", 0), item.get("event_title", "").lower() if item.get("type") == "major" else item.get("character_name", "").lower()))
+    return events
+
+
+def _paginated_events_response(events: list[dict[str, Any]], limit: int, offset: int) -> dict[str, Any]:
+    total = len(events)
+    paged = events[offset : offset + limit]
+    return {
+        "items": paged,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "has_more": (offset + limit) < total,
     }
 
 
@@ -260,6 +283,13 @@ async def get_chapter(
             )
             if chapter is not None
             else []
+        ),
+        "beta_feedback": await list_chapter_beta_feedback(
+            db,
+            book_id=book.id,
+            chapter_number=chapter_num,
+            current_user=current_user,
+            collaborator=collaborator,
         ),
         "characters": char_data,
     }
@@ -462,13 +492,19 @@ async def get_summary(
     return {"status": "ready", **data, "diagnostics": {"analysis_status": chapter_analysis_status(chapter)}}
 
 
-@router.get("/{book_id}/events", response_model=BookEventsOut)
+@router.get("/{book_id}/events")
 async def get_reader_events(
     book_id: uuid.UUID,
     chapter: int | None = Query(None),
+    limit: int = 50,
+    offset: int = 0,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    if limit < 1 or limit > 100:
+        raise HTTPException(400, "limit must be between 1 and 100")
+    if offset < 0:
+        raise HTTPException(400, "offset must be >= 0")
     book = await db.get(Book, book_id)
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
@@ -489,7 +525,9 @@ async def get_reader_events(
         progress_version,
     )
     if cached is not None:
-        return BookEventsOut(**cached)
+        cached_payload = BookEventsOut(**cached)
+        all_events = _build_combined_events(cached_payload.major_events, cached_payload.character_events)
+        return _paginated_events_response(all_events, limit, offset)
 
     chapter_rows = (
         await db.execute(
@@ -524,7 +562,8 @@ async def get_reader_events(
         progress_version,
         payload.model_dump(mode="json"),
     )
-    return payload
+    all_events = _build_combined_events(major_events, character_events)
+    return _paginated_events_response(all_events, limit, offset)
 
 
 @router.get("/{book_id}/relationships")
@@ -532,9 +571,15 @@ async def get_relationships(
     book_id: uuid.UUID,
     chapter: int = Query(...),
     include_inactive: bool = Query(False),
+    limit: int = 50,
+    offset: int = 0,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    if limit < 1 or limit > 100:
+        raise HTTPException(400, "limit must be between 1 and 100")
+    if offset < 0:
+        raise HTTPException(400, "offset must be >= 0")
     book = await db.get(Book, book_id)
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
@@ -542,7 +587,15 @@ async def get_relationships(
     cache_key = f"{key_relationship_graph(str(book_id), chapter)}:v4:{cache_scope}"
     cached = await cache_get(cache_key)
     if cached:
-        return cached
+        graph = cast(dict[str, Any], cached)
+        all_edges = graph.get("edges", [])
+        total_edges = len(all_edges)
+        graph["edges"] = all_edges[offset : offset + limit]
+        graph["total_edges"] = total_edges
+        graph["limit"] = limit
+        graph["offset"] = offset
+        graph["has_more"] = (offset + limit) < total_edges
+        return graph
 
     chars_result = await db.execute(
         select(Character).where(Character.book_id == book_id, Character.first_chapter <= chapter)
@@ -550,9 +603,14 @@ async def get_relationships(
     chars = list(chars_result.scalars().all())
 
     rels_result = await db.execute(
-        select(CharacterRelationship).where(
+        select(CharacterRelationship)
+        .where(
             CharacterRelationship.book_id == book_id,
             CharacterRelationship.from_chapter <= chapter,
+        )
+        .options(
+            selectinload(CharacterRelationship.character_a),
+            selectinload(CharacterRelationship.character_b),
         )
     )
     historical_rels, _ = canonicalize_relationship_book_rows(list(rels_result.scalars().all()))
@@ -682,6 +740,13 @@ async def get_relationships(
     }
     if graph["nodes"] or graph["edges"] or graph["hidden_nodes"]:
         await cache_set(cache_key, graph, settings.REDIS_TTL_GRAPH)
+    all_edges = graph["edges"]
+    total_edges = len(all_edges)
+    graph["edges"] = all_edges[offset : offset + limit]
+    graph["total_edges"] = total_edges
+    graph["limit"] = limit
+    graph["offset"] = offset
+    graph["has_more"] = (offset + limit) < total_edges
     return graph
 
 
@@ -708,6 +773,9 @@ async def search(
         book_id,
         q,
         chapter,
+        limit=settings.READER_SEARCH_RETURN_CHUNKS,
+        candidate_limit=settings.READER_SEARCH_CANDIDATE_CHUNKS,
+        similarity_threshold=settings.READER_SEARCH_SIMILARITY_THRESHOLD,
         usage_user_id=current_user.id,
         usage_feature="reader_search",
     )
@@ -717,7 +785,7 @@ async def search(
             select(BookChunk.text, BookChunk.chunk_index, Chapter.number, Chapter.title)
             .join(Chapter, Chapter.id == BookChunk.chapter_id)
             .where(BookChunk.book_id == book_id, Chapter.number <= chapter, BookChunk.text.ilike(f"%{lowered}%"))
-            .limit(settings.SEARCH_MAX_CONTEXT_CHUNKS)
+            .limit(settings.READER_SEARCH_RETURN_CHUNKS)
         )).all()
         results = [
             build_search_result(text=row[0], chunk_index=row[1], chapter_num=row[2], chapter_title=row[3], relevance=0.5)
@@ -731,7 +799,7 @@ async def search(
                 select(BookChunk.text, BookChunk.chunk_index, Chapter.number, Chapter.title)
                 .join(Chapter, Chapter.id == BookChunk.chapter_id)
                 .where(BookChunk.book_id == book_id, Chapter.number <= chapter, or_(*token_filters))
-                .limit(settings.SEARCH_MAX_CONTEXT_CHUNKS)
+                .limit(settings.READER_SEARCH_RETURN_CHUNKS)
             )).all()
             results = [
                 build_search_result(text=row[0], chunk_index=row[1], chapter_num=row[2], chapter_title=row[3], relevance=0.35)
@@ -813,12 +881,18 @@ async def get_foreshadowing_highlights(
     return {"items": items}
 
 
-@router.get("/{book_id}/timeline", response_model=TimelineResponseOut)
+@router.get("/{book_id}/timeline")
 async def get_timeline(
     book_id: uuid.UUID,
+    limit: int = 50,
+    offset: int = 0,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    if limit < 1 or limit > 100:
+        raise HTTPException(400, "limit must be between 1 and 100")
+    if offset < 0:
+        raise HTTPException(400, "offset must be >= 0")
     book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
 
     book_version = await get_book_cache_version(str(book_id))
@@ -830,7 +904,15 @@ async def get_timeline(
         progress_version,
     )
     if cached is not None:
-        return cached
+        payload = cast(dict[str, Any], cached)
+        all_events = payload.get("events", [])
+        total_events = len(all_events)
+        payload["events"] = all_events[offset : offset + limit]
+        payload["total_events"] = total_events
+        payload["limit"] = limit
+        payload["offset"] = offset
+        payload["has_more"] = (offset + limit) < total_events
+        return payload
 
     read_set = await timeline_visible_chapter_set(db, book, current_user, collaborator)
     if collaborator is not None:
@@ -979,6 +1061,13 @@ async def get_timeline(
         progress_version,
         payload,
     )
+    all_events = payload["events"]
+    total_events = len(all_events)
+    payload["events"] = all_events[offset : offset + limit]
+    payload["total_events"] = total_events
+    payload["limit"] = limit
+    payload["offset"] = offset
+    payload["has_more"] = (offset + limit) < total_events
     return payload
 
 
@@ -1168,8 +1257,13 @@ async def memory_recall(
     current_user=Depends(get_current_user),
     _=Depends(rate_limit_recall),
 ):
-    book = await db.get(Book, book_id)
-    if not book or book.user_id != current_user.id:
+    book_result = await db.execute(
+        select(Book)
+        .where(Book.id == book_id, Book.user_id == current_user.id)
+        .options(selectinload(Book.characters))
+    )
+    book = book_result.scalars().first()
+    if not book:
         raise HTTPException(404)
     book_title = book.title
 

@@ -41,7 +41,7 @@ const AuthorToolsNav = dynamic(
   () => import("@/components/layout/AuthorToolsNav").then((module) => module.AuthorToolsNav),
   {
     ssr: false,
-    loading: () => <div className="rounded-[1.4rem] border border-dashed border-white/10 p-8" />,
+    loading: () => <div className="rounded-lg border border-dashed border-white/10 p-8" />,
   }
 )
 
@@ -387,7 +387,7 @@ export default function ScenesPage() {
               onToggleInspector={() => setShowInspectorOnMobile((current) => !current)}
             />
 
-            <section className={`overflow-hidden rounded-[1.25rem] border ${isDark ? "border-white/10 bg-[#09121f]/92 shadow-[0_22px_72px_-54px_rgba(0,0,0,0.78)]" : "border-white/70 bg-white/90 shadow-[0_24px_60px_-42px_rgba(15,23,42,0.2)]"}`}>
+            <section className={`overflow-hidden rounded-md border ${isDark ? "border-white/10 bg-[#09121f]/92 shadow-modal" : "border-white/70 bg-white/90 shadow-card"}`}>
               {treeLoading && !tree ? (
                 <WorkspaceStateCard
                   isDark={isDark}
@@ -506,10 +506,10 @@ function WorkspaceHeader({
   onNewFolder: () => void
 }) {
   return (
-    <section className={`rounded-[1.5rem] border px-5 py-5 sm:px-6 sm:py-6 ${isDark ? "border-white/10 bg-[#08111d]/84" : "border-white/70 bg-white/88"}`}>
+    <section className={`rounded-lg border px-5 py-5 sm:px-6 sm:py-6 ${isDark ? "border-white/10 bg-[#08111d]/84" : "border-white/70 bg-white/88"}`}>
       <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
         <div className="min-w-0">
-          <p className={`text-[11px] font-semibold uppercase tracking-[0.28em] ${isDark ? "text-teal-300" : "text-teal-700"}`}>Scene workspace</p>
+          <p className={`text-3xs font-semibold uppercase tracking-[0.28em] ${isDark ? "text-teal-300" : "text-teal-700"}`}>Scene workspace</p>
           <h1 className="mt-3 font-serif text-3xl sm:text-[2.75rem]">{book?.title || "Manuscript"} scenes</h1>
           <p className={`mt-3 max-w-3xl text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
             Organize scenes with nested folders, move them between planning buckets, and keep metadata attached when you import them into the manuscript.
@@ -603,7 +603,7 @@ function SceneBrowserPanel({
         <WorkspaceTabs isDark={isDark} value={browserView} onChange={onBrowserViewChange} />
 
         <div className="flex items-center gap-2">
-          <label className={`flex min-w-0 flex-1 items-center gap-2 rounded-[0.9rem] border px-3 py-2.5 text-sm ${isDark ? "border-white/10 bg-[#030b16] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}>
+          <label className={`flex min-w-0 flex-1 items-center gap-2 rounded-sm border px-3 py-2.5 text-sm ${isDark ? "border-white/10 bg-[#030b16] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}>
             <IconSearch />
             <span className="sr-only">Search scenes or folders</span>
             <input
@@ -616,7 +616,7 @@ function SceneBrowserPanel({
           <button
             type="button"
             aria-label="Scene browser filters"
-            className={`inline-flex h-10 w-10 items-center justify-center rounded-[0.9rem] border ${isDark ? "border-white/10 bg-[#030b16] text-slate-400" : "border-stone-200 bg-white text-stone-500"}`}
+            className={`inline-flex h-10 w-10 items-center justify-center rounded-sm border ${isDark ? "border-white/10 bg-[#030b16] text-slate-400" : "border-stone-200 bg-white text-stone-500"}`}
           >
             <IconFilter />
           </button>
@@ -656,7 +656,7 @@ function SceneBrowserPanel({
                   event.preventDefault()
                   onDropScene(dragItem.id, null)
                 }}
-                className={`flex w-full items-center justify-between rounded-[0.95rem] border px-3 py-2.5 text-left text-sm transition ${
+                className={`flex w-full items-center justify-between rounded-md border px-3 py-2.5 text-left text-sm transition ${
                   !selectedFolder
                     ? isDark
                       ? "border-teal-400/30 bg-teal-400/12 text-teal-50"
@@ -701,7 +701,7 @@ function SceneBrowserPanel({
             action={<button type="button" aria-label="Create new scene" onClick={onCreateScene} className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border transition ${isDark ? "border-white/10 text-slate-400 hover:border-white/15 hover:bg-white/[0.06] hover:text-white" : "border-stone-200 text-stone-500 hover:bg-stone-100 hover:text-stone-900"}`}><IconPlus /></button>}
           >
             {filteredScenes.length === 0 ? (
-              <div className={`rounded-[1rem] border border-dashed px-4 py-8 text-center ${isDark ? "border-white/10 bg-white/[0.02]" : "border-stone-300 bg-stone-50/80"}`}>
+              <div className={`rounded-md border border-dashed px-4 py-8 text-center ${isDark ? "border-white/10 bg-white/[0.02]" : "border-stone-300 bg-stone-50/80"}`}>
                 <div className={`mx-auto flex h-11 w-11 items-center justify-center rounded-full ${isDark ? "bg-white/[0.04] text-slate-400" : "bg-stone-100 text-stone-500"}`}>
                   <IconDocument />
                 </div>
@@ -724,7 +724,7 @@ function SceneBrowserPanel({
                       event.dataTransfer.setData("application/lorevia-scene-item", JSON.stringify(payload))
                     }}
                     onClick={() => onSelectScene(scene)}
-                    className={`block w-full rounded-[1rem] border px-3 py-3 text-left transition ${
+                    className={`block w-full rounded-md border px-3 py-3 text-left transition ${
                       selectedSceneId === scene.id
                         ? isDark
                           ? "border-teal-400/35 bg-teal-400/12 text-white"
@@ -735,7 +735,7 @@ function SceneBrowserPanel({
                     }`}
                   >
                     <span className="block truncate text-sm font-semibold">{scene.title}</span>
-                    <span className={`mt-1 block truncate text-[11px] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{scene.path}</span>
+                    <span className={`mt-1 block truncate text-3xs ${isDark ? "text-slate-500" : "text-stone-400"}`}>{scene.path}</span>
                     {scene.description ? (
                       <span className={`mt-2 line-clamp-2 block text-xs leading-5 ${isDark ? "text-slate-400" : "text-stone-500"}`}>{scene.description}</span>
                     ) : null}
@@ -786,7 +786,7 @@ function SceneMetadataForm({
   }
 
   return (
-    <section className={`rounded-[1.05rem] border px-4 py-4 sm:px-5 sm:py-5 ${isDark ? "border-white/10 bg-[#0b1421]" : "border-stone-200 bg-white"}`}>
+    <section className={`rounded-md border px-4 py-4 sm:px-5 sm:py-5 ${isDark ? "border-white/10 bg-[#0b1421]" : "border-stone-200 bg-white"}`}>
       <div className="flex flex-col gap-1 border-b border-white/10 pb-4">
         <p className={sectionLabel(isDark)}>Scene metadata</p>
         <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>Keep chapter assignment, folder path, POV, and planning notes aligned with the current draft.</p>
@@ -872,7 +872,7 @@ function SceneEditorPanel({
   onSave: () => void
 }) {
   return (
-    <section className={`rounded-[1.05rem] border ${isDark ? "border-white/10 bg-[#09111c]" : "border-stone-200 bg-white"}`}>
+    <section className={`rounded-md border ${isDark ? "border-white/10 bg-[#09111c]" : "border-stone-200 bg-white"}`}>
       <div className="flex flex-col gap-2 border-b border-white/10 px-4 py-4 sm:px-5">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
@@ -932,14 +932,14 @@ function MetadataPreviewPanel({
       <div className="space-y-4">
         <PanelCard isDark={isDark} label="Metadata preview" title="Scene metadata">
           {metadataRows.length === 0 ? (
-            <p className={`rounded-[1rem] border border-dashed px-4 py-6 text-sm leading-6 ${isDark ? "border-white/10 text-slate-500" : "border-stone-300 text-stone-500"}`}>
+            <p className={`rounded-md border border-dashed px-4 py-6 text-sm leading-6 ${isDark ? "border-white/10 text-slate-500" : "border-stone-300 text-stone-500"}`}>
               Save labels such as POV, Location, Time, Characters, Goals, Conflict, Objects, Plot Threads, or Mood to populate this panel.
             </p>
           ) : (
             <div className="space-y-3">
               {metadataRows.map(([key, value]) => (
-                <div key={key} className={`rounded-[1rem] border px-4 py-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white"}`}>
-                  <p className={`text-[10px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{key.replaceAll("_", " ")}</p>
+                <div key={key} className={`rounded-md border px-4 py-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white"}`}>
+                  <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{key.replaceAll("_", " ")}</p>
                   <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-200" : "text-stone-700"}`}>{formatMetadataValue(value)}</p>
                 </div>
               ))}
@@ -948,13 +948,13 @@ function MetadataPreviewPanel({
         </PanelCard>
 
         <PanelCard isDark={isDark} label="Metadata note" title="Folder-aware metadata">
-          <p className={`rounded-[1rem] border px-4 py-4 text-sm leading-6 ${isDark ? "border-teal-400/18 bg-teal-400/10 text-teal-50" : "border-teal-200 bg-teal-50 text-teal-800"}`}>
+          <p className={`rounded-md border px-4 py-4 text-sm leading-6 ${isDark ? "border-teal-400/18 bg-teal-400/10 text-teal-50" : "border-teal-200 bg-teal-50 text-teal-800"}`}>
             Scene files follow folder paths directly, so you can keep planning by act, chapter, POV, or any other structure that fits your process.
           </p>
         </PanelCard>
 
         <PanelCard isDark={isDark} label="Scene file" title="Current file">
-          <div className={`rounded-[1rem] border px-4 py-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white"}`}>
+          <div className={`rounded-md border px-4 py-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white"}`}>
             <p className={`text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-700"}`}>
               {currentScenePath ?? "Set a title to generate the scene filename."}
             </p>
@@ -963,7 +963,7 @@ function MetadataPreviewPanel({
 
         <PanelCard isDark={isDark} label="Story hierarchy" title="Current hierarchy">
           {structureTree.length ? (
-            <div className={`rounded-[1rem] border px-4 py-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white"}`}>
+            <div className={`rounded-md border px-4 py-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white"}`}>
               <div className="space-y-2">
                 {structureTree.map((node) => (
                   <StructureTreePreview key={node.id} node={node} isDark={isDark} depth={0} />
@@ -971,7 +971,7 @@ function MetadataPreviewPanel({
               </div>
             </div>
           ) : (
-            <p className={`rounded-[1rem] border border-dashed px-4 py-6 text-sm leading-6 ${isDark ? "border-white/10 text-slate-500" : "border-stone-300 text-stone-500"}`}>
+            <p className={`rounded-md border border-dashed px-4 py-6 text-sm leading-6 ${isDark ? "border-white/10 text-slate-500" : "border-stone-300 text-stone-500"}`}>
               No hierarchy is available for this manuscript yet.
             </p>
           )}
@@ -996,7 +996,7 @@ function WorkspaceTabs({
   ]
 
   return (
-    <div className={`inline-flex rounded-[0.95rem] border p-1 ${isDark ? "border-white/10 bg-[#020814]" : "border-stone-200 bg-white"}`} role="tablist" aria-label="Scene browser sections">
+    <div className={`inline-flex rounded-md border p-1 ${isDark ? "border-white/10 bg-[#020814]" : "border-stone-200 bg-white"}`} role="tablist" aria-label="Scene browser sections">
       {tabs.map((tab) => {
         const active = tab.id === value
         return (
@@ -1006,7 +1006,7 @@ function WorkspaceTabs({
             role="tab"
             aria-selected={active}
             onClick={() => onChange(tab.id)}
-            className={`rounded-[0.7rem] px-4 py-2 text-xs font-semibold uppercase tracking-[0.22em] transition ${
+            className={`rounded-sm px-4 py-2 text-xs font-semibold uppercase tracking-[0.22em] transition ${
               active
                 ? isDark
                   ? "bg-teal-400/14 text-teal-100"
@@ -1038,7 +1038,7 @@ function PanelCard({
   children: ReactNode
 }) {
   return (
-    <section className={`rounded-[1rem] border px-4 py-4 ${isDark ? "border-white/10 bg-[#0b1421]" : "border-stone-200 bg-white"}`}>
+    <section className={`rounded-md border px-4 py-4 ${isDark ? "border-white/10 bg-[#0b1421]" : "border-stone-200 bg-white"}`}>
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className={sectionLabel(isDark)}>{label}</p>
@@ -1064,7 +1064,7 @@ function WorkspaceStateCard({
 }) {
   return (
     <div className="px-5 py-16 sm:px-8">
-      <div className={`mx-auto max-w-2xl rounded-[1.25rem] border px-6 py-10 text-center ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white"}`}>
+      <div className={`mx-auto max-w-2xl rounded-md border px-6 py-10 text-center ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white"}`}>
         <p className={sectionLabel(isDark)}>Scene workspace</p>
         <h2 className={`mt-3 text-xl font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{title}</h2>
         <p className={`mt-3 text-sm leading-7 ${isDark ? "text-slate-400" : "text-stone-500"}`}>{body}</p>
@@ -1163,7 +1163,7 @@ function SceneFolderTree({
                   event.preventDefault()
                   onDropScene(dragItem.id, child.path)
                 }}
-                className={`flex min-w-0 flex-1 items-center justify-between rounded-[0.95rem] border px-3 py-2 text-left text-sm transition ${
+                className={`flex min-w-0 flex-1 items-center justify-between rounded-md border px-3 py-2 text-left text-sm transition ${
                   active
                     ? isDark
                       ? "border-teal-400/30 bg-teal-400/12 text-teal-50"
@@ -1236,7 +1236,7 @@ function ActionButton({
   return (
     <button
       {...props}
-      className={`inline-flex items-center justify-center gap-2 rounded-[0.9rem] border px-4 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${styles[variant]} ${className}`}
+      className={`inline-flex items-center justify-center gap-2 rounded-sm border px-4 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${styles[variant]} ${className}`}
     />
   )
 }
@@ -1263,7 +1263,7 @@ function ActionLink({
       : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"
 
   return (
-    <Link href={href as Route} className={`inline-flex items-center justify-center gap-2 rounded-[0.9rem] border px-4 py-2.5 text-sm font-semibold transition ${classes} ${className ?? ""}`}>
+    <Link href={href as Route} className={`inline-flex items-center justify-center gap-2 rounded-sm border px-4 py-2.5 text-sm font-semibold transition ${classes} ${className ?? ""}`}>
       {children}
     </Link>
   )
@@ -1275,15 +1275,15 @@ function formatMetadataValue(value: unknown) {
 }
 
 function sectionLabel(isDark: boolean) {
-  return `text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-400"}`
+  return `text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-400"}`
 }
 
 function labelClass(isDark: boolean) {
-  return `mb-2 block text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-400" : "text-stone-500"}`
+  return `mb-2 block text-3xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-400" : "text-stone-500"}`
 }
 
 function inputClass(isDark: boolean) {
-  return `w-full rounded-[0.95rem] border px-3 py-2.5 text-sm outline-none transition focus-visible:ring-2 ${
+  return `w-full rounded-md border px-3 py-2.5 text-sm outline-none transition focus-visible:ring-2 ${
     isDark
       ? "border-white/10 bg-[#040b15] text-slate-100 placeholder:text-slate-500 focus-visible:border-teal-300/30 focus-visible:ring-teal-300/20"
       : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400 focus-visible:border-teal-400 focus-visible:ring-teal-200"
@@ -1319,7 +1319,7 @@ function WritingToolsPanel({
 }) {
   if (!visible) {
     return (
-      <section className={`rounded-[1.05rem] border px-4 py-4 sm:px-5 ${isDark ? "border-white/10 bg-[#0b1421]" : "border-stone-200 bg-white"}`}>
+      <section className={`rounded-md border px-4 py-4 sm:px-5 ${isDark ? "border-white/10 bg-[#0b1421]" : "border-stone-200 bg-white"}`}>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className={sectionLabel(isDark)}>Writing assistant</p>
@@ -1332,7 +1332,7 @@ function WritingToolsPanel({
   }
 
   return (
-    <div className="rounded-[1.05rem] border border-white/10 bg-black/10 p-4 sm:p-5">
+    <div className="rounded-md border border-white/10 bg-black/10 p-4 sm:p-5">
       <div className="flex items-center justify-between gap-3">
         <p className={sectionLabel(isDark)}>Writing assistant</p>
         <span className={`text-xs ${isDark ? "text-slate-500" : "text-stone-400"}`}>Loaded on demand</span>

@@ -173,7 +173,7 @@ export function PublicWriterProfilePageClient({
           Back to library
         </Link>
 
-        <section className={`mt-5 rounded-[1.75rem] border p-5 sm:p-6 lg:p-7 ${panelClass}`}>
+        <section className={`mt-5 rounded-lg border p-5 sm:p-6 lg:p-7 ${panelClass}`}>
           <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
             <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
               <div className={`flex h-24 w-24 shrink-0 items-center justify-center rounded-full border text-4xl ${insetClass} ${isDark ? "text-slate-200" : "text-slate-700"}`}>
@@ -181,12 +181,12 @@ export function PublicWriterProfilePageClient({
               </div>
 
               <div className="max-w-xl">
-                <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${eyebrowClass}`}>Public writer profile</p>
+                <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${eyebrowClass}`}>Public writer profile</p>
                 <h1 className="mt-2 font-display text-[2.3rem] tracking-[-0.035em] sm:text-[2.7rem]">@{profileView.username}</h1>
                 <p className={`mt-3 max-w-lg text-sm leading-7 ${mutedText}`}>
                   Visible public profile for reading activity, discussion history, and the public books this writer has chosen to share.
                 </p>
-                <p className={`mt-4 text-[11px] font-semibold uppercase tracking-[0.22em] ${softText}`}>Public forum status: public</p>
+                <p className={`mt-4 text-3xs font-semibold uppercase tracking-[0.22em] ${softText}`}>Public forum status: public</p>
               </div>
             </div>
 
@@ -294,7 +294,7 @@ export function PublicWriterProfilePageClient({
           <div className="mt-5">
             {project ? (
               <div className="grid gap-4 lg:grid-cols-[minmax(0,1.25fr)_16rem]">
-                <div className={`rounded-[1.25rem] border p-5 ${insetClass}`}>
+                <div className={`rounded-md border p-5 ${insetClass}`}>
                   <div className="flex flex-wrap items-center gap-2">
                     {project.genre ? (
                       <span className={`rounded-full px-3 py-1 text-xs font-semibold ${isDark ? "bg-amber-400/15 text-amber-200" : "bg-amber-100 text-amber-800"}`}>
@@ -322,8 +322,8 @@ export function PublicWriterProfilePageClient({
                   ) : null}
                 </div>
 
-                <div className={`rounded-[1.25rem] border p-5 ${insetClass}`}>
-                  <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${softText}`}>Public reach</p>
+                <div className={`rounded-md border p-5 ${insetClass}`}>
+                  <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${softText}`}>Public reach</p>
                   <p className="mt-3 text-[1.75rem] font-semibold tracking-[-0.02em]">{profileView.public_analytics.total_chapter_views.toLocaleString()}</p>
                   <p className={`mt-3 text-sm leading-7 ${mutedText}`}>Chapter opens across this writer&apos;s visible public uploads.</p>
                 </div>
@@ -354,10 +354,10 @@ function SectionCard({
   children: React.ReactNode
 }) {
   return (
-    <section className={`rounded-[1.75rem] border p-5 sm:p-6 ${isDark ? "border-white/[0.08] bg-[#141b23]" : "border-[#dde2e8] bg-white"} ${className}`.trim()}>
+    <section className={`rounded-lg border p-5 sm:p-6 ${isDark ? "border-white/[0.08] bg-[#141b23]" : "border-[#dde2e8] bg-white"} ${className}`.trim()}>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-500"}`}>{eyebrow}</p>
+          <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-500"}`}>{eyebrow}</p>
           <h2 className="mt-1 font-display text-[2rem] tracking-[-0.03em]">{title}</h2>
         </div>
         {trailing ? <div className="sm:pt-1">{trailing}</div> : null}
@@ -406,13 +406,13 @@ function MetricCard({
   icon: React.ReactNode
 }) {
   return (
-    <div className={`rounded-[1.25rem] border p-4 ${isDark ? "border-white/[0.08] bg-[#111820]" : "border-[#e5e7eb] bg-[#fbfcfd]"}`}>
+    <div className={`rounded-md border p-4 ${isDark ? "border-white/[0.08] bg-[#111820]" : "border-[#e5e7eb] bg-[#fbfcfd]"}`}>
       <div className="flex items-start gap-3">
         <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${isDark ? "bg-white/[0.04] text-slate-300" : "bg-white text-slate-500"} border ${isDark ? "border-white/[0.08]" : "border-slate-200"}`}>
           {icon}
         </div>
         <div className="min-w-0">
-          <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-500"}`}>{label}</p>
+          <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-500"}`}>{label}</p>
           <p className="mt-2 text-[1.35rem] font-semibold tracking-[-0.02em]">{value}</p>
           <p className={`mt-1 text-sm leading-6 ${isDark ? "text-slate-400" : "text-slate-600"}`}>{detail}</p>
         </div>
@@ -443,7 +443,7 @@ function TabButton({ isDark, active, onClick, label }: { isDark: boolean; active
 
 function PublicBookCard({ isDark, book }: { isDark: boolean; book: PublicBook }) {
   return (
-    <article className={`rounded-[1.25rem] border p-5 ${isDark ? "border-white/[0.08] bg-[#111820]" : "border-[#e5e7eb] bg-[#fbfcfd]"}`}>
+    <article className={`rounded-md border p-5 ${isDark ? "border-white/[0.08] bg-[#111820]" : "border-[#e5e7eb] bg-[#fbfcfd]"}`}>
       <div className="flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em]">
         <span className={isDark ? "text-cyan-300" : "text-cyan-700"}>{book.genre || "Unspecified genre"}</span>
         <span className="text-slate-400">&bull;</span>
@@ -477,7 +477,7 @@ function PostActivityCard({ isDark, post }: { isDark: boolean; post: PublicUserA
   const statusLabel = post.status === "open" ? "Open" : "Closed"
 
   return (
-    <article className={`rounded-[1.25rem] border p-5 ${isDark ? "border-white/[0.08] bg-[#111820]" : "border-[#e5e7eb] bg-[#fbfcfd]"}`}>
+    <article className={`rounded-md border p-5 ${isDark ? "border-white/[0.08] bg-[#111820]" : "border-[#e5e7eb] bg-[#fbfcfd]"}`}>
       <div className="flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em]">
         <span className={isDark ? "text-cyan-300" : "text-cyan-700"}>{typeLabel}</span>
         <span className="text-slate-400">&bull;</span>
@@ -498,7 +498,7 @@ function PostActivityCard({ isDark, post }: { isDark: boolean; post: PublicUserA
 
 function CommentActivityCard({ isDark, comment }: { isDark: boolean; comment: PublicUserActivityComment }) {
   return (
-    <article className={`rounded-[1.25rem] border p-5 ${isDark ? "border-white/[0.08] bg-[#111820]" : "border-[#e5e7eb] bg-[#fbfcfd]"}`}>
+    <article className={`rounded-md border p-5 ${isDark ? "border-white/[0.08] bg-[#111820]" : "border-[#e5e7eb] bg-[#fbfcfd]"}`}>
       <div className="flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em]">
         <span className={comment.thread_type === "general" ? (isDark ? "text-cyan-300" : "text-cyan-700") : (isDark ? "text-amber-300" : "text-amber-700")}>
           {comment.thread_type === "general" ? "General" : "Novel"}
@@ -523,7 +523,7 @@ function CommentActivityCard({ isDark, comment }: { isDark: boolean; comment: Pu
 
 function InlineEmptyState({ isDark, icon, text }: { isDark: boolean; icon: React.ReactNode; text: string }) {
   return (
-    <div className={`flex items-center gap-3 rounded-[1.25rem] border px-4 py-4 text-sm ${isDark ? "border-white/[0.08] bg-[#111820] text-slate-500" : "border-[#e5e7eb] bg-[#fbfcfd] text-slate-500"}`}>
+    <div className={`flex items-center gap-3 rounded-md border px-4 py-4 text-sm ${isDark ? "border-white/[0.08] bg-[#111820] text-slate-500" : "border-[#e5e7eb] bg-[#fbfcfd] text-slate-500"}`}>
       <span className={isDark ? "text-slate-400" : "text-slate-500"}>{icon}</span>
       <span>{text}</span>
     </div>

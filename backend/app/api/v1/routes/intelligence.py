@@ -2,8 +2,9 @@
 Grounded intelligence routes: contextual Q&A.
 """
 import json
+import hashlib
 import uuid
-from typing import Any, Literal, NotRequired, TypedDict, cast
+from typing import Any, Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.encoders import jsonable_encoder
@@ -16,25 +17,79 @@ from app.api.deps.auth import get_current_user
 from app.api.deps.rate_limit import rate_limit_chat
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.redis import cache_get, cache_set, key_grounded_answer
+from app.core.redis import (
+    cache_get,
+    cache_set,
+    get_cross_book_intelligence_cache,
+    key_grounded_answer,
+    set_cross_book_intelligence_cache,
+)
 from app.models.book import Book, Series, SeriesBook
-from app.models.character import Character
-from app.models.intelligence import WikiEntry
-from app.schemas.intelligence import GroundedAnswerOut, GroundedCitationOut, QARequest
+from app.schemas.intelligence import (
+    CrossBookIntelligenceOut,
+    CrossBookMatchOut,
+    GroundedAnswerOut,
+    GroundedCitationOut,
+    QARequest,
+)
 from app.utils.llm_usage_utils import create_tracked_chat_completion, record_llm_usage_counts
-from app.utils.intelligence_utils import build_grounded_qa_context
+from app.utils.intelligence_utils import (
+    build_grounded_qa_context,
+    compute_cross_book_snapshot_hash,
+    get_cross_book_character_matches,
+    get_cross_book_wiki_matches,
+)
 from app.utils.logging.errors import public_error_message
 
 router = APIRouter()
 
 
-class CrossBookMatch(TypedDict):
-    left_book_id: str
-    left_name: str
-    right_book_id: str
-    right_name: str
-    similarity: float
-    entry_type: NotRequired[str | None]
+@router.get("/{book_id}/cross-book-intelligence", response_model=CrossBookIntelligenceOut)
+async def cross_book_intelligence(
+    book_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await db.get(Book, book_id)
+    if not book or book.user_id != current_user.id:
+        raise HTTPException(404)
+
+    comparison_books = [book]
+    series_name = None
+    if book.primary_series_id:
+        series = await db.get(Series, book.primary_series_id)
+        series_name = series.name if series else None
+        series_book_rows_result = await db.execute(
+            select(Book)
+            .join(SeriesBook, SeriesBook.book_id == Book.id)
+            .where(
+                SeriesBook.series_id == book.primary_series_id,
+                Book.user_id == current_user.id,
+            )
+        )
+        series_book_rows = series_book_rows_result.scalars().all()
+        comparison_books = list(series_book_rows) or [book]
+
+    book_ids = [item.id for item in comparison_books]
+    sorted_book_id_strs = sorted(str(bid) for bid in book_ids)
+    books_hash = hashlib.md5(",".join(sorted_book_id_strs).encode()).hexdigest()[:12]
+    snapshot_hash = await compute_cross_book_snapshot_hash(db, book_ids)
+
+    cached = await get_cross_book_intelligence_cache(books_hash, snapshot_hash)
+    if cached is not None:
+        return CrossBookIntelligenceOut(**{**cached, "cached": True})
+
+    character_matches_raw = await get_cross_book_character_matches(db, book_ids)
+    wiki_matches_raw = await get_cross_book_wiki_matches(db, book_ids)
+
+    payload = {
+        "series_name": series_name,
+        "comparison_book_ids": sorted_book_id_strs,
+        "character_matches": [CrossBookMatchOut(**match) for match in character_matches_raw],
+        "wiki_matches": [CrossBookMatchOut(**match) for match in wiki_matches_raw],
+    }
+    await set_cross_book_intelligence_cache(books_hash, snapshot_hash, payload)
+    return CrossBookIntelligenceOut(**payload)
 
 
 def get_client() -> AsyncOpenAI:
@@ -240,101 +295,4 @@ async def qa_stream_endpoint(
     )
 
 
-@router.get("/{book_id}/cross-book-intelligence")
-async def cross_book_intelligence(
-    book_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user),
-):
-    book = await db.get(Book, book_id)
-    if not book or book.user_id != current_user.id:
-        raise HTTPException(404)
 
-    comparison_books = [book]
-    series_name = None
-    if book.primary_series_id:
-        series = await db.get(Series, book.primary_series_id)
-        series_name = series.name if series else None
-        series_book_rows_result = await db.execute(
-            select(Book)
-            .join(SeriesBook, SeriesBook.book_id == Book.id)
-            .where(
-                SeriesBook.series_id == book.primary_series_id,
-                Book.user_id == current_user.id,
-            )
-        )
-        series_book_rows = series_book_rows_result.scalars().all()
-        comparison_books = list(series_book_rows) or [book]
-
-    book_ids = [item.id for item in comparison_books]
-    characters_result = await db.execute(
-        select(Character).where(
-            Character.book_id.in_(book_ids),
-            Character.embedding.is_not(None),
-        )
-    )
-    characters = characters_result.scalars().all()
-    wikis_result = await db.execute(
-        select(WikiEntry).where(
-            WikiEntry.book_id.in_(book_ids),
-            WikiEntry.embedding.is_not(None),
-        )
-    )
-    wikis = wikis_result.scalars().all()
-
-    character_matches: list[CrossBookMatch] = []
-    for idx, left in enumerate(characters):
-        for right in characters[idx + 1:]:
-            if left.book_id == right.book_id:
-                continue
-            similarity = _cosine_similarity(left.embedding, right.embedding)
-            if similarity < 0.9:
-                continue
-            character_matches.append({
-                "left_book_id": str(left.book_id),
-                "left_name": left.name,
-                "right_book_id": str(right.book_id),
-                "right_name": right.name,
-                "similarity": round(similarity, 3),
-            })
-
-    wiki_matches: list[CrossBookMatch] = []
-    for idx, left in enumerate(wikis):
-        for right in wikis[idx + 1:]:
-            if left.book_id == right.book_id:
-                continue
-            similarity = _cosine_similarity(left.embedding, right.embedding)
-            if similarity < 0.9:
-                continue
-            wiki_matches.append({
-                "left_book_id": str(left.book_id),
-                "left_name": left.name,
-                "right_book_id": str(right.book_id),
-                "right_name": right.name,
-                "similarity": round(similarity, 3),
-                "entry_type": left.entry_type or right.entry_type,
-            })
-
-    character_matches.sort(key=lambda item: item["similarity"], reverse=True)
-    wiki_matches.sort(key=lambda item: item["similarity"], reverse=True)
-    return {
-        "series_name": series_name,
-        "comparison_book_ids": [str(item.id) for item in comparison_books],
-        "character_matches": character_matches[:20],
-        "wiki_matches": wiki_matches[:20],
-    }
-
-
-def _cosine_similarity(left, right) -> float:
-    if left is None or right is None:
-        return 0.0
-    if len(left) != len(right):
-        return 0.0
-    dot = sum(a * b for a, b in zip(left, right))
-    left_mag = sum(a * a for a in left) ** 0.5
-    right_mag = sum(b * b for b in right) ** 0.5
-    if left_mag == 0 or right_mag == 0:
-        return 0.0
-    similarity = dot / (left_mag * right_mag)
-    # Convert to regular Python float to avoid JSON serialization issues
-    return float(similarity)

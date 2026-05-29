@@ -33,8 +33,8 @@ export default function ForgotPasswordPage() {
 
   return (
     <main className={`min-h-screen px-4 py-12 ${isDark ? "bg-black text-white" : "bg-[#f8f3ec] text-stone-950"}`}>
-      <form onSubmit={submit} className={`mx-auto mt-12 max-w-md rounded-[1.5rem] border p-6 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-white"}`}>
-        <p className={`text-[11px] font-semibold uppercase tracking-[0.28em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Account recovery</p>
+      <form onSubmit={submit} className={`mx-auto mt-12 max-w-md rounded-lg border p-6 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-white"}`}>
+        <p className={`text-3xs font-semibold uppercase tracking-[0.28em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Account recovery</p>
         <h1 className="mt-2 text-3xl font-semibold">Reset your password</h1>
         <p className={`mt-3 text-sm leading-6 ${isDark ? "text-slate-400" : "text-stone-600"}`}>
           Enter the email for your LoreVia account and we will send a reset link if the account exists.

@@ -7,6 +7,7 @@ import Link from "next/link"
 
 import { AuthorFeatureComponent } from "@/components/billing/AuthorFeatureComponent"
 import { ThemeBrandImage } from "@/components/layout/ThemeBrandImage"
+import { Button } from "@/components/ui/Button"
 import { canUseAuthorFeatures } from "@/lib/billing/plans"
 import { useCachedBookDetail } from "@/lib/hooks/useBookDetail"
 import { useAuthStore } from "@/lib/stores/authStore"
@@ -210,10 +211,10 @@ export function AuthorToolsNav({
   const expandedRailWidth = railSize === "compact" ? "xl:w-[16.5rem]" : "xl:w-[18.5rem]"
   const hoverExpandedRailWidth = railSize === "compact" ? "xl:group-hover/navwrap:w-[16.5rem] xl:group-focus-within/navwrap:w-[16.5rem]" : "xl:group-hover/navwrap:w-[18.5rem] xl:group-focus-within/navwrap:w-[18.5rem]"
   const containerClass = rail
-    ? `group/rail z-20 flex w-full flex-col overflow-hidden rounded-[1.6rem] border p-3 shadow-[0_22px_54px_-42px_rgba(58,49,37,0.24)] transition-[width,background-color,border-color,box-shadow] duration-300 xl:h-[calc(100vh-7.5rem)] ${isPinnedOpen ? expandedRailWidth : `${collapsedRailWidth} ${hoverExpandedRailWidth}`} ${
+    ? `group/rail z-20 flex w-full flex-col overflow-hidden rounded-lg border p-3 shadow-[0_22px_54px_-42px_rgba(58,49,37,0.24)] transition-[width,background-color,border-color,box-shadow] duration-300 xl:h-[calc(100vh-7.5rem)] ${isPinnedOpen ? expandedRailWidth : `${collapsedRailWidth} ${hoverExpandedRailWidth}`} ${
         isDark ? "border-white/10 bg-[#0b1220]/96 text-white xl:hover:border-white/14 xl:hover:bg-[#101826]/96" : "border-[rgba(var(--border),0.9)] bg-[rgba(255,252,247,0.96)] text-stone-950 xl:hover:border-stone-300 xl:hover:bg-white"
       }`
-    : `sticky top-5 rounded-[1.75rem] border p-4 ${isDark ? "border-white/10 bg-[rgba(8,14,24,0.9)]" : "border-[rgba(var(--border),0.9)] bg-[rgba(255,252,247,0.96)]"}`
+    : `sticky top-5 rounded-lg border p-4 ${isDark ? "border-white/10 bg-[rgba(8,14,24,0.9)]" : "border-[rgba(var(--border),0.9)] bg-[rgba(255,252,247,0.96)]"}`
   const labelVisibility = rail
     ? isPinnedOpen
       ? "opacity-100"
@@ -232,19 +233,18 @@ export function AuthorToolsNav({
           aria-hidden="true"
           className="absolute inset-y-4 left-0 z-20 hidden w-4 xl:block"
         />
-        <button
-          type="button"
+        <Button
+          variant="secondary"
+          size="sm"
           aria-label={isPinnedOpen ? "Collapse sidebar" : "Expand sidebar"}
           data-testid="author-nav-rail-toggle"
           onClick={() => setIsPinnedOpen((current) => !current)}
-          className={`absolute left-0 top-8 z-30 hidden h-10 w-10 -translate-x-1/2 items-center justify-center rounded-full border shadow-[0_16px_34px_-24px_rgba(0,0,0,0.75)] transition xl:flex ${
-            isDark ? "border-white/10 bg-[#0b1220] text-slate-300 hover:bg-[#101826] hover:text-white" : "border-stone-200 bg-white text-stone-600 hover:bg-stone-50 hover:text-stone-950"
-          }`}
+          className="absolute left-0 top-8 z-30 hidden h-10 w-10 -translate-x-1/2 rounded-full shadow-[0_16px_34px_-24px_rgba(0,0,0,0.75)] xl:flex"
         >
           <span className={`transition-transform duration-200 ${isPinnedOpen ? "rotate-180" : ""}`}>
             <NavSvg icon="chevron-right" />
           </span>
-        </button>
+        </Button>
         <aside className={containerClass}>
           <NavHeader isDark={isDark} labelVisibility={labelVisibility} title={title} />
           <p className={`mt-3 line-clamp-2 px-1 text-xs leading-5 transition-opacity duration-200 ${labelVisibility} ${isDark ? "text-slate-500" : "text-stone-500"}`}>
@@ -255,7 +255,7 @@ export function AuthorToolsNav({
             {sections.map((section) => {
               const sectionMarkup = (
               <div>
-                <p className={`mb-2 px-1 text-[10px] font-semibold uppercase tracking-[0.24em] transition-opacity duration-200 ${labelVisibility} ${isDark ? "text-slate-600" : "text-stone-400"}`}>
+                <p className={`mb-2 px-1 text-3xs font-semibold uppercase tracking-[0.24em] transition-opacity duration-200 ${labelVisibility} ${isDark ? "text-slate-600" : "text-stone-400"}`}>
                   {section.title}
                 </p>
                 <div className="space-y-1">
@@ -267,7 +267,7 @@ export function AuthorToolsNav({
                         href={item.href}
                         title={item.label}
                         data-testid={`author-nav-item-${item.id}`}
-                        className={`group/item flex min-h-[3.1rem] items-start gap-3 rounded-[1rem] border px-2.5 py-2.5 text-sm outline-none transition-[background-color,border-color,color,box-shadow,transform] duration-200 focus-visible:ring-2 focus-visible:ring-offset-0 ${
+                        className={`group/item flex min-h-[3.1rem] items-start gap-3 rounded-md border px-2.5 py-2.5 text-sm outline-none transition-[background-color,border-color,color,box-shadow,transform] duration-200 focus-visible:ring-2 focus-visible:ring-offset-0 ${
                           selected
                             ? isDark
                               ? "border-white/12 bg-[linear-gradient(135deg,rgba(94,234,212,0.14),rgba(129,140,248,0.16))] text-white shadow-[0_18px_38px_-28px_rgba(94,234,212,0.18)]"
@@ -277,7 +277,7 @@ export function AuthorToolsNav({
                               : "border-transparent text-stone-600 hover:border-stone-200 hover:bg-stone-100 focus-visible:ring-stone-300 hover:text-stone-950"
                         }`}
                       >
-                        <span className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-[0.8rem] border transition-colors ${
+                        <span className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-sm border transition-colors ${
                           selected
                             ? isDark
                               ? "border-white/15 bg-white/10 text-teal-100"
@@ -290,12 +290,12 @@ export function AuthorToolsNav({
                         </span>
                         <span className={`min-w-0 flex-1 transition-opacity duration-200 ${labelVisibility}`}>
                           <span className="block truncate font-semibold">{item.label}</span>
-                          <span className={`mt-0.5 block truncate text-[10px] uppercase tracking-[0.18em] ${selected ? (isDark ? "text-slate-300" : "text-white/70") : (isDark ? "text-slate-500" : "text-stone-400")}`}>
+                          <span className={`mt-0.5 block truncate text-3xs uppercase tracking-[0.18em] ${selected ? (isDark ? "text-slate-300" : "text-white/70") : (isDark ? "text-slate-500" : "text-stone-400")}`}>
                             {item.tone}
                           </span>
                           <span
                             data-testid={`author-nav-helper-${item.id}`}
-                            className={`mt-1.5 block overflow-hidden text-[11px] leading-4 transition-all duration-200 ${helperVisibility} ${
+                            className={`mt-1.5 block overflow-hidden text-3xs leading-4 transition-all duration-200 ${helperVisibility} ${
                               selected
                                 ? isDark
                                   ? "text-slate-200"
@@ -340,7 +340,7 @@ export function AuthorToolsNav({
         {sections.map((section) => {
           const sectionMarkup = (
           <div>
-            <p className={`mb-2 px-1 text-[10px] font-semibold uppercase tracking-[0.24em] transition-opacity duration-200 ${labelVisibility} ${isDark ? "text-slate-600" : "text-stone-400"}`}>
+            <p className={`mb-2 px-1 text-3xs font-semibold uppercase tracking-[0.24em] transition-opacity duration-200 ${labelVisibility} ${isDark ? "text-slate-600" : "text-stone-400"}`}>
               {section.title}
             </p>
             <div className="space-y-1">
@@ -352,7 +352,7 @@ export function AuthorToolsNav({
                     href={item.href}
                     title={item.label}
                     data-testid={`author-nav-item-${item.id}`}
-                    className={`group/item flex min-h-[3.1rem] items-start gap-3 rounded-[1rem] border px-2.5 py-2.5 text-sm outline-none transition-[background-color,border-color,color,box-shadow,transform] duration-200 focus-visible:ring-2 focus-visible:ring-offset-0 ${
+                    className={`group/item flex min-h-[3.1rem] items-start gap-3 rounded-md border px-2.5 py-2.5 text-sm outline-none transition-[background-color,border-color,color,box-shadow,transform] duration-200 focus-visible:ring-2 focus-visible:ring-offset-0 ${
                       selected
                         ? isDark
                           ? "border-white/12 bg-[linear-gradient(135deg,rgba(94,234,212,0.14),rgba(129,140,248,0.16))] text-white shadow-[0_18px_38px_-28px_rgba(94,234,212,0.18)]"
@@ -362,7 +362,7 @@ export function AuthorToolsNav({
                           : "border-transparent text-stone-600 hover:border-stone-200 hover:bg-stone-100 focus-visible:ring-stone-300 hover:text-stone-950"
                     }`}
                   >
-                    <span className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-[0.8rem] border transition-colors ${
+                    <span className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-sm border transition-colors ${
                       selected
                         ? isDark
                           ? "border-white/15 bg-white/10 text-teal-100"
@@ -375,12 +375,12 @@ export function AuthorToolsNav({
                     </span>
                     <span className={`min-w-0 flex-1 transition-opacity duration-200 ${labelVisibility}`}>
                       <span className="block truncate font-semibold">{item.label}</span>
-                      <span className={`mt-0.5 block truncate text-[10px] uppercase tracking-[0.18em] ${selected ? (isDark ? "text-slate-300" : "text-white/70") : (isDark ? "text-slate-500" : "text-stone-400")}`}>
+                      <span className={`mt-0.5 block truncate text-3xs uppercase tracking-[0.18em] ${selected ? (isDark ? "text-slate-300" : "text-white/70") : (isDark ? "text-slate-500" : "text-stone-400")}`}>
                         {item.tone}
                       </span>
                       <span
                         data-testid={`author-nav-helper-${item.id}`}
-                        className={`mt-1.5 block overflow-hidden text-[11px] leading-4 transition-all duration-200 ${rail ? helperVisibility : selected ? "max-h-20 opacity-100" : "max-h-0 opacity-0"} ${
+                        className={`mt-1.5 block overflow-hidden text-3xs leading-4 transition-all duration-200 ${rail ? helperVisibility : selected ? "max-h-20 opacity-100" : "max-h-0 opacity-0"} ${
                           selected
                             ? isDark
                               ? "text-slate-200"

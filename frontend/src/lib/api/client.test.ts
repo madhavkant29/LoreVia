@@ -77,7 +77,7 @@ describe("api client", () => {
     await loadClientModule()
 
     expect(axiosCreateMock).toHaveBeenCalledWith({
-      baseURL: "http://localhost:8000/api/v1",
+      baseURL: "/api/v1",
       headers: { "Content-Type": "application/json" },
       withCredentials: true,
     })
@@ -97,6 +97,8 @@ describe("api client", () => {
 
   it("uses the backend origin directly for localhost browser sessions", async () => {
     const originalWindow = globalThis.window
+    const originalVitest = process.env.VITEST
+    delete process.env.VITEST
     vi.stubGlobal("window", { location: { hostname: "localhost", origin: "http://localhost:3000" } })
 
     await loadClientModule()
@@ -108,6 +110,7 @@ describe("api client", () => {
     })
 
     vi.stubGlobal("window", originalWindow)
+    if (originalVitest) process.env.VITEST = originalVitest
   })
 
   it("removes uppercase content-type headers from FormData requests", async () => {
@@ -233,7 +236,7 @@ describe("api client", () => {
       response: { status: 401 },
     })
 
-    expect(axiosPostMock).toHaveBeenCalledWith("http://localhost:8000/api/v1/auth/refresh", null, {
+    expect(axiosPostMock).toHaveBeenCalledWith("/api/v1/auth/refresh", null, {
       withCredentials: true,
       headers: { "X-CSRF-Token": "csrf-token" },
     })

@@ -488,7 +488,7 @@ export function WorldbuildingWorkspace({
       ) : null}
 
       <div className="grid gap-4 xl:grid-cols-[17.5rem_minmax(0,1fr)]">
-        <aside className={`overflow-hidden rounded-[1.75rem] border ${panelClass(isDark)}`}>
+        <aside className={`overflow-hidden rounded-lg border ${panelClass(isDark)}`}>
           <div className={`border-b px-5 py-4 ${isDark ? "border-white/10" : "border-stone-200"}`} />
           <div className={`flex items-center justify-between border-b px-5 py-4 ${isDark ? "border-white/10" : "border-stone-200"}`}>
             <div>
@@ -589,7 +589,7 @@ export function WorldbuildingWorkspace({
                     />
                   </LabeledField>
 
-                  <div className={`rounded-[1.35rem] border border-dashed p-4 ${isDark ? "border-white/12 bg-[#07111f]" : "border-stone-300 bg-stone-50"}`}>
+                  <div className={`rounded-lg border border-dashed p-4 ${isDark ? "border-white/12 bg-[#07111f]" : "border-stone-300 bg-stone-50"}`}>
                     <label className="block cursor-pointer">
                       <span className="sr-only">Upload world corpus files</span>
                       <input
@@ -650,7 +650,7 @@ export function WorldbuildingWorkspace({
           </WorkspaceCard>
 
           {loadingDocumentBody ? (
-            <div className={`rounded-[1.7rem] border px-5 py-10 text-center ${panelClass(isDark)}`}>
+            <div className={`rounded-lg border px-5 py-10 text-center ${panelClass(isDark)}`}>
               <p className={`text-sm ${mutedTextClass(isDark)}`}>Loading document content...</p>
             </div>
           ) : null}
@@ -755,7 +755,7 @@ export function WorldbuildingWorkspace({
                               </div>
 
                               <div className={`mt-4 rounded-2xl border px-4 py-3 ${isDark ? "border-amber-300/15 bg-amber-400/10 text-amber-100" : "border-amber-200 bg-amber-50 text-amber-900"}`}>
-                                <p className="text-[11px] font-semibold uppercase tracking-[0.22em]">Suggested fix</p>
+                                <p className="text-3xs font-semibold uppercase tracking-[0.22em]">Suggested fix</p>
                                 <p className="mt-2 text-sm leading-6">{item.suggested_fix}</p>
                               </div>
                             </article>
@@ -1044,7 +1044,7 @@ export function WorldbuildingWorkspace({
             )}
           >
             <div className="grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
-              <div className={`rounded-[1.35rem] border p-4 ${softPanelClass(isDark)}`}>
+              <div className={`rounded-lg border p-4 ${softPanelClass(isDark)}`}>
                 <LabeledField label="Query the canon" isDark={isDark}>
                   <textarea
                     value={logicQuery}
@@ -1113,7 +1113,7 @@ export function WorldbuildingWorkspace({
                 ) : null}
               </div>
 
-              <div className={`rounded-[1.35rem] border p-4 ${softPanelClass(isDark)}`}>
+              <div className={`rounded-lg border p-4 ${softPanelClass(isDark)}`}>
                 <div className="flex flex-wrap gap-2">
                   <span className={badgeClass(isDark)}>{wikiEntries.length} total</span>
                   {Object.entries(wikiTypeSummary).slice(0, 3).map(([type, count]) => (
@@ -1309,11 +1309,11 @@ function WorkspaceCard({
   isDark: boolean
 }) {
   return (
-    <section className={`rounded-[1.55rem] border p-4 md:p-5 ${panelClass(isDark)}`}>
+    <section className={`rounded-lg border p-4 md:p-5 ${panelClass(isDark)}`}>
       <div className={`flex flex-col gap-3 border-b pb-4 md:flex-row md:items-start md:justify-between ${isDark ? "border-white/10" : "border-stone-200"}`}>
         <div className="min-w-0">
           <div className="flex items-center gap-3">
-            <span className={`inline-flex h-6 min-w-6 items-center justify-center rounded-full px-2 text-[11px] font-semibold ${isDark ? "bg-white/8 text-slate-300" : "bg-stone-100 text-stone-600"}`}>
+            <span className={`inline-flex h-6 min-w-6 items-center justify-center rounded-full px-2 text-3xs font-semibold ${isDark ? "bg-white/8 text-slate-300" : "bg-stone-100 text-stone-600"}`}>
               {number}
             </span>
             <p className={eyebrowClass(isDark)}>{sectionLabel}</p>
@@ -1342,7 +1342,7 @@ function MetricCard({
   isDark: boolean
 }) {
   return (
-    <div className={`rounded-[1.35rem] border px-4 py-4 ${panelClass(isDark)}`}>
+    <div className={`rounded-lg border px-4 py-4 ${panelClass(isDark)}`}>
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className={eyebrowClass(isDark)}>{label}</p>
@@ -1366,7 +1366,7 @@ function LabeledField({
 }) {
   return (
     <label className="block">
-      <span className={`mb-2 block text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>{label}</span>
+      <span className={`mb-2 block text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>{label}</span>
       {children}
     </label>
   )
@@ -1386,7 +1386,7 @@ function SectionPanel({
   isDark: boolean
 }) {
   return (
-    <div className={`rounded-[1.4rem] border p-4 ${isDark ? "border-white/10 bg-[#08101b]" : "border-stone-200 bg-stone-50/80"}`}>
+    <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-[#08101b]" : "border-stone-200 bg-stone-50/80"}`}>
       <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
         <div>
           <h3 className={`text-base font-semibold ${titleTextClass(isDark)}`}>{title}</h3>
@@ -1420,7 +1420,7 @@ function EmptyState({
   compact?: boolean
 }) {
   return (
-    <div className={`rounded-[1.35rem] border border-dashed px-5 text-center ${isDark ? "border-white/10 bg-white/[0.02]" : "border-stone-300 bg-stone-50"} ${compact ? "py-6" : "py-10"}`}>
+    <div className={`rounded-lg border border-dashed px-5 text-center ${isDark ? "border-white/10 bg-white/[0.02]" : "border-stone-300 bg-stone-50"} ${compact ? "py-6" : "py-10"}`}>
       <p className={`text-sm font-medium ${titleTextClass(isDark)}`}>{title}</p>
       <p className={`mt-2 text-sm ${mutedTextClass(isDark)}`}>{description}</p>
     </div>
@@ -1429,7 +1429,7 @@ function EmptyState({
 
 function LoadingState({ label, isDark }: { label: string; isDark: boolean }) {
   return (
-    <div className={`rounded-[1.35rem] border border-dashed px-5 py-10 text-center ${isDark ? "border-white/10 bg-white/[0.02] text-slate-400" : "border-stone-300 bg-stone-50 text-stone-500"}`}>
+    <div className={`rounded-lg border border-dashed px-5 py-10 text-center ${isDark ? "border-white/10 bg-white/[0.02] text-slate-400" : "border-stone-300 bg-stone-50 text-stone-500"}`}>
       {label}
     </div>
   )
@@ -1449,7 +1449,7 @@ function BacklogColumn({
   isDark: boolean
 }) {
   return (
-    <div className={`rounded-[1.4rem] border p-4 ${softPanelClass(isDark)}`}>
+    <div className={`rounded-lg border p-4 ${softPanelClass(isDark)}`}>
       <div className="flex items-center gap-2">
         <p className={eyebrowClass(isDark)}>{label}</p>
         <span className={badgeClass(isDark)}>{count}</span>
@@ -1527,7 +1527,7 @@ function softPanelClass(isDark: boolean) {
 }
 
 function eyebrowClass(isDark: boolean) {
-  return `text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-400" : "text-stone-500"}`
+  return `text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-400" : "text-stone-500"}`
 }
 
 function titleTextClass(isDark: boolean) {
@@ -1578,13 +1578,13 @@ function mutedActionClass(isDark: boolean, accent: "teal") {
 }
 
 function badgeClass(isDark: boolean) {
-  return `rounded-full px-2.5 py-1 text-[11px] font-semibold ${isDark ? "bg-white/8 text-slate-300" : "bg-stone-100 text-stone-600"}`
+  return `rounded-full px-2.5 py-1 text-3xs font-semibold ${isDark ? "bg-white/8 text-slate-300" : "bg-stone-100 text-stone-600"}`
 }
 
 function accentBadgeClass(accent: "teal" | "blue" | "amber", isDark: boolean) {
-  if (accent === "teal") return `rounded-full px-2.5 py-1 text-[11px] font-semibold ${isDark ? "bg-teal-500/10 text-teal-200" : "bg-teal-50 text-teal-700"}`
-  if (accent === "amber") return `rounded-full px-2.5 py-1 text-[11px] font-semibold ${isDark ? "bg-amber-400/15 text-amber-100" : "bg-amber-50 text-amber-800"}`
-  return `rounded-full px-2.5 py-1 text-[11px] font-semibold ${isDark ? "bg-sky-500/10 text-sky-200" : "bg-sky-50 text-sky-700"}`
+  if (accent === "teal") return `rounded-full px-2.5 py-1 text-3xs font-semibold ${isDark ? "bg-teal-500/10 text-teal-200" : "bg-teal-50 text-teal-700"}`
+  if (accent === "amber") return `rounded-full px-2.5 py-1 text-3xs font-semibold ${isDark ? "bg-amber-400/15 text-amber-100" : "bg-amber-50 text-amber-800"}`
+  return `rounded-full px-2.5 py-1 text-3xs font-semibold ${isDark ? "bg-sky-500/10 text-sky-200" : "bg-sky-50 text-sky-700"}`
 }
 
 function accentDotClass(accent: "teal" | "blue" | "violet" | "amber", isDark: boolean) {
@@ -1632,15 +1632,15 @@ function severityClass(severity: string, isDark: boolean) {
   const normalized = severity.toLowerCase()
   if (normalized === "critical") {
     return isDark
-      ? "rounded-full bg-rose-500/15 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-rose-200"
-      : "rounded-full bg-rose-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-rose-700"
+      ? "rounded-full bg-rose-500/15 px-2.5 py-1 text-3xs font-semibold uppercase tracking-[0.18em] text-rose-200"
+      : "rounded-full bg-rose-50 px-2.5 py-1 text-3xs font-semibold uppercase tracking-[0.18em] text-rose-700"
   }
   if (normalized === "high") {
     return isDark
-      ? "rounded-full bg-amber-400/15 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-100"
-      : "rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-800"
+      ? "rounded-full bg-amber-400/15 px-2.5 py-1 text-3xs font-semibold uppercase tracking-[0.18em] text-amber-100"
+      : "rounded-full bg-amber-50 px-2.5 py-1 text-3xs font-semibold uppercase tracking-[0.18em] text-amber-800"
   }
   return isDark
-    ? "rounded-full bg-white/8 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-200"
-    : "rounded-full bg-stone-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-700"
+    ? "rounded-full bg-white/8 px-2.5 py-1 text-3xs font-semibold uppercase tracking-[0.18em] text-slate-200"
+    : "rounded-full bg-stone-100 px-2.5 py-1 text-3xs font-semibold uppercase tracking-[0.18em] text-stone-700"
 }

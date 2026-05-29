@@ -119,13 +119,13 @@ export function ManuscriptPagedPreview({
 
   return (
     <div
-      className={`rounded-[1.35rem] border p-4 shadow-[0_24px_80px_-55px_rgba(15,23,42,0.28)] ${
+      className={`rounded-lg border p-4 shadow-card ${
         isDark ? "border-white/10 bg-[#0c1118]/92" : "border-[#d8d0c4] bg-[#f8f4ee]"
       }`}
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-sky-300" : "text-sky-700"}`}>
+          <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-sky-300" : "text-sky-700"}`}>
             Read-only paged preview
           </p>
           <p className={`mt-2 text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>
@@ -168,7 +168,7 @@ export function ManuscriptPagedPreview({
         ref={shellRef}
         data-testid="manuscript-paged-preview-shell"
         data-preview-page-count={pageCount}
-        className={`manuscript-paged-preview-shell relative mx-auto mt-4 max-w-[980px] rounded-[1.15rem] border ${
+        className={`manuscript-paged-preview-shell relative mx-auto mt-4 max-w-[980px] rounded-md border ${
           isDark ? "border-white/10 bg-[#05070a]" : "border-[#e7dfd3] bg-[#efe6d8]"
         }`}
         style={previewStyle}

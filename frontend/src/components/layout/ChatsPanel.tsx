@@ -287,7 +287,7 @@ export function ChatsPanel({ mode = "sidebar" }: { mode?: "sidebar" | "page" }) 
 
           {relationships?.incoming_requests.length ? (
             <div className="mt-4 space-y-2">
-              <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-500"}`}>Pending for you</p>
+              <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-500"}`}>Pending for you</p>
               {relationships.incoming_requests.slice(0, 3).map((request) => (
                 <div key={request.id} className={`rounded-2xl border px-3 py-3 text-sm ${isDark ? "border-white/10 bg-white/[0.03] text-slate-300" : "border-slate-200 bg-white text-slate-700"}`}>
                   @{request.requester_username || "member"} wants to connect.
@@ -297,7 +297,7 @@ export function ChatsPanel({ mode = "sidebar" }: { mode?: "sidebar" | "page" }) 
           ) : null}
 
           <div className="mt-4">
-            <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-500"}`}>Conversations</p>
+            <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-500"}`}>Conversations</p>
             <div className="mt-3 space-y-2">
               {loading ? (
                 <div className={`rounded-2xl border px-3 py-4 text-sm ${isDark ? "border-white/10 bg-white/[0.03] text-slate-400" : "border-slate-200 bg-white text-slate-500"}`}>Loading chats...</div>
@@ -316,7 +316,7 @@ export function ChatsPanel({ mode = "sidebar" }: { mode?: "sidebar" | "page" }) 
                   <div className="flex items-center justify-between gap-3">
                     <p className="text-sm font-semibold">@{conversation.other_user.username}</p>
                     {conversation.unread_count > 0 ? (
-                      <span className="rounded-full bg-rose-500 px-2 py-0.5 text-[11px] font-semibold text-white">{Math.min(conversation.unread_count, 9)}</span>
+                      <span className="rounded-full bg-rose-500 px-2 py-0.5 text-3xs font-semibold text-white">{Math.min(conversation.unread_count, 9)}</span>
                     ) : null}
                   </div>
                   <p className={`mt-1 line-clamp-2 text-xs leading-5 ${isDark ? "text-slate-400" : "text-slate-600"}`}>{conversation.last_message_preview || "No messages yet."}</p>
@@ -327,7 +327,7 @@ export function ChatsPanel({ mode = "sidebar" }: { mode?: "sidebar" | "page" }) 
 
           {search.length >= 2 ? (
             <div className="mt-4">
-              <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-500"}`}>Search results</p>
+              <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-500"}`}>Search results</p>
               <div className="mt-3 space-y-2">
                 {searching ? (
                   <div className={`rounded-2xl border px-3 py-4 text-sm ${isDark ? "border-white/10 bg-white/[0.03] text-slate-400" : "border-slate-200 bg-white text-slate-500"}`}>Searching...</div>
@@ -373,7 +373,7 @@ export function ChatsPanel({ mode = "sidebar" }: { mode?: "sidebar" | "page" }) 
                       <div key={message.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
                         <div className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-6 ${mine ? (isDark ? "bg-amber-400 text-slate-950" : "bg-[#ff6a1a] text-white") : (isDark ? "bg-white/[0.05] text-slate-100" : "bg-slate-100 text-slate-800")}`}>
                           <p>{message.body}</p>
-                          <p className={`mt-2 text-[11px] ${mine ? "text-current/80" : (isDark ? "text-slate-500" : "text-slate-500")}`}>{new Date(message.created_at).toLocaleString()}</p>
+                          <p className={`mt-2 text-3xs ${mine ? "text-current/80" : (isDark ? "text-slate-500" : "text-slate-500")}`}>{new Date(message.created_at).toLocaleString()}</p>
                         </div>
                       </div>
                     )

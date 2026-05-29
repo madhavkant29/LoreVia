@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import select
@@ -14,6 +15,7 @@ from app.schemas.books import (
     ChapterSceneOrderUpdateBody,
     ChapterVersionDetailOut,
     ChapterVersionOut,
+    ChapterVersionRestoreStatusOut,
     ManuscriptAnnotationBody,
     ManuscriptAnnotationOut,
     ManuscriptWorkspaceTreeOut,
@@ -33,7 +35,6 @@ from app.utils.book_utils import (
     collaboration_can_edit,
     delete_manuscript_annotation,
     delete_novel_scene,
-    extract_novel_scene_candidates,
     get_chapter_version_content,
     get_scene_version_content,
     get_book_with_collaboration_access,
@@ -42,7 +43,6 @@ from app.utils.book_utils import (
     list_novel_scenes,
     list_scene_versions,
     reorder_chapter_novel_scenes,
-    replace_chapter_novel_scenes,
     restore_chapter_version,
     restore_scene_version,
     save_manuscript_annotation,
@@ -51,10 +51,9 @@ from app.utils.book_utils import (
     snapshot_chapter_version,
     snapshot_scene_version,
     manuscript_text_to_html,
-    sync_chapter_content_from_novel_scenes,
 )
 from app.utils.billing_utils import require_author_access
-from app.workers.consumers.extraction_consumer import _process_chapter
+from app.workers.tasks.extraction_tasks import process_chapter_task
 
 router = APIRouter()
 
@@ -531,46 +530,46 @@ async def restore_saved_chapter_version(
         raise HTTPException(403, "This share cannot edit the manuscript.")
     if collaborator is None:
         require_author_access(current_user)
-    if collaborator is not None:
-        version = (
-            await db.execute(
-                select(ChapterVersion).where(ChapterVersion.book_id == book.id, ChapterVersion.id == version_id)
-            )
-        ).scalar_one_or_none()
-        if version is None:
-            raise HTTPException(404, "Chapter version not found")
-        if not collaboration_allows_chapter(collaborator, version.chapter_number):
-            raise HTTPException(403, "This share cannot restore that chapter.")
+    version = (
+        await db.execute(
+            select(ChapterVersion).where(ChapterVersion.book_id == book.id, ChapterVersion.id == version_id)
+        )
+    ).scalar_one_or_none()
+    if version is None:
+        raise HTTPException(404, "Chapter version not found")
+    if collaborator is not None and not collaboration_allows_chapter(collaborator, version.chapter_number):
+        raise HTTPException(403, "This share cannot restore that chapter.")
+
     restored = await restore_chapter_version(db, book=book, version_id=version_id)
-    await _process_chapter(
-        db,
-        book,
-        {
-            "number": restored["chapter_number"],
-            "title": restored["title"],
-            "text": restored["text"],
-            "html": restored["html"],
-            "description": None,
-            "images": [],
-        },
-    )
-    if book.work_type != "screenplay":
-        extracted_scenes = extract_novel_scene_candidates(
-            text=restored["text"],
-            chapter_number=restored["chapter_number"],
-            source="chapter_sync",
+
+    version = await db.get(ChapterVersion, version_id)
+    if version is None or version.book_id != book.id:
+        raise HTTPException(404, "Chapter version not found")
+    version.restore_status = "queued"
+    version.restore_error = None
+    version.restore_task_id = None
+    version.restore_started_at = None
+    version.restore_completed_at = None
+    await db.commit()
+
+    try:
+        task = process_chapter_task.apply_async(
+            args=[str(book.id), restored["chapter_number"], str(version_id)],
+            queue="extraction",
         )
-        await replace_chapter_novel_scenes(
-            db,
-            book=book,
-            chapter_number=restored["chapter_number"],
-            scenes=extracted_scenes,
-        )
-        await sync_chapter_content_from_novel_scenes(
-            db,
-            book=book,
-            chapter_number=restored["chapter_number"],
-        )
+    except Exception as exc:
+        version.restore_status = "failed"
+        version.restore_error = str(exc)[:2000]
+        version.restore_completed_at = datetime.now(UTC)
+        await db.commit()
+        raise HTTPException(500, "Unable to queue restore processing.") from exc
+
+    version.restore_status = "processing"
+    version.restore_task_id = getattr(task, "id", None)
+    version.restore_started_at = datetime.now(UTC)
+    version.restore_completed_at = None
+    await db.commit()
+
     versions = await list_chapter_versions(db, book, restored["chapter_number"], 12)
     scenes = await list_novel_scenes(
         db,
@@ -578,7 +577,10 @@ async def restore_saved_chapter_version(
         collaborator=collaborator,
         chapter_number=restored["chapter_number"],
     )
+
     return {
+        "status": "restore_queued",
+        "task_id": getattr(task, "id", None),
         "chapter_number": restored["chapter_number"],
         "title": restored["title"],
         "text": restored["text"],
@@ -586,6 +588,38 @@ async def restore_saved_chapter_version(
         "versions": versions,
         "scenes": scenes,
     }
+
+
+@router.get("/{book_id}/chapter-versions/{version_id}/restore-status", response_model=ChapterVersionRestoreStatusOut)
+async def get_chapter_version_restore_status(
+    book_id: uuid.UUID,
+    version_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
+    if collaborator and not collaboration_can_edit(collaborator):
+        raise HTTPException(403, "This share cannot edit the manuscript.")
+    if collaborator is None:
+        require_author_access(current_user)
+    version = (
+        await db.execute(
+            select(ChapterVersion).where(ChapterVersion.book_id == book.id, ChapterVersion.id == version_id)
+        )
+    ).scalar_one_or_none()
+    if version is None:
+        raise HTTPException(404, "Chapter version not found")
+    if collaborator is not None and not collaboration_allows_chapter(collaborator, version.chapter_number):
+        raise HTTPException(403, "This share cannot access that chapter history.")
+    return ChapterVersionRestoreStatusOut(
+        id=str(version.id),
+        chapter_number=version.chapter_number,
+        restore_status=version.restore_status,
+        restore_error=version.restore_error,
+        restore_task_id=version.restore_task_id,
+        restore_started_at=version.restore_started_at,
+        restore_completed_at=version.restore_completed_at,
+    )
 
 
 @router.post("/{book_id}/scenes/{scene_id}/insert")

@@ -96,7 +96,7 @@ export default async function BlogArticlePage({ params }: { params: Promise<{ sl
       <JsonLdScript id={`blog-breadcrumbs-jsonld-${article.slug}`} data={breadcrumbJsonLd} />
 
       <section className="app-container py-10 md:py-14">
-        <div className="app-panel app-panel--strong rounded-[2rem] p-6 md:p-8 lg:p-10">
+        <div className="app-panel app-panel--strong rounded-lg p-6 md:p-8 lg:p-10">
           <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
             <Link href="/blog" className="hover:text-foreground">
               Blog
@@ -134,7 +134,7 @@ export default async function BlogArticlePage({ params }: { params: Promise<{ sl
         
         <div className="mt-8 grid gap-8 lg:grid-cols-[0.75fr_1.25fr]">
           <aside className="space-y-6 lg:sticky lg:top-28">
-            <div className="app-panel app-panel--strong rounded-[2rem] p-6 md:p-8">
+            <div className="app-panel app-panel--strong rounded-lg p-6 md:p-8">
               <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">Key takeaways</p>
               <ul className="mt-5 space-y-4 text-sm leading-7 text-foreground/85">
                 {article.highlights.map((highlight) => (
@@ -146,13 +146,13 @@ export default async function BlogArticlePage({ params }: { params: Promise<{ sl
               </ul>
             </div>
 
-            <div className="app-panel rounded-[2rem] p-6 md:p-8">
+            <div className="app-panel rounded-lg p-6 md:p-8">
               <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">Why this guide exists</p>
               <p className="mt-4 text-sm leading-7 text-muted-foreground">{article.description}</p>
             </div>
 
             {demoPage ? (
-              <div className="app-panel rounded-[2rem] p-6 md:p-8">
+              <div className="app-panel rounded-lg p-6 md:p-8">
                 <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">See it in action</p>
                 <h2 className="mt-3 text-xl font-semibold tracking-[-0.02em] text-foreground">{demoPage.title}</h2>
                 <p className="mt-3 text-sm leading-7 text-muted-foreground">{demoPage.featuredInsight}</p>
@@ -166,7 +166,7 @@ export default async function BlogArticlePage({ params }: { params: Promise<{ sl
 
           <article className="space-y-6">
             {article.sections.map((section) => (
-              <section key={section.heading} className="app-panel rounded-[2rem] p-6 md:p-8">
+              <section key={section.heading} className="app-panel rounded-lg p-6 md:p-8">
                 <h2 className="text-[2rem] font-semibold tracking-[-0.03em] text-foreground md:text-[2.2rem]">
                   {section.heading}
                 </h2>
@@ -190,7 +190,7 @@ export default async function BlogArticlePage({ params }: { params: Promise<{ sl
                 ) : null}
 
                 {section.highlight ? (
-                  <div className="mt-6 rounded-[1.4rem] border border-[rgba(var(--border),0.8)] bg-[rgba(31,97,93,0.08)] p-5 text-sm leading-7 text-foreground/85 dark:bg-[rgba(105,180,173,0.08)]">
+                  <div className="mt-6 rounded-lg border border-[rgba(var(--border),0.8)] bg-[rgba(31,97,93,0.08)] p-5 text-sm leading-7 text-foreground/85 dark:bg-[rgba(105,180,173,0.08)]">
                     {section.highlight}
                   </div>
                 ) : null}
@@ -201,7 +201,7 @@ export default async function BlogArticlePage({ params }: { params: Promise<{ sl
       </section>
 
       <section className="app-container pb-8">
-        <div className="app-panel app-panel--subtle rounded-[2rem] p-6 md:p-8 lg:p-10">
+        <div className="app-panel app-panel--subtle rounded-lg p-6 md:p-8 lg:p-10">
           <div className="max-w-2xl">
             <p className="app-eyebrow">Related answers</p>
             <h2 className="mt-4 text-3xl font-semibold tracking-[-0.03em] text-foreground md:text-4xl">
@@ -211,7 +211,7 @@ export default async function BlogArticlePage({ params }: { params: Promise<{ sl
 
           <div className="mt-8 grid gap-5 lg:grid-cols-3">
             {supportingAnswers.map((answer) => (
-              <article key={answer.slug} className="h-full rounded-[1.6rem] border border-[rgba(var(--border),0.76)] bg-white/70 p-6 dark:bg-white/[0.04]">
+              <article key={answer.slug} className="h-full rounded-lg border border-[rgba(var(--border),0.76)] bg-white/70 p-6 dark:bg-white/[0.04]">
                 <h3 className="text-xl font-semibold tracking-[-0.03em] text-foreground">
                   <Link href={`/answers/${answer.slug}`} className="hover:text-[rgb(var(--accent))]">
                     {answer.question}
@@ -225,7 +225,7 @@ export default async function BlogArticlePage({ params }: { params: Promise<{ sl
       </section>
 
       <section className="app-container pb-20 pt-8 md:pb-24">
-        <div className="app-panel app-panel--strong rounded-[2rem] p-7 md:p-10">
+        <div className="app-panel app-panel--strong rounded-lg p-7 md:p-10">
           <div className="max-w-3xl">
             <p className="app-eyebrow">Try LoreVia</p>
             <h2 className="mt-4 text-3xl font-semibold tracking-[-0.03em] text-foreground md:text-4xl">

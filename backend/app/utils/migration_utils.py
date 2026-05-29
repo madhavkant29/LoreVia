@@ -6,6 +6,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from alembic import op
+import sqlalchemy as sa
 
 LOCAL_DATABASE_HOSTS = {"localhost", "127.0.0.1", "::1", "postgres", "db"}
 CORE_APPLICATION_TABLES = frozenset({"users", "books", "chapters"})
@@ -134,6 +135,53 @@ def should_reset_local_alembic_state(existing_tables: set[str]) -> bool:
     return "alembic_version" in existing_tables and not CORE_APPLICATION_TABLES.issubset(existing_tables)
 
 
+def drop_orphan_table_rowtype_if_present_sql(table_name: str, *, schema: str = "public") -> str:
+    """Return SQL that drops a leftover composite type when the table is missing."""
+
+    return "\n".join(
+        (
+            "DO $$",
+            "DECLARE",
+            "    target_rel_oid oid;",
+            "    target_type_oid oid;",
+            "BEGIN",
+            "    SELECT c.oid",
+            "    INTO target_rel_oid",
+            "    FROM pg_class c",
+            "    JOIN pg_namespace n ON n.oid = c.relnamespace",
+            f"    WHERE n.nspname = {_quote_literal(schema)}",
+            f"      AND c.relname = {_quote_literal(table_name)}",
+            "      AND c.relkind IN ('r', 'p', 'v', 'm', 'f');",
+            "",
+            "    IF target_rel_oid IS NULL THEN",
+            "        SELECT t.oid",
+            "        INTO target_type_oid",
+            "        FROM pg_type t",
+            "        JOIN pg_namespace n ON n.oid = t.typnamespace",
+            f"        WHERE n.nspname = {_quote_literal(schema)}",
+            f"          AND t.typname = {_quote_literal(table_name)};",
+            "",
+            "        IF target_type_oid IS NOT NULL THEN",
+            f"            EXECUTE 'DROP TYPE ' || {_quote_literal(_qualified_name(schema, table_name))};",
+            "        END IF;",
+            "    END IF;",
+            "END",
+            "$$;",
+        )
+    )
+
+
+def drop_orphan_table_rowtype_if_present_on_connection(
+    connection: sa.Connection,
+    table_name: str,
+    *,
+    schema: str = "public",
+) -> None:
+    """Drop a leftover table rowtype using a SQLAlchemy connection."""
+
+    connection.execute(sa.text(drop_orphan_table_rowtype_if_present_sql(table_name, schema=schema)))
+
+
 def drop_orphan_table_rowtype_if_present(table_name: str, *, schema: str = "public") -> None:
     """Drop a leftover composite type when the table itself is missing.
 
@@ -144,39 +192,7 @@ def drop_orphan_table_rowtype_if_present(table_name: str, *, schema: str = "publ
     metadata.
     """
 
-    op.execute(
-        "\n".join(
-            (
-                "DO $$",
-                "DECLARE",
-                "    target_rel_oid oid;",
-                "    target_type_oid oid;",
-                "BEGIN",
-                "    SELECT c.oid",
-                "    INTO target_rel_oid",
-                "    FROM pg_class c",
-                "    JOIN pg_namespace n ON n.oid = c.relnamespace",
-                f"    WHERE n.nspname = {_quote_literal(schema)}",
-                f"      AND c.relname = {_quote_literal(table_name)}",
-                "      AND c.relkind IN ('r', 'p', 'v', 'm', 'f');",
-                "",
-                "    IF target_rel_oid IS NULL THEN",
-                "        SELECT t.oid",
-                "        INTO target_type_oid",
-                "        FROM pg_type t",
-                "        JOIN pg_namespace n ON n.oid = t.typnamespace",
-                f"        WHERE n.nspname = {_quote_literal(schema)}",
-                f"          AND t.typname = {_quote_literal(table_name)};",
-                "",
-                "        IF target_type_oid IS NOT NULL THEN",
-                f"            EXECUTE 'DROP TYPE ' || {_quote_literal(_qualified_name(schema, table_name))};",
-                "        END IF;",
-                "    END IF;",
-                "END",
-                "$$;",
-            )
-        )
-    )
+    op.execute(drop_orphan_table_rowtype_if_present_sql(table_name, schema=schema))
 
 
 def grant_supabase_data_api_table_access(

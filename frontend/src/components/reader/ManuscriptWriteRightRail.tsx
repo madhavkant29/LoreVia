@@ -91,7 +91,7 @@ export function ManuscriptWriteRightRail({
 
   return (
     <aside className="min-w-0 space-y-3 xl:sticky xl:top-4 xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto">
-      <div className={`rounded-[1.45rem] border p-1.5 ${isDark ? "border-white/10 bg-[#0c1118]/92" : "border-stone-200 bg-white/90"}`}>
+      <div className={`rounded-lg border p-1.5 ${isDark ? "border-white/10 bg-[#0c1118]/92" : "border-stone-200 bg-white/90"}`}>
         <div className="flex items-center gap-1" role="tablist" aria-label="Writing context panels">
           {([
             ["context", "Context"],
@@ -122,11 +122,11 @@ export function ManuscriptWriteRightRail({
       </div>
 
       {activeRightPane === "character" && selectedCharCard ? (
-        <div className={`rounded-[1.35rem] border p-4 ${isDark ? "border-white/10 bg-[#0c1118]/92" : "border-stone-200 bg-white/90"}`}>
+        <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-[#0c1118]/92" : "border-stone-200 bg-white/90"}`}>
           <button
             type="button"
             onClick={onClearSelectedCharCard}
-            className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}
+            className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}
           >
             Back to context
           </button>
@@ -144,9 +144,9 @@ export function ManuscriptWriteRightRail({
 
       {activeRightPane === "context" ? (
         <>
-          <div className={`rounded-[1.35rem] border p-4 ${isDark ? "border-white/10 bg-[#0c1118]/92" : "border-stone-200 bg-white/90"}`}>
+          <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-[#0c1118]/92" : "border-stone-200 bg-white/90"}`}>
             <div className="flex items-center justify-between gap-3">
-              <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Active characters</p>
+              <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Active characters</p>
               <span className={`text-sm font-semibold ${isDark ? "text-slate-300" : "text-stone-700"}`}>{activeChapterContextCharacters.length || Math.min(4, characters.length)}</span>
             </div>
             <div className="mt-4 space-y-3">
@@ -172,9 +172,9 @@ export function ManuscriptWriteRightRail({
             <Link href={`/${bookId}/characters`} className={`mt-4 inline-flex text-sm ${isDark ? "text-sky-300" : "text-sky-700"}`}>View all characters -&gt;</Link>
           </div>
 
-          <div className={`rounded-[1.35rem] border p-4 ${isDark ? "border-white/10 bg-[#0c1118]/92" : "border-stone-200 bg-white/90"}`}>
+          <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-[#0c1118]/92" : "border-stone-200 bg-white/90"}`}>
             <div className="flex items-center justify-between gap-3">
-              <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Unresolved threads</p>
+              <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Unresolved threads</p>
               <span className={`text-sm font-semibold ${isDark ? "text-slate-300" : "text-stone-700"}`}>{activeThreadSummary.length || Math.min(3, plotThreads.length)}</span>
             </div>
             <div className="mt-4 space-y-3">
@@ -189,9 +189,9 @@ export function ManuscriptWriteRightRail({
             <Link href={`/${bookId}/plot-threads`} className={`mt-4 inline-flex text-sm ${isDark ? "text-sky-300" : "text-sky-700"}`}>View all threads -&gt;</Link>
           </div>
 
-          <div className={`rounded-[1.35rem] border p-4 ${isDark ? "border-white/10 bg-[#0c1118]/92" : "border-stone-200 bg-white/90"}`}>
+          <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-[#0c1118]/92" : "border-stone-200 bg-white/90"}`}>
             <div className="flex items-center justify-between gap-3">
-              <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Recent events</p>
+              <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Recent events</p>
               <span className={`text-sm font-semibold ${isDark ? "text-slate-300" : "text-stone-700"}`}>{recentEventSummary.length}</span>
             </div>
             <div className="mt-4 space-y-3">
@@ -206,9 +206,9 @@ export function ManuscriptWriteRightRail({
             <Link href={`/${bookId}/timeline`} className={`mt-4 inline-flex text-sm ${isDark ? "text-sky-300" : "text-sky-700"}`}>View timeline -&gt;</Link>
           </div>
 
-          <div className={`rounded-[1.35rem] border p-4 ${isDark ? "border-white/10 bg-[#0c1118]/92" : "border-stone-200 bg-white/90"}`}>
+          <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-[#0c1118]/92" : "border-stone-200 bg-white/90"}`}>
             <div className="flex items-center justify-between gap-3">
-              <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Continuity warnings</p>
+              <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Continuity warnings</p>
               <span className={`text-sm font-semibold ${isDark ? "text-slate-300" : "text-stone-700"}`}>{warningSummary.length || review?.continuity_issues.length || 0}</span>
             </div>
             <div className="mt-4 space-y-3">
@@ -222,17 +222,17 @@ export function ManuscriptWriteRightRail({
             </div>
           </div>
 
-          <div className={`rounded-[1.35rem] border p-4 ${isDark ? "border-sky-400/20 bg-sky-400/[0.04]" : "border-sky-200 bg-sky-50/80"}`}>
+          <div className={`rounded-lg border p-4 ${isDark ? "border-sky-400/20 bg-sky-400/[0.04]" : "border-sky-200 bg-sky-50/80"}`}>
             <div className="flex items-center justify-between gap-3">
-              <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Ask LoreVia</p>
-              <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${isDark ? "bg-sky-500/15 text-sky-200" : "bg-sky-100 text-sky-700"}`}>Beta</span>
+              <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Ask LoreVia</p>
+              <span className={`rounded-full px-2 py-0.5 text-3xs font-semibold ${isDark ? "bg-sky-500/15 text-sky-200" : "bg-sky-100 text-sky-700"}`}>Beta</span>
             </div>
             <input
               type="text"
               readOnly
               aria-label="Ask LoreVia about your story"
               placeholder="Ask anything about your story..."
-              className={`mt-4 w-full rounded-[1rem] border px-3 py-3 text-sm outline-none ${isDark ? "border-white/10 bg-black/20 text-slate-300 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-700 placeholder:text-stone-400"}`}
+              className={`mt-4 w-full rounded-md border px-3 py-3 text-sm outline-none ${isDark ? "border-white/10 bg-black/20 text-slate-300 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-700 placeholder:text-stone-400"}`}
             />
             <div className="mt-3 flex flex-wrap gap-2">
               <button type="button" onClick={() => onOpenRightPane("context")} className={`rounded-full px-3 py-1.5 text-xs font-medium ${isDark ? "bg-white/10 text-slate-200" : "bg-white text-stone-700"}`}>Check continuity</button>
@@ -244,12 +244,12 @@ export function ManuscriptWriteRightRail({
       ) : null}
 
       {activeRightPane === "advisor" ? (
-        <div className={`rounded-[1.35rem] border p-4 ${isDark ? "border-white/10 bg-[#0c1118]/92" : "border-stone-200 bg-white/90"}`}>
-          <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Chapter advisor</p>
+        <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-[#0c1118]/92" : "border-stone-200 bg-white/90"}`}>
+          <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Chapter advisor</p>
           <p className={`mt-3 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-700"}`}>Use LoreVia while drafting to tighten prose, surface continuity risks, and suggest stronger scene transitions.</p>
           <div className="mt-4 space-y-3">
             {suggestions.slice(0, 3).map((suggestion, index) => (
-              <div key={`${suggestion.title}-${index}`} className={`rounded-[1rem] border p-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
+              <div key={`${suggestion.title}-${index}`} className={`rounded-md border p-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
                 <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{suggestion.title}</p>
                 <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-400" : "text-stone-600"}`}>{suggestion.description}</p>
               </div>
@@ -262,15 +262,15 @@ export function ManuscriptWriteRightRail({
 
       {activeRightPane === "notes" ? (
         <>
-          <div className={`rounded-[1.35rem] border p-4 ${isDark ? "border-white/10 bg-[#0c1118]/92" : "border-stone-200 bg-white/90"}`}>
+          <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-[#0c1118]/92" : "border-stone-200 bg-white/90"}`}>
             <div className="flex items-center justify-between gap-3">
-              <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Chapter notes</p>
+              <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Chapter notes</p>
               <Link href={`/${bookId}/notes`} className={`text-sm ${isDark ? "text-sky-300" : "text-sky-700"}`}>All notes -&gt;</Link>
             </div>
             {chapterAnnotationsCount > 0 ? <p className={`mt-2 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{chapterAnnotationsCount} annotation{chapterAnnotationsCount === 1 ? "" : "s"} anchored to this chapter.</p> : null}
             <div className="mt-4 space-y-3">
               {chapterManualNotes.slice(0, 4).map((note) => (
-                <div key={note.id} className={`rounded-[1rem] border p-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
+                <div key={note.id} className={`rounded-md border p-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
                   <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{note.title || `Chapter ${activeChapterNumber} note`}</p>
                   <p className={`mt-2 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{new Date(note.updated_at).toLocaleString()}</p>
                 </div>
@@ -278,11 +278,11 @@ export function ManuscriptWriteRightRail({
               {chapterManualNotes.length === 0 ? <p className={`text-sm ${isDark ? "text-slate-500" : "text-stone-500"}`}>No notes saved for this chapter yet.</p> : null}
             </div>
           </div>
-          <div className={`rounded-[1.35rem] border p-4 ${isDark ? "border-white/10 bg-[#0c1118]/92" : "border-stone-200 bg-white/90"}`}>
-            <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Book notes</p>
+          <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-[#0c1118]/92" : "border-stone-200 bg-white/90"}`}>
+            <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Book notes</p>
             <div className="mt-4 space-y-3">
               {generalNotes.slice(0, 3).map((note) => (
-                <div key={note.id} className={`rounded-[1rem] border p-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
+                <div key={note.id} className={`rounded-md border p-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
                   <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{note.title || "Book note"}</p>
                   <p className={`mt-2 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{new Date(note.updated_at).toLocaleString()}</p>
                 </div>
@@ -294,8 +294,8 @@ export function ManuscriptWriteRightRail({
       ) : null}
 
       {activeRightPane === "arcs" ? (
-        <div className={`rounded-[1.35rem] border p-4 ${isDark ? "border-white/10 bg-[#0c1118]/92" : "border-stone-200 bg-white/90"}`}>
-          <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Character emotional arc</p>
+        <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-[#0c1118]/92" : "border-stone-200 bg-white/90"}`}>
+          <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Character emotional arc</p>
           {arcSummaryCharacter ? (
             <div className="mt-4">
               <p className={`text-lg font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{arcSummaryCharacter.character_name}</p>

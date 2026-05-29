@@ -1,12 +1,16 @@
 "use client"
 
 import type { ReactNode } from "react"
+import { useRef } from "react"
 import dynamic from "next/dynamic"
-import { startTransition, useEffect, useState } from "react"
+import { startTransition, Suspense, useEffect, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import type { Route } from "next"
 import { useRouter } from "next/navigation"
 
+import { Button } from "@/components/ui/Button"
+import { ErrorCard } from "@/components/ui/ErrorCard"
+import { Skeleton } from "@/components/ui/Skeleton"
 import { booksApi } from "@/lib/api/books"
 import { asQueryKey, booksListCacheKey } from "@/lib/query/cacheKeys"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
@@ -17,7 +21,7 @@ const UpcomingBetaReadsCard = dynamic(
   () => import("@/components/library/UpcomingBetaReadsCard").then((module) => module.UpcomingBetaReadsCard),
   {
     ssr: false,
-    loading: () => <div className="rounded-[1.5rem] border p-6" />,
+    loading: () => <Skeleton variant="card" className="min-h-[12rem] rounded-lg" />,
   }
 )
 
@@ -218,10 +222,12 @@ export default function LibraryPage() {
   const [pinnedIds, setPinnedIds] = useState<Record<string, boolean>>({})
   const [pinsReady, setPinsReady] = useState(false)
   const [showBetaReadsCard, setShowBetaReadsCard] = useState(false)
+  const searchInputRef = useRef<HTMLInputElement>(null)
 
   const {
     data: books = [],
     isLoading: loading,
+    isError: booksError,
     refetch,
   } = useQuery<Book[]>({
     queryKey: asQueryKey(booksListCacheKey(true)),
@@ -274,6 +280,17 @@ export default function LibraryPage() {
 
     return () => cancel(handle)
   }, [showBetaReadsCard])
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if ((event.metaKey || event.ctrlKey) && event.key === "k") {
+        event.preventDefault()
+        searchInputRef.current?.focus()
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [])
 
   const normalizedSearch = search.trim().toLowerCase()
   const visibleBooks = books.filter((book) => !book.hidden_at)
@@ -372,12 +389,6 @@ export default function LibraryPage() {
   const mutedText = isDark ? "text-[#a6a39b]" : "text-stone-600"
   const headingText = isDark ? "text-[#f5f0e8]" : "text-stone-950"
   const controlClass = isDark ? "border-white/[0.08] bg-[#1f2427] text-[#ebe7df]" : "border-stone-200 bg-white text-stone-800"
-  const secondaryButtonClass = isDark
-    ? "border-white/[0.08] bg-[#1f2427] text-[#ebe7df] hover:bg-[#252b2f]"
-    : "border-stone-200 bg-white text-stone-800 hover:bg-stone-50"
-  const primaryButtonClass = isDark
-    ? "bg-[#215f5c] text-white hover:bg-[#1d5552]"
-    : "bg-[#1f615d] text-white hover:bg-[#194f4c]"
   const hasAnyProjects = visibleBooks.length > 0
   const [interactiveReady, setInteractiveReady] = useState(false)
 
@@ -385,8 +396,24 @@ export default function LibraryPage() {
     setInteractiveReady(true)
   }, [])
 
+  if (booksError) {
+    return (
+      <div className={`relative left-1/2 min-h-screen w-screen -translate-x-1/2 transition-colors duration-300 ${pageBackground}`}>
+        <div className="mx-auto w-full max-w-[1280px] px-4 pb-20 pt-10 sm:px-6 lg:px-10">
+          <ErrorCard
+            title="Failed to load library"
+            message="Something went wrong while loading your library. Check your connection and try again."
+            onRetry={() => refetch()}
+            isDark={isDark}
+            variant="full"
+          />
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div className={`relative left-1/2 min-h-screen w-screen -translate-x-1/2 transition-colors duration-300 ${pageBackground}`}>
+    <div className={`relative left-1/2 min-h-screen w-screen -translate-x-1/2 transition-colors duration-300 ${pageBackground}`}> 
       <div className="mx-auto w-full max-w-[1280px] px-4 pb-20 pt-10 sm:px-6 lg:px-10">
         <section className="space-y-8">
           <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
@@ -398,43 +425,46 @@ export default function LibraryPage() {
             </div>
 
             <div className="flex flex-col gap-3 sm:flex-row lg:pt-6">
-              <button
-                type="button"
+              <Button
+                variant="secondary"
+                size="md"
                 onClick={() => router.push("/public/forum" as Route)}
-                className={`inline-flex min-h-11 items-center justify-center gap-2.5 rounded-xl border px-5 text-sm font-medium transition ${secondaryButtonClass}`}
+                className="min-h-11 rounded-xl"
               >
                 <ForumIcon className={isDark ? "text-[#d2cdc3]" : "text-stone-600"} />
                 Beta Forum
-              </button>
+              </Button>
 
-              <button
-                type="button"
+              <Button
+                variant="primary"
+                size="md"
                 disabled={!interactiveReady}
                 onClick={() => {
                   setUploadPreset({})
                   setShowUpload(true)
                 }}
-                className={`inline-flex min-h-11 items-center justify-center gap-2.5 rounded-xl px-5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${primaryButtonClass}`}
+                className="min-h-11 rounded-xl"
               >
                 <PlusIcon />
                 New Project
-              </button>
+              </Button>
             </div>
           </div>
 
-          <section className={`rounded-[1.5rem] border p-4 sm:p-5 ${surfaceClass}`}>
+          <section className={`rounded-lg border p-4 sm:p-5 ${surfaceClass}`}>
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div className="flex flex-1 flex-col gap-3 md:flex-row md:flex-wrap md:items-center">
                 <label className={`flex min-h-12 flex-1 items-center gap-3 rounded-xl border px-4 ${controlClass}`}>
                   <SearchIcon className={isDark ? "text-[#7e7b74]" : "text-stone-400"} />
                   <input
+                    ref={searchInputRef}
                     value={search}
                     onChange={(event) => setSearch(event.target.value)}
                     placeholder="Search projects..."
                     className={`w-full bg-transparent text-[0.95rem] outline-none ${isDark ? "placeholder:text-[#6a675f]" : "placeholder:text-stone-400"}`}
                   />
                   <span
-                    className={`hidden items-center rounded-md border px-2 py-1 text-[11px] font-medium sm:inline-flex ${
+                    className={`hidden items-center rounded-md border px-2 py-1 text-3xs font-medium sm:inline-flex ${
                       isDark ? "border-white/[0.08] bg-white/[0.03] text-[#9f9b94]" : "border-stone-200 bg-stone-50 text-stone-500"
                     }`}
                   >
@@ -443,17 +473,18 @@ export default function LibraryPage() {
                 </label>
 
                 <div className="relative">
-                  <button
-                    type="button"
+                  <Button
+                    variant="secondary"
+                    size="md"
                     onClick={() => setFilterOpen((current) => !current)}
-                    className={`inline-flex min-h-12 items-center gap-3 rounded-xl border px-4 text-sm font-medium transition ${controlClass}`}
+                    className="min-h-12 rounded-xl"
                   >
                     <FilterIcon className={isDark ? "text-[#d2cdc3]" : "text-stone-600"} />
                     {filterSummary}
-                  </button>
+                  </Button>
 
                   {filterOpen ? (
-                    <div className={`absolute left-0 top-full z-30 mt-3 w-[18rem] rounded-[1.25rem] border p-4 shadow-[0_20px_50px_-30px_rgba(0,0,0,0.35)] ${surfaceClass}`}>
+                    <div className={`absolute left-0 top-full z-30 mt-3 w-[18rem] rounded-md border p-4 shadow-dropdown ${surfaceClass}`}>
                       <div className="space-y-4">
                         <div>
                           <p className={`text-[0.68rem] font-semibold uppercase tracking-[0.24em] ${mutedText}`}>Project mode</p>
@@ -577,7 +608,9 @@ export default function LibraryPage() {
             </div>
           </section>
 
-          {showBetaReadsCard ? <UpcomingBetaReadsCard isDark={isDark} /> : <div className={`rounded-[1.5rem] border p-6 ${surfaceClass}`} />}
+          <Suspense fallback={<Skeleton variant="card" className="min-h-[12rem] rounded-lg" />}>
+            {showBetaReadsCard ? <UpcomingBetaReadsCard isDark={isDark} /> : <div className={`rounded-lg border p-6 ${surfaceClass}`} />}
+          </Suspense>
 
           <section className="space-y-4">
             <SectionHeading
@@ -777,7 +810,7 @@ export default function LibraryPage() {
 
       {publishBook ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 py-8">
-          <div className={`w-full max-w-2xl rounded-[1.35rem] border p-6 sm:p-7 ${surfaceClass}`}>
+          <div className={`w-full max-w-2xl rounded-lg border p-6 sm:p-7 ${surfaceClass}`}>
             <p className={`text-[0.68rem] font-semibold uppercase tracking-[0.24em] ${mutedText}`}>Public book</p>
             <h2 className={`mt-3 font-display text-[2rem] tracking-[-0.03em] ${headingText}`}>Publish your own original work</h2>
             <p className={`mt-3 text-sm leading-7 ${mutedText}`}>
@@ -798,21 +831,23 @@ export default function LibraryPage() {
               </label>
             </div>
             <div className="mt-6 flex justify-end gap-3">
-              <button
-                type="button"
+              <Button
+                variant="secondary"
+                size="md"
                 onClick={() => setPublishBook(null)}
-                className={`rounded-xl border px-4 py-2 text-sm font-medium transition ${isDark ? "border-white/[0.08] bg-[#1f2427] text-[#ebe7df] hover:bg-[#252b2f]" : "border-stone-200 bg-white text-stone-800 hover:bg-stone-50"}`}
+                className="rounded-xl"
               >
                 Cancel
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
+                variant="primary"
+                size="md"
                 disabled={!publishConfirmed || !publishSlug.trim() || busyBookId === publishBook.id}
                 onClick={() => void handlePublish(publishBook)}
-                className="rounded-xl bg-[#1f615d] px-5 py-2 text-sm font-semibold text-white transition hover:bg-[#194f4c] disabled:opacity-50"
+                className="rounded-xl"
               >
                 Publish publicly
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -846,11 +881,36 @@ function SectionHeading({
 
 function LoadingPanel({ isDark, label }: { isDark: boolean; label: string }) {
   return (
-    <div className={`rounded-[1.35rem] border border-dashed px-6 py-16 text-center ${isDark ? "border-white/[0.08] bg-[#191d20] text-[#9f9b94]" : "border-stone-300 bg-[#fbfaf7] text-stone-500"}`}>
-      <div className="mx-auto flex max-w-sm flex-col items-center gap-3">
-        <div className={`h-10 w-10 animate-pulse rounded-full ${isDark ? "bg-white/[0.08]" : "bg-stone-200"}`} />
-        <p className="text-sm">{label}</p>
-      </div>
+    <div className="grid gap-4 xl:grid-cols-3">
+      {Array.from({ length: 3 }).map((_, i) => (
+        <div
+          key={i}
+          className={`rounded-lg border p-5 ${isDark ? "border-white/[0.08] bg-[#1f2427]" : "border-stone-200 bg-white"}`}
+        >
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex min-w-0 items-start gap-4">
+              <Skeleton variant="circle" className="h-14 w-14" />
+              <div className="min-w-0 flex-1 space-y-2.5">
+                <Skeleton variant="text" className="h-5 w-36" />
+                <Skeleton variant="text" className="h-3.5 w-24" />
+              </div>
+            </div>
+            <Skeleton variant="circle" className="h-8 w-8" />
+          </div>
+          <Skeleton variant="text" className="mt-5 h-4 w-3/4" />
+          <Skeleton variant="text" className="mt-5 h-1.5 w-full" />
+          <div className="mt-3 flex items-center justify-between gap-4">
+            <Skeleton variant="text" className="h-3.5 w-32" />
+            <Skeleton variant="text" className="h-3.5 w-20" />
+          </div>
+          <Skeleton variant="text" className="mt-2 h-3 w-28" />
+          <div className={`mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 border-t pt-4 ${isDark ? "border-white/[0.08]" : "border-stone-200"}`}>
+            <Skeleton variant="text" className="h-3 w-16" />
+            <Skeleton variant="text" className="h-3 w-16" />
+            <Skeleton variant="text" className="h-3 w-20" />
+          </div>
+        </div>
+      ))}
     </div>
   )
 }
@@ -869,7 +929,7 @@ function EmptyPanel({
   actionHandler?: () => void
 }) {
   return (
-    <div className={`rounded-[1.35rem] border border-dashed px-6 py-16 text-center ${isDark ? "border-white/[0.08] bg-[#191d20]" : "border-stone-300 bg-[#fbfaf7]"}`}>
+    <div className={`rounded-lg border border-dashed px-6 py-16 text-center ${isDark ? "border-white/[0.08] bg-[#191d20]" : "border-stone-300 bg-[#fbfaf7]"}`}>
       <div className="mx-auto flex max-w-xl flex-col items-center">
         <div className={`flex h-14 w-14 items-center justify-center rounded-full ${isDark ? "bg-[#22272a] text-[#d0c8bc]" : "bg-[#eef3ef] text-[#1f615d]"}`}>
           <FolderIcon className="h-6 w-6" />
@@ -877,16 +937,15 @@ function EmptyPanel({
         <p className={`mt-5 text-[1.75rem] font-semibold tracking-[-0.02em] ${isDark ? "text-[#f5f0e8]" : "text-stone-900"}`}>{title}</p>
         <p className={`mx-auto mt-3 max-w-lg text-sm leading-7 ${isDark ? "text-[#9f9b94]" : "text-stone-500"}`}>{body}</p>
         {actionLabel && actionHandler ? (
-          <button
-            type="button"
+          <Button
+            variant="secondary"
+            size="md"
             onClick={actionHandler}
-            className={`mt-6 inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border px-5 text-sm font-medium transition ${
-              isDark ? "border-[#417672] bg-[#1f2427] text-[#efe9df] hover:bg-[#252b2f]" : "border-[#9fc1be] bg-white text-[#1f615d] hover:bg-[#f4f8f7]"
-            }`}
+            className="mt-6 min-h-11 rounded-xl"
           >
             <PlusIcon />
             {actionLabel}
-          </button>
+          </Button>
         ) : null}
       </div>
     </div>
@@ -947,7 +1006,7 @@ function ProjectCard({
           onOpen()
         }
       }}
-      className={`group relative cursor-pointer rounded-[1.35rem] border p-5 transition duration-200 hover:border-[#9fc1be] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#1f615d]/30 ${
+      className={`group relative cursor-pointer rounded-lg border p-5 transition duration-200 hover:border-[#9fc1be] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#1f615d]/30 ${
         isDark ? "border-white/[0.08] bg-[#1f2427] hover:bg-[#23292c]" : "border-stone-200 bg-white hover:bg-[#fcfbf8]"
       }`}
     >
@@ -969,7 +1028,7 @@ function ProjectCard({
                 {getGenreLabel(book)} <span className={metaClass}>·</span> {book.work_type === "screenplay" ? "Screenplay" : "Novel"}
               </p>
               {publicSampleStatus ? (
-                <p className={`mt-2 inline-flex rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${isDark ? "bg-cyan-400/12 text-cyan-200" : "bg-cyan-100 text-cyan-800"}`}>
+                <p className={`mt-2 inline-flex rounded-full px-2.5 py-1 text-3xs font-semibold uppercase tracking-[0.14em] ${isDark ? "bg-cyan-400/12 text-cyan-200" : "bg-cyan-100 text-cyan-800"}`}>
                   {publicSampleStatus}
                 </p>
               ) : null}
@@ -977,17 +1036,18 @@ function ProjectCard({
           </div>
 
           <div className="relative">
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={(event) => {
                 event.stopPropagation()
                 onMenuToggle()
               }}
-              className={`relative z-20 rounded-lg p-2 transition ${isDark ? "text-[#8c8994] hover:bg-white/[0.06] hover:text-white" : "text-stone-500 hover:bg-stone-100 hover:text-stone-900"}`}
+              className="relative z-20 rounded-lg p-2"
               aria-label={`Open actions for ${book.title}`}
             >
               <DotsIcon />
-            </button>
+            </Button>
 
             {menuOpen ? (
               <ProjectMenu
@@ -1086,7 +1146,7 @@ function ProjectRow({
           onOpen()
         }
       }}
-      className={`relative cursor-pointer rounded-[1.35rem] border px-5 py-5 transition hover:border-[#9fc1be] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#1f615d]/30 ${isDark ? "border-white/[0.08] bg-[#1f2427] hover:bg-[#23292c]" : "border-stone-200 bg-white hover:bg-[#fcfbf8]"}`}
+      className={`relative cursor-pointer rounded-lg border px-5 py-5 transition hover:border-[#9fc1be] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#1f615d]/30 ${isDark ? "border-white/[0.08] bg-[#1f2427] hover:bg-[#23292c]" : "border-stone-200 bg-white hover:bg-[#fcfbf8]"}`}
     >
       <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
         <div className="flex min-w-0 items-center gap-4">
@@ -1103,7 +1163,7 @@ function ProjectRow({
               {getGenreLabel(book)} <span className={metaClass}>·</span> {book.work_type === "screenplay" ? "Screenplay" : "Novel"}
             </p>
             {publicSampleStatus ? (
-              <p className={`mt-2 inline-flex rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${isDark ? "bg-cyan-400/12 text-cyan-200" : "bg-cyan-100 text-cyan-800"}`}>
+              <p className={`mt-2 inline-flex rounded-full px-2.5 py-1 text-3xs font-semibold uppercase tracking-[0.14em] ${isDark ? "bg-cyan-400/12 text-cyan-200" : "bg-cyan-100 text-cyan-800"}`}>
                 {publicSampleStatus}
               </p>
             ) : null}
@@ -1124,32 +1184,32 @@ function ProjectRow({
 
         <div className="flex items-center justify-between gap-3 xl:justify-end">
           {book.mode === "author" ? (
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={(event) => {
                 event.stopPropagation()
                 onAddChapter()
               }}
-              className={`relative z-10 rounded-full px-4 py-2 text-sm font-medium transition ${
-                isDark ? "bg-white/[0.04] text-[#f1ece4] hover:bg-white/[0.08]" : "bg-stone-100 text-stone-800 hover:bg-stone-200"
-              }`}
+              className="relative z-10 rounded-full"
             >
               Add {storyUnitLabel(book.work_type)}
-            </button>
+            </Button>
           ) : null}
 
           <div className="relative">
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={(event) => {
                 event.stopPropagation()
                 onMenuToggle()
               }}
-              className={`relative z-20 rounded-lg p-2 transition ${isDark ? "text-[#8c8994] hover:bg-white/[0.06] hover:text-white" : "text-stone-500 hover:bg-stone-100 hover:text-stone-900"}`}
+              className="relative z-20 rounded-lg p-2"
               aria-label={`Open actions for ${book.title}`}
             >
               <DotsIcon />
-            </button>
+            </Button>
 
             {menuOpen ? (
               <ProjectMenu
@@ -1210,7 +1270,7 @@ function ProjectMenu({
   return (
     <div
       onClick={(event) => event.stopPropagation()}
-      className={`absolute right-0 top-full z-30 mt-2 w-48 overflow-hidden rounded-[1rem] border py-2 shadow-[0_20px_50px_-30px_rgba(0,0,0,0.35)] ${isDark ? "border-white/[0.08] bg-[#1b2023]" : "border-stone-200 bg-white"}`}
+      className={`absolute right-0 top-full z-30 mt-2 w-48 overflow-hidden rounded-md border py-2 shadow-dropdown ${isDark ? "border-white/[0.08] bg-[#1b2023]" : "border-stone-200 bg-white"}`}
     >
       <MenuButton isDark={isDark} onClick={onTogglePinned} label={isPinned ? "Unpin project" : "Pin project"} />
       {isAuthor ? <MenuButton isDark={isDark} onClick={onAddChapter} label={`Add ${storyUnitLabel(workType)}`} /> : null}
@@ -1239,14 +1299,15 @@ function MenuButton({
   danger?: boolean
 }) {
   return (
-    <button
-      type="button"
+    <Button
+      variant="ghost"
+      size="md"
       onClick={(event) => {
         event.stopPropagation()
         onClick()
       }}
       disabled={disabled}
-      className={`block w-full px-4 py-2.5 text-left text-sm transition disabled:opacity-50 ${
+      className={`w-full justify-start rounded-none ${
         danger
           ? isDark
             ? "text-rose-300 hover:bg-rose-500/10"
@@ -1257,7 +1318,7 @@ function MenuButton({
       }`}
     >
       {label}
-    </button>
+    </Button>
   )
 }
 
@@ -1275,7 +1336,7 @@ function CreateProjectCard({ isDark, onCreate }: { isDark: boolean; onCreate: ()
     <button
       type="button"
       onClick={onCreate}
-      className={`flex min-h-[18.25rem] flex-col items-center justify-center rounded-[1.35rem] border border-dashed p-8 text-center transition ${
+      className={`flex min-h-[18.25rem] flex-col items-center justify-center rounded-lg border border-dashed p-8 text-center transition ${
         isDark
           ? "border-white/[0.08] bg-[#191d20] hover:border-[#3d7a75] hover:bg-[#1f2427]"
           : "border-stone-300 bg-[#fbfaf7] hover:border-[#9fc1be] hover:bg-white"
@@ -1295,7 +1356,7 @@ function CreateProjectRow({ isDark, onCreate }: { isDark: boolean; onCreate: () 
     <button
       type="button"
       onClick={onCreate}
-      className={`flex items-center justify-between rounded-[1.35rem] border border-dashed px-5 py-5 text-left transition ${
+      className={`flex items-center justify-between rounded-lg border border-dashed px-5 py-5 text-left transition ${
         isDark
           ? "border-white/[0.08] bg-[#191d20] hover:border-[#3d7a75] hover:bg-[#1f2427]"
           : "border-stone-300 bg-[#fbfaf7] hover:border-[#9fc1be] hover:bg-white"

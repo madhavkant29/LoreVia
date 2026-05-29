@@ -169,14 +169,14 @@ function SectionHeading({
 
 function HeroProductMockup() {
   return (
-    <div className="overflow-hidden rounded-[1.9rem] border border-white/10 bg-[linear-gradient(180deg,rgba(13,23,21,0.98),rgba(8,17,15,0.98))] shadow-[0_30px_90px_-52px_rgba(0,0,0,0.78)]">
+    <div className="overflow-hidden rounded-lg border border-white/10 bg-[linear-gradient(180deg,rgba(13,23,21,0.98),rgba(8,17,15,0.98))] shadow-[0_30px_90px_-52px_rgba(0,0,0,0.78)]">
       <div className="grid min-h-[36rem] lg:grid-cols-[12rem_1.25fr_14.5rem]">
         <aside className="border-b border-white/8 bg-[#0b1513] p-5 lg:border-b-0 lg:border-r">
           <div className="rounded-xl border border-white/8 bg-white/5 px-3 py-2 text-sm text-[#d9e0db]">
             Bloodline of Dawn
           </div>
           <div className="mt-6">
-            <p className="text-[10px] uppercase tracking-[0.22em] text-[#6fae9f]">Manuscript</p>
+            <p className="text-3xs uppercase tracking-[0.22em] text-[#6fae9f]">Manuscript</p>
             <div className="mt-3 space-y-2">
               {["Chapters", "Scenes", "Manuscript", "Outline", "Notes", "Bookmarks"].map((item, index) => (
                 <div
@@ -218,7 +218,7 @@ function HeroProductMockup() {
             </div>
           </div>
 
-          <div className="mt-7 rounded-[1.35rem] border border-white/8 bg-[#0c1413] p-6">
+          <div className="mt-7 rounded-lg border border-white/8 bg-[#0c1413] p-6">
             <h4 className="font-display text-3xl text-white">Chapter 12</h4>
             <div className="mt-5 space-y-4 text-sm leading-8 text-[#d9e0db]">
               <p>
@@ -251,8 +251,8 @@ function HeroProductMockup() {
             ))}
           </div>
 
-          <div className="mt-6 rounded-[1.25rem] border border-white/8 bg-[#0d1715] p-4">
-            <p className="text-[10px] uppercase tracking-[0.24em] text-[#6fae9f]">Continuity findings</p>
+          <div className="mt-6 rounded-md border border-white/8 bg-[#0d1715] p-4">
+            <p className="text-3xs uppercase tracking-[0.24em] text-[#6fae9f]">Continuity findings</p>
             <div className="mt-4 space-y-3">
               {[
                 ["Character age", "Possible mismatch for Elira between ch. 7 and ch. 12"],
@@ -267,8 +267,8 @@ function HeroProductMockup() {
             </div>
           </div>
 
-          <div className="mt-4 rounded-[1.25rem] border border-white/8 bg-[#0d1715] p-4">
-            <p className="text-[10px] uppercase tracking-[0.24em] text-[#6fae9f]">Ask LoreVia</p>
+          <div className="mt-4 rounded-md border border-white/8 bg-[#0d1715] p-4">
+            <p className="text-3xs uppercase tracking-[0.24em] text-[#6fae9f]">Ask LoreVia</p>
             <div className="mt-3 rounded-xl border border-white/8 bg-[#101a18] px-3 py-3 text-sm text-[#d9e0db]">
               What are the stakes in this chapter?
             </div>
@@ -284,10 +284,10 @@ function HeroProductMockup() {
 
 function WorkflowPanel() {
   return (
-    <div className="rounded-[2rem] border border-white/8 bg-[linear-gradient(180deg,rgba(12,22,20,0.98),rgba(8,17,15,0.98))] p-6 md:p-8">
+    <div className="rounded-lg border border-white/8 bg-[linear-gradient(180deg,rgba(12,22,20,0.98),rgba(8,17,15,0.98))] p-6 md:p-8">
       <div className="grid gap-8 lg:grid-cols-[0.85fr_1.15fr]">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-[#6fae9f]">Your writing workflow</p>
+          <p className="text-3xs font-semibold uppercase tracking-[0.32em] text-[#6fae9f]">Your writing workflow</p>
           <h2 className="mt-5 max-w-lg font-display text-4xl font-semibold leading-[1.02] text-white md:text-5xl">
             A workspace that guides your entire process
           </h2>
@@ -313,8 +313,8 @@ function WorkflowPanel() {
               ["Plot threads", "17", "Active threads"],
               ["Timeline events", "86", "Tracked events"],
             ].map(([label, value, note]) => (
-              <div key={label} className="rounded-[1.3rem] border border-white/8 bg-[#0d1715] p-5">
-                <p className="text-[10px] uppercase tracking-[0.22em] text-[#6fae9f]">{label}</p>
+              <div key={label} className="rounded-lg border border-white/8 bg-[#0d1715] p-5">
+                <p className="text-3xs uppercase tracking-[0.22em] text-[#6fae9f]">{label}</p>
                 <p className="mt-3 text-4xl font-semibold tracking-tight text-white">{value}</p>
                 <p className="mt-2 text-sm text-[#8fa19a]">{note}</p>
               </div>
@@ -322,8 +322,8 @@ function WorkflowPanel() {
           </div>
 
           <div className="grid gap-4 md:grid-cols-[0.8fr_1.2fr_0.7fr]">
-            <div className="rounded-[1.3rem] border border-white/8 bg-[#0d1715] p-5">
-              <p className="text-[10px] uppercase tracking-[0.22em] text-[#6fae9f]">Continuity score</p>
+            <div className="rounded-lg border border-white/8 bg-[#0d1715] p-5">
+              <p className="text-3xs uppercase tracking-[0.22em] text-[#6fae9f]">Continuity score</p>
               <p className="mt-3 text-4xl font-semibold tracking-tight text-white">92%</p>
               <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/8">
                 <div className="h-full w-[92%] rounded-full bg-[#4fb6a3]" />
@@ -331,8 +331,8 @@ function WorkflowPanel() {
               <p className="mt-3 text-sm text-[#8fa19a]">Good</p>
             </div>
 
-            <div className="rounded-[1.3rem] border border-white/8 bg-[#0d1715] p-5">
-              <p className="text-[10px] uppercase tracking-[0.22em] text-[#6fae9f]">Recent finding</p>
+            <div className="rounded-lg border border-white/8 bg-[#0d1715] p-5">
+              <p className="text-3xs uppercase tracking-[0.22em] text-[#6fae9f]">Recent finding</p>
               <p className="mt-4 text-lg font-semibold text-white">Timeline gap</p>
               <p className="mt-2 text-sm leading-7 text-[#aeb9b3]">
                 Travel time between ch. 9 and ch. 10 is unusually short for the route the manuscript establishes.
@@ -342,15 +342,15 @@ function WorkflowPanel() {
               </div>
             </div>
 
-            <div className="rounded-[1.3rem] border border-white/8 bg-[#0d1715] p-5">
-              <p className="text-[10px] uppercase tracking-[0.22em] text-[#6fae9f]">Chapters</p>
+            <div className="rounded-lg border border-white/8 bg-[#0d1715] p-5">
+              <p className="text-3xs uppercase tracking-[0.22em] text-[#6fae9f]">Chapters</p>
               <p className="mt-3 text-4xl font-semibold tracking-tight text-white">24</p>
               <p className="mt-2 text-sm text-[#8fa19a]">Total chapters</p>
             </div>
           </div>
 
-          <div className="rounded-[1.35rem] border border-white/8 bg-[#0d1715] p-5">
-            <p className="text-[10px] uppercase tracking-[0.22em] text-[#6fae9f]">Ask LoreVia about your manuscript</p>
+          <div className="rounded-lg border border-white/8 bg-[#0d1715] p-5">
+            <p className="text-3xs uppercase tracking-[0.22em] text-[#6fae9f]">Ask LoreVia about your manuscript</p>
             <div className="mt-4 rounded-xl border border-white/8 bg-[#0b1513] px-4 py-3 text-sm text-[#d9e0db]">
               What are the motivations driving Kael in the last three chapters?
             </div>
@@ -376,7 +376,7 @@ function HomepageComparisonSection() {
     <Section id="compare" className="pt-8">
       <div className="grid gap-8 lg:grid-cols-[0.85fr_1.15fr] lg:items-start">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-[#6fae9f]">Comparison</p>
+          <p className="text-3xs font-semibold uppercase tracking-[0.32em] text-[#6fae9f]">Comparison</p>
           <h2 className="mt-5 max-w-lg font-display text-4xl font-semibold leading-[1.02] text-white md:text-5xl">
             A writing workspace that understands the manuscript.
           </h2>
@@ -393,7 +393,7 @@ function HomepageComparisonSection() {
                 <Link
                   key={item.slug}
                   href={`/compare/${item.slug}`}
-                  className="rounded-[1.2rem] border border-white/8 bg-white/5 px-4 py-4 transition hover:border-white/16 hover:bg-white/8"
+                  className="rounded-md border border-white/8 bg-white/5 px-4 py-4 transition hover:border-white/16 hover:bg-white/8"
                 >
                   <p className="text-base font-semibold text-white">LoreVia vs {item.name}</p>
                   <p className="mt-2 text-sm leading-7 text-[#9fb0a8]">{item.summary}</p>
@@ -411,7 +411,7 @@ function HomepageComparisonSection() {
           </Link>
         </div>
 
-        <div className="overflow-hidden rounded-[1.75rem] border border-white/10 bg-[#0d1715] shadow-[0_24px_70px_-48px_rgba(0,0,0,0.72)]">
+        <div className="overflow-hidden rounded-lg border border-white/10 bg-[#0d1715] shadow-[0_24px_70px_-48px_rgba(0,0,0,0.72)]">
           <div className="overflow-x-auto">
             <table className="w-full min-w-[720px] border-separate border-spacing-0 text-left text-sm">
               <thead>
@@ -560,7 +560,7 @@ export default function HomePage() {
           <div className="mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {featureStrip.map((item, index) => (
               <Reveal key={item.title} delay={index * 60}>
-                <article className="h-full rounded-[1.5rem] border border-white/8 bg-[#0d1715] p-5 md:p-6">
+                <article className="h-full rounded-lg border border-white/8 bg-[#0d1715] p-5 md:p-6">
                   <div className="inline-flex h-12 w-12 items-center justify-center rounded-full border border-white/10 bg-white/5 text-[#7fd7c5]">
                     {item.icon}
                   </div>
@@ -589,7 +589,7 @@ export default function HomePage() {
             {faqItems.map((item) => (
               <details
                 key={item.q}
-                className="group self-start rounded-[1.3rem] border border-white/8 bg-[#0d1715] p-5 open:border-[#235f57]"
+                className="group self-start rounded-lg border border-white/8 bg-[#0d1715] p-5 open:border-[#235f57]"
               >
                 <summary className="flex cursor-pointer list-none items-center justify-between gap-4 text-lg font-semibold text-white">
                   <span>{item.q}</span>
@@ -602,7 +602,7 @@ export default function HomePage() {
         </Section>
 
         <section className="mx-auto max-w-7xl px-5 pb-22 pt-6 md:px-8">
-          <div className="rounded-[2rem] border border-[#1e5a53] bg-[linear-gradient(180deg,rgba(18,50,46,0.98),rgba(10,24,21,0.98))] px-6 py-8 shadow-[0_24px_60px_-40px_rgba(13,58,53,0.6)] md:px-10 md:py-10">
+          <div className="rounded-lg border border-[#1e5a53] bg-[linear-gradient(180deg,rgba(18,50,46,0.98),rgba(10,24,21,0.98))] px-6 py-8 shadow-[0_24px_60px_-40px_rgba(13,58,53,0.6)] md:px-10 md:py-10">
             <div className="grid gap-6 lg:grid-cols-[1fr_auto] lg:items-center">
               <div>
                 <h2 className="font-display text-4xl font-semibold leading-tight text-white md:text-5xl">

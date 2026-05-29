@@ -28,6 +28,13 @@ class CharacterOut(BaseModel):
         cluster_mention_count: int = 0
         resolver_status: str | None = None
         review_note: str | None = None
+        visibility_state: str | None = None
+        approval_state: str | None = None
+        approval_source: str | None = None
+        approval_reason_codes: list[str] = Field(default_factory=list)
+        dossier_summary: dict | None = None
+        trust_tier: str | None = None
+        trust_reasons: list[str] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -55,6 +62,12 @@ class CharacterOut(BaseModel):
     character_type_score: int | None = None
     subtype_scores: dict | None = None
     analysis_metadata: CharacterAnalysisOut | None = None
+    visibility_state: str | None = None
+    approval_state: str | None = None
+    approval_source: str | None = None
+    approval_reason_codes: list[str] = Field(default_factory=list)
+    approval_updated_at: datetime | None = None
+    is_manual: bool = False
     created_at: datetime
 
 
@@ -99,6 +112,7 @@ class CharacterCandidateOut(BaseModel):
     resolver_reasons: list[str] = Field(default_factory=list)
     canonical_confidence: float | None = None
     grounding_coverage: float | None = None
+    dossier_summary: dict = Field(default_factory=dict)
     snippets: list[str] = Field(default_factory=list)
     source_batch_key: str | None = None
     created_at: datetime
@@ -146,6 +160,20 @@ class CharacterRelationshipCandidateOut(BaseModel):
     updated_at: datetime
 
 
+class CharacterDecisionEventOut(BaseModel):
+    id: uuid.UUID
+    book_id: uuid.UUID
+    character_id: uuid.UUID
+    actor_user_id: uuid.UUID | None = None
+    action: str
+    visibility_state: str | None = None
+    approval_state: str | None = None
+    approval_source: str | None = None
+    reason_codes: list[str] = Field(default_factory=list)
+    evidence: dict = Field(default_factory=dict)
+    created_at: datetime
+
+
 class CharacterReviewCountsOut(BaseModel):
     pending_candidates: int = 0
     pending_duplicate_suggestions: int = 0
@@ -156,4 +184,6 @@ class CharacterReviewOut(BaseModel):
     candidates: list[CharacterCandidateOut] = Field(default_factory=list)
     duplicate_suggestions: list[CharacterDuplicateSuggestionOut] = Field(default_factory=list)
     relationship_candidates: list[CharacterRelationshipCandidateOut] = Field(default_factory=list)
+    shadow_characters: list[CharacterOut] = Field(default_factory=list)
+    decision_events: list[CharacterDecisionEventOut] = Field(default_factory=list)
     counts: CharacterReviewCountsOut = Field(default_factory=CharacterReviewCountsOut)

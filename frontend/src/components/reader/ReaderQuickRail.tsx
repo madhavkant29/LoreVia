@@ -71,14 +71,14 @@ export function ReaderQuickRail({ bookId, chapterNum, theme, onSummary }: Reader
   return (
     <aside className="reader-nonprint hidden xl:block">
       <div className="sticky top-28">
-        <div className={`flex flex-col gap-3 rounded-[1.35rem] border p-3 shadow-[0_24px_70px_-56px_rgba(8,15,31,0.9)] backdrop-blur ${shellClass}`}>
+        <div className={`flex flex-col gap-3 rounded-lg border p-3 shadow-[0_24px_70px_-56px_rgba(8,15,31,0.9)] backdrop-blur ${shellClass}`}>
           {actions.map((action) => (
             <Link
               key={action.key}
               prefetch={false}
               href={action.href(bookId)}
               aria-label={action.label}
-              className={`flex h-10 w-10 items-center justify-center rounded-[1rem] border transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${buttonClass}`}
+              className={`flex h-10 w-10 items-center justify-center rounded-md border transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${buttonClass}`}
               title={action.label}
             >
               {action.icon}
@@ -88,14 +88,14 @@ export function ReaderQuickRail({ bookId, chapterNum, theme, onSummary }: Reader
             type="button"
             aria-label="Open summary"
             onClick={onSummary}
-            className={`flex h-10 w-10 items-center justify-center rounded-[1rem] border transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${buttonClass}`}
+            className={`flex h-10 w-10 items-center justify-center rounded-md border transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${buttonClass}`}
             title="Summary"
           >
             <svg viewBox="0 0 20 20" aria-hidden="true" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.6">
               <path d="M5 5.5h10M5 10h10M5 14.5h6.5" />
             </svg>
           </button>
-          <div className={`mt-1 border-t pt-3 text-center text-[10px] uppercase tracking-[0.24em] ${theme === "dark" ? "border-white/10 text-slate-500" : "border-stone-200 text-stone-400"}`}>
+          <div className={`mt-1 border-t pt-3 text-center text-3xs uppercase tracking-[0.24em] ${theme === "dark" ? "border-white/10 text-slate-500" : "border-stone-200 text-stone-400"}`}>
             Chapter {chapterNum}
           </div>
         </div>

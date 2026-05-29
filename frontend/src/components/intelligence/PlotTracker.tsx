@@ -129,7 +129,7 @@ export function PlotTracker({ bookId, chapter, mode = "compact" }: Props) {
     return (
       <div className="space-y-3">
         {threads.slice(0, 6).map((thread) => (
-          <div key={thread.id} className={`rounded-[1rem] border px-3 py-3 text-sm ${isDark ? "border-white/10 bg-white/[0.03] text-slate-200" : "border-stone-200 bg-stone-50 text-stone-700"}`}>
+          <div key={thread.id} className={`rounded-md border px-3 py-3 text-sm ${isDark ? "border-white/10 bg-white/[0.03] text-slate-200" : "border-stone-200 bg-stone-50 text-stone-700"}`}>
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="font-semibold">{thread.title}</p>
@@ -139,7 +139,7 @@ export function PlotTracker({ bookId, chapter, mode = "compact" }: Props) {
                   {thread.resolved_at ? ` • Resolved in chapter ${thread.resolved_at}` : ""}
                 </p>
               </div>
-              <span className={`rounded-full border px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] ${statusClasses(thread.status, isDark)}`}>
+              <span className={`rounded-full border px-2 py-1 text-3xs font-semibold uppercase tracking-[0.16em] ${statusClasses(thread.status, isDark)}`}>
                 {STATUS_LABELS[thread.status] ?? STATUS_LABELS.unknown}
               </span>
             </div>
@@ -160,8 +160,8 @@ export function PlotTracker({ bookId, chapter, mode = "compact" }: Props) {
     <div className="space-y-6">
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         {STATUS_ORDER.map((status) => (
-          <div key={status} className={`rounded-[1.25rem] border px-4 py-4 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-white/80"}`}>
-            <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>{STATUS_LABELS[status]}</p>
+          <div key={status} className={`rounded-md border px-4 py-4 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-white/80"}`}>
+            <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>{STATUS_LABELS[status]}</p>
             <p className={`mt-3 text-3xl font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{grouped[status].length}</p>
           </div>
         ))}
@@ -177,18 +177,18 @@ export function PlotTracker({ bookId, chapter, mode = "compact" }: Props) {
                 <p className={`text-xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>{STATUS_LABELS[status]}</p>
                 <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>{statusThreads.length} thread{statusThreads.length === 1 ? "" : "s"}</p>
               </div>
-              <span className={`rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] ${statusClasses(status, isDark)}`}>
+              <span className={`rounded-full border px-3 py-1 text-3xs font-semibold uppercase tracking-[0.16em] ${statusClasses(status, isDark)}`}>
                 {STATUS_LABELS[status]}
               </span>
             </div>
             <div className="space-y-3">
               {statusThreads.map((thread) => (
-                <div key={thread.id} className={`rounded-[1.4rem] border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white/90"}`}>
+                <div key={thread.id} className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white/90"}`}>
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
                         <p className={`text-base font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{thread.title}</p>
-                        {thread.type ? <span className={`rounded-full px-2.5 py-1 text-[11px] uppercase tracking-[0.16em] ${isDark ? "bg-white/8 text-slate-300" : "bg-stone-100 text-stone-600"}`}>{thread.type}</span> : null}
+                        {thread.type ? <span className={`rounded-full px-2.5 py-1 text-3xs uppercase tracking-[0.16em] ${isDark ? "bg-white/8 text-slate-300" : "bg-stone-100 text-stone-600"}`}>{thread.type}</span> : null}
                       </div>
                       {thread.description ? <p className={`mt-2 max-w-3xl text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{thread.description}</p> : null}
                       <p className={`mt-2 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>
@@ -199,23 +199,23 @@ export function PlotTracker({ bookId, chapter, mode = "compact" }: Props) {
                         {thread.mention_count > 0 ? ` • ${thread.mention_count} mentions tracked` : ""}
                       </p>
                     </div>
-                    <span className={`rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] ${statusClasses(thread.status, isDark)}`}>
+                    <span className={`rounded-full border px-3 py-1 text-3xs font-semibold uppercase tracking-[0.16em] ${statusClasses(thread.status, isDark)}`}>
                       {STATUS_LABELS[thread.status] ?? STATUS_LABELS.unknown}
                     </span>
                   </div>
 
                   {(thread.related_characters.length > 0 || thread.risk || thread.suggested_action) ? (
                     <div className="mt-4 grid gap-3 lg:grid-cols-3">
-                      <div className={`rounded-[1rem] border px-3 py-3 text-sm ${isDark ? "border-white/10 bg-black/40 text-slate-300" : "border-stone-200 bg-stone-50 text-stone-700"}`}>
-                        <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Related characters</p>
+                      <div className={`rounded-md border px-3 py-3 text-sm ${isDark ? "border-white/10 bg-black/40 text-slate-300" : "border-stone-200 bg-stone-50 text-stone-700"}`}>
+                        <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Related characters</p>
                         <p className="mt-2 leading-6">{thread.related_characters.length ? thread.related_characters.join(", ") : "No linked characters yet."}</p>
                       </div>
-                      <div className={`rounded-[1rem] border px-3 py-3 text-sm ${isDark ? "border-white/10 bg-black/40 text-slate-300" : "border-stone-200 bg-stone-50 text-stone-700"}`}>
-                        <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Risk</p>
+                      <div className={`rounded-md border px-3 py-3 text-sm ${isDark ? "border-white/10 bg-black/40 text-slate-300" : "border-stone-200 bg-stone-50 text-stone-700"}`}>
+                        <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Risk</p>
                         <p className="mt-2 leading-6">{thread.risk || "No immediate closure risk flagged."}</p>
                       </div>
-                      <div className={`rounded-[1rem] border px-3 py-3 text-sm ${isDark ? "border-white/10 bg-black/40 text-slate-300" : "border-stone-200 bg-stone-50 text-stone-700"}`}>
-                        <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Suggested action</p>
+                      <div className={`rounded-md border px-3 py-3 text-sm ${isDark ? "border-white/10 bg-black/40 text-slate-300" : "border-stone-200 bg-stone-50 text-stone-700"}`}>
+                        <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Suggested action</p>
                         <p className="mt-2 leading-6">{thread.suggested_action || "No action suggested yet."}</p>
                       </div>
                     </div>
@@ -230,7 +230,7 @@ export function PlotTracker({ bookId, chapter, mode = "compact" }: Props) {
                         <select
                           value={draftStatuses[thread.id] ?? thread.status}
                           onChange={(event) => setDraftStatuses((current) => ({ ...current, [thread.id]: event.target.value }))}
-                          className={`w-full rounded-[1rem] border px-3 py-3 text-sm outline-none ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-stone-50 text-stone-900"}`}
+                          className={`w-full rounded-md border px-3 py-3 text-sm outline-none ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-stone-50 text-stone-900"}`}
                         >
                           {STATUS_OPTIONS.map((value) => (
                             <option key={value} value={value}>
@@ -248,7 +248,7 @@ export function PlotTracker({ bookId, chapter, mode = "compact" }: Props) {
                           onChange={(event) => setDraftNotes((current) => ({ ...current, [thread.id]: event.target.value }))}
                           placeholder="Resolve this in arc 5."
                           rows={3}
-                          className={`w-full rounded-[1rem] border px-3 py-3 text-sm leading-6 outline-none ${isDark ? "border-white/10 bg-black text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-stone-50 text-stone-900 placeholder:text-stone-400"}`}
+                          className={`w-full rounded-md border px-3 py-3 text-sm leading-6 outline-none ${isDark ? "border-white/10 bg-black text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-stone-50 text-stone-900 placeholder:text-stone-400"}`}
                         />
                       </div>
                     </div>

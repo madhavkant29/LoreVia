@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Reques
 from fastapi.responses import Response
 from sqlalchemy import and_, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 # ─── Upload limits ────────────────────────────────────────────────────────────
 # Hard cap on book uploads. file.read() without a limit causes OOM DoS.
@@ -197,7 +198,6 @@ from app.utils.book_utils import (
     as_bool,
     book_out,
     build_book_out_list,
-    build_chapter_consistency_report,
     build_character_card_payload,
     build_emotional_arc_payload,
     build_obsidian_graph,
@@ -257,6 +257,10 @@ from app.utils.book_utils import (
 
 # ── Utils imports ──────────────────────────────────────────────────────────────
 from app.utils.character_utils import (
+    CHARACTER_APPROVAL_APPROVED,
+    CHARACTER_APPROVAL_PENDING_REVIEW,
+    CHARACTER_APPROVAL_SOURCE_MANUAL_REVIEW,
+    CHARACTER_VISIBILITY_VISIBLE,
     CHARACTER_CANDIDATE_PENDING,
     CHARACTER_DUPLICATE_PENDING,
     CHARACTER_RELATIONSHIP_CANDIDATE_ACCEPTED,
@@ -275,15 +279,18 @@ from app.utils.character_utils import (
     demote_character_to_review_candidate,
     dedupe_preserve_order,
     is_displayable_character,
+    is_cast_visible_character,
     list_character_review_data,
     mark_character_curated,
     mark_character_candidates_merged,
     merge_characters,
     partition_character,
     promote_character_candidate,
+    reject_character_as_noise,
     refresh_character_duplicate_suggestions,
     relationship_summary_for_character,
     serialize_book_character,
+    set_character_review_state,
 )
 from app.utils.public_utils import (
     CONTENT_SOURCE_TYPE_ADMIN_SEEDED,
@@ -332,9 +339,8 @@ from app.utils.export_utils import (
     manuscript_pdf_compiled,
 )
 from app.utils.llm_usage_utils import summarize_llm_usage_for_user
+from app.utils.ingestion_utils import build_analysis_chapter_state
 from app.utils.notification_utils import (
-    build_chapter_report_notification,
-    build_continuity_risk_notifications,
     build_upload_processing_notification,
 )
 from app.utils.queue_utils import queue_for_user
@@ -353,8 +359,8 @@ from app.utils.user_utils import (
     build_writing_dashboard_stats,
 )
 from app.utils.upload_security_utils import validate_document_upload_bytes
-from app.workers.consumers.analysis_consumer import analyse_chapter
 from app.workers.consumers.extraction_consumer import _process_chapter
+from app.workers.tasks.analysis_tasks import analyse_chapter_task
 from app.workers.tasks.extraction_tasks import process_book_task
 from scripts.repair_character_bible_book import apply_repair_plan, build_repair_plan
 
@@ -596,7 +602,10 @@ async def get_book_events(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    book = await get_owned_book(db, book_id, current_user.id)
+    book = await get_owned_book(
+        db, book_id, current_user.id,
+        options=(selectinload(Book.characters),),
+    )
     chapter_rows = (
         await db.execute(
             select(Chapter.number, Chapter.title, ChapterSummary.key_events)
@@ -605,8 +614,7 @@ async def get_book_events(
             .order_by(Chapter.number)
         )
     ).all()
-    characters_result = await db.execute(select(Character).where(Character.book_id == book.id).order_by(Character.name))
-    characters = list(characters_result.scalars().all())
+    characters = sorted(book.characters or [], key=lambda c: c.name or "")
     character_names_by_id = {str(character.id): character.name for character in characters}
 
     major_events: list[dict] = []
@@ -968,45 +976,54 @@ async def import_manuscript_content(
         await db.commit()
 
     chapter_reports: list[ChapterConsistencyReport] = []
+    chapters_for_analysis: list[tuple[int, str]] = []
+    analysis_tasks: list[dict[str, object]] = []
     for number in imported_numbers:
         chapter = (
             await db.execute(select(Chapter).where(Chapter.book_id == book.id, Chapter.number == number))
         ).scalar()
         if chapter is not None:
-            chapter_payload = deserialize_manuscript_content(await asyncio.to_thread(storage.download_book, chapter.s3_key)) if chapter.s3_key else {"text": ""}
-            chapter_text = str(chapter_payload.get("text") or "")
-            await db.execute(
-                delete(PlotThread).where(
-                    PlotThread.book_id == book.id,
-                    PlotThread.introduced_at == number,
-                )
+            chapter.analysis_state = build_analysis_chapter_state(
+                chapter.analysis_state if isinstance(getattr(chapter, "analysis_state", None), dict) else None,
+                status="queued",
+                increment_attempt=True,
             )
-            await db.commit()
-            try:
-                await analyse_chapter(str(chapter.id), chapter_text, chapter.title or "")
-                chapter_reports.append(await build_chapter_consistency_report(db, book, number))
-            except Exception:
-                log.warning(
-                    "manuscript_import_analysis_failed book_id=%s chapter_number=%s",
-                    book.id,
-                    number,
-                    exc_info=True,
-                )
+            chapters_for_analysis.append((number, str(chapter.id)))
 
-    if book.mode == "author" and len(chapter_reports) == 1:
-        for report in chapter_reports:
-            notification = build_chapter_report_notification(book, report)
-            if notification is not None:
-                db.add(notification)
-            for risk_notification in build_continuity_risk_notifications(book, report):
-                db.add(risk_notification)
+    if chapters_for_analysis:
         await db.commit()
+
+    for number, chapter_id in chapters_for_analysis:
+        try:
+            task_result = analyse_chapter_task.apply_async(
+                args=[chapter_id, str(book.id)],
+                kwargs={"is_reprocessing": False},
+                queue="analysis",
+            )
+            analysis_tasks.append(
+                {
+                    "chapter_id": chapter_id,
+                    "chapter_number": number,
+                    "task_id": getattr(task_result, "id", None),
+                }
+            )
+        except Exception:
+            log.warning(
+                "manuscript_import_analysis_dispatch_failed book_id=%s chapter_number=%s",
+                book.id,
+                number,
+                exc_info=True,
+            )
 
     await invalidate_advisor_caches_for_book(db, book_id=book.id)
 
     return ManuscriptImportResult(
+        status="imported",
         book_id=str(book.id),
         imported_chapters=sorted(set(imported_numbers)),
+        chapters_created=len(imported_numbers),
+        analysis_dispatched=len(analysis_tasks),
+        analysis_tasks=analysis_tasks,
         chapter_content_versions=imported_content_versions,
         total_chapters=book.total_chapters or total_chapters,
         mode=book.mode or "author",
@@ -1076,15 +1093,27 @@ async def update_book_series(
     return await book_out(db, book, current_user.id)
 
 
-@router.get("/series", response_model=list[SeriesOut])
+@router.get("/series")
 async def list_series(
+    limit: int = 50,
+    offset: int = 0,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    if limit < 1 or limit > 100:
+        raise HTTPException(400, "limit must be between 1 and 100")
+    if offset < 0:
+        raise HTTPException(400, "offset must be >= 0")
+    total_result = await db.execute(
+        select(func.count()).select_from(Series).where(Series.user_id == current_user.id)
+    )
+    total = total_result.scalar() or 0
     rows_result = await db.execute(
         select(Series)
         .where(Series.user_id == current_user.id)
         .order_by(Series.created_at.desc(), Series.name)
+        .limit(limit)
+        .offset(offset)
     )
     rows = list(rows_result.scalars().all())
     series_ids = [series.id for series in rows]
@@ -1096,12 +1125,19 @@ async def list_series(
             .order_by(SeriesBook.series_id, SeriesBook.position, Book.created_at)
         )
     ).all() if series_ids else []
-    return await build_series_out_list(
+    items = await build_series_out_list(
         db,
         series_rows=rows,
         membership_rows=membership_rows,
         user_id=current_user.id,
     )
+    return {
+        "items": items,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "has_more": (offset + limit) < total,
+    }
 
 
 @router.get("/series/{series_id}/bible", response_model=SeriesBibleOut)
@@ -1355,7 +1391,14 @@ async def list_saved_notes(
 
 @router.get("/{book_id}", response_model=BookOut)
 async def get_book(book_id: uuid.UUID, db: AsyncSession = Depends(get_db), current_user=Depends(get_current_user)):
-    book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
+    book, collaborator = await get_book_with_collaboration_access(
+        db, book_id, current_user,
+        options=(
+            selectinload(Book.characters),
+            selectinload(Book.chapters),
+            selectinload(Book.plot_threads),
+        ),
+    )
     return await book_out(db, book, current_user.id, collaborator)
 
 
@@ -1365,7 +1408,14 @@ async def get_book_overview(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
+    book, collaborator = await get_book_with_collaboration_access(
+        db, book_id, current_user,
+        options=(
+            selectinload(Book.characters),
+            selectinload(Book.chapters),
+            selectinload(Book.plot_threads),
+        ),
+    )
     cache_version = await get_book_cache_version(str(book.id))
     access_key = _book_cache_access_key(current_user.id, collaborator)
     cached = await get_book_overview_cache(str(book.id), str(current_user.id), access_key, cache_version)
@@ -1777,11 +1827,16 @@ async def get_emotional_arc(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    book = await get_owned_book(db, book_id, current_user.id)
-    characters = (
-        await db.execute(select(Character).where(Character.book_id == book.id).order_by(Character.mention_count.desc(), Character.name))
-    ).scalars().all()
-    return EmotionalArcOverviewOut(**build_emotional_arc_payload(list(characters)))
+    book = await get_owned_book(
+        db, book_id, current_user.id,
+        options=(selectinload(Book.characters),),
+    )
+    characters = sorted(
+        book.characters or [],
+        key=lambda c: (c.mention_count or 0, c.name or ""),
+        reverse=True,
+    )
+    return EmotionalArcOverviewOut(**build_emotional_arc_payload(characters))
 
 
 @router.get("/{book_id}/manuscript/export")
@@ -2105,9 +2160,14 @@ async def get_book_characters(book_id: uuid.UUID, db: AsyncSession = Depends(get
     book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
     if not collaboration_has_resource(collaborator, "character_bible"):
         raise HTTPException(403, "This share does not include the character bible.")
-    result = await db.execute(select(Character).where(Character.book_id == book_id).order_by(Character.first_chapter, Character.name))
+    result = await db.execute(
+        select(Character)
+        .where(Character.book_id == book_id)
+        .options(selectinload(Character.voice_profile))
+        .order_by(Character.first_chapter, Character.name)
+    )
     all_characters = list(result.scalars().all())
-    characters = all_characters if book.mode == "author" else [char for char in all_characters if is_displayable_character(char)]
+    characters = [char for char in all_characters if is_cast_visible_character(char)] if book.mode == "author" else [char for char in all_characters if is_displayable_character(char)]
     rel_result = await db.execute(select(CharacterRelationship).where(CharacterRelationship.book_id == book_id))
     relationships = list(rel_result.scalars().all())
     char_by_id = {char.id: char for char in characters}
@@ -2139,10 +2199,10 @@ async def get_book_characters(book_id: uuid.UUID, db: AsyncSession = Depends(get
         for state in state_rows:
             states_by_character.setdefault(state.character_id, []).append(state)
 
-        voice_profiles = (
-            await db.execute(select(CharacterVoiceProfile).where(CharacterVoiceProfile.book_id == book_id))
-        ).scalars().all()
-        voice_profiles_by_character = {profile.character_id: profile for profile in voice_profiles}
+        for character in all_characters:
+            profile = getattr(character, "voice_profile", None)
+            if profile is not None:
+                voice_profiles_by_character[character.id] = profile
 
     counterpart_names = {char.id: char.name for char in characters}
     relationships_by_character: dict[uuid.UUID, list[CharacterRelationship]] = {char_id: [] for char_id in character_ids}
@@ -2265,6 +2325,13 @@ async def create_book_character(
 
     db.add(character)
     await db.flush()
+    append_character_review_audit_entry(
+        character,
+        action="manual_character_created",
+        details={"created_from": "author_create_route"},
+        actor_user_id=current_user.id,
+        reason_codes=["manual_character"],
+    )
     await refresh_character_duplicate_suggestions(db, book_id=book.id)
     await db.commit()
     await db.refresh(character)
@@ -2502,6 +2569,57 @@ async def demote_book_character(
     return {"demoted": str(character_id), "candidate_id": str(candidate.id)}
 
 
+@router.post("/{book_id}/characters/{character_id}/approve")
+async def approve_book_character(
+    book_id: uuid.UUID,
+    character_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
+    character = await db.get(Character, character_id)
+    if not character or character.book_id != book.id:
+        raise HTTPException(404, "Character not found")
+    set_character_review_state(
+        character,
+        visibility_state=CHARACTER_VISIBILITY_VISIBLE,
+        approval_state=CHARACTER_APPROVAL_APPROVED,
+        approval_source=CHARACTER_APPROVAL_SOURCE_MANUAL_REVIEW,
+        reason_codes=["author_approved_character"],
+        action="character_approved_from_review",
+        details={"route": "approve_character"},
+        actor_user_id=current_user.id,
+    )
+    await refresh_character_duplicate_suggestions(db, book_id=book.id)
+    await db.commit()
+    return {"approved": str(character.id)}
+
+
+@router.post("/{book_id}/characters/{character_id}/reject")
+async def reject_book_character(
+    book_id: uuid.UUID,
+    character_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
+    character = await db.get(Character, character_id)
+    if not character or character.book_id != book.id:
+        raise HTTPException(404, "Character not found")
+    reject_character_as_noise(
+        character,
+        reason_codes=["author_rejected_character"],
+        action="character_rejected_from_review",
+        details={"route": "reject_character"},
+        actor_user_id=current_user.id,
+    )
+    await refresh_character_duplicate_suggestions(db, book_id=book.id)
+    await db.commit()
+    return {"rejected": str(character.id)}
+
+
 @router.post("/{book_id}/character-review/{candidate_id}/promote")
 async def promote_book_character_candidate(
     book_id: uuid.UUID,
@@ -2560,6 +2678,20 @@ async def reject_book_character_candidate(
     candidate = await db.get(CharacterCandidate, candidate_id)
     if not candidate or candidate.book_id != book.id:
         raise HTTPException(404, "Candidate not found")
+    if candidate.matched_character_id is not None:
+        character = await db.get(Character, candidate.matched_character_id)
+        if (
+            character is not None
+            and character.book_id == book.id
+            and character.approval_state == CHARACTER_APPROVAL_PENDING_REVIEW
+        ):
+            reject_character_as_noise(
+                character,
+                reason_codes=["candidate_rejected", *(candidate.reason_codes or [])],
+                action="character_review_candidate_rejected",
+                details={"candidate_id": str(candidate.id)},
+                actor_user_id=current_user.id,
+            )
     candidate.status = "rejected"
     await db.commit()
     return {"rejected": str(candidate.id)}

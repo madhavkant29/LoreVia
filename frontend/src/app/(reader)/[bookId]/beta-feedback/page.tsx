@@ -34,7 +34,7 @@ const FINAL_RATING_OPTIONS = [5, 4.5, 4, 3.5, 3, 2.5, 2, 1.5, 1] as const
 function StatPill({ label, value, isDark }: { label: string; value: string; isDark: boolean }) {
   return (
     <div className={`rounded-xl border px-3 py-2 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-slate-200 bg-slate-50"}`}>
-      <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>{label}</p>
+      <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>{label}</p>
       <p className={`mt-1 text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{value}</p>
     </div>
   )
@@ -437,7 +437,7 @@ export default function BetaFeedbackPage() {
                           <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{assignment.reader_email}</p>
                           <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>{assignment.task_label}</p>
                         </div>
-                        <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${assignment.view_bucket === "completed" ? "bg-emerald-500/10 text-emerald-400" : assignment.view_bucket === "missed" ? "bg-rose-500/10 text-rose-400" : "bg-sky-500/10 text-sky-400"}`}>
+                        <span className={`rounded-full px-2.5 py-1 text-3xs font-semibold ${assignment.view_bucket === "completed" ? "bg-emerald-500/10 text-emerald-400" : assignment.view_bucket === "missed" ? "bg-rose-500/10 text-rose-400" : "bg-sky-500/10 text-sky-400"}`}>
                           {assignment.status_label}
                         </span>
                       </div>
@@ -482,7 +482,7 @@ export default function BetaFeedbackPage() {
                           <div key={question.id} className={`rounded-md border px-3 py-2 text-sm ${isDark ? "border-white/[0.06] bg-white/[0.02] text-slate-200" : "border-slate-200 bg-white text-slate-700"}`}>
                             <div className="flex items-center justify-between gap-3">
                               <span>{question.prompt}</span>
-                              <span className={`text-[11px] ${isDark ? "text-slate-500" : "text-slate-400"}`}>{question.answer_count} answers</span>
+                              <span className={`text-3xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>{question.answer_count} answers</span>
                             </div>
                           </div>
                         )) : (
@@ -519,7 +519,7 @@ export default function BetaFeedbackPage() {
                     <h2 className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>Your beta read</h2>
                     <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>{readerDetail.assignment.task_label}</p>
                   </div>
-                  <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${readerDetail.assignment.submission_allowed ? "bg-emerald-500/10 text-emerald-400" : "bg-sky-500/10 text-sky-400"}`}>
+                  <span className={`rounded-full px-2.5 py-1 text-3xs font-semibold ${readerDetail.assignment.submission_allowed ? "bg-emerald-500/10 text-emerald-400" : "bg-sky-500/10 text-sky-400"}`}>
                     {readerDetail.assignment.status_label}
                   </span>
                 </div>

@@ -13,7 +13,7 @@ import { useBookModeStore, type BookMode } from "@/lib/stores/bookModeStore"
 import { GENRE_TAGS } from "@/lib/constants/genreTags"
 import { asQueryKey, bookCacheKey, booksListCacheKey, booksSeriesCacheKey, booksStatsCacheKey } from "@/lib/query/cacheKeys"
 import { capture } from "@/lib/analytics/posthog"
-import type { Book, BookSeries, BookWorkType, ChapterConsistencyReport, UserStats } from "@/types/book"
+import type { Book, BookSeries, BookWorkType, ChapterConsistencyReport, PaginatedSeries, UserStats } from "@/types/book"
 import type { AdvisorSuggestion, EditorialReview, EditorialReviewPassage, ManuscriptSynopsis } from "@/types/intelligence"
 import type { PlotThread } from "@/types/reader"
 
@@ -45,6 +45,8 @@ export function UploadModal({
   const [customTag, setCustomTag] = useState("")
   const [selectedSeriesIds, setSelectedSeriesIds] = useState<string[]>([])
   const [existingBookId, setExistingBookId] = useState(initialExistingBookId)
+  const [existingBookMenuOpen, setExistingBookMenuOpen] = useState(false)
+  const [hoveredExistingBookId, setHoveredExistingBookId] = useState<string | null>(null)
   const [chapterSource, setChapterSource] = useState<"paste" | "upload">("paste")
   const [chapterNumber, setChapterNumber] = useState("")
   const [chapterNumberDirty, setChapterNumberDirty] = useState(false)
@@ -78,15 +80,17 @@ export function UploadModal({
   const [reportReady, setReportReady] = useState<{ bookId: string; chapterNum?: number; text: string } | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const coverInputRef = useRef<HTMLInputElement>(null)
+  const existingBookMenuRef = useRef<HTMLDivElement>(null)
   const { theme } = usePreferencesStore()
   const user = useAuthStore((state) => state.user)
   const canUploadAuthorMode = canUseAuthorFeatures(user?.tier)
   const setBookMode = useBookModeStore((state) => state.setMode)
   const isDark = theme === "dark"
-  const { data: series = [] } = useQuery<BookSeries[]>({
+  const { data: paginatedSeries } = useQuery<PaginatedSeries>({
     queryKey: asQueryKey(booksSeriesCacheKey()),
     queryFn: () => booksApi.listSeries(),
   })
+  const series = paginatedSeries?.items ?? []
 
   const {
     data: books = [],
@@ -113,7 +117,7 @@ export function UploadModal({
     refetchIntervalInBackground: false,
   })
 
-  const infoButtonClass = `inline-flex h-4 w-4 items-center justify-center rounded-full border text-[10px] font-semibold leading-none transition ${
+  const infoButtonClass = `inline-flex h-4 w-4 items-center justify-center rounded-full border text-3xs font-semibold leading-none transition ${
     isDark
       ? "border-white/20 text-slate-300 hover:border-white/40 hover:bg-white/10 hover:text-white"
       : "border-stone-300 text-stone-500 hover:border-stone-400 hover:bg-stone-100 hover:text-stone-700"
@@ -129,12 +133,17 @@ export function UploadModal({
     .slice(0, TAG_SUGGESTION_LIMIT)
   const existingAuthorBooks = books.filter((book) => book.mode === "author" && !book.hidden_at)
   const selectedExistingBook = existingAuthorBooks.find((book) => book.id === existingBookId) ?? null
+  const existingBookSelectLabel = selectedExistingBook?.title ?? "Create a new upload"
   const isManagingExisting = mode === "author" && !!existingBookId
   const effectiveWorkType = isManagingExisting ? (selectedExistingBook?.work_type ?? workType) : workType
   const needsUsername = mode === "author" && !user?.username
   const hasChapterText = chapterText.trim().length > 0
   const hasChapterFiles = files.length > 0
   const canSubmitExistingImport = chapterSource === "paste" ? hasChapterText : hasChapterFiles
+  const existingBookOptionStyle = (selected: boolean, hovered: boolean) => ({
+    backgroundColor: selected ? "#2563eb" : hovered ? "#f3f4f6" : "#ffffff",
+    color: selected ? "#ffffff" : "#000000",
+  })
 
   useEffect(() => {
     setMode(initialMode)
@@ -245,6 +254,17 @@ export function UploadModal({
     if (!isManagingExisting || !selectedExistingBook) return
     setWorkType(selectedExistingBook.work_type)
   }, [isManagingExisting, selectedExistingBook])
+
+  useEffect(() => {
+    if (!existingBookMenuOpen) return
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!existingBookMenuRef.current?.contains(event.target as Node)) {
+        setExistingBookMenuOpen(false)
+      }
+    }
+    document.addEventListener("mousedown", handlePointerDown)
+    return () => document.removeEventListener("mousedown", handlePointerDown)
+  }, [existingBookMenuOpen])
 
   const resetImportFeedback = () => {
     setError(null)
@@ -435,11 +455,11 @@ export function UploadModal({
           ? "Update Chapter & Process"
           : "Add Chapter & Process"
         : "Upload manuscript"
-  const shellClassName = `flex ${isInline ? "min-h-0" : "max-h-[92vh]"} w-full ${postImportReview || isManagingExisting ? "max-w-5xl" : "max-w-4xl"} flex-col overflow-hidden rounded-[28px] border shadow-2xl transition-colors ${
+  const shellClassName = `flex ${isInline ? "min-h-0" : "max-h-[92vh]"} w-full ${postImportReview || isManagingExisting ? "max-w-5xl" : "max-w-4xl"} flex-col overflow-hidden rounded-lg border shadow-2xl transition-colors ${
     isDark
       ? isInline
-        ? "border-white/10 bg-[#0B0B0B] text-slate-100 shadow-[0_30px_80px_-35px_rgba(0,0,0,0.8)]"
-        : "border-white/10 bg-[#0B0B0B]/95 backdrop-blur-xl text-slate-100 shadow-[0_30px_80px_-35px_rgba(0,0,0,0.9)]"
+        ? "border-white/10 bg-[#0B0B0B] text-slate-100 shadow-modal"
+        : "border-white/10 bg-[#0B0B0B]/95 backdrop-blur-xl text-slate-100 shadow-modal"
       : "border-black/5 bg-white text-slate-950"
   }`
 
@@ -496,7 +516,7 @@ export function UploadModal({
           <div className="reader-scrollbar min-h-0 flex-1 overflow-y-auto px-6 py-5">
           <div className="flex flex-col gap-4">
           {!isManagingExisting ? (
-            <div className={`rounded-[24px] border p-5 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-slate-200 bg-slate-50/80"}`}>
+            <div className={`rounded-lg border p-5 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-slate-200 bg-slate-50/80"}`}>
               <div className="mb-3">
                 <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>File upload</p>
                 <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
@@ -505,7 +525,7 @@ export function UploadModal({
               </div>
               <div
                 onClick={() => inputRef.current?.click()}
-                className={`cursor-pointer rounded-[24px] border-2 border-dashed p-6 transition-colors ${
+                className={`cursor-pointer rounded-lg border-2 border-dashed p-6 transition-colors ${
                   isDark
                     ? files.length > 0
                       ? "border-indigo-400/50 bg-indigo-500/10"
@@ -723,19 +743,61 @@ export function UploadModal({
                 <label className={`mb-2 block text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                   Manage existing author upload
                 </label>
-                <select
-                  value={existingBookId}
-                  onChange={(e) => {
-                    setExistingBookId(e.target.value)
-                    setChapterNumberDirty(false)
-                  }}
-                  className={`w-full rounded-lg border px-3 py-2.5 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-100" : "border-gray-300 bg-white text-slate-950"}`}
-                >
-                  <option value="">Create a new upload</option>
-                  {existingAuthorBooks.map((book) => (
-                    <option key={book.id} value={book.id}>{book.title}</option>
-                  ))}
-                </select>
+                <div className="relative" ref={existingBookMenuRef}>
+                  <button
+                    type="button"
+                    aria-haspopup="listbox"
+                    aria-expanded={existingBookMenuOpen}
+                    onClick={() => setExistingBookMenuOpen((open) => !open)}
+                    className={`flex w-full items-center justify-between rounded-lg border px-3 py-2.5 text-left text-sm ${isDark ? "border-white/10" : "border-gray-300"}`}
+                    style={{ backgroundColor: "#ffffff", color: "#000000" }}
+                  >
+                    <span className="truncate">{existingBookSelectLabel}</span>
+                    <span aria-hidden="true" className="ml-3 text-base leading-none">v</span>
+                  </button>
+                  {existingBookMenuOpen ? (
+                    <div
+                      role="listbox"
+                      className="absolute z-50 mt-1 max-h-64 w-full overflow-auto rounded-lg border border-gray-300 bg-white py-1 shadow-2xl"
+                    >
+                      <button
+                        type="button"
+                        role="option"
+                        aria-selected={existingBookId === ""}
+                        onClick={() => {
+                          setExistingBookId("")
+                          setChapterNumberDirty(false)
+                          setExistingBookMenuOpen(false)
+                        }}
+                        onMouseEnter={() => setHoveredExistingBookId("")}
+                        onMouseLeave={() => setHoveredExistingBookId((current) => (current === "" ? null : current))}
+                        className="block w-full px-3 py-2 text-left text-sm"
+                        style={existingBookOptionStyle(existingBookId === "", hoveredExistingBookId === "")}
+                      >
+                        Create a new upload
+                      </button>
+                      {existingAuthorBooks.map((book) => (
+                        <button
+                          key={book.id}
+                          type="button"
+                          role="option"
+                          aria-selected={existingBookId === book.id}
+                          onClick={() => {
+                            setExistingBookId(book.id)
+                            setChapterNumberDirty(false)
+                            setExistingBookMenuOpen(false)
+                          }}
+                          onMouseEnter={() => setHoveredExistingBookId(book.id)}
+                          onMouseLeave={() => setHoveredExistingBookId((current) => (current === book.id ? null : current))}
+                          className="block w-full px-3 py-2 text-left text-sm"
+                          style={existingBookOptionStyle(existingBookId === book.id, hoveredExistingBookId === book.id)}
+                        >
+                          {book.title}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
               </div>
             ) : null}
           </div>
@@ -774,7 +836,7 @@ export function UploadModal({
             {shouldShowTagSuggestions && suggestedTags.length > 0 && (
               <div className={`mt-1 border-t ${isDark ? "border-white/10" : "border-gray-100"}`}>
                 <div className="px-3 pt-3">
-                  <p className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? "text-slate-500" : "text-slate-500"}`}>
+                  <p className={`text-3xs font-bold uppercase tracking-wider ${isDark ? "text-slate-500" : "text-slate-500"}`}>
                     Suggestions
                   </p>
                 </div>
@@ -819,12 +881,6 @@ export function UploadModal({
               ))}
             </div>
           ) : null}
-          </div>
-
-          <div className={`rounded-xl border px-4 py-3 text-sm ${isDark ? "border-white/10 bg-white/[0.03] text-slate-300" : "border-gray-200 bg-gray-50 text-slate-600"}`}>
-            <p className="font-semibold">Private by default</p>
-            <p className="mt-1">This upload stays in your workspace.</p>
-            <p className="mt-2 text-xs">Public sharing is not part of this step.</p>
           </div>
 
           {series.length > 0 ? (
@@ -1313,7 +1369,7 @@ export function UploadModal({
                         {postImportSynopsis.focus_points.length > 0 ? (
                           <div className="mt-3 flex flex-wrap gap-2">
                             {postImportSynopsis.focus_points.map((point) => (
-                              <span key={point} className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${isDark ? "bg-white/10 text-slate-300" : "bg-stone-100 text-stone-700"}`}>{point}</span>
+                              <span key={point} className={`rounded-full px-2.5 py-1 text-3xs font-semibold ${isDark ? "bg-white/10 text-slate-300" : "bg-stone-100 text-stone-700"}`}>{point}</span>
                             ))}
                           </div>
                         ) : null}

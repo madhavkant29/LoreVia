@@ -1,15 +1,87 @@
 from __future__ import annotations
 
 import json
+import uuid
 from collections.abc import Callable
 from typing import Any, cast
-import uuid
 
 from openai import AsyncOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
+from tenacity import (
+    retry,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from app.core.config import settings
 from app.utils.llm_usage_utils import create_tracked_chat_completion
+
+_openai_client: AsyncOpenAI | None = None
+_gemini_client: object | None = None
+
+
+def _get_openai_client(external: AsyncOpenAI | None = None) -> AsyncOpenAI:
+    global _openai_client
+    if external is not None:
+        return external
+    if _openai_client is None:
+        _openai_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    return _openai_client
+
+
+def _get_gemini_client() -> object:
+    global _gemini_client
+    if _gemini_client is not None:
+        return _gemini_client
+    from google import generativeai as genai
+
+    _gemini_client = genai.Client(api_key=settings.GEMINI_API_KEY)
+    return _gemini_client
+
+
+def _is_transient_openai_error(exc: BaseException) -> bool:
+    import httpx
+
+    if isinstance(exc, (httpx.TimeoutException, httpx.ConnectError, httpx.RemoteProtocolError)):
+        return True
+    try:
+        from openai import APIStatusError
+
+        if isinstance(exc, APIStatusError):
+            return exc.status_code >= 500 or exc.status_code == 429
+    except ImportError:
+        pass
+    return False
+
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=1, max=8),
+    retry=retry_if_exception(_is_transient_openai_error),
+    reraise=True,
+)
+async def _call_openai_completion(
+    *,
+    client: AsyncOpenAI,
+    feature: str,
+    model: str,
+    db: AsyncSession | None = None,
+    user_id: uuid.UUID | None = None,
+    book_id: uuid.UUID | None = None,
+    metadata: dict[str, Any] | None = None,
+    **kwargs: Any,
+) -> Any:
+    return await create_tracked_chat_completion(
+        client=client,
+        feature=feature,
+        model=model,
+        db=db,
+        user_id=user_id,
+        book_id=book_id,
+        metadata=metadata,
+        **kwargs,
+    )
 
 
 async def complete_with_fallback(
@@ -31,7 +103,7 @@ async def complete_with_fallback(
     openai_error: Exception | None = None
 
     if settings.OPENAI_API_KEY:
-        client = openai_client or AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+        client = _get_openai_client(openai_client)
         try:
             request_kwargs = cast(
                 dict[str, Any],
@@ -46,7 +118,7 @@ async def complete_with_fallback(
             )
             if response_format is not None:
                 request_kwargs["response_format"] = response_format
-            response = await create_tracked_chat_completion(
+            response = await _call_openai_completion(
                 client=client,
                 feature=usage_feature,
                 model=openai_model,
@@ -61,9 +133,6 @@ async def complete_with_fallback(
                 return content.strip()
         except Exception as exc:  # pragma: no cover - network/provider path
             openai_error = exc
-        finally:
-            if openai_client is None:
-                await client.close()
 
     if settings.GEMINI_API_KEY and gemini_model:
         try:
@@ -96,12 +165,11 @@ async def _complete_with_gemini(
     want_json: bool,
 ) -> str:
     try:
-        from google import generativeai as genai
         from google.generativeai import types
     except Exception as exc:  # pragma: no cover - optional dependency
         raise RuntimeError("Gemini fallback requested but google-genai is not installed") from exc
 
-    client = cast(Any, genai).Client(api_key=settings.GEMINI_API_KEY)
+    client = cast(Any, _get_gemini_client())
     config = cast(Any, types).GenerateContentConfig(
         temperature=temperature,
         max_output_tokens=max_tokens,

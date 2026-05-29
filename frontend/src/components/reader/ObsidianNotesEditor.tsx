@@ -26,7 +26,7 @@ const GraphViewer = dynamic(
   () => import("./GraphViewer").then((module) => module.GraphViewer),
   {
     ssr: false,
-    loading: () => <div className="min-h-[34rem] animate-pulse rounded-[1.35rem] bg-black/5" />,
+    loading: () => <div className="min-h-[34rem] animate-pulse rounded-lg bg-black/5" />,
   }
 )
 
@@ -34,7 +34,7 @@ const MarkdownPreview = dynamic(
   () => import("./MarkdownPreview").then((module) => module.MarkdownPreview),
   {
     ssr: false,
-    loading: () => <div className="min-h-[32rem] animate-pulse rounded-[1.2rem] bg-black/5" />,
+    loading: () => <div className="min-h-[32rem] animate-pulse rounded-md bg-black/5" />,
   }
 )
 
@@ -816,7 +816,7 @@ export function ObsidianNotesEditor({
 
   return (
     <div
-      className={`rounded-[2rem] border p-4 shadow-[0_36px_110px_-56px_rgba(2,6,23,0.95)] sm:p-5 ${
+      className={`rounded-lg border p-4 shadow-[0_36px_110px_-56px_rgba(2,6,23,0.95)] sm:p-5 ${
         isDark
           ? "border-white/8 bg-[radial-gradient(circle_at_top,_rgba(20,184,166,0.08),transparent_18%),linear-gradient(180deg,#060b16_0%,#091120_48%,#0b1424_100%)]"
           : "border-stone-200 bg-[linear-gradient(180deg,#fdfdfd_0%,#f6f8fb_100%)]"
@@ -859,7 +859,7 @@ export function ObsidianNotesEditor({
       </div>
 
       <div className="mt-5 grid gap-4 xl:grid-cols-[21rem_minmax(0,1fr)_19rem]">
-        <aside className={`overflow-hidden rounded-[1.55rem] border ${isDark ? "border-white/8 bg-[#07101d]/90" : "border-stone-200 bg-white/90"}`}>
+        <aside className={`overflow-hidden rounded-lg border ${isDark ? "border-white/8 bg-[#07101d]/90" : "border-stone-200 bg-white/90"}`}>
           <div className={`border-b px-5 py-5 ${isDark ? "border-white/8" : "border-stone-200"}`}>
             <div className="flex items-center gap-3">
               <div className={`flex h-12 w-12 items-center justify-center rounded-2xl ${isDark ? "bg-emerald-500/12 text-emerald-200" : "bg-emerald-50 text-emerald-700"}`}>
@@ -889,7 +889,7 @@ export function ObsidianNotesEditor({
             </div>
 
             <div className="mt-6 flex items-center justify-between">
-              <p className={`text-[11px] font-semibold uppercase tracking-[0.28em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Folders</p>
+              <p className={`text-3xs font-semibold uppercase tracking-[0.28em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Folders</p>
               <button type="button" onClick={() => createFolder()} className={`rounded-full p-1.5 ${isDark ? "text-slate-400 hover:bg-white/[0.06] hover:text-white" : "text-stone-500 hover:bg-stone-100 hover:text-stone-900"}`} title="Create folder">
                 <IconPlus />
               </button>
@@ -939,7 +939,7 @@ export function ObsidianNotesEditor({
             </div>
 
             <div className="mt-6">
-              <p className={`text-[11px] font-semibold uppercase tracking-[0.28em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Notes</p>
+              <p className={`text-3xs font-semibold uppercase tracking-[0.28em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Notes</p>
               <div className="mt-3 flex gap-2">
                 <button type="button" onClick={() => setNotesView("recent")} className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${notesView === "recent" ? "bg-emerald-500/16 text-emerald-200" : isDark ? "text-slate-400 hover:bg-white/[0.05] hover:text-white" : "text-stone-500 hover:bg-stone-100 hover:text-stone-900"}`}>
                   Recent
@@ -1004,7 +1004,7 @@ export function ObsidianNotesEditor({
           </div>
         </aside>
 
-        <section className={`overflow-hidden rounded-[1.55rem] border ${isDark ? "border-white/8 bg-[#08111e]/95" : "border-stone-200 bg-white"}`}>
+        <section className={`overflow-hidden rounded-lg border ${isDark ? "border-white/8 bg-[#08111e]/95" : "border-stone-200 bg-white"}`}>
           {selectedNote ? (
             <>
               <div className={`flex flex-col gap-5 border-b px-5 py-4 ${isDark ? "border-white/8" : "border-stone-200"} lg:flex-row lg:items-start lg:justify-between`}>
@@ -1073,7 +1073,7 @@ export function ObsidianNotesEditor({
 
               <div className="p-5">
                 <WhatsTheWordPanel bookId={bookId} isDark={isDark} className="mb-4" />
-                <div className={`overflow-hidden rounded-[1.4rem] border ${isDark ? "border-white/8 bg-[#0a1323]" : "border-stone-200 bg-stone-50"}`}>
+                <div className={`overflow-hidden rounded-lg border ${isDark ? "border-white/8 bg-[#0a1323]" : "border-stone-200 bg-stone-50"}`}>
                   {(mode === "edit" || mode === "split") ? (
                     <div className={`border-b px-3 py-3 ${isDark ? "border-white/8 bg-white/[0.02]" : "border-stone-200 bg-white/80"}`}>
                       <div className="flex flex-wrap gap-2">
@@ -1116,7 +1116,7 @@ export function ObsidianNotesEditor({
                         value={selectedContent}
                         onChange={(event) => updateDraft(selectedNote.path, event.target.value)}
                         spellCheck={false}
-                        className={`min-h-[42rem] w-full resize-none border-0 px-4 py-5 font-mono text-[15px] leading-8 outline-none ${
+                        className={`min-h-[42rem] w-full resize-none border-0 px-4 py-5 font-mono text-base leading-8 outline-none ${
                           isDark
                             ? "bg-[#0a1323] text-slate-100 placeholder:text-slate-500"
                             : "bg-white text-stone-900 placeholder:text-stone-400"
@@ -1176,7 +1176,7 @@ export function ObsidianNotesEditor({
 
             <div className="mt-4 grid gap-3">
               <label className="space-y-2">
-                <span className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Folder path</span>
+                <span className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Folder path</span>
                 <input
                   value={editedFolder}
                   onChange={(event) => setEditedFolder(event.target.value)}
@@ -1185,7 +1185,7 @@ export function ObsidianNotesEditor({
                 />
               </label>
               <label className="space-y-2">
-                <span className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>File title</span>
+                <span className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>File title</span>
                 <input
                   value={editedTitle}
                   onChange={(event) => setEditedTitle(event.target.value)}
@@ -1202,7 +1202,7 @@ export function ObsidianNotesEditor({
                 </button>
               </div>
               <div className={`rounded-2xl border p-3 ${isDark ? "border-white/8 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
-                <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Send to scenes</p>
+                <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Send to scenes</p>
                 <div className="mt-3 flex gap-2">
                   <select
                     value={sceneChapterNumber ?? ""}
@@ -1312,10 +1312,10 @@ export function ObsidianNotesEditor({
 
       {graphExpanded ? (
         <div className="fixed inset-0 z-[70] flex items-stretch justify-center bg-black/70 p-3 backdrop-blur-sm sm:p-5">
-          <div className={`flex h-full w-full max-w-[96rem] flex-col overflow-hidden rounded-[1.8rem] border shadow-[0_40px_140px_-50px_rgba(2,6,23,0.95)] ${isDark ? "border-white/10 bg-[#08111d]" : "border-stone-200 bg-[#f4f7fb]"}`}>
+          <div className={`flex h-full w-full max-w-[96rem] flex-col overflow-hidden rounded-lg border shadow-[0_40px_140px_-50px_rgba(2,6,23,0.95)] ${isDark ? "border-white/10 bg-[#08111d]" : "border-stone-200 bg-[#f4f7fb]"}`}>
             <div className={`flex flex-col gap-3 border-b px-5 py-4 sm:flex-row sm:items-center sm:justify-between ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-white/70"}`}>
               <div>
-                <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-emerald-300" : "text-emerald-700"}`}>Obsidian graph</p>
+                <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-emerald-300" : "text-emerald-700"}`}>Obsidian graph</p>
                 <h3 className={`mt-1 text-2xl font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>Vault graph view</h3>
                 <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
                   Pan, zoom, drag nodes, and open linked notes directly from the site.
@@ -1352,7 +1352,7 @@ export function ObsidianNotesEditor({
               </div>
 
               <aside className={`border-l p-5 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-white/65"}`}>
-                <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>How it works</p>
+                <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>How it works</p>
                 <div className={`mt-4 space-y-3 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
                   <p>Drag nodes to shape the map. Your layout stays saved in the browser.</p>
                   <p>Hovering a note spotlights its neighborhood so relationships are easier to trace.</p>
@@ -1361,8 +1361,8 @@ export function ObsidianNotesEditor({
                 </div>
 
                 {selectedNote ? (
-                  <div className={`mt-6 rounded-[1.2rem] border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
-                    <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Selected note</p>
+                  <div className={`mt-6 rounded-md border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
+                    <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Selected note</p>
                     <h4 className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{noteTitle(selectedNote.path)}</h4>
                     <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{selectedNote.path}</p>
                     <button
@@ -1502,9 +1502,9 @@ function PanelCard({
   children: ReactNode
 }) {
   return (
-    <section className={`rounded-[1.4rem] border p-4 ${isDark ? "border-white/8 bg-[#07101d]/88" : "border-stone-200 bg-white/90"}`}>
+    <section className={`rounded-lg border p-4 ${isDark ? "border-white/8 bg-[#07101d]/88" : "border-stone-200 bg-white/90"}`}>
       <div className="mb-4 flex items-center justify-between gap-3">
-        <p className={`text-[11px] font-semibold uppercase tracking-[0.28em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{title}</p>
+        <p className={`text-3xs font-semibold uppercase tracking-[0.28em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{title}</p>
         <div className="flex items-center gap-2">
           {typeof count === "number" ? (
             <span className={`inline-flex h-6 min-w-6 items-center justify-center rounded-full px-2 text-xs font-semibold ${isDark ? "bg-white/[0.05] text-slate-300" : "bg-stone-100 text-stone-700"}`}>
@@ -1613,14 +1613,14 @@ function MiniGraphPreview({
 
   if (!nodes.length) {
     return (
-      <div className={`flex min-h-[13rem] items-center justify-center rounded-[1.25rem] border border-dashed text-sm ${isDark ? "border-white/8 text-slate-500" : "border-stone-300 text-stone-500"}`}>
+      <div className={`flex min-h-[13rem] items-center justify-center rounded-md border border-dashed text-sm ${isDark ? "border-white/8 text-slate-500" : "border-stone-300 text-stone-500"}`}>
         Link a few notes to see the mini graph preview.
       </div>
     )
   }
 
   return (
-    <div className={`relative min-h-[13rem] overflow-hidden rounded-[1.25rem] border ${isDark ? "border-white/8 bg-[#091321]" : "border-stone-200 bg-stone-50"}`}>
+    <div className={`relative min-h-[13rem] overflow-hidden rounded-md border ${isDark ? "border-white/8 bg-[#091321]" : "border-stone-200 bg-stone-50"}`}>
       <svg className="absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
         {nodes.map((node, index) => {
           const position = positions[index]

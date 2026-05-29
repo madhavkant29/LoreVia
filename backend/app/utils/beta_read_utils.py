@@ -13,13 +13,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.models.beta_read import (
     BetaReadAssignment,
-    BetaReadFeedbackItem,
     BetaReadFeedbackKind,
     BetaReadAssignmentState,
+    BetaReadFeedbackItem,
     BetaReadQuestion,
     BetaReadScopeKind,
 )
-from app.models.book import Book, BookCollaborator, BookNote, NovelScene
+from app.models.book import Book, BookCollaborator, BookNote, Chapter, ManuscriptAnnotation, NovelScene
 from app.models.intelligence import Notification
 from app.models.progress import ReadingProgress
 from app.models.user import User
@@ -33,12 +33,14 @@ from app.schemas.beta_reads import (
     BetaReadJobRunOut,
     BetaReadQuestionOut,
 )
+from app.schemas.books import ChapterBetaFeedbackOut, CollaboratorActivityItemOut, CollaboratorActivityOut
 from app.utils.book_utils import (
     apply_collaboration_permissions,
     apply_collaboration_scope,
     normalize_collaboration_email,
     normalize_collaboration_permissions,
     normalize_collaboration_scope,
+    serialize_book_collaborator,
 )
 from app.utils.notification_utils import create_notification_once, make_notification_idempotency_key
 
@@ -648,6 +650,266 @@ async def _serialize_beta_read_feedback_items(
             )
         )
     return serialized_items
+
+
+def _beta_feedback_reader_display_name(
+    *,
+    assignment: BetaReadAssignment,
+    reader: User | None,
+    collaborator: BookCollaborator | None,
+) -> str:
+    collaborator_name = str(collaborator.display_name or "").strip() if collaborator is not None else ""
+    if collaborator_name:
+        return collaborator_name
+    username = str(reader.username or "").strip() if reader is not None else ""
+    if username:
+        return username
+    reader_email = str(reader.email or "").strip() if reader is not None else ""
+    if reader_email:
+        return reader_email
+    fallback_email = str(assignment.reader_email or "").strip()
+    return fallback_email or "Beta reader"
+
+
+def _beta_feedback_activity_title(item: BetaReadFeedbackItem) -> str:
+    if item.kind == BetaReadFeedbackKind.CHAPTER_COMMENT.value:
+        return "Left a chapter comment"
+    if item.kind == BetaReadFeedbackKind.SCENE_REACTION.value:
+        return "Left a scene reaction"
+    if item.kind == BetaReadFeedbackKind.ANSWER.value:
+        return "Answered an author question"
+    if item.kind == BetaReadFeedbackKind.CONFUSING.value:
+        return "Flagged a confusing moment"
+    if item.kind == BetaReadFeedbackKind.BORING.value:
+        return "Flagged a slow moment"
+    if item.kind == BetaReadFeedbackKind.FAVORITE.value:
+        return "Marked a favorite moment"
+    return "Added beta feedback"
+
+
+async def list_chapter_beta_feedback(
+    db: AsyncSession,
+    *,
+    book_id: uuid.UUID,
+    chapter_number: int,
+    current_user: User,
+    collaborator: BookCollaborator | None,
+) -> list[ChapterBetaFeedbackOut]:
+    query = (
+        select(BetaReadFeedbackItem, BetaReadAssignment)
+        .join(BetaReadAssignment, BetaReadAssignment.id == BetaReadFeedbackItem.assignment_id)
+        .where(
+            BetaReadFeedbackItem.book_id == book_id,
+            BetaReadFeedbackItem.kind == BetaReadFeedbackKind.CHAPTER_COMMENT.value,
+            BetaReadFeedbackItem.chapter_number == chapter_number,
+        )
+        .order_by(BetaReadFeedbackItem.created_at.asc())
+    )
+    if collaborator is not None:
+        normalized_email = normalize_collaboration_email(current_user.email)
+        query = query.where(
+            or_(
+                BetaReadFeedbackItem.reader_user_id == current_user.id,
+                BetaReadAssignment.reader_email == normalized_email,
+            )
+        )
+    rows = (await db.execute(query)).all()
+    if not rows:
+        return []
+
+    reader_ids = {
+        assignment.reader_user_id
+        for _item, assignment in rows
+        if assignment.reader_user_id is not None
+    }
+    collaborator_ids = {
+        assignment.collaborator_id
+        for _item, assignment in rows
+        if assignment.collaborator_id is not None
+    }
+    readers = (
+        await db.execute(select(User).where(User.id.in_(list(reader_ids))))
+    ).scalars().all() if reader_ids else []
+    collaborators = (
+        await db.execute(select(BookCollaborator).where(BookCollaborator.id.in_(list(collaborator_ids))))
+    ).scalars().all() if collaborator_ids else []
+    readers_by_id = {reader.id: reader for reader in readers}
+    collaborators_by_id = {entry.id: entry for entry in collaborators}
+
+    payload: list[ChapterBetaFeedbackOut] = []
+    for item, assignment in rows:
+        author_metadata = beta_feedback_item_author_metadata(item)
+        reader = readers_by_id.get(assignment.reader_user_id) if assignment.reader_user_id is not None else None
+        collaborator_row = collaborators_by_id.get(assignment.collaborator_id) if assignment.collaborator_id is not None else None
+        payload.append(
+            ChapterBetaFeedbackOut(
+                id=str(item.id),
+                assignment_id=str(assignment.id),
+                collaborator_id=str(assignment.collaborator_id) if assignment.collaborator_id else None,
+                reader_user_id=str(assignment.reader_user_id) if assignment.reader_user_id else None,
+                reader_email=assignment.reader_email,
+                reader_display_name=_beta_feedback_reader_display_name(
+                    assignment=assignment,
+                    reader=reader,
+                    collaborator=collaborator_row,
+                ),
+                task_label=assignment.task_label,
+                kind=item.kind,
+                chapter_number=item.chapter_number,
+                anchor_text=item.anchor_text,
+                body=item.body,
+                author_status=author_metadata["author_status"],
+                created_at=item.created_at,
+                updated_at=item.updated_at,
+            )
+        )
+    return payload
+
+
+async def get_book_collaborator_activity(
+    db: AsyncSession,
+    *,
+    book: Book,
+    collaborator_id: uuid.UUID,
+) -> CollaboratorActivityOut:
+    collaborator = await db.get(BookCollaborator, collaborator_id)
+    if collaborator is None or collaborator.book_id != book.id:
+        raise HTTPException(404, "Collaborator not found.")
+
+    assignments = (
+        await db.execute(
+            select(BetaReadAssignment)
+            .where(
+                BetaReadAssignment.book_id == book.id,
+                or_(
+                    BetaReadAssignment.collaborator_id == collaborator.id,
+                    BetaReadAssignment.reader_email == collaborator.email,
+                ),
+            )
+            .order_by(BetaReadAssignment.created_at.desc())
+        )
+    ).scalars().all()
+    context = await load_beta_assignment_render_context(db, assignments=assignments) if assignments else None
+    assignment_payload = [
+        _build_beta_read_assignment_out_from_context(assignment, context=context)
+        for assignment in assignments
+    ] if context is not None else []
+
+    assignment_ids = [assignment.id for assignment in assignments]
+    feedback_rows = (
+        await db.execute(
+            select(BetaReadFeedbackItem, BetaReadAssignment)
+            .join(BetaReadAssignment, BetaReadAssignment.id == BetaReadFeedbackItem.assignment_id)
+            .where(BetaReadFeedbackItem.assignment_id.in_(assignment_ids))
+            .order_by(BetaReadFeedbackItem.created_at.desc())
+        )
+    ).all() if assignment_ids else []
+    annotations = (
+        await db.execute(
+            select(ManuscriptAnnotation)
+            .where(
+                ManuscriptAnnotation.book_id == book.id,
+                ManuscriptAnnotation.user_id == collaborator.invited_user_id,
+            )
+            .order_by(ManuscriptAnnotation.created_at.desc())
+        )
+    ).scalars().all() if collaborator.invited_user_id is not None else []
+
+    chapter_numbers = {
+        int(number)
+        for number in [
+            *[item.chapter_number for item, _assignment in feedback_rows if item.chapter_number is not None],
+            *[annotation.chapter_number for annotation in annotations if annotation.chapter_number is not None],
+        ]
+        if number is not None
+    }
+    chapter_rows = (
+        await db.execute(
+            select(Chapter.number, Chapter.title).where(
+                Chapter.book_id == book.id,
+                Chapter.number.in_(sorted(chapter_numbers)),
+            )
+        )
+    ).all() if chapter_numbers else []
+    chapter_titles = {int(number): title for number, title in chapter_rows}
+
+    items: list[CollaboratorActivityItemOut] = []
+    for assignment in assignments:
+        if assignment.first_opened_at is not None:
+            items.append(
+                CollaboratorActivityItemOut(
+                    id=f"{assignment.id}:opened",
+                    kind="beta_read_opened",
+                    title="Opened beta read",
+                    body=assignment.task_label,
+                    assignment_id=str(assignment.id),
+                    created_at=assignment.first_opened_at,
+                )
+            )
+        if assignment.submitted_at is not None:
+            items.append(
+                CollaboratorActivityItemOut(
+                    id=f"{assignment.id}:submitted",
+                    kind="beta_read_submitted",
+                    title="Submitted beta read",
+                    body=assignment.final_feedback,
+                    assignment_id=str(assignment.id),
+                    created_at=assignment.submitted_at,
+                )
+            )
+        if assignment.completed_at is not None:
+            items.append(
+                CollaboratorActivityItemOut(
+                    id=f"{assignment.id}:completed",
+                    kind="beta_read_completed",
+                    title="Beta read completed",
+                    body=assignment.task_label,
+                    assignment_id=str(assignment.id),
+                    created_at=assignment.completed_at,
+                )
+            )
+
+    chapter_comment_count = 0
+    for feedback_item, assignment in feedback_rows:
+        if feedback_item.kind == BetaReadFeedbackKind.CHAPTER_COMMENT.value:
+            chapter_comment_count += 1
+        items.append(
+            CollaboratorActivityItemOut(
+                id=f"feedback:{feedback_item.id}",
+                kind=feedback_item.kind,
+                title=_beta_feedback_activity_title(feedback_item),
+                body=feedback_item.body or feedback_item.anchor_text or feedback_item.reaction,
+                chapter_number=feedback_item.chapter_number,
+                chapter_title=chapter_titles.get(int(feedback_item.chapter_number)) if feedback_item.chapter_number is not None else None,
+                assignment_id=str(assignment.id),
+                feedback_item_id=str(feedback_item.id),
+                created_at=feedback_item.created_at,
+            )
+        )
+
+    for annotation in annotations:
+        items.append(
+            CollaboratorActivityItemOut(
+                id=f"annotation:{annotation.id}",
+                kind="annotation",
+                title="Left a manuscript annotation",
+                body=annotation.comment,
+                chapter_number=annotation.chapter_number,
+                chapter_title=chapter_titles.get(int(annotation.chapter_number)) if annotation.chapter_number is not None else None,
+                annotation_id=str(annotation.id),
+                created_at=annotation.created_at,
+            )
+        )
+
+    items.sort(key=lambda item: item.created_at, reverse=True)
+    return CollaboratorActivityOut(
+        collaborator=serialize_book_collaborator(collaborator),
+        assignments=assignment_payload,
+        items=items,
+        chapter_comment_count=chapter_comment_count,
+        annotation_count=len(annotations),
+        latest_activity_at=items[0].created_at if items else None,
+    )
 
 
 async def _upsert_beta_read_collaborator(

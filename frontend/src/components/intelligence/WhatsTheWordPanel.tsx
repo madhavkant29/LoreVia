@@ -66,13 +66,13 @@ export function WhatsTheWordPanel({
 
       {open ? (
         <div
-          className={`mt-3 rounded-[1.1rem] border p-4 ${
+          className={`mt-3 rounded-md border p-4 ${
             isDark ? "border-white/10 bg-black/25" : "border-stone-200 bg-white/92"
           }`}
         >
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div className="min-w-0 flex-1">
-              <p className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-sky-300" : "text-sky-700"}`}>
+              <p className={`text-3xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-sky-300" : "text-sky-700"}`}>
                 Word finder
               </p>
               <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
@@ -87,7 +87,7 @@ export function WhatsTheWordPanel({
                 }}
                 rows={4}
                 placeholder="For example: a smile that hides contempt behind politeness"
-                className={`mt-3 w-full rounded-[1rem] border px-4 py-3 text-sm leading-6 ${
+                className={`mt-3 w-full rounded-md border px-4 py-3 text-sm leading-6 ${
                   isDark
                     ? "border-white/10 bg-[#020617] text-slate-100 placeholder:text-slate-500"
                     : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"
@@ -105,11 +105,11 @@ export function WhatsTheWordPanel({
 
             <div className="w-full lg:max-w-[18rem]">
               <div
-                className={`rounded-[1rem] border px-4 py-4 ${
+                className={`rounded-md border px-4 py-4 ${
                   isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"
                 }`}
               >
-                <p className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>
+                <p className={`text-3xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>
                   Suggestion
                 </p>
                 {result ? (

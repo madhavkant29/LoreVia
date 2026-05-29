@@ -61,6 +61,7 @@ let container: HTMLDivElement | null = null
 let root: Root | null = null
 
 ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+Element.prototype.scrollIntoView = vi.fn()
 
 function renderPage() {
   container = document.createElement("div")
@@ -159,6 +160,25 @@ afterEach(() => {
 
 describe("AdvisorPage", () => {
   it("renders the accessible mode toggle and preserved notes link", async () => {
+    advisorSuggestionsMock.mockResolvedValue({
+      suggestions: [],
+      total: 0,
+      book_title: "The Ember Gate",
+      meta: {
+        character_count: 3,
+        state_count: 0,
+        open_thread_count: 0,
+        clue_count: 0,
+        relationship_count: 0,
+        world_element_count: 0,
+        heuristic_count: 0,
+        fallback_applied: false,
+        proactive_audit_applied: false,
+        scan_basis: [],
+        data_gaps: [],
+        audit_summary: null,
+      },
+    })
     renderPage()
     await flushUi()
     await flushUi()

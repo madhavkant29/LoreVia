@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy import select
 
 from app.models.book import Book
-from app.models.character import Character, CharacterCandidate, CharacterDuplicateSuggestion, CharacterMention, CharacterRelationshipCandidate
+from app.models.character import Character, CharacterCandidate, CharacterDecisionEvent, CharacterDuplicateSuggestion, CharacterMention, CharacterRelationshipCandidate
 from app.models.user import User
 from app.utils.character_utils import (
     CHARACTER_CANDIDATE_PENDING,
@@ -396,16 +396,32 @@ def test_build_character_review_payload_surfaces_structured_candidate_and_duplic
         shared_evidence=cast(dict, suggestion)["shared_evidence"],
         status="pending",
     )
+    decision_event = CharacterDecisionEvent(
+        id=uuid.UUID("00000000-0000-0000-0000-000000000205"),
+        book_id=primary.book_id,
+        character_id=secondary.id,
+        action="character_demoted_for_review",
+        visibility_state="quarantined",
+        approval_state="pending_review",
+        approval_source="backfill_review",
+        reason_codes=["role_only_reference"],
+        evidence={"source": "repair"},
+    )
 
     payload = build_character_review_payload(
         [candidate],
         [duplicate],
         [],
         character_map={primary.id: primary, secondary.id: secondary},
+        shadow_characters=[secondary],
+        decision_events=[decision_event],
     )
 
     assert payload["candidates"][0]["cluster_names"] == ["Grete", "Gregor's sister"]
     assert payload["candidates"][0]["resolver_status"] == "held_for_review"
     assert payload["candidates"][0]["snippets"] == ["Grete brings food to Gregor."]
+    assert payload["candidates"][0]["dossier_summary"]["strict_auto_eligible"] is False
     assert payload["duplicate_suggestions"][0]["primary_is_protected"] is True
     assert isinstance(payload["duplicate_suggestions"][0]["shared_chapters"], list)
+    assert payload["shadow_characters"][0]["name"] == "Gregor's sister"
+    assert payload["decision_events"][0]["action"] == "character_demoted_for_review"

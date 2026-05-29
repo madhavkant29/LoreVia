@@ -5,12 +5,12 @@
 @tailwind utilities;
 
 :root {
-  --background: 243 244 246;
-  --foreground: 31 41 46;
+  --background: 248 244 238;
+  --foreground: 2 6 23;
   --card: 255 255 255;
-  --card-foreground: 31 41 46;
+  --card-foreground: 2 6 23;
   --muted: 237 239 242;
-  --muted-foreground: 109 113 112;
+  --muted-foreground: 100 116 139;
   --border: 217 222 228;
   --accent: 33 97 94;
   --accent-foreground: 255 255 255;
@@ -21,6 +21,9 @@
   --panel-strong-gradient: rgba(255, 255, 255, 0.98);
   --panel-subtle-gradient: rgba(248, 249, 251, 0.92);
   --panel-shadow: 0 18px 40px -32px rgba(15, 23, 42, 0.12);
+  --shadow-card: 0 24px 60px -40px rgba(15, 23, 42, 0.18);
+  --shadow-dropdown: 0 20px 50px -30px rgba(15, 23, 42, 0.4);
+  --shadow-modal: 0 30px 80px -35px rgba(0, 0, 0, 0.8);
   --hairline: rgba(255, 255, 255, 0.52);
   --font-ui: "Avenir Next";
   --font-merriweather: "Iowan Old Style";
@@ -34,12 +37,12 @@
 }
 
 .dark {
-  --background: 20 24 27;
-  --foreground: 238 233 225;
+  --background: 23 27 29;
+  --foreground: 241 245 249;
   --card: 29 34 38;
-  --card-foreground: 238 233 225;
+  --card-foreground: 241 245 249;
   --muted: 37 44 49;
-  --muted-foreground: 167 167 161;
+  --muted-foreground: 148 163 184;
   --border: 70 74 74;
   --accent: 105 180 173;
   --accent-foreground: 255 255 255;
@@ -50,6 +53,9 @@
   --panel-strong-gradient: rgba(32, 37, 41, 0.98);
   --panel-subtle-gradient: rgba(32, 37, 41, 0.88);
   --panel-shadow: 0 18px 38px -30px rgba(0, 0, 0, 0.42);
+  --shadow-card: 0 24px 60px -40px rgba(0, 0, 0, 0.32);
+  --shadow-dropdown: 0 20px 50px -30px rgba(0, 0, 0, 0.52);
+  --shadow-modal: 0 30px 80px -35px rgba(0, 0, 0, 0.9);
   --hairline: rgba(255, 255, 255, 0.03);
 }
 
@@ -124,7 +130,7 @@ body::before {
     border: 1px solid rgba(var(--border), 0.72);
     background: var(--panel-gradient);
     box-shadow: var(--panel-shadow);
-    border-radius: 1.35rem;
+    border-radius: 1.75rem;
   }
 
   .app-panel--strong {
@@ -183,7 +189,7 @@ body::before {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    border-radius: 0.8rem;
+    border-radius: 0.5rem;
     background: rgb(var(--accent));
     padding: 0.85rem 1.15rem;
     font-size: 0.9rem;
@@ -202,7 +208,7 @@ body::before {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    border-radius: 0.8rem;
+    border-radius: 0.5rem;
     border: 1px solid rgba(var(--border), 0.9);
     background: rgba(255, 255, 255, 0.9);
     padding: 0.85rem 1.15rem;
@@ -227,7 +233,7 @@ body::before {
 
   .app-input {
     width: 100%;
-    border-radius: 0.9rem;
+    border-radius: 0.5rem;
     border: 1px solid rgba(var(--border), 0.9);
     background: rgba(255, 255, 255, 0.94);
     padding: 0.85rem 0.95rem;
@@ -251,7 +257,7 @@ body::before {
   }
 
   .app-stat {
-    border-radius: 1.1rem;
+    border-radius: 1rem;
     border: 1px solid rgba(var(--border), 0.76);
     background: rgba(255, 255, 255, 0.78);
     padding: 0.95rem 0.95rem 1rem;
@@ -304,7 +310,7 @@ body::before {
 
   .app-empty-state {
     border: 1px dashed rgba(var(--border), 0.95);
-    border-radius: 1.15rem;
+    border-radius: 1rem;
     background: rgba(255, 255, 255, 0.66);
     padding: 3rem 1.5rem;
     text-align: center;
@@ -705,7 +711,7 @@ body::before {
   max-width: 100%;
   height: auto;
   margin: 1rem 0;
-  border-radius: 0.9rem;
+  border-radius: 0.5rem;
 }
 
 .manuscript-editor a,
@@ -861,4 +867,13 @@ body::before {
   border-left: 3px solid rgba(148, 163, 184, 0.4);
   padding-left: 0.9rem;
   opacity: 0.95;
+}
+
+@keyframes fadeSlideIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-slide-in {
+  animation: fadeSlideIn 0.3s ease-out both;
 }

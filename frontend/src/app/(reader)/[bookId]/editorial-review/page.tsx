@@ -23,7 +23,7 @@ const AuthorToolsNav = dynamic(
   () => import("@/components/layout/AuthorToolsNav").then((module) => module.AuthorToolsNav),
   {
     ssr: false,
-    loading: () => <div className="rounded-[1.8rem] border border-dashed p-8" />,
+    loading: () => <div className="rounded-lg border border-dashed p-8" />,
   }
 )
 
@@ -33,7 +33,7 @@ const EditorialReviewResults = dynamic(
     ssr: false,
     loading: () => (
       <section className="space-y-4">
-        <div className="rounded-[1.5rem] border border-white/10 bg-white/[0.03] p-6">
+        <div className="rounded-lg border border-white/10 bg-white/[0.03] p-6">
           <div className="h-3 w-28 animate-pulse rounded-full bg-white/10" />
           <div className="mt-4 h-4 w-3/4 animate-pulse rounded-full bg-white/10" />
           <div className="mt-2 h-4 w-1/2 animate-pulse rounded-full bg-white/10" />
@@ -166,11 +166,11 @@ export default function EditorialReviewPage() {
             <section className={shellCardClass(isDark, "px-5 py-6 sm:px-7 sm:py-6")}>
               <div className="flex flex-col gap-6 xl:flex-row xl:items-center xl:justify-between">
                 <div className="max-w-4xl">
-                  <p className={`text-[11px] font-semibold uppercase tracking-[0.32em] ${isDark ? "text-violet-300" : "text-violet-700"}`}>Editorial workspace</p>
+                  <p className={`text-3xs font-semibold uppercase tracking-[0.32em] ${isDark ? "text-violet-300" : "text-violet-700"}`}>Editorial workspace</p>
                   <h1 className={`mt-3 font-serif text-4xl tracking-[-0.035em] sm:text-[3.15rem] ${isDark ? "text-white" : "text-stone-950"}`}>
                     {book?.title || "Book"} editorial review
                   </h1>
-                  <p className={`mt-4 max-w-3xl text-sm leading-7 sm:text-[15px] ${isDark ? "text-slate-300" : "text-stone-600"}`}>
+                  <p className={`mt-4 max-w-3xl text-sm leading-7 sm:text-base ${isDark ? "text-slate-300" : "text-stone-600"}`}>
                     Paste a scene, passage, or full chapter to cross-check continuity, tighten presentation, and save review notes back into the shared workspace.
                   </p>
                 </div>
@@ -192,7 +192,7 @@ export default function EditorialReviewPage() {
             <section className={surfaceCardClass(isDark, "px-5 py-6 sm:px-6")}>
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div className="max-w-3xl">
-                  <p className={`text-[11px] font-semibold uppercase tracking-[0.32em] ${isDark ? "text-teal-300" : "text-teal-700"}`}>Manuscript import</p>
+                  <p className={`text-3xs font-semibold uppercase tracking-[0.32em] ${isDark ? "text-teal-300" : "text-teal-700"}`}>Manuscript import</p>
                   <p className={`mt-3 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
                     Paste a chapter, upload replacements, or import smaller source files directly from this page before you review them.
                   </p>
@@ -227,7 +227,7 @@ export default function EditorialReviewPage() {
               </div>
 
               <div className="mt-6 space-y-5">
-                <div className={`overflow-hidden rounded-[1.05rem] border ${isDark ? "border-white/10 bg-[#08101a]" : "border-stone-200 bg-stone-50/80"}`}>
+                <div className={`overflow-hidden rounded-md border ${isDark ? "border-white/10 bg-[#08101a]" : "border-stone-200 bg-stone-50/80"}`}>
                   <label
                     htmlFor="editorial-review-files"
                     className={`flex cursor-pointer flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between ${isDark ? "hover:bg-white/[0.03]" : "hover:bg-white/70"}`}
@@ -282,7 +282,7 @@ export default function EditorialReviewPage() {
                     type="button"
                     onClick={() => void importManuscript()}
                     disabled={importLoading || !canImport}
-                    className={`inline-flex items-center justify-center rounded-[0.95rem] px-4 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-45 ${
+                    className={`inline-flex items-center justify-center rounded-md px-4 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-45 ${
                       isDark
                         ? "border border-teal-400/30 bg-teal-500/12 text-teal-100 hover:bg-teal-500/18"
                         : "border border-teal-200 bg-teal-700 text-white hover:bg-teal-800"
@@ -300,14 +300,14 @@ export default function EditorialReviewPage() {
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                   <div className="grid gap-4 sm:grid-cols-[minmax(0,11.5rem)_auto] sm:items-end">
                     <label className="block">
-                      <span className={`block text-[11px] font-semibold uppercase tracking-[0.32em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Chapter number</span>
+                      <span className={`block text-3xs font-semibold uppercase tracking-[0.32em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Chapter number</span>
                       <input
                         type="number"
                         min={1}
                         value={editChapter}
                         onChange={(event) => setEditChapter(event.target.value)}
                         placeholder="e.g. 42"
-                        className={`mt-3 w-full rounded-[0.95rem] border px-3.5 py-3 text-sm outline-none transition ${
+                        className={`mt-3 w-full rounded-md border px-3.5 py-3 text-sm outline-none transition ${
                           isDark
                             ? "border-white/10 bg-[#08101a] text-slate-100 placeholder:text-slate-500 focus:border-violet-400/60 focus:bg-[#0a1420]"
                             : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-500 focus:border-violet-400"
@@ -319,7 +319,7 @@ export default function EditorialReviewPage() {
                       type="button"
                       onClick={() => void runEditorialReview()}
                       disabled={!canReview}
-                      className={`inline-flex min-h-[3rem] items-center justify-center rounded-[0.95rem] px-5 py-3 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-45 ${
+                      className={`inline-flex min-h-[3rem] items-center justify-center rounded-md px-5 py-3 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-45 ${
                         isDark
                           ? "bg-[linear-gradient(135deg,rgba(109,40,217,0.92),rgba(79,70,229,0.92))] text-white shadow-[0_18px_38px_-24px_rgba(109,40,217,0.55)] hover:translate-y-[-1px]"
                           : "bg-violet-700 text-white hover:bg-violet-800"
@@ -336,7 +336,7 @@ export default function EditorialReviewPage() {
 
                 <label className="block">
                   <span className="sr-only">Passage text</span>
-                  <div className={`overflow-hidden rounded-[1.05rem] border ${isDark ? "border-white/10 bg-[#08101a]" : "border-stone-200 bg-white"}`}>
+                  <div className={`overflow-hidden rounded-md border ${isDark ? "border-white/10 bg-[#08101a]" : "border-stone-200 bg-white"}`}>
                     <textarea
                       value={editText}
                       onChange={(event) => setEditText(event.target.value)}
@@ -358,7 +358,7 @@ export default function EditorialReviewPage() {
                 {saveStatus ? <StatusBanner isDark={isDark} message={saveStatus} tone={inferStatusTone(saveStatus)} /> : null}
 
                 {editLoading ? (
-                  <div className={`space-y-3 rounded-[1.1rem] border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50/80"}`}>
+                  <div className={`space-y-3 rounded-md border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50/80"}`}>
                     <div className={`h-2.5 w-40 animate-pulse rounded-full ${isDark ? "bg-white/10" : "bg-stone-200"}`} />
                     <div className={`h-2.5 w-full animate-pulse rounded-full ${isDark ? "bg-white/8" : "bg-stone-200/80"}`} />
                     <div className={`h-2.5 w-3/4 animate-pulse rounded-full ${isDark ? "bg-white/6" : "bg-stone-200/70"}`} />
@@ -400,7 +400,7 @@ function HeaderActionLink({
   return (
     <Link
       href={href}
-      className={`inline-flex min-h-[2.9rem] items-center justify-center rounded-[1rem] border px-4 py-2.5 text-sm font-semibold transition ${
+      className={`inline-flex min-h-[2.9rem] items-center justify-center rounded-md border px-4 py-2.5 text-sm font-semibold transition ${
         primary
           ? isDark
             ? "border-violet-400/30 bg-[linear-gradient(135deg,rgba(109,40,217,0.95),rgba(79,70,229,0.95))] text-white shadow-[0_18px_38px_-24px_rgba(109,40,217,0.55)] hover:translate-y-[-1px]"
@@ -455,7 +455,7 @@ function StatusBanner({
       : isDark ? "border-white/10 bg-white/[0.04] text-slate-300" : "border-stone-200 bg-stone-50 text-stone-700"
 
   return (
-    <p aria-live="polite" className={`rounded-[0.95rem] border px-4 py-2.5 text-sm ${toneClass}`}>
+    <p aria-live="polite" className={`rounded-md border px-4 py-2.5 text-sm ${toneClass}`}>
       {message}
     </p>
   )
@@ -479,9 +479,9 @@ function inferStatusTone(message: string): "error" | "success" | "info" {
 }
 
 function shellCardClass(isDark: boolean, extra = "") {
-  return `rounded-[1.75rem] border ${isDark ? "border-white/10 bg-[rgba(8,14,24,0.82)]" : "border-white/70 bg-white/88"} ${extra}`
+  return `rounded-lg border ${isDark ? "border-white/10 bg-[rgba(8,14,24,0.82)]" : "border-white/70 bg-white/88"} ${extra}`
 }
 
 function surfaceCardClass(isDark: boolean, extra = "") {
-  return `rounded-[1.55rem] border ${isDark ? "border-white/10 bg-[rgba(8,14,22,0.9)] shadow-[0_18px_70px_-46px_rgba(0,0,0,0.72)]" : "border-stone-200 bg-white/92"} ${extra}`
+  return `rounded-lg border ${isDark ? "border-white/10 bg-[rgba(8,14,22,0.9)] shadow-modal" : "border-stone-200 bg-white/92"} ${extra}`
 }

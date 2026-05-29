@@ -14,6 +14,7 @@ from app.utils.ingestion_utils import (
     extract_queue_wait_ms,
     is_book_hidden,
     is_retryable_processing_error,
+    load_analysis_chapter_payload,
     load_processing_chapter_payload,
     load_staged_chapter_payload,
     mark_book_processing_cancelled,
@@ -282,6 +283,61 @@ async def test_load_processing_chapter_payload_returns_chapter_only_payload(monk
         "text": "Chapter body",
         "html": "<p>Chapter body</p>",
     }
+
+
+@pytest.mark.asyncio
+async def test_load_analysis_chapter_payload_validates_book_and_loads_text(monkeypatch):
+    book_id = uuid.uuid4()
+    chapter_id = uuid.uuid4()
+    db = AsyncMock()
+    db.get = AsyncMock(
+        return_value=type(
+            "ChapterRow",
+            (),
+            {
+                "id": chapter_id,
+                "book_id": book_id,
+                "number": 2,
+                "s3_key": "chapters/custom/2.txt",
+                "title": "Two",
+            },
+        )()
+    )
+
+    async def _fake_load(*_args, **_kwargs):
+        return {"number": 2, "title": "Two", "text": "Chapter body", "html": None}
+
+    monkeypatch.setattr("app.utils.ingestion_utils.load_processing_chapter_payload", _fake_load)
+
+    payload = await load_analysis_chapter_payload(db, str(chapter_id), book_id=str(book_id))
+
+    assert payload == {
+        "chapter_id": str(chapter_id),
+        "title": "Two",
+        "text": "Chapter body",
+    }
+
+
+@pytest.mark.asyncio
+async def test_load_analysis_chapter_payload_rejects_book_mismatch():
+    db = AsyncMock()
+    db.get = AsyncMock(
+        return_value=type(
+            "ChapterRow",
+            (),
+            {
+                "id": uuid.uuid4(),
+                "book_id": uuid.uuid4(),
+                "number": 1,
+                "s3_key": "chapters/custom/1.txt",
+                "title": "One",
+            },
+        )()
+    )
+
+    payload = await load_analysis_chapter_payload(db, str(uuid.uuid4()), book_id=str(uuid.uuid4()))
+
+    assert payload is None
 
 
 def test_derive_summary_modes_from_detailed_prefers_key_events():

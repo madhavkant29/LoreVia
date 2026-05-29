@@ -74,7 +74,7 @@ export function NotificationBell({ enabled = true }: { enabled?: boolean }) {
       >
         <BellIcon hasUnread={hasUnread} />
         {badgeLabel ? (
-          <span className="absolute -right-0.5 -top-0.5 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-semibold text-white ring-2 ring-background shadow-sm shadow-rose-500/30">
+          <span className="absolute -right-0.5 -top-0.5 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-3xs font-semibold text-white ring-2 ring-background shadow-sm shadow-rose-500/30">
             {badgeLabel}
           </span>
         ) : null}
@@ -89,7 +89,7 @@ export function NotificationBell({ enabled = true }: { enabled?: boolean }) {
       >
         <BellIcon hasUnread={hasUnread} />
         {badgeLabel ? (
-          <span className="absolute -right-0.5 -top-0.5 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-semibold text-white ring-2 ring-background shadow-sm shadow-rose-500/30">
+          <span className="absolute -right-0.5 -top-0.5 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-3xs font-semibold text-white ring-2 ring-background shadow-sm shadow-rose-500/30">
             {badgeLabel}
           </span>
         ) : null}
@@ -100,7 +100,7 @@ export function NotificationBell({ enabled = true }: { enabled?: boolean }) {
           <div className="fixed inset-0 z-40 hidden bg-black/30 lg:block" aria-hidden="true" />
           <aside
             ref={panelRef}
-            className={`fixed right-0 top-0 z-50 hidden h-screen w-[26rem] border-l shadow-[-24px_0_70px_-38px_rgba(0,0,0,0.5)] lg:block ${isDark ? "border-white/10 bg-[#050505]" : "border-stone-200 bg-stone-50"}`}
+            className={`fixed right-0 top-0 z-50 hidden h-screen w-[26rem] border-l shadow-modal lg:block ${isDark ? "border-white/10 bg-[#050505]" : "border-stone-200 bg-stone-50"}`}
           >
             <NotificationsPanel mode="sidebar" />
           </aside>

@@ -102,16 +102,16 @@ export function ReaderToolbar({
                 <img src="/logoandtext.png" alt="LoreVia" className="h-10 w-[154px] object-contain object-left" fetchPriority="high" />
               </Link>
               <nav className="hidden items-center gap-6 lg:flex" style={{ fontFamily: "var(--reader-label)" }}>
-                <Link prefetch={false} href="/library" className={`text-[15px] font-medium transition ${toneClass.navLink}`}>
+                <Link prefetch={false} href="/library" className={`text-base font-medium transition ${toneClass.navLink}`}>
                   Library
                 </Link>
-                <Link prefetch={false} href="/settings" className={`text-[15px] font-medium transition ${toneClass.navLink}`}>
+                <Link prefetch={false} href="/settings" className={`text-base font-medium transition ${toneClass.navLink}`}>
                   Settings
                 </Link>
                 <button
                   type="button"
                   onClick={onToggleTheme}
-                  className={`rounded-2xl border px-4 py-2 text-[15px] font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${toneClass.ghost}`}
+                  className={`rounded-2xl border px-4 py-2 text-base font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${toneClass.ghost}`}
                 >
                   {theme === "dark" ? "Light" : "Dark"}
                 </button>
@@ -122,35 +122,35 @@ export function ReaderToolbar({
               <Link
                 prefetch={false}
                 href={`/${bookId}`}
-                className={`inline-flex min-h-11 items-center rounded-[1.1rem] border px-4 py-2 text-[15px] font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${toneClass.primary}`}
+                className={`inline-flex min-h-11 items-center rounded-md border px-4 py-2 text-base font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${toneClass.primary}`}
               >
                 Back to book
               </Link>
               <button
                 type="button"
                 onClick={onSummary}
-                className={`inline-flex min-h-11 items-center rounded-[1.1rem] border px-4 py-2 text-[15px] font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${toneClass.ghost}`}
+                className={`inline-flex min-h-11 items-center rounded-md border px-4 py-2 text-base font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${toneClass.ghost}`}
               >
                 Summary
               </button>
               <Link
                 prefetch={false}
                 href={`/${bookId}/graph`}
-                className={`inline-flex min-h-11 items-center rounded-[1.1rem] border px-4 py-2 text-[15px] font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${toneClass.ghost}`}
+                className={`inline-flex min-h-11 items-center rounded-md border px-4 py-2 text-base font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${toneClass.ghost}`}
               >
                 Graph
               </Link>
               <Link
                 prefetch={false}
                 href={`/${bookId}/ask`}
-                className={`inline-flex min-h-11 items-center rounded-[1.1rem] border px-4 py-2 text-[15px] font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${toneClass.ghost}`}
+                className={`inline-flex min-h-11 items-center rounded-md border px-4 py-2 text-base font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${toneClass.ghost}`}
               >
                 Ask with citations
               </Link>
               <Link
                 prefetch={false}
                 href={`/${bookId}/search`}
-                className={`inline-flex min-h-11 items-center rounded-[1.1rem] border px-4 py-2 text-[15px] font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${toneClass.ghost}`}
+                className={`inline-flex min-h-11 items-center rounded-md border px-4 py-2 text-base font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${toneClass.ghost}`}
               >
                 Search passages
               </Link>
@@ -159,14 +159,14 @@ export function ReaderToolbar({
             <button
               type="button"
               onClick={() => setMobileToolsOpen((current) => !current)}
-              className={`rounded-2xl border px-4 py-2 text-[15px] font-medium transition md:hidden ${toneClass.ghost}`}
+              className={`rounded-2xl border px-4 py-2 text-base font-medium transition md:hidden ${toneClass.ghost}`}
             >
               {mobileToolsOpen ? "Close" : "Menu"}
             </button>
           </div>
 
           <div className="min-w-0">
-            <p className={`text-[13px] ${toneClass.meta}`} style={{ fontFamily: "var(--reader-label)" }}>
+            <p className={`text-sm ${toneClass.meta}`} style={{ fontFamily: "var(--reader-label)" }}>
               {chapterMeta}
             </p>
             <div className="mt-2.5 flex items-center gap-4">
@@ -182,35 +182,35 @@ export function ReaderToolbar({
           </div>
 
           {mobileToolsOpen ? (
-            <div className={`grid gap-3 rounded-[1.5rem] border p-3 md:hidden ${toneClass.card}`} style={{ fontFamily: "var(--reader-label)" }}>
+            <div className={`grid gap-3 rounded-lg border p-3 md:hidden ${toneClass.card}`} style={{ fontFamily: "var(--reader-label)" }}>
               <div className="flex flex-wrap gap-2">
-                <Link prefetch={false} href="/library" className={`rounded-[1rem] border px-4 py-2 text-sm font-medium transition ${toneClass.ghost}`}>
+                <Link prefetch={false} href="/library" className={`rounded-md border px-4 py-2 text-sm font-medium transition ${toneClass.ghost}`}>
                   Library
                 </Link>
-                <Link prefetch={false} href="/settings" className={`rounded-[1rem] border px-4 py-2 text-sm font-medium transition ${toneClass.ghost}`}>
+                <Link prefetch={false} href="/settings" className={`rounded-md border px-4 py-2 text-sm font-medium transition ${toneClass.ghost}`}>
                   Settings
                 </Link>
-                <button type="button" onClick={onToggleTheme} className={`rounded-[1rem] border px-4 py-2 text-sm font-medium transition ${toneClass.ghost}`}>
+                <button type="button" onClick={onToggleTheme} className={`rounded-md border px-4 py-2 text-sm font-medium transition ${toneClass.ghost}`}>
                   {theme === "dark" ? "Light" : "Dark"}
                 </button>
               </div>
               <div className={`grid gap-2 border-t pt-3 ${toneClass.border}`}>
                 <div className="flex flex-wrap gap-2">
-                  <Link prefetch={false} href={`/${bookId}`} className={`rounded-[1rem] border px-4 py-2 text-sm font-medium transition ${toneClass.primary}`}>
+                  <Link prefetch={false} href={`/${bookId}`} className={`rounded-md border px-4 py-2 text-sm font-medium transition ${toneClass.primary}`}>
                     Back to book
                   </Link>
-                  <button type="button" onClick={onSummary} className={`rounded-[1rem] border px-4 py-2 text-sm font-medium transition ${toneClass.ghost}`}>
+                  <button type="button" onClick={onSummary} className={`rounded-md border px-4 py-2 text-sm font-medium transition ${toneClass.ghost}`}>
                     Summary
                   </button>
-                  <Link prefetch={false} href={`/${bookId}/graph`} className={`rounded-[1rem] border px-4 py-2 text-sm font-medium transition ${toneClass.ghost}`}>
+                  <Link prefetch={false} href={`/${bookId}/graph`} className={`rounded-md border px-4 py-2 text-sm font-medium transition ${toneClass.ghost}`}>
                     Graph
                   </Link>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <Link prefetch={false} href={`/${bookId}/ask`} className={`rounded-[1rem] border px-4 py-2 text-sm font-medium transition ${toneClass.ghost}`}>
+                  <Link prefetch={false} href={`/${bookId}/ask`} className={`rounded-md border px-4 py-2 text-sm font-medium transition ${toneClass.ghost}`}>
                     Ask with citations
                   </Link>
-                  <Link prefetch={false} href={`/${bookId}/search`} className={`rounded-[1rem] border px-4 py-2 text-sm font-medium transition ${toneClass.ghost}`}>
+                  <Link prefetch={false} href={`/${bookId}/search`} className={`rounded-md border px-4 py-2 text-sm font-medium transition ${toneClass.ghost}`}>
                     Search passages
                   </Link>
                 </div>
@@ -223,11 +223,11 @@ export function ReaderToolbar({
       <div className={`border-b backdrop-blur-xl ${toneClass.subShell}`}>
         <div className="mx-auto flex w-full max-w-[1620px] flex-col gap-3 px-4 py-3 sm:px-6 lg:px-8 xl:px-10" style={{ fontFamily: "var(--reader-label)" }}>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-            <p className={`text-[11px] font-semibold uppercase tracking-[0.28em] ${theme === "dark" ? "text-[#9ba4ff]" : "text-violet-700"}`}>
+            <p className={`text-3xs font-semibold uppercase tracking-[0.28em] ${theme === "dark" ? "text-[#9ba4ff]" : "text-violet-700"}`}>
               Overview
             </p>
             <span className={toneClass.subtle}>&gt;</span>
-            <p className={`text-[11px] uppercase tracking-[0.28em] ${toneClass.ui}`}>
+            <p className={`text-3xs uppercase tracking-[0.28em] ${toneClass.ui}`}>
               {breadcrumbLabel}
             </p>
           </div>
@@ -279,7 +279,7 @@ export function ReaderToolbar({
                 <Link
                   prefetch={false}
                   href={`/${bookId}/chapter/${chapterNum - 1}`}
-                  className={`inline-flex min-h-10 items-center rounded-[0.95rem] border px-3 py-2 text-sm font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${toneClass.ghost}`}
+                  className={`inline-flex min-h-10 items-center rounded-md border px-3 py-2 text-sm font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${toneClass.ghost}`}
                 >
                   Prev
                 </Link>
@@ -288,7 +288,7 @@ export function ReaderToolbar({
                 <Link
                   prefetch={false}
                   href={`/${bookId}/chapter/${chapterNum + 1}`}
-                  className={`inline-flex min-h-10 items-center rounded-[0.95rem] border px-3 py-2 text-sm font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${toneClass.ghost}`}
+                  className={`inline-flex min-h-10 items-center rounded-md border px-3 py-2 text-sm font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${toneClass.ghost}`}
                 >
                   Next
                 </Link>
@@ -320,8 +320,8 @@ function SegmentGroup({
   children: ReactNode
 }) {
   return (
-    <div className={`flex min-h-11 items-center gap-1 rounded-[1.2rem] border px-1.5 py-1 ${toneClass.card}`}>
-      <span className={`px-2 text-[10px] uppercase tracking-[0.22em] ${toneClass.subtle}`}>{label}</span>
+    <div className={`flex min-h-11 items-center gap-1 rounded-md border px-1.5 py-1 ${toneClass.card}`}>
+      <span className={`px-2 text-3xs uppercase tracking-[0.22em] ${toneClass.subtle}`}>{label}</span>
       <div className={`mx-1 h-4 w-px ${toneClass.divider}`} />
       {children}
     </div>
@@ -341,7 +341,7 @@ function SegmentButton({
     <button
       type="button"
       onClick={onClick}
-      className={`rounded-[0.95rem] border px-3 py-2 text-sm font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${toneClass.ghost}`}
+      className={`rounded-md border px-3 py-2 text-sm font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${toneClass.ghost}`}
     >
       {label}
     </button>
@@ -364,7 +364,7 @@ function SegmentToggle({
       type="button"
       aria-pressed={selected}
       onClick={onClick}
-      className={`rounded-[0.95rem] border px-3 py-2 text-sm font-medium capitalize transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${selected ? toneClass.active : toneClass.ghost}`}
+      className={`rounded-md border px-3 py-2 text-sm font-medium capitalize transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${selected ? toneClass.active : toneClass.ghost}`}
     >
       {label}
     </button>

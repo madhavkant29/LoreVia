@@ -91,7 +91,7 @@ export default async function DemoPage({ params }: { params: Promise<{ slug: str
       <JsonLdScript id={`demo-breadcrumbs-jsonld-${demo.slug}`} data={breadcrumbJsonLd} />
 
       <section className="app-container py-10 md:py-14">
-        <div className="app-panel app-panel--strong rounded-[2rem] p-6 md:p-8 lg:p-10">
+        <div className="app-panel app-panel--strong rounded-lg p-6 md:p-8 lg:p-10">
           <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
             <Link href="/demo" className="hover:text-foreground">
               Demo
@@ -131,13 +131,13 @@ export default async function DemoPage({ params }: { params: Promise<{ slug: str
 
         <div className="mt-8 grid gap-8 lg:grid-cols-[1.2fr_0.8fr]">
           <article className="space-y-6">
-            <section className="app-panel rounded-[2rem] p-6 md:p-8">
+            <section className="app-panel rounded-lg p-6 md:p-8">
               <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">Featured insight</p>
               <p className="mt-4 text-base leading-8 text-muted-foreground md:text-lg">{demo.featuredInsight}</p>
             </section>
 
             {demo.sections.map((section) => (
-              <section key={section.heading} className="app-panel rounded-[2rem] p-6 md:p-8">
+              <section key={section.heading} className="app-panel rounded-lg p-6 md:p-8">
                 <h2 className="text-[2rem] font-semibold tracking-[-0.03em] text-foreground md:text-[2.2rem]">
                   {section.heading}
                 </h2>
@@ -163,13 +163,13 @@ export default async function DemoPage({ params }: { params: Promise<{ slug: str
           </article>
 
           <aside className="space-y-6 lg:sticky lg:top-28">
-            <div className="app-panel app-panel--strong rounded-[2rem] p-6 md:p-8">
+            <div className="app-panel app-panel--strong rounded-lg p-6 md:p-8">
               <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">Why this page exists</p>
               <p className="mt-4 text-sm leading-7 text-muted-foreground">{demo.description}</p>
             </div>
 
             {article ? (
-              <div className="app-panel rounded-[2rem] p-6 md:p-8">
+              <div className="app-panel rounded-lg p-6 md:p-8">
                 <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">Related guide</p>
                 <h2 className="mt-4 text-2xl font-semibold tracking-[-0.03em] text-foreground">{article.title}</h2>
                 <p className="mt-3 text-sm leading-7 text-muted-foreground">{article.description}</p>
@@ -180,7 +180,7 @@ export default async function DemoPage({ params }: { params: Promise<{ slug: str
               </div>
             ) : null}
 
-            <div className="app-panel rounded-[2rem] p-6 md:p-8">
+            <div className="app-panel rounded-lg p-6 md:p-8">
               <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">Why demos work</p>
               <p className="mt-4 text-sm leading-7 text-muted-foreground">
                 Public-domain examples make the product promise testable. Instead of talking abstractly about continuity or character memory, the page shows how those workflows would read against a recognizable manuscript.
@@ -191,7 +191,7 @@ export default async function DemoPage({ params }: { params: Promise<{ slug: str
       </section>
 
       <section className="app-container pb-8">
-        <div className="app-panel app-panel--subtle rounded-[2rem] p-6 md:p-8 lg:p-10">
+        <div className="app-panel app-panel--subtle rounded-lg p-6 md:p-8 lg:p-10">
           <div className="max-w-2xl">
             <p className="app-eyebrow">Related questions</p>
             <h2 className="mt-4 text-3xl font-semibold tracking-[-0.03em] text-foreground md:text-4xl">
@@ -201,7 +201,7 @@ export default async function DemoPage({ params }: { params: Promise<{ slug: str
 
           <div className="mt-8 grid gap-5 lg:grid-cols-2">
             {relatedAnswers.map((answer) => (
-              <article key={answer.slug} className="h-full rounded-[1.6rem] border border-[rgba(var(--border),0.76)] bg-white/70 p-6 dark:bg-white/[0.04]">
+              <article key={answer.slug} className="h-full rounded-lg border border-[rgba(var(--border),0.76)] bg-white/70 p-6 dark:bg-white/[0.04]">
                 <h3 className="text-xl font-semibold tracking-[-0.03em] text-foreground">
                   <Link href={`/answers/${answer.slug}`} className="hover:text-[rgb(var(--accent))]">
                     {answer.question}
@@ -215,7 +215,7 @@ export default async function DemoPage({ params }: { params: Promise<{ slug: str
       </section>
 
       <section className="app-container pb-20 pt-8 md:pb-24">
-        <div className="app-panel app-panel--strong rounded-[2rem] p-7 md:p-10">
+        <div className="app-panel app-panel--strong rounded-lg p-7 md:p-10">
           <div className="max-w-3xl">
             <p className="app-eyebrow">Try LoreVia</p>
             <h2 className="mt-4 text-3xl font-semibold tracking-[-0.03em] text-foreground md:text-4xl">

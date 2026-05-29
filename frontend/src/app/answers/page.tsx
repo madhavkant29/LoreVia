@@ -62,7 +62,7 @@ export default function AnswersPage() {
       <JsonLdScript id="answers-collection-jsonld" data={jsonLd} />
 
       <section className="app-container py-10 md:py-14">
-        <div className="app-panel app-panel--strong rounded-[2rem] p-6 md:p-8 lg:p-10">
+        <div className="app-panel app-panel--strong rounded-lg p-6 md:p-8 lg:p-10">
           <div className="grid gap-10 lg:grid-cols-[1.05fr_0.95fr] lg:items-start">
             <div className="max-w-3xl">
               <span className="app-chip">Question pages</span>
@@ -84,13 +84,13 @@ export default function AnswersPage() {
               </div>
             </div>
 
-            <div className="rounded-[1.8rem] border border-[rgba(var(--border),0.76)] bg-white/72 p-6 dark:bg-white/[0.04] md:p-8">
+            <div className="rounded-lg border border-[rgba(var(--border),0.76)] bg-white/72 p-6 dark:bg-white/[0.04] md:p-8">
               <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">Topic clusters</p>
               <div className="mt-6 grid gap-4 sm:grid-cols-2">
                 {blogArticles.slice(0, 4).map((article) => {
                   const linkedCount = answerPages.filter((answer) => answer.articleSlug === article.slug).length
                   return (
-                    <div key={article.slug} className="rounded-[1.4rem] border border-[rgba(var(--border),0.76)] bg-white/75 p-5 dark:bg-white/[0.04]">
+                    <div key={article.slug} className="rounded-lg border border-[rgba(var(--border),0.76)] bg-white/75 p-5 dark:bg-white/[0.04]">
                       <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
                         {linkedCount} supporting pages
                       </p>
@@ -105,7 +105,7 @@ export default function AnswersPage() {
       </section>
 
       <section className="app-container pb-20 md:pb-24">
-        <div className="app-panel rounded-[2rem] p-6 md:p-8 lg:p-10">
+        <div className="app-panel rounded-lg p-6 md:p-8 lg:p-10">
           <div className="max-w-2xl">
             <p className="app-eyebrow">All questions</p>
             <h2 className="mt-4 text-3xl font-semibold tracking-[-0.03em] text-foreground md:text-4xl">
@@ -117,7 +117,7 @@ export default function AnswersPage() {
             {answerPages.map((answer) => {
               const article = getBlogArticleBySlug(answer.articleSlug)
               return (
-                <article key={answer.slug} className="h-full rounded-[1.6rem] border border-[rgba(var(--border),0.76)] bg-white/66 p-6 dark:bg-white/[0.04]">
+                <article key={answer.slug} className="h-full rounded-lg border border-[rgba(var(--border),0.76)] bg-white/66 p-6 dark:bg-white/[0.04]">
                   <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
                     Linked guide: {article?.title ?? "LoreVia guide"}
                   </p>

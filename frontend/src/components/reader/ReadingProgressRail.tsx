@@ -18,7 +18,7 @@ export function ReadingProgressRail({
   return (
     <aside className="reader-nonprint hidden xl:block">
       <div className="sticky top-28 flex justify-end">
-        <div className={`flex min-h-[500px] w-[76px] flex-col items-center rounded-[2rem] border px-3 py-5 ${theme === "dark"
+        <div className={`flex min-h-[500px] w-[76px] flex-col items-center rounded-lg border px-3 py-5 ${theme === "dark"
             ? "border-white/10 bg-[#0d1422]/66 text-slate-300 shadow-[0_24px_70px_-56px_rgba(8,15,31,0.9)]"
             : "border-stone-200/80 bg-white/80 text-stone-600"
           }`}>
@@ -26,7 +26,7 @@ export function ReadingProgressRail({
             <p className={`text-2xl font-semibold ${theme === "dark" ? "text-white" : "text-stone-950"}`}>
               {progressPercent ?? "–"}%
             </p>
-            <p className={`mt-1 text-[10px] uppercase tracking-[0.24em] ${theme === "dark" ? "text-slate-500" : "text-stone-400"}`}>
+            <p className={`mt-1 text-3xs uppercase tracking-[0.24em] ${theme === "dark" ? "text-slate-500" : "text-stone-400"}`}>
               Of chapter
             </p>
           </div>
@@ -46,7 +46,7 @@ export function ReadingProgressRail({
             <p className={`text-sm font-medium ${theme === "dark" ? "text-slate-200" : "text-stone-800"}`}>
               {wordsRead.toLocaleString()}
             </p>
-            <p className={`mt-1 text-[10px] uppercase tracking-[0.24em] ${theme === "dark" ? "text-slate-500" : "text-stone-400"}`}>
+            <p className={`mt-1 text-3xs uppercase tracking-[0.24em] ${theme === "dark" ? "text-slate-500" : "text-stone-400"}`}>
               of {totalWords.toLocaleString()} words
             </p>
           </div>
