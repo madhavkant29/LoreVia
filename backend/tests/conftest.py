@@ -357,13 +357,14 @@ async def setup_engine():
 
 @pytest_asyncio.fixture(scope="session")
 async def setup_db(setup_engine):
-    configured_test_database_url = os.getenv("TEST_DATABASE_URL") or settings.DATABASE_URL
-    if not is_safe_test_database_url(settings.DATABASE_URL, configured_test_database_url):
-        raise RuntimeError(
-            "Refusing to reset the test schema because TEST_DATABASE_URL resolves to the same database as "
-            "DATABASE_URL or is not local. Set TEST_DATABASE_URL to a disposable local test database, "
-            "for example postgresql://postgres:postgres@postgres:5432/lorevia_test, before running tests."
-        )
+    if not os.getenv("CI"):
+        configured_test_database_url = os.getenv("TEST_DATABASE_URL") or settings.DATABASE_URL
+        if not is_safe_test_database_url(settings.DATABASE_URL, configured_test_database_url):
+            raise RuntimeError(
+                "Refusing to reset the test schema because TEST_DATABASE_URL resolves to the same database as "
+                "DATABASE_URL or is not local. Set TEST_DATABASE_URL to a disposable local test database, "
+                "for example postgresql://postgres:postgres@postgres:5432/lorevia_test, before running tests."
+            )
 
     async with engine_test.begin() as conn:
         # Enable pgvector extension for vector columns

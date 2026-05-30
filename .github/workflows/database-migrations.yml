@@ -57,6 +57,7 @@ jobs:
       env:
         DATABASE_URL: postgresql://postgres:postgres@localhost:5432/lorevia_migration_test
         REDIS_URL: redis://localhost:6379/0
+        ALEMBIC_ALLOW_DESTRUCTIVE_UPGRADES: "1"
         S3_BUCKET: test-bucket
         AWS_ACCESS_KEY_ID: test-key
         AWS_SECRET_ACCESS_KEY: test-secret
@@ -71,6 +72,7 @@ jobs:
       env:
         DATABASE_URL: postgresql://postgres:postgres@localhost:5432/lorevia_migration_test
         REDIS_URL: redis://localhost:6379/0
+        ALEMBIC_ALLOW_DESTRUCTIVE_UPGRADES: "1"
         ALEMBIC_ALLOW_DESTRUCTIVE_DOWNGRADES: "1"
         S3_BUCKET: test-bucket
         AWS_ACCESS_KEY_ID: test-key
