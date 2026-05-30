@@ -10,8 +10,25 @@ from app.utils.worker_async_utils import run_worker_coro
                  queue="intelligence", max_retries=2, ignore_result=True)
 def generate_wiki_task(self, book_id: str):
     """Generate auto-wiki for all chapters of a book. Phase 3."""
-    # Placeholder — implemented in Phase 3
-    pass
+
+    async def _run():
+        from app.core.database import AsyncSessionLocal
+        from app.models.book import Book
+        from app.utils.world_building_utils import generate_wiki_from_manuscript
+
+        async with AsyncSessionLocal() as db:
+            book = await db.get(Book, uuid.UUID(book_id))
+            if not book:
+                raise ValueError("wiki_book_not_found")
+            await generate_wiki_from_manuscript(db, book)
+            await db.commit()
+
+    try:
+        return run_worker_coro(_run())
+    except ValueError:
+        raise
+    except Exception as exc:
+        raise self.retry(exc=exc)
 
 
 @celery_app.task(bind=True, name="intelligence_tasks.generate_advisor_reply",

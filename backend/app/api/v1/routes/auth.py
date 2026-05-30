@@ -85,7 +85,6 @@ from app.utils.user_utils import (
     current_daily_word_count,
     current_daily_word_goal,
     get_login_activity_dates_from_table,
-    login_activity_dates,
     record_login_activity,
     record_login_activity_row,
 )
@@ -127,10 +126,7 @@ def _user_response_with_cookies(response: Response, user_out: UserOut | None, ac
 async def _build_user_out(user: User, db: AsyncSession | None = None) -> UserOut:
     tier = build_tier_presentation(user)
     created_at = user.created_at or datetime.now(UTC)
-    if db is not None:
-        activity_dates = await get_login_activity_dates_from_table(db, str(user.id))
-    else:
-        activity_dates = login_activity_dates(user)
+    activity_dates = await get_login_activity_dates_from_table(db, str(user.id)) if db is not None else []
     return UserOut(
         id=user.id,
         email=user.email,

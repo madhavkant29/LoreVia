@@ -9,6 +9,7 @@ from fastapi import HTTPException
 
 from app.api.v1.routes import public
 from app.schemas.public import PublicBookManualIn, PublicBookShareBody, PublicChapterIn
+from app.utils import public_utils
 
 
 class _ScalarList:
@@ -723,7 +724,7 @@ async def test_get_public_chapter_builds_payload(monkeypatch):
 async def test_create_public_book_manual_requires_chapters():
     body = PublicBookManualIn(title="Title", chapters=[])
     with pytest.raises(HTTPException) as exc:
-        await public.create_public_book_manual(body=body, db=_FakeDB(), admin_user=SimpleNamespace(id=uuid.uuid4()))
+        await public.create_public_book_manual(db=_FakeDB(), body=body, admin_user=SimpleNamespace(id=uuid.uuid4()))
     assert exc.value.status_code == 400
 
 
@@ -731,13 +732,13 @@ async def test_create_public_book_manual_requires_chapters():
 async def test_create_public_book_manual_persists_book_and_chapters(monkeypatch):
     uploaded = []
     invalidated = []
-    monkeypatch.setattr(public, "upload_text", lambda key, text: uploaded.append((key, text)))
-    monkeypatch.setattr(public, "count_tokens", lambda text: len(text.split()))
+    monkeypatch.setattr(public_utils, "upload_text", lambda key, text: uploaded.append((key, text)))
+    monkeypatch.setattr(public_utils, "count_tokens", lambda text: len(text.split()))
 
     async def _fake_cache_del(key):
         invalidated.append(key)
 
-    monkeypatch.setattr(public, "cache_del", _fake_cache_del)
+    monkeypatch.setattr(public_utils, "cache_del", _fake_cache_del)
     user = SimpleNamespace(id=uuid.uuid4())
     body = PublicBookManualIn(
         title="Title",
@@ -751,7 +752,7 @@ async def test_create_public_book_manual_persists_book_and_chapters(monkeypatch)
     )
     db = _FakeDB()
 
-    payload = await public.create_public_book_manual(body=body, db=db, admin_user=user)
+    payload = await public.create_public_book_manual(db=db, body=body, admin_user=user)
 
     book = db.added[0]
     assert payload["visibility"] == "public"
@@ -761,7 +762,7 @@ async def test_create_public_book_manual_persists_book_and_chapters(monkeypatch)
     assert book.total_chapters == 2
     assert book.total_tokens == 3
     assert len(uploaded) == 2
-    assert invalidated == [public.key_public_books()]
+    assert invalidated == [public_utils.key_public_books()]
 
 
 @pytest.mark.asyncio
@@ -771,27 +772,27 @@ async def test_append_public_chapter_raises_for_foreign_book():
     body = PublicChapterIn(title="Title", text="text", description="desc")
 
     with pytest.raises(HTTPException) as exc:
-        await public.append_public_chapter(uuid.uuid4(), body=body, db=db, admin_user=SimpleNamespace(id=uuid.uuid4()))
+        await public.append_public_chapter(db=db, book_id=uuid.uuid4(), body=body, admin_user=SimpleNamespace(id=uuid.uuid4()))
     assert exc.value.status_code == 404
 
 
 @pytest.mark.asyncio
 async def test_append_public_chapter_updates_counts_and_invalidates_cache(monkeypatch):
     invalidated = []
-    monkeypatch.setattr(public, "upload_text", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(public, "count_tokens", lambda text: len(text.split()))
+    monkeypatch.setattr(public_utils, "upload_text", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(public_utils, "count_tokens", lambda text: len(text.split()))
 
     async def _fake_cache_del(key):
         invalidated.append(key)
 
-    monkeypatch.setattr(public, "cache_del", _fake_cache_del)
+    monkeypatch.setattr(public_utils, "cache_del", _fake_cache_del)
     user_id = uuid.uuid4()
     book_id = uuid.uuid4()
     book = SimpleNamespace(id=book_id, user_id=user_id, is_public=True, source_kind="public_demo", total_tokens=2, total_chapters=1)
     db = _FakeDB(get_values=[book], execute_values=[_Result(scalar_one=2)])
     body = PublicChapterIn(title="Next", text="one two three", description="desc")
 
-    payload = await public.append_public_chapter(book_id, body=body, db=db, admin_user=SimpleNamespace(id=user_id))
+    payload = await public.append_public_chapter(db=db, book_id=book_id, body=body, admin_user=SimpleNamespace(id=user_id))
 
     assert payload == {"book_id": str(book_id), "chapter_number": 2, "saved": True}
     assert book.total_chapters == 2

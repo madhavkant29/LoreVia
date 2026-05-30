@@ -63,7 +63,7 @@ async def test_manuscript_import_dispatches_analysis_async(client, db, monkeypat
         dispatched.append({"args": args, "kwargs": kwargs})
         return _Result(f"analysis-{len(dispatched)}")
 
-    monkeypatch.setattr("app.api.v1.routes.books.analyse_chapter_task.apply_async", _fake_apply_async)
+    monkeypatch.setattr("app.api.v1.routes.books.imports.analyse_chapter_task.apply_async", _fake_apply_async)
 
     started_at = time.perf_counter()
     response = await client.post(

@@ -5,11 +5,22 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import Request
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.book import Book
+from app.models.character import Character
+from app.models.intelligence import BookChunk, ChapterSummary
+from app.models.moderation import CreatorStrike
 from app.models.user import AdminAuditEvent, AdminPrincipal, User
+from app.schemas.admin import CreatorStrikeOut, PendingPublicShareOut
 from app.utils.auth_utils import next_token_version
+from app.utils.public_utils import (
+    PUBLIC_SHARE_STATUS_PENDING,
+    USER_PUBLIC_SHARE_SOURCE_KIND,
+    active_serious_strike_count,
+    add_moderation_action,
+)
 
 
 ADMIN_SCOPE_MODERATION = "moderation_admin"
@@ -161,3 +172,154 @@ async def record_admin_audit_event(
     )
     db.add(event)
     return event
+
+
+async def record_admin_read(
+    db: AsyncSession,
+    *,
+    request: Request,
+    admin_user: User,
+    action_type: str,
+    reason: str,
+    metadata: dict[str, object] | None = None,
+) -> None:
+    scopes_snapshot = principal_scope_snapshot(
+        getattr(request.state, "admin_principal", None)
+    )
+    await record_admin_audit_event(
+        db,
+        actor_user_id=admin_user.id,
+        action_type=action_type,
+        result="allowed",
+        reason=reason,
+        request=request,
+        scopes_snapshot=scopes_snapshot,
+        metadata=metadata,
+    )
+    await db.commit()
+
+
+async def serialize_pending_public_shares(
+    db: AsyncSession,
+    *,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[PendingPublicShareOut]:
+    rows = (
+        await db.execute(
+            select(Book, User.username)
+            .join(User, User.id == Book.user_id)
+            .where(
+                Book.source_kind == USER_PUBLIC_SHARE_SOURCE_KIND,
+                Book.public_share_status == PUBLIC_SHARE_STATUS_PENDING,
+                Book.hidden_at.is_(None),
+                Book.archived_at.is_(None),
+            )
+            .order_by(Book.public_share_requested_at.asc(), Book.created_at.asc())
+            .offset(offset)
+            .limit(limit)
+        )
+    ).all()
+    return [
+        PendingPublicShareOut(
+            book_id=str(book.id),
+            user_id=str(book.user_id),
+            author_username=username,
+            title=book.title,
+            author=book.author,
+            genre=book.genre,
+            isbn=book.isbn,
+            copyright_warning=bool(book.copyright_warning),
+            public_description=book.public_description,
+            requested_at=book.public_share_requested_at,
+            created_at=book.created_at,
+        )
+        for book, username in rows
+    ]
+
+
+async def get_platform_metrics(db: AsyncSession) -> dict:
+    import app.core.redis
+
+    users = (await db.execute(select(func.count()).select_from(User))).scalar()
+    books = (await db.execute(select(func.count()).select_from(Book))).scalar()
+    chars = (await db.execute(select(func.count()).select_from(Character))).scalar()
+    chunks = (await db.execute(select(func.count()).select_from(BookChunk))).scalar()
+    summaries = (await db.execute(select(func.count()).select_from(ChapterSummary))).scalar()
+    r = await app.core.redis.get_redis()
+    mem = await r.info("memory")
+    return {
+        "users": users,
+        "books": books,
+        "characters": chars,
+        "chunks_indexed": chunks,
+        "summaries_cached": summaries,
+        "redis_memory_mb": round(mem.get("used_memory", 0) / 1024 / 1024, 2),
+    }
+
+
+async def apply_creator_strike(
+    db: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    book_id: uuid.UUID | None,
+    report_id: uuid.UUID | None,
+    strike_type: str,
+    severity: str,
+    reason: str,
+    admin_user_id: uuid.UUID,
+    request: Request,
+) -> CreatorStrikeOut:
+    scopes_snapshot = principal_scope_snapshot(
+        getattr(request.state, "admin_principal", None)
+    )
+    strike = CreatorStrike(
+        user_id=user_id,
+        book_id=book_id,
+        report_id=report_id,
+        strike_type=strike_type,
+        severity=severity,
+        reason=reason,
+        created_by_user_id=admin_user_id,
+        is_active=True,
+    )
+    db.add(strike)
+    await db.flush()
+    serious_count = await active_serious_strike_count(db, user_id=user_id)
+    await add_moderation_action(
+        db,
+        action_type="strike_added",
+        actor_user_id=admin_user_id,
+        target_user_id=user_id,
+        book_id=strike.book_id,
+        report_id=strike.report_id,
+        previous_status=None,
+        new_status=f"serious_strikes:{serious_count}",
+        reason=reason,
+        metadata={"severity": severity, "strike_type": strike_type},
+    )
+    await record_admin_audit_event(
+        db,
+        actor_user_id=admin_user_id,
+        target_user_id=user_id,
+        target_book_id=strike.book_id,
+        target_report_id=strike.report_id,
+        action_type="strike_added",
+        result="allowed",
+        reason=reason,
+        request=request,
+        scopes_snapshot=scopes_snapshot,
+        metadata={"severity": severity, "strike_type": strike_type},
+    )
+    await db.commit()
+    return CreatorStrikeOut(
+        id=str(strike.id),
+        user_id=str(strike.user_id),
+        book_id=str(strike.book_id) if strike.book_id else None,
+        report_id=str(strike.report_id) if strike.report_id else None,
+        strike_type=strike.strike_type,
+        severity=strike.severity,
+        reason=strike.reason,
+        is_active=bool(strike.is_active),
+        created_at=strike.created_at,
+    )

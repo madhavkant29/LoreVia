@@ -156,10 +156,25 @@ async def test_legacy_billing_status_route_is_not_exposed(client, db):
 
 
 @pytest.mark.asyncio
-async def test_billing_confirmation_returns_transaction_summary(auth_headers, client, db, monkeypatch):
-    me = await client.get("/api/v1/auth/me", headers=auth_headers)
+async def test_billing_confirmation_returns_transaction_summary(client, db, monkeypatch):
+    from app.core.security import create_access_token
+
+    me_request = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": f"billing-txn-{uuid.uuid4().hex[:8]}@lorevia.app",
+            "username": f"billing-txn-{uuid.uuid4().hex[:8]}",
+            "password": "SecurePass456!@#",
+            "accepted_terms": True,
+            "device_id": f"device-{uuid.uuid4().hex}",
+        },
+    )
+    assert me_request.status_code == 201
+    user_id = uuid.UUID(me_request.json()["id"])
+    token = create_access_token(str(user_id))
+    cookie_headers = {"Cookie": f"lorevia_access_token={token}"}
+    me = await client.get("/api/v1/auth/me", headers=cookie_headers)
     assert me.status_code == 200
-    user_id = uuid.UUID(me.json()["id"])
 
     db.add(
         Subscription(
@@ -191,7 +206,7 @@ async def test_billing_confirmation_returns_transaction_summary(auth_headers, cl
 
     monkeypatch.setattr("app.api.v1.routes.billing.get_transaction_summary", fake_get_transaction_summary)
 
-    response = await client.get("/api/v1/billing/confirmation?transaction_id=txn_123", headers=auth_headers)
+    response = await client.get("/api/v1/billing/confirmation?transaction_id=txn_123", headers=cookie_headers)
 
     assert response.status_code == 200
     payload = response.json()

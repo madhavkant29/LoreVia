@@ -2,7 +2,7 @@ import uuid
 from datetime import UTC, date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps.auth import (
@@ -20,9 +20,7 @@ from app.core.database import get_db
 from app.core.redis import cache_del, key_public_book_detail, key_public_books
 import app.core.redis
 from app.models.book import Book
-from app.models.moderation import ContentReport, CreatorStrike
-from app.models.character import Character
-from app.models.intelligence import BookChunk, ChapterSummary
+from app.models.moderation import ContentReport
 from app.models.user import AdminAuditEvent, AdminPrincipal, User, UserRateLimitOverride
 from app.schemas.admin import (
     AdminAuditEventOut,
@@ -53,11 +51,15 @@ from app.schemas.public import (
     PublicChapterIn,
 )
 from app.services.admin_service import (
+    apply_creator_strike,
+    get_platform_metrics,
     grant_admin_principal,
     list_admin_principals,
     principal_scope_snapshot,
     record_admin_audit_event,
+    record_admin_read,
     revoke_admin_principal,
+    serialize_pending_public_shares,
 )
 from app.services.refund_service import (
     approve_refund_review,
@@ -85,7 +87,6 @@ from app.utils.public_utils import (
     PUBLIC_SHARE_STATUS_PENDING,
     USER_PUBLIC_SHARE_SOURCE_KIND,
     add_moderation_action,
-    active_serious_strike_count,
     append_public_demo_book_chapter,
     get_public_share_status,
     create_public_demo_book,
@@ -99,26 +100,72 @@ def _admin_scopes_from_request(request: Request) -> list[str]:
     return principal_scope_snapshot(getattr(request.state, "admin_principal", None))
 
 
-async def _record_admin_read(
-    *,
+async def _apply_book_moderation_action(
     db: AsyncSession,
-    request: Request,
-    admin_user: User,
-    action_type: str,
+    book_id: uuid.UUID,
+    action: str,
     reason: str,
-    metadata: dict[str, object] | None = None,
-) -> None:
+    admin_user_id: uuid.UUID,
+    request: Request,
+) -> dict:
+    book = await db.get(Book, book_id)
+    if book is None:
+        raise HTTPException(404, "Book not found")
+    previous_status = str(getattr(book, "moderation_status", "") or "") or None
+
+    if action == "hide":
+        book.moderation_status = MODERATION_STATUS_HIDDEN
+        book.public_status = PUBLIC_STATUS_HIDDEN
+        book.is_public = False
+        book.takedown_reason = reason
+        book.takedown_at = datetime.now(UTC)
+        book.takedown_by_user_id = admin_user_id
+        audit_action = "book_hidden"
+        moderation_action = "book_hidden"
+    elif action == "remove":
+        book.moderation_status = MODERATION_STATUS_REMOVED
+        book.public_status = PUBLIC_STATUS_REMOVED
+        book.is_public = False
+        book.takedown_reason = reason
+        book.takedown_at = datetime.now(UTC)
+        book.takedown_by_user_id = admin_user_id
+        audit_action = "book_removed"
+        moderation_action = "book_removed"
+    elif action == "restore":
+        book.moderation_status = MODERATION_STATUS_CLEAN
+        book.public_status = PUBLIC_STATUS_PUBLISHED
+        book.is_public = True
+        book.takedown_reason = None
+        book.takedown_at = None
+        book.takedown_by_user_id = None
+        audit_action = "book_restored"
+        moderation_action = "book_restored"
+    else:
+        raise HTTPException(400, f"Unknown moderation action: {action}")
+
+    await add_moderation_action(
+        db,
+        action_type=moderation_action,
+        actor_user_id=admin_user_id,
+        target_user_id=book.user_id,
+        book_id=book.id,
+        previous_status=previous_status,
+        new_status=book.moderation_status,
+        reason=reason,
+    )
     await record_admin_audit_event(
         db,
-        actor_user_id=admin_user.id,
-        action_type=action_type,
+        actor_user_id=admin_user_id,
+        target_user_id=book.user_id,
+        target_book_id=book.id,
+        action_type=audit_action,
         result="allowed",
         reason=reason,
         request=request,
         scopes_snapshot=_admin_scopes_from_request(request),
-        metadata=metadata,
     )
     await db.commit()
+    return {"ok": True, "book_id": str(book.id), "moderation_status": book.moderation_status}
 
 
 @router.get("/session", response_model=AdminSessionOut)
@@ -185,7 +232,7 @@ async def get_admin_access(
     admin_user: User = Depends(require_owner_admin),
 ):
     principals = await list_admin_principals(db, limit=limit, offset=offset)
-    await _record_admin_read(
+    await record_admin_read(
         db=db,
         request=request,
         admin_user=admin_user,
@@ -289,7 +336,7 @@ async def list_admin_audit_events(
             )
         ).scalars().all()
     )
-    await _record_admin_read(
+    await record_admin_read(
         db=db,
         request=request,
         admin_user=admin_user,
@@ -307,7 +354,7 @@ async def get_admin_billing_status(
     admin_user: User = Depends(require_billing_admin),
 ):
     payload = BillingStatusOut(**billing_configuration_status())
-    await _record_admin_read(
+    await record_admin_read(
         db=db,
         request=request,
         admin_user=admin_user,
@@ -325,38 +372,8 @@ async def list_pending_public_shares(
     db: AsyncSession = Depends(get_db),
     admin_user: User = Depends(require_moderation_admin),
 ):
-    rows = (
-        await db.execute(
-            select(Book, User.username)
-            .join(User, User.id == Book.user_id)
-            .where(
-                Book.source_kind == USER_PUBLIC_SHARE_SOURCE_KIND,
-                Book.public_share_status == PUBLIC_SHARE_STATUS_PENDING,
-                Book.hidden_at.is_(None),
-                Book.archived_at.is_(None),
-            )
-            .order_by(Book.public_share_requested_at.asc(), Book.created_at.asc())
-            .offset(offset)
-            .limit(limit)
-        )
-    ).all()
-    payload = [
-        PendingPublicShareOut(
-            book_id=str(book.id),
-            user_id=str(book.user_id),
-            author_username=username,
-            title=book.title,
-            author=book.author,
-            genre=book.genre,
-            isbn=book.isbn,
-            copyright_warning=bool(book.copyright_warning),
-            public_description=book.public_description,
-            requested_at=book.public_share_requested_at,
-            created_at=book.created_at,
-        )
-        for book, username in rows
-    ]
-    await _record_admin_read(
+    payload = await serialize_pending_public_shares(db, limit=limit, offset=offset)
+    await record_admin_read(
         db=db,
         request=request,
         admin_user=admin_user,
@@ -494,19 +511,8 @@ async def metrics(
     db: AsyncSession = Depends(get_db),
     admin_user: User = Depends(require_super_admin),
 ):
-    users = (await db.execute(select(func.count()).select_from(User))).scalar()
-    books = (await db.execute(select(func.count()).select_from(Book))).scalar()
-    chars = (await db.execute(select(func.count()).select_from(Character))).scalar()
-    chunks = (await db.execute(select(func.count()).select_from(BookChunk))).scalar()
-    summaries = (await db.execute(select(func.count()).select_from(ChapterSummary))).scalar()
-    r = await app.core.redis.get_redis()
-    mem = await r.info("memory")
-    payload = {
-        "users": users, "books": books, "characters": chars,
-        "chunks_indexed": chunks, "summaries_cached": summaries,
-        "redis_memory_mb": round(mem.get("used_memory", 0) / 1024 / 1024, 2),
-    }
-    await _record_admin_read(
+    payload = await get_platform_metrics(db)
+    await record_admin_read(
         db=db,
         request=request,
         admin_user=admin_user,
@@ -534,7 +540,7 @@ async def subscription_metrics(
         cohort_end=resolved_end_date,
         reactivation_window_days=reactivation_window_days,
     )
-    await _record_admin_read(
+    await record_admin_read(
         db=db,
         request=request,
         admin_user=admin_user,
@@ -559,7 +565,7 @@ async def get_refund_reviews(
     admin_user: User = Depends(require_billing_admin),
 ):
     reviews = await list_refund_reviews(db, status=status, limit=limit, offset=offset)
-    await _record_admin_read(
+    await record_admin_read(
         db=db,
         request=request,
         admin_user=admin_user,
@@ -668,6 +674,7 @@ async def deny_refund_review_request(
     return review
 
 
+# Thin endpoint — Redis queue checks are lightweight standalone calls.
 @router.get("/queue-depth")
 async def queue_depth(
     request: Request,
@@ -681,7 +688,7 @@ async def queue_depth(
         "embedding": await maybe_await(r.llen("embedding")),
         "intelligence": await maybe_await(r.llen("intelligence")),
     }
-    await _record_admin_read(
+    await record_admin_read(
         db=db,
         request=request,
         admin_user=admin_user,
@@ -716,7 +723,7 @@ async def get_rate_limit_override(
             "api_per_minute": override.api_per_minute if override else None,
         },
     }
-    await _record_admin_read(
+    await record_admin_read(
         db=db,
         request=request,
         admin_user=admin_user,
@@ -830,7 +837,7 @@ async def list_content_reports(
         )
         for report in reports
     ]
-    await _record_admin_read(
+    await record_admin_read(
         db=db,
         request=request,
         admin_user=admin_user,
@@ -851,39 +858,14 @@ async def hide_public_book(
     __: None = Depends(require_admin_step_up),
     admin_user: User = Depends(require_moderation_admin),
 ):
-    book = await db.get(Book, book_id)
-    if book is None:
-        raise HTTPException(404, "Book not found")
-    previous_status = str(getattr(book, "moderation_status", "") or "") or None
-    book.moderation_status = MODERATION_STATUS_HIDDEN
-    book.public_status = PUBLIC_STATUS_HIDDEN
-    book.is_public = False
-    book.takedown_reason = body.reason
-    book.takedown_at = datetime.now(UTC)
-    book.takedown_by_user_id = admin_user.id
-    await add_moderation_action(
-        db,
-        action_type="book_hidden",
-        actor_user_id=admin_user.id,
-        target_user_id=book.user_id,
-        book_id=book.id,
-        previous_status=previous_status,
-        new_status=book.moderation_status,
+    return await _apply_book_moderation_action(
+        db=db,
+        book_id=book_id,
+        action="hide",
         reason=body.reason,
-    )
-    await record_admin_audit_event(
-        db,
-        actor_user_id=admin_user.id,
-        target_user_id=book.user_id,
-        target_book_id=book.id,
-        action_type="book_hidden",
-        result="allowed",
-        reason=body.reason,
+        admin_user_id=admin_user.id,
         request=request,
-        scopes_snapshot=_admin_scopes_from_request(request),
     )
-    await db.commit()
-    return {"ok": True, "book_id": str(book.id), "moderation_status": book.moderation_status}
 
 
 @router.post("/books/{book_id}/remove")
@@ -896,39 +878,14 @@ async def remove_public_book(
     __: None = Depends(require_admin_step_up),
     admin_user: User = Depends(require_moderation_admin),
 ):
-    book = await db.get(Book, book_id)
-    if book is None:
-        raise HTTPException(404, "Book not found")
-    previous_status = str(getattr(book, "moderation_status", "") or "") or None
-    book.moderation_status = MODERATION_STATUS_REMOVED
-    book.public_status = PUBLIC_STATUS_REMOVED
-    book.is_public = False
-    book.takedown_reason = body.reason
-    book.takedown_at = datetime.now(UTC)
-    book.takedown_by_user_id = admin_user.id
-    await add_moderation_action(
-        db,
-        action_type="book_removed",
-        actor_user_id=admin_user.id,
-        target_user_id=book.user_id,
-        book_id=book.id,
-        previous_status=previous_status,
-        new_status=book.moderation_status,
+    return await _apply_book_moderation_action(
+        db=db,
+        book_id=book_id,
+        action="remove",
         reason=body.reason,
-    )
-    await record_admin_audit_event(
-        db,
-        actor_user_id=admin_user.id,
-        target_user_id=book.user_id,
-        target_book_id=book.id,
-        action_type="book_removed",
-        result="allowed",
-        reason=body.reason,
+        admin_user_id=admin_user.id,
         request=request,
-        scopes_snapshot=_admin_scopes_from_request(request),
     )
-    await db.commit()
-    return {"ok": True, "book_id": str(book.id), "moderation_status": book.moderation_status}
 
 
 @router.post("/books/{book_id}/restore")
@@ -941,39 +898,14 @@ async def restore_public_book(
     __: None = Depends(require_admin_step_up),
     admin_user: User = Depends(require_moderation_admin),
 ):
-    book = await db.get(Book, book_id)
-    if book is None:
-        raise HTTPException(404, "Book not found")
-    previous_status = str(getattr(book, "moderation_status", "") or "") or None
-    book.moderation_status = MODERATION_STATUS_CLEAN
-    book.public_status = PUBLIC_STATUS_PUBLISHED
-    book.is_public = True
-    book.takedown_reason = None
-    book.takedown_at = None
-    book.takedown_by_user_id = None
-    await add_moderation_action(
-        db,
-        action_type="book_restored",
-        actor_user_id=admin_user.id,
-        target_user_id=book.user_id,
-        book_id=book.id,
-        previous_status=previous_status,
-        new_status=book.moderation_status,
+    return await _apply_book_moderation_action(
+        db=db,
+        book_id=book_id,
+        action="restore",
         reason=body.reason,
-    )
-    await record_admin_audit_event(
-        db,
-        actor_user_id=admin_user.id,
-        target_user_id=book.user_id,
-        target_book_id=book.id,
-        action_type="book_restored",
-        result="allowed",
-        reason=body.reason,
+        admin_user_id=admin_user.id,
         request=request,
-        scopes_snapshot=_admin_scopes_from_request(request),
     )
-    await db.commit()
-    return {"ok": True, "book_id": str(book.id), "moderation_status": book.moderation_status}
 
 
 @router.post("/users/{user_id}/strikes", response_model=CreatorStrikeOut)
@@ -989,53 +921,14 @@ async def add_creator_strike(
     user = await db.get(User, user_id)
     if user is None:
         raise HTTPException(404, "User not found")
-    strike = CreatorStrike(
+    return await apply_creator_strike(
+        db,
         user_id=user_id,
         book_id=uuid.UUID(body.book_id) if body.book_id else None,
         report_id=uuid.UUID(body.report_id) if body.report_id else None,
         strike_type=body.strike_type,
         severity=body.severity,
         reason=body.reason,
-        created_by_user_id=admin_user.id,
-        is_active=True,
-    )
-    db.add(strike)
-    await db.flush()
-    serious_count = await active_serious_strike_count(db, user_id=user_id)
-    await add_moderation_action(
-        db,
-        action_type="strike_added",
-        actor_user_id=admin_user.id,
-        target_user_id=user_id,
-        book_id=strike.book_id,
-        report_id=strike.report_id,
-        previous_status=None,
-        new_status=f"serious_strikes:{serious_count}",
-        reason=body.reason,
-        metadata={"severity": body.severity, "strike_type": body.strike_type},
-    )
-    await record_admin_audit_event(
-        db,
-        actor_user_id=admin_user.id,
-        target_user_id=user_id,
-        target_book_id=strike.book_id,
-        target_report_id=strike.report_id,
-        action_type="strike_added",
-        result="allowed",
-        reason=body.reason,
+        admin_user_id=admin_user.id,
         request=request,
-        scopes_snapshot=_admin_scopes_from_request(request),
-        metadata={"severity": body.severity, "strike_type": body.strike_type},
-    )
-    await db.commit()
-    return CreatorStrikeOut(
-        id=str(strike.id),
-        user_id=str(strike.user_id),
-        book_id=str(strike.book_id) if strike.book_id else None,
-        report_id=str(strike.report_id) if strike.report_id else None,
-        strike_type=strike.strike_type,
-        severity=strike.severity,
-        reason=strike.reason,
-        is_active=bool(strike.is_active),
-        created_at=strike.created_at,
     )

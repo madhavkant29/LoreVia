@@ -185,7 +185,7 @@ test("settings page updates promotional email preferences", async ({ page }) => 
 test("author uploads default the manuscript byline from the public username", async ({ page }) => {
   await installMockApi(page)
   await page.goto("/library")
-  await page.getByRole("button", { name: /^new project$/i }).click()
+  await page.getByRole("button", { name: /^new project$/i }).first().click()
   await page.getByRole("button", { name: /^author mode$/i }).click()
 
   const bylineInput = page.getByPlaceholder("Manuscript author or pen name")

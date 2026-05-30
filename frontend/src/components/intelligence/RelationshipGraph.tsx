@@ -338,7 +338,7 @@ export function RelationshipGraph({
 
   const { data: graphQueryData = null, isLoading: loading } = useQuery<GraphData | null>({
     queryKey: asQueryKey(readerCacheKey(bookId, `relationships:${upToChapter}:${includeInactive ? "all" : "active"}`)),
-    queryFn: () => readerApi.getRelationships(bookId, upToChapter, { includeInactive }),
+    queryFn: () => readerApi.getRelationships(bookId, upToChapter, { includeInactive, include: "nodes,edges" }),
   })
 
   useEffect(() => {

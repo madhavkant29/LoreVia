@@ -10,6 +10,7 @@ import { ThemeBrandImage } from "@/components/layout/ThemeBrandImage"
 import { Button } from "@/components/ui/Button"
 import { canUseAuthorFeatures } from "@/lib/billing/plans"
 import { useCachedBookDetail } from "@/lib/hooks/useBookDetail"
+import { useNavigationPrefetch } from "@/lib/hooks/useNavigationPrefetch"
 import { useAuthStore } from "@/lib/stores/authStore"
 import type { Book } from "@/types/book"
 import type { CollaborationPermissions } from "@/types/book"
@@ -176,6 +177,7 @@ export function AuthorToolsNav({
   const hasFreeSampleIntelligenceAccess = tier === "free"
   const hasCollaboratorAccess = Boolean(collaborationRole && collaborationPermissions)
   const showAuthorSections = currentShell === "author" && (isOwnerSession || hasOwnAuthorAccess || hasCollaboratorAccess)
+  const { prefetchByNavId } = useNavigationPrefetch(bookId)
 
   const sections = useMemo(
     () =>
@@ -267,6 +269,8 @@ export function AuthorToolsNav({
                         href={item.href}
                         title={item.label}
                         data-testid={`author-nav-item-${item.id}`}
+                        onMouseEnter={() => prefetchByNavId(item.id)}
+                        onFocus={() => prefetchByNavId(item.id)}
                         className={`group/item flex min-h-[3.1rem] items-start gap-3 rounded-md border px-2.5 py-2.5 text-sm outline-none transition-[background-color,border-color,color,box-shadow,transform] duration-200 focus-visible:ring-2 focus-visible:ring-offset-0 ${
                           selected
                             ? isDark
@@ -352,6 +356,8 @@ export function AuthorToolsNav({
                     href={item.href}
                     title={item.label}
                     data-testid={`author-nav-item-${item.id}`}
+                    onMouseEnter={() => prefetchByNavId(item.id)}
+                    onFocus={() => prefetchByNavId(item.id)}
                     className={`group/item flex min-h-[3.1rem] items-start gap-3 rounded-md border px-2.5 py-2.5 text-sm outline-none transition-[background-color,border-color,color,box-shadow,transform] duration-200 focus-visible:ring-2 focus-visible:ring-offset-0 ${
                       selected
                         ? isDark

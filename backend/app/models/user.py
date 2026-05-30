@@ -30,7 +30,6 @@ class User(Base):
     last_login_date: Mapped[date | None] = mapped_column(Date)
     login_streak_days: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     longest_login_streak_days: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
-    login_activity_dates: Mapped[list[date] | None] = mapped_column(ARRAY(Date))
     legal_accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     legal_version: Mapped[str | None] = mapped_column(String)
     email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -358,7 +357,7 @@ class UserLoginActivity(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     login_date: Mapped[date] = mapped_column(Date, nullable=False)
     ip_hash: Mapped[str | None] = mapped_column(String, nullable=True)
     device_id: Mapped[str | None] = mapped_column(String, nullable=True)

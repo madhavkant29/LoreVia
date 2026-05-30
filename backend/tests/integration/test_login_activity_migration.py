@@ -46,12 +46,19 @@ async def _insert_test_user(engine) -> str:
     async with engine.connect() as conn:
         await conn.execute(
             sa.text(
-                "INSERT INTO users (id, email, password_hash) VALUES (:id, :email, :hash)"
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS login_activity_dates DATE[]"
+            ),
+        )
+        await conn.execute(
+            sa.text(
+                "INSERT INTO users (id, email, password_hash, tier, reading_mode) VALUES (:id, :email, :hash, :tier, :reading_mode)"
             ),
             {
                 "id": user_id,
                 "email": f"test-{user_id}@lorevia.app",
                 "hash": "$2b$12$LJ3m4ys3GZfnYMz8kVsKaOi6ELVNrfcA5KZpGJb5qM3VBQhY1Xf3u",
+                "tier": "free",
+                "reading_mode": "casual",
             },
         )
         await conn.commit()
@@ -62,11 +69,17 @@ async def _get_table_rows(engine, user_id: str) -> list[date]:
     async with engine.connect() as conn:
         result = await conn.execute(
             sa.text(
-                "SELECT login_date FROM user_login_activity WHERE user_id = :uid ORDER BY login_date"
+                "SELECT DISTINCT login_date FROM user_login_activity WHERE user_id = :uid ORDER BY login_date"
             ),
             {"uid": user_id},
         )
-        return [row[0] for row in result]
+        rows = []
+        for row in result:
+            val = row[0]
+            if hasattr(val, 'date'):
+                val = val.date()
+            rows.append(val)
+        return rows
 
 
 @pytest.mark.asyncio

@@ -7,8 +7,8 @@ import Link from "next/link"
 import { RevisionIntelligencePanel } from "@/components/revision/RevisionIntelligencePanel"
 import { ErrorCard } from "@/components/ui/ErrorCard"
 import { Skeleton } from "@/components/ui/Skeleton"
-import { resolveAssetUrl } from "@/lib/utils/assetUrls"
 import { buildIssueDisplay } from "@/lib/utils/storyFeedback"
+import { SmartBookCover } from "@/components/ui/SmartBookCover"
 import type { Book, GoalCalendarItem, PreWritingCheck, RevisionIntelligence, StoryHealth, WriterWorkspace } from "@/types/book"
 import type { ChapterListResponse } from "@/types/reader"
 
@@ -466,7 +466,12 @@ function CurrentProjectCard({
     <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
       <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Current project</p>
       <div className="mt-4 grid gap-5 md:grid-cols-[9rem_minmax(0,1fr)] xl:grid-cols-[10rem_minmax(0,1fr)]">
-        <BookCover book={book} isDark={isDark} />
+        <SmartBookCover
+          src={book.cover_url}
+          title={book.title}
+          isDark={isDark}
+          className="aspect-[0.72] min-h-48 overflow-hidden rounded-lg"
+        />
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-3">
             <h2 className={`break-words text-2xl font-semibold tracking-tight sm:text-3xl ${isDark ? "text-white" : "text-slate-950"}`}>{book.title}</h2>
@@ -614,7 +619,12 @@ function CurrentProjectHero({
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.1fr)_22rem]">
         <div className="grid gap-6 lg:grid-cols-[11rem_minmax(0,1fr)]">
           <div className="space-y-4">
-            <BookCover book={book} isDark={isDark} />
+            <SmartBookCover
+              src={book.cover_url}
+              title={book.title}
+              isDark={isDark}
+              className="aspect-[0.72] min-h-48 overflow-hidden rounded-lg"
+            />
             <button
               type="button"
               onClick={onOpenRelationships}
@@ -2120,32 +2130,6 @@ function EmptyTabState({ isDark, title, body }: { isDark: boolean; title: string
   )
 }
 
-function BookCover({ book, isDark }: { book: Book; isDark: boolean }) {
-  const [failed, setFailed] = useState(false)
-  const src = !failed ? resolveAssetUrl(book.cover_url) : null
-
-  if (!src) {
-    return (
-      <div className={`flex aspect-[0.72] min-h-48 items-center justify-center overflow-hidden rounded-lg ${isDark ? "bg-[#18202b]" : "bg-slate-100"}`}>
-        <span className={`font-serif text-5xl font-bold ${isDark ? "text-white/20" : "text-slate-300"}`}>{titleInitials(book.title)}</span>
-      </div>
-    )
-  }
-
-  return (
-    <div className="aspect-[0.72] min-h-48 overflow-hidden rounded-lg">
-      <img
-        src={src}
-        alt={`${book.title} cover`}
-        loading="lazy"
-        decoding="async"
-        onError={() => setFailed(true)}
-        className="h-full w-full object-cover object-center"
-      />
-    </div>
-  )
-}
-
 function panelClass(isDark: boolean, extra = "") {
   return `min-w-0 rounded-lg border shadow-card ${
     isDark ? "border-white/[0.065] bg-[#0d141c]" : "border-slate-200/70 bg-white"
@@ -2177,15 +2161,6 @@ function clamp(value: number, min: number, max: number) {
 function formatNumber(value: number | null | undefined) {
   if (typeof value !== "number" || Number.isNaN(value)) return "Syncing"
   return value.toLocaleString()
-}
-
-function titleInitials(title: string) {
-  return title
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() ?? "")
-    .join("")
 }
 
 function formatDateInputValue(date: Date) {

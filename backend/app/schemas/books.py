@@ -113,9 +113,9 @@ class BookOut(BaseModel):
 
 class BookOverviewOut(BaseModel):
     book: BookOut
-    progress: ReadingProgressOut
-    chapter_list: ChapterListResponseOut
-    summary_collection: SummaryCollectionResponseOut
+    progress: ReadingProgressOut | None = None
+    chapter_list: ChapterListResponseOut | None = None
+    summary_collection: SummaryCollectionResponseOut | None = None
 
 
 class BookForumMetadataBody(BaseModel):

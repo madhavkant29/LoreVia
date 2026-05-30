@@ -11,7 +11,6 @@ from app.utils.user_utils import (
     current_daily_word_count,
     current_daily_word_goal,
     get_login_activity_dates_from_table,
-    login_activity_dates,
     normalize_writing_entry_title,
     record_login_activity,
     record_login_activity_row,
@@ -27,7 +26,6 @@ def _user_stub(**overrides):
         "last_login_date": None,
         "login_streak_days": 0,
         "longest_login_streak_days": 0,
-        "login_activity_dates": [],
     }
     payload.update(overrides)
     return SimpleNamespace(**payload)
@@ -57,7 +55,6 @@ def test_record_login_activity_increments_streak_on_consecutive_days():
         last_login_date=date(2026, 5, 6),
         login_streak_days=3,
         longest_login_streak_days=4,
-        login_activity_dates=[date(2026, 5, 5), date(2026, 5, 6)],
     )
 
     record_login_activity(user, now=datetime(2026, 5, 7, 8, 30, tzinfo=UTC))
@@ -65,7 +62,6 @@ def test_record_login_activity_increments_streak_on_consecutive_days():
     assert user.last_login_date == date(2026, 5, 7)
     assert user.login_streak_days == 4
     assert user.longest_login_streak_days == 4
-    assert login_activity_dates(user)[-1] == date(2026, 5, 7)
 
 
 def test_record_login_activity_does_not_double_count_same_day():
@@ -73,14 +69,12 @@ def test_record_login_activity_does_not_double_count_same_day():
         last_login_date=date(2026, 5, 7),
         login_streak_days=2,
         longest_login_streak_days=2,
-        login_activity_dates=[date(2026, 5, 6), date(2026, 5, 7)],
     )
 
     record_login_activity(user, now=datetime(2026, 5, 7, 17, 45, tzinfo=UTC))
 
     assert user.login_streak_days == 2
     assert user.longest_login_streak_days == 2
-    assert login_activity_dates(user) == [date(2026, 5, 6), date(2026, 5, 7)]
 
 
 def test_normalize_writing_entry_title_prefers_explicit_title():
@@ -344,15 +338,13 @@ async def test_get_login_activity_dates_from_table_empty_returns_empty():
 
 
 @pytest.mark.asyncio
-async def test_record_login_activity_still_updates_user_object_for_old_array_dual_write():
+async def test_record_login_activity_updates_streak_fields():
     user = _user_stub(
         last_login_date=date(2026, 5, 28),
         login_streak_days=3,
         longest_login_streak_days=3,
-        login_activity_dates=[date(2026, 5, 27), date(2026, 5, 28)],
     )
 
     record_login_activity(user, now=datetime(2026, 5, 29, 12, 0, tzinfo=UTC))
 
     assert user.login_streak_days == 4
-    assert login_activity_dates(user)[-1] == date(2026, 5, 29)

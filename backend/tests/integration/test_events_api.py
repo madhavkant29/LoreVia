@@ -79,5 +79,6 @@ async def test_book_and_reader_events_endpoints_filter_by_progress(client, db):
 
     reader_events = await client.get(f"/api/v1/reader/{book.id}/events", headers=headers)
     assert reader_events.status_code == 200
-    assert [item["event_title"] for item in reader_events.json()["major_events"]] == ["The oath"]
-    assert [item["event_title"] for item in reader_events.json()["character_events"]] == ["Takes the oath"]
+    items = reader_events.json()["items"]
+    assert [item["event_title"] for item in items if item.get("type") == "major"] == ["The oath"]
+    assert [item["event_title"] for item in items if item.get("type") == "character"] == ["Takes the oath"]

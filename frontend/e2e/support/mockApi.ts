@@ -2582,6 +2582,40 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
       return json(route, characterReviewPayload)
     }
 
+    if (path === "/api/v1/books/book-1/character-review/reprocess" && method === "GET") {
+      return json(route, {
+        book_id: "book-1",
+        dry_run: true,
+        allow_merge_safe_pairs: true,
+        allow_demote_obvious_noise: true,
+        planned_merges: [["char-gregors-sister", "char-grete"]],
+        planned_demotions: [],
+        skipped_protected_merge_pairs: [],
+        skipped_protected_demotions: [],
+        updated_first_chapters: { "char-grete": 1 },
+        updated_last_seen_chapters: { "char-grete": 4 },
+        character_labels: { "char-gregors-sister": "Gregor's sister", "char-grete": "Grete" },
+        pending_duplicate_suggestions: 0,
+        pending_relationship_candidates: 1,
+        unresolved_relationship_deltas: {},
+      })
+    }
+
+    if (path === "/api/v1/books/book-1/character-review/reprocess" && method === "POST") {
+      return json(route, {
+        book_id: "book-1",
+        merged_pairs: [["char-gregors-sister", "char-grete"]],
+        demoted_character_ids: [],
+        skipped_protected_merge_pairs: [],
+        skipped_protected_demotions: [],
+        first_chapter_recomputes: { "char-grete": 1 },
+        last_seen_chapter_recomputes: { "char-grete": 4 },
+        character_labels: { "char-gregors-sister": "Gregor's sister", "char-grete": "Grete" },
+        duplicate_suggestion_delta: { pending: 0 },
+        unresolved_relationship_deltas: {},
+      })
+    }
+
     const relationshipReviewMatch = path.match(/^\/api\/v1\/books\/book-1\/relationship-review\/([^/]+)\/(attach-a|attach-b|accept|resolve|reject)$/)
     if (relationshipReviewMatch && method === "POST") {
       const [, candidateId, action] = relationshipReviewMatch

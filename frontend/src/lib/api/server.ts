@@ -1,0 +1,52 @@
+import "server-only"
+
+import { resolveApiOrigin } from "@/lib/constants"
+import { normalizeBookRouteId } from "@/lib/utils/bookRoutes"
+import type { Book } from "@/types/book"
+import type { ChapterData } from "@/types/reader"
+
+const API_BASE = `${resolveApiOrigin()}/api/v1`
+
+async function fetchAuthenticatedJson<T>(
+  path: string,
+  cookieHeader: string | null,
+): Promise<T | null> {
+  try {
+    const response = await fetch(`${API_BASE}${path}`, {
+      cache: "no-store",
+      headers: cookieHeader ? { cookie: cookieHeader } : undefined,
+    })
+
+    if (response.status === 401 || response.status === 403) {
+      return null
+    }
+
+    if (!response.ok) {
+      throw new Error(`API request failed for ${path} with status ${response.status}`)
+    }
+
+    return response.json() as Promise<T>
+  } catch {
+    return null
+  }
+}
+
+function readerBookPath(bookId: string, suffix: string) {
+  return `/reader/${normalizeBookRouteId(bookId)}${suffix}`
+}
+
+export const serverApi = {
+  getChapter(bookId: string, chapterNum: number, cookieHeader: string | null) {
+    return fetchAuthenticatedJson<ChapterData>(
+      readerBookPath(bookId, `/chapter/${chapterNum}`),
+      cookieHeader,
+    )
+  },
+
+  listBooks(includeHidden: boolean, cookieHeader: string | null) {
+    return fetchAuthenticatedJson<Book[]>(
+      `/books?include_hidden=${includeHidden}`,
+      cookieHeader,
+    )
+  },
+}

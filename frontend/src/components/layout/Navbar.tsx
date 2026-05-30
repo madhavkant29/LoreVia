@@ -1,15 +1,18 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import type { Route } from "next"
 import { usePathname, useRouter } from "next/navigation"
 
 import { Button } from "@/components/ui/Button"
 import { authApi } from "@/lib/api/auth"
+import { booksApi } from "@/lib/api/books"
 import { BrandLockup } from "@/components/layout/BrandLockup"
 import { ChatLauncher } from "@/components/layout/ChatLauncher"
 import { NotificationBell } from "@/components/layout/NotificationBell"
+import { asQueryKey, booksListCacheKey } from "@/lib/query/cacheKeys"
+import { queryClient } from "@/lib/query/queryClient"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 
@@ -92,6 +95,17 @@ export function Navbar() {
     const source = user?.username || user?.email || "?"
     return source.slice(0, 1).toUpperCase()
   }, [user?.email, user?.username])
+
+  const libraryPrefetchedRef = useRef(false)
+
+  const handleLibraryPrefetch = useCallback(() => {
+    if (libraryPrefetchedRef.current) return
+    libraryPrefetchedRef.current = true
+    queryClient.prefetchQuery({
+      queryKey: asQueryKey(booksListCacheKey(true)),
+      queryFn: () => booksApi.list(true),
+    })
+  }, [])
 
   const publicProfileHref = user?.username ? (`/public/writers/${user.username}` as Route) : null
 
@@ -204,6 +218,8 @@ export function Navbar() {
                 key={item.href}
                 href={item.href}
                 onClick={() => setMobileMenuOpen(false)}
+                onMouseEnter={item.href === "/library" ? handleLibraryPrefetch : undefined}
+                onFocus={item.href === "/library" ? handleLibraryPrefetch : undefined}
                 className={`relative rounded-xl px-4 py-2 text-sm font-semibold tracking-tight transition-colors duration-150 ${
                   pathname === item.href
                     ? "bg-teal-700/10 text-teal-800 dark:bg-teal-400/15 dark:text-teal-200"

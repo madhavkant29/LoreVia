@@ -78,7 +78,7 @@ vi.mock("@/lib/utils/bookRoutes", () => ({
   getBookHref: () => "/book-1",
 }))
 
-import LibraryPage from "../page"
+import { LibraryClient } from "../LibraryClient"
 
 let container: HTMLDivElement | null = null
 let root: Root | null = null
@@ -107,7 +107,7 @@ function render() {
   root = createRoot(container)
 
   act(() => {
-    root?.render(<LibraryPage />)
+    root?.render(<LibraryClient />)
   })
 }
 

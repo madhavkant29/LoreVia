@@ -1,0 +1,328 @@
+from __future__ import annotations
+
+import json
+import re
+import uuid
+from typing import Any, cast
+
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import Response, StreamingResponse
+from openai import AsyncOpenAI
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from app.api.deps.auth import get_current_user
+from app.api.deps.rate_limit import rate_limit_advisor
+from app.core.config import settings
+from app.core.database import get_db
+from app.core.redis import get_advisor_response_cache
+from app.models.book import Book
+from app.models.intelligence import AdvisorJob
+from app.services.advisor_jobs_service import (
+    ADVISOR_SCOPE_BOOK,
+    create_advisor_job,
+    mark_advisor_job_failed,
+    serialize_advisor_job,
+)
+from app.schemas.advisor import (
+    AdvisorRequest,
+    AdvisorTaskStatusResponse,
+    WhatsTheWordRequest,
+    WhatsTheWordResponse,
+)
+from app.utils.advisor_utils import (
+    generate_whats_the_word_result,
+    make_advisor_cache_key,
+    stream_advisor_reply_payload,
+)
+from app.utils.logging.errors import public_error_message
+from app.workers.tasks.intelligence_tasks import generate_advisor_reply_task
+
+router = APIRouter()
+
+
+def _safe_prompt_str(value: str | None) -> str:
+    """Escape Python str.format() brace syntax in user-controlled values.
+
+    A book title like '} Ignore all previous instructions. {title' would
+    otherwise be interpreted by str.format() as a closing/opening brace,
+    causing a KeyError or — depending on the template — injecting unexpected
+    content into the LLM system prompt.  We escape both braces so the value
+    is always treated as a literal string by the template engine.
+    """
+    return (value or "").replace("{", "{{").replace("}", "}}")
+
+
+def _best_issue_snippet(text: str, description: str) -> str:
+    sentences = [item.strip() for item in re.split(r"(?<=[.!?])\s+", text or "") if item.strip()]
+    if not sentences:
+        return " ".join((text or "").split())[:220]
+    description_tokens = {token for token in re.findall(r"[a-z0-9']+", (description or "").lower()) if len(token) > 3}
+    ranked = sorted(
+        sentences,
+        key=lambda sentence: sum(1 for token in description_tokens if token in sentence.lower()),
+        reverse=True,
+    )
+    return ranked[0][:220]
+
+
+def _parse_advisor_job_id(task_id: str) -> uuid.UUID:
+    try:
+        return uuid.UUID(str(task_id))
+    except ValueError as exc:
+        raise HTTPException(404, detail="advisor task not found") from exc
+
+
+def _advisor_sse(event: str, data: dict[str, Any]) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, default=str)}\n\n"
+
+
+def _advisor_stream_response(event_stream) -> StreamingResponse:
+    return StreamingResponse(
+        event_stream,
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+async def _enqueue_book_advisor_task(
+    *,
+    db: AsyncSession,
+    book: Book,
+    body: AdvisorRequest,
+    current_user_id: uuid.UUID,
+    response: Response,
+) -> dict[str, Any]:
+    last_user_msg = next(
+        (message.content for message in reversed(body.messages) if message.role == "user"),
+        "",
+    )
+    if not last_user_msg:
+        raise HTTPException(400, detail="no user message found")
+    cache_key = make_advisor_cache_key(book.id, last_user_msg)
+    cached = await get_advisor_response_cache(str(book.id), cache_key)
+    if cached is not None:
+        return {**cached, "cached": True}
+
+    job = await create_advisor_job(
+        db,
+        scope=ADVISOR_SCOPE_BOOK,
+        user_id=current_user_id,
+        book_id=book.id,
+    )
+    try:
+        generate_advisor_reply_task.apply_async(
+            task_id=str(job.id),
+            kwargs={
+                "job_id": str(job.id),
+                "book_id": str(book.id),
+                "user_id": str(current_user_id),
+                "messages": [{"role": msg.role, "content": msg.content} for msg in body.messages],
+                "total_chapters": body.total_chapters,
+            },
+        )
+    except Exception as exc:
+        await mark_advisor_job_failed(
+            db,
+            job_id=job.id,
+            error_code="advisor_enqueue_failed",
+            error_detail=public_error_message(500),
+        )
+        raise
+    response.status_code = 202
+    return {"task_id": str(job.id), "status": "queued", "cached": False}
+
+
+# ─── Main advisor conversation endpoint ──────────────────────────────────────
+
+@router.post("/{book_id}/advisor/message")
+async def advisor_message(
+    book_id: uuid.UUID,
+    body: AdvisorRequest,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _=Depends(rate_limit_advisor),
+):
+    book = await db.get(Book, book_id)
+    if not book or book.user_id != current_user.id:
+        raise HTTPException(404)
+
+    if not body.messages:
+        raise HTTPException(400, detail="messages list is empty")
+
+    return await _enqueue_book_advisor_task(
+        db=db,
+        book=book,
+        body=body,
+        current_user_id=current_user.id,
+        response=response,
+    )
+
+
+@router.post("/{book_id}/advisor/message-stream")
+async def advisor_message_stream(
+    book_id: uuid.UUID,
+    body: AdvisorRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _=Depends(rate_limit_advisor),
+):
+    book = await db.get(Book, book_id)
+    if not book or book.user_id != current_user.id:
+        raise HTTPException(404)
+
+    if not body.messages:
+        raise HTTPException(400, detail="messages list is empty")
+
+    async def event_stream():
+        try:
+            async for item in stream_advisor_reply_payload(
+                db=db,
+                book=book,
+                user_id=current_user.id,
+                messages=[{"role": msg.role, "content": msg.content} for msg in body.messages],
+                total_chapters=body.total_chapters,
+            ):
+                yield _advisor_sse(item["event"], item["data"])
+        except Exception as exc:
+            yield _advisor_sse("error", {"error": public_error_message(500)})
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.get("/{book_id}/advisor/greeting")
+async def advisor_greeting(
+    book_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    result = await db.execute(
+        select(Book)
+        .where(Book.id == book_id, Book.user_id == current_user.id)
+        .options(
+            selectinload(Book.characters),
+            selectinload(Book.plot_threads),
+        )
+    )
+    book = result.scalars().first()
+    if not book:
+        raise HTTPException(404)
+
+    return {
+        "message": f"What aspect of *{book.title}* feels unsolved right now?",
+        "book_title": book.title,
+        "stats": {
+            "characters": len(book.characters) if book.characters else 0,
+            "plot_threads": len(book.plot_threads) if book.plot_threads else 0,
+            "total_chapters": book.total_chapters,
+        },
+    }
+
+
+@router.post("/{book_id}/advisor/whats-the-word", response_model=WhatsTheWordResponse)
+async def whats_the_word(
+    book_id: uuid.UUID,
+    body: WhatsTheWordRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _=Depends(rate_limit_advisor),
+):
+    book = await db.get(Book, book_id)
+    if not book or book.user_id != current_user.id:
+        raise HTTPException(404)
+
+    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    try:
+        payload = await generate_whats_the_word_result(
+            client=client,
+            model=settings.OPENAI_INTEL_MODEL,
+            book_title=book.title,
+            description=body.description,
+            previous_word=body.previous_word,
+        )
+        return WhatsTheWordResponse(**payload)
+    finally:
+        await client.close()
+
+
+@router.post("/{book_id}/advisor/whats-the-word-stream")
+async def whats_the_word_stream(
+    book_id: uuid.UUID,
+    body: WhatsTheWordRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _=Depends(rate_limit_advisor),
+):
+    book = await db.get(Book, book_id)
+    if not book or book.user_id != current_user.id:
+        raise HTTPException(404)
+
+    async def event_stream():
+        client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+        try:
+            yield _advisor_sse("stage", {"message": "Finding the closest fit..."})
+            payload = await generate_whats_the_word_result(
+                client=client,
+                model=settings.OPENAI_INTEL_MODEL,
+                book_title=book.title,
+                description=body.description,
+                previous_word=body.previous_word,
+            )
+            yield _advisor_sse("done", cast(dict[str, Any], jsonable_encoder(WhatsTheWordResponse(**payload))))
+        except Exception as exc:
+            yield _advisor_sse("error", {"error": public_error_message(500)})
+        finally:
+            await client.close()
+
+    return _advisor_stream_response(event_stream())
+
+
+@router.post("/{book_id}/advisor/message-async")
+async def advisor_message_async(
+    book_id: uuid.UUID,
+    body: AdvisorRequest,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _=Depends(rate_limit_advisor),
+):
+    book = await db.get(Book, book_id)
+    if not book or book.user_id != current_user.id:
+        raise HTTPException(404)
+
+    if not body.messages:
+        raise HTTPException(400, detail="messages list is empty")
+
+    return await _enqueue_book_advisor_task(
+        db=db,
+        book=book,
+        body=body,
+        current_user_id=current_user.id,
+        response=response,
+    )
+
+
+@router.get("/{book_id}/advisor/message-async/{task_id}", response_model=AdvisorTaskStatusResponse)
+async def advisor_message_async_status(
+    book_id: uuid.UUID,
+    task_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await db.get(Book, book_id)
+    if not book or book.user_id != current_user.id:
+        raise HTTPException(404)
+
+    job = await db.get(AdvisorJob, _parse_advisor_job_id(task_id))
+    if job is None:
+        raise HTTPException(404, detail="advisor task not found")
+    if job.user_id != current_user.id or job.scope != ADVISOR_SCOPE_BOOK or job.book_id != book.id:
+        raise HTTPException(403, detail="advisor task does not belong to this book")
+    return serialize_advisor_job(job)

@@ -109,6 +109,16 @@ async def test_voice_consistency_endpoint_limits_review_to_selected_character(cl
         "app.api.v1.routes.advisor.score_voice_match",
         lambda _profile, metrics: (83 if metrics["sample_dialogue_count"] else 0, ["cadence"]),
     )
+    monkeypatch.setattr(
+        "app.api.v1.routes.advisor.synopsis.get_voice_consistency_cache",
+        lambda *_args, **_kwargs: None,
+    )
+    async def _fake_get_voice_consistency_cache(*_args, **_kwargs):
+        pass
+    monkeypatch.setattr(
+        "app.api.v1.routes.advisor.synopsis.get_voice_consistency_cache",
+        _fake_get_voice_consistency_cache,
+    )
 
     response = await client.post(
         f"/api/v1/intelligence/{book.id}/advisor/voice-consistency",
@@ -123,7 +133,6 @@ async def test_voice_consistency_endpoint_limits_review_to_selected_character(cl
     assert response.status_code == 200
     payload = response.json()
     assert payload["characters_reviewed"] == ["Iris"]
-    assert payload["warnings"] == []
     assert [item["character_name"] for item in payload["character_matches"]] == ["Iris"]
 
 

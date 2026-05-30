@@ -62,7 +62,6 @@ async def test_refresh_route_uses_canonical_local_user_for_supabase_subject(monk
         last_login_at=None,
         login_streak_days=0,
         longest_login_streak_days=0,
-        login_activity_dates=[],
         email_verified_at=datetime.now(UTC),
         messaging_permission="anyone",
         created_at=datetime.now(UTC),

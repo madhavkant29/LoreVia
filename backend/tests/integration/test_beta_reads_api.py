@@ -738,7 +738,7 @@ async def test_expired_beta_read_revokes_book_invite_access(client, db):
     )
     assert create_response.status_code == 201
 
-    before_expiry = await client.get("/api/v1/books", headers=_auth_headers(reader.id))
+    before_expiry = await client.get("/api/v1/books/", headers=_auth_headers(reader.id))
     assert before_expiry.status_code == 200
     assert any(item["id"] == str(book.id) for item in before_expiry.json())
 
@@ -762,7 +762,7 @@ async def test_expired_beta_read_revokes_book_invite_access(client, db):
     await db.refresh(collaborator)
     assert collaborator.invite_status == "revoked"
 
-    after_expiry = await client.get("/api/v1/books", headers=_auth_headers(reader.id))
+    after_expiry = await client.get("/api/v1/books/", headers=_auth_headers(reader.id))
     assert after_expiry.status_code == 200
     assert all(item["id"] != str(book.id) for item in after_expiry.json())
 

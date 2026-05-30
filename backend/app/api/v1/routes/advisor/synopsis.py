@@ -1,78 +1,43 @@
-"""
-Story Advisor — author-mode intelligence endpoint.
-RAG-grounded conversation: embeds each user message, retrieves top-5 relevant
-chunks, sends only those chunks + last 10 conversation turns to GPT-4o-mini.
-
-Also provides:
-- /advisor/suggestions  — proactive scan for plotholes, dropped threads, dead
-                          characters, unused setups, future directions (DB-only)
-- /advisor/message      — conversational turn
-"""
 from __future__ import annotations
 
-import asyncio
-import json
-import re
 import uuid
 from typing import Any, cast
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import StreamingResponse
 from openai import AsyncOpenAI
-from openai.types.chat import ChatCompletionMessageParam
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.api.deps.auth import get_current_user
-from app.api.deps.rate_limit import rate_limit_advisor, rate_limit_continuity_checker
+from app.api.deps.rate_limit import rate_limit_continuity_checker
+from app.api.v1.routes.advisor.chat import (
+    _advisor_sse,
+    _advisor_stream_response,
+    _best_issue_snippet,
+    _safe_prompt_str,
+)
+from app.api.v1.routes.advisor.suggestions import (
+    advisor_suggestions as _suggestions_advisor_suggestions,
+)
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.redis import (
-    get_advisor_response_cache,
     get_editorial_review_cache,
-    get_proactive_scan_cache,
     get_prose_tighten_cache,
-    get_series_advisor_response_cache,
-    get_series_continuity_cache,
-    get_suggestion_scan_cache,
     get_synopsis_cache,
     get_voice_consistency_cache,
-    set_advisor_response_cache,
     set_editorial_review_cache,
-    set_proactive_scan_cache,
     set_prose_tighten_cache,
-    set_series_advisor_response_cache,
-    set_series_continuity_cache,
-    set_suggestion_scan_cache,
     set_synopsis_cache,
     set_voice_consistency_cache,
 )
 from app.core.storage import download_book
 from app.engine.search.semantic import semantic_search
-from app.models.book import Book, Chapter, Series, SeriesBook
-from app.models.character import Character, CharacterState, CharacterVoiceProfile
-from app.models.intelligence import AdvisorJob, AdvisorSuggestionJob, ChapterSummary, CharacterRelationship, PlotThread, WorldElement
-from app.services.advisor_jobs_service import (
-    ADVISOR_SCOPE_BOOK,
-    ADVISOR_SCOPE_SERIES,
-    create_advisor_job,
-    mark_advisor_job_failed,
-    serialize_advisor_job,
-)
-from app.services.advisor_suggestion_jobs_service import (
-    create_advisor_suggestion_job,
-    mark_advisor_suggestion_job_failed,
-    serialize_advisor_suggestion_job,
-)
-from app.utils.plot_thread_utils import derive_plot_thread_status, is_plot_thread_open
+from app.models.book import Book, Chapter
+from app.models.character import Character, CharacterVoiceProfile
 from app.schemas.advisor import (
-    AdvisorRequest,
-    AdvisorSuggestionJobStatusResponse,
-    AdvisorSuggestionScanResponse,
-    AdvisorSuggestionsResponse,
-    AdvisorTaskStatusResponse,
     EditorialReviewRequest,
     InlineContinuityRequest,
     InlineContinuityResponse,
@@ -80,48 +45,25 @@ from app.schemas.advisor import (
     ProseTightenResponse,
     SynopsisResponse,
     VoiceConsistencyRequest,
-    WhatsTheWordRequest,
-    WhatsTheWordResponse,
 )
 from app.utils.advisor_utils import (
-    ADVISOR_SYSTEM,
     EDITORIAL_SYSTEM,
     EDITORIAL_USER,
-    PROACTIVE_SCAN_SYSTEM,
-    PROACTIVE_SCAN_USER,
     PROSE_TIGHTEN_SYSTEM,
     PROSE_TIGHTEN_USER,
-    SERIES_ADVISOR_SYSTEM,
-    SERIES_CONTINUITY_SYSTEM,
     SYNOPSIS_SYSTEM,
     SYNOPSIS_USER,
     VOICE_CONSISTENCY_SYSTEM,
     VOICE_CONSISTENCY_USER,
-    build_advisor_suggestions_payload,
-    build_advisor_world_analysis,
-    build_advisor_world_context,
     build_character_voice_context,
     build_continuity_report_markdown,
     build_continuity_report_pdf,
-    build_fallback_advisor_suggestions,
-    compute_synopsis_content_fingerprint,
-    retrieve_series_continuity_passages,
-    generate_whats_the_word_result,
-    build_series_story_context,
     build_story_context,
-    stream_advisor_reply_payload,
-    stream_series_advisor_reply_payload,
-    classify_intent,
-    classify_response_type,
-    detect_advisor_world_mode,
+    compute_synopsis_content_fingerprint,
     identify_character_mentions,
-    make_advisor_cache_key,
-    make_advisor_suggestions_cache_key,
     make_editorial_cache_key,
     normalize_editorial_review_result,
-    normalize_proactive_scan_result,
     normalize_prose_tighten_result,
-    normalize_series_continuity_result,
     normalize_synopsis_result,
     normalize_voice_consistency_result,
 )
@@ -130,439 +72,8 @@ from app.utils.export_utils import export_filename_base
 from app.utils.intelligence_utils import compute_voice_metrics, extract_dialogue_samples_by_character, score_voice_match
 from app.utils.llm_usage_utils import create_tracked_chat_completion
 from app.utils.logging.errors import public_error_message
-from app.workers.tasks.intelligence_tasks import generate_advisor_reply_task
-from app.workers.tasks.intelligence_tasks import generate_series_advisor_reply_task
-from app.workers.tasks.intelligence_tasks import generate_advisor_suggestions_task
 
 router = APIRouter()
-
-
-def _safe_prompt_str(value: str | None) -> str:
-    """Escape Python str.format() brace syntax in user-controlled values.
-
-    A book title like '} Ignore all previous instructions. {title' would
-    otherwise be interpreted by str.format() as a closing/opening brace,
-    causing a KeyError or — depending on the template — injecting unexpected
-    content into the LLM system prompt.  We escape both braces so the value
-    is always treated as a literal string by the template engine.
-    """
-    return (value or "").replace("{", "{{").replace("}", "}}")
-
-
-def _best_issue_snippet(text: str, description: str) -> str:
-    sentences = [item.strip() for item in re.split(r"(?<=[.!?])\s+", text or "") if item.strip()]
-    if not sentences:
-        return " ".join((text or "").split())[:220]
-    description_tokens = {token for token in re.findall(r"[a-z0-9']+", (description or "").lower()) if len(token) > 3}
-    ranked = sorted(
-        sentences,
-        key=lambda sentence: sum(1 for token in description_tokens if token in sentence.lower()),
-        reverse=True,
-    )
-    return ranked[0][:220]
-
-
-def _parse_advisor_job_id(task_id: str) -> uuid.UUID:
-    try:
-        return uuid.UUID(str(task_id))
-    except ValueError as exc:
-        raise HTTPException(404, detail="advisor task not found") from exc
-
-
-def _advisor_sse(event: str, data: dict[str, Any]) -> str:
-    return f"event: {event}\ndata: {json.dumps(data, default=str)}\n\n"
-
-
-def _advisor_stream_response(event_stream) -> StreamingResponse:
-    return StreamingResponse(
-        event_stream,
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
-
-
-async def _enqueue_book_advisor_task(
-    *,
-    db: AsyncSession,
-    book: Book,
-    body: AdvisorRequest,
-    current_user_id: uuid.UUID,
-    response: Response,
-) -> dict[str, Any]:
-    last_user_msg = next(
-        (message.content for message in reversed(body.messages) if message.role == "user"),
-        "",
-    )
-    if not last_user_msg:
-        raise HTTPException(400, detail="no user message found")
-    cache_key = make_advisor_cache_key(book.id, last_user_msg)
-    cached = await get_advisor_response_cache(str(book.id), cache_key)
-    if cached is not None:
-        return {**cached, "cached": True}
-
-    job = await create_advisor_job(
-        db,
-        scope=ADVISOR_SCOPE_BOOK,
-        user_id=current_user_id,
-        book_id=book.id,
-    )
-    try:
-        generate_advisor_reply_task.apply_async(
-            task_id=str(job.id),
-            kwargs={
-                "job_id": str(job.id),
-                "book_id": str(book.id),
-                "user_id": str(current_user_id),
-                "messages": [{"role": msg.role, "content": msg.content} for msg in body.messages],
-                "total_chapters": body.total_chapters,
-            },
-        )
-    except Exception as exc:
-        await mark_advisor_job_failed(
-            db,
-            job_id=job.id,
-            error_code="advisor_enqueue_failed",
-            error_detail=public_error_message(500),
-        )
-        raise
-    response.status_code = 202
-    return {"task_id": str(job.id), "status": "queued", "cached": False}
-
-
-async def _enqueue_series_advisor_task(
-    *,
-    db: AsyncSession,
-    series: Series,
-    body: AdvisorRequest,
-    current_user_id: uuid.UUID,
-    response: Response,
-) -> dict[str, Any]:
-    last_user_msg = next(
-        (message.content for message in reversed(body.messages) if message.role == "user"),
-        "",
-    )
-    if not last_user_msg:
-        raise HTTPException(400, detail="no user message found")
-    cache_key = make_advisor_cache_key(f"series:{series.id}", last_user_msg)
-    cached = await get_series_advisor_response_cache(str(series.id), cache_key)
-    if cached is not None:
-        return {**cached, "cached": True}
-
-    job = await create_advisor_job(
-        db,
-        scope=ADVISOR_SCOPE_SERIES,
-        user_id=current_user_id,
-        series_id=series.id,
-    )
-    try:
-        generate_series_advisor_reply_task.apply_async(
-            task_id=str(job.id),
-            kwargs={
-                "job_id": str(job.id),
-                "series_id": str(series.id),
-                "user_id": str(current_user_id),
-                "messages": [{"role": msg.role, "content": msg.content} for msg in body.messages],
-            },
-        )
-    except Exception as exc:
-        await mark_advisor_job_failed(
-            db,
-            job_id=job.id,
-            error_code="advisor_enqueue_failed",
-            error_detail=public_error_message(500),
-        )
-        raise
-    response.status_code = 202
-    return {"task_id": str(job.id), "status": "queued", "cached": False}
-
-# ─── Main advisor conversation endpoint ──────────────────────────────────────
-
-@router.post("/{book_id}/advisor/message")
-async def advisor_message(
-    book_id: uuid.UUID,
-    body: AdvisorRequest,
-    response: Response,
-    db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user),
-    _=Depends(rate_limit_advisor),
-):
-    book = await db.get(Book, book_id)
-    if not book or book.user_id != current_user.id:
-        raise HTTPException(404)
-
-    if not body.messages:
-        raise HTTPException(400, detail="messages list is empty")
-
-    return await _enqueue_book_advisor_task(
-        db=db,
-        book=book,
-        body=body,
-        current_user_id=current_user.id,
-        response=response,
-    )
-
-
-@router.post("/{book_id}/advisor/message-stream")
-async def advisor_message_stream(
-    book_id: uuid.UUID,
-    body: AdvisorRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user),
-    _=Depends(rate_limit_advisor),
-):
-    book = await db.get(Book, book_id)
-    if not book or book.user_id != current_user.id:
-        raise HTTPException(404)
-
-    if not body.messages:
-        raise HTTPException(400, detail="messages list is empty")
-
-    async def event_stream():
-        try:
-            async for item in stream_advisor_reply_payload(
-                db=db,
-                book=book,
-                user_id=current_user.id,
-                messages=[{"role": msg.role, "content": msg.content} for msg in body.messages],
-                total_chapters=body.total_chapters,
-            ):
-                yield _advisor_sse(item["event"], item["data"])
-        except Exception as exc:
-            yield _advisor_sse("error", {"error": public_error_message(500)})
-
-    return StreamingResponse(
-        event_stream(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
-
-
-@router.get("/{book_id}/advisor/greeting")
-async def advisor_greeting(
-    book_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user),
-):
-    result = await db.execute(
-        select(Book)
-        .where(Book.id == book_id, Book.user_id == current_user.id)
-        .options(
-            selectinload(Book.characters),
-            selectinload(Book.plot_threads),
-        )
-    )
-    book = result.scalars().first()
-    if not book:
-        raise HTTPException(404)
-
-    return {
-        "message": f"What aspect of *{book.title}* feels unsolved right now?",
-        "book_title": book.title,
-        "stats": {
-            "characters": len(book.characters) if book.characters else 0,
-            "plot_threads": len(book.plot_threads) if book.plot_threads else 0,
-            "total_chapters": book.total_chapters,
-        },
-    }
-
-
-@router.post("/{book_id}/advisor/whats-the-word", response_model=WhatsTheWordResponse)
-async def whats_the_word(
-    book_id: uuid.UUID,
-    body: WhatsTheWordRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user),
-    _=Depends(rate_limit_advisor),
-):
-    book = await db.get(Book, book_id)
-    if not book or book.user_id != current_user.id:
-        raise HTTPException(404)
-
-    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
-    try:
-        payload = await generate_whats_the_word_result(
-            client=client,
-            model=settings.OPENAI_INTEL_MODEL,
-            book_title=book.title,
-            description=body.description,
-            previous_word=body.previous_word,
-        )
-        return WhatsTheWordResponse(**payload)
-    finally:
-        await client.close()
-
-
-@router.post("/{book_id}/advisor/whats-the-word-stream")
-async def whats_the_word_stream(
-    book_id: uuid.UUID,
-    body: WhatsTheWordRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user),
-    _=Depends(rate_limit_advisor),
-):
-    book = await db.get(Book, book_id)
-    if not book or book.user_id != current_user.id:
-        raise HTTPException(404)
-
-    async def event_stream():
-        client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
-        try:
-            yield _advisor_sse("stage", {"message": "Finding the closest fit..."})
-            payload = await generate_whats_the_word_result(
-                client=client,
-                model=settings.OPENAI_INTEL_MODEL,
-                book_title=book.title,
-                description=body.description,
-                previous_word=body.previous_word,
-            )
-            yield _advisor_sse("done", cast(dict[str, Any], jsonable_encoder(WhatsTheWordResponse(**payload))))
-        except Exception as exc:
-            yield _advisor_sse("error", {"error": public_error_message(500)})
-        finally:
-            await client.close()
-
-    return _advisor_stream_response(event_stream())
-
-
-@router.post("/{book_id}/advisor/message-async")
-async def advisor_message_async(
-    book_id: uuid.UUID,
-    body: AdvisorRequest,
-    response: Response,
-    db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user),
-    _=Depends(rate_limit_advisor),
-):
-    book = await db.get(Book, book_id)
-    if not book or book.user_id != current_user.id:
-        raise HTTPException(404)
-
-    if not body.messages:
-        raise HTTPException(400, detail="messages list is empty")
-
-    return await _enqueue_book_advisor_task(
-        db=db,
-        book=book,
-        body=body,
-        current_user_id=current_user.id,
-        response=response,
-    )
-
-
-@router.get("/{book_id}/advisor/message-async/{task_id}", response_model=AdvisorTaskStatusResponse)
-async def advisor_message_async_status(
-    book_id: uuid.UUID,
-    task_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user),
-):
-    book = await db.get(Book, book_id)
-    if not book or book.user_id != current_user.id:
-        raise HTTPException(404)
-
-    job = await db.get(AdvisorJob, _parse_advisor_job_id(task_id))
-    if job is None:
-        raise HTTPException(404, detail="advisor task not found")
-    if job.user_id != current_user.id or job.scope != ADVISOR_SCOPE_BOOK or job.book_id != book.id:
-        raise HTTPException(403, detail="advisor task does not belong to this book")
-    return serialize_advisor_job(job)
-
-
-# ─── Proactive suggestions scan ──────────────────────────────────────────────
-
-@router.get("/{book_id}/advisor/suggestions", response_model=AdvisorSuggestionsResponse)
-async def advisor_suggestions(
-    book_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user),
-):
-    book = await db.get(Book, book_id)
-    if not book or book.user_id != current_user.id:
-        raise HTTPException(404)
-
-    result = await build_advisor_suggestions_payload(
-        db=db,
-        book=book,
-        user_id=current_user.id,
-    )
-    result["cached"] = False
-    return result
-
-
-@router.post("/{book_id}/advisor/suggestions/scan", response_model=AdvisorSuggestionScanResponse)
-async def advisor_suggestions_scan(
-    book_id: uuid.UUID,
-    response: Response,
-    db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user),
-    _=Depends(rate_limit_advisor),
-):
-    book = await db.get(Book, book_id)
-    if not book or book.user_id != current_user.id:
-        raise HTTPException(404)
-
-    total_ch = book.total_chapters or 1
-    cache_key = make_advisor_suggestions_cache_key(
-        book_id=book_id,
-        total_chapters=total_ch,
-        character_count=0,
-        thread_count=0,
-        state_count=0,
-        relationship_count=0,
-        world_element_count=0,
-    )
-    cached = await get_suggestion_scan_cache(str(book.id), cache_key)
-    if cached is not None:
-        return {"job_id": str(uuid.uuid4()), "status": "queued", "cached": True}
-
-    job = await create_advisor_suggestion_job(
-        db,
-        user_id=current_user.id,
-        book_id=book.id,
-        cache_key=cache_key,
-    )
-    try:
-        generate_advisor_suggestions_task.apply_async(
-            task_id=str(job.id),
-            kwargs={
-                "job_id": str(job.id),
-                "book_id": str(book.id),
-                "user_id": str(current_user.id),
-                "total_chapters": total_ch,
-            },
-        )
-    except Exception as exc:
-        await mark_advisor_suggestion_job_failed(
-            db,
-            job_id=job.id,
-            error_code="advisor_suggestions_enqueue_failed",
-            error_detail=public_error_message(500),
-        )
-        raise
-    response.status_code = 202
-    return {"job_id": str(job.id), "status": "queued", "cached": False}
-
-
-@router.get(
-    "/{book_id}/advisor/suggestions/jobs/{job_id}",
-    response_model=AdvisorSuggestionJobStatusResponse,
-)
-async def advisor_suggestions_job_status(
-    book_id: uuid.UUID,
-    job_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user),
-):
-    book = await db.get(Book, book_id)
-    if not book or book.user_id != current_user.id:
-        raise HTTPException(404)
-
-    job = await db.get(AdvisorSuggestionJob, _parse_advisor_job_id(job_id))
-    if job is None:
-        raise HTTPException(404, detail="suggestion scan job not found")
-    if job.user_id != current_user.id or job.book_id != book.id:
-        raise HTTPException(403, detail="scan job does not belong to this book")
-    return serialize_advisor_suggestion_job(job)
 
 
 # ─── Editorial Review ─────────────────────────────────────────────────────────
@@ -1244,7 +755,7 @@ async def continuity_report(
         current_user=current_user,
         _=_,
     )
-    suggestions_payload = await advisor_suggestions(book_id=book_id, db=db, current_user=current_user)
+    suggestions_payload = await _suggestions_advisor_suggestions(book_id=book_id, db=db, current_user=current_user)
     open_threads = [
         item for item in suggestions_payload.get("suggestions", [])
         if item.get("type") in {"dropped_thread", "future_direction", "unresolved_clue", "arc_opportunity"}
@@ -1272,280 +783,3 @@ async def continuity_report(
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename_base}-continuity-report.pdf"'},
     )
-
-
-# ─── Series Ask endpoint ──────────────────────────────────────────────────────
-
-@router.post("/series/{series_id}/advisor/message")
-async def series_advisor_message(
-    series_id: uuid.UUID,
-    body: AdvisorRequest,
-    response: Response,
-    db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user),
-    _=Depends(rate_limit_advisor),
-):
-    """Single-LLM-call advisor that answers questions spanning a whole book series.
-
-    Cost strategy:
-    - One round of RAG-free context (series story context only, capped tokens).
-    - One LLM call to gpt-4o-mini.
-    - No per-book round-trips.
-    """
-    series = await db.get(Series, series_id)
-    if not series or series.user_id != current_user.id:
-        raise HTTPException(404)
-
-    if not body.messages:
-        raise HTTPException(400, detail="messages list is empty")
-
-    return await _enqueue_series_advisor_task(
-        db=db,
-        series=series,
-        body=body,
-        current_user_id=current_user.id,
-        response=response,
-    )
-
-
-@router.post("/series/{series_id}/advisor/message-stream")
-async def series_advisor_message_stream(
-    series_id: uuid.UUID,
-    body: AdvisorRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user),
-    _=Depends(rate_limit_advisor),
-):
-    series = await db.get(Series, series_id)
-    if not series or series.user_id != current_user.id:
-        raise HTTPException(404)
-
-    if not body.messages:
-        raise HTTPException(400, detail="messages list is empty")
-
-    async def event_stream():
-        try:
-            async for item in stream_series_advisor_reply_payload(
-                db=db,
-                series=series,
-                user_id=current_user.id,
-                messages=[{"role": msg.role, "content": msg.content} for msg in body.messages],
-            ):
-                yield _advisor_sse(item["event"], item["data"])
-        except Exception as exc:
-            yield _advisor_sse("error", {"error": public_error_message(500)})
-
-    return StreamingResponse(
-        event_stream(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
-
-
-@router.get("/series/{series_id}/advisor/message/{task_id}", response_model=AdvisorTaskStatusResponse)
-async def series_advisor_message_status(
-    series_id: uuid.UUID,
-    task_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user),
-):
-    series = await db.get(Series, series_id)
-    if not series or series.user_id != current_user.id:
-        raise HTTPException(404)
-
-    job = await db.get(AdvisorJob, _parse_advisor_job_id(task_id))
-    if job is None:
-        raise HTTPException(404, detail="advisor task not found")
-    if job.user_id != current_user.id or job.scope != ADVISOR_SCOPE_SERIES or job.series_id != series.id:
-        raise HTTPException(403, detail="advisor task does not belong to this series")
-    return serialize_advisor_job(job)
-
-
-class SeriesContinuityRequest(AdvisorRequest):
-    """Reuse AdvisorRequest shape but add book_id and optional chapter_num."""
-    book_id: uuid.UUID
-    chapter_num: int | None = None
-    text: str
-
-
-@router.post("/series/{series_id}/continuity-check")
-async def series_continuity_check(
-    series_id: uuid.UUID,
-    body: SeriesContinuityRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user),
-    _=Depends(rate_limit_continuity_checker),
-):
-    """Cross-series continuity check: compares a new passage against prior volumes.
-
-    Cost strategy:
-    - Context from prior books only (up to 3, capped per book).
-    - Single LLM call using gpt-4o-mini with JSON mode.
-    - RAG retrieval scoped to prior book IDs only (up to 6 passages).
-    """
-    series = await db.get(Series, series_id)
-    if not series or series.user_id != current_user.id:
-        raise HTTPException(404)
-
-    if not body.text.strip():
-        raise HTTPException(400, detail="Passage text is required.")
-
-    # Current book must be in the series
-    current_book = await db.get(Book, body.book_id)
-    if not current_book or current_book.user_id != current_user.id:
-        raise HTTPException(404, detail="Book not found.")
-
-    # ── Cache check ───────────────────────────────────────────────────────────
-    series_cache_key = make_editorial_cache_key(
-        str(series_id) + str(body.book_id),  # scope to series+book pair
-        body.text,
-        body.chapter_num,
-    )
-    cached_series = await get_series_continuity_cache(str(series.id), str(current_book.id), series_cache_key)
-    if cached_series is not None:
-        return {**cached_series, "cached": True}
-
-    # Load all memberships in order
-    memberships = (
-        await db.execute(
-            select(SeriesBook.book_id, SeriesBook.position)
-            .where(SeriesBook.series_id == series_id)
-            .order_by(SeriesBook.position.asc().nulls_last())
-        )
-    ).all()
-
-    current_position = next(
-        (row.position for row in memberships if row.book_id == body.book_id), None
-    )
-
-    # Prior books = those with a lower series position, or all others if unordered
-    if current_position is not None:
-        prior_book_ids = [
-            row.book_id for row in memberships
-            if row.book_id != body.book_id and (row.position or 999) < current_position
-        ]
-    else:
-        prior_book_ids = [row.book_id for row in memberships if row.book_id != body.book_id]
-
-    # Limit to top 3 prior books for cost efficiency
-    prior_book_ids = prior_book_ids[:3]
-
-    if not prior_book_ids:
-        return {
-            "review": {
-                "continuity_issues": [],
-                "cross_book_opportunities": [],
-                "thematic_fit": {"score": "strong", "notes": "No prior books in series to compare against."},
-                "overall_verdict": "This is the first book in the series — no cross-book continuity check possible.",
-            },
-            "retrieved_passages": [],
-        }
-
-    # Load prior book titles
-    prior_book_rows = (
-        await db.execute(select(Book.id, Book.title).where(Book.id.in_(prior_book_ids)))
-    ).all()
-    prior_titles = {row.id: row.title for row in prior_book_rows}
-
-    # Build prior series context
-    story_ctx = await build_series_story_context(
-        db, prior_book_ids, prior_titles,
-        max_chars_per_book=8, max_threads_per_book=5,
-    )
-
-    # RAG: retrieve relevant passages from prior books only (cross-series search)
-    hits = await retrieve_series_continuity_passages(
-        db=db,
-        prior_book_ids=prior_book_ids,
-        query=body.text[:600],
-        user_id=current_user.id,
-        book_id=current_book.id,
-    )
-
-    passages_block = "\n\n".join(
-        f"[{h['book_title']} — Ch. {h['chapter_num']}]: {h['text'][:300]}"
-        for h in hits
-    ) or "No closely matching passages found in earlier books."
-
-    chapter_hint = (
-        f"This passage will appear in Chapter {body.chapter_num} of \"{current_book.title}\"."
-        if body.chapter_num
-        else f"Chapter number not specified. Book: \"{current_book.title}\"."
-    )
-
-    system_msg = SERIES_CONTINUITY_SYSTEM.format(
-        series_name=_safe_prompt_str(series.name),
-        new_book_title=_safe_prompt_str(current_book.title),
-        story_context=_safe_prompt_str(story_ctx),
-    )
-    user_msg = (
-        f"{chapter_hint}\n\n"
-        f"--- NEW PASSAGE ---\n{body.text[:4000]}\n\n"
-        f"--- RETRIEVED PASSAGES FROM EARLIER BOOKS ---\n{passages_block}"
-    )
-
-    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
-    try:
-        response = await create_tracked_chat_completion(
-            client=client,
-            feature="series_continuity_check",
-            model=settings.OPENAI_INTEL_MODEL,
-            db=db,
-            user_id=current_user.id,
-            book_id=current_book.id,
-            temperature=0.2,
-            max_tokens=1200,
-            response_format={"type": "json_object"},
-            messages=[
-                {"role": "system", "content": system_msg},
-                {"role": "user", "content": user_msg},
-            ],
-        )
-        raw = response.choices[0].message.content or "{}"
-        result = normalize_series_continuity_result(raw)
-
-        response_payload = {
-            "review": result,
-            "retrieved_passages": [
-                {
-                    "book_title": h["book_title"],
-                    "chapter_num": h["chapter_num"],
-                    "chapter_title": h.get("chapter_title"),
-                    "excerpt": h["text"][:220],
-                    "relevance": h["relevance"],
-                }
-                for h in hits[:5]
-            ],
-            "cached": False,
-        }
-        await set_series_continuity_cache(str(series.id), str(current_book.id), series_cache_key, response_payload)
-        return response_payload
-    finally:
-        await client.close()
-
-
-@router.post("/series/{series_id}/continuity-check-stream")
-async def series_continuity_check_stream(
-    series_id: uuid.UUID,
-    body: SeriesContinuityRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user),
-    _=Depends(rate_limit_continuity_checker),
-):
-    async def event_stream():
-        try:
-            yield _advisor_sse("stage", {"message": "Comparing this passage to earlier books..."})
-            payload = await series_continuity_check(
-                series_id=series_id,
-                body=body,
-                db=db,
-                current_user=current_user,
-                _=_,
-            )
-            yield _advisor_sse("done", cast(dict[str, Any], jsonable_encoder(payload)))
-        except HTTPException as exc:
-            yield _advisor_sse("error", {"error": public_error_message(exc.status_code)})
-        except Exception:
-            yield _advisor_sse("error", {"error": public_error_message(500)})
-
-    return _advisor_stream_response(event_stream())

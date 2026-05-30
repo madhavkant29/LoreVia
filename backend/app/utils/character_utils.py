@@ -745,7 +745,7 @@ def is_protected_character(char: Character | None) -> bool:
     return bool(getattr(char, "is_manual", False) or metadata.get("protected_from_repair"))
 
 
-def serialize_character_detail(char: Character) -> dict[str, Any]:
+def serialize_character_detail(char: Character, *, skip_analysis_metadata: bool = False) -> dict[str, Any]:
     visibility_state, approval_state, approval_source, approval_reason_codes = character_governance(char)
     return {
         "id": char.id,
@@ -771,7 +771,7 @@ def serialize_character_detail(char: Character) -> dict[str, Any]:
         "character_type": getattr(char, "character_type", None),
         "character_type_score": getattr(char, "character_type_score", None),
         "subtype_scores": getattr(char, "subtype_scores", None) or {},
-        "analysis_metadata": build_character_analysis_payload(char),
+        "analysis_metadata": None if skip_analysis_metadata else build_character_analysis_payload(char),
         "visibility_state": visibility_state,
         "approval_state": approval_state,
         "approval_source": approval_source,
@@ -792,10 +792,13 @@ def serialize_book_character(
     voice_profile: CharacterVoiceProfile | None,
     total_chapters: int | None,
     tags: list[str] | None = None,
+    skip_arc_tracker: bool = False,
+    skip_analysis_metadata: bool = False,
+    skip_tags: bool = False,
 ) -> dict[str, Any]:
     relationship_summaries = dedupe_preserve_order(rel_summaries.get(str(char.id), []))
     visibility_state, approval_state, approval_source, approval_reason_codes = character_governance(char)
-    return {
+    result: dict[str, Any] = {
         "id": str(char.id),
         "book_id": str(char.book_id),
         "name": char.name,
@@ -828,7 +831,6 @@ def serialize_book_character(
         "character_type": char.character_type,
         "character_type_score": char.character_type_score,
         "subtype_scores": char.subtype_scores or {},
-        "analysis_metadata": build_character_analysis_payload(char),
         "visibility_state": visibility_state,
         "approval_state": approval_state,
         "approval_source": approval_source,
@@ -836,16 +838,24 @@ def serialize_book_character(
         "approval_updated_at": getattr(char, "approval_updated_at", None),
         "is_manual": getattr(char, "is_manual", False),
         "graph_visibility_override": get_graph_visibility_override(char),
-        "tags": tags or [],
-        "arc_tracker": build_character_arc_tracker(
+    }
+    if skip_analysis_metadata:
+        result["analysis_metadata"] = None
+    else:
+        result["analysis_metadata"] = build_character_analysis_payload(char)
+    result["tags"] = [] if skip_tags else (tags or [])
+    if skip_arc_tracker:
+        result["arc_tracker"] = None
+    else:
+        result["arc_tracker"] = build_character_arc_tracker(
             char,
             states=states,
             relationships=relationships,
             counterpart_names=counterpart_names,
             voice_profile=voice_profile,
             total_chapters=total_chapters,
-        ),
-    }
+        )
+    return result
 
 
 def serialize_reader_character(

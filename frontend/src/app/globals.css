@@ -142,10 +142,6 @@ body::before {
     box-shadow: none;
   }
 
-  .app-divider {
-    border-color: rgba(var(--border), 0.72);
-  }
-
   .app-eyebrow {
     font-size: 0.66rem;
     font-weight: 700;
@@ -869,11 +865,3 @@ body::before {
   opacity: 0.95;
 }
 
-@keyframes fadeSlideIn {
-  from { opacity: 0; transform: translateY(6px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-
-.animate-fade-slide-in {
-  animation: fadeSlideIn 0.3s ease-out both;
-}
