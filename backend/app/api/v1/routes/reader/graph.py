@@ -35,7 +35,7 @@ from app.utils.relationship_utils import (
     canonicalize_relationship_book_rows,
     relationship_effective_status,
 )
-from app.utils.sparse_utils import apply_sparse_includes, include_requested
+from app.utils.sparse_utils import apply_sparse_includes, include_requested, parse_csv_param
 
 router = APIRouter()
 
@@ -58,7 +58,7 @@ async def get_relationships(
     book = await db.get(Book, book_id)
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
-    use_cache = include is None
+    use_cache = parse_csv_param(include) is None
     cache_scope = "all" if include_inactive else "active"
     cache_key = f"{key_relationship_graph(str(book_id), chapter)}:v4:{cache_scope}"
     if use_cache:

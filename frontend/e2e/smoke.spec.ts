@@ -366,14 +366,12 @@ test("collaboration workspace creates a story-scoped share", async ({ page }) =>
 
   const emailField = page.getByPlaceholder("reader@example.com")
   const nameField = page.getByPlaceholder("Display name")
-  await emailField.fill("editor@example.com")
-  if (await emailField.inputValue() !== "editor@example.com") {
-    await emailField.fill("editor@example.com")
-  }
-  await expect(emailField).toHaveValue("editor@example.com")
   await nameField.fill("Dev Editor")
   await page.getByRole("combobox").selectOption("developmental_editor")
   await page.getByLabel("Can view selected chapters only").uncheck()
+  await emailField.fill("editor@example.com")
+  await expect(emailField).toHaveValue("editor@example.com")
+  await expect(page.getByRole("button", { name: /save share/i })).toBeEnabled()
   await page.getByRole("button", { name: /save share/i }).click()
 
   await expect(page.getByText("Share saved.")).toBeVisible()

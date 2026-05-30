@@ -32,13 +32,17 @@ def process_chapter_task(self, book_id: str, chapter_num: int, chapter_version_i
         from sqlalchemy import select
 
         from app.core.database import AsyncSessionLocal
-        from app.models.book import Book, Chapter, ChapterVersion
+        from app.models.book import Book, Chapter
+        try:
+            from app.models.book import ChapterVersion
+        except ImportError:
+            ChapterVersion = None
 
         version_uuid = uuid.UUID(chapter_version_id) if chapter_version_id else None
         queue_wait_ms = extract_queue_wait_ms(getattr(self.request, "headers", None))
         async with AsyncSessionLocal() as db:
             try:
-                if version_uuid is not None:
+                if version_uuid is not None and ChapterVersion is not None:
                     version = await db.get(ChapterVersion, version_uuid)
                     if version is not None:
                         version.restore_status = "processing"
@@ -50,7 +54,7 @@ def process_chapter_task(self, book_id: str, chapter_num: int, chapter_version_i
 
                 book = await db.get(Book, uuid.UUID(book_id))
                 if not book:
-                    if version_uuid is not None:
+                    if version_uuid is not None and ChapterVersion is not None:
                         version = await db.get(ChapterVersion, version_uuid)
                         if version is not None:
                             version.restore_status = "failed"
@@ -66,7 +70,7 @@ def process_chapter_task(self, book_id: str, chapter_num: int, chapter_version_i
                 ).scalar()
 
                 if await is_book_hidden(db, book.id):
-                    if version_uuid is not None:
+                    if version_uuid is not None and ChapterVersion is not None:
                         version = await db.get(ChapterVersion, version_uuid)
                         if version is not None:
                             version.restore_status = "failed"
@@ -115,7 +119,7 @@ def process_chapter_task(self, book_id: str, chapter_num: int, chapter_version_i
                     )
                     await db.commit()
 
-                if version_uuid is not None:
+                if version_uuid is not None and ChapterVersion is not None:
                     version = await db.get(ChapterVersion, version_uuid)
                     if version is not None:
                         version.restore_status = "restored"
@@ -123,7 +127,7 @@ def process_chapter_task(self, book_id: str, chapter_num: int, chapter_version_i
                         version.restore_completed_at = datetime.now(UTC)
                         await db.commit()
             except Exception as exc:
-                if version_uuid is not None:
+                if version_uuid is not None and ChapterVersion is not None:
                     await db.rollback()
                     version = await db.get(ChapterVersion, version_uuid)
                     if version is not None:

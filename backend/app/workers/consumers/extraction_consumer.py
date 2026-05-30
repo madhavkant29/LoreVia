@@ -909,6 +909,15 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                     evidence=candidate_evidence,
                     source_batch_key=entity_source_batch_key,
                 )
+                await _record_cluster_member_candidates(
+                    db,
+                    book_id=book.id,
+                    chapter_number=chapter_number,
+                    entity=entity,
+                    matched_character_id=None,
+                    reason_code=reasons[0],
+                    status=CHARACTER_CANDIDATE_PENDING,
+                )
                 await _record_entity_cluster_mentions(
                     db,
                     book_id=book.id,
@@ -1033,6 +1042,15 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                     reason_codes=reasons,
                     evidence=candidate_evidence,
                     source_batch_key=entity_source_batch_key,
+                )
+                await _record_cluster_member_candidates(
+                    db,
+                    book_id=book.id,
+                    chapter_number=chapter_number,
+                    entity=entity,
+                    matched_character_id=None,
+                    reason_code=reasons[0],
+                    status=CHARACTER_CANDIDATE_PENDING,
                 )
                 await _record_entity_cluster_mentions(
                     db,
@@ -1740,15 +1758,15 @@ async def _record_cluster_member_candidates(
     book_id: uuid.UUID,
     chapter_number: int,
     entity: dict[str, Any],
-    matched_character_id: uuid.UUID,
+    matched_character_id: uuid.UUID | None,
     reason_code: str,
+    status: str = "accepted",
 ) -> None:
     members = entity.get("cluster_members") if isinstance(entity.get("cluster_members"), list) else []
     if not members:
         return
 
     primary_name = normalize_character_name(str(entity.get("name") or ""))
-    primary_source_batch_key = str(entity.get("_source_batch_key") or "") or None
     seen: set[tuple[str, str | None]] = set()
     for member in members:
         raw_name = " ".join(str(member.get("name") or "").split()).strip()
@@ -1756,7 +1774,7 @@ async def _record_cluster_member_candidates(
         source_batch_key = str(member.get("source_batch_key") or "") or None
         if not raw_name or not normalized_name:
             continue
-        if normalized_name == primary_name and source_batch_key == primary_source_batch_key:
+        if normalized_name == primary_name:
             continue
         dedupe_key = (normalized_name, source_batch_key)
         if dedupe_key in seen:
@@ -1770,7 +1788,7 @@ async def _record_cluster_member_candidates(
             proposed_name=raw_name,
             aliases=member.get("aliases") if isinstance(member.get("aliases"), list) else [],
             matched_character_id=matched_character_id,
-            status="accepted",
+            status=status,
             confidence=entity.get("confidence"),
             reason_codes=[reason_code],
             evidence={
@@ -2075,6 +2093,21 @@ def _character_save_decision(entity: dict):
             allowed=decision.allowed,
             score=decision.score,
             reasons=tuple(decision.reasons),
+        )
+    confidence = float(entity.get("confidence") or 0.0)
+    if confidence >= AUTO_SAVE_CONFIDENCE and not dossier_summary.get("strict_auto_eligible"):
+        return CharacterPersistenceDecision(
+            allowed=False,
+            score=decision.score,
+            reasons=tuple([
+                "candidate_dossier_needs_review",
+                *[
+                    str(reason).strip()
+                    for reason in (dossier_summary.get("strict_auto_reason_codes") or [])
+                    if str(reason).strip()
+                ],
+                *decision.reasons,
+            ]),
         )
     return decision
 

@@ -138,3 +138,29 @@ from app.utils.tag_utils import (  # noqa: E402, F401
 )
 
 __all__ = ["router", "get_chapter_media_public"]
+
+
+import importlib  # noqa: E402
+import sys  # noqa: E402
+from types import ModuleType  # noqa: E402
+
+_PATCH_TARGET_MODULES = tuple(
+    importlib.import_module(module_name)
+    for module_name in (
+        "app.api.v1.routes.reader.core",
+        "app.api.v1.routes.reader.graph",
+        "app.api.v1.routes.reader.progress",
+        "app.api.v1.routes.reader.timeline",
+    )
+)
+
+
+class _PatchPropagatingModule(ModuleType):
+    def __setattr__(self, name, value):
+        super().__setattr__(name, value)
+        for target_module in _PATCH_TARGET_MODULES:
+            if hasattr(target_module, name):
+                setattr(target_module, name, value)
+
+
+sys.modules[__name__].__class__ = _PatchPropagatingModule

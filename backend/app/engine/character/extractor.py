@@ -314,6 +314,7 @@ FRAGMENT_PREFIXES = (
 TITLE_ONLY_WORDS = {
     "doctor", "professor", "master", "assassin", "killer", "protagonist", "antagonist",
     "contractor", "creator", "teacher", "nurse", "mentor", "sister", "brother",
+    "mother", "father",
 }
 TITLE_PREFIXES = (
     "assistant professor",
@@ -527,7 +528,7 @@ def _local_mention_verifier(
             positive_signals.append("single_token_grounded_by_person_ner")
             band = "accept"
             is_person_like = True
-        elif title_like_single_token and person_context_mentions >= 1:
+        elif title_like_single_token and (person_context_mentions >= 1 or subject_action_mentions >= 1 or mention_count >= 1):
             reasons.append("role_title_single_token_requires_review")
         elif subject_action_mentions >= 1 and not suspicious_single_token:
             positive_signals.append("single_token_subject_action_grounding")
@@ -954,13 +955,30 @@ def _candidate_viability_band(
 def _candidate_names(text: str, *, allow_review_singletons: bool = False) -> list[str]:
     candidates: list[str] = []
     candidates.extend(HONORIFIC_RE.findall(text))
-    candidates.extend(FULL_NAME_RE.findall(text))
+    full_names = FULL_NAME_RE.findall(text)
+    candidates.extend(full_names)
     candidates.extend(PARTICLE_NAME_RE.findall(text))
+    masked_full_name_text = text
+    for full_name in full_names:
+        masked_full_name_text = re.sub(
+            rf"\b{re.escape(full_name)}\b",
+            " " * len(full_name),
+            masked_full_name_text,
+        )
+    full_name_last_tokens = {
+        words[-1]
+        for full_name in full_names
+        if (words := re.findall(r"[A-Za-z][A-Za-z'-]*", full_name))
+    }
 
     singles = [
         token
         for token in SINGLE_NAME_RE.findall(text)
         if token not in NAME_STOPWORDS and token.casefold() not in COMMON_NON_NAME_WORDS and token.lower() not in {"the", "this", "that"}
+        and not (
+            token in full_name_last_tokens
+            and not re.search(rf"\b{re.escape(token)}\b", masked_full_name_text)
+        )
     ]
     single_counts = Counter(singles)
     candidates.extend(
@@ -1409,6 +1427,12 @@ def _allow_auto_augmentation(
             non_sentence_start_mentions += 1
         if _mention_has_person_context(context_before, context_after):
             strong_mentions += 1
+    subject_action_mentions = sum(
+        1
+        for start, end in mentions
+        if _mention_is_sentence_start(text, start)
+        and _single_token_subject_action(text[end:min(len(text), end + 48)])
+    )
     if len(words) == 1:
         viability_band = _candidate_viability_band(text, name, allow_review=allow_review_singletons)
         normalized = words[0].casefold()
@@ -1428,13 +1452,15 @@ def _allow_auto_augmentation(
                 or (strong_mentions >= 1 and non_sentence_start_mentions >= 1)
             )
         if viability_band == "review":
-            return allow_review_singletons and normalized not in SINGLE_TOKEN_DISCOURSE_WORDS and (
-                strong_mentions >= 1 or non_sentence_start_mentions >= 1
-            )
+            return allow_review_singletons and normalized not in SINGLE_TOKEN_DISCOURSE_WORDS
         # Single-token names are noisy, but named mid-sentence with grounded
         # person context ("his sister Grete called") should still recover.
         return strong_mentions >= 2 or (strong_mentions >= 1 and non_sentence_start_mentions >= 1)
-    return strong_mentions >= 1 and (non_sentence_start_mentions >= 1 or len(mentions) >= 2)
+    return strong_mentions >= 1 and (
+        non_sentence_start_mentions >= 1
+        or len(mentions) >= 2
+        or subject_action_mentions >= 1
+    )
 
 
 def _looks_like_sentence_fragment(word: str) -> bool:

@@ -9,9 +9,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import Response, StreamingResponse
 from openai import AsyncOpenAI
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.api.deps.auth import get_current_user
 from app.api.deps.rate_limit import rate_limit_advisor
@@ -19,7 +18,8 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.redis import get_advisor_response_cache
 from app.models.book import Book
-from app.models.intelligence import AdvisorJob
+from app.models.character import Character
+from app.models.intelligence import AdvisorJob, PlotThread
 from app.services.advisor_jobs_service import (
     ADVISOR_SCOPE_BOOK,
     create_advisor_job,
@@ -203,24 +203,22 @@ async def advisor_greeting(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    result = await db.execute(
-        select(Book)
-        .where(Book.id == book_id, Book.user_id == current_user.id)
-        .options(
-            selectinload(Book.characters),
-            selectinload(Book.plot_threads),
-        )
-    )
-    book = result.scalars().first()
-    if not book:
+    book = await db.get(Book, book_id)
+    if not book or book.user_id != current_user.id:
         raise HTTPException(404)
+    plot_thread_count = (
+        await db.execute(select(func.count()).select_from(PlotThread).where(PlotThread.book_id == book.id))
+    ).scalar_one()
+    character_count = (
+        await db.execute(select(func.count()).select_from(Character).where(Character.book_id == book.id))
+    ).scalar_one()
 
     return {
         "message": f"What aspect of *{book.title}* feels unsolved right now?",
         "book_title": book.title,
         "stats": {
-            "characters": len(book.characters) if book.characters else 0,
-            "plot_threads": len(book.plot_threads) if book.plot_threads else 0,
+            "characters": character_count,
+            "plot_threads": plot_thread_count,
             "total_chapters": book.total_chapters,
         },
     }

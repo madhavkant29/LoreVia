@@ -30,6 +30,7 @@ from app.utils.book_utils import (
     as_bool,
     clean_manuscript_html,
     deserialize_manuscript_content,
+    estimate_readability,
     extract_novel_scene_candidates,
     get_owned_book,
     next_chapter_number,
@@ -541,5 +542,4 @@ async def manuscript_readability(
     book = await get_owned_book(db, book_id, current_user.id)
     require_author_access(current_user)
     _ = book
-    from app.utils.book_utils import estimate_readability
     return ReadabilityMetricsOut(**estimate_readability(body.text))

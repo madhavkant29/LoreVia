@@ -6678,6 +6678,12 @@ def split_long_document(text: str, max_words: int = 3500) -> list[str]:
     for paragraph in paragraphs:
         paragraph_words = len(paragraph.split())
         if bucket and bucket_words + paragraph_words > max_words:
+            if bucket_words < 250 and paragraph_words >= max_words:
+                bucket.append(paragraph)
+                parts.append("\n\n".join(bucket))
+                bucket = []
+                bucket_words = 0
+                continue
             parts.append("\n\n".join(bucket))
             bucket = []
             bucket_words = 0

@@ -105,7 +105,7 @@ from app.core.redis import (
 )
 from app.core.security import create_asset_token, decode_token
 from app.engine.character.consolidator import consolidate_characters
-from app.utils.sparse_utils import include_requested
+from app.utils.sparse_utils import include_requested, parse_csv_param
 from app.models.book import (
     Book,
     BookCollaborator,
@@ -562,7 +562,7 @@ async def get_book_overview(
             selectinload(Book.plot_threads),
         ),
     )
-    use_cache = include is None
+    use_cache = parse_csv_param(include) is None
     if use_cache:
         cache_version = await get_book_cache_version(str(book.id))
         access_key = _book_cache_access_key(current_user.id, collaborator)
@@ -757,8 +757,16 @@ async def get_emotional_arc(
         db, book_id, current_user.id,
         options=(selectinload(Book.characters),),
     )
+    book_characters = getattr(book, "characters", None)
+    if book_characters is None:
+        result = await db.execute(
+            select(Character)
+            .where(Character.book_id == book_id)
+            .order_by(Character.mention_count.desc().nullslast(), Character.name)
+        )
+        book_characters = result.scalars().all()
     characters = sorted(
-        book.characters or [],
+        book_characters or [],
         key=lambda c: (c.mention_count or 0, c.name or ""),
         reverse=True,
     )

@@ -101,7 +101,9 @@ async def test_cleanup_webhook_events(db, monkeypatch):
     assert result["deleted"] == 1
 
     remaining_count = await db.scalar(
-        select(func.count()).select_from(PaddleWebhookEvent)
+        select(func.count())
+        .select_from(PaddleWebhookEvent)
+        .where(PaddleWebhookEvent.id.in_([old_id, recent_id, pending_id, processing_id]))
     )
     assert remaining_count == 3
 
@@ -225,7 +227,9 @@ async def test_cleanup_subscription_events(db, monkeypatch):
     assert result["deleted"] == 1
 
     remaining_count = await db.scalar(
-        select(func.count()).select_from(SubscriptionEvent)
+        select(func.count())
+        .select_from(SubscriptionEvent)
+        .where(SubscriptionEvent.id.in_([old_id, recent_id]))
     )
     assert remaining_count == 1
 

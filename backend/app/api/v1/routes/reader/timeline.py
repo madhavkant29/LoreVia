@@ -4,7 +4,6 @@ from typing import Any, cast
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.api.deps.auth import get_current_user
 from app.api.deps.rate_limit import rate_limit_recall
@@ -46,7 +45,7 @@ from app.utils.reader_utils import (
     timeline_visible_chapter_set,
     update_plot_thread_note,
 )
-from app.utils.sparse_utils import apply_sparse_fields, apply_sparse_includes, include_requested
+from app.utils.sparse_utils import apply_sparse_fields, apply_sparse_includes, include_requested, parse_csv_param
 
 router = APIRouter()
 
@@ -87,7 +86,16 @@ def _build_combined_events(major_events: list[MajorEventOut], character_events: 
         events.append({"type": "major", **e.model_dump(mode="json")})
     for e in character_events:
         events.append({"type": "character", **e.model_dump(mode="json")})
-    events.sort(key=lambda item: (item.get("chapter_number", 0), item.get("event_title", "").lower() if item.get("type") == "major" else item.get("character_name", "").lower()))
+    type_order = {"major": 0, "character": 1}
+    events.sort(
+        key=lambda item: (
+            item.get("chapter_number", 0),
+            type_order.get(str(item.get("type")), 9),
+            item.get("event_title", "").lower()
+            if item.get("type") == "major"
+            else item.get("character_name", "").lower(),
+        )
+    )
     return events
 
 
@@ -235,7 +243,7 @@ async def get_timeline(
         raise HTTPException(400, "offset must be >= 0")
     book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
 
-    use_cache = include is None
+    use_cache = parse_csv_param(include) is None
     if use_cache:
         book_version = await get_book_cache_version(str(book_id))
         progress_version = await get_reader_progress_cache_version(str(book_id), str(current_user.id))
@@ -475,13 +483,8 @@ async def memory_recall(
     current_user=Depends(get_current_user),
     _=Depends(rate_limit_recall),
 ):
-    book_result = await db.execute(
-        select(Book)
-        .where(Book.id == book_id, Book.user_id == current_user.id)
-        .options(selectinload(Book.characters))
-    )
-    book = book_result.scalars().first()
-    if not book:
+    book = await db.get(Book, book_id)
+    if not book or book.user_id != current_user.id:
         raise HTTPException(404)
     book_title = book.title
 

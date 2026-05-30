@@ -18,7 +18,13 @@ export default async function ChapterPage({
   try {
     await queryClient.prefetchQuery({
       queryKey: readerCacheKey(bookId, chapterNum),
-      queryFn: () => serverApi.getChapter(bookId, chapterNum, cookieHeader),
+      queryFn: async () => {
+        const chapter = await serverApi.getChapter(bookId, chapterNum, cookieHeader)
+        if (chapter === null) {
+          throw new Error("Chapter prefetch unavailable")
+        }
+        return chapter
+      },
       staleTime: 60_000,
     })
   } catch {

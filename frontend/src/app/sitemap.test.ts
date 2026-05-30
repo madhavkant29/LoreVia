@@ -1,4 +1,9 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
+
+vi.mock("@/lib/api/public.server", () => ({
+  listPublicBooksServer: vi.fn(async () => []),
+  listPublicForumPostsServer: vi.fn(async () => ({ items: [] })),
+}))
 
 import sitemap from "./sitemap"
 

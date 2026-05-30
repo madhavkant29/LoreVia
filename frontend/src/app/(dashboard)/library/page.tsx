@@ -12,7 +12,13 @@ export default async function LibraryPage() {
   try {
     await queryClient.prefetchQuery({
       queryKey: asQueryKey(booksListCacheKey(true)),
-      queryFn: () => serverApi.listBooks(true, cookieHeader),
+      queryFn: async () => {
+        const books = await serverApi.listBooks(true, cookieHeader)
+        if (books === null) {
+          throw new Error("Book prefetch unavailable")
+        }
+        return books
+      },
       staleTime: 20_000,
     })
   } catch {

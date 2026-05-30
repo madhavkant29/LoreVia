@@ -130,3 +130,31 @@ router.include_router(chat_router)
 router.include_router(suggestions_router)
 router.include_router(synopsis_router)
 router.include_router(jobs_router)
+
+
+import importlib  # noqa: E402
+import sys  # noqa: E402
+from types import ModuleType  # noqa: E402
+
+_PATCH_TARGET_MODULES = tuple(
+    importlib.import_module(module_name)
+    for module_name in (
+        "app.api.v1.routes.advisor.chat",
+        "app.api.v1.routes.advisor.suggestions",
+        "app.api.v1.routes.advisor.synopsis",
+        "app.api.v1.routes.advisor.jobs",
+    )
+)
+
+
+class _PatchPropagatingModule(ModuleType):
+    def __setattr__(self, name, value):
+        super().__setattr__(name, value)
+        for target_module in _PATCH_TARGET_MODULES:
+            if hasattr(target_module, name):
+                setattr(target_module, name, value)
+            if name == "advisor_suggestions" and hasattr(target_module, "_suggestions_advisor_suggestions"):
+                setattr(target_module, "_suggestions_advisor_suggestions", value)
+
+
+sys.modules[__name__].__class__ = _PatchPropagatingModule

@@ -98,7 +98,11 @@ export default function VoiceConsistencyPage() {
   )
 
   useEffect(() => {
-    if (selectedCharacterId && !characters.some((character) => character.id === selectedCharacterId)) {
+    if (
+      selectedCharacterId &&
+      characters.length > 0 &&
+      !characters.some((character) => character.id === selectedCharacterId)
+    ) {
       setSelectedCharacterId(null)
     }
   }, [characters, selectedCharacterId])

@@ -62,10 +62,7 @@ async def get_book_events(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    book = await get_owned_book(
-        db, book_id, current_user.id,
-        options=(selectinload(Book.characters),),
-    )
+    book = await get_owned_book(db, book_id, current_user.id)
     chapter_rows = (
         await db.execute(
             select(Chapter.number, Chapter.title, ChapterSummary.key_events)
@@ -74,7 +71,11 @@ async def get_book_events(
             .order_by(Chapter.number)
         )
     ).all()
-    characters = sorted(book.characters or [], key=lambda c: c.name or "")
+    characters = (
+        await db.execute(
+            select(Character).where(Character.book_id == book.id).order_by(Character.name)
+        )
+    ).scalars().all()
     character_names_by_id = {str(character.id): character.name for character in characters}
 
     major_events: list[dict] = []

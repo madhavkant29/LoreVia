@@ -18,7 +18,8 @@ from typing import Any
 def parse_csv_param(value: str | None) -> set[str] | None:
     if value is None:
         return None
-    value = str(value) if not isinstance(value, str) else value
+    if not isinstance(value, str):
+        return None
     if not value.strip():
         return None
     return {item.strip() for item in value.split(",") if item.strip()}

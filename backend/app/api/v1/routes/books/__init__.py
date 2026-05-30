@@ -33,6 +33,7 @@ router.include_router(events_router)
 # ── Route endpoint functions ─────────────────────────────────────────────────
 from app.api.v1.routes.books.characters import (  # noqa: E402, F401
     accept_relationship_candidate,
+    apply_book_character_reprocess,
     attach_relationship_candidate_a,
     attach_relationship_candidate_b,
     create_book_character,
@@ -43,6 +44,7 @@ from app.api.v1.routes.books.characters import (  # noqa: E402, F401
     get_book_characters,
     merge_book_characters,
     partition_book_character,
+    preview_book_character_reprocess,
     reject_relationship_candidate,
     resolve_relationship_candidate,
     share_book_character,
@@ -76,7 +78,14 @@ from app.api.v1.routes.books.events import (  # noqa: E402, F401
     get_book_events,
     get_reader_safe_book_events,
 )
-from app.api.v1.routes.books.exports import export_manuscript  # noqa: E402, F401
+from app.api.v1.routes.books.exports import (  # noqa: E402, F401
+    export_character_bible,
+    export_character_card,
+    export_manuscript,
+    list_character_bible_obsidian_notes,
+    preview_character_bible_obsidian,
+    save_character_bible_obsidian_note,
+)
 from app.api.v1.routes.books.imports import (  # noqa: E402, F401
     import_manuscript_content,
     manuscript_readability,
@@ -122,13 +131,16 @@ from app.core.redis import (  # noqa: E402, F401
     set_book_overview_cache,
     set_writer_workspace_cache,
 )
+from app.core.security import create_asset_token, decode_token  # noqa: E402, F401
 from app.services.pipeline_state_service import build_writer_workspace_update  # noqa: E402, F401
 from app.utils.advisor_utils import invalidate_advisor_caches_for_book  # noqa: E402, F401
 from app.utils.billing_utils import require_author_access  # noqa: E402, F401
+from app.utils.billing_utils import calculate_upload_usage_summary  # noqa: E402, F401
 from app.utils.book_utils import (  # noqa: E402, F401
     _append_recent_revision_edit,
     book_out,
     build_book_out_list,
+    build_character_card_payload,
     build_emotional_arc_payload,
     build_obsidian_graph,
     build_prewriting_check,
@@ -145,6 +157,7 @@ from app.utils.book_utils import (  # noqa: E402, F401
     delete_book_note,
     delete_obsidian_note,
     deserialize_manuscript_content,
+    ensure_book_cover,
     estimate_readability,
     export_obsidian_notes_zip,
     extract_novel_scene_candidates,
@@ -158,7 +171,9 @@ from app.utils.book_utils import (  # noqa: E402, F401
     list_novel_scenes,
     list_obsidian_note_relations,
     list_obsidian_notes,
+    list_obsidian_vault_notes,
     list_user_notes,
+    load_obsidian_vault_overrides,
     next_chapter_number,
     normalize_book_work_type,
     normalize_imported_chapters,
@@ -176,8 +191,22 @@ from app.utils.reader_utils import (  # noqa: E402, F401
     build_reading_progress_payload,
     build_summary_collection_payload,
 )
-from app.utils.tag_utils import list_custom_tags_for_entity_ids  # noqa: E402, F401
-from app.utils.character_utils import is_displayable_character, relationship_summary_for_character  # noqa: E402, F401
+from app.utils.tag_utils import get_custom_tags_for_entity, list_custom_tags_for_entity_ids  # noqa: E402, F401
+from app.utils.character_utils import (  # noqa: E402, F401
+    append_unique_summary,
+    apply_manual_character_description,
+    build_manual_character,
+    clean_string_list,
+    dedupe_preserve_order,
+    demote_character_to_review_candidate,
+    is_displayable_character,
+    mark_character_candidates_merged,
+    merge_characters,
+    partition_character,
+    refresh_character_duplicate_suggestions,
+    relationship_summary_for_character,
+    serialize_book_character,
+)
 from app.utils.user_utils import build_writing_dashboard_stats  # noqa: E402, F401
 
 # Placeholders for monkeypatch.setattr in tests
@@ -191,6 +220,20 @@ from app.utils.notification_utils import build_upload_processing_notification  #
 from app.utils.queue_utils import queue_for_user  # noqa: E402, F401
 from app.utils.user_utils import add_daily_word_progress  # noqa: E402, F401
 from app.utils.export_utils import manuscript_docx  # noqa: E402, F401
+from app.utils.export_utils import (  # noqa: E402, F401
+    build_character_bible_obsidian_context,
+    character_bible_docx,
+    character_bible_markdown,
+    character_bible_obsidian_folder,
+    character_bible_obsidian_preview,
+    character_bible_pdf,
+    character_card_docx,
+    character_card_markdown,
+    character_card_pdf,
+    manuscript_epub_compiled,
+    manuscript_obsidian_vault_zip,
+    manuscript_pdf_compiled,
+)
 from app.engine.character.consolidator import consolidate_characters  # noqa: E402, F401
 from dataclasses import asdict  # noqa: E402, F401
 
@@ -202,3 +245,33 @@ __all__ = [
     "get_book_cover_public",
     "get_book_character_card_public",
 ]
+
+
+import importlib  # noqa: E402
+import sys  # noqa: E402
+from types import ModuleType  # noqa: E402
+
+_PATCH_TARGET_MODULES = tuple(
+    importlib.import_module(module_name)
+    for module_name in (
+        "app.api.v1.routes.books.characters",
+        "app.api.v1.routes.books.core",
+        "app.api.v1.routes.books.events",
+        "app.api.v1.routes.books.exports",
+        "app.api.v1.routes.books.imports",
+        "app.api.v1.routes.books.notes",
+        "app.api.v1.routes.books.publish",
+        "app.api.v1.routes.books.series",
+    )
+)
+
+
+class _PatchPropagatingModule(ModuleType):
+    def __setattr__(self, name, value):
+        super().__setattr__(name, value)
+        for target_module in _PATCH_TARGET_MODULES:
+            if hasattr(target_module, name):
+                setattr(target_module, name, value)
+
+
+sys.modules[__name__].__class__ = _PatchPropagatingModule

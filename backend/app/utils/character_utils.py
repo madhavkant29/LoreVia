@@ -17,6 +17,7 @@ from typing import Any, cast
 import bleach  # type: ignore[import-untyped]
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.exc import UnmappedInstanceError
 from sqlalchemy.orm import object_session, selectinload
 
 from app.engine.character.entity_filters import (
@@ -1711,7 +1712,10 @@ def append_character_review_audit_entry(
     metadata["review_audit"] = entries[-12:]
     metadata["user_reviewed"] = True
     character.analysis_metadata = metadata
-    session = object_session(character)
+    try:
+        session = object_session(character)
+    except UnmappedInstanceError:
+        session = None
     if session is not None and character.id is not None:
         visibility_state, approval_state, approval_source, _approval_reason_codes = character_governance(character)
         session.add(
