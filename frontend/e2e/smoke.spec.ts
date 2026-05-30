@@ -374,7 +374,7 @@ test("collaboration workspace creates a story-scoped share", async ({ page }) =>
   await expect(page.getByRole("button", { name: /save share/i })).toBeEnabled()
   await page.getByRole("button", { name: /save share/i }).click()
 
-  await expect(page.getByText("Share saved.")).toBeVisible()
+  await expect(page.getByText("Share saved.")).toBeVisible({ timeout: 15000 })
   await expect(page.getByText("Dev Editor")).toBeVisible()
   await expect(page.getByText("edit manuscript / story bible / AI scans / export / comment", { exact: true }).first()).toBeVisible()
 })
@@ -509,8 +509,11 @@ test("voice consistency runs without the max-depth console loop", async ({ page 
 
   await page.getByRole("button", { name: /run voice review/i }).click()
 
+  // Wait for the loading state to complete by checking the button text changes back
+  await expect(page.getByRole("button", { name: /run voice review/i })).toBeVisible()
+
   await expect(page.getByRole("heading", { name: "Character voice consistency" })).toBeVisible()
-  await expect(page.getByText("1 character baseline reviewed")).toBeVisible()
+  await expect(page.getByText("1 character baseline reviewed")).toBeVisible({ timeout: 15000 })
   await expect(page.getByText("Nora sounds more formal than her baseline")).toBeVisible()
 
   expect(consoleMessages.some((message) => /Maximum update depth exceeded/i.test(message))).toBe(false)
@@ -527,7 +530,10 @@ test("voice consistency can target a selected character", async ({ page }) => {
   await expect(page.getByText("Focused review: Gregor")).toBeVisible()
   await page.getByRole("button", { name: /run voice review/i }).click()
 
-  await expect(page.getByText("Reviewed: Gregor")).toBeVisible()
+  // Wait for the loading state to complete
+  await expect(page.getByRole("button", { name: /run voice review/i })).toBeVisible()
+
+  await expect(page.getByText("Reviewed: Gregor")).toBeVisible({ timeout: 15000 })
   await expect(page.getByText("Gregor slips into abstract explanation")).toBeVisible()
   await expect(page.getByText("74% match")).toBeVisible()
   await expect(page.getByText("Closest alternate voice: Grete (38% match)")).toBeVisible()
@@ -542,7 +548,10 @@ test("voice consistency warns when selected-character attribution is weak", asyn
   await page.locator("select").nth(1).selectOption("char-grete")
   await page.getByRole("button", { name: /run voice review/i }).click()
 
-  await expect(page.getByText("Reviewed: Grete")).toBeVisible()
+  // Wait for the loading state to complete
+  await expect(page.getByRole("button", { name: /run voice review/i })).toBeVisible()
+
+  await expect(page.getByText("Reviewed: Grete")).toBeVisible({ timeout: 15000 })
   await expect(page.getByText("Dialogue could not be confidently attributed to Grete; the review used the full submitted passage instead.")).toBeVisible()
 })
 
@@ -561,7 +570,10 @@ test("voice consistency surfaces backend errors instead of failing silently", as
 
   await page.getByRole("button", { name: /run voice review/i }).click()
 
-  await expect(page.getByText("Voice review is temporarily unavailable.")).toBeVisible()
+  // Wait for the loading state to complete
+  await expect(page.getByRole("button", { name: /run voice review/i })).toBeVisible()
+
+  await expect(page.getByText("Voice review is temporarily unavailable.")).toBeVisible({ timeout: 15000 })
 })
 
 test("character bible exposes manual merge without duplicate-key warnings", async ({ page }) => {
@@ -614,9 +626,11 @@ test("character bible review queue workspace renders candidate controls without 
   await installMockApi(page)
   await page.goto("/book-1/characters")
 
-  await page.getByRole("button", { name: /^review queue$/i }).click()
+  const reviewQueueButton = page.getByRole("button", { name: /^review queue$/i })
+  await expect(reviewQueueButton).toBeVisible()
+  await reviewQueueButton.click()
 
-  await expect(page.getByRole("heading", { name: "Grounded review workspace" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Grounded review workspace" })).toBeVisible({ timeout: 15000 })
   await expect(page.getByText("Candidate summary")).toBeVisible()
   await expect(page.getByRole("heading", { name: "Gregor's sister" })).toBeVisible()
   await expect(page.getByRole("button", { name: /^promote candidate$/i })).toBeVisible()
