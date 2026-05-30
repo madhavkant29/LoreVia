@@ -23,6 +23,7 @@ vi.mock("@/lib/api/reader", () => ({
 }))
 
 import { useReader } from "./useReader"
+import type { ChapterData } from "@/types/reader"
 
 describe("useReader", () => {
   let container: HTMLDivElement | null = null
@@ -61,7 +62,7 @@ describe("useReader", () => {
     hookResult = null
   })
 
-  function render(bookId: string, chapterNum: number, useQueryReturn = { data: undefined, isLoading: true, error: null }) {
+  function render(bookId: string, chapterNum: number, useQueryReturn: { data: ChapterData | undefined; isLoading: boolean; error: Error | null } = { data: undefined, isLoading: true, error: null }) {
     useQueryMock.mockReturnValue(useQueryReturn)
 
     function TestComponent() {
