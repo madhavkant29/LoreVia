@@ -399,7 +399,7 @@ function HeaderActionLink({
 }) {
   return (
     <Link
-      href={href}
+      href={href as any}
       className={`inline-flex min-h-[2.9rem] items-center justify-center rounded-md border px-4 py-2.5 text-sm font-semibold transition ${
         primary
           ? isDark

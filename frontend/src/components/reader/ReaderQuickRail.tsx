@@ -76,7 +76,7 @@ export function ReaderQuickRail({ bookId, chapterNum, theme, onSummary }: Reader
             <Link
               key={action.key}
               prefetch={false}
-              href={action.href(bookId)}
+              href={action.href(bookId) as any}
               aria-label={action.label}
               className={`flex h-10 w-10 items-center justify-center rounded-md border transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${buttonClass}`}
               title={action.label}
