@@ -131,6 +131,7 @@ async def test_cache_delete_if_owner_falls_back_when_eval_is_unavailable(monkeyp
 
     deleted = await redis_module.cache_delete_if_owner("worker:lock", "owner-1")
 
+    print(f"DEBUG: deleted={deleted}, store={fake_redis.store}")
     assert deleted is True
     assert "worker:lock" not in fake_redis.store
 

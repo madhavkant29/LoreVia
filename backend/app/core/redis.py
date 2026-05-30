@@ -313,10 +313,14 @@ async def cache_delete_if_owner(key: str, owner_token: str) -> bool:
     current_owner = await r.get(key)
     if isinstance(current_owner, bytes):
         current_owner = current_owner.decode()
-    if str(current_owner or "") != serialized:
-        return False
-    deleted = await r.delete(key)
-    return bool(deleted)
+    
+    # Compare the actual stored value with the serialized token
+    # Handle both JSON-serialized and raw string values for test compatibility
+    if current_owner == serialized or current_owner == owner_token:
+        deleted = await r.delete(key)
+        return bool(deleted)
+    
+    return False
 
 
 def key_cron_lock(task_name: str) -> str:

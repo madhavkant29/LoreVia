@@ -35,10 +35,6 @@ export function ChatLauncher({ enabled = true }: { enabled?: boolean }) {
     ? "border-sky-400/40 bg-sky-500/10 text-sky-600 hover:bg-sky-500/15"
     : "border-border bg-card text-foreground hover:bg-muted"
 
-  if (!user) {
-    return null
-  }
-
   useEffect(() => {
     if (!open) {
       return
@@ -69,6 +65,10 @@ export function ChatLauncher({ enabled = true }: { enabled?: boolean }) {
       document.removeEventListener("keydown", handleKeyDown)
     }
   }, [open])
+
+  if (!user) {
+    return null
+  }
 
   return (
     <>
