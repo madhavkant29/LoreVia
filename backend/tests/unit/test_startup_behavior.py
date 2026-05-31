@@ -95,7 +95,7 @@ async def test_ready_checks_database_and_redis(monkeypatch) -> None:
 
     monkeypatch.setattr("app.core.database.engine", _FakeEngine())
     monkeypatch.setattr("app.core.redis.get_redis", _fake_get_redis)
-    monkeypatch.setattr("app.utils.schema_utils.assert_auth_schema_compatible", _fake_schema_check)
+    monkeypatch.setattr("app.utils.schema_utils.assert_core_runtime_schema_compatible", _fake_schema_check)
 
     result = await ready()
 

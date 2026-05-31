@@ -1,6 +1,7 @@
 import logging
 from collections.abc import AsyncGenerator
 
+from sqlalchemy import event
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
@@ -9,9 +10,18 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+
 def _build_engine_config() -> tuple[str, dict]:
     url = make_url(settings.DATABASE_URL.replace("postgresql://", "postgresql+psycopg://"))
     return url.render_as_string(hide_password=False), {"prepare_threshold": None}
+
+
+def _initialize_postgres_session(dbapi_connection) -> None:
+    with dbapi_connection.cursor() as cursor:
+        # The app models are intentionally unqualified and assume the runtime
+        # schema is `public`, so enforce that at session start instead of
+        # relying on role or pooler defaults.
+        cursor.execute("SET search_path TO public")
 
 
 def _effective_pool_settings() -> tuple[int, int]:
@@ -43,6 +53,11 @@ engine = create_async_engine(
     echo=settings.DATABASE_SQL_ECHO,
     connect_args=engine_connect_args,
 )
+
+
+@event.listens_for(engine.sync_engine, "connect")
+def _set_search_path_on_connect(dbapi_connection, _connection_record) -> None:
+    _initialize_postgres_session(dbapi_connection)
 
 AsyncSessionLocal = async_sessionmaker(
     engine, class_=AsyncSession, expire_on_commit=False

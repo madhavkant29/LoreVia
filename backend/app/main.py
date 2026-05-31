@@ -265,12 +265,12 @@ async def health():
 async def ready():
     from app.core.database import engine
     from app.core.redis import get_redis
-    from app.utils.schema_utils import assert_auth_schema_compatible
+    from app.utils.schema_utils import assert_core_runtime_schema_compatible
 
     try:
         async with engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
-            await assert_auth_schema_compatible(conn)
+            await assert_core_runtime_schema_compatible(conn)
         r = await get_redis()
         await r.ping()
     except Exception:
