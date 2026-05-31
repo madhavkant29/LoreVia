@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import axios from "axios"
 
 import { authApi } from "@/lib/api/auth"
+import { normalizeLoginError } from "@/lib/auth/loginMessages"
 import { supabase } from "@/lib/supabase"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { getOrCreateDeviceId } from "@/lib/utils/device"
@@ -110,7 +111,11 @@ export default function AuthCallbackPage() {
         if (axios.isAxiosError(error)) {
           const detail = error.response?.data?.detail
           if (typeof detail === "string" && detail.trim()) {
-            fail(detail)
+            fail(normalizeLoginError(detail, error.response?.status) ?? "OAuth sign-in failed.")
+            return
+          }
+          if (error.response?.status && error.response.status >= 500) {
+            fail(normalizeLoginError(null, error.response.status) ?? "OAuth sign-in failed.")
             return
           }
         }

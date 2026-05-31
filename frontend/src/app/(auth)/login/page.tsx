@@ -48,8 +48,11 @@ function LoginInner() {
 
   useEffect(() => {
     const oauthError = searchParams.get("error")
-    if (oauthError) setError(normalizeLoginError(oauthError))
-  }, [searchParams])
+    if (oauthError) {
+      setError(normalizeLoginError(oauthError))
+      router.replace("/login")
+    }
+  }, [router, searchParams])
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -71,7 +74,11 @@ function LoginInner() {
           return
         }
         if (typeof detail === "string" && detail.trim()) {
-          setError(normalizeLoginError(detail))
+          setError(normalizeLoginError(detail, error.response?.status))
+          return
+        }
+        if (error.response?.status && error.response.status >= 500) {
+          setError(normalizeLoginError(null, error.response.status))
           return
         }
       }

@@ -7,9 +7,17 @@ from fastapi import Response
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from app.api.v1.routes.auth import oauth_supabase, refresh
+from app.api.v1.routes.auth import _record_login_activity, _schedule_trial_email_events_best_effort, oauth_supabase, refresh
 from app.core.security import create_access_token, create_refresh_token, decode_token
 from app.schemas.auth import RefreshBody, SupabaseOAuthBody
+
+
+class _AsyncContext:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
 
 
 @pytest.mark.asyncio
@@ -45,6 +53,49 @@ async def test_supabase_oauth_failure_does_not_log_response_body(monkeypatch, ca
     assert exc_info.value.status_code == 401
     assert "top-secret-value" not in caplog.text
     assert "Supabase OAuth verification failed" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_trial_email_schedule_failure_does_not_block_auth(monkeypatch, caplog):
+    class FakeDB:
+        def begin_nested(self):
+            return _AsyncContext()
+
+    async def fake_schedule(*_args, **_kwargs):
+        raise RuntimeError("trial_email_events unavailable")
+
+    monkeypatch.setattr("app.api.v1.routes.auth.schedule_trial_email_events", fake_schedule)
+
+    with caplog.at_level("WARNING", logger="lorevia.auth"):
+        await _schedule_trial_email_events_best_effort(FakeDB(), SimpleNamespace(id="user-1"))
+
+    assert "trial_email_schedule_failed_during_auth" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_login_activity_cache_failure_does_not_block_auth(monkeypatch, caplog):
+    user = SimpleNamespace(
+        id="user-1",
+        last_login_at=None,
+        last_login_date=None,
+        login_streak_days=0,
+        longest_login_streak_days=0,
+    )
+
+    async def fake_record_login_activity_row(*_args, **_kwargs):
+        return None
+
+    async def fake_mark_cache_dirty(*_args, **_kwargs):
+        raise RuntimeError("redis unavailable")
+
+    monkeypatch.setattr("app.api.v1.routes.auth.record_login_activity_row", fake_record_login_activity_row)
+    monkeypatch.setattr("app.api.v1.routes.auth.mark_user_dashboard_cache_dirty", fake_mark_cache_dirty)
+
+    with caplog.at_level("WARNING", logger="lorevia.auth"):
+        await _record_login_activity(object(), user)
+
+    assert "login_activity_cache_invalidation_failed" in caplog.text
+    assert user.last_login_date is not None
 
 
 @pytest.mark.asyncio

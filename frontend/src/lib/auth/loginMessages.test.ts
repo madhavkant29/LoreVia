@@ -25,6 +25,18 @@ describe("loginMessages", () => {
     )
   })
 
+  it("maps cloudflare origin errors to a retryable sign-in message", () => {
+    expect(
+      normalizeLoginError(
+        "The origin web server returned an invalid or incomplete response to Cloudflare.",
+      ),
+    ).toBe("Sign-in was temporarily unavailable. Please try again.")
+  })
+
+  it("maps server failures without details to a retryable sign-in message", () => {
+    expect(normalizeLoginError(null, 502)).toBe("Sign-in was temporarily unavailable. Please try again.")
+  })
+
   it("passes through unrelated auth errors", () => {
     expect(normalizeLoginError("OAuth sign-in failed.")).toBe("OAuth sign-in failed.")
   })
