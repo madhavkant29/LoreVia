@@ -1,6 +1,6 @@
 /** @type {import("next").NextConfig} */
 function getApiOrigin() {
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL
+  const apiUrl = process.env.API_ORIGIN || process.env.NEXT_PUBLIC_API_URL
   if (!apiUrl) return null
 
   try {
