@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException, UploadFile
 
+from app.api.v1.router import api_router
 from app.api.v1.routes import books
 from app.utils.llm_usage_utils import LlmUsageSummary
 from app.schemas.books import (
@@ -39,12 +40,12 @@ from app.schemas.books import (
 def test_books_collection_route_accepts_no_trailing_slash():
     paths = {
         route.path
-        for route in books.router.routes
+        for route in api_router.routes
         if "GET" in getattr(route, "methods", set())
     }
 
-    assert "" in paths
-    assert "/" in paths
+    assert "/books" in paths
+    assert "/books/" in paths
 
 
 class _ScalarList:
