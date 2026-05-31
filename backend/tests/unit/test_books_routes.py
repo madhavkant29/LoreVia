@@ -36,6 +36,17 @@ from app.schemas.books import (
 )
 
 
+def test_books_collection_route_accepts_no_trailing_slash():
+    paths = {
+        route.path
+        for route in books.router.routes
+        if "GET" in getattr(route, "methods", set())
+    }
+
+    assert "" in paths
+    assert "/" in paths
+
+
 class _ScalarList:
     def __init__(self, items):
         self._items = items

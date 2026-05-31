@@ -19,6 +19,8 @@ fi
 WEB_CONCURRENCY="${WEB_CONCURRENCY:-1}"
 GUNICORN_TIMEOUT="${GUNICORN_TIMEOUT:-120}"
 GUNICORN_KEEPALIVE="${GUNICORN_KEEPALIVE:-5}"
+FORWARDED_ALLOW_IPS="${FORWARDED_ALLOW_IPS:-*}"
+export FORWARDED_ALLOW_IPS
 
 if [ "${RUN_MIGRATIONS:-}" = "1" ]; then
   echo "RUN_MIGRATIONS is no longer handled by the web startup path."
@@ -29,6 +31,7 @@ exec gunicorn app.main:app \
   --worker-class uvicorn.workers.UvicornWorker \
   --workers "$WEB_CONCURRENCY" \
   --bind 0.0.0.0:8000 \
+  --forwarded-allow-ips "$FORWARDED_ALLOW_IPS" \
   --timeout "$GUNICORN_TIMEOUT" \
   --keep-alive "$GUNICORN_KEEPALIVE" \
   --access-logfile - \
