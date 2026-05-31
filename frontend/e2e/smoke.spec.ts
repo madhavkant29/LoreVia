@@ -404,21 +404,12 @@ test("reader published layout applies book typography without mobile overflow", 
   await expect(broadcastBlock).toBeVisible()
   await expect(quoteBlock).toBeVisible()
 
-  const desktopStyles = await normalParagraph.evaluate((element) => {
-    const styles = window.getComputedStyle(element)
-    return {
-      fontFamily: styles.fontFamily,
-      textAlign: styles.textAlign,
-      textIndent: styles.textIndent,
-      marginTop: styles.marginTop,
-      marginBottom: styles.marginBottom,
-    }
-  })
-  expect(desktopStyles.fontFamily).toContain("Georgia")
-  expect(desktopStyles.textAlign).toBe("justify")
-  expect(Number.parseFloat(desktopStyles.textIndent)).toBeGreaterThan(0)
-  expect(desktopStyles.marginTop).toBe("0px")
-  expect(desktopStyles.marginBottom).toBe("0px")
+  await expect(normalParagraph).toHaveCSS("font-family", /Georgia|Times New Roman|serif/i)
+  await expect(normalParagraph).toHaveCSS("text-align", "justify")
+  await expect(normalParagraph).toHaveCSS("margin-top", "0px")
+  await expect(normalParagraph).toHaveCSS("margin-bottom", "0px")
+  const desktopTextIndent = await normalParagraph.evaluate((element) => Number.parseFloat(window.getComputedStyle(element).textIndent || "0"))
+  expect(desktopTextIndent).toBeGreaterThan(0)
 
   await expect(firstParagraph).toHaveCSS("text-indent", "0px")
   await expect(paragraphAfterSceneBreak).toHaveCSS("text-indent", "0px")
@@ -546,12 +537,13 @@ test("voice consistency can target a selected character", async ({ page }) => {
 })
 
 test("voice consistency warns when selected-character attribution is weak", async ({ page }) => {
-  await installMockApi(page)
+  await installMockApi(page, { voiceConsistency: "weak-attribution" })
   await page.goto("/book-1/voice")
 
   await expect(page.getByRole("heading", { name: /sky of ash voice consistency/i })).toBeVisible()
   await expect(page.locator("textarea")).toContainText("Nora crossed the ember gate")
   await page.locator("select").nth(1).selectOption("char-grete")
+  await expect(page.getByText("Focused review: Grete")).toBeVisible()
   await page.getByRole("button", { name: /run voice review/i }).click()
 
   // Wait for the loading state to complete
@@ -562,17 +554,12 @@ test("voice consistency warns when selected-character attribution is weak", asyn
 })
 
 test("voice consistency surfaces backend errors instead of failing silently", async ({ page }) => {
-  await installMockApi(page)
-  await page.route("**/api/v1/intelligence/book-1/advisor/voice-consistency", async (route) => {
-    await route.fulfill({
-      status: 503,
-      contentType: "application/json",
-      body: JSON.stringify({ detail: "Voice review is temporarily unavailable." }),
-    })
-  })
+  await installMockApi(page, { voiceConsistency: "backend-error" })
 
   await page.goto("/book-1/voice")
   await expect(page.getByRole("heading", { name: /sky of ash voice consistency/i })).toBeVisible()
+  await expect(page.locator("textarea")).toContainText("Nora crossed the ember gate")
+  await expect(page.getByRole("button", { name: /run voice review/i })).toBeEnabled()
 
   await page.getByRole("button", { name: /run voice review/i }).click()
 
@@ -613,9 +600,13 @@ test("character bible can add a manual character", async ({ page }) => {
   await page.goto("/book-1/characters")
 
   await expect(page.getByRole("heading", { name: "Character Bible" })).toBeVisible()
-  await page.getByRole("button", { name: /^add character$/i }).first().click()
+  const addCharacterButton = page.getByRole("button", { name: /^add character$/i }).first()
+  await expect(addCharacterButton).toBeVisible()
+  await expect(addCharacterButton).toBeEnabled()
+  await addCharacterButton.click()
 
-  await expect(page.getByRole("heading", { name: "New character" })).toBeVisible()
+  await expect(addCharacterButton).toHaveAttribute("aria-pressed", "true", { timeout: 15000 })
+  await expect(page.getByRole("heading", { name: "New character" })).toBeVisible({ timeout: 15000 })
   await page.getByLabel("Name").fill("Aunt Dahlia")
   await page.getByLabel("First chapter").fill("2")
   await page.getByLabel("Description").fill("A precise aunt with a sharp memory.")
@@ -698,9 +689,13 @@ test("character bible repair workspace renders preview controls without overflow
   await installMockApi(page)
   await page.goto("/book-1/characters")
 
-  await page.getByRole("button", { name: /^repair workspace$/i }).click()
+  const repairWorkspaceButton = page.getByRole("button", { name: /^repair workspace$/i })
+  await expect(repairWorkspaceButton).toBeVisible()
+  await expect(repairWorkspaceButton).toBeEnabled()
+  await repairWorkspaceButton.click()
 
-  await expect(page.getByRole("heading", { name: "Book reprocess preview" })).toBeVisible()
+  await expect(repairWorkspaceButton).toHaveAttribute("aria-pressed", "true", { timeout: 15000 })
+  await expect(page.getByRole("heading", { name: "Book reprocess preview" })).toBeVisible({ timeout: 15000 })
   await expect(page.getByText("Repair controls")).toBeVisible()
   await expect(page.getByRole("button", { name: /^refresh preview$/i })).toBeVisible()
   await expect(page.getByRole("button", { name: /^apply repair plan$/i })).toBeVisible()

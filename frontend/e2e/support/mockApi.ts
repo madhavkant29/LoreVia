@@ -7,11 +7,13 @@ import type { PublicForumPost } from "@/types/public"
 type SessionMode = "authenticated" | "guest"
 type LoginMode = "success" | "unauthorized"
 type AdminMode = "none" | "moderation" | "billing" | "super" | "owner"
+type VoiceConsistencyMode = "success" | "backend-error" | "weak-attribution"
 
 type MockOptions = {
   session?: SessionMode
   login?: LoginMode
   admin?: AdminMode
+  voiceConsistency?: VoiceConsistencyMode
 }
 
 const ADMIN_TEST_SESSION_COOKIE = "lorevia_admin_test_session"
@@ -2140,6 +2142,7 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
   const session = options.session ?? "authenticated"
   const login = options.login ?? "success"
   const admin = options.admin ?? "none"
+  const voiceConsistencyMode = options.voiceConsistency ?? "success"
   const adminCookieMode = admin === "none" ? "guest" : admin
   await page.context().addCookies([
     {
@@ -2160,6 +2163,9 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
   let mockBetaReads = JSON.parse(JSON.stringify(initialBetaReads))
   let mockBetaReadQuestions = JSON.parse(JSON.stringify(initialBetaReadQuestions))
   let mockBetaReadFeedbackItems = JSON.parse(JSON.stringify(initialBetaReadFeedbackItems))
+  let mockCharacterBibleCharacters: Character[] = JSON.parse(JSON.stringify(characterBibleCharacters))
+  let mockCharacterReviewPayload = JSON.parse(JSON.stringify(characterReviewPayload))
+  let mockRelationshipGraph = JSON.parse(JSON.stringify(relationshipGraph))
   let mockNotes = JSON.parse(JSON.stringify(notes))
   let mockManuscriptAnnotations = JSON.parse(JSON.stringify(manuscriptAnnotations))
   let mockEmailPreferences: EmailPreferences = {
@@ -2575,11 +2581,11 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
     }
 
     if (path === "/api/v1/books/book-1/characters" && method === "GET") {
-      return json(route, characterBibleCharacters)
+      return json(route, mockCharacterBibleCharacters)
     }
 
     if (path === "/api/v1/books/book-1/character-review" && method === "GET") {
-      return json(route, characterReviewPayload)
+      return json(route, mockCharacterReviewPayload)
     }
 
     if (path === "/api/v1/books/book-1/character-review/reprocess" && method === "GET") {
@@ -2619,8 +2625,8 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
     const relationshipReviewMatch = path.match(/^\/api\/v1\/books\/book-1\/relationship-review\/([^/]+)\/(attach-a|attach-b|accept|resolve|reject)$/)
     if (relationshipReviewMatch && method === "POST") {
       const [, candidateId, action] = relationshipReviewMatch
-      const candidate = characterReviewPayload.relationship_candidates.find(
-        (item: typeof characterReviewPayload.relationship_candidates[number]) => item.id === candidateId,
+      const candidate = mockCharacterReviewPayload.relationship_candidates.find(
+        (item: typeof mockCharacterReviewPayload.relationship_candidates[number]) => item.id === candidateId,
       )
       if (!candidate) {
         return notFound(route)
@@ -2644,8 +2650,8 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
         : action === "resolve"
           ? "resolved"
           : "rejected"
-      characterReviewPayload.counts.pending_relationship_candidates = characterReviewPayload.relationship_candidates.filter(
-        (item: typeof characterReviewPayload.relationship_candidates[number]) => item.status === "pending",
+      mockCharacterReviewPayload.counts.pending_relationship_candidates = mockCharacterReviewPayload.relationship_candidates.filter(
+        (item: typeof mockCharacterReviewPayload.relationship_candidates[number]) => item.status === "pending",
       ).length
 
       return json(route, {
@@ -2670,7 +2676,7 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
         personality_tags?: string[]
       } | null
       const created: Character = {
-        id: `char-manual-${characterBibleCharacters.length + 1}`,
+        id: `char-manual-${mockCharacterBibleCharacters.length + 1}`,
         book_id: "book-1",
         name: payload?.name ?? "Manual Character",
         aliases: payload?.aliases ?? [],
@@ -2692,7 +2698,7 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
         arc_summary: payload?.arc_summary ?? null,
         relationship_summaries: [],
       }
-      characterBibleCharacters.push(created)
+      mockCharacterBibleCharacters.push(created)
       return json(route, created, 201)
     }
 
@@ -3029,7 +3035,7 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
     }
 
     if (path === "/api/v1/reader/book-1/relationships" && method === "GET") {
-      return json(route, relationshipGraph)
+      return json(route, mockRelationshipGraph)
     }
 
     if (path === "/api/v1/books/book-1/cover" && method === "GET") {
@@ -3103,6 +3109,16 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
     }
 
     if (path === "/api/v1/intelligence/book-1/advisor/voice-consistency" && method === "POST") {
+      if (voiceConsistencyMode === "backend-error") {
+        return route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ detail: "Voice review is temporarily unavailable." }),
+        })
+      }
+      if (voiceConsistencyMode === "weak-attribution") {
+        return json(route, weakAttributionVoiceConsistency)
+      }
       const payload = route.request().postDataJSON() as { character_id?: string } | null
       if (payload?.character_id === "char-gregor") {
         return json(route, selectedCharacterVoiceConsistency)
