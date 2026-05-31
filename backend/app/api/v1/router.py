@@ -45,6 +45,14 @@ api_router.add_api_route(
     methods=["GET"],
     dependencies=[Depends(rate_limit_public_asset)],
 )
+api_router.add_api_route(
+    "/books",
+    books.list_books,
+    methods=["GET"],
+    response_model=list[books.BookOut],
+    include_in_schema=False,
+    dependencies=[Depends(rate_limit_api)],
+)
 
 api_router.include_router(collaboration.router, prefix="/books",         tags=["collaboration"], dependencies=[Depends(rate_limit_api)])
 api_router.include_router(books.router,         prefix="/books",         tags=["books"], dependencies=[Depends(rate_limit_api)])

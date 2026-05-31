@@ -407,7 +407,6 @@ async def update_book_forum_metadata(
 
 # ─── Book listing & stats ────────────────────────────────────────────────────
 
-@router.get("", response_model=list[BookOut], include_in_schema=False)
 @router.get("/", response_model=list[BookOut])
 async def list_books(
     include_hidden: bool = Query(False),

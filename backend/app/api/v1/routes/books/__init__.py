@@ -68,6 +68,7 @@ from app.api.v1.routes.books.core import (  # noqa: E402, F401
     get_user_stats,
     get_writer_workspace,
     hide_book,
+    list_books,
     list_saved_notes,
     update_book_mode,
     update_writer_workspace,
