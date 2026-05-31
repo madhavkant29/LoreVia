@@ -17,11 +17,15 @@ def _build_engine_config() -> tuple[str, dict]:
 
 
 def _initialize_postgres_session(dbapi_connection) -> None:
-    with dbapi_connection.cursor() as cursor:
-        # The app models are intentionally unqualified and assume the runtime
-        # schema is `public`, so enforce that at session start instead of
-        # relying on role or pooler defaults.
+    cursor = dbapi_connection.cursor()
+    try:
+        # Some psycopg async-adapted cursors do not implement the context
+        # manager protocol on the DBAPI wrapper, so close explicitly.
         cursor.execute("SET search_path TO public")
+    finally:
+        close = getattr(cursor, "close", None)
+        if callable(close):
+            close()
 
 
 def _effective_pool_settings() -> tuple[int, int]:
