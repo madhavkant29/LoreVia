@@ -3,12 +3,24 @@ from starlette.responses import Response
 from types import SimpleNamespace
 
 from app.core import events
-from app.main import _LazyMountedApp, _lazy_api_app, ready
+from app.main import _LazyMountedApp, _cors_failure_headers, _lazy_api_app, ready
 
 
 def test_api_app_is_not_built_at_import_time() -> None:
     _lazy_api_app._app = None
     assert _lazy_api_app._app is None
+
+
+def test_cors_failure_headers_include_allowed_origin() -> None:
+    headers = dict(_cors_failure_headers("https://www.getlorevia.com"))
+
+    assert headers[b"access-control-allow-origin"] == b"https://www.getlorevia.com"
+    assert headers[b"access-control-allow-credentials"] == b"true"
+    assert headers[b"vary"] == b"Origin"
+
+
+def test_cors_failure_headers_omit_untrusted_origin() -> None:
+    assert _cors_failure_headers("https://evil.example.com") == []
 
 
 @pytest.mark.asyncio

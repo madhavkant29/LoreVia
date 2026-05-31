@@ -1,4 +1,5 @@
 import asyncio
+import re
 import time
 import uuid
 from collections.abc import Callable
@@ -38,6 +39,30 @@ from app.utils.logging.logger import configure_logging, get_logger
 
 configure_logging()
 log = get_logger("lorevia.http")
+
+
+_CORS_OPTIONS = cors_middleware_options()
+_CORS_ALLOW_ORIGINS = {str(origin) for origin in _CORS_OPTIONS.get("allow_origins", [])}
+_CORS_ALLOW_CREDENTIALS = bool(_CORS_OPTIONS.get("allow_credentials"))
+_CORS_ALLOW_ORIGIN_REGEX = (
+    re.compile(str(pattern))
+    if isinstance((pattern := _CORS_OPTIONS.get("allow_origin_regex")), str) and pattern
+    else None
+)
+
+
+def _cors_failure_headers(origin: str | None) -> list[tuple[bytes, bytes]]:
+    if not origin:
+        return []
+    if origin in _CORS_ALLOW_ORIGINS or (_CORS_ALLOW_ORIGIN_REGEX and _CORS_ALLOW_ORIGIN_REGEX.match(origin)):
+        headers: list[tuple[bytes, bytes]] = [
+            (b"access-control-allow-origin", origin.encode()),
+            (b"vary", b"Origin"),
+        ]
+        if _CORS_ALLOW_CREDENTIALS:
+            headers.append((b"access-control-allow-credentials", b"true"))
+        return headers
+    return []
 
 
 def _install_exception_handlers(target_app: FastAPI) -> None:
@@ -161,6 +186,11 @@ class SecurityHeadersMiddleware:
             if name == b"x-request-id":
                 request_id = value.decode()
                 break
+        request_origin = None
+        for name, value in headers_list:
+            if name == b"origin":
+                request_origin = value.decode()
+                break
         if not request_id:
             request_id = str(uuid.uuid4())
         
@@ -213,13 +243,16 @@ class SecurityHeadersMiddleware:
             )
             # If response hasn't started, send a 500 error response
             if not response_started:
+                failure_headers: list[list[bytes]] = [
+                    [b"content-type", b"text/plain"],
+                    [b"x-request-id", request_id.encode()],
+                ]
+                for header_name, header_value in _cors_failure_headers(request_origin):
+                    failure_headers.append([header_name, header_value])
                 await send({
                     "type": "http.response.start",
                     "status": 500,
-                    "headers": [
-                        [b"content-type", b"text/plain"],
-                        [b"x-request-id", request_id.encode()],
-                    ],
+                    "headers": failure_headers,
                 })
                 await send({
                     "type": "http.response.body",
