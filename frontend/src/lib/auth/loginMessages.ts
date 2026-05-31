@@ -4,12 +4,31 @@ const GOOGLE_TERMS_REQUIRED_DETAIL =
 const MISSING_ACCOUNT_OR_METHOD_MESSAGE =
   "No account found for that sign-in. Create one if you're new to LoreVia, or use the same sign-in method you originally chose, like Google."
 const INVALID_CREDENTIALS_MESSAGE = "Invalid email or password."
+const TEMPORARY_SIGN_IN_MESSAGE = "Sign-in was temporarily unavailable. Please try again."
+
+function isTemporaryOriginError(detail: string): boolean {
+  const normalized = detail.toLowerCase()
+  return (
+    normalized.includes("origin web server returned an invalid or incomplete response") ||
+    normalized.includes("origin_bad_gateway") ||
+    normalized.includes("bad gateway") ||
+    normalized.includes("cloudflare") ||
+    normalized.includes("status code 500") ||
+    normalized.includes("internal server error")
+  )
+}
 
 export function normalizeLoginError(error: string | null | undefined, status?: number): string | null {
   const detail = (error || "").trim()
 
   if (!detail) {
-    return status === 401 ? MISSING_ACCOUNT_OR_METHOD_MESSAGE : null
+    if (status === 401) return MISSING_ACCOUNT_OR_METHOD_MESSAGE
+    if (status && status >= 500) return TEMPORARY_SIGN_IN_MESSAGE
+    return null
+  }
+
+  if (isTemporaryOriginError(detail) || (status && status >= 500)) {
+    return TEMPORARY_SIGN_IN_MESSAGE
   }
 
   if (detail === GOOGLE_TERMS_REQUIRED_DETAIL) {

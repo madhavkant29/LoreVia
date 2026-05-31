@@ -167,7 +167,26 @@ async def _record_login_activity(
         ip_hash=ip_hash,
         device_id=device_id,
     )
-    await mark_user_dashboard_cache_dirty(str(user.id))
+    try:
+        await mark_user_dashboard_cache_dirty(str(user.id))
+    except Exception:
+        log.warning(
+            "login_activity_cache_invalidation_failed",
+            extra={"user_id": str(user.id)},
+            exc_info=True,
+        )
+
+
+async def _schedule_trial_email_events_best_effort(db: AsyncSession, user: User) -> None:
+    try:
+        async with db.begin_nested():
+            await schedule_trial_email_events(db, user)
+    except Exception:
+        log.warning(
+            "trial_email_schedule_failed_during_auth",
+            extra={"user_id": str(user.id)},
+            exc_info=True,
+        )
 
 
 async def _issue_email_verification(user: User) -> tuple[bool, str]:
@@ -220,7 +239,7 @@ async def register(
     try:
         db.add(user)
         await db.flush()
-        await schedule_trial_email_events(db, user)
+        await _schedule_trial_email_events_best_effort(db, user)
         db.add(build_device_trial(user.id, device_id))
         await db.commit()
     except IntegrityError:
@@ -338,7 +357,7 @@ async def oauth_supabase(
             try:
                 db.add(existing)
                 await db.flush()
-                await schedule_trial_email_events(db, existing)
+                await _schedule_trial_email_events_best_effort(db, existing)
                 if not local_supabase_recovery:
                     db.add(build_device_trial(existing.id, device_id))
                 await db.commit()
@@ -354,7 +373,7 @@ async def oauth_supabase(
                 mutated = True
             if not existing.email_verified_at:
                 existing.email_verified_at = datetime.now(UTC)
-                await schedule_trial_email_events(db, existing)
+                await _schedule_trial_email_events_best_effort(db, existing)
                 mutated = True
             if mutated:
                 await db.commit()
@@ -494,7 +513,7 @@ async def verify_email(
         user.email_verified_at = datetime.now(UTC)
         await db.commit()
         await db.refresh(user)
-        await schedule_trial_email_events(db, user)
+        await _schedule_trial_email_events_best_effort(db, user)
         await db.commit()
         _schedule_onboarding_email(background_tasks, user.email)
 

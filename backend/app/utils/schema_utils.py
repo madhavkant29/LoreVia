@@ -8,10 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from app.models.beta_read import BetaReadAssignment
 from app.models.book import Book, BookForumPost, PublicBookAnalyticsEvent, PublicBookRanking
 from app.models.intelligence import AdvisorJob
-from app.models.user import User, UserLoginActivity
+from app.models.user import DeviceTrial, TrialEmailEvent, User, UserLoginActivity
 
 AUTH_RUNTIME_COLUMNS: Mapping[str, frozenset[str]] = {
     User.__tablename__: frozenset(User.__table__.columns.keys()),
+    DeviceTrial.__tablename__: frozenset(DeviceTrial.__table__.columns.keys()),
+    TrialEmailEvent.__tablename__: frozenset(TrialEmailEvent.__table__.columns.keys()),
     UserLoginActivity.__tablename__: frozenset(UserLoginActivity.__table__.columns.keys()),
 }
 
