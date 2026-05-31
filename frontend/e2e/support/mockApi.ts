@@ -7,7 +7,7 @@ import type { PublicForumPost } from "@/types/public"
 type SessionMode = "authenticated" | "guest"
 type LoginMode = "success" | "unauthorized"
 type AdminMode = "none" | "moderation" | "billing" | "super" | "owner"
-type VoiceConsistencyMode = "success" | "backend-error" | "weak-attribution"
+type VoiceConsistencyMode = "success" | "backend-error" | "weak-attribution" | "selected-character"
 
 type MockOptions = {
   session?: SessionMode
@@ -3118,6 +3118,9 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
       }
       if (voiceConsistencyMode === "weak-attribution") {
         return json(route, weakAttributionVoiceConsistency)
+      }
+      if (voiceConsistencyMode === "selected-character") {
+        return json(route, selectedCharacterVoiceConsistency)
       }
       const payload = route.request().postDataJSON() as { character_id?: string } | null
       if (payload?.character_id === "char-gregor") {

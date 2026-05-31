@@ -368,7 +368,11 @@ test("collaboration workspace creates a story-scoped share", async ({ page }) =>
   const nameField = page.getByPlaceholder("Display name")
   await nameField.fill("Dev Editor")
   await page.getByRole("combobox").selectOption("developmental_editor")
-  await page.getByLabel("Can view selected chapters only").uncheck()
+  await expect(page.getByText("Structure, continuity, and arc partner.")).toBeVisible()
+  const selectedChaptersOnly = page.getByLabel("Can view selected chapters only")
+  await selectedChaptersOnly.uncheck()
+  await expect(selectedChaptersOnly).not.toBeChecked()
+  await expect(emailField).toBeEnabled()
   await emailField.fill("editor@example.com")
   await expect(emailField).toHaveValue("editor@example.com")
   await expect(page.getByRole("button", { name: /save share/i })).toBeEnabled()
@@ -518,7 +522,7 @@ test("voice consistency runs without the max-depth console loop", async ({ page 
 })
 
 test("voice consistency can target a selected character", async ({ page }) => {
-  await installMockApi(page)
+  await installMockApi(page, { voiceConsistency: "selected-character" })
   await page.goto("/book-1/voice")
 
   await expect(page.getByRole("heading", { name: /sky of ash voice consistency/i })).toBeVisible()
