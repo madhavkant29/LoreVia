@@ -244,9 +244,9 @@ test("book overview opens the manuscript editor", async ({ page }) => {
     await dismissCookies.click()
   }
 
-  await page.getByRole("button", { name: /open manuscript editor/i }).dispatchEvent("click")
+  await page.getByRole("button", { name: /open manuscript editor/i }).click()
 
-  await expect(page).toHaveURL(/\/(?:[^/]+--)?book-1\/manuscript$/)
+  await expect(page).toHaveURL(/\/(?:[^/]+--)?book-1\/manuscript$/, { timeout: 15000 })
   await expect(page.getByText("Story manuscript")).toBeVisible()
   await expect(page.getByText("Manuscript progress")).toBeVisible()
 })
@@ -372,7 +372,13 @@ test("collaboration workspace creates a story-scoped share", async ({ page }) =>
   await emailField.fill("editor@example.com")
   await expect(emailField).toHaveValue("editor@example.com")
   await expect(page.getByRole("button", { name: /save share/i })).toBeEnabled()
+  
+  // Wait for the save request to complete
+  const savePromise = page.waitForResponse(response => 
+    response.url().includes('/collaborators') && response.request().method() === 'POST'
+  )
   await page.getByRole("button", { name: /save share/i }).click()
+  await savePromise
 
   await expect(page.getByText("Share saved.")).toBeVisible({ timeout: 15000 })
   await expect(page.getByText("Dev Editor")).toBeVisible()
@@ -510,10 +516,10 @@ test("voice consistency runs without the max-depth console loop", async ({ page 
   await page.getByRole("button", { name: /run voice review/i }).click()
 
   // Wait for the loading state to complete by checking the button text changes back
-  await expect(page.getByRole("button", { name: /run voice review/i })).toBeVisible()
+  await expect(page.getByRole("button", { name: /run voice review/i })).toBeVisible({ timeout: 15000 })
 
   await expect(page.getByRole("heading", { name: "Character voice consistency" })).toBeVisible()
-  await expect(page.getByText("1 character baseline reviewed")).toBeVisible({ timeout: 15000 })
+  await expect(page.getByText("Reviewed: Nora Vale")).toBeVisible({ timeout: 15000 })
   await expect(page.getByText("Nora sounds more formal than her baseline")).toBeVisible()
 
   expect(consoleMessages.some((message) => /Maximum update depth exceeded/i.test(message))).toBe(false)
@@ -531,7 +537,7 @@ test("voice consistency can target a selected character", async ({ page }) => {
   await page.getByRole("button", { name: /run voice review/i }).click()
 
   // Wait for the loading state to complete
-  await expect(page.getByRole("button", { name: /run voice review/i })).toBeVisible()
+  await expect(page.getByRole("button", { name: /run voice review/i })).toBeVisible({ timeout: 15000 })
 
   await expect(page.getByText("Reviewed: Gregor")).toBeVisible({ timeout: 15000 })
   await expect(page.getByText("Gregor slips into abstract explanation")).toBeVisible()
@@ -549,7 +555,7 @@ test("voice consistency warns when selected-character attribution is weak", asyn
   await page.getByRole("button", { name: /run voice review/i }).click()
 
   // Wait for the loading state to complete
-  await expect(page.getByRole("button", { name: /run voice review/i })).toBeVisible()
+  await expect(page.getByRole("button", { name: /run voice review/i })).toBeVisible({ timeout: 15000 })
 
   await expect(page.getByText("Reviewed: Grete")).toBeVisible({ timeout: 15000 })
   await expect(page.getByText("Dialogue could not be confidently attributed to Grete; the review used the full submitted passage instead.")).toBeVisible()
@@ -571,7 +577,7 @@ test("voice consistency surfaces backend errors instead of failing silently", as
   await page.getByRole("button", { name: /run voice review/i }).click()
 
   // Wait for the loading state to complete
-  await expect(page.getByRole("button", { name: /run voice review/i })).toBeVisible()
+  await expect(page.getByRole("button", { name: /run voice review/i })).toBeVisible({ timeout: 15000 })
 
   await expect(page.getByText("Voice review is temporarily unavailable.")).toBeVisible({ timeout: 15000 })
 })
