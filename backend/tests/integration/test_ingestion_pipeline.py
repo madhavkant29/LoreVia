@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.models.book import Book, Chapter
 from app.models.character import Character, CharacterCandidate, CharacterRelationshipCandidate
 from app.models.intelligence import CharacterRelationship, Notification
+from app.models.user import User
 from app.workers.consumers import extraction_consumer
 from app.workers.consumers.extraction_consumer import _process_chapter, process_book
 
@@ -514,6 +515,84 @@ async def test_upload_pipeline_routes_low_confidence_new_character_into_review_q
     assert gregor_candidate.status == "pending"
     assert "candidate_dossier_needs_review" in (gregor_candidate.reason_codes or [])
     assert "insufficient_cross_chapter_support" in (gregor_candidate.reason_codes or [])
+
+
+@pytest.mark.asyncio
+async def test_process_chapter_records_ambiguous_roster_match_without_crashing(db, monkeypatch):
+    user = User(
+        email="ambiguous-roster@getlorevia.com",
+        username="ambiguous_roster",
+        password_hash="hash",
+        tier="author",
+    )
+    db.add(user)
+    await db.flush()
+    book = Book(
+        user_id=user.id,
+        title="Ambiguous Roster",
+        format="txt",
+        s3_key="ambiguous-roster.txt",
+        status="processing",
+        mode="author",
+        total_chapters=1,
+        writer_workspace={},
+    )
+    db.add(book)
+    await db.flush()
+    db.add_all(
+        [
+            Character(book_id=book.id, name="Mina Bell", aliases=["Mimi"], first_chapter=1),
+            Character(book_id=book.id, name="Mina Reed", aliases=["Mimi"], first_chapter=1),
+        ]
+    )
+    await db.commit()
+
+    async def _fake_extract(_text: str, **_kwargs) -> dict:
+        return {
+            "characters": [
+                {
+                    "name": "Mimi",
+                    "aliases": [],
+                    "entity_type": "person",
+                    "confidence": 0.82,
+                    "traits": {},
+                    "personality_tags": [],
+                    "motivations": [],
+                    "fears": [],
+                    "arc_summary": "A named character with an ambiguous roster match.",
+                    "evidence": {
+                        "mention_count": 2,
+                        "strong_mention_count": 1,
+                        "has_dialogue_or_action": True,
+                        "appears_multiple_times": True,
+                    },
+                },
+            ],
+            "relationships": [],
+        }
+
+    async def _fake_embed(texts: list[str], **_kwargs) -> list[list[float]]:
+        return _embedding_for(len(texts))
+
+    monkeypatch.setattr("app.workers.consumers.extraction_consumer.extract_characters_and_relationships", _fake_extract)
+    monkeypatch.setattr("app.workers.consumers.extraction_consumer.embed_batch", _fake_embed)
+
+    await _process_chapter(
+        db,
+        book,
+        {"number": 1, "title": "One", "text": "Mimi crossed the room. Mimi opened the archive."},
+        queue_wait_ms=2,
+    )
+
+    candidates = (
+        await db.execute(
+            select(CharacterCandidate).where(CharacterCandidate.book_id == book.id)
+        )
+    ).scalars().all()
+
+    assert len(candidates) == 1
+    assert candidates[0].proposed_name == "Mimi"
+    assert candidates[0].reason_codes == ["ambiguous_roster_match"]
 
 
 @pytest.mark.asyncio

@@ -965,7 +965,7 @@ export default function CharactersPage() {
   }, [progressData])
 
   useEffect(() => {
-    if (reviewDataEnabled || workspaceMode === "review" || workspaceMode === "duplicates") {
+    if (reviewDataEnabled || (!charactersLoading && chars.length === 0) || workspaceMode === "review" || workspaceMode === "duplicates") {
       setReviewDataEnabled(true)
       return
     }
@@ -985,7 +985,7 @@ export default function CharactersPage() {
     })
 
     return () => cancel(handle)
-  }, [reviewDataEnabled, workspaceMode])
+  }, [charactersLoading, chars.length, reviewDataEnabled, workspaceMode])
 
   const isDark = theme === "dark"
   const isAuthorMode = book?.mode === "author"
@@ -1073,6 +1073,8 @@ export default function CharactersPage() {
     () => (reviewData.relationship_candidates ?? []).filter((candidate) => candidate.status === "pending"),
     [reviewData.relationship_candidates],
   )
+  const pendingReviewItemCount = pendingCandidates.length + pendingRelationshipCandidates.length
+  const hasPendingReviewItems = pendingReviewItemCount > 0
 
   const mergeSuggestions = useMemo(
     () => (reviewData.duplicate_suggestions ?? [])
@@ -2167,7 +2169,7 @@ export default function CharactersPage() {
         {mergeError ? <p className="mt-3 text-sm text-amber-400">{mergeError}</p> : null}
         {error ? <p className="mt-3 text-sm text-rose-400">{error}</p> : null}
 
-        {!error && (chars.length > 0 || creating) ? (
+        {!error && (chars.length > 0 || creating || workspaceMode !== "profile") ? (
           <div className={`mt-5 overflow-hidden rounded-lg border shadow-[0_24px_70px_rgba(0,0,0,0.18)] ${isDark ? "border-white/10 bg-[#070c13]" : "border-stone-200 bg-white/94"}`}>
             <div className="grid xl:h-[calc(100vh-12rem)] xl:grid-cols-[340px_minmax(0,1fr)_320px] 2xl:grid-cols-[350px_minmax(0,1fr)_330px]">
               <aside className={`border-b xl:min-h-0 xl:overflow-y-auto xl:border-b-0 xl:border-r ${isDark ? "border-white/8" : "border-stone-200"}`}>
@@ -4115,15 +4117,32 @@ export default function CharactersPage() {
           </div>
         ) : !error ? (
           <div className={`mt-5 rounded-lg border p-6 text-sm ${isDark ? "border-white/10 bg-black/20 text-slate-300" : "border-stone-200 bg-white/85 text-stone-600"}`}>
-            <p>No character profiles are ready yet. Processing continues in the background after upload.</p>
+            <p>
+              {hasPendingReviewItems
+                ? `LoreVia held ${pendingReviewItemCount} extracted ${pendingReviewItemCount === 1 ? "item" : "items"} for review instead of adding them automatically.`
+                : book?.status === "processing"
+                  ? "No character profiles are ready yet. Processing continues in the background after upload."
+                  : "No character profiles were saved from this manuscript."}
+            </p>
             {isAuthorMode ? (
-              <button
-                type="button"
-                onClick={openCreateCharacter}
-                className="mt-4 rounded-md bg-[linear-gradient(135deg,#8b5cf6,#6d28d9)] px-5 py-3 text-sm font-semibold text-white shadow-[0_15px_35px_rgba(109,40,217,0.22)] transition hover:translate-y-[-1px]"
-              >
-                Add character manually
-              </button>
+              <div className="mt-4 flex flex-wrap gap-3">
+                {hasPendingReviewItems ? (
+                  <button
+                    type="button"
+                    onClick={openReviewQueue}
+                    className="rounded-md bg-[linear-gradient(135deg,#0f766e,#0d9488)] px-5 py-3 text-sm font-semibold text-white shadow-[0_15px_35px_rgba(13,148,136,0.2)] transition hover:translate-y-[-1px]"
+                  >
+                    Review held candidates
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={openCreateCharacter}
+                  className="rounded-md bg-[linear-gradient(135deg,#8b5cf6,#6d28d9)] px-5 py-3 text-sm font-semibold text-white shadow-[0_15px_35px_rgba(109,40,217,0.22)] transition hover:translate-y-[-1px]"
+                >
+                  Add character manually
+                </button>
+              </div>
             ) : null}
           </div>
         ) : null}

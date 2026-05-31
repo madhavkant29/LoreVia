@@ -8,12 +8,14 @@ type SessionMode = "authenticated" | "guest"
 type LoginMode = "success" | "unauthorized"
 type AdminMode = "none" | "moderation" | "billing" | "super" | "owner"
 type VoiceConsistencyMode = "success" | "backend-error" | "weak-attribution" | "selected-character"
+type CharacterBibleMode = "default" | "review-only"
 
 type MockOptions = {
   session?: SessionMode
   login?: LoginMode
   admin?: AdminMode
   voiceConsistency?: VoiceConsistencyMode
+  characterBible?: CharacterBibleMode
 }
 
 const ADMIN_TEST_SESSION_COOKIE = "lorevia_admin_test_session"
@@ -2143,6 +2145,7 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
   const login = options.login ?? "success"
   const admin = options.admin ?? "none"
   const voiceConsistencyMode = options.voiceConsistency ?? "success"
+  const characterBibleMode = options.characterBible ?? "default"
   const adminCookieMode = admin === "none" ? "guest" : admin
   await page.context().addCookies([
     {
@@ -2163,7 +2166,9 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
   let mockBetaReads = JSON.parse(JSON.stringify(initialBetaReads))
   let mockBetaReadQuestions = JSON.parse(JSON.stringify(initialBetaReadQuestions))
   let mockBetaReadFeedbackItems = JSON.parse(JSON.stringify(initialBetaReadFeedbackItems))
-  let mockCharacterBibleCharacters: Character[] = JSON.parse(JSON.stringify(characterBibleCharacters))
+  let mockCharacterBibleCharacters: Character[] = characterBibleMode === "review-only"
+    ? []
+    : JSON.parse(JSON.stringify(characterBibleCharacters))
   let mockCharacterReviewPayload = JSON.parse(JSON.stringify(characterReviewPayload))
   let mockRelationshipGraph = JSON.parse(JSON.stringify(relationshipGraph))
   let mockNotes = JSON.parse(JSON.stringify(notes))
