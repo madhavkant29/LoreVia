@@ -83,13 +83,13 @@ describe("api client", () => {
     })
   })
 
-  it("uses NEXT_PUBLIC_API_URL when provided", async () => {
+  it("keeps browser requests same-origin even when NEXT_PUBLIC_API_URL is set", async () => {
     process.env.NEXT_PUBLIC_API_URL = "http://localhost:8000/api/v1"
 
     await loadClientModule()
 
     expect(axiosCreateMock).toHaveBeenCalledWith({
-      baseURL: "http://localhost:8000/api/v1",
+      baseURL: "/api/v1",
       headers: { "Content-Type": "application/json" },
       withCredentials: true,
     })
@@ -246,7 +246,7 @@ describe("api client", () => {
     vi.stubGlobal("document", originalDocument)
   })
 
-  it("uses the configured api base for refresh requests", async () => {
+  it("keeps refresh requests same-origin in the browser even when NEXT_PUBLIC_API_URL is set", async () => {
     process.env.NEXT_PUBLIC_API_URL = "http://localhost:8000/api/v1"
     const { captured, apiClientMock } = await loadClientModule()
     const originalRequest: { url: string; _retry?: boolean } = { url: "/books/1" }
@@ -258,7 +258,7 @@ describe("api client", () => {
       response: { status: 401 },
     })
 
-    expect(axiosPostMock).toHaveBeenCalledWith("http://localhost:8000/api/v1/auth/refresh", null, { withCredentials: true })
+    expect(axiosPostMock).toHaveBeenCalledWith("/api/v1/auth/refresh", null, { withCredentials: true })
   })
 
   it("does not refresh auth me failures", async () => {
