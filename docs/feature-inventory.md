@@ -765,7 +765,7 @@ The migration layer includes explicit Alembic safety utilities that detect non-l
 
 - `POST /auth/register`
 - `POST /auth/login`
-- `POST /auth/oauth/supabase`
+- `POST /api/v1/auth/oauth/supabase`
 - `POST /auth/forgot-password`
 - `POST /auth/reset-password`
 - `POST /auth/refresh`

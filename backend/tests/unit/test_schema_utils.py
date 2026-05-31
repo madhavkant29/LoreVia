@@ -1,6 +1,11 @@
 import pytest
 
-from app.utils.schema_utils import AUTH_RUNTIME_COLUMNS, assert_auth_schema_compatible
+from app.utils.schema_utils import (
+    AUTH_RUNTIME_COLUMNS,
+    CORE_RUNTIME_COLUMNS,
+    assert_auth_schema_compatible,
+    assert_core_runtime_schema_compatible,
+)
 
 
 class _FakeResult:
@@ -29,6 +34,14 @@ def _complete_schema_rows():
     ]
 
 
+def _complete_core_schema_rows():
+    return [
+        (table_name, column_name)
+        for table_name, columns in CORE_RUNTIME_COLUMNS.items()
+        for column_name in columns
+    ]
+
+
 @pytest.mark.asyncio
 async def test_assert_auth_schema_compatible_accepts_complete_schema():
     connection = _FakeConnection(_complete_schema_rows())
@@ -51,3 +64,29 @@ async def test_assert_auth_schema_compatible_reports_missing_columns():
 
     assert "user_login_activity.login_date" in str(exc_info.value)
     assert "users.supabase_auth_id" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_assert_core_runtime_schema_compatible_accepts_complete_schema():
+    connection = _FakeConnection(_complete_core_schema_rows())
+
+    await assert_core_runtime_schema_compatible(connection)
+
+    assert set(connection.parameters["table_names"]) == set(CORE_RUNTIME_COLUMNS)
+
+
+@pytest.mark.asyncio
+async def test_assert_core_runtime_schema_compatible_reports_missing_columns():
+    rows = [
+        row
+        for row in _complete_core_schema_rows()
+        if row not in {("books", "public_status"), ("advisor_jobs", "status"), ("public_book_rankings", "snapshot_date")}
+    ]
+
+    with pytest.raises(RuntimeError) as exc_info:
+        await assert_core_runtime_schema_compatible(_FakeConnection(rows))
+
+    error = str(exc_info.value)
+    assert "books.public_status" in error
+    assert "advisor_jobs.status" in error
+    assert "public_book_rankings.snapshot_date" in error
