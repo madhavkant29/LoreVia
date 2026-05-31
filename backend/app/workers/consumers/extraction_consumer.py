@@ -915,7 +915,7 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                     chapter_number=chapter_number,
                     entity=entity,
                     matched_character_id=None,
-                    reason_code=reasons[0],
+                    reason_code="ambiguous_roster_match",
                     status=CHARACTER_CANDIDATE_PENDING,
                 )
                 await _record_entity_cluster_mentions(

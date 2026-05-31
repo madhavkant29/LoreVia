@@ -644,6 +644,20 @@ test("character bible review queue workspace renders candidate controls without 
   expect(hasHorizontalOverflow).toBe(false)
 })
 
+test("character bible exposes held candidates when no visible profiles were saved", async ({ page }) => {
+  await installMockApi(page, { characterBible: "review-only" })
+  await page.goto(`${BOOK_ROUTE}/characters`)
+
+  await expect(page.getByText("LoreVia held 2 extracted items for review instead of adding them automatically.")).toBeVisible({ timeout: 15000 })
+  const reviewHeldCandidatesButton = page.getByRole("button", { name: /^review held candidates$/i })
+  await expect(reviewHeldCandidatesButton).toBeVisible()
+  await reviewHeldCandidatesButton.click()
+
+  await expect(page.getByRole("heading", { name: "Grounded review workspace" })).toBeVisible({ timeout: 15000 })
+  await expect(page.getByRole("heading", { name: "Gregor's sister" })).toBeVisible()
+  await expect(page.getByRole("button", { name: /^promote candidate$/i })).toBeVisible()
+})
+
 test("relationship graph inspector responds to node and edge selection", async ({ page }) => {
   const { consoleMessages, pageErrors } = watchBrowserSignals(page)
   await installMockApi(page)
