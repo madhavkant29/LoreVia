@@ -15,7 +15,14 @@ from sqlalchemy import update as sa_update
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
-from app.core.redis import cache_del, cache_set_if_absent, key_extraction_inflight
+from app.core.redis import (
+    INFLIGHT_BOOK_TTL_SECONDS,
+    cache_del,
+    cache_delete_if_owner,
+    cache_set_if_absent,
+    key_extraction_inflight,
+    key_extraction_inflight_book,
+)
 from app.core.storage import download_book, upload_binary
 from app.engine.character.deduplicator import (
     character_name_keys,
@@ -25,10 +32,10 @@ from app.engine.character.deduplicator import (
     resolve_character_match_id,
     resolve_character_match_ids,
 )
-from app.engine.character.entity_filters import character_persistence_decision
+from app.engine.character.entity_filters import CharacterPersistenceDecision, character_persistence_decision
 from app.engine.character.extractor import extract_characters_and_relationships, fallback_character_mentions
 from app.engine.character.profile_builder import build_character_profile, update_profile
-from app.engine.embeddings.embedder import build_character_embedding_text, embed_batch
+from app.engine.embeddings.embedder import build_character_embedding_text, build_chunk_embedding_text, embed_batch
 from app.models.book import Book, Chapter, ChapterMedia
 from app.models.character import Character, CharacterMention, CharacterState, CharacterVoiceProfile
 from app.models.intelligence import BookChunk, CharacterRelationship
@@ -38,12 +45,17 @@ from app.services.email_service import send_processing_complete_with_stats
 from app.utils.billing_utils import has_paid_reading_access
 from app.utils.book_utils import parse_book_upload_for_ingestion, refresh_screenplay_scene_rows
 from app.utils.character_utils import (
+    CHARACTER_APPROVAL_APPROVED,
+    CHARACTER_APPROVAL_SOURCE_DETERMINISTIC_AUTO,
+    CHARACTER_VISIBILITY_VISIBLE,
     CHARACTER_CANDIDATE_PENDING,
     CHARACTER_RELATIONSHIP_CANDIDATE_PENDING,
     build_character_mention_cluster_key,
+    build_character_dossier_summary,
     cluster_character_entities,
     build_character_roster_snapshot,
     find_earliest_character_mention_chapters,
+    is_cast_visible_character,
     is_role_only_character_name,
     normalize_character_name,
     record_character_candidate,
@@ -76,6 +88,11 @@ from app.utils.intelligence_utils import (
 )
 from app.utils.notification_utils import collect_book_ready_stats, upsert_book_ready_notification
 from app.utils.queue_utils import queue_for_user
+from app.utils.relationship_utils import (
+    canonical_relationship_pair_key,
+    relationship_state_signature,
+    upsert_relationship_timeline_state,
+)
 
 log = logging.getLogger("lorevia.extraction")
 AUTO_SAVE_CONFIDENCE = 0.78
@@ -87,15 +104,17 @@ def _relationship_signature(
     character_a_id: uuid.UUID,
     character_b_id: uuid.UUID,
     rel_type: str,
+    sentiment: float | None,
     from_chapter: int,
     description: str | None,
-) -> tuple[str, str, str, int, str]:
-    left_id = str(character_a_id)
-    right_id = str(character_b_id)
-    ordered = tuple(sorted((left_id, right_id)))
-    normalized_type = " ".join(str(rel_type or "neutral").split()).strip().lower() or "neutral"
-    normalized_description = " ".join(str(description or "").split()).strip().casefold()
-    return ordered[0], ordered[1], normalized_type, int(from_chapter or 0), normalized_description
+) -> tuple[str, str, str, float | None, str, int]:
+    left_id, right_id = canonical_relationship_pair_key(character_a_id, character_b_id)
+    normalized_type, normalized_sentiment, normalized_description = relationship_state_signature(
+        rel_type=rel_type or "neutral",
+        sentiment=sentiment,
+        description=description,
+    )
+    return left_id, right_id, normalized_type, normalized_sentiment, normalized_description, int(from_chapter or 0)
 
 
 def _relationship_resolution_candidates(
@@ -124,6 +143,14 @@ def _relationship_evidence_payload(
     unresolved_side: str,
     resolution: str,
 ) -> dict[str, Any]:
+    pair_key: list[str] | None = None
+    if rel.get("matched_character_a_id") and rel.get("matched_character_b_id"):
+        pair_key = list(
+            canonical_relationship_pair_key(
+                uuid.UUID(str(rel["matched_character_a_id"])),
+                uuid.UUID(str(rel["matched_character_b_id"])),
+            )
+        )
     return {
         "relationship": {
             "character_a": " ".join(str(rel.get("character_a") or "").split()).strip(),
@@ -138,6 +165,9 @@ def _relationship_evidence_payload(
         "resolution": resolution,
         "counterpart_name": counterpart_name,
         "counterpart_character_id": str(counterpart_character_id) if counterpart_character_id else None,
+        "pair_key": pair_key,
+        "character_a_matches": [str(item) for item in rel.get("character_a_matches", [])[:3]],
+        "character_b_matches": [str(item) for item in rel.get("character_b_matches", [])[:3]],
     }
 
 
@@ -166,7 +196,7 @@ async def _record_relationship_review_candidates(
             raw_character_b=right_name,
             matched_character_a_id=left_matches[0] if len(left_matches) == 1 else None,
             matched_character_b_id=right_matches[0] if len(right_matches) == 1 else None,
-            rel_type=str(rel.get("rel_type") or rel.get("relationship") or "connection").strip() or None,
+            rel_type=str(rel.get("rel_type") or rel.get("type") or rel.get("relationship") or "connection").strip() or None,
             sentiment=rel.get("sentiment"),
             description=str(rel.get("description") or "").strip() or None,
             status=CHARACTER_RELATIONSHIP_CANDIDATE_PENDING,
@@ -199,7 +229,7 @@ async def _persist_relationship_records(
     existing_characters: list[Character],
     relationships: list[dict[str, Any]],
     key_cache: dict[uuid.UUID, set[str]],
-    persisted_signatures: set[tuple[str, str, str, int, str]],
+    persisted_signatures: set[tuple[str, str, str, float | None, str, int]],
 ) -> tuple[int, list[dict[str, Any]], int]:
     persisted = 0
     unresolved: list[dict[str, Any]] = []
@@ -225,24 +255,23 @@ async def _persist_relationship_records(
                 left_matches[0],
                 right_matches[0],
                 str(rel.get("type") or "neutral"),
+                rel.get("sentiment"),
                 chapter_number,
                 str(rel.get("description") or ""),
             )
-            if signature in persisted_signatures:
-                continue
-            persisted_signatures.add(signature)
-            db.add(
-                CharacterRelationship(
-                    book_id=book_id,
-                    character_a_id=left_matches[0],
-                    character_b_id=right_matches[0],
-                    rel_type=str(rel.get("type") or "neutral"),
-                    sentiment=rel.get("sentiment"),
-                    description=rel.get("description"),
-                    from_chapter=chapter_number,
-                )
+            relationship, created = await upsert_relationship_timeline_state(
+                db,
+                book_id=book_id,
+                character_a_id=left_matches[0],
+                character_b_id=right_matches[0],
+                rel_type=str(rel.get("type") or "neutral"),
+                sentiment=rel.get("sentiment"),
+                description=str(rel.get("description") or ""),
+                from_chapter=chapter_number,
             )
-            persisted += 1
+            if created:
+                persisted_signatures.add(signature)
+                persisted += 1
             continue
 
         unresolved_entry = {
@@ -254,6 +283,8 @@ async def _persist_relationship_records(
             "chapter_number": chapter_number,
             "character_a_matches": [str(item) for item in left_matches[:3]],
             "character_b_matches": [str(item) for item in right_matches[:3]],
+            "matched_character_a_id": str(left_matches[0]) if len(left_matches) == 1 else None,
+            "matched_character_b_id": str(right_matches[0]) if len(right_matches) == 1 else None,
         }
         unresolved.append(unresolved_entry)
         review_candidate_count += await _record_relationship_review_candidates(
@@ -268,7 +299,20 @@ async def _persist_relationship_records(
     return persisted, unresolved, review_candidate_count
 
 
-async def process_book(book_id: str, queue_wait_ms: int | None = None) -> dict:
+async def process_book(book_id: str, queue_wait_ms: int | None = None, task_id: str | None = None) -> dict:
+    inflight_key = key_extraction_inflight_book(book_id)
+    owner_token = task_id or "unknown"
+    if not await cache_set_if_absent(inflight_key, owner_token, INFLIGHT_BOOK_TTL_SECONDS):
+        log.info("book_processing_already_inflight book_id=%s", book_id)
+        return {"skipped": "already_inflight"}
+
+    try:
+        return await _process_book_impl(book_id, queue_wait_ms=queue_wait_ms)
+    finally:
+        await cache_delete_if_owner(inflight_key, owner_token)
+
+
+async def _process_book_impl(book_id: str, queue_wait_ms: int | None = None) -> dict:
     async with AsyncSessionLocal() as db:
         started_at = time.perf_counter()
         processing_started_at = datetime.now(UTC)
@@ -439,12 +483,21 @@ async def process_book(book_id: str, queue_wait_ms: int | None = None) -> dict:
             )
             return {"skipped": "book_hidden"}
 
+        existing_chapters = (
+            await db.execute(
+                select(Chapter).where(Chapter.book_id == book.id)
+            )
+        ).scalars().all()
+        existing_chapter_map: dict[int, Chapter] = {
+            ch.number: ch for ch in existing_chapters if ch.number is not None
+        }
         for ch_data in all_chapters:
             await _ensure_chapter_stub(
                 db,
                 book,
                 ch_data,
                 s3_key=stored_chapter_keys.get(int(ch_data["number"]), ""),
+                existing_chapter_map=existing_chapter_map,
             )
         if screenplay_payload is not None:
             await refresh_screenplay_scene_rows(
@@ -645,7 +698,15 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
         )
 
         embed_started = time.perf_counter()
-        chunk_batches = chunked(chunks, settings.EXTRACTION_EMBED_BATCH_SIZE)
+        chunk_embedding_inputs = [
+            build_chunk_embedding_text(
+                chapter_number=chapter_number,
+                chapter_title=chapter.title or ch_data.get("title"),
+                text=chunk,
+            )
+            for chunk in chunks
+        ]
+        chunk_batches = chunked(chunk_embedding_inputs, settings.EXTRACTION_EMBED_BATCH_SIZE)
         embed_semaphore = asyncio.Semaphore(
             max(1, min(settings.EXTRACTION_EMBED_CONCURRENCY, len(chunk_batches) or 1))
         )
@@ -730,6 +791,7 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                     CharacterRelationship.character_a_id,
                     CharacterRelationship.character_b_id,
                     CharacterRelationship.rel_type,
+                    CharacterRelationship.sentiment,
                     CharacterRelationship.from_chapter,
                     CharacterRelationship.description,
                 ).where(
@@ -738,11 +800,12 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                 )
             )
         ).all()
-        persisted_relationship_signatures: set[tuple[str, str, str, int, str]] = {
+        persisted_relationship_signatures: set[tuple[str, str, str, float | None, str, int]] = {
             _relationship_signature(
                 row.character_a_id,
                 row.character_b_id,
                 row.rel_type,
+                row.sentiment,
                 row.from_chapter,
                 row.description,
             )
@@ -761,7 +824,7 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                     batch_index,
                     exc_info=result,
                 )
-                result = fallback_character_mentions(batch_text)
+                result = await fallback_character_mentions(batch_text, book_id=book.id)
                 extraction_fallback_batches += 1
                 extraction_fallback_character_count += len(result.get("characters", []))
             result = cast(dict[str, Any], result)
@@ -828,6 +891,7 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
             decision = _character_save_decision(entity)
             candidate_evidence = _candidate_record_evidence(entity)
             manual_review_reason = _entity_requires_manual_review(entity)
+            existing_match = next((item for item in existing_characters if item.id == existing_id), None) if existing_id is not None else None
 
             if len(matching_ids) > 1:
                 ambiguous_entity_count += 1
@@ -845,6 +909,15 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                     evidence=candidate_evidence,
                     source_batch_key=entity_source_batch_key,
                 )
+                await _record_cluster_member_candidates(
+                    db,
+                    book_id=book.id,
+                    chapter_number=chapter_number,
+                    entity=entity,
+                    matched_character_id=None,
+                    reason_code=reasons[0],
+                    status=CHARACTER_CANDIDATE_PENDING,
+                )
                 await _record_entity_cluster_mentions(
                     db,
                     book_id=book.id,
@@ -857,6 +930,33 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                 continue
 
             if existing_id is not None:
+                if existing_match is not None and not is_cast_visible_character(existing_match):
+                    reasons = ["matched_quarantined_character", *list(decision.reasons or [])]
+                    quarantined_candidate_count += 1
+                    await record_character_candidate(
+                        db,
+                        book_id=book.id,
+                        chapter_number=chapter_number,
+                        raw_name=str(entity.get("name") or ""),
+                        proposed_name=str(entity.get("name") or ""),
+                        aliases=entity.get("aliases") if isinstance(entity.get("aliases"), list) else [],
+                        matched_character_id=existing_id,
+                        status=CHARACTER_CANDIDATE_PENDING,
+                        confidence=entity.get("confidence"),
+                        reason_codes=reasons,
+                        evidence=candidate_evidence,
+                        source_batch_key=entity_source_batch_key,
+                    )
+                    await _record_entity_cluster_mentions(
+                        db,
+                        book_id=book.id,
+                        chapter_number=chapter_number,
+                        entity=entity,
+                        matched_character_id=existing_id,
+                        resolver_status="matched_needs_review",
+                        resolver_reasons=reasons,
+                    )
+                    continue
                 if not decision.allowed or not _should_update_existing_character(entity):
                     reasons = list(decision.reasons or []) or ["existing_match_needs_review"]
                     if manual_review_reason and manual_review_reason not in reasons:
@@ -942,6 +1042,15 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                     reason_codes=reasons,
                     evidence=candidate_evidence,
                     source_batch_key=entity_source_batch_key,
+                )
+                await _record_cluster_member_candidates(
+                    db,
+                    book_id=book.id,
+                    chapter_number=chapter_number,
+                    entity=entity,
+                    matched_character_id=None,
+                    reason_code=reasons[0],
+                    status=CHARACTER_CANDIDATE_PENDING,
                 )
                 await _record_entity_cluster_mentions(
                     db,
@@ -1386,12 +1495,15 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
         await cache_del(inflight_key)
 
 
-async def _ensure_chapter_stub(db, book, ch_data: dict, *, s3_key: str):
-    existing = (
-        await db.execute(
-            select(Chapter).where(Chapter.book_id == book.id, Chapter.number == ch_data["number"])
-        )
-    ).scalar()
+async def _ensure_chapter_stub(db, book, ch_data: dict, *, s3_key: str, existing_chapter_map: dict[int, Chapter] | None = None):
+    if existing_chapter_map is not None:
+        existing = existing_chapter_map.get(int(ch_data["number"]))
+    else:
+        existing = (
+            await db.execute(
+                select(Chapter).where(Chapter.book_id == book.id, Chapter.number == ch_data["number"])
+            )
+        ).scalar()
 
     if existing is None:
         db.add(
@@ -1549,6 +1661,19 @@ async def _promote_new_character_from_entity(
     pending_first_chapter_updates: dict[uuid.UUID, Character],
     source_batch_key: str | None,
 ) -> Character:
+    dossier_summary = _entity_dossier_summary(entity)
+    entity["visibility_state"] = CHARACTER_VISIBILITY_VISIBLE
+    entity["approval_state"] = CHARACTER_APPROVAL_APPROVED
+    entity["approval_source"] = CHARACTER_APPROVAL_SOURCE_DETERMINISTIC_AUTO
+    entity["approval_reason_codes"] = [
+        "deterministic_auto_promotion",
+        *[
+            str(reason).strip()
+            for reason in (dossier_summary.get("summary_reason_codes") or [])
+            if str(reason).strip()
+        ],
+    ]
+    entity["dossier_summary"] = dossier_summary
     profile = build_character_profile(entity, book_id, chapter_number)
     char = Character(**profile, embedding=embedding)
     db.add(char)
@@ -1633,15 +1758,15 @@ async def _record_cluster_member_candidates(
     book_id: uuid.UUID,
     chapter_number: int,
     entity: dict[str, Any],
-    matched_character_id: uuid.UUID,
+    matched_character_id: uuid.UUID | None,
     reason_code: str,
+    status: str = "accepted",
 ) -> None:
     members = entity.get("cluster_members") if isinstance(entity.get("cluster_members"), list) else []
     if not members:
         return
 
     primary_name = normalize_character_name(str(entity.get("name") or ""))
-    primary_source_batch_key = str(entity.get("_source_batch_key") or "") or None
     seen: set[tuple[str, str | None]] = set()
     for member in members:
         raw_name = " ".join(str(member.get("name") or "").split()).strip()
@@ -1649,7 +1774,7 @@ async def _record_cluster_member_candidates(
         source_batch_key = str(member.get("source_batch_key") or "") or None
         if not raw_name or not normalized_name:
             continue
-        if normalized_name == primary_name and source_batch_key == primary_source_batch_key:
+        if normalized_name == primary_name:
             continue
         dedupe_key = (normalized_name, source_batch_key)
         if dedupe_key in seen:
@@ -1663,7 +1788,7 @@ async def _record_cluster_member_candidates(
             proposed_name=raw_name,
             aliases=member.get("aliases") if isinstance(member.get("aliases"), list) else [],
             matched_character_id=matched_character_id,
-            status="accepted",
+            status=status,
             confidence=entity.get("confidence"),
             reason_codes=[reason_code],
             evidence={
@@ -1714,8 +1839,32 @@ def _entity_evidence(entity: dict) -> dict:
     return evidence if isinstance(evidence, dict) else {}
 
 
+def _entity_dossier_summary(entity: dict) -> dict[str, Any]:
+    evidence = _entity_evidence(entity)
+    verifier = evidence.get("verifier") if isinstance(evidence.get("verifier"), dict) else {}
+    final = verifier.get("final") if isinstance(verifier, dict) and isinstance(verifier.get("final"), dict) else {}
+    return build_character_dossier_summary(
+        name=entity.get("name"),
+        aliases=entity.get("aliases") if isinstance(entity.get("aliases"), list) else [],
+        evidence=evidence,
+        reason_codes=[
+            *(
+                final.get("reasons")
+                if isinstance(final.get("reasons"), list)
+                else []
+            ),
+            *(
+                evidence.get("resolver_reasons")
+                if isinstance(evidence.get("resolver_reasons"), list)
+                else []
+            ),
+        ],
+    )
+
+
 def _candidate_record_evidence(entity: dict) -> dict[str, Any]:
     evidence = dict(_entity_evidence(entity))
+    evidence["dossier_summary"] = _entity_dossier_summary(entity)
     evidence["entity"] = {
         "name": entity.get("name"),
         "canonical_name": entity.get("canonical_name"),
@@ -1760,7 +1909,40 @@ def _blocked_character_ids(
     return blocked_ids
 
 
+def _entity_verifier_summary(entity: dict) -> dict[str, Any]:
+    evidence = _entity_evidence(entity)
+    verifier = evidence.get("verifier") if isinstance(evidence.get("verifier"), dict) else {}
+    final = verifier.get("final") if isinstance(verifier, dict) else {}
+    return final if isinstance(final, dict) else {}
+
+
+def _entity_verifier_band(entity: dict) -> str | None:
+    final = _entity_verifier_summary(entity)
+    band = str(final.get("confidence_band") or "").strip()
+    return band or None
+
+
 def _should_update_existing_character(entity: dict) -> bool:
+    verifier_band = _entity_verifier_band(entity)
+    if verifier_band == "reject":
+        return False
+    if verifier_band == "review":
+        return False
+    dossier_summary = _entity_dossier_summary(entity)
+    if dossier_summary.get("resolver_ambiguity_count") or dossier_summary.get("conflict_signal_count"):
+        return False
+    if verifier_band == "accept":
+        return bool(
+            dossier_summary.get("strict_auto_eligible")
+            or (
+                not dossier_summary.get("single_token")
+                and dossier_summary.get("person_ner_support", 0) >= 1
+                and (
+                    _entity_evidence(entity).get("has_dialogue_or_action")
+                    or _has_character_profile_signal(entity)
+                )
+            )
+        )
     confidence = float(entity.get("confidence") or 0.0)
     if confidence >= AUTO_SAVE_CONFIDENCE:
         return True
@@ -1809,6 +1991,12 @@ def _has_character_profile_signal(entity: dict) -> bool:
 
 
 def _entity_requires_manual_review(entity: dict) -> str | None:
+    verifier_band = _entity_verifier_band(entity)
+    if verifier_band == "review":
+        return "mention_verifier_review"
+    if verifier_band == "reject":
+        return "mention_verifier_rejected"
+
     evidence = _entity_evidence(entity)
     cluster_names = [
         str(item).strip()
@@ -1842,6 +2030,8 @@ def _entity_requires_manual_review(entity: dict) -> str | None:
 
 
 def _can_auto_save_character(entity: dict) -> bool:
+    if _entity_verifier_band(entity) != "accept":
+        return False
     if _entity_requires_manual_review(entity):
         return False
     return _character_save_decision(entity).allowed
@@ -1851,7 +2041,7 @@ def _character_save_decision(entity: dict):
     evidence = _entity_evidence(entity)
     traits = entity.get("traits")
     trait_state = traits if isinstance(traits, dict) else {}
-    return character_persistence_decision(
+    decision = character_persistence_decision(
         entity.get("name"),
         role=entity.get("role"),
         aliases=entity.get("aliases") if isinstance(entity.get("aliases"), list) else None,
@@ -1865,6 +2055,61 @@ def _character_save_decision(entity: dict):
         evidence=evidence,
         entity_type=str(entity.get("entity_type") or "person"),
     )
+    verifier_band = _entity_verifier_band(entity)
+    verifier_reasons = [
+        str(reason).strip()
+        for reason in (_entity_verifier_summary(entity).get("reasons") or [])
+        if str(reason).strip()
+    ]
+    dossier_summary = _entity_dossier_summary(entity)
+    if verifier_band == "reject":
+        return CharacterPersistenceDecision(
+            allowed=False,
+            score=decision.score,
+            reasons=tuple(["mention_verifier_rejected", *verifier_reasons]),
+        )
+    if verifier_band == "review":
+        return CharacterPersistenceDecision(
+            allowed=False,
+            score=decision.score,
+            reasons=tuple(["mention_verifier_review", *verifier_reasons]),
+        )
+    if verifier_band == "accept":
+        if not dossier_summary.get("strict_auto_eligible"):
+            return CharacterPersistenceDecision(
+                allowed=False,
+                score=decision.score,
+                reasons=tuple([
+                    "candidate_dossier_needs_review",
+                    *[
+                        str(reason).strip()
+                        for reason in (dossier_summary.get("strict_auto_reason_codes") or [])
+                        if str(reason).strip()
+                    ],
+                    *decision.reasons,
+                ]),
+            )
+        return CharacterPersistenceDecision(
+            allowed=decision.allowed,
+            score=decision.score,
+            reasons=tuple(decision.reasons),
+        )
+    confidence = float(entity.get("confidence") or 0.0)
+    if confidence >= AUTO_SAVE_CONFIDENCE and not dossier_summary.get("strict_auto_eligible"):
+        return CharacterPersistenceDecision(
+            allowed=False,
+            score=decision.score,
+            reasons=tuple([
+                "candidate_dossier_needs_review",
+                *[
+                    str(reason).strip()
+                    for reason in (dossier_summary.get("strict_auto_reason_codes") or [])
+                    if str(reason).strip()
+                ],
+                *decision.reasons,
+            ]),
+        )
+    return decision
 
 
 def _append_rejected_character_reports(target: list[dict[str, Any]], entries: list[dict[str, Any]] | None) -> None:

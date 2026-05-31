@@ -1,10 +1,22 @@
+import pytest
+from fastapi import HTTPException
+from starlette.requests import Request
 from starlette.responses import Response
 
+from app.utils.auth_csrf import (
+    AUTH_CSRF_COOKIE_NAME,
+    AUTH_CSRF_HEADER_NAME,
+    cookie_authenticated_request_requires_csrf,
+    create_auth_csrf_token,
+    set_auth_csrf_cookie,
+    validate_auth_csrf_token,
+)
 from app.utils.auth_cookies import (
     ACCESS_TOKEN_COOKIE_NAME,
     REFRESH_TOKEN_COOKIE_NAME,
     auth_cookie_secure,
     clear_auth_cookies,
+    get_auth_token,
     set_auth_cookies,
     set_access_cookie,
 )
@@ -24,10 +36,32 @@ def test_set_auth_cookies_uses_http_only_lax_path(monkeypatch):
     ]
     assert any(ACCESS_TOKEN_COOKIE_NAME in header for header in set_cookie_headers)
     assert any(REFRESH_TOKEN_COOKIE_NAME in header for header in set_cookie_headers)
+    assert any(AUTH_CSRF_COOKIE_NAME in header for header in set_cookie_headers)
     assert any("httponly" in header.lower() for header in set_cookie_headers)
     assert any("samesite=lax" in header.lower() for header in set_cookie_headers)
     assert any("secure" in header.lower() for header in set_cookie_headers)
-    assert any("path=/api/v1" in header.lower() for header in set_cookie_headers)
+    assert any("path=/" in header.lower() for header in set_cookie_headers)
+
+
+def test_set_auth_cookies_expires_legacy_api_prefix_cookies(monkeypatch):
+    monkeypatch.setattr("app.core.config.settings.API_V1_PREFIX", "/api/v1", raising=False)
+    monkeypatch.setattr("app.core.config.settings.APP_URL", "https://getlorevia.com", raising=False)
+    monkeypatch.setattr("app.core.config.settings.DEBUG", False, raising=False)
+
+    response = Response()
+    set_auth_cookies(response, "access-token", "refresh-token")
+
+    set_cookie_headers = [
+        value.decode() if isinstance(value, bytes) else value
+        for name, value in response.raw_headers
+        if name.lower() == b"set-cookie"
+    ]
+    assert any(ACCESS_TOKEN_COOKIE_NAME in header and "path=/api/v1" in header.lower() for header in set_cookie_headers)
+    assert any(ACCESS_TOKEN_COOKIE_NAME in header and "path=/api/v1/" in header.lower() for header in set_cookie_headers)
+    assert any(REFRESH_TOKEN_COOKIE_NAME in header and "path=/api/v1" in header.lower() for header in set_cookie_headers)
+    assert any(REFRESH_TOKEN_COOKIE_NAME in header and "path=/api/v1/" in header.lower() for header in set_cookie_headers)
+    assert any(AUTH_CSRF_COOKIE_NAME in header and "path=/api/v1" in header.lower() for header in set_cookie_headers)
+    assert any(AUTH_CSRF_COOKIE_NAME in header and "path=/api/v1/" in header.lower() for header in set_cookie_headers)
 
 
 def test_set_auth_cookies_disables_secure_for_local_http(monkeypatch):
@@ -58,9 +92,10 @@ def test_clear_auth_cookies_sets_expired_headers(monkeypatch):
         for name, value in response.raw_headers
         if name.lower() == b"set-cookie"
     ]
-    assert len(set_cookie_headers) == 2
     assert any(ACCESS_TOKEN_COOKIE_NAME in header for header in set_cookie_headers)
     assert any(REFRESH_TOKEN_COOKIE_NAME in header for header in set_cookie_headers)
+    assert any(AUTH_CSRF_COOKIE_NAME in header for header in set_cookie_headers)
+    assert any("path=/" in header.lower() for header in set_cookie_headers)
 
 
 def test_set_access_cookie_sets_only_the_access_token(monkeypatch):
@@ -75,8 +110,159 @@ def test_set_access_cookie_sets_only_the_access_token(monkeypatch):
         for name, value in response.raw_headers
         if name.lower() == b"set-cookie"
     ]
-    assert len(set_cookie_headers) == 1
-    assert ACCESS_TOKEN_COOKIE_NAME in set_cookie_headers[0]
-    assert "httponly" in set_cookie_headers[0].lower()
-    assert "samesite=lax" in set_cookie_headers[0].lower()
-    assert "path=/api/v1" in set_cookie_headers[0].lower()
+    active_access_cookie = next(
+        header for header in set_cookie_headers
+        if ACCESS_TOKEN_COOKIE_NAME in header and "max-age=900" in header.lower()
+    )
+    assert "httponly" in active_access_cookie.lower()
+    assert "samesite=lax" in active_access_cookie.lower()
+    assert "path=/" in active_access_cookie.lower()
+    assert any(AUTH_CSRF_COOKIE_NAME in header for header in set_cookie_headers)
+
+
+def test_set_access_cookie_expires_legacy_api_prefix_access_cookie(monkeypatch):
+    monkeypatch.setattr("app.core.config.settings.API_V1_PREFIX", "/api/v1", raising=False)
+    monkeypatch.setattr("app.core.config.settings.APP_URL", "https://getlorevia.com", raising=False)
+    monkeypatch.setattr("app.core.config.settings.DEBUG", False, raising=False)
+
+    response = Response()
+    set_access_cookie(response, "access-token")
+
+    set_cookie_headers = [
+        value.decode() if isinstance(value, bytes) else value
+        for name, value in response.raw_headers
+        if name.lower() == b"set-cookie"
+    ]
+    assert any(ACCESS_TOKEN_COOKIE_NAME in header and "path=/api/v1" in header.lower() for header in set_cookie_headers)
+    assert any(ACCESS_TOKEN_COOKIE_NAME in header and "path=/api/v1/" in header.lower() for header in set_cookie_headers)
+    assert any(AUTH_CSRF_COOKIE_NAME in header and "path=/api/v1" in header.lower() for header in set_cookie_headers)
+    assert any(AUTH_CSRF_COOKIE_NAME in header and "path=/api/v1/" in header.lower() for header in set_cookie_headers)
+
+
+def test_set_auth_csrf_cookie_uses_readable_lax_cookie(monkeypatch):
+    monkeypatch.setattr("app.core.config.settings.APP_URL", "https://getlorevia.com", raising=False)
+    monkeypatch.setattr("app.core.config.settings.DEBUG", False, raising=False)
+
+    response = Response()
+    set_auth_csrf_cookie(response, "csrf-token")
+
+    set_cookie_headers = [
+        value.decode() if isinstance(value, bytes) else value
+        for name, value in response.raw_headers
+        if name.lower() == b"set-cookie"
+    ]
+    active_csrf_cookie = next(
+        header for header in set_cookie_headers
+        if AUTH_CSRF_COOKIE_NAME in header and "csrf-token" in header
+    )
+    assert "httponly" not in active_csrf_cookie.lower()
+    assert "samesite=lax" in active_csrf_cookie.lower()
+    assert "path=/" in active_csrf_cookie.lower()
+
+
+def test_cookie_authenticated_request_requires_csrf_only_for_unsafe_non_bearer_methods():
+    patch_request = Request({"type": "http", "method": "PATCH", "headers": []})
+    get_request = Request({"type": "http", "method": "GET", "headers": []})
+    bearer_request = Request({"type": "http", "method": "POST", "headers": [(b"authorization", b"Bearer token")]})
+
+    assert cookie_authenticated_request_requires_csrf(patch_request) is True
+    assert cookie_authenticated_request_requires_csrf(get_request) is False
+    assert cookie_authenticated_request_requires_csrf(bearer_request) is False
+
+
+def test_get_auth_token_prefers_cookie_over_bearer_token():
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "headers": [(b"cookie", b"lorevia_access_token=cookie-token")],
+        }
+    )
+
+    assert get_auth_token(request, bearer_token="bearer-token") == "cookie-token"
+
+
+def test_get_auth_token_prefers_last_duplicate_cookie_value():
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "headers": [
+                (
+                    b"cookie",
+                    b"lorevia_access_token=stale-token; lorevia_access_token=fresh-token",
+                )
+            ],
+        }
+    )
+
+    assert get_auth_token(request, bearer_token="bearer-token") == "fresh-token"
+
+
+def test_get_auth_token_uses_bearer_token_when_cookie_is_missing():
+    request = Request({"type": "http", "method": "GET", "headers": []})
+
+    assert get_auth_token(request, bearer_token="bearer-token") == "bearer-token"
+
+
+def test_validate_auth_csrf_token_accepts_matching_cookie_header_and_origin():
+    token = create_auth_csrf_token()
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "headers": [
+                (b"cookie", f"{AUTH_CSRF_COOKIE_NAME}={token}".encode("utf-8")),
+                (AUTH_CSRF_HEADER_NAME.encode("utf-8"), token.encode("utf-8")),
+                (b"origin", b"https://getlorevia.com"),
+            ],
+        }
+    )
+
+    validate_auth_csrf_token(request)
+
+
+def test_validate_auth_csrf_token_prefers_last_duplicate_cookie_value():
+    stale_token = create_auth_csrf_token()
+    fresh_token = create_auth_csrf_token()
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "headers": [
+                (
+                    b"cookie",
+                    f"{AUTH_CSRF_COOKIE_NAME}={stale_token}; {AUTH_CSRF_COOKIE_NAME}={fresh_token}".encode("utf-8"),
+                ),
+                (AUTH_CSRF_HEADER_NAME.encode("utf-8"), fresh_token.encode("utf-8")),
+                (b"origin", b"https://getlorevia.com"),
+            ],
+        }
+    )
+
+    validate_auth_csrf_token(request)
+
+
+@pytest.mark.parametrize(
+    ("cookie_token", "header_token", "origin"),
+    [
+        (None, "token", "https://getlorevia.com"),
+        ("token", None, "https://getlorevia.com"),
+        ("token", "different", "https://getlorevia.com"),
+        (create_auth_csrf_token(), create_auth_csrf_token(), "https://evil.example"),
+    ],
+)
+def test_validate_auth_csrf_token_rejects_invalid_inputs(cookie_token, header_token, origin):
+    headers = []
+    if cookie_token:
+        headers.append((b"cookie", f"{AUTH_CSRF_COOKIE_NAME}={cookie_token}".encode("utf-8")))
+    if header_token:
+        headers.append((AUTH_CSRF_HEADER_NAME.encode("utf-8"), header_token.encode("utf-8")))
+    if origin:
+        headers.append((b"origin", origin.encode("utf-8")))
+    request = Request({"type": "http", "method": "POST", "headers": headers})
+
+    with pytest.raises(HTTPException) as exc_info:
+        validate_auth_csrf_token(request)
+
+    assert exc_info.value.status_code == 403

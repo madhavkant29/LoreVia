@@ -8,6 +8,7 @@ services:
       REDIS_URL: redis://:${REDIS_PASSWORD:-local-dev-redis-password}@redis:6379/0
       CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-local-dev-redis-password}@redis:6379/0
       CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-local-dev-redis-password}@redis:6379/0
+      TEST_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/lorevia_test
     depends_on:
       postgres:
         condition: service_healthy
@@ -93,10 +94,11 @@ services:
     environment:
       ALEMBIC_ALLOW_DESTRUCTIVE_UPGRADES: "1"
       REDIS_URL: redis://:${REDIS_PASSWORD:-local-dev-redis-password}@redis:6379/0
+      TEST_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/lorevia_test
     depends_on:
       postgres:
         condition: service_healthy
-    command: python scripts/bootstrap_db.py
+    command: sh -c "python scripts/ensure_local_test_db.py && python scripts/bootstrap_db.py"
     networks:
       - default
       - redis_internal

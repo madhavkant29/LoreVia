@@ -108,7 +108,7 @@ export default function BetaReadsPage() {
     return (
       <article
         key={assignment.id}
-        className="rounded-[1.2rem] border border-[rgba(var(--border),0.75)] bg-[rgba(255,255,255,0.55)] p-5 dark:bg-[rgba(255,255,255,0.03)]"
+        className="rounded-md border border-[rgba(var(--border),0.75)] bg-[rgba(255,255,255,0.55)] p-5 dark:bg-[rgba(255,255,255,0.03)]"
       >
         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <div className="space-y-2">
@@ -210,7 +210,7 @@ export default function BetaReadsPage() {
                   </p>
                 </div>
                 {missedWarning ? (
-                  <div className="rounded-[1rem] border border-amber-300/40 bg-amber-100/70 px-4 py-3 text-sm text-amber-900 dark:bg-amber-300/10 dark:text-amber-100">
+                  <div className="rounded-md border border-amber-300/40 bg-amber-100/70 px-4 py-3 text-sm text-amber-900 dark:bg-amber-300/10 dark:text-amber-100">
                     {missedWarning}
                   </div>
                 ) : null}
@@ -302,7 +302,7 @@ export default function BetaReadsPage() {
           </div>
 
           {isError ? (
-            <div className="mt-5 rounded-[1rem] border border-rose-300/40 bg-rose-100/70 px-4 py-3 text-sm text-rose-900 dark:bg-rose-300/10 dark:text-rose-100">
+            <div className="mt-5 rounded-md border border-rose-300/40 bg-rose-100/70 px-4 py-3 text-sm text-rose-900 dark:bg-rose-300/10 dark:text-rose-100">
               We could not load your beta reads right now.
             </div>
           ) : null}

@@ -227,6 +227,17 @@ def build_character_analysis_metadata(extracted: dict, *, persistence_reason: st
     else:
         confidence_band = "low"
     summary_quality = "generic" if "generic_summary" in quality_flags else ("grounded" if grounding_passage_count >= 2 else "thin")
+    trust_tier = str(extracted.get("trust_tier") or "visible").strip() or "visible"
+    trust_reasons = [
+        str(reason).strip()
+        for reason in (extracted.get("trust_reasons") or [])
+        if str(reason).strip()
+    ]
+    approval_reason_codes = [
+        str(reason).strip()
+        for reason in (extracted.get("approval_reason_codes") or [])
+        if str(reason).strip()
+    ]
     return {
         "persistence_reason": persistence_reason or "extracted_character",
         "evidence_count": mention_count,
@@ -241,6 +252,13 @@ def build_character_analysis_metadata(extracted: dict, *, persistence_reason: st
         "cluster_size": cluster_size,
         "cluster_mention_count": cluster_mention_count,
         "resolver_status": str(extracted.get("resolver_status") or evidence.get("resolver_status") or "").strip() or None,
+        "visibility_state": str(extracted.get("visibility_state") or "visible").strip() or "visible",
+        "approval_state": str(extracted.get("approval_state") or "approved").strip() or "approved",
+        "approval_source": str(extracted.get("approval_source") or "deterministic_auto").strip() or "deterministic_auto",
+        "approval_reason_codes": approval_reason_codes,
+        "dossier_summary": extracted.get("dossier_summary") if isinstance(extracted.get("dossier_summary"), dict) else None,
+        "trust_tier": trust_tier,
+        "trust_reasons": trust_reasons,
     }
 
 
@@ -280,6 +298,14 @@ def build_character_profile(extracted: dict, book_id: uuid.UUID, first_chapter: 
         "archetype": archetype,
         "growth_events": merge_growth_events(_growth_event_group(extracted.get("growth_event"))),
         "analysis_metadata": build_character_analysis_metadata(extracted),
+        "visibility_state": str(extracted.get("visibility_state") or "visible").strip() or "visible",
+        "approval_state": str(extracted.get("approval_state") or "approved").strip() or "approved",
+        "approval_source": str(extracted.get("approval_source") or "deterministic_auto").strip() or "deterministic_auto",
+        "approval_reason_codes": [
+            str(reason).strip()
+            for reason in (extracted.get("approval_reason_codes") or [])
+            if str(reason).strip()
+        ],
     }
 
 

@@ -8,7 +8,7 @@ const NotificationsPanel = dynamic(
   () => import("@/components/layout/NotificationsPanel").then((module) => module.NotificationsPanel),
   {
     ssr: false,
-    loading: () => <div className="min-h-screen rounded-[1.5rem] border p-6" />,
+    loading: () => <div className="min-h-screen rounded-lg border p-6" />,
   }
 )
 

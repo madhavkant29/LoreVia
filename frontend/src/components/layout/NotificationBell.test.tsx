@@ -98,6 +98,28 @@ describe("NotificationBell", () => {
     expect(view.querySelector('[data-testid="notifications-panel"]')).not.toBeNull()
   })
 
+  it("closes the notifications sidebar when clicking outside it", async () => {
+    useNotificationsStateMock.mockReturnValue({ unreadCount: 0 })
+    usePreferencesStoreMock.mockReturnValue({ theme: "light" })
+
+    const view = renderNotificationBell()
+    const toggleButton = view.querySelector("button")
+
+    await act(async () => {
+      toggleButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+      await Promise.resolve()
+    })
+
+    expect(view.querySelector('[data-testid="notifications-panel"]')).not.toBeNull()
+
+    await act(async () => {
+      document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }))
+      await Promise.resolve()
+    })
+
+    expect(view.querySelector('[data-testid="notifications-panel"]')).toBeNull()
+  })
+
   it("defers notification queries until the bell is enabled or opened", async () => {
     useNotificationsStateMock.mockReturnValue({ unreadCount: 0 })
     usePreferencesStoreMock.mockReturnValue({ theme: "light" })

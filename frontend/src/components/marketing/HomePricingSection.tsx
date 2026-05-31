@@ -63,7 +63,7 @@ export function HomePricingSection({ ctaHref }: HomePricingSectionProps) {
   return (
     <section id="pricing" className="mx-auto max-w-7xl px-5 py-20 md:px-8">
       <div className="text-center">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-[#6fae9f]">Pricing</p>
+        <p className="text-3xs font-semibold uppercase tracking-[0.32em] text-[#6fae9f]">Pricing</p>
         <h2 className="mt-5 font-display text-4xl font-semibold leading-[1.02] text-white md:text-5xl">
           Simple, transparent pricing
         </h2>
@@ -104,7 +104,7 @@ export function HomePricingSection({ ctaHref }: HomePricingSectionProps) {
           return (
             <Reveal key={tier.name} delay={index * 70} className="h-full">
               <article
-                className={`relative flex h-full flex-col rounded-[1.7rem] border p-6 md:p-7 ${
+                className={`relative flex h-full flex-col rounded-lg border p-6 md:p-7 ${
                   tier.highlight
                     ? "border-[#205f58] bg-[linear-gradient(180deg,rgba(17,49,45,0.98),rgba(11,28,25,0.98))] shadow-[0_24px_54px_-34px_rgba(18,64,59,0.52)]"
                     : "border-white/10 bg-[#0d1715]"

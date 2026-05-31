@@ -26,7 +26,7 @@ from fastapi import HTTPException
 from PIL import Image, ImageDraw, ImageFont
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import aliased
+from sqlalchemy.orm import aliased, selectinload
 
 from app.core.config import settings
 from app.core.security import create_asset_token
@@ -2283,26 +2283,19 @@ COLLABORATION_DEFAULT_PERMISSIONS = {
 COLLABORATION_ROLE_DEFAULT_PERMISSIONS = {
     "viewer": {
         **COLLABORATION_DEFAULT_PERMISSIONS,
-        "can_view_story_bible": True,
-        "can_run_ai_scans": True,
         "can_view_selected_chapters_only": True,
     },
     "reader_only": {
         **COLLABORATION_DEFAULT_PERMISSIONS,
-        "can_view_story_bible": True,
-        "can_run_ai_scans": True,
         "can_view_selected_chapters_only": True,
     },
     "commenter": {
         **COLLABORATION_DEFAULT_PERMISSIONS,
-        "can_view_story_bible": True,
-        "can_run_ai_scans": True,
         "can_comment": True,
         "can_view_selected_chapters_only": True,
     },
     "beta_reader": {
         **COLLABORATION_DEFAULT_PERMISSIONS,
-        "can_view_story_bible": True,
         "can_comment": True,
         "can_view_selected_chapters_only": True,
     },
@@ -2343,6 +2336,33 @@ COLLABORATION_ROLE_DEFAULT_PERMISSIONS = {
         "can_view_selected_chapters_only": False,
     },
 }
+COLLABORATION_READER_SHELL_ROLES = {"viewer", "reader_only", "commenter", "beta_reader"}
+COLLABORATION_AUTHOR_SHELL_ROLES = {"editor", "developmental_editor", "coauthor", "co_writer"}
+READER_VISIBLE_FEATURES = (
+    "overview",
+    "read",
+    "chapters",
+    "recaps",
+    "search",
+    "timeline",
+    "feedback",
+)
+
+
+@dataclass(slots=True)
+class BookAccessContext:
+    access_class: str
+    workspace_shell: str
+    can_switch_workspace_mode: bool
+    can_edit_manuscript: bool
+    can_comment: bool
+    can_export: bool
+    can_view_story_bible: bool
+    can_run_ai_scans: bool
+    visible_reader_features: tuple[str, ...]
+    collaboration_role: str | None
+    collaboration_scope: dict | None
+    collaboration_permissions: dict | None
 
 
 def normalize_collaboration_email(email: str) -> str:
@@ -2357,6 +2377,60 @@ def normalize_collaboration_role(role: str) -> str:
     if cleaned not in COLLABORATION_ROLES:
         raise HTTPException(400, "Invalid collaborator role")
     return cleaned
+
+
+def collaboration_role_workspace_shell(role: str) -> str:
+    normalized_role = normalize_collaboration_role(role)
+    if normalized_role in COLLABORATION_READER_SHELL_ROLES:
+        return "reader"
+    return "author"
+
+
+def build_book_access_context(
+    book: Book,
+    *,
+    user_id: uuid.UUID,
+    collaborator: BookCollaborator | None = None,
+) -> BookAccessContext:
+    if collaborator is None:
+        workspace_shell = "author" if (book.mode or "reader") == "author" else "reader"
+        return BookAccessContext(
+            access_class="owner",
+            workspace_shell=workspace_shell,
+            can_switch_workspace_mode=True,
+            can_edit_manuscript=True,
+            can_comment=True,
+            can_export=True,
+            can_view_story_bible=True,
+            can_run_ai_scans=True,
+            visible_reader_features=READER_VISIBLE_FEATURES,
+            collaboration_role=None,
+            collaboration_scope=None,
+            collaboration_permissions=None,
+        )
+
+    scope = collaboration_scope_payload(collaborator)
+    permissions = collaboration_permissions_payload(collaborator, role=collaborator.role, scope=scope)
+    workspace_shell = collaboration_role_workspace_shell(collaborator.role)
+    return BookAccessContext(
+        access_class="reader_collaborator" if workspace_shell == "reader" else "author_collaborator",
+        workspace_shell=workspace_shell,
+        can_switch_workspace_mode=False,
+        can_edit_manuscript=permissions["can_edit_manuscript"],
+        can_comment=permissions["can_comment"],
+        can_export=permissions["can_export"],
+        can_view_story_bible=permissions["can_view_story_bible"],
+        can_run_ai_scans=permissions["can_run_ai_scans"],
+        visible_reader_features=READER_VISIBLE_FEATURES,
+        collaboration_role=collaborator.role,
+        collaboration_scope=scope,
+        collaboration_permissions=permissions,
+    )
+
+
+def _collaboration_permissions_for_role(collaborator: BookCollaborator) -> dict:
+    scope = collaboration_scope_payload(collaborator)
+    return collaboration_permissions_payload(collaborator, role=collaborator.role, scope=scope)
 
 
 def collaboration_scope_payload(raw_scope: Any) -> dict:
@@ -2530,34 +2604,19 @@ def collaboration_allows_chapter(collaborator: BookCollaborator | None, chapter_
 def collaboration_can_comment(collaborator: BookCollaborator | None) -> bool:
     if collaborator is None:
         return True
-    permissions = collaboration_permissions_payload(
-        collaborator,
-        role=collaborator.role,
-        scope=collaboration_scope_payload(collaborator),
-    )
-    return permissions["can_comment"]
+    return _collaboration_permissions_for_role(collaborator)["can_comment"]
 
 
 def collaboration_can_edit(collaborator: BookCollaborator | None) -> bool:
     if collaborator is None:
         return True
-    permissions = collaboration_permissions_payload(
-        collaborator,
-        role=collaborator.role,
-        scope=collaboration_scope_payload(collaborator),
-    )
-    return permissions["can_edit_manuscript"]
+    return _collaboration_permissions_for_role(collaborator)["can_edit_manuscript"]
 
 
 def collaboration_can_export(collaborator: BookCollaborator | None) -> bool:
     if collaborator is None:
         return True
-    permissions = collaboration_permissions_payload(
-        collaborator,
-        role=collaborator.role,
-        scope=collaboration_scope_payload(collaborator),
-    )
-    return permissions["can_export"]
+    return _collaboration_permissions_for_role(collaborator)["can_export"]
 
 
 def collaboration_can_copy_manuscript(book: Book, collaborator: BookCollaborator | None) -> bool:
@@ -2571,23 +2630,13 @@ def collaboration_can_copy_manuscript(book: Book, collaborator: BookCollaborator
 def collaboration_can_view_story_bible(collaborator: BookCollaborator | None) -> bool:
     if collaborator is None:
         return True
-    permissions = collaboration_permissions_payload(
-        collaborator,
-        role=collaborator.role,
-        scope=collaboration_scope_payload(collaborator),
-    )
-    return permissions["can_view_story_bible"]
+    return _collaboration_permissions_for_role(collaborator)["can_view_story_bible"]
 
 
 def collaboration_can_run_ai_scans(collaborator: BookCollaborator | None) -> bool:
     if collaborator is None:
         return True
-    permissions = collaboration_permissions_payload(
-        collaborator,
-        role=collaborator.role,
-        scope=collaboration_scope_payload(collaborator),
-    )
-    return permissions["can_run_ai_scans"]
+    return _collaboration_permissions_for_role(collaborator)["can_run_ai_scans"]
 
 
 def collaboration_has_resource(collaborator: BookCollaborator | None, resource: str) -> bool:
@@ -2664,8 +2713,16 @@ async def get_book_with_collaboration_access(
     db: AsyncSession,
     book_id: uuid.UUID,
     user: User,
+    *,
+    options: tuple | None = None,
 ) -> tuple[Book, BookCollaborator | None]:
-    book = await db.get(Book, book_id)
+    if options:
+        result = await db.execute(
+            select(Book).where(Book.id == book_id).options(*options)
+        )
+        book = result.scalars().first()
+    else:
+        book = await db.get(Book, book_id)
     if not book:
         raise HTTPException(404, "Book not found")
     if book.user_id == user.id:
@@ -2674,6 +2731,46 @@ async def get_book_with_collaboration_access(
     if collaborator:
         return book, collaborator
     raise HTTPException(404, "Book not found")
+
+
+def require_book_owner_access(
+    book: Book,
+    user: User,
+    collaborator: BookCollaborator | None = None,
+) -> BookAccessContext:
+    if collaborator is not None or book.user_id != user.id:
+        raise HTTPException(403, "Only the book owner can use this route.")
+    return build_book_access_context(book, user_id=user.id, collaborator=None)
+
+
+def require_author_shell_access(
+    book: Book,
+    user: User,
+    collaborator: BookCollaborator | None = None,
+) -> BookAccessContext:
+    access = build_book_access_context(book, user_id=user.id, collaborator=collaborator)
+    if access.workspace_shell != "author":
+        raise HTTPException(403, "This share is limited to the reader workspace.")
+    return access
+
+
+def require_reader_shell_access(
+    book: Book,
+    user: User,
+    collaborator: BookCollaborator | None = None,
+) -> BookAccessContext:
+    access = build_book_access_context(book, user_id=user.id, collaborator=collaborator)
+    if access.workspace_shell != "reader":
+        raise HTTPException(403, "This route is only available in the reader workspace.")
+    return access
+
+
+def require_collaboration_chapter_access(
+    collaborator: BookCollaborator | None,
+    chapter_number: int,
+) -> None:
+    if not collaboration_allows_chapter(collaborator, chapter_number):
+        raise HTTPException(403, "This share does not include that chapter.")
 
 
 async def list_book_collaborators(db: AsyncSession, book: Book) -> list[BookCollaboratorOut]:
@@ -2783,8 +2880,20 @@ async def delete_book_collaborator(db: AsyncSession, book: Book, collaboration_i
     await db.commit()
 
 
-async def get_owned_book(db: AsyncSession, book_id: uuid.UUID, user_id: uuid.UUID) -> Book:
-    book = await db.get(Book, book_id)
+async def get_owned_book(
+    db: AsyncSession,
+    book_id: uuid.UUID,
+    user_id: uuid.UUID,
+    *,
+    options: tuple | None = None,
+) -> Book:
+    if options:
+        result = await db.execute(
+            select(Book).where(Book.id == book_id, Book.user_id == user_id).options(*options)
+        )
+        book = result.scalars().first()
+    else:
+        book = await db.get(Book, book_id)
     if not book or book.user_id != user_id:
         raise HTTPException(404, "Book not found")
     return book
@@ -5824,17 +5933,20 @@ async def book_out(
     collaborator: BookCollaborator | None = None,
     *,
     context: BookRenderContext | None = None,
+    progress: ReadingProgress | None = None,
 ) -> BookOut:
+    access = build_book_access_context(book, user_id=user_id, collaborator=collaborator)
     if context is None:
         await ensure_book_cover(db, book)
-        progress = (
-            await db.execute(
-                select(ReadingProgress).where(
-                    ReadingProgress.book_id == book.id,
-                    ReadingProgress.user_id == user_id,
+        if progress is None:
+            progress = (
+                await db.execute(
+                    select(ReadingProgress).where(
+                        ReadingProgress.book_id == book.id,
+                        ReadingProgress.user_id == user_id,
+                    )
                 )
-            )
-        ).scalars().first()
+            ).scalars().first()
         total_words = (
             await db.scalar(
                 select(func.coalesce(func.sum(Chapter.word_count), 0)).where(Chapter.book_id == book.id)
@@ -5858,6 +5970,9 @@ async def book_out(
         work_type=book.work_type,
         status=book.status,
         mode=book.mode or "reader",
+        workspace_shell=access.workspace_shell,
+        access_class=access.access_class,
+        can_switch_workspace_mode=access.can_switch_workspace_mode,
         source_kind=book.source_kind or "single_upload",
         preserve_chapter_numbers=bool(book.preserve_chapter_numbers),
         preserve_source_chapters=bool(book.preserve_source_chapters),
@@ -5899,15 +6014,15 @@ async def book_out(
         chapters_read_count=chapters_read_count,
         chapters_left=chapters_left,
         processing=build_book_processing_payload(book),
-        collaboration_role=collaborator.role if collaborator else None,
-        collaboration_scope=collaboration_scope_model(collaborator.scope) if collaborator else None,
+        collaboration_role=access.collaboration_role,
+        collaboration_scope=collaboration_scope_model(access.collaboration_scope) if access.collaboration_scope else None,
         collaboration_permissions=(
             collaboration_permissions_model(
-                collaborator.permissions,
-                role=collaborator.role,
-                scope=collaborator.scope,
+                access.collaboration_permissions,
+                role=access.collaboration_role or "viewer",
+                scope=access.collaboration_scope,
             )
-            if collaborator
+            if access.collaboration_permissions and access.collaboration_role
             else None
         ),
     )
@@ -6518,6 +6633,7 @@ def normalize_imported_chapters(
         title = _clean_optional_text(" ".join(str(chapter.get("title") or "").split()).strip())
         description = _clean_optional_text(" ".join(str(chapter.get("description") or "").split()).strip())
         html = clean_manuscript_html(chapter.get("html")) if chapter.get("html") else None
+        images = list(chapter.get("images") or [])
         desired_number = chapter_number if replace_existing and chapter_number else running_number
         parts = split_long_document(text) if chunk_long_documents and not preserve_exact_structure else [text]
         for index, part in enumerate(parts, start=1):
@@ -6531,6 +6647,7 @@ def normalize_imported_chapters(
                 "text": part,
                 "html": html if len(parts) == 1 else manuscript_text_to_html(part),
                 "description": description,
+                "images": images if len(parts) == 1 else _filter_import_images_for_text(part, images),
                 "scene_heading": chapter.get("scene_heading"),
                 "scene_number": chapter.get("scene_number"),
                 "dialogue_count": chapter.get("dialogue_count"),
@@ -6538,6 +6655,16 @@ def normalize_imported_chapters(
             desired_number += 1
         running_number = desired_number
     return normalized
+
+
+def _filter_import_images_for_text(text: str, images: list[dict]) -> list[dict]:
+    markers = {
+        match.group(0)
+        for match in re.finditer(r"\[\[IMAGE:[^\]]+\]\]", text or "")
+    }
+    if not markers:
+        return []
+    return [image for image in images if image.get("marker") in markers]
 
 
 def split_long_document(text: str, max_words: int = 3500) -> list[str]:
@@ -6551,6 +6678,12 @@ def split_long_document(text: str, max_words: int = 3500) -> list[str]:
     for paragraph in paragraphs:
         paragraph_words = len(paragraph.split())
         if bucket and bucket_words + paragraph_words > max_words:
+            if bucket_words < 250 and paragraph_words >= max_words:
+                bucket.append(paragraph)
+                parts.append("\n\n".join(bucket))
+                bucket = []
+                bucket_words = 0
+                continue
             parts.append("\n\n".join(bucket))
             bucket = []
             bucket_words = 0
@@ -7175,6 +7308,11 @@ async def get_chapter_version_content(
         "word_count": version.word_count,
         "note": version.note,
         "snapshot_kind": version.snapshot_kind,
+        "restore_status": version.restore_status,
+        "restore_error": version.restore_error,
+        "restore_task_id": version.restore_task_id,
+        "restore_started_at": version.restore_started_at,
+        "restore_completed_at": version.restore_completed_at,
         "created_at": version.created_at,
         "text": str(stored.get("text") or ""),
         "html": cast(str | None, stored.get("html")),
@@ -7296,6 +7434,11 @@ async def list_chapter_versions(
             "word_count": version.word_count,
             "note": version.note,
             "snapshot_kind": version.snapshot_kind,
+            "restore_status": version.restore_status,
+            "restore_error": version.restore_error,
+            "restore_task_id": version.restore_task_id,
+            "restore_started_at": version.restore_started_at,
+            "restore_completed_at": version.restore_completed_at,
             "created_at": version.created_at,
         }
         for version in versions

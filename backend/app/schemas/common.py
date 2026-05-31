@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Generic, TypeVar
 
 from pydantic import BaseModel, ConfigDict
 
@@ -8,8 +9,12 @@ class TimestampMixin(BaseModel):
     created_at: datetime
 
 
-class PaginatedResponse(BaseModel):
-    items: list
+T = TypeVar("T")
+
+
+class PaginatedResponse(BaseModel, Generic[T]):
+    items: list[T]
     total: int
-    page: int
-    page_size: int
+    limit: int
+    offset: int
+    has_more: bool

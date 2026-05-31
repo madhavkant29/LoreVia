@@ -13,11 +13,13 @@ class User(Base):
     __table_args__ = (
         UniqueConstraint("email", name="uq_users_email"),
         UniqueConstraint("username", name="uq_users_username"),
+        UniqueConstraint("supabase_auth_id", name="uq_users_supabase_auth_id"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     email: Mapped[str] = mapped_column(String, nullable=False)
     username: Mapped[str | None] = mapped_column(String, nullable=True)
+    supabase_auth_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     password_hash: Mapped[str] = mapped_column(String, nullable=False)
     tier: Mapped[str] = mapped_column(String, default="free")   # subscription tier only: free | author | architect | admin (legacy reader/collaborator aliases normalize to free)
     reading_mode: Mapped[str] = mapped_column(String, default="casual")  # casual | analyst | speed
@@ -28,7 +30,6 @@ class User(Base):
     last_login_date: Mapped[date | None] = mapped_column(Date)
     login_streak_days: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     longest_login_streak_days: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
-    login_activity_dates: Mapped[list[date] | None] = mapped_column(ARRAY(Date))
     legal_accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     legal_version: Mapped[str | None] = mapped_column(String)
     email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -79,6 +80,7 @@ class User(Base):
     direct_conversations_as_a = relationship("DirectConversation", foreign_keys="DirectConversation.participant_a_user_id", back_populates="participant_a", cascade="all, delete-orphan")
     direct_conversations_as_b = relationship("DirectConversation", foreign_keys="DirectConversation.participant_b_user_id", back_populates="participant_b", cascade="all, delete-orphan")
     direct_messages_sent = relationship("DirectMessage", foreign_keys="DirectMessage.sender_user_id", back_populates="sender", cascade="all, delete-orphan")
+    login_activities = relationship("UserLoginActivity", back_populates="user", cascade="all, delete-orphan")
     email_preferences = relationship("EmailPreference", back_populates="user", cascade="all, delete-orphan", uselist=False)
 
 
@@ -346,3 +348,19 @@ class LlmUsageEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
     user = relationship("User", back_populates="llm_usage_events")
+
+
+class UserLoginActivity(Base):
+    __tablename__ = "user_login_activity"
+    __table_args__ = (
+        Index("ix_user_login_activity_user_date", "user_id", "login_date"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    login_date: Mapped[date] = mapped_column(Date, nullable=False)
+    ip_hash: Mapped[str | None] = mapped_column(String, nullable=True)
+    device_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    user = relationship("User", back_populates="login_activities")

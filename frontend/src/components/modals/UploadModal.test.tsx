@@ -195,6 +195,41 @@ describe("UploadModal", () => {
     )
     expect(authState.user.username).toBe("author")
   })
+
+  it("removes the private workspace notice and renders author upload options with explicit colors", async () => {
+    useQueryMock.mockImplementation(({ queryKey }: { queryKey: unknown }) => {
+      if (queryKey === "books:list") {
+        return {
+          data: [
+            {
+              id: "book-1",
+              title: "metamorphosis",
+              mode: "author",
+              hidden_at: null,
+              work_type: "novel",
+            },
+          ],
+          refetch: vi.fn(),
+        }
+      }
+      return { data: undefined, refetch: vi.fn() }
+    })
+
+    const view = renderUploadModal({ initialMode: "author" })
+
+    expect(view.textContent).not.toContain("Private by default")
+    expect(view.textContent).not.toContain("This upload stays in your workspace.")
+    expect(view.textContent).not.toContain("Public sharing is not part of this step.")
+
+    const toggleButton = findButton(view, "Create a new upload")
+    await act(async () => {
+      toggleButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+    })
+
+    const optionButton = findButton(view, "metamorphosis")
+    expect(optionButton?.getAttribute("style")).toContain("background-color: rgb(255, 255, 255)")
+    expect(optionButton?.getAttribute("style")).toContain("color: rgb(0, 0, 0)")
+  })
 })
 
 function renderUploadModal(props?: Partial<React.ComponentProps<typeof UploadModal>>) {

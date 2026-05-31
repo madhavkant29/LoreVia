@@ -4,12 +4,13 @@ import type { ReactNode } from "react"
 import type { Route } from "next"
 import axios from "axios"
 import { useQuery } from "@tanstack/react-query"
-import { startTransition, Suspense, useEffect, useMemo, useRef, useState } from "react"
+import { startTransition, Suspense, useDeferredValue, useEffect, useMemo, useRef, useState } from "react"
 import dynamic from "next/dynamic"
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 
 import { EditorToolbar, RichTextEditor } from "@/components/editor/SharedRichTextEditor"
+import { Skeleton } from "@/components/ui/Skeleton"
 import { booksApi } from "@/lib/api/books"
 import { intelligenceApi } from "@/lib/api/intelligence"
 import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
@@ -408,14 +409,16 @@ function ManuscriptPageInner() {
     if (!target) return null
     return Math.min(100, Math.round((fullBookWordCount / target) * 100))
   }, [fullBookWordCount, writerWorkspace])
+  const deferredChapterSearch = useDeferredValue(chapterSearch)
+  const deferredSceneSearch = useDeferredValue(sceneSearch)
   const leftRailVisible = workspaceTab === "write" && !focusMode && showLeftRail
   const rightRailVisible = workspaceTab === "write" && !focusMode && showRightRail
   const desktopLayoutClass = leftRailVisible && rightRailVisible
-    ? "xl:grid-cols-[17rem_minmax(0,1fr)_21rem]"
+    ? "xl:grid-cols-[18.5rem_minmax(0,1fr)_22rem]"
     : leftRailVisible
-      ? "xl:grid-cols-[17rem_minmax(0,1fr)]"
+      ? "xl:grid-cols-[18.5rem_minmax(0,1fr)]"
       : rightRailVisible
-        ? "xl:grid-cols-[minmax(0,1fr)_21rem]"
+        ? "xl:grid-cols-[minmax(0,1fr)_22rem]"
         : "xl:grid-cols-1"
   const chapterListItems = chapterList?.chapters ?? []
   const fullBookPageMap = useMemo(() => {
@@ -493,13 +496,26 @@ function ManuscriptPageInner() {
     [notes]
   )
   const filteredChapterItems = useMemo(() => {
-    const query = chapterSearch.trim().toLowerCase()
+    const query = deferredChapterSearch.trim().toLowerCase()
     if (!query) return chapterListItems
     return chapterListItems.filter((chapter) => {
       const title = chapter.title?.toLowerCase() ?? ""
       return title.includes(query) || `chapter ${chapter.number}`.includes(query)
     })
-  }, [chapterListItems, chapterSearch])
+  }, [chapterListItems, deferredChapterSearch])
+  const chapterRowStats = useMemo(() => {
+    const stats: Record<number, { wordCount: number; sceneCount: number; readingTime: string }> = {}
+    for (const chapter of chapterListItems) {
+      const draftText = bookDrafts[chapter.number]?.text ?? ""
+      const wordCount = countWords(draftText)
+      stats[chapter.number] = {
+        wordCount,
+        sceneCount: buildSceneOutline(draftText).length,
+        readingTime: formatReadingTimeLabel(wordCount > 0 ? Math.max(1, Math.ceil(wordCount / 250)) : 0),
+      }
+    }
+    return stats
+  }, [bookDrafts, chapterListItems])
   const activeChapterDisplayTitle = chapterTitle.trim() || chapterListItems.find((chapter) => chapter.number === activeChapterNumber)?.title?.trim() || `Chapter ${activeChapterNumber}`
   const activeChapterHeading = `${activeChapterNumber}. ${activeChapterDisplayTitle}`
   const chapterPreviewSections = useMemo(() => ([
@@ -510,8 +526,9 @@ function ManuscriptPageInner() {
       html,
     },
   ]), [activeChapterDisplayTitle, activeChapterNumber, html])
-  const fullBookPreviewSections = useMemo(() => (
-    (chapterList?.chapters ?? [])
+  const fullBookPreviewSections = useMemo(() => {
+    if (editorMode !== "book" || draftSurfaceMode !== "paged") return []
+    return (chapterList?.chapters ?? [])
       .map((chapter) => {
         const draft = bookDrafts[chapter.number] ?? { title: chapter.title || `Chapter ${chapter.number}`, text: "", html: textToHtml("") }
         return {
@@ -521,7 +538,7 @@ function ManuscriptPageInner() {
           html: draft.html,
         }
       })
-  ), [bookDrafts, chapterList])
+  }, [bookDrafts, chapterList, draftSurfaceMode, editorMode])
   const chapterPageSummaryLabel = draftSurfaceMode === "paged"
     ? `${chapterPreviewPageCount} preview page${chapterPreviewPageCount === 1 ? "" : "s"}`
     : `~${chapterApproxPages} pages`
@@ -541,7 +558,7 @@ function ManuscriptPageInner() {
   const arcSummaryCharacter = emotionalArc?.characters[0] ?? null
   const filteredSceneGroups = useMemo(() => {
     if (!workspaceTree) return []
-    const query = sceneSearch.trim().toLowerCase()
+    const query = deferredSceneSearch.trim().toLowerCase()
     if (!query) return workspaceTree.scene_groups
     return workspaceTree.scene_groups
       .map((group) => ({
@@ -553,7 +570,7 @@ function ManuscriptPageInner() {
         ),
       }))
       .filter((group) => group.scenes.length > 0)
-  }, [sceneSearch, workspaceTree])
+  }, [deferredSceneSearch, workspaceTree])
   const structureVersionByChapter = useMemo(() => {
     const next: Record<number, number> = {}
     for (const chapter of workspaceTree?.chapters ?? []) {
@@ -563,10 +580,10 @@ function ManuscriptPageInner() {
   }, [workspaceTree])
   const filteredNotePaths = useMemo(() => {
     const paths = workspaceTree?.note_paths ?? []
-    const query = sceneSearch.trim().toLowerCase()
+    const query = deferredSceneSearch.trim().toLowerCase()
     if (!query) return paths
     return paths.filter((path) => path.toLowerCase().includes(query))
-  }, [sceneSearch, workspaceTree])
+  }, [deferredSceneSearch, workspaceTree])
   const manuscriptFrontMatter = writerWorkspace?.manuscript_front_matter
   const openRightPane = (pane: RightPane) => {
     setActiveRightPane(pane)
@@ -2135,7 +2152,7 @@ function ManuscriptPageInner() {
   }
 
   return (
-    <div className={`min-h-screen ${isDark ? "bg-[#080808] text-slate-100" : "bg-[#f3eee6] text-stone-950"}`}>
+    <div className={`min-h-screen overflow-x-hidden ${isDark ? "bg-[radial-gradient(circle_at_top_left,rgba(14,165,233,0.08),transparent_32rem),linear-gradient(180deg,#07090d_0%,#050609_100%)] text-slate-100" : "bg-[#f3eee6] text-stone-950"}`}>
       <style jsx global>{`
         ::highlight(lorevia-annotation-open) {
           background: ${isDark ? "rgba(251, 191, 36, 0.18)" : "rgba(245, 158, 11, 0.22)"};
@@ -2155,7 +2172,7 @@ function ManuscriptPageInner() {
           className="pointer-events-none fixed z-50 hidden -translate-x-1/2 xl:block"
           style={{ top: selectionMenu.top, left: selectionMenu.left }}
         >
-          <div className={`pointer-events-auto flex items-center gap-2 rounded-full border px-2 py-2 shadow-[0_18px_50px_-24px_rgba(15,23,42,0.45)] ${isDark ? "border-white/10 bg-[#0f1117]" : "border-stone-200 bg-white"}`}>
+          <div className={`pointer-events-auto flex items-center gap-2 rounded-full border px-2 py-2 shadow-dropdown ${isDark ? "border-white/10 bg-[#0f1117]" : "border-stone-200 bg-white"}`}>
             <button
               type="button"
               onMouseDown={(event) => event.preventDefault()}
@@ -2190,13 +2207,13 @@ function ManuscriptPageInner() {
           </div>
         </div>
       ) : null}
-      <div className="mx-auto max-w-[1600px] px-4 pb-12 pt-5 sm:px-6 lg:px-8">
-        <div className={`rounded-[2rem] border px-5 py-5 shadow-[0_22px_70px_-55px_rgba(15,23,42,0.2)] ${isDark ? "border-white/10 bg-white/[0.03]" : "border-white/80 bg-white/92"}`}>
+      <div className="mx-auto max-w-[1620px] px-3 pb-10 pt-3 sm:px-5 lg:px-6">
+        <div className={`rounded-lg border px-4 py-4 shadow-card sm:px-5 ${isDark ? "border-white/10 bg-[#0b0f15]/90" : "border-white/80 bg-white/92"}`}>
           <div className="flex flex-col gap-5">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div className="min-w-0">
-                <p className={`text-base ${isDark ? "text-slate-300" : "text-stone-600"}`}>{book?.title}</p>
-                <h1 className={`mt-2 font-serif text-4xl leading-tight ${isDark ? "text-white" : "text-stone-950"}`}>{activeChapterHeading}</h1>
+                <p className={`text-sm font-medium ${isDark ? "text-slate-300" : "text-stone-600"}`}>{book?.title}</p>
+                <h1 className={`mt-2 font-serif text-3xl leading-tight sm:text-4xl ${isDark ? "text-white" : "text-stone-950"}`}>{activeChapterHeading}</h1>
               </div>
               <div className="flex flex-wrap items-center gap-3">
                 <div className="flex items-center gap-2">
@@ -2215,9 +2232,9 @@ function ManuscriptPageInner() {
                     Export
                   </button>
                   {showExportMenu ? (
-                    <div className={`absolute right-0 top-full z-20 mt-2 w-64 rounded-2xl border p-1.5 shadow-[0_18px_50px_-24px_rgba(15,23,42,0.4)] ${isDark ? "border-white/10 bg-[#0f1117]" : "border-stone-200 bg-white"}`}>
+                    <div className={`absolute right-0 top-full z-20 mt-2 w-64 rounded-2xl border p-1.5 shadow-dropdown ${isDark ? "border-white/10 bg-[#0f1117]" : "border-stone-200 bg-white"}`}>
                       <div className="px-3 py-2">
-                        <p className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Publishing preset</p>
+                        <p className={`text-3xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Publishing preset</p>
                         <select
                           value={writerWorkspace?.publishing.active_preset ?? "standard_manuscript"}
                           onChange={(event) => {
@@ -2258,16 +2275,20 @@ function ManuscriptPageInner() {
               </div>
             </div>
             <div className={`flex flex-wrap items-center gap-5 border-t pt-4 ${isDark ? "border-white/10" : "border-stone-200"}`}>
-              {(["write", "plan", "analyze", "characters"] as const).map((tab) => (
-                <button
-                  key={tab}
-                  type="button"
-                  onClick={() => setWorkspaceTab(tab)}
-                  className={`border-b-2 pb-2 text-sm font-medium transition ${workspaceTab === tab ? isDark ? "border-sky-400 text-white" : "border-sky-500 text-stone-950" : isDark ? "border-transparent text-slate-400 hover:text-slate-200" : "border-transparent text-stone-500 hover:text-stone-800"}`}
-                >
-                  {tab === "write" ? "Write" : tab === "plan" ? "Plan" : tab === "analyze" ? "Analyze" : "Characters"}
-                </button>
-              ))}
+              <div className="flex flex-wrap items-center gap-5" role="tablist" aria-label="Manuscript workspace modes">
+                {(["write", "plan", "analyze", "characters"] as const).map((tab) => (
+                  <button
+                    key={tab}
+                    type="button"
+                    role="tab"
+                    aria-selected={workspaceTab === tab}
+                    onClick={() => setWorkspaceTab(tab)}
+                    className={`border-b-2 pb-2 text-sm font-medium transition ${workspaceTab === tab ? isDark ? "border-sky-400 text-white" : "border-sky-500 text-stone-950" : isDark ? "border-transparent text-slate-400 hover:text-slate-200" : "border-transparent text-stone-500 hover:text-stone-800"}`}
+                  >
+                    {tab === "write" ? "Write" : tab === "plan" ? "Plan" : tab === "analyze" ? "Analyze" : "Characters"}
+                  </button>
+                ))}
+              </div>
               <div className="ml-auto flex flex-wrap items-center gap-2">
                 <div className={`inline-flex rounded-full p-1 ${isDark ? "border border-white/10 bg-black/30" : "border border-stone-200 bg-stone-100/80"}`}>
                   {(["edit", "paged"] as const).map((mode) => (
@@ -2283,16 +2304,17 @@ function ManuscriptPageInner() {
                   ))}
                 </div>
                 <div className={`inline-flex rounded-full p-1 ${isDark ? "border border-white/10 bg-black/30" : "border border-stone-200 bg-stone-100/80"}`}>
-                {(["chapter", "book"] as const).map((mode) => (
-                  <button
-                    key={`header-mode-${mode}`}
-                    type="button"
-                    onClick={() => setEditorMode(mode)}
-                    className={`rounded-full px-4 py-2 text-sm font-medium transition ${editorMode === mode ? isDark ? "bg-white text-slate-950" : "bg-stone-900 text-white" : isDark ? "text-slate-300 hover:bg-white/10" : "text-stone-600 hover:bg-white"}`}
-                  >
-                    {mode === "chapter" ? "Chapter" : "Full book"}
-                  </button>
-                ))}
+                  {(["chapter", "book"] as const).map((mode) => (
+                    <button
+                      key={`header-mode-${mode}`}
+                      type="button"
+                      aria-pressed={editorMode === mode}
+                      onClick={() => setEditorMode(mode)}
+                      className={`rounded-full px-4 py-2 text-sm font-medium transition ${editorMode === mode ? isDark ? "bg-white text-slate-950" : "bg-stone-900 text-white" : isDark ? "text-slate-300 hover:bg-white/10" : "text-stone-600 hover:bg-white"}`}
+                    >
+                      {mode === "chapter" ? "Chapter" : "Full book"}
+                    </button>
+                  ))}
                 </div>
               </div>
             </div>
@@ -2333,13 +2355,13 @@ function ManuscriptPageInner() {
           />
         ) : null}
         {(workspaceTab === "write" || workspaceTab === "analyze" || workspaceTab === "characters") ? (
-        <div className={`mt-8 grid gap-5 ${desktopLayoutClass}`}>
+        <div className={`mt-4 grid min-w-0 gap-4 ${desktopLayoutClass}`}>
           {leftRailVisible ? (
-          <aside className={`rounded-[1.8rem] border p-4 ${isDark ? "border-white/10 bg-[#0d1117]" : "border-stone-200 bg-white/90"}`}>
+          <aside className={`min-w-0 rounded-lg border p-4 xl:sticky xl:top-4 xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto ${isDark ? "border-white/10 bg-[#0c1118]/92" : "border-stone-200 bg-white/90"}`}>
             <div className="flex items-center justify-between">
               <div>
                 <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Workspace</p>
-                <p className={`mt-1 text-[11px] ${isDark ? "text-slate-500" : "text-stone-500"}`}>{book?.title || "Current project"}</p>
+                <p className={`mt-1 text-3xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{book?.title || "Current project"}</p>
               </div>
               <div className="flex gap-2">
                 <button
@@ -2365,8 +2387,8 @@ function ManuscriptPageInner() {
                 </button>
               </div>
             </div>
-            <div className={`mt-4 rounded-[1.2rem] border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white"}`}>
-              <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Manuscript</p>
+            <div className={`mt-4 rounded-md border p-4 shadow-[0_18px_50px_-45px_rgba(14,165,233,0.45)] ${isDark ? "border-white/10 bg-[linear-gradient(145deg,rgba(14,165,233,0.09),rgba(255,255,255,0.025))]" : "border-stone-200 bg-white"}`}>
+              <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Manuscript</p>
               <h2 className={`mt-3 text-2xl font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{book?.title}</h2>
               <p className={`mt-2 text-sm ${isDark ? "text-sky-300" : "text-sky-700"}`}>Story manuscript</p>
               <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{fullBookWordCount.toLocaleString()} words across the working draft · {fullBookReadingTime}</p>
@@ -2376,16 +2398,17 @@ function ManuscriptPageInner() {
               value={chapterSearch}
               onChange={(event) => setChapterSearch(event.target.value)}
               placeholder="Search chapters"
-              className={`mt-4 w-full rounded-[0.95rem] border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/30 text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
+              className={`mt-4 w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/30 text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
             />
             <div className="mt-4">
-              <p className={`text-[11px] font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>chapters</p>
+              <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Chapters</p>
               <div className="mt-2 space-y-2">
               {filteredChapterItems.map((chapter) => {
                 const active = selectedChapter === chapter.number || (selectedChapter === null && draftChapterNumber === chapter.number)
-                const rowWordCount = countWords(bookDrafts[chapter.number]?.text ?? "")
-                const rowScenes = buildSceneOutline(bookDrafts[chapter.number]?.text ?? "")
-                const rowReadingTime = formatReadingTimeLabel(rowWordCount > 0 ? Math.max(1, Math.ceil(rowWordCount / 250)) : 0)
+                const rowStats = chapterRowStats[chapter.number] ?? { wordCount: 0, sceneCount: 0, readingTime: "0 min read" }
+                const rowScenes = { length: rowStats.sceneCount }
+                const rowReadingTime = rowStats.readingTime
+                const rowWordCount = rowStats.wordCount
                 return (
                   <button
                     key={chapter.number}
@@ -2394,15 +2417,15 @@ function ManuscriptPageInner() {
                       setDraftChapterNumber(null)
                       setReplaceExisting(true)
                     }}
-                    className={`w-full rounded-[1rem] border px-3 py-3 text-left text-sm transition ${active ? isDark ? "border-sky-400/40 bg-sky-400/15 text-white" : "border-sky-300 bg-sky-50 text-stone-900" : isDark ? "border-white/10 bg-white/[0.03] text-slate-300 hover:bg-white/10" : "border-stone-200 bg-stone-50 text-stone-700 hover:bg-white"}`}
+                    className={`w-full rounded-md border px-3 py-3 text-left text-sm transition focus:outline-none focus:ring-2 focus:ring-sky-400/40 ${active ? isDark ? "border-sky-400/60 bg-sky-400/15 text-white shadow-[inset_3px_0_0_rgba(56,189,248,0.75)]" : "border-sky-300 bg-sky-50 text-stone-900 shadow-[inset_3px_0_0_rgba(14,165,233,0.75)]" : isDark ? "border-white/10 bg-white/[0.035] text-slate-300 hover:border-white/15 hover:bg-white/[0.07]" : "border-stone-200 bg-stone-50 text-stone-700 hover:bg-white"}`}
                   >
                     <div className="flex items-center justify-between gap-2">
                       <p className="font-semibold">Chapter {chapter.number}</p>
                       <span className={`h-2.5 w-2.5 rounded-full ${active ? "bg-sky-400" : chapter.processed ? "bg-emerald-400" : isDark ? "bg-slate-600" : "bg-stone-300"}`} />
                     </div>
                     <p className="mt-1 line-clamp-1 text-xs opacity-75">{chapter.title || `Chapter ${chapter.number}`}</p>
-                    <p className={`text-[11px] ${isDark ? "text-slate-500" : "text-stone-500"}`}>{rowScenes.length} scene{rowScenes.length === 1 ? "" : "s"} · {rowReadingTime}</p>
-                    <p className={`mt-2 text-[11px] ${isDark ? "text-slate-500" : "text-stone-500"}`}>{rowWordCount > 0 ? `${rowWordCount.toLocaleString()} words` : "Draft ready"} · {dirtyDrafts.includes(chapter.number) ? "needs review" : "saved"}</p>
+                    <p className={`text-3xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{rowScenes.length} scene{rowScenes.length === 1 ? "" : "s"} · {rowReadingTime}</p>
+                    <p className={`mt-2 text-3xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{rowWordCount > 0 ? `${rowWordCount.toLocaleString()} words` : "Draft ready"} · {dirtyDrafts.includes(chapter.number) ? "needs review" : "saved"}</p>
                   </button>
                 )
               })}
@@ -2410,14 +2433,14 @@ function ManuscriptPageInner() {
             </div>
             <div className="mt-4">
               <div className="flex items-center justify-between gap-3">
-                <p className={`text-[11px] font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>scenes/</p>
+                <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Scenes / reorder</p>
                 <Link
                   href={`/${bookId}/scenes`}
-                  className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-white text-stone-700"}`}
+                  className={`rounded-full px-2.5 py-1 text-3xs font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-white text-stone-700"}`}
                 >
                   Open workspace
                 </Link>
-                <label className={`flex items-center gap-2 text-[11px] ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+                <label className={`flex items-center gap-2 text-3xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>
                   <input
                     type="checkbox"
                     checked={includeSceneMetadataOnImport}
@@ -2437,20 +2460,24 @@ function ManuscriptPageInner() {
                   const chapterSceneCount = group.scenes.length
                   const chapterReorderDisabled = !isChapterSceneGroup || chapterOrderState === "saving"
                   return (
-                    <div key={group.id} className={`rounded-[1rem] border p-2 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-white"}`}>
+                    <div
+                      key={group.id}
+                      style={{ contentVisibility: "auto", containIntrinsicSize: "240px" }}
+                      className={`rounded-md border p-2 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-white"}`}
+                    >
                       <button
                         onClick={() => setCollapsedSceneGroups((current) => ({ ...current, [group.id]: !collapsed }))}
-                        className="flex w-full items-center justify-between gap-3 rounded-[0.85rem] px-2 py-2 text-left"
+                        className="flex w-full items-center justify-between gap-3 rounded-sm px-2 py-2 text-left"
                       >
                         <span className={`text-xs font-semibold uppercase tracking-[0.12em] ${isDark ? "text-slate-300" : "text-stone-700"}`}>{group.label}</span>
-                        <span className={`text-[11px] ${isDark ? "text-slate-500" : "text-stone-500"}`}>{collapsed ? "+" : "−"}</span>
+                        <span className={`text-3xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{collapsed ? "+" : "−"}</span>
                       </button>
                       {isChapterSceneGroup ? (
                         <div className="flex flex-wrap items-center gap-2 px-2 pb-1">
-                          <span className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] ${isDark ? "border-white/10 bg-white/[0.04] text-slate-400" : "border-stone-200 bg-stone-50 text-stone-500"}`}>
+                          <span className={`rounded-full border px-2.5 py-1 text-3xs font-semibold uppercase tracking-[0.16em] ${isDark ? "border-white/10 bg-white/[0.04] text-slate-400" : "border-stone-200 bg-stone-50 text-stone-500"}`}>
                             Reorder scenes
                           </span>
-                          <span className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] ${getSceneOrderStatusTone(chapterOrderState, isDark)}`}>
+                          <span className={`rounded-full border px-2.5 py-1 text-3xs font-semibold uppercase tracking-[0.16em] ${getSceneOrderStatusTone(chapterOrderState, isDark)}`}>
                             {getSceneOrderStatusLabel(chapterOrderState, isDraggingWithinChapter)}
                           </span>
                         </div>
@@ -2494,14 +2521,14 @@ function ManuscriptPageInner() {
                                       resetSceneDragState()
                                       void reorderScenesInChapter(chapterSceneNumber, sourceSceneId, index)
                                     }}
-                                    className={`overflow-hidden rounded-full border text-center text-[10px] font-semibold uppercase tracking-[0.16em] transition-all ${isDraggingWithinChapter ? "h-8 px-3" : "h-0 border-transparent px-0 opacity-0"} ${isBeforeDropTarget ? isDark ? "border-sky-400/40 bg-sky-500/15 text-sky-100" : "border-sky-300 bg-sky-50 text-sky-700" : isDark ? "border-dashed border-white/10 bg-white/[0.03] text-slate-500" : "border-dashed border-stone-200 bg-stone-50 text-stone-400"}`}
+                                    className={`overflow-hidden rounded-full border text-center text-3xs font-semibold uppercase tracking-[0.16em] transition-all ${isDraggingWithinChapter ? "h-8 px-3" : "h-0 border-transparent px-0 opacity-0"} ${isBeforeDropTarget ? isDark ? "border-sky-400/40 bg-sky-500/15 text-sky-100" : "border-sky-300 bg-sky-50 text-sky-700" : isDark ? "border-dashed border-white/10 bg-white/[0.03] text-slate-500" : "border-dashed border-stone-200 bg-stone-50 text-stone-400"}`}
                                   >
                                     <span className="inline-flex h-full items-center">{getSceneDropSlotLabel(index, chapterSceneCount)}</span>
                                   </div>
                                 ) : null}
                                 <div
                                   data-scene-id={scene.id}
-                                  className={`rounded-[0.9rem] border px-3 py-3 transition ${isDraggedScene ? "scale-[0.99] opacity-70" : ""} ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}
+                                  className={`rounded-sm border px-3 py-3 transition ${isDraggedScene ? "scale-[0.99] opacity-70" : ""} ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}
                                 >
                                   <div className="flex items-start justify-between gap-3">
                                     <div className="flex min-w-0 flex-1 items-start gap-3">
@@ -2524,25 +2551,25 @@ function ManuscriptPageInner() {
                                             }, 0)
                                           }}
                                           aria-label={`Drag ${scene.title} to reorder this chapter`}
-                                          className={`shrink-0 rounded-[0.75rem] border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition ${chapterReorderDisabled ? "cursor-not-allowed opacity-50" : "cursor-grab active:cursor-grabbing"} ${isDark ? "border-white/10 bg-white/[0.04] text-slate-300" : "border-stone-200 bg-white text-stone-600"}`}
+                                          className={`shrink-0 rounded-sm border px-2 py-1 text-3xs font-semibold uppercase tracking-[0.16em] transition ${chapterReorderDisabled ? "cursor-not-allowed opacity-50" : "cursor-grab active:cursor-grabbing"} ${isDark ? "border-white/10 bg-white/[0.04] text-slate-300" : "border-stone-200 bg-white text-stone-600"}`}
                                         >
                                           Drag
                                         </button>
                                       ) : null}
                                       <div className="min-w-0 flex-1">
                                         <div className="flex items-center gap-2">
-                                          {isChapterSceneGroup ? <span className={`text-[10px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Scene {scene.sort_order}</span> : null}
+                                          {isChapterSceneGroup ? <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Scene {scene.sort_order}</span> : null}
                                           <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{scene.title}</p>
                                         </div>
-                                        <p className={`mt-1 text-[11px] ${isDark ? "text-slate-500" : "text-stone-500"}`}>{scene.path}</p>
+                                        <p className={`mt-1 text-3xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{scene.path}</p>
                                         {scene.description ? <p className={`mt-2 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>{scene.description}</p> : null}
                                       </div>
                                     </div>
-                                    <button onClick={() => void insertSceneIntoDraft(scene)} className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${isDark ? "bg-emerald-500/15 text-emerald-200" : "bg-emerald-50 text-emerald-700"}`}>Insert</button>
+                                    <button onClick={() => void insertSceneIntoDraft(scene)} className={`rounded-full px-2.5 py-1 text-3xs font-semibold ${isDark ? "bg-emerald-500/15 text-emerald-200" : "bg-emerald-50 text-emerald-700"}`}>Insert</button>
                                   </div>
                                   <div className="mt-3 flex flex-wrap gap-2">
-                                    <button onClick={() => openSceneEditor(scene)} className={`rounded-full px-2.5 py-1 text-[11px] ${isDark ? "bg-white/10 text-slate-200" : "bg-white text-stone-700"}`}>Edit</button>
-                                    <button onClick={() => void removeScene(scene)} className={`rounded-full px-2.5 py-1 text-[11px] ${isDark ? "bg-rose-500/10 text-rose-200" : "bg-rose-50 text-rose-700"}`}>Delete</button>
+                                    <button onClick={() => openSceneEditor(scene)} className={`rounded-full px-2.5 py-1 text-3xs ${isDark ? "bg-white/10 text-slate-200" : "bg-white text-stone-700"}`}>Edit</button>
+                                    <button onClick={() => void removeScene(scene)} className={`rounded-full px-2.5 py-1 text-3xs ${isDark ? "bg-rose-500/10 text-rose-200" : "bg-rose-50 text-rose-700"}`}>Delete</button>
                                   </div>
                                 </div>
                               </div>
@@ -2579,7 +2606,7 @@ function ManuscriptPageInner() {
                                 resetSceneDragState()
                                 void reorderScenesInChapter(chapterSceneNumber, sourceSceneId, chapterSceneCount)
                               }}
-                              className={`overflow-hidden rounded-full border text-center text-[10px] font-semibold uppercase tracking-[0.16em] transition-all ${isDraggingWithinChapter ? "h-8 px-3" : "h-0 border-transparent px-0 opacity-0"} ${sceneDropTarget?.chapterNumber === chapterSceneNumber && sceneDropTarget.index === chapterSceneCount ? isDark ? "border-sky-400/40 bg-sky-500/15 text-sky-100" : "border-sky-300 bg-sky-50 text-sky-700" : isDark ? "border-dashed border-white/10 bg-white/[0.03] text-slate-500" : "border-dashed border-stone-200 bg-stone-50 text-stone-400"}`}
+                              className={`overflow-hidden rounded-full border text-center text-3xs font-semibold uppercase tracking-[0.16em] transition-all ${isDraggingWithinChapter ? "h-8 px-3" : "h-0 border-transparent px-0 opacity-0"} ${sceneDropTarget?.chapterNumber === chapterSceneNumber && sceneDropTarget.index === chapterSceneCount ? isDark ? "border-sky-400/40 bg-sky-500/15 text-sky-100" : "border-sky-300 bg-sky-50 text-sky-700" : isDark ? "border-dashed border-white/10 bg-white/[0.03] text-slate-500" : "border-dashed border-stone-200 bg-stone-50 text-stone-400"}`}
                             >
                               <span className="inline-flex h-full items-center">{getSceneDropSlotLabel(chapterSceneCount, chapterSceneCount)}</span>
                             </div>
@@ -2593,8 +2620,8 @@ function ManuscriptPageInner() {
               </div>
             </div>
             <div className="mt-4 hidden">
-              <p className={`text-[11px] font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>notes/</p>
-              <div className={`mt-2 rounded-[1rem] border p-3 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-white"}`}>
+              <p className={`text-3xs font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>notes/</p>
+              <div className={`mt-2 rounded-md border p-3 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-white"}`}>
                 <div className="space-y-2">
                   {filteredNotePaths.slice(0, 12).map((path) => (
                     <p key={path} className={`text-xs ${isDark ? "text-slate-300" : "text-stone-700"}`}>{path}</p>
@@ -2603,7 +2630,7 @@ function ManuscriptPageInner() {
                 </div>
               </div>
             </div>
-            <div className={`mt-4 rounded-[1.2rem] border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white"}`}>
+            <div className={`mt-4 rounded-md border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white"}`}>
               <div className="flex items-center justify-between gap-3">
                 <p className={`text-sm font-medium ${isDark ? "text-slate-300" : "text-stone-700"}`}>Manuscript progress</p>
                 <span className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{bookGoalProgress ?? 0}%</span>
@@ -2618,55 +2645,55 @@ function ManuscriptPageInner() {
             {selectedChapter !== null ? (
               <div className="mt-4">
                 <div className="flex items-center justify-between gap-3">
-                  <p className={`text-[11px] font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Version history</p>
-                  <button onClick={() => void createSnapshot()} className={`rounded-full px-3 py-1.5 text-[11px] font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}>Save named version</button>
+                  <p className={`text-3xs font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Version history</p>
+                  <button onClick={() => void createSnapshot()} className={`rounded-full px-3 py-1.5 text-3xs font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}>Save named version</button>
                 </div>
                 <input
                   type="text"
                   value={chapterVersionNameDraft}
                   onChange={(event) => setChapterVersionNameDraft(event.target.value)}
                   placeholder={`Example: Before rewrite of chapter ${selectedChapter}`}
-                  className={`mt-2 w-full rounded-[0.95rem] border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/30 text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
+                  className={`mt-2 w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/30 text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
                 />
                 <div className="mt-2 space-y-2">
                   {chapterVersions.map((version) => (
-                    <div key={version.id} className={`rounded-[0.85rem] px-3 py-3 ${isDark ? "bg-white/[0.03]" : "bg-stone-50"}`}>
+                    <div key={version.id} className={`rounded-sm px-3 py-3 ${isDark ? "bg-white/[0.03]" : "bg-stone-50"}`}>
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <p className={`text-sm font-medium ${isDark ? "text-white" : "text-stone-900"}`}>{version.note || "Previous draft"}</p>
                           <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>
                         {new Date(version.created_at).toLocaleString()} {version.word_count ? `· ${version.word_count} words` : ""}
                       </p>
-                          <p className={`mt-1 text-[11px] uppercase tracking-[0.12em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>{(version.snapshot_kind || "manual").replaceAll("_", " ")}</p>
+                          <p className={`mt-1 text-3xs uppercase tracking-[0.12em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>{(version.snapshot_kind || "manual").replaceAll("_", " ")}</p>
                         </div>
                         <button
                           onClick={() => void restoreSnapshot(version.id)}
                           disabled={restoringVersionId === version.id}
-                          className={`rounded-full px-3 py-1.5 text-[11px] font-semibold ${isDark ? "bg-amber-500/10 text-amber-200 disabled:opacity-50" : "bg-amber-50 text-amber-700 disabled:opacity-50"}`}
+                          className={`rounded-full px-3 py-1.5 text-3xs font-semibold ${isDark ? "bg-amber-500/10 text-amber-200 disabled:opacity-50" : "bg-amber-50 text-amber-700 disabled:opacity-50"}`}
                         >
                           {restoringVersionId === version.id ? "Restoring..." : "Restore"}
                         </button>
                         <button
                           onClick={() => void previewSnapshot(version.id)}
-                          className={`rounded-full px-3 py-1.5 text-[11px] font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}
+                          className={`rounded-full px-3 py-1.5 text-3xs font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}
                         >
                           Compare
                         </button>
                       </div>
                       {chapterVersionDetail?.id === version.id ? (
                         <div className="mt-3 grid gap-3">
-                          <p className={`text-[11px] ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+                          <p className={`text-3xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>
                             {chapterVersionDetail.text === text ? "Matches the current draft." : "Compared with the current draft below."}
                           </p>
                           <div className="grid gap-3 xl:grid-cols-2">
-                            <div className={`rounded-[0.8rem] border px-3 py-2 ${isDark ? "border-white/10 bg-black/30" : "border-stone-200 bg-white"}`}>
-                              <p className={`text-[11px] font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Saved version</p>
+                            <div className={`rounded-sm border px-3 py-2 ${isDark ? "border-white/10 bg-black/30" : "border-stone-200 bg-white"}`}>
+                              <p className={`text-3xs font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Saved version</p>
                               <div className={`mt-2 max-h-44 overflow-y-auto text-xs leading-5 ${isDark ? "text-slate-300" : "text-stone-700"}`}>
                                 {chapterVersionDetail.text || "No text stored in this snapshot."}
                               </div>
                             </div>
-                            <div className={`rounded-[0.8rem] border px-3 py-2 ${isDark ? "border-white/10 bg-black/30" : "border-stone-200 bg-white"}`}>
-                              <p className={`text-[11px] font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Current draft</p>
+                            <div className={`rounded-sm border px-3 py-2 ${isDark ? "border-white/10 bg-black/30" : "border-stone-200 bg-white"}`}>
+                              <p className={`text-3xs font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Current draft</p>
                               <div className={`mt-2 max-h-44 overflow-y-auto text-xs leading-5 ${isDark ? "text-slate-300" : "text-stone-700"}`}>
                                 {text || "No draft text yet."}
                               </div>
@@ -2683,8 +2710,9 @@ function ManuscriptPageInner() {
           </aside>
           ) : null}
 
-          <section ref={manuscriptSectionRef} className={`rounded-[1.8rem] border p-5 ${!leftRailVisible && !rightRailVisible ? "xl:mx-auto xl:max-w-[980px]" : ""} ${isDark ? "border-white/10 bg-black/80" : "border-stone-200 bg-[#faf8f4]"}`}>
+          <section ref={manuscriptSectionRef} className={`min-w-0 rounded-lg border p-3 sm:p-4 ${!leftRailVisible && !rightRailVisible ? "xl:mx-auto xl:max-w-[1040px]" : ""} ${isDark ? "border-white/10 bg-[#070b10]/88" : "border-stone-200 bg-[#faf8f4]"}`}>
             {workspaceTab !== "write" ? (
+              <Suspense fallback={<Skeleton variant="card" className="min-h-64" />}>
               <ManuscriptNonWriteWorkspace
                 isDark={isDark}
                 bookId={bookId}
@@ -2736,6 +2764,7 @@ function ManuscriptPageInner() {
                 logicSelectionText={logicSelectionText}
                 continuityLoading={continuityLoading}
               />
+              </Suspense>
             ) : null}
             <WhatsTheWordPanel bookId={bookId} isDark={isDark} className="mb-4" />
 
@@ -2751,20 +2780,20 @@ function ManuscriptPageInner() {
                 />
               ) : (
               <div className="space-y-4">
-                <div className={`relative mx-auto w-full max-w-full rounded-[1.4rem] border shadow-[0_24px_80px_-55px_rgba(15,23,42,0.25)] ${isDark ? "border-white/10 bg-[#101010]" : "border-[#d8d0c4] bg-[#fdfcf9]"}`}>
+                <div className={`relative mx-auto w-full max-w-full overflow-hidden rounded-md border shadow-card ${isDark ? "border-white/10 bg-[#0e1218]" : "border-[#d8d0c4] bg-[#fdfcf9]"}`}>
                   {showPageGuides ? (
                     <div
                       aria-hidden
-                      className={`pointer-events-none absolute inset-0 rounded-[1.4rem] ${isDark ? "opacity-20" : "opacity-35"}`}
+                      className={`pointer-events-none absolute inset-0 rounded-lg ${isDark ? "opacity-20" : "opacity-35"}`}
                       style={{
                         backgroundImage: `repeating-linear-gradient(to bottom, transparent 0, transparent calc(297mm - 1px), ${isDark ? "rgba(255,255,255,0.08)" : "rgba(15,23,42,0.08)"} calc(297mm - 1px), ${isDark ? "rgba(255,255,255,0.08)" : "rgba(15,23,42,0.08)"} 297mm)`,
                       }}
                     />
                   ) : null}
-                  <div className={`border-b rounded-t-[1.4rem] px-6 py-6 sm:px-8 ${isDark ? "border-white/10 bg-white/[0.02]" : "border-[#e6dfd4] bg-[#f7f3ed]"}`}>
+                  <div className={`border-b px-5 py-5 sm:px-7 ${isDark ? "border-white/10 bg-[#111721]" : "border-[#e6dfd4] bg-[#f7f3ed]"}`}>
                     <div className="flex items-start justify-between gap-4">
                       <div className="min-w-0 flex-1">
-                        <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{book?.title || "Manuscript"}</p>
+                        <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{book?.title || "Manuscript"}</p>
                         <input
                           key={`chapter-heading-${activeChapterNumber}-${chapterTitle}`}
                           type="text"
@@ -2776,7 +2805,7 @@ function ManuscriptPageInner() {
                         <p className={`mt-2 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{chapterWordCount.toLocaleString()} words · ~{chapterApproxPages} pages</p>
                       </div>
                       <div className="flex items-center gap-2">
-                        <span className={`rounded-full px-3 py-1.5 text-[11px] font-semibold ${saveStateTone(activeChapterNumber)}`}>
+                        <span className={`rounded-full px-3 py-1.5 text-3xs font-semibold ${saveStateTone(activeChapterNumber)}`}>
                           {saveStateLabel(activeChapterNumber)}
                         </span>
                         <button
@@ -2811,7 +2840,7 @@ function ManuscriptPageInner() {
                     ) : null}
                     {autosaveMetaLabel(activeChapterNumber) ? <p className={`mt-3 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{autosaveMetaLabel(activeChapterNumber)}</p> : null}
                   </div>
-                  <div className={`sticky top-3 z-10 border-b px-4 py-3 transition-all duration-200 translate-y-0 opacity-100 pointer-events-auto ${isDark ? "border-white/10 bg-[#0d1117]/95 backdrop-blur" : "border-[#e6dfd4] bg-[#f7f3ed]/95 backdrop-blur"}`}>
+                  <div className={`sticky top-3 z-10 border-b px-3 py-3 transition-all duration-200 translate-y-0 opacity-100 pointer-events-auto ${isDark ? "border-white/10 bg-[#0c1118]/95 backdrop-blur" : "border-[#e6dfd4] bg-[#f7f3ed]/95 backdrop-blur"}`}>
                     <EditorToolbar editorKey={`chapter-${activeChapterNumber}`} isDark={isDark} compact characters={characters} onAddComment={() => openAnnotationComposer()} onOpenNotes={() => openRightPane("notes")} />
                   </div>
                   <RichTextEditor
@@ -2837,9 +2866,13 @@ function ManuscriptPageInner() {
                     editorKey={`chapter-${activeChapterNumber}`}
                     placeholder="Write or paste the chapter here..."
                     style={{ ...sheetStyle, textIndent: firstLineIndent ? "1.5em" : "0" }}
-                    className={`relative min-h-[297mm] w-full border-0 bg-transparent px-6 py-10 sm:px-[20mm] sm:py-[24mm] outline-none ${isDark ? "text-slate-100 placeholder:text-slate-500" : "text-stone-900 placeholder:text-stone-400"}`}
-                    contentClassName="mx-auto w-full max-w-[760px]"
+                    className={`relative min-h-[58vh] w-full border-0 bg-transparent px-5 py-10 outline-none sm:px-[18mm] sm:py-[22mm] ${isDark ? "text-slate-100 placeholder:text-slate-500" : "text-stone-900 placeholder:text-stone-400"}`}
+                    contentClassName="mx-auto w-full max-w-[780px]"
                   />
+                  <div className={`flex flex-wrap items-center justify-between gap-3 border-t px-5 py-3 text-xs sm:px-7 ${isDark ? "border-white/10 bg-[#0b1016] text-slate-400" : "border-[#e6dfd4] bg-[#f7f3ed] text-stone-500"}`}>
+                    <span>{chapterWordCount.toLocaleString()} words</span>
+                    <span>{saveStateLabel(activeChapterNumber)}</span>
+                  </div>
                 </div>
               </div>
               )
@@ -2870,21 +2903,22 @@ function ManuscriptPageInner() {
                       ref={(node) => {
                         chapterRefs.current[chapter.number] = node
                       }}
-                      className={`relative mx-auto w-full max-w-full rounded-[1.4rem] border shadow-[0_24px_80px_-55px_rgba(15,23,42,0.25)] ${jumpTarget === chapter.number ? isDark ? "border-teal-400/40 bg-[#101010]" : "border-teal-300 bg-[#fdfcf9]" : isDark ? "border-white/10 bg-[#101010]" : "border-[#d8d0c4] bg-[#fdfcf9]"}`}
+                      style={{ contentVisibility: "auto", containIntrinsicSize: "820px" }}
+                      className={`relative mx-auto w-full max-w-full overflow-hidden rounded-md border shadow-card ${jumpTarget === chapter.number ? isDark ? "border-teal-400/50 bg-[#0e1218]" : "border-teal-300 bg-[#fdfcf9]" : isDark ? "border-white/10 bg-[#0e1218]" : "border-[#d8d0c4] bg-[#fdfcf9]"}`}
                     >
                       {showPageGuides ? (
                         <div
                           aria-hidden
-                          className={`pointer-events-none absolute inset-0 rounded-[1.4rem] ${isDark ? "opacity-20" : "opacity-35"}`}
+                          className={`pointer-events-none absolute inset-0 rounded-lg ${isDark ? "opacity-20" : "opacity-35"}`}
                           style={{
                             backgroundImage: `repeating-linear-gradient(to bottom, transparent 0, transparent calc(297mm - 1px), ${isDark ? "rgba(255,255,255,0.08)" : "rgba(15,23,42,0.08)"} calc(297mm - 1px), ${isDark ? "rgba(255,255,255,0.08)" : "rgba(15,23,42,0.08)"} 297mm)`,
                           }}
                         />
                       ) : null}
-                      <div className={`border-b rounded-t-[1.4rem] px-6 py-6 sm:px-8 ${isDark ? "border-white/10 bg-white/[0.02]" : "border-[#e6dfd4] bg-[#f7f3ed]"}`}>
+                      <div className={`border-b px-5 py-5 sm:px-7 ${isDark ? "border-white/10 bg-[#111721]" : "border-[#e6dfd4] bg-[#f7f3ed]"}`}>
                         <div className="flex items-start justify-between gap-4">
                           <div className="min-w-0 flex-1">
-                            <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Chapter {chapter.number}</p>
+                            <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Chapter {chapter.number}</p>
                             <input
                               key={`book-heading-${chapter.number}-${draft.title}`}
                               type="text"
@@ -2915,7 +2949,7 @@ function ManuscriptPageInner() {
                             <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{formatReadingTimeLabel(countWords(draft.text) > 0 ? Math.max(1, Math.ceil(countWords(draft.text) / 250)) : 0)} · {buildSceneOutline(draft.text).length} scene{buildSceneOutline(draft.text).length === 1 ? "" : "s"}</p>
                           </div>
                           <div className="flex items-center gap-2">
-                            <span className={`rounded-full px-3 py-1.5 text-[11px] font-semibold ${saveStateTone(chapter.number)}`}>
+                            <span className={`rounded-full px-3 py-1.5 text-3xs font-semibold ${saveStateTone(chapter.number)}`}>
                               {saveStateLabel(chapter.number)}
                             </span>
                             <button
@@ -2929,7 +2963,7 @@ function ManuscriptPageInner() {
                           </div>
                         </div>
                       </div>
-                      <div className={`sticky top-3 z-10 border-b px-4 py-3 transition-all duration-200 translate-y-0 opacity-100 pointer-events-auto ${isDark ? "border-white/10 bg-[#0d1117]/95 backdrop-blur" : "border-[#e6dfd4] bg-[#f7f3ed]/95 backdrop-blur"}`}>
+                      <div className={`sticky top-3 z-10 border-b px-3 py-3 transition-all duration-200 translate-y-0 opacity-100 pointer-events-auto ${isDark ? "border-white/10 bg-[#0c1118]/95 backdrop-blur" : "border-[#e6dfd4] bg-[#f7f3ed]/95 backdrop-blur"}`}>
                         <EditorToolbar editorKey={`book-${chapter.number}`} isDark={isDark} compact characters={characters} onAddComment={() => openAnnotationComposer()} onOpenNotes={() => openRightPane("notes")} />
                       </div>
                       <RichTextEditor
@@ -2957,9 +2991,13 @@ function ManuscriptPageInner() {
                         editorKey={`book-${chapter.number}`}
                         placeholder="Draft this chapter..."
                         style={{ ...sheetStyle, textIndent: firstLineIndent ? "1.5em" : "0" }}
-                        className={`relative min-h-[240mm] w-full border-0 bg-transparent px-6 py-10 sm:px-[20mm] sm:py-[22mm] outline-none ${isDark ? "text-slate-100 placeholder:text-slate-500" : "text-stone-900 placeholder:text-stone-400"}`}
-                        contentClassName="mx-auto w-full max-w-[760px]"
+                        className={`relative min-h-[54vh] w-full border-0 bg-transparent px-5 py-10 outline-none sm:px-[18mm] sm:py-[22mm] ${isDark ? "text-slate-100 placeholder:text-slate-500" : "text-stone-900 placeholder:text-stone-400"}`}
+                        contentClassName="mx-auto w-full max-w-[780px]"
                       />
+                      <div className={`flex flex-wrap items-center justify-between gap-3 border-t px-5 py-3 text-xs sm:px-7 ${isDark ? "border-white/10 bg-[#0b1016] text-slate-400" : "border-[#e6dfd4] bg-[#f7f3ed] text-stone-500"}`}>
+                        <span>{countWords(draft.text).toLocaleString()} words</span>
+                        <span>{saveStateLabel(chapter.number)}</span>
+                      </div>
                     </div>
                   )
                 })}
@@ -2988,6 +3026,7 @@ function ManuscriptPageInner() {
           </section>
 
           {workspaceTab === "write" && rightRailVisible ? (
+            <Suspense fallback={<Skeleton variant="card" className="min-h-96 rounded-md" />}>
             <ManuscriptWriteRightRail
               isDark={isDark}
               bookId={bookId}
@@ -3014,6 +3053,7 @@ function ManuscriptPageInner() {
               activeChapterNumber={activeChapterNumber}
               arcSummaryCharacter={arcSummaryCharacter}
             />
+            </Suspense>
           ) : null}
 
           {workspaceTab !== "write" && rightRailVisible ? (
@@ -3021,7 +3061,7 @@ function ManuscriptPageInner() {
 
             {/* ── Character Card pane ──────────────────────────── */}
             {activeRightPane === "character" ? (
-              <div className={`rounded-[1.6rem] border ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white/80"}`}>
+              <div className={`rounded-lg border ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white/80"}`}>
                 {/* Header: browse list or card header */}
                 {selectedCharCard ? (
                   <>
@@ -3029,7 +3069,7 @@ function ManuscriptPageInner() {
                       <div>
                         <button
                           onClick={() => setSelectedCharCard(null)}
-                          className={`mb-1 text-[11px] font-semibold uppercase tracking-[0.18em] transition ${isDark ? "text-slate-500 hover:text-slate-300" : "text-stone-400 hover:text-stone-600"}`}
+                          className={`mb-1 text-3xs font-semibold uppercase tracking-[0.18em] transition ${isDark ? "text-slate-500 hover:text-slate-300" : "text-stone-400 hover:text-stone-600"}`}
                         >
                           ← All characters
                         </button>
@@ -3070,32 +3110,32 @@ function ManuscriptPageInner() {
                       {/* Role + First chapter badges */}
                       <div className="flex flex-wrap gap-2">
                         {selectedCharCard.role && (
-                          <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] ${
+                          <span className={`rounded-full px-2.5 py-1 text-3xs font-semibold uppercase tracking-[0.16em] ${
                             selectedCharCard.role === "mc" ? isDark ? "bg-indigo-500/20 text-indigo-200" : "bg-indigo-100 text-indigo-700"
                             : selectedCharCard.role === "sc" ? isDark ? "bg-teal-500/20 text-teal-200" : "bg-teal-100 text-teal-700"
                             : isDark ? "bg-white/10 text-slate-300" : "bg-stone-100 text-stone-600"
                           }`}>{selectedCharCard.role === "mc" ? "Main" : selectedCharCard.role === "sc" ? "Supporting" : "Background"}</span>
                         )}
-                        <span className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${isDark ? "bg-white/8 text-slate-400" : "bg-stone-100 text-stone-500"}`}>
+                        <span className={`rounded-full px-2.5 py-1 text-3xs font-medium ${isDark ? "bg-white/8 text-slate-400" : "bg-stone-100 text-stone-500"}`}>
                           Ch. {selectedCharCard.first_chapter}{selectedCharCard.last_seen_chapter ? ` to ${selectedCharCard.last_seen_chapter}` : ""}
                         </span>
                         {selectedCharCard.archetype && (
-                          <span className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${isDark ? "bg-white/8 text-slate-400" : "bg-stone-100 text-stone-500"}`}>{selectedCharCard.archetype}</span>
+                          <span className={`rounded-full px-2.5 py-1 text-3xs font-medium ${isDark ? "bg-white/8 text-slate-400" : "bg-stone-100 text-stone-500"}`}>{selectedCharCard.archetype}</span>
                         )}
                         {selectedCharCard.character_type === "gag" && (
-                          <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${isDark ? "bg-amber-500/20 text-amber-300" : "bg-amber-100 text-amber-700"}`}>🎭 Gag</span>
+                          <span className={`rounded-full px-2.5 py-1 text-3xs font-semibold ${isDark ? "bg-amber-500/20 text-amber-300" : "bg-amber-100 text-amber-700"}`}>🎭 Gag</span>
                         )}
                       </div>
 
                       {/* Description */}
                       <div>
-                        <p className={`mb-1 text-[10px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Description</p>
+                        <p className={`mb-1 text-3xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Description</p>
                         {charCardEditing ? (
                           <textarea
                             rows={3}
                             value={charCardDraft.description}
                             onChange={e => setCharCardDraft(d => ({ ...d, description: e.target.value }))}
-                            className={`w-full resize-none rounded-[0.8rem] border px-3 py-2 text-sm leading-6 outline-none ${isDark ? "border-white/10 bg-black/30 text-slate-200" : "border-stone-200 bg-stone-50 text-stone-800"}`}
+                            className={`w-full resize-none rounded-sm border px-3 py-2 text-sm leading-6 outline-none ${isDark ? "border-white/10 bg-black/30 text-slate-200" : "border-stone-200 bg-stone-50 text-stone-800"}`}
                           />
                         ) : (
                           <p className={`text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{selectedCharCard.description || <span className="opacity-40">No description yet.</span>}</p>
@@ -3104,13 +3144,13 @@ function ManuscriptPageInner() {
 
                       {/* Arc summary */}
                       <div>
-                        <p className={`mb-1 text-[10px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Arc summary</p>
+                        <p className={`mb-1 text-3xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Arc summary</p>
                         {charCardEditing ? (
                           <textarea
                             rows={4}
                             value={charCardDraft.arcSummary}
                             onChange={e => setCharCardDraft(d => ({ ...d, arcSummary: e.target.value }))}
-                            className={`w-full resize-none rounded-[0.8rem] border px-3 py-2 text-sm leading-6 outline-none ${isDark ? "border-white/10 bg-black/30 text-slate-200" : "border-stone-200 bg-stone-50 text-stone-800"}`}
+                            className={`w-full resize-none rounded-sm border px-3 py-2 text-sm leading-6 outline-none ${isDark ? "border-white/10 bg-black/30 text-slate-200" : "border-stone-200 bg-stone-50 text-stone-800"}`}
                           />
                         ) : (
                           <p className={`text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{selectedCharCard.arc_summary || <span className="opacity-40">No arc summary yet.</span>}</p>
@@ -3119,13 +3159,13 @@ function ManuscriptPageInner() {
 
                       {/* Personality tags */}
                       <div>
-                        <p className={`mb-1 text-[10px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Personality</p>
+                        <p className={`mb-1 text-3xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Personality</p>
                         {charCardEditing ? (
                           <input
                             value={charCardDraft.personalityTags}
                             onChange={e => setCharCardDraft(d => ({ ...d, personalityTags: e.target.value }))}
                             placeholder="Comma-separated traits"
-                            className={`w-full rounded-[0.8rem] border px-3 py-2 text-sm outline-none ${isDark ? "border-white/10 bg-black/30 text-slate-200 placeholder:text-slate-600" : "border-stone-200 bg-stone-50 text-stone-800"}`}
+                            className={`w-full rounded-sm border px-3 py-2 text-sm outline-none ${isDark ? "border-white/10 bg-black/30 text-slate-200 placeholder:text-slate-600" : "border-stone-200 bg-stone-50 text-stone-800"}`}
                           />
                         ) : (
                           <div className="flex flex-wrap gap-1.5">
@@ -3138,13 +3178,13 @@ function ManuscriptPageInner() {
 
                       {/* Motivations */}
                       <div>
-                        <p className={`mb-1 text-[10px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Motivations</p>
+                        <p className={`mb-1 text-3xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Motivations</p>
                         {charCardEditing ? (
                           <input
                             value={charCardDraft.motivations}
                             onChange={e => setCharCardDraft(d => ({ ...d, motivations: e.target.value }))}
                             placeholder="Comma-separated"
-                            className={`w-full rounded-[0.8rem] border px-3 py-2 text-sm outline-none ${isDark ? "border-white/10 bg-black/30 text-slate-200 placeholder:text-slate-600" : "border-stone-200 bg-stone-50 text-stone-800"}`}
+                            className={`w-full rounded-sm border px-3 py-2 text-sm outline-none ${isDark ? "border-white/10 bg-black/30 text-slate-200 placeholder:text-slate-600" : "border-stone-200 bg-stone-50 text-stone-800"}`}
                           />
                         ) : (
                           <ul className="space-y-1">
@@ -3157,13 +3197,13 @@ function ManuscriptPageInner() {
 
                       {/* Fears */}
                       <div>
-                        <p className={`mb-1 text-[10px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Fears</p>
+                        <p className={`mb-1 text-3xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Fears</p>
                         {charCardEditing ? (
                           <input
                             value={charCardDraft.fears}
                             onChange={e => setCharCardDraft(d => ({ ...d, fears: e.target.value }))}
                             placeholder="Comma-separated"
-                            className={`w-full rounded-[0.8rem] border px-3 py-2 text-sm outline-none ${isDark ? "border-white/10 bg-black/30 text-slate-200 placeholder:text-slate-600" : "border-stone-200 bg-stone-50 text-stone-800"}`}
+                            className={`w-full rounded-sm border px-3 py-2 text-sm outline-none ${isDark ? "border-white/10 bg-black/30 text-slate-200 placeholder:text-slate-600" : "border-stone-200 bg-stone-50 text-stone-800"}`}
                           />
                         ) : (
                           <ul className="space-y-1">
@@ -3177,13 +3217,13 @@ function ManuscriptPageInner() {
                       {/* Growth events */}
                       {(selectedCharCard.growth_events ?? []).length > 0 && (
                         <div>
-                          <p className={`mb-1 text-[10px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Growth events</p>
+                          <p className={`mb-1 text-3xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Growth events</p>
                           <div className="space-y-2">
                             {selectedCharCard.growth_events!
                               .slice()
                               .sort((left, right) => (right.chapter_number ?? right.chapter ?? 0) - (left.chapter_number ?? left.chapter ?? 0))
                               .map((ev, i) => (
-                              <div key={i} className={`rounded-[0.8rem] border px-3 py-2 text-xs ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
+                              <div key={i} className={`rounded-sm border px-3 py-2 text-xs ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
                                 {(ev.chapter_number ?? ev.chapter) ? (
                                   <span className={`font-semibold ${isDark ? "text-indigo-300" : "text-violet-600"}`}>
                                     Ch. {ev.chapter_number ?? ev.chapter} ·{" "}
@@ -3258,14 +3298,14 @@ function ManuscriptPageInner() {
                         <button
                           key={char.id}
                           onClick={() => openCharCard(char)}
-                          className={`w-full rounded-[1rem] border px-3 py-3 text-left transition ${
+                          className={`w-full rounded-md border px-3 py-3 text-left transition ${
                             isDark ? "border-white/10 bg-white/[0.03] hover:bg-white/[0.07]" : "border-stone-200 bg-stone-50 hover:bg-white"
                           }`}
                         >
                           <div className="flex items-center justify-between gap-2">
                             <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{char.name}</p>
                             {char.role && (
-                              <span className={`text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full ${
+                              <span className={`text-3xs font-semibold uppercase px-2 py-0.5 rounded-full ${
                                 char.role === "mc" ? isDark ? "bg-indigo-500/20 text-indigo-300" : "bg-indigo-100 text-indigo-700"
                                 : char.role === "sc" ? isDark ? "bg-teal-500/20 text-teal-300" : "bg-teal-100 text-teal-700"
                                 : isDark ? "bg-white/10 text-slate-400" : "bg-stone-100 text-stone-500"
@@ -3278,7 +3318,7 @@ function ManuscriptPageInner() {
                           {char.personality_tags && char.personality_tags.length > 0 && (
                             <div className="mt-1.5 flex flex-wrap gap-1">
                               {char.personality_tags.slice(0, 3).map(t => (
-                                <span key={t} className={`text-[10px] rounded-full px-2 py-0.5 ${isDark ? "bg-white/8 text-slate-400" : "bg-stone-100 text-stone-500"}`}>{t}</span>
+                                <span key={t} className={`text-3xs rounded-full px-2 py-0.5 ${isDark ? "bg-white/8 text-slate-400" : "bg-stone-100 text-stone-500"}`}>{t}</span>
                               ))}
                             </div>
                           )}
@@ -3294,7 +3334,7 @@ function ManuscriptPageInner() {
               <>
             {editorMode === "book" ? (
               <>
-                <div className={`rounded-[1.6rem] border p-4 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white/80"}`}>
+                <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white/80"}`}>
                   <div className="flex items-center justify-between gap-3">
                     <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Page navigator</p>
                     <span className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{fullBookPageSummaryLabel}</span>
@@ -3308,14 +3348,14 @@ function ManuscriptPageInner() {
                       value={gotoPageInput}
                       onChange={(event) => setGotoPageInput(event.target.value)}
                       placeholder="Page #"
-                      className={`w-full rounded-[0.9rem] border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
+                      className={`w-full rounded-sm border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
                     />
                     <button
                       onClick={() => {
                         const page = parseInt(gotoPageInput)
                         if (!Number.isNaN(page)) jumpToPage(page)
                       }}
-                      className={`rounded-[0.9rem] px-3 py-2 text-sm font-medium ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}
+                      className={`rounded-sm px-3 py-2 text-sm font-medium ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}
                     >
                       Go
                     </button>
@@ -3325,7 +3365,7 @@ function ManuscriptPageInner() {
                       <button
                         key={`page-${item.chapter}`}
                         onClick={() => jumpToPage(item.startPage)}
-                        className={`block w-full rounded-[1rem] border px-3 py-3 text-left text-sm ${jumpTarget === item.chapter ? isDark ? "border-teal-400/30 bg-teal-500/10 text-slate-100" : "border-teal-300 bg-teal-50 text-stone-900" : isDark ? "border-white/10 bg-white/[0.03] text-slate-200 hover:bg-white/[0.07]" : "border-stone-200 bg-stone-50 text-stone-700 hover:bg-stone-100"}`}
+                        className={`block w-full rounded-md border px-3 py-3 text-left text-sm ${jumpTarget === item.chapter ? isDark ? "border-teal-400/30 bg-teal-500/10 text-slate-100" : "border-teal-300 bg-teal-50 text-stone-900" : isDark ? "border-white/10 bg-white/[0.03] text-slate-200 hover:bg-white/[0.07]" : "border-stone-200 bg-stone-50 text-stone-700 hover:bg-stone-100"}`}
                       >
                         <p className="font-semibold">Pages {item.startPage}{item.endPage > item.startPage ? ` to ${item.endPage}` : ""}</p>
                         <p className="mt-1 text-xs opacity-75">Chapter {item.chapter} · {item.title}</p>
@@ -3334,7 +3374,7 @@ function ManuscriptPageInner() {
                   </div>
                 </div>
 
-                <div className={`rounded-[1.6rem] border p-4 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white/80"}`}>
+                <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white/80"}`}>
                   <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>References</p>
                   <div className="mt-3 max-h-72 space-y-2 overflow-y-auto pr-1">
                     {fullBookReferenceItems.length > 0 ? fullBookReferenceItems.map((item) => {
@@ -3343,11 +3383,11 @@ function ManuscriptPageInner() {
                         <button
                           key={item.id}
                           onClick={() => jumpToChapter(item.chapter)}
-                          className={`block w-full rounded-[1rem] border px-3 py-3 text-left text-sm ${isDark ? "border-white/10 bg-white/[0.03] text-slate-200 hover:bg-white/[0.07]" : "border-stone-200 bg-stone-50 text-stone-700 hover:bg-stone-100"}`}
+                          className={`block w-full rounded-md border px-3 py-3 text-left text-sm ${isDark ? "border-white/10 bg-white/[0.03] text-slate-200 hover:bg-white/[0.07]" : "border-stone-200 bg-stone-50 text-stone-700 hover:bg-stone-100"}`}
                         >
                           <div className="flex items-center justify-between gap-3">
                             <p className="font-semibold">Page {pageRef?.startPage ?? "?"}</p>
-                            <span className={`text-[11px] ${isDark ? "text-slate-500" : "text-stone-500"}`}>{item.source}</span>
+                            <span className={`text-3xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{item.source}</span>
                           </div>
                           <p className="mt-1 text-xs opacity-75">Chapter {item.chapter} · {item.title}</p>
                           <p className="mt-2 text-xs opacity-80">{item.excerpt}</p>
@@ -3360,20 +3400,20 @@ function ManuscriptPageInner() {
             ) : null}
 
             {synopsis ? (
-              <div className={`rounded-[1.6rem] border p-4 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white/80"}`}>
+              <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white/80"}`}>
                 <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Synopsis generator</p>
                 <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-200" : "text-stone-700"}`}>{synopsis.synopsis}</p>
                 {synopsis.focus_points.length > 0 ? (
                   <div className="mt-3 flex flex-wrap gap-2">
                     {synopsis.focus_points.map((point) => (
-                      <span key={point} className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${isDark ? "bg-white/10 text-slate-300" : "bg-stone-100 text-stone-700"}`}>{point}</span>
+                      <span key={point} className={`rounded-full px-2.5 py-1 text-3xs font-semibold ${isDark ? "bg-white/10 text-slate-300" : "bg-stone-100 text-stone-700"}`}>{point}</span>
                     ))}
                   </div>
                 ) : null}
               </div>
             ) : null}
 
-            <div className={`rounded-[1.6rem] border p-4 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white/80"}`}>
+            <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white/80"}`}>
               <div className="flex items-center justify-between gap-3">
                 <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Continuity check</p>
                 <Link href={`/${bookId}/reports`} className={`rounded-full px-3 py-1.5 text-xs font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}>Report history</Link>
@@ -3382,7 +3422,7 @@ function ManuscriptPageInner() {
                 <div className="mt-3 space-y-3">
                   <p className={`text-sm font-medium ${isDark ? "text-white" : "text-stone-900"}`}>{review.overall_verdict}</p>
                   {review.continuity_issues.length > 0 ? review.continuity_issues.map((issue, index) => (
-                    <div key={`${issue.title}-${index}`} className={`rounded-[1rem] border px-3 py-3 text-sm ${isDark ? "border-amber-500/20 bg-amber-500/10 text-slate-200" : "border-amber-200 bg-amber-50 text-stone-700"}`}>
+                    <div key={`${issue.title}-${index}`} className={`rounded-md border px-3 py-3 text-sm ${isDark ? "border-amber-500/20 bg-amber-500/10 text-slate-200" : "border-amber-200 bg-amber-50 text-stone-700"}`}>
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex-1">
                           <p className="font-semibold">{issue.title}</p>
@@ -3391,7 +3431,7 @@ function ManuscriptPageInner() {
                         </div>
                         <button
                           onClick={() => void saveContinuityIssueAsNote(issue)}
-                          className={`shrink-0 rounded-full px-3 py-1.5 text-[11px] font-semibold transition ${isDark ? "bg-white/10 text-slate-200 hover:bg-white/20" : "bg-white text-stone-700 hover:bg-stone-100"}`}
+                          className={`shrink-0 rounded-full px-3 py-1.5 text-3xs font-semibold transition ${isDark ? "bg-white/10 text-slate-200 hover:bg-white/20" : "bg-white text-stone-700 hover:bg-stone-100"}`}
                         >
                           Save as note
                         </button>
@@ -3404,13 +3444,13 @@ function ManuscriptPageInner() {
                     <div className="space-y-2">
                       <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Insertion opportunities</p>
                       {review.insertion_opportunities.map((item, index) => (
-                        <div key={`${item.title}-${index}`} className={`rounded-[1rem] border px-3 py-3 text-sm ${isDark ? "border-teal-500/20 bg-teal-500/10 text-slate-200" : "border-teal-200 bg-teal-50 text-stone-700"}`}>
+                        <div key={`${item.title}-${index}`} className={`rounded-md border px-3 py-3 text-sm ${isDark ? "border-teal-500/20 bg-teal-500/10 text-slate-200" : "border-teal-200 bg-teal-50 text-stone-700"}`}>
                           <div className="flex items-start justify-between gap-3">
                             <div>
                               <p className="font-semibold">{item.title}</p>
                               <p className="mt-1 text-xs opacity-75">Chapter {item.target_chapter}{item.target_chapter_title ? ` - ${item.target_chapter_title}` : ""}</p>
                             </div>
-                            <button onClick={() => jumpToChapter(item.target_chapter)} className={`rounded-full px-3 py-1 text-[11px] font-semibold ${isDark ? "bg-white/10 text-slate-100" : "bg-white text-stone-700"}`}>
+                            <button onClick={() => jumpToChapter(item.target_chapter)} className={`rounded-full px-3 py-1 text-3xs font-semibold ${isDark ? "bg-white/10 text-slate-100" : "bg-white text-stone-700"}`}>
                               Jump there
                             </button>
                           </div>
@@ -3442,7 +3482,7 @@ function ManuscriptPageInner() {
               )}
             </div>
 
-            <div className={`rounded-[1.6rem] border p-4 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white/80"}`}>
+            <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white/80"}`}>
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Character voice consistency</p>
@@ -3454,14 +3494,14 @@ function ManuscriptPageInner() {
               </div>
             </div>
 
-            <div className={`rounded-[1.6rem] border p-4 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white/80"}`}>
+            <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white/80"}`}>
               <div className="flex items-center justify-between gap-3">
                 <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Open threads</p>
                 <Link href={`/${bookId}/plot-threads`} className={`rounded-full px-3 py-1.5 text-xs font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}>Dashboard</Link>
               </div>
               <div className="mt-3 space-y-2">
                 {plotThreads.length > 0 ? plotThreads.map((thread) => (
-                  <div key={thread.id} className={`rounded-[1rem] border px-3 py-3 text-sm ${isDark ? "border-white/10 bg-white/[0.03] text-slate-200" : "border-stone-200 bg-stone-50 text-stone-700"}`}>
+                  <div key={thread.id} className={`rounded-md border px-3 py-3 text-sm ${isDark ? "border-white/10 bg-white/[0.03] text-slate-200" : "border-stone-200 bg-stone-50 text-stone-700"}`}>
                     <p className="font-semibold">{thread.title}</p>
                     <p className="mt-1 text-xs opacity-75">Introduced in chapter {thread.introduced_at ?? "?"} · {thread.status}</p>
                   </div>
@@ -3470,14 +3510,14 @@ function ManuscriptPageInner() {
             </div>
 
             {reviewPassages.length > 0 ? (
-              <div className={`rounded-[1.6rem] border p-4 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white/80"}`}>
+              <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white/80"}`}>
                 <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Cross-referenced passages</p>
                 <div className="mt-3 space-y-2">
                   {reviewPassages.map((passage, index) => (
                     <button
                       key={`${passage.chapter_num}-${index}`}
                       onClick={() => jumpToChapter(passage.chapter_num)}
-                      className={`block w-full rounded-[1rem] border px-3 py-3 text-left text-sm ${isDark ? "border-white/10 bg-white/[0.03] text-slate-200 hover:bg-white/[0.07]" : "border-stone-200 bg-stone-50 text-stone-700 hover:bg-stone-100"}`}
+                      className={`block w-full rounded-md border px-3 py-3 text-left text-sm ${isDark ? "border-white/10 bg-white/[0.03] text-slate-200 hover:bg-white/[0.07]" : "border-stone-200 bg-stone-50 text-stone-700 hover:bg-stone-100"}`}
                     >
                       <p className="font-semibold">Chapter {passage.chapter_num}{passage.chapter_title ? `: ${passage.chapter_title}` : ""}{typeof passage.chunk_index === "number" ? ` | chunk ${passage.chunk_index}` : ""}</p>
                       <p className="mt-1 text-xs opacity-80">{passage.excerpt}</p>
@@ -3489,7 +3529,7 @@ function ManuscriptPageInner() {
               </>
             ) : (
               <>
-                <div className={`rounded-[1.6rem] border p-4 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white/80"}`}>
+                <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white/80"}`}>
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Notes</p>
@@ -3520,9 +3560,9 @@ function ManuscriptPageInner() {
                       value={noteTitle}
                       onChange={(event) => setNoteTitle(event.target.value)}
                       placeholder="Note title"
-                      className={`w-full rounded-[0.9rem] border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
+                      className={`w-full rounded-sm border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
                     />
-                    <div className={`overflow-hidden rounded-[1rem] border ${isDark ? "border-white/10 bg-[#0b0f17]" : "border-stone-200 bg-white"}`}>
+                    <div className={`overflow-hidden rounded-md border ${isDark ? "border-white/10 bg-[#0b0f17]" : "border-stone-200 bg-white"}`}>
                       <EditorToolbar editorKey="note-editor-modal" isDark={isDark} compact characters={characters} />
                       <RichTextEditor
                         editorKey="note-editor-modal"
@@ -3543,7 +3583,7 @@ function ManuscriptPageInner() {
                       <button
                         onClick={saveNote}
                         disabled={savingNote || !noteBodyText.trim()}
-                        className="rounded-[1rem] bg-[linear-gradient(135deg,#d97706,#b45309)] px-4 py-3 text-sm font-semibold text-white transition disabled:opacity-40"
+                        className="rounded-md bg-[linear-gradient(135deg,#d97706,#b45309)] px-4 py-3 text-sm font-semibold text-white transition disabled:opacity-40"
                       >
                         {savingNote ? "Saving..." : `Save ${noteScope === "chapter" ? "chapter" : "book"} note`}
                       </button>
@@ -3551,13 +3591,13 @@ function ManuscriptPageInner() {
                         type="button"
                         onClick={() => void saveWorkspaceVaultNote()}
                         disabled={!noteBodyText.trim()}
-                        className={`rounded-[1rem] px-4 py-3 text-sm font-semibold transition disabled:opacity-40 ${isDark ? "bg-white/10 text-slate-100" : "bg-stone-100 text-stone-700"}`}
+                        className={`rounded-md px-4 py-3 text-sm font-semibold transition disabled:opacity-40 ${isDark ? "bg-white/10 text-slate-100" : "bg-stone-100 text-stone-700"}`}
                       >
                         Save to workspace notes
                       </button>
                       <Link
                         href={`/${bookId}/notes`}
-                        className={`inline-flex items-center justify-center rounded-[1rem] px-4 py-3 text-sm font-semibold ${isDark ? "bg-white/6 text-slate-200" : "bg-white text-stone-700 border border-stone-200"}`}
+                        className={`inline-flex items-center justify-center rounded-md px-4 py-3 text-sm font-semibold ${isDark ? "bg-white/6 text-slate-200" : "bg-white text-stone-700 border border-stone-200"}`}
                       >
                         Open notes workspace
                       </Link>
@@ -3565,7 +3605,7 @@ function ManuscriptPageInner() {
                   </div>
                 </div>
 
-                <div className={`rounded-[1.6rem] border p-4 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white/80"}`}>
+                <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white/80"}`}>
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Annotations</p>
@@ -3580,14 +3620,14 @@ function ManuscriptPageInner() {
                     </button>
                   </div>
                   {annotationAnchor ? (
-                    <div className={`mt-4 rounded-[1rem] border p-3 ${isDark ? "border-amber-500/20 bg-amber-500/10" : "border-amber-200 bg-amber-50"}`}>
-                      <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-amber-200" : "text-amber-800"}`}>Selected passage</p>
+                    <div className={`mt-4 rounded-md border p-3 ${isDark ? "border-amber-500/20 bg-amber-500/10" : "border-amber-200 bg-amber-50"}`}>
+                      <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-amber-200" : "text-amber-800"}`}>Selected passage</p>
                       <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-100" : "text-stone-700"}`}>{annotationAnchor.quote}</p>
                       <div className="mt-3 flex flex-wrap gap-2">
                         <select
                           value={annotationCategory}
                           onChange={(event) => setAnnotationCategory(event.target.value as ManuscriptAnnotationCategory)}
-                          className={`rounded-[0.9rem] border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/40 text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
+                          className={`rounded-sm border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/40 text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
                         >
                           {MANUSCRIPT_ANNOTATION_CATEGORIES.map((category) => (
                             <option key={category} value={category}>
@@ -3617,13 +3657,13 @@ function ManuscriptPageInner() {
                         onChange={(event) => setAnnotationDraft(event.target.value)}
                         placeholder="Leave an inline annotation"
                         rows={4}
-                        className={`mt-3 w-full rounded-[0.9rem] border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/40 text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
+                        className={`mt-3 w-full rounded-sm border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/40 text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
                       />
                       <div className="mt-3 flex flex-wrap gap-2">
                         <button
                           onClick={() => void saveAnnotation()}
                           disabled={annotationActionId === "new" || !annotationDraft.trim()}
-                          className="rounded-[1rem] bg-[linear-gradient(135deg,#0f766e,#115e59)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
+                          className="rounded-md bg-[linear-gradient(135deg,#0f766e,#115e59)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
                         >
                           {annotationActionId === "new" ? "Saving..." : "Save annotation"}
                         </button>
@@ -3633,7 +3673,7 @@ function ManuscriptPageInner() {
                             setAnnotationAnchor(null)
                             setAnnotationDraft("")
                           }}
-                          className={`rounded-[1rem] px-4 py-2 text-sm font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}
+                          className={`rounded-md px-4 py-2 text-sm font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}
                         >
                           Cancel
                         </button>
@@ -3644,7 +3684,7 @@ function ManuscriptPageInner() {
                   )}
                 </div>
 
-                <div className={`rounded-[1.6rem] border p-4 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white/80"}`}>
+                <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white/80"}`}>
                   <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Chapter annotations</p>
                   <div className="mt-3 space-y-2">
                     {annotationsLoading ? <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>Loading annotations...</p> : null}
@@ -3652,16 +3692,16 @@ function ManuscriptPageInner() {
                     {[...openChapterAnnotations, ...resolvedChapterAnnotations].map((annotation) => (
                       <div
                         key={annotation.id}
-                        className={`rounded-[1rem] border px-3 py-3 ${activeAnnotationId === annotation.id ? isDark ? "border-amber-400/40 bg-amber-500/10" : "border-amber-300 bg-amber-50" : isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}
+                        className={`rounded-md border px-3 py-3 ${activeAnnotationId === annotation.id ? isDark ? "border-amber-400/40 bg-amber-500/10" : "border-amber-300 bg-amber-50" : isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div>
                             <div className="flex flex-wrap items-center gap-2">
                               <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{annotationCategoryLabel(annotation.category)}</p>
-                              <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] ${annotation.status === "resolved" ? isDark ? "bg-white/10 text-slate-300" : "bg-stone-200 text-stone-700" : isDark ? "bg-emerald-500/15 text-emerald-200" : "bg-emerald-100 text-emerald-800"}`}>
+                              <span className={`rounded-full px-2 py-0.5 text-3xs font-semibold uppercase tracking-[0.14em] ${annotation.status === "resolved" ? isDark ? "bg-white/10 text-slate-300" : "bg-stone-200 text-stone-700" : isDark ? "bg-emerald-500/15 text-emerald-200" : "bg-emerald-100 text-emerald-800"}`}>
                                 {annotation.status}
                               </span>
-                              <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] ${isDark ? "bg-white/10 text-slate-300" : "bg-stone-200 text-stone-700"}`}>
+                              <span className={`rounded-full px-2 py-0.5 text-3xs font-semibold uppercase tracking-[0.14em] ${isDark ? "bg-white/10 text-slate-300" : "bg-stone-200 text-stone-700"}`}>
                                 {annotation.visibility}
                               </span>
                             </div>
@@ -3698,13 +3738,13 @@ function ManuscriptPageInner() {
                   </div>
                 </div>
 
-                <div className={`rounded-[1.6rem] border p-4 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white/80"}`}>
+                <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white/80"}`}>
                   <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Chapter-linked notes</p>
                   <div className="mt-3 space-y-2">
                     {notesLoading ? <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>Loading notes...</p> : null}
                     {!notesLoading && chapterManualNotes.length === 0 ? <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>No notes saved for this chapter yet.</p> : null}
                     {chapterManualNotes.map((note) => (
-                      <div key={note.id} className={`rounded-[1rem] border px-3 py-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
+                      <div key={note.id} className={`rounded-md border px-3 py-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
                         {editingNoteId === note.id ? (
                           <div className="space-y-3">
                             <input
@@ -3759,12 +3799,12 @@ function ManuscriptPageInner() {
                   </div>
                 </div>
 
-                <div className={`rounded-[1.6rem] border p-4 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white/80"}`}>
+                <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white/80"}`}>
                   <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Whole-book notes</p>
                   <div className="mt-3 space-y-2">
                     {!notesLoading && generalNotes.length === 0 ? <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>No general notes saved yet.</p> : null}
                     {generalNotes.map((note) => (
-                      <div key={note.id} className={`rounded-[1rem] border px-3 py-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
+                      <div key={note.id} className={`rounded-md border px-3 py-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
                         {editingNoteId === note.id ? (
                           <div className="space-y-3">
                             <input
@@ -3873,8 +3913,9 @@ function ManuscriptPageInner() {
 }
 function DeferredPanelLoadingState({ label }: { label: string }) {
   return (
-    <div className="flex min-h-[12rem] items-center justify-center rounded-[1.2rem] border border-border bg-card/60 p-6 text-sm text-muted-foreground">
-      {label}
+    <div className="flex min-h-[12rem] flex-col items-center justify-center gap-3 rounded-md border border-border bg-card/60 p-6">
+      <Skeleton variant="card" className="w-full min-h-44" />
+      <p className="text-sm text-muted-foreground">{label}</p>
     </div>
   )
 }

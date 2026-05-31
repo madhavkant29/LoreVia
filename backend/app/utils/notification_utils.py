@@ -56,6 +56,19 @@ def _analysis_pipeline_status(book: Book) -> str:
     return " ".join(str(analysis.get("status") or "").split()).strip() or "pending"
 
 
+def _book_ready_diagnostic_totals(book: Book) -> tuple[int, int]:
+    raw_workspace = getattr(book, "writer_workspace", None)
+    workspace = raw_workspace if isinstance(raw_workspace, dict) else {}
+    processing = workspace.get("processing") if isinstance(workspace.get("processing"), dict) else {}
+    parser_diagnostics = processing.get("parser_diagnostics") if isinstance(processing, dict) else {}
+    extraction = parser_diagnostics.get("character_extraction") if isinstance(parser_diagnostics, dict) else {}
+    totals = extraction.get("totals") if isinstance(extraction.get("totals"), dict) else {}
+    return (
+        int(totals.get("saved_characters") or 0),
+        int(totals.get("relationships_persisted") or 0),
+    )
+
+
 def _compose_book_ready_body(book: Book, stats: BookReadyStats) -> str:
     extraction_failures = _character_extraction_failures(book)
     analysis_status = _analysis_pipeline_status(book)
@@ -375,6 +388,9 @@ async def collect_book_ready_stats(db: AsyncSession, book: Book) -> BookReadySta
             )
         ).scalar_one()
     )
+    diagnostic_character_count, diagnostic_relationship_count = _book_ready_diagnostic_totals(book)
+    character_count = max(character_count, diagnostic_character_count)
+    relationship_count = max(relationship_count, diagnostic_relationship_count)
     plot_thread_count = int(
         (
             await db.execute(

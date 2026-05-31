@@ -20,7 +20,7 @@ export function SiteFooter() {
   const isEditorialMarketingSurface = pathname === "/" || pathname?.startsWith("/compare") === true
 
   const footerLinkClass =
-    `group inline-flex items-center gap-3 rounded-[0.9rem] px-0 py-0.5 text-[1.02rem] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[rgba(var(--accent),0.45)] ${
+    `group inline-flex items-center gap-3 rounded-sm px-0 py-0.5 text-[1.02rem] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[rgba(var(--accent),0.45)] ${
       isEditorialMarketingSurface
         ? "text-[#f3ede4] hover:text-[#69c6b1]"
         : "text-stone-900 hover:text-[#1f615d] dark:text-[#f3ede4] dark:hover:text-[#69c6b1]"
@@ -60,7 +60,7 @@ export function SiteFooter() {
           </div>
 
           <div className="min-w-0">
-            <p className={`text-[11px] font-semibold uppercase tracking-[0.28em] ${isEditorialMarketingSurface ? "text-[#6fae9f]" : "text-stone-500 dark:text-slate-400"}`}>Navigation</p>
+            <p className={`text-3xs font-semibold uppercase tracking-[0.28em] ${isEditorialMarketingSurface ? "text-[#6fae9f]" : "text-stone-500 dark:text-slate-400"}`}>Navigation</p>
             <div className="mt-6 grid gap-8 sm:grid-cols-2">
               {navigationColumns.map((column, index) => (
                 <div key={index} className="flex flex-col items-start gap-4">
@@ -98,7 +98,7 @@ export function SiteFooter() {
           </div>
 
           <div className="min-w-0">
-            <p className={`text-[11px] font-semibold uppercase tracking-[0.28em] ${isEditorialMarketingSurface ? "text-[#6fae9f]" : "text-stone-500 dark:text-slate-400"}`}>Contact</p>
+            <p className={`text-3xs font-semibold uppercase tracking-[0.28em] ${isEditorialMarketingSurface ? "text-[#6fae9f]" : "text-stone-500 dark:text-slate-400"}`}>Contact</p>
             <div className="mt-6 space-y-6">
               <div className="flex items-start gap-4">
                 <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full border ${
@@ -151,7 +151,7 @@ export function SiteFooter() {
           </div>
 
           <div className="min-w-0">
-            <p className={`text-[11px] font-semibold uppercase tracking-[0.28em] ${isEditorialMarketingSurface ? "text-[#6fae9f]" : "text-stone-500 dark:text-slate-400"}`}>Connect</p>
+            <p className={`text-3xs font-semibold uppercase tracking-[0.28em] ${isEditorialMarketingSurface ? "text-[#6fae9f]" : "text-stone-500 dark:text-slate-400"}`}>Connect</p>
             <SocialLinks
               className="mt-6 flex items-center gap-3"
               linkClassName={`inline-flex h-11 w-11 items-center justify-center rounded-full border transition-colors ${

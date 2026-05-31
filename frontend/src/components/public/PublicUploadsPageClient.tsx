@@ -46,7 +46,7 @@ function formatNumber(value: number) {
 function MetricCard({ label, value, note, isDark }: { label: string; value: string; note: string; isDark: boolean }) {
   return (
     <article className={`rounded-2xl border p-5 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-white"}`}>
-      <p className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{label}</p>
+      <p className={`text-3xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{label}</p>
       <p className="mt-3 text-3xl font-semibold">{value}</p>
       <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-600"}`}>{note}</p>
     </article>
@@ -89,7 +89,7 @@ function CreatorBookCard({ book, isDark }: { book: PublicBook; isDark: boolean }
     <article className={`rounded-2xl border p-6 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-white"}`}>
       {book.ranking?.label ? (
         <div className="flex flex-wrap items-center gap-2">
-          <span className={`rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "bg-cyan-300/10 text-cyan-200" : "bg-cyan-50 text-cyan-800"}`}>
+          <span className={`rounded-full px-3 py-1 text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "bg-cyan-300/10 text-cyan-200" : "bg-cyan-50 text-cyan-800"}`}>
             #{book.ranking.position ?? "?"} {book.ranking.label}
           </span>
         </div>

@@ -6,12 +6,17 @@ from app.utils.migration_utils import (
     create_policy_if_missing,
     destructive_downgrade_revisions,
     destructive_upgrade_revisions,
+    drop_orphan_table_rowtype_if_present,
+    drop_orphan_table_rowtype_if_present_on_connection,
+    drop_orphan_table_rowtype_if_present_sql,
     enable_row_level_security,
     grant_sequence_privileges,
     grant_supabase_data_api_sequence_access,
     grant_supabase_data_api_table_access,
     grant_table_privileges,
     is_local_database_url,
+    is_safe_test_database_url,
+    normalized_database_target,
     redact_database_target,
     resolve_alembic_database_url,
     should_reset_local_alembic_state,
@@ -28,6 +33,40 @@ def test_is_local_database_url_accepts_local_hosts() -> None:
 def test_is_local_database_url_rejects_remote_hosts() -> None:
     assert not is_local_database_url(
         "postgresql://postgres:pass@aws-1-ap-south-1.pooler.supabase.com:5432/postgres"
+    )
+
+
+def test_normalized_database_target_collapses_local_host_aliases() -> None:
+    assert normalized_database_target("postgresql://postgres:pass@postgres:5432/lorevia") == (
+        "local",
+        5432,
+        "lorevia",
+    )
+    assert normalized_database_target("postgresql://postgres:pass@127.0.0.1:5432/lorevia") == (
+        "local",
+        5432,
+        "lorevia",
+    )
+
+
+def test_is_safe_test_database_url_rejects_same_local_database() -> None:
+    assert not is_safe_test_database_url(
+        "postgresql://postgres:pass@postgres:5432/lorevia",
+        "postgresql://postgres:pass@127.0.0.1:5432/lorevia",
+    )
+
+
+def test_is_safe_test_database_url_accepts_distinct_local_test_database() -> None:
+    assert is_safe_test_database_url(
+        "postgresql://postgres:pass@postgres:5432/lorevia",
+        "postgresql://postgres:pass@postgres:5432/lorevia_test",
+    )
+
+
+def test_is_safe_test_database_url_rejects_remote_test_database() -> None:
+    assert not is_safe_test_database_url(
+        "postgresql://postgres:pass@postgres:5432/lorevia",
+        "postgresql://postgres:pass@remote.example.com:5432/lorevia_test",
     )
 
 
@@ -274,3 +313,48 @@ def test_create_policy_if_missing_rejects_invalid_command(monkeypatch) -> None:
         assert "Unsupported policy command" in str(exc)
     else:  # pragma: no cover - defensive
         raise AssertionError("Expected ValueError for invalid policy command")
+
+
+def test_drop_orphan_table_rowtype_if_present_executes_expected_do_block(monkeypatch) -> None:
+    executed: list[str] = []
+    monkeypatch.setattr(
+        "app.utils.migration_utils.op",
+        SimpleNamespace(execute=executed.append),
+    )
+
+    drop_orphan_table_rowtype_if_present("users")
+
+    assert len(executed) == 1
+    assert "FROM pg_class c" in executed[0]
+    assert "FROM pg_type t" in executed[0]
+    assert "c.relkind IN ('r', 'p', 'v', 'm', 'f')" in executed[0]
+    assert "c.relname = 'users'" in executed[0]
+    assert "t.typname = 'users'" in executed[0]
+    assert "DROP TYPE " in executed[0]
+    assert '"public"."users"' in executed[0]
+
+
+def test_drop_orphan_table_rowtype_if_present_sql_returns_expected_do_block() -> None:
+    sql = drop_orphan_table_rowtype_if_present_sql("users")
+
+    assert "FROM pg_class c" in sql
+    assert "FROM pg_type t" in sql
+    assert "c.relkind IN ('r', 'p', 'v', 'm', 'f')" in sql
+    assert "c.relname = 'users'" in sql
+    assert "t.typname = 'users'" in sql
+    assert "DROP TYPE " in sql
+    assert '"public"."users"' in sql
+
+
+def test_drop_orphan_table_rowtype_if_present_on_connection_executes_expected_sql() -> None:
+    executed: list[object] = []
+
+    class FakeConnection:
+        def execute(self, statement: object) -> None:
+            executed.append(statement)
+
+    drop_orphan_table_rowtype_if_present_on_connection(FakeConnection(), "users")
+
+    assert len(executed) == 1
+    statement = executed[0]
+    assert getattr(statement, "text", "") == drop_orphan_table_rowtype_if_present_sql("users")

@@ -15,7 +15,7 @@ from app.core.redis import (
 
 if TYPE_CHECKING:
     from app.models.book import Book
-    from app.models.user import User
+    from app.models.user import User, UserLoginActivity
 
 
 DEFAULT_DAILY_WORD_GOAL = 1000
@@ -39,13 +39,6 @@ def current_daily_word_goal(user: User) -> int:
     return max(int(user.daily_word_goal or DEFAULT_DAILY_WORD_GOAL), 1)
 
 
-def login_activity_dates(user: User) -> list[date]:
-    values = sorted({item for item in (user.login_activity_dates or []) if isinstance(item, date)})
-    if len(values) <= MAX_LOGIN_ACTIVITY_DAYS:
-        return values
-    return values[-MAX_LOGIN_ACTIVITY_DAYS:]
-
-
 def record_login_activity(user: User, *, now: datetime | None = None) -> None:
     current = now.astimezone(UTC) if now is not None else datetime.now(UTC)
     today = current.date()
@@ -55,7 +48,6 @@ def record_login_activity(user: User, *, now: datetime | None = None) -> None:
     user.last_login_date = today
 
     if previous_day == today:
-        user.login_activity_dates = _append_login_day(user.login_activity_dates, today)
         return
 
     if previous_day == today - timedelta(days=1):
@@ -64,7 +56,6 @@ def record_login_activity(user: User, *, now: datetime | None = None) -> None:
         user.login_streak_days = 1
 
     user.longest_login_streak_days = max(int(user.longest_login_streak_days or 0), int(user.login_streak_days or 0))
-    user.login_activity_dates = _append_login_day(user.login_activity_dates, today)
 
 
 def add_daily_word_progress(user: User, words_added: int, *, now: datetime | None = None) -> int:
@@ -77,11 +68,42 @@ def add_daily_word_progress(user: User, words_added: int, *, now: datetime | Non
     return int(user.today_word_count or 0)
 
 
-def _append_login_day(existing_days: list[date] | None, day: date) -> list[date]:
-    days = sorted({item for item in (existing_days or []) if isinstance(item, date)} | {day})
-    if len(days) > MAX_LOGIN_ACTIVITY_DAYS:
-        days = days[-MAX_LOGIN_ACTIVITY_DAYS:]
-    return days
+async def record_login_activity_row(
+    db: AsyncSession,
+    user_id: str,
+    login_date: date,
+    *,
+    ip_hash: str | None = None,
+    device_id: str | None = None,
+) -> UserLoginActivity:
+    from app.models.user import UserLoginActivity as UserLoginActivityModel
+
+    row = UserLoginActivityModel(
+        user_id=user_id,
+        login_date=login_date,
+        ip_hash=ip_hash,
+        device_id=device_id,
+    )
+    db.add(row)
+    await db.flush()
+    return row
+
+
+async def get_login_activity_dates_from_table(
+    db: AsyncSession,
+    user_id: str,
+) -> list[date]:
+    from app.models.user import UserLoginActivity as UserLoginActivityModel
+
+    result = await db.execute(
+        select(UserLoginActivityModel.login_date)
+        .where(UserLoginActivityModel.user_id == user_id)
+        .order_by(UserLoginActivityModel.login_date.desc())
+        .limit(MAX_LOGIN_ACTIVITY_DAYS)
+    )
+    rows = result.scalars().all()
+    dates = sorted({row for row in rows if isinstance(row, date)})
+    return dates
 
 
 def build_writing_activity_entry(

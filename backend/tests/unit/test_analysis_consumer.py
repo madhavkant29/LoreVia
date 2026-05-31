@@ -7,7 +7,14 @@ from app.models.book import Book, Chapter
 from app.models.character import Character
 from app.models.intelligence import PlotThread
 from app.models.user import User
+from app.utils.ingestion_utils import ANALYSIS_INFLIGHT_TTL_SECONDS
 from app.workers.consumers.analysis_consumer import _upsert_plot_threads
+
+
+def test_inflight_lock_ttl_exceeds_hard_limit():
+    ANALYSIS_HARD_LIMIT = 15 * 60        # celery_app.py task_annotations time_limit
+    MINIMUM_TTL = ANALYSIS_HARD_LIMIT + 300
+    assert ANALYSIS_INFLIGHT_TTL_SECONDS >= MINIMUM_TTL
 
 
 @pytest.mark.asyncio

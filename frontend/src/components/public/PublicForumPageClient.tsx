@@ -251,7 +251,7 @@ export function PublicForumPageClient({
           <Link href="/library" className={`text-sm ${isDark ? "text-slate-400 hover:text-white" : "text-slate-500 hover:text-slate-900"}`}>{"<- Back to library"}</Link>
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em]">
+              <div className="flex flex-wrap items-center gap-2 text-3xs font-semibold uppercase tracking-[0.18em]">
                 <span className={`rounded-full px-2.5 py-1 ${isDark ? "bg-[#1d2631] text-slate-200" : "bg-slate-100 text-slate-700"}`}>LoreVia Forum</span>
                 <span className={isDark ? "text-slate-500" : "text-slate-500"}>Ranked beta novels</span>
                 <MetaDivider isDark={isDark} />
@@ -369,13 +369,13 @@ export function PublicForumPageClient({
             <section className={`rounded-3xl border p-4 shadow-sm ${isDark ? "border-white/10 bg-[#121821]" : "border-slate-200 bg-white"}`}>
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-500"}`}>Author tools</p>
+                  <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-500"}`}>Author tools</p>
                   <h2 className="mt-2 text-lg font-semibold">Open a new thread</h2>
                   <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-400" : "text-slate-600"}`}>
                     Switch between general community conversations and manuscript-specific beta-reader threads.
                   </p>
                 </div>
-                <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${isDark ? "bg-white/[0.06] text-slate-300" : "bg-slate-100 text-slate-700"}`}>@{viewer.username || "member"}</span>
+                <span className={`rounded-full px-2.5 py-1 text-3xs font-semibold ${isDark ? "bg-white/[0.06] text-slate-300" : "bg-slate-100 text-slate-700"}`}>@{viewer.username || "member"}</span>
               </div>
               <div className={`mt-4 inline-flex rounded-full p-1 ${isDark ? "bg-white/[0.05]" : "bg-slate-100"}`}>
                 <button
@@ -499,7 +499,7 @@ export function PublicForumPageClient({
             </section>
           ) : (
             <section className={`rounded-3xl border p-4 shadow-sm ${isDark ? "border-white/10 bg-[#121821]" : "border-slate-200 bg-white"}`}>
-              <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-500"}`}>Browse first</p>
+              <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-500"}`}>Browse first</p>
               <h2 className="mt-2 text-lg font-semibold">Read like a real beta reader</h2>
               <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-400" : "text-slate-600"}`}>
                 Sign in to comment on active threads, react to other readers, and send a direct beta-read note when an author is open to contact.
@@ -508,7 +508,7 @@ export function PublicForumPageClient({
           )}
 
           <section className={`rounded-3xl border p-4 shadow-sm ${isDark ? "border-white/10 bg-[#121821]" : "border-slate-200 bg-white"}`}>
-            <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-500"}`}>How this feed works</p>
+            <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-500"}`}>How this feed works</p>
             <div className="mt-4 space-y-3 text-sm">
               <InfoRow
                 isDark={isDark}
@@ -544,7 +544,7 @@ function ForumFeedCard({ isDark, post }: { isDark: boolean, post: PublicForumPos
         <div className={`flex w-[72px] shrink-0 flex-col items-center justify-start gap-2 border-r px-3 py-4 ${isDark ? "border-white/10 bg-[#0f141b]" : "border-slate-200 bg-slate-50/70"}`}>
           <VoteArrowIcon className={isDark ? "text-slate-500" : "text-slate-400"} />
           <span className="text-lg font-semibold">{Math.round(post.discoverability_score)}</span>
-          <span className={`text-[11px] uppercase tracking-[0.16em] ${isDark ? "text-slate-500" : "text-slate-500"}`}>pulse</span>
+          <span className={`text-3xs uppercase tracking-[0.16em] ${isDark ? "text-slate-500" : "text-slate-500"}`}>pulse</span>
         </div>
 
         <div className="min-w-0 flex-1 px-4 py-4 sm:px-5">
@@ -568,7 +568,7 @@ function ForumFeedCard({ isDark, post }: { isDark: boolean, post: PublicForumPos
             ) : null}
           </div>
 
-          <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em]">
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-3xs font-semibold uppercase tracking-[0.18em]">
             <span className={isDark ? "text-amber-300" : "text-orange-700"}>{post.genre || post.work_type || "discussion"}</span>
             {post.title ? (
               <>
@@ -658,7 +658,7 @@ function StatCard({ isDark, value, label }: { isDark: boolean, value: string, la
   return (
     <div className={`rounded-2xl px-3 py-3 ${isDark ? "bg-[#151b22]" : "bg-white ring-1 ring-slate-200"}`}>
       <p className="text-lg font-semibold">{value}</p>
-      <p className={`mt-1 text-[11px] uppercase tracking-[0.16em] ${isDark ? "text-slate-500" : "text-slate-500"}`}>{label}</p>
+      <p className={`mt-1 text-3xs uppercase tracking-[0.16em] ${isDark ? "text-slate-500" : "text-slate-500"}`}>{label}</p>
     </div>
   )
 }
@@ -681,7 +681,7 @@ function ShellChip({ children, isDark, active = false }: { children: React.React
 function UserBadge({ isDark, username }: { isDark: boolean, username: string }) {
   return (
     <span className={`inline-flex items-center gap-2 rounded-full px-2.5 py-1 font-medium ${isDark ? "bg-white/[0.05] text-slate-100" : "bg-slate-100 text-slate-900"}`}>
-      <span className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-semibold ${isDark ? "bg-[#202834] text-slate-100" : "bg-white text-slate-700 ring-1 ring-slate-200"}`}>
+      <span className={`flex h-5 w-5 items-center justify-center rounded-full text-3xs font-semibold ${isDark ? "bg-[#202834] text-slate-100" : "bg-white text-slate-700 ring-1 ring-slate-200"}`}>
         {username.slice(0, 1).toUpperCase()}
       </span>
       @{username}

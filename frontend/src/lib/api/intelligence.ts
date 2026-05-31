@@ -8,6 +8,8 @@ import type {
   AdvisorResponse,
   AdvisorGreeting,
   AdvisorSuggestionsResponse,
+  AdvisorSuggestionScanResponse,
+  AdvisorSuggestionJobStatusResponse,
   AdvisorTaskStatusResponse,
   AdvisorAsyncAccepted,
   EditorialReviewResponse,
@@ -26,6 +28,11 @@ type AdvisorStreamHandlers = {
   onDelta?: (content: string) => void
   onStage?: (message: string) => void
   signal?: AbortSignal
+}
+
+type VoiceConsistencyOptions = {
+  chapterNum?: number
+  characterId?: string | null
 }
 
 function intelligencePath(bookId: string, suffix = "") {
@@ -187,6 +194,14 @@ export const intelligenceApi = {
   advisorSuggestions: (bookId: string) =>
     apiClient.get<AdvisorSuggestionsResponse>(intelligencePath(bookId, "/advisor/suggestions")).then(r => r.data),
 
+  advisorSuggestionsScan: (bookId: string) =>
+    apiClient.post<AdvisorSuggestionScanResponse>(intelligencePath(bookId, "/advisor/suggestions/scan")).then(r => r.data),
+
+  advisorSuggestionsJobStatus: (bookId: string, jobId: string) =>
+    apiClient.get<AdvisorSuggestionJobStatusResponse>(
+      intelligencePath(bookId, `/advisor/suggestions/jobs/${jobId}`),
+    ).then(r => r.data),
+
   editorialReview: (bookId: string, text: string, chapterNum?: number) =>
     apiClient.post<EditorialReviewResponse>(intelligencePath(bookId, "/advisor/editorial-review"), {
       text: clampAdvisorPassage(text),
@@ -235,16 +250,18 @@ export const intelligenceApi = {
         chapter_num: chapterNum ?? null,
       },
     }, handlers),
-  voiceConsistencyReview: (bookId: string, text: string, chapterNum?: number) =>
+  voiceConsistencyReview: (bookId: string, text: string, options?: VoiceConsistencyOptions) =>
     apiClient.post<VoiceConsistencyResponse>(intelligencePath(bookId, "/advisor/voice-consistency"), {
       text: clampAdvisorPassage(text),
-      chapter_num: chapterNum ?? null,
+      chapter_num: options?.chapterNum ?? null,
+      ...(options?.characterId ? { character_id: options.characterId } : {}),
     }).then(r => r.data),
-  voiceConsistencyReviewStream: (bookId: string, text: string, chapterNum?: number, handlers?: AdvisorStreamHandlers) =>
+  voiceConsistencyReviewStream: (bookId: string, text: string, options?: VoiceConsistencyOptions, handlers?: AdvisorStreamHandlers) =>
     requestSse<VoiceConsistencyResponse>(intelligencePath(bookId, "/advisor/voice-consistency-stream"), {
       payload: {
         text: clampAdvisorPassage(text),
-        chapter_num: chapterNum ?? null,
+        chapter_num: options?.chapterNum ?? null,
+        ...(options?.characterId ? { character_id: options.characterId } : {}),
       },
     }, handlers),
   continuityReport: (bookId: string, text: string, format: ContinuityReportFormat, chapterNum?: number) =>

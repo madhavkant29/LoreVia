@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import uuid
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -77,6 +78,20 @@ class AdvisorSuggestionsResponse(BaseModel):
     total: int
     book_title: str
     meta: AdvisorScanMeta
+    cached: bool = False
+
+
+class AdvisorSuggestionScanResponse(BaseModel):
+    job_id: str
+    status: Literal["queued"]
+    cached: bool = False
+
+
+class AdvisorSuggestionJobStatusResponse(BaseModel):
+    job_id: str
+    status: Literal["queued", "running", "complete", "failed"]
+    result: AdvisorSuggestionsResponse | None = None
+    error: str | None = None
 
 
 class EditorialReviewRequest(BaseModel):
@@ -87,6 +102,7 @@ class EditorialReviewRequest(BaseModel):
 class VoiceConsistencyRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=MAX_PASSAGE_CHARS)
     chapter_num: int | None = Field(default=None, ge=1)
+    character_id: uuid.UUID | None = None
 
 
 class ProseTightenRequest(BaseModel):
@@ -143,3 +159,11 @@ class InlineContinuityResponse(BaseModel):
     issues: list[InlineContinuityIssueOut] = Field(default_factory=list)
     memory_bank: list[str] = Field(default_factory=list)
     overall_verdict: str
+
+
+class SynopsisResponse(BaseModel):
+    spoiler_level: str
+    synopsis: str
+    focus_points: list[str] = Field(default_factory=list)
+    coverage_chapters: list[int] = Field(default_factory=list)
+    cached: bool = False

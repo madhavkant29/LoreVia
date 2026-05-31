@@ -12,9 +12,11 @@ from typing import cast
 from app.core.config import settings
 from app.core.llm import complete_with_fallback
 from app.engine.character.entity_filters import (
+    COMMON_NON_NAME_WORDS,
+    SINGLE_TOKEN_DISCOURSE_WORDS,
+    contextual_ner_entity_label,
     looks_like_person_entity_name,
     person_name_shape_score,
-    character_persistence_decision,
 )
 
 log = logging.getLogger("lorevia.character.extractor")
@@ -102,6 +104,29 @@ If nothing found, return {"characters": [], "relationships": []}.
 Omit null trait fields entirely.
 Return raw JSON only."""
 
+MENTION_VERIFIER_SYSTEM = """You verify whether candidate mentions in story passages refer to actual people/characters.
+
+Rules:
+- Decide from the passage context, not from capitalization alone.
+- Reject interjections, commands, discourse markers, narration fragments, places, groups, organizations, concepts, and objects.
+- A candidate can be a person even if lightly described, if the local passage clearly uses it as a person mention.
+- If the passage is still ambiguous, return is_person as null.
+- Never invent names that are not supported by the supplied mention windows.
+
+Return ONLY valid JSON:
+{
+  "results": [
+    {
+      "id": "candidate id",
+      "is_person": true,
+      "confidence": 0.0,
+      "canonical_name_or_null": null,
+      "reason": "short reason"
+    }
+  ]
+}
+"""
+
 
 async def extract_characters_and_relationships(
     chunk_text: str,
@@ -146,6 +171,13 @@ async def extract_characters_and_relationships(
             candidate_names,
             rejected_characters=rejected_characters,
         )
+        characters = await _apply_contextual_mention_verification(
+            chunk_text,
+            characters,
+            rejected_characters=rejected_characters,
+            user_id=user_id,
+            book_id=book_id,
+        )
         characters = _apply_anti_merge_hints(chunk_text, characters)
         return {
             "characters": characters,
@@ -160,6 +192,13 @@ async def extract_characters_and_relationships(
             candidate_names,
             rejected_characters=rejected_characters,
         )
+        characters = await _apply_contextual_mention_verification(
+            chunk_text,
+            characters,
+            rejected_characters=rejected_characters,
+            user_id=user_id,
+            book_id=book_id,
+        )
         return {
             "characters": _apply_anti_merge_hints(chunk_text, characters),
             "relationships": [],
@@ -167,17 +206,30 @@ async def extract_characters_and_relationships(
         }
 
 
-def fallback_character_mentions(chunk_text: str) -> dict:
-    candidate_names = _candidate_names(chunk_text)
+async def fallback_character_mentions(
+    chunk_text: str,
+    *,
+    user_id: uuid.UUID | None = None,
+    book_id: uuid.UUID | None = None,
+) -> dict:
+    candidate_names = _candidate_names(chunk_text, allow_review_singletons=True)
     rejected_characters: list[dict] = []
     characters = _augment_with_named_mentions(
         chunk_text,
         [],
         candidate_names,
         rejected_characters=rejected_characters,
+        allow_review_candidates=True,
+    )
+    filtered = await _apply_contextual_mention_verification(
+        chunk_text,
+        characters,
+        rejected_characters=rejected_characters,
+        user_id=user_id,
+        book_id=book_id,
     )
     return {
-        "characters": _apply_anti_merge_hints(chunk_text, characters),
+        "characters": _apply_anti_merge_hints(chunk_text, filtered),
         "relationships": [],
         "rejected_characters": rejected_characters,
     }
@@ -262,6 +314,7 @@ FRAGMENT_PREFIXES = (
 TITLE_ONLY_WORDS = {
     "doctor", "professor", "master", "assassin", "killer", "protagonist", "antagonist",
     "contractor", "creator", "teacher", "nurse", "mentor", "sister", "brother",
+    "mother", "father",
 }
 TITLE_PREFIXES = (
     "assistant professor",
@@ -329,12 +382,494 @@ def _record_rejected_character(
     )
 
 
+def _mention_window_bounds(text: str, start: int, end: int) -> tuple[int, int]:
+    left = max(
+        text.rfind(".", 0, start),
+        text.rfind("!", 0, start),
+        text.rfind("?", 0, start),
+        text.rfind("\n", 0, start),
+    )
+    right_candidates = [
+        value
+        for value in (
+            text.find(".", end),
+            text.find("!", end),
+            text.find("?", end),
+            text.find("\n", end),
+        )
+        if value >= 0
+    ]
+    right = min(right_candidates) if right_candidates else len(text)
+    window_start = max(0, left + 1)
+    window_end = len(text) if right == len(text) else right + 1
+    return window_start, window_end
+
+
+def _mention_window(text: str, start: int, end: int) -> str:
+    window_start, window_end = _mention_window_bounds(text, start, end)
+    window = " ".join(text[window_start:window_end].split()).strip()
+    if window:
+        return window
+    return " ".join(text[max(0, start - 90): min(len(text), end + 90)].split()).strip()
+
+
+def _looks_like_interjection_clause(after: str) -> bool:
+    lowered = after.casefold()
+    return bool(
+        re.match(r"^[,!?]\s+(?:he|she|they|it|i|we|you|the|a|an)\b", lowered)
+        or re.match(r"^[,!?]\s+(?:was|were|is|are|had|has|have)\b", lowered)
+        or re.match(r"^[,!?]\s+(?:said|asked|replied|shouted|whispered|muttered)\b", lowered)
+    )
+
+
+def _single_token_starts_like_interjection(name: str, after: str) -> bool:
+    words = re.findall(r"[A-Za-z][A-Za-z'-]*", name)
+    if len(words) != 1:
+        return False
+    return _looks_like_interjection_clause(after)
+
+
+def _single_token_subject_action(after: str) -> bool:
+    lowered = after.casefold()
+    return bool(
+        re.match(
+            r"^\s+(?:said|asked|replied|called|told|whispered|shouted|muttered|smiled|laughed|sighed|nodded|stared|looked|turned|answered|cried|screamed|warned|snapped|grinned|awoke|woke|watched|walked|stepped|moved|stood|sat|rose|opened|closed|reached|grabbed|held|took|came|went|ran|hurried|followed|glanced|noticed|saw|heard|felt)\b",
+            lowered,
+        )
+    )
+
+
+def _clean_verifier_reason(value: object | None) -> str | None:
+    cleaned = " ".join(str(value or "").split()).strip()
+    return cleaned or None
+
+
+def _local_mention_verifier(
+    source_text: str,
+    name: str,
+    *,
+    aliases: list[str] | None = None,
+    traits: dict | None = None,
+    entity_type: str | None = None,
+) -> dict:
+    targets = [candidate for candidate in [name, *(aliases or [])] if candidate]
+    mention_windows: list[dict] = []
+    person_context_mentions = 0
+    mid_sentence_mentions = 0
+    sentence_start_mentions = 0
+    person_ner_mentions = 0
+    non_person_ner_mentions = 0
+    interjection_like_mentions = 0
+    subject_action_mentions = 0
+
+    for candidate in targets:
+        for start, end in _find_name_mentions(source_text, candidate):
+            before = source_text[max(0, start - 48):start]
+            after = source_text[end:min(len(source_text), end + 72)]
+            window = _mention_window(source_text, start, end)
+            is_sentence_start = _mention_is_sentence_start(source_text, start)
+            interjection_like = is_sentence_start and _single_token_starts_like_interjection(candidate, after)
+            subject_action = is_sentence_start and not interjection_like and _single_token_subject_action(after)
+            has_person_context = _mention_has_person_context(before, after) and not interjection_like
+            ner_label = contextual_ner_entity_label(window, candidate)
+            if has_person_context:
+                person_context_mentions += 1
+            if is_sentence_start:
+                sentence_start_mentions += 1
+            else:
+                mid_sentence_mentions += 1
+            if subject_action:
+                subject_action_mentions += 1
+            if ner_label == "PERSON":
+                person_ner_mentions += 1
+            elif ner_label in {"ORG", "GPE", "LOC", "FAC", "PRODUCT", "EVENT", "WORK_OF_ART", "LAW", "LANGUAGE", "NORP"}:
+                non_person_ner_mentions += 1
+            if interjection_like:
+                interjection_like_mentions += 1
+
+            mention_windows.append(
+                {
+                    "text": window,
+                    "has_person_context": has_person_context,
+                    "sentence_start": is_sentence_start,
+                    "ner_label": ner_label,
+                }
+            )
+
+    mention_count = len(mention_windows)
+    words = re.findall(r"[A-Za-z][A-Za-z'-]*", name)
+    normalized = _normalize_name(name)
+    has_description = any(isinstance(value, dict) and value.get("value") for value in (traits or {}).values())
+    allowed_entity_type = str(entity_type or "person").strip().casefold() in {"person", "alias", "unknown"}
+    non_person_tokens = [token for token in normalized.split() if token in NON_CHARACTER_TOKENS or token in ENTITY_NON_PERSON_TOKENS]
+    suspicious_single_token = bool(len(words) == 1 and words[0].casefold() in COMMON_NON_NAME_WORDS)
+    title_like_single_token = bool(len(words) == 1 and words[0].casefold() in TITLE_ONLY_WORDS)
+
+    reasons: list[str] = []
+    positive_signals: list[str] = []
+    negative_signals: list[str] = []
+    band = "review"
+    is_person_like = False
+
+    if not allowed_entity_type:
+        reasons.append("entity_type_not_person")
+        band = "reject"
+    elif not mention_windows:
+        reasons.append("no_grounded_mentions")
+        band = "reject"
+    elif normalized in NON_CHARACTER_EXACT:
+        reasons.append("known_non_character_phrase")
+        band = "reject"
+    elif non_person_tokens and person_context_mentions == 0 and person_ner_mentions == 0:
+        reasons.append("context_contains_non_person_tokens")
+        band = "reject"
+    elif len(words) == 1:
+        if person_ner_mentions >= 1:
+            positive_signals.append("single_token_grounded_by_person_ner")
+            band = "accept"
+            is_person_like = True
+        elif title_like_single_token and (person_context_mentions >= 1 or subject_action_mentions >= 1 or mention_count >= 1):
+            reasons.append("role_title_single_token_requires_review")
+        elif subject_action_mentions >= 1 and not suspicious_single_token:
+            positive_signals.append("single_token_subject_action_grounding")
+            band = "accept"
+            is_person_like = True
+        elif person_context_mentions >= 2 and (mid_sentence_mentions >= 1 or mention_count >= 2) and not suspicious_single_token:
+            positive_signals.append("single_token_grounded_by_context")
+            band = "accept"
+            is_person_like = True
+        elif person_context_mentions >= 1 and (mid_sentence_mentions >= 1 or has_description) and not suspicious_single_token:
+            positive_signals.append("single_token_has_mid_sentence_grounding")
+            band = "accept"
+            is_person_like = True
+        elif non_person_ner_mentions >= 1 and person_context_mentions == 0 and person_ner_mentions == 0:
+            negative_signals.append("single_token_ner_non_person")
+            reasons.append("contextual_ner_non_person")
+            band = "reject"
+        elif interjection_like_mentions >= 1 and person_context_mentions == 0 and person_ner_mentions == 0:
+            negative_signals.append("single_token_interjection_like")
+            reasons.append("interjection_like_usage")
+            band = "reject"
+        elif sentence_start_mentions == mention_count and person_context_mentions == 0 and person_ner_mentions == 0:
+            negative_signals.append("single_token_sentence_start_only")
+            reasons.append("sentence_start_capitalization_only")
+            band = "reject"
+        elif suspicious_single_token and person_context_mentions >= 1:
+            reasons.append("single_token_common_word_requires_review")
+        else:
+            reasons.append("ambiguous_single_token_mention")
+    else:
+        if person_context_mentions >= 1 or person_ner_mentions >= 1:
+            positive_signals.append("multi_token_grounded_by_context")
+            band = "accept"
+            is_person_like = True
+        elif mention_count >= 2 and mid_sentence_mentions >= 1:
+            positive_signals.append("multi_token_repeated_mid_sentence")
+            band = "accept"
+            is_person_like = True
+        elif non_person_ner_mentions >= 1 and person_context_mentions == 0 and person_ner_mentions == 0:
+            negative_signals.append("multi_token_ner_non_person")
+            reasons.append("contextual_ner_non_person")
+            band = "reject"
+        else:
+            reasons.append("ambiguous_multi_token_mention")
+
+    if band == "accept" and not is_person_like:
+        is_person_like = True
+    if band == "reject":
+        is_person_like = False
+
+    return {
+        "is_person_like": is_person_like,
+        "confidence_band": band,
+        "reasons": reasons,
+        "positive_signals": positive_signals,
+        "negative_signals": negative_signals,
+        "mention_count": mention_count,
+        "person_context_mentions": person_context_mentions,
+        "mid_sentence_mentions": mid_sentence_mentions,
+        "sentence_start_mentions": sentence_start_mentions,
+        "subject_action_mentions": subject_action_mentions,
+        "person_ner_mentions": person_ner_mentions,
+        "non_person_ner_mentions": non_person_ner_mentions,
+        "interjection_like_mentions": interjection_like_mentions,
+        "windows": mention_windows[:3],
+    }
+
+
+async def verify_character_candidate_personhood(
+    source_text: str,
+    name: str,
+    *,
+    aliases: list[str] | None = None,
+    traits: dict | None = None,
+    entity_type: str | None = None,
+    user_id: uuid.UUID | None = None,
+    book_id: uuid.UUID | None = None,
+) -> dict:
+    local = _local_mention_verifier(
+        source_text,
+        name,
+        aliases=aliases,
+        traits=traits,
+        entity_type=entity_type,
+    )
+    if local["confidence_band"] != "review":
+        return {
+            "local": local,
+            "llm": {"used": False, "is_person_like": None, "confidence": None, "canonical_name": None, "reason": None},
+            "final": {
+                "confidence_band": local["confidence_band"],
+                "is_person_like": bool(local["is_person_like"]),
+                "reasons": list(local["reasons"]),
+            },
+        }
+
+    payload = await _verify_review_candidates_with_llm(
+        source_text,
+        [
+            {
+                "id": "candidate-0",
+                "name": name,
+                "aliases": aliases or [],
+                "entity_type": entity_type or "person",
+                "traits": traits or {},
+                "verifier_local": local,
+            }
+        ],
+        user_id=user_id,
+        book_id=book_id,
+    )
+    llm_result = payload.get("candidate-0", {})
+    final_band = "review"
+    final_is_person_like = False
+    final_reasons = list(local["reasons"])
+    llm_is_person = llm_result.get("is_person_like")
+    llm_confidence = llm_result.get("confidence")
+    if llm_is_person is True:
+        final_band = "accept"
+        final_is_person_like = True
+        final_reasons = ["llm_confirmed_person", *final_reasons]
+    elif llm_is_person is False and (llm_confidence is None or float(llm_confidence) >= 0.55):
+        final_band = "reject"
+        final_reasons = ["llm_rejected_person", *final_reasons]
+    return {
+        "local": local,
+        "llm": llm_result,
+        "final": {
+            "confidence_band": final_band,
+            "is_person_like": final_is_person_like,
+            "reasons": final_reasons,
+        },
+    }
+
+
+async def _verify_review_candidates_with_llm(
+    source_text: str,
+    candidates: list[dict],
+    *,
+    user_id: uuid.UUID | None = None,
+    book_id: uuid.UUID | None = None,
+) -> dict[str, dict]:
+    if not candidates:
+        return {}
+
+    request_items = []
+    for item in candidates:
+        verifier_local = item.get("verifier_local") if isinstance(item.get("verifier_local"), dict) else {}
+        request_items.append(
+            {
+                "id": str(item.get("id") or ""),
+                "name": str(item.get("name") or "").strip(),
+                "entity_type": str(item.get("entity_type") or "person").strip() or "person",
+                "aliases": [str(alias).strip() for alias in (item.get("aliases") or []) if str(alias).strip()][:4],
+                "local_reasons": [str(reason).strip() for reason in (verifier_local.get("reasons") or []) if str(reason).strip()][:4],
+                "windows": [
+                    str(window.get("text") or "").strip()
+                    for window in (verifier_local.get("windows") or [])
+                    if isinstance(window, dict) and str(window.get("text") or "").strip()
+                ][:3],
+            }
+        )
+
+    raw = await complete_with_fallback(
+        system=MENTION_VERIFIER_SYSTEM,
+        user=json.dumps({"passage": source_text[:4000], "candidates": request_items}, ensure_ascii=True),
+        openai_model=settings.OPENAI_EXTRACT_MODEL,
+        gemini_model=settings.GEMINI_EXTRACT_MODEL,
+        temperature=0.0,
+        max_tokens=1200,
+        response_format={"type": "json_object"},
+        usage_feature="character_mention_verification",
+        usage_user_id=user_id,
+        usage_book_id=book_id,
+    )
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+
+    results: dict[str, dict] = {}
+    for item in parsed.get("results", []):
+        if not isinstance(item, dict):
+            continue
+        candidate_id = str(item.get("id") or "").strip()
+        if not candidate_id:
+            continue
+        raw_confidence = item.get("confidence")
+        try:
+            confidence = float(raw_confidence) if raw_confidence is not None else None
+        except (TypeError, ValueError):
+            confidence = None
+        is_person_raw = item.get("is_person")
+        is_person_like = is_person_raw if isinstance(is_person_raw, bool) else None
+        results[candidate_id] = {
+            "used": True,
+            "is_person_like": is_person_like,
+            "confidence": confidence,
+            "canonical_name": _clean_verifier_reason(item.get("canonical_name_or_null")),
+            "reason": _clean_verifier_reason(item.get("reason")),
+        }
+    return results
+
+
+async def _apply_contextual_mention_verification(
+    source_text: str,
+    characters: list[dict],
+    *,
+    rejected_characters: list[dict] | None = None,
+    user_id: uuid.UUID | None = None,
+    book_id: uuid.UUID | None = None,
+) -> list[dict]:
+    if not characters:
+        return []
+
+    reviewed_candidates: list[dict] = []
+    verified: list[dict] = []
+    for index, character in enumerate(characters):
+        name = str(character.get("name") or "").strip()
+        if not name:
+            continue
+        candidate_id = f"candidate-{index}"
+        traits = cast(dict[str, object], character.get("traits") if isinstance(character.get("traits"), dict) else {})
+        aliases = [str(alias).strip() for alias in (character.get("aliases") or []) if str(alias).strip()]
+        verifier = {
+            "local": _local_mention_verifier(
+                source_text,
+                name,
+                aliases=aliases,
+                traits=traits,
+                entity_type=str(character.get("entity_type") or "person"),
+            ),
+            "llm": {"used": False, "is_person_like": None, "confidence": None, "canonical_name": None, "reason": None},
+            "final": {},
+        }
+        local = verifier["local"]
+        if local["confidence_band"] == "accept":
+            verifier["final"] = {
+                "confidence_band": "accept",
+                "is_person_like": True,
+                "reasons": list(local["reasons"]),
+            }
+        elif local["confidence_band"] == "reject":
+            verifier["final"] = {
+                "confidence_band": "reject",
+                "is_person_like": False,
+                "reasons": list(local["reasons"]),
+            }
+        else:
+            reviewed_candidates.append(
+                {
+                    "id": candidate_id,
+                    "name": name,
+                    "aliases": aliases,
+                    "entity_type": str(character.get("entity_type") or "person"),
+                    "traits": traits,
+                    "verifier_local": local,
+                }
+            )
+            verifier["final"] = {
+                "confidence_band": "review",
+                "is_person_like": False,
+                "reasons": list(local["reasons"]),
+            }
+        evidence = dict(character.get("evidence") if isinstance(character.get("evidence"), dict) else {})
+        evidence["verifier"] = verifier
+        character["evidence"] = evidence
+        character["_verifier_candidate_id"] = candidate_id
+        verified.append(character)
+
+    llm_results = await _verify_review_candidates_with_llm(
+        source_text,
+        reviewed_candidates,
+        user_id=user_id,
+        book_id=book_id,
+    )
+    for character in verified:
+        evidence = dict(character.get("evidence") if isinstance(character.get("evidence"), dict) else {})
+        verifier = dict(evidence.get("verifier") if isinstance(evidence.get("verifier"), dict) else {})
+        local = dict(verifier.get("local") if isinstance(verifier.get("local"), dict) else {})
+        if local.get("confidence_band") != "review":
+            continue
+        llm_result = dict(llm_results.get(str(character.get("_verifier_candidate_id") or "")) or {})
+        verifier["llm"] = {
+            "used": bool(llm_result),
+            "is_person_like": llm_result.get("is_person_like"),
+            "confidence": llm_result.get("confidence"),
+            "canonical_name": llm_result.get("canonical_name"),
+            "reason": llm_result.get("reason"),
+        }
+        llm_is_person = llm_result.get("is_person_like")
+        llm_confidence = llm_result.get("confidence")
+        if llm_is_person is True:
+            verifier["final"] = {
+                "confidence_band": "accept",
+                "is_person_like": True,
+                "reasons": ["llm_confirmed_person", *[str(reason).strip() for reason in (local.get("reasons") or []) if str(reason).strip()]],
+            }
+        elif llm_is_person is False and (llm_confidence is None or float(llm_confidence) >= 0.55):
+            verifier["final"] = {
+                "confidence_band": "reject",
+                "is_person_like": False,
+                "reasons": ["llm_rejected_person", *[str(reason).strip() for reason in (local.get("reasons") or []) if str(reason).strip()]],
+            }
+        evidence["verifier"] = verifier
+        character["evidence"] = evidence
+        canonical_name = _clean_verifier_reason(llm_result.get("canonical_name"))
+        if canonical_name and canonical_name != str(character.get("name") or "") and _contains_supported_subspan(
+            str(character.get("name") or ""),
+            canonical_name,
+            source_text,
+        ):
+            character["llm_canonical_name"] = canonical_name
+
+    accepted_or_review: list[dict] = []
+    for character in verified:
+        evidence = dict(character.get("evidence") if isinstance(character.get("evidence"), dict) else {})
+        verifier = dict(evidence.get("verifier") if isinstance(evidence.get("verifier"), dict) else {})
+        final = dict(verifier.get("final") if isinstance(verifier.get("final"), dict) else {})
+        if final.get("confidence_band") == "reject":
+            _record_rejected_character(
+                rejected_characters,
+                stage="mention_verifier",
+                name=str(character.get("name") or ""),
+                reason=";".join(str(reason).strip() for reason in (final.get("reasons") or []) if str(reason).strip()) or "mention_verifier_rejected",
+                confidence=float(character.get("confidence") or 0.0),
+                evidence=evidence,
+            )
+            continue
+        character.pop("_verifier_candidate_id", None)
+        accepted_or_review.append(character)
+    return accepted_or_review
+
+
 def _augment_with_named_mentions(
     chunk_text: str,
     characters: list[dict],
     candidates: list[str] | None = None,
     *,
     rejected_characters: list[dict] | None = None,
+    allow_review_candidates: bool = False,
 ) -> list[dict]:
     existing_names = {_normalize_name(item.get("name")) for item in characters if item.get("name")}
     existing_aliases = {
@@ -350,7 +885,11 @@ def _augment_with_named_mentions(
         normalized = _normalize_name(candidate)
         if not normalized or normalized in known:
             continue
-        if not _allow_auto_augmentation(chunk_text, candidate):
+        if not _allow_auto_augmentation(
+            chunk_text,
+            candidate,
+            allow_review_singletons=allow_review_candidates,
+        ):
             evidence = _build_evidence(chunk_text, candidate, {}, [])
             _record_rejected_character(
                 rejected_characters,
@@ -361,24 +900,10 @@ def _augment_with_named_mentions(
             )
             continue
         evidence = _build_evidence(chunk_text, candidate, {}, [])
-        decision = character_persistence_decision(
-            candidate,
-            evidence=evidence,
-            entity_type="person",
-        )
-        if not decision.allowed:
-            _record_rejected_character(
-                rejected_characters,
-                stage="candidate_augmentation",
-                name=candidate,
-                reason=";".join(decision.reasons) if decision.reasons else "save_gate_rejected",
-                evidence=evidence,
-            )
-            continue
         confidence = (
             FALLBACK_STRONG_MENTION_CONFIDENCE
             if int(evidence.get("strong_mention_count") or 0) >= 1
-            else MIN_CHARACTER_CONFIDENCE
+            else MIN_BORDERLINE_CONFIDENCE
         )
         characters.append(
             {
@@ -412,22 +937,58 @@ def _augment_with_named_mentions(
     return characters
 
 
-def _candidate_names(text: str) -> list[str]:
+def _candidate_viability_band(
+    text: str,
+    name: str,
+    *,
+    allow_review: bool = False,
+) -> str | None:
+    local = _local_mention_verifier(text, name, entity_type="person")
+    band = str(local.get("confidence_band") or "").strip()
+    if band == "accept":
+        return "accept"
+    if allow_review and band == "review":
+        return "review"
+    return None
+
+
+def _candidate_names(text: str, *, allow_review_singletons: bool = False) -> list[str]:
     candidates: list[str] = []
     candidates.extend(HONORIFIC_RE.findall(text))
-    candidates.extend(FULL_NAME_RE.findall(text))
+    full_names = FULL_NAME_RE.findall(text)
+    candidates.extend(full_names)
     candidates.extend(PARTICLE_NAME_RE.findall(text))
+    masked_full_name_text = text
+    for full_name in full_names:
+        masked_full_name_text = re.sub(
+            rf"\b{re.escape(full_name)}\b",
+            " " * len(full_name),
+            masked_full_name_text,
+        )
+    full_name_last_tokens = {
+        words[-1]
+        for full_name in full_names
+        if (words := re.findall(r"[A-Za-z][A-Za-z'-]*", full_name))
+    }
 
     singles = [
         token
         for token in SINGLE_NAME_RE.findall(text)
-        if token not in NAME_STOPWORDS and token.lower() not in {"the", "this", "that"}
+        if token not in NAME_STOPWORDS and token.casefold() not in COMMON_NON_NAME_WORDS and token.lower() not in {"the", "this", "that"}
+        and not (
+            token in full_name_last_tokens
+            and not re.search(rf"\b{re.escape(token)}\b", masked_full_name_text)
+        )
     ]
     single_counts = Counter(singles)
     candidates.extend(
         name
         for name, count in single_counts.items()
-        if _has_character_context(text, name) or count >= 2
+        if (
+            _has_character_context(text, name)
+            or count >= 2
+            or _candidate_viability_band(text, name, allow_review=allow_review_singletons) is not None
+        )
     )
 
     deduped: list[str] = []
@@ -435,9 +996,18 @@ def _candidate_names(text: str) -> list[str]:
     for name in candidates:
         cleaned = " ".join(name.split()).strip(" .,:;!?\"'")
         normalized = _normalize_name(cleaned)
+        words = re.findall(r"[A-Za-z][A-Za-z'-]*", cleaned)
+        viability_band = (
+            _candidate_viability_band(text, cleaned, allow_review=allow_review_singletons)
+            if len(words) == 1
+            else None
+        )
         if not cleaned or not normalized or normalized in seen:
             continue
         if not _looks_like_character_name(cleaned, text):
+            if not (len(words) == 1 and viability_band is not None and looks_like_person_entity_name(cleaned)):
+                continue
+        elif len(words) == 1 and viability_band == "reject":
             continue
         seen.add(normalized)
         deduped.append(cleaned)
@@ -612,7 +1182,11 @@ def _looks_like_character_name(name: str, source_text: str) -> bool:
     words = re.findall(r"[A-Za-z][A-Za-z'-]*", cleaned)
     if not words:
         return False
-    if len(words) == 1 and (words[0] in SINGLE_NAME_DISCOURSE_MARKERS or words[0] in SINGLE_NAME_TIME_WORDS):
+    if len(words) == 1 and (
+        words[0] in SINGLE_NAME_DISCOURSE_MARKERS
+        or words[0] in SINGLE_NAME_TIME_WORDS
+        or words[0].casefold() in SINGLE_TOKEN_DISCOURSE_WORDS
+    ):
         return False
     if len(words) == 1 and words[0].isupper() and len(words[0]) > 1:
         return False
@@ -705,28 +1279,6 @@ def _clean_character_entries(
 
         traits = cast(dict[str, object], item.get("traits") if isinstance(item.get("traits"), dict) else {})
         arc_summary = _sanitize_summary(item.get("arc_summary"))
-        evidence = _build_evidence(source_text, cleaned_name, traits, [])
-        decision = character_persistence_decision(
-            cleaned_name,
-            entity_type=entity_type,
-            evidence=evidence,
-            personality_tags=item.get("personality_tags") if isinstance(item.get("personality_tags"), list) else None,
-            motivations=item.get("motivations") if isinstance(item.get("motivations"), list) else None,
-            fears=item.get("fears") if isinstance(item.get("fears"), list) else None,
-            archetype=item.get("archetype") if isinstance(item.get("archetype"), str) else None,
-            trait_state=traits,
-            arc_summary=arc_summary,
-        )
-        if not decision.allowed:
-            _record_rejected_character(
-                rejected_characters,
-                stage="llm_clean",
-                name=raw_name,
-                reason=";".join(decision.reasons) if decision.reasons else "save_gate_rejected",
-                confidence=confidence,
-                evidence=evidence,
-            )
-            continue
 
         aliases = []
         for alias in item.get("aliases") or []:
@@ -856,7 +1408,12 @@ def _mention_has_person_context(before: str, after: str) -> bool:
     )
 
 
-def _allow_auto_augmentation(text: str, name: str) -> bool:
+def _allow_auto_augmentation(
+    text: str,
+    name: str,
+    *,
+    allow_review_singletons: bool = False,
+) -> bool:
     words = re.findall(r"[A-Za-z][A-Za-z'-]*", name)
     mentions = _find_name_mentions(text, name)
     if not mentions:
@@ -870,11 +1427,40 @@ def _allow_auto_augmentation(text: str, name: str) -> bool:
             non_sentence_start_mentions += 1
         if _mention_has_person_context(context_before, context_after):
             strong_mentions += 1
+    subject_action_mentions = sum(
+        1
+        for start, end in mentions
+        if _mention_is_sentence_start(text, start)
+        and _single_token_subject_action(text[end:min(len(text), end + 48)])
+    )
     if len(words) == 1:
+        viability_band = _candidate_viability_band(text, name, allow_review=allow_review_singletons)
+        normalized = words[0].casefold()
+        subject_action_mentions = sum(
+            1
+            for start, end in mentions
+            if _mention_is_sentence_start(text, start)
+            and not _single_token_starts_like_interjection(name, text[end:min(len(text), end + 48)])
+            and _single_token_subject_action(text[end:min(len(text), end + 48)])
+        )
+        if viability_band == "accept":
+            if normalized in SINGLE_TOKEN_DISCOURSE_WORDS:
+                return strong_mentions >= 2 and non_sentence_start_mentions >= 1
+            return bool(
+                subject_action_mentions >= 1
+                or strong_mentions >= 2
+                or (strong_mentions >= 1 and non_sentence_start_mentions >= 1)
+            )
+        if viability_band == "review":
+            return allow_review_singletons and normalized not in SINGLE_TOKEN_DISCOURSE_WORDS
         # Single-token names are noisy, but named mid-sentence with grounded
         # person context ("his sister Grete called") should still recover.
         return strong_mentions >= 2 or (strong_mentions >= 1 and non_sentence_start_mentions >= 1)
-    return strong_mentions >= 1 and (non_sentence_start_mentions >= 1 or len(mentions) >= 2)
+    return strong_mentions >= 1 and (
+        non_sentence_start_mentions >= 1
+        or len(mentions) >= 2
+        or subject_action_mentions >= 1
+    )
 
 
 def _looks_like_sentence_fragment(word: str) -> bool:

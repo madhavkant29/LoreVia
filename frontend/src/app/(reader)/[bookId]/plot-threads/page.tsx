@@ -22,7 +22,7 @@ export default function PlotThreadsPage() {
       <div className="mx-auto max-w-7xl px-4 pb-16 pt-6 sm:px-6 lg:px-8">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p className={`text-[11px] font-semibold uppercase tracking-[0.3em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Author dashboard</p>
+            <p className={`text-3xs font-semibold uppercase tracking-[0.3em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Author dashboard</p>
             <h1 className={`mt-2 font-serif text-4xl ${isDark ? "text-white" : "text-stone-950"}`}>Plot Thread Dashboard</h1>
             <p className={`mt-3 max-w-3xl text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
               See every tracked thread across the manuscript, check what is still unresolved, and leave private reminders for future arcs.
@@ -34,7 +34,7 @@ export default function PlotThreadsPage() {
           </div>
         </div>
 
-        <div className={`mt-8 rounded-[1.8rem] border p-5 sm:p-6 ${isDark ? "border-white/10 bg-black/70" : "border-stone-200 bg-white/90"}`}>
+        <div className={`mt-8 rounded-lg border p-5 sm:p-6 ${isDark ? "border-white/10 bg-black/70" : "border-stone-200 bg-white/90"}`}>
           <PlotTracker bookId={bookId} mode="dashboard" />
         </div>
       </div>

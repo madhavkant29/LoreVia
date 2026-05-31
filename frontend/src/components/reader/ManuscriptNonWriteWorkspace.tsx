@@ -108,7 +108,7 @@ export function ManuscriptNonWriteWorkspace({
   return (
     <>
       {preWritingCheck ? (
-        <div className={`mb-5 rounded-[1.3rem] border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
+        <div className={`mb-5 rounded-lg border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-emerald-300" : "text-emerald-700"}`}>Before you start Chapter {preWritingCheck.upcoming_chapter}</p>
@@ -128,7 +128,7 @@ export function ManuscriptNonWriteWorkspace({
         </div>
       ) : null}
 
-      <div className={`mb-8 rounded-[1.4rem] border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white/90"}`}>
+      <div className={`mb-8 rounded-lg border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white/90"}`}>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-3">
             <div className={`inline-flex rounded-full p-1 ${isDark ? "border border-white/10 bg-black/40 shadow-inner" : "border border-stone-200 bg-stone-100 shadow-inner"}`}>
@@ -232,7 +232,7 @@ export function ManuscriptNonWriteWorkspace({
               value={recallQuery}
               onChange={(event) => onRecallQueryChange(event.target.value)}
               placeholder="Search character, scene detail, clue, or thread"
-              className={`w-full rounded-[0.9rem] border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
+              className={`w-full rounded-sm border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
             />
             <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_auto]">
               <input
@@ -240,25 +240,25 @@ export function ManuscriptNonWriteWorkspace({
                 value={replaceQuery}
                 onChange={(event) => onReplaceQueryChange(event.target.value)}
                 placeholder="Find text"
-                className={`rounded-[0.9rem] border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
+                className={`rounded-sm border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
               />
               <input
                 type="text"
                 value={replaceValue}
                 onChange={(event) => onReplaceValueChange(event.target.value)}
                 placeholder="Replace with"
-                className={`rounded-[0.9rem] border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
+                className={`rounded-sm border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
               />
-              <button onClick={onReplaceInCurrentChapter} disabled={!replaceQuery} className={`rounded-[0.9rem] px-4 py-2 text-sm font-medium ${isDark ? "bg-white/10 text-slate-200 disabled:opacity-40" : "bg-stone-100 text-stone-700 disabled:opacity-40"}`}>
+              <button onClick={onReplaceInCurrentChapter} disabled={!replaceQuery} className={`rounded-sm px-4 py-2 text-sm font-medium ${isDark ? "bg-white/10 text-slate-200 disabled:opacity-40" : "bg-stone-100 text-stone-700 disabled:opacity-40"}`}>
                 Replace one
               </button>
-              <button onClick={onReplaceEverywhere} disabled={!replaceQuery} className={`rounded-[0.9rem] px-4 py-2 text-sm font-medium ${isDark ? "bg-white/10 text-slate-200 disabled:opacity-40" : "bg-stone-100 text-stone-700 disabled:opacity-40"}`}>
+              <button onClick={onReplaceEverywhere} disabled={!replaceQuery} className={`rounded-sm px-4 py-2 text-sm font-medium ${isDark ? "bg-white/10 text-slate-200 disabled:opacity-40" : "bg-stone-100 text-stone-700 disabled:opacity-40"}`}>
                 {editorMode === "chapter" ? "Replace all" : "Replace across book"}
               </button>
             </div>
             <div className="grid gap-3 lg:grid-cols-2">
-              <div className={`rounded-[1rem] border p-3 ${isDark ? "border-white/10 bg-black/40" : "border-stone-200 bg-stone-50"}`}>
-                <p className={`text-[11px] font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Instant character info</p>
+              <div className={`rounded-md border p-3 ${isDark ? "border-white/10 bg-black/40" : "border-stone-200 bg-stone-50"}`}>
+                <p className={`text-3xs font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Instant character info</p>
                 {recallCharacter ? (
                   <div className="mt-2 space-y-2">
                     <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{recallCharacter.name}</p>
@@ -269,15 +269,15 @@ export function ManuscriptNonWriteWorkspace({
                   <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>Type a known character name to get an instant reminder.</p>
                 )}
               </div>
-              <div className={`rounded-[1rem] border p-3 ${isDark ? "border-white/10 bg-black/40" : "border-stone-200 bg-stone-50"}`}>
-                <p className={`text-[11px] font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Quick search hits</p>
+              <div className={`rounded-md border p-3 ${isDark ? "border-white/10 bg-black/40" : "border-stone-200 bg-stone-50"}`}>
+                <p className={`text-3xs font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Quick search hits</p>
                 <div className="mt-2 space-y-2">
                   {recallLoading ? <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>Searching...</p> : null}
                   {!recallLoading && recallResults.map((result, index) => (
                     <button
                       key={`${result.chapter_num}-${index}`}
                       onClick={() => onJumpToChapter(result.chapter_num)}
-                      className={`block w-full rounded-[0.85rem] p-2 text-left ${activeFindIndex === index ? isDark ? "bg-emerald-500/15" : "bg-emerald-50" : isDark ? "bg-white/[0.03] hover:bg-white/[0.08]" : "bg-white hover:bg-stone-100"}`}
+                      className={`block w-full rounded-sm p-2 text-left ${activeFindIndex === index ? isDark ? "bg-emerald-500/15" : "bg-emerald-50" : isDark ? "bg-white/[0.03] hover:bg-white/[0.08]" : "bg-white hover:bg-stone-100"}`}
                     >
                       <p className={`text-xs font-semibold ${isDark ? "text-emerald-300" : "text-emerald-700"}`}>Chapter {result.chapter_num}{result.chapter_title ? ` - ${result.chapter_title}` : ""}</p>
                       <p className={`mt-1 text-xs ${isDark ? "text-slate-300" : "text-stone-600"}`}>{result.summary}</p>
@@ -292,25 +292,25 @@ export function ManuscriptNonWriteWorkspace({
       </div>
 
       {inlineContinuity ? (
-        <div className={`mb-8 rounded-[1.4rem] border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white/90"}`}>
+        <div className={`mb-8 rounded-lg border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white/90"}`}>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
-              <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-rose-300" : "text-rose-700"}`}>Chapter memory continuity checker</p>
+              <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-rose-300" : "text-rose-700"}`}>Chapter memory continuity checker</p>
               <p className={`mt-2 text-sm ${isDark ? "text-slate-300" : "text-stone-700"}`}>{inlineContinuity.overall_verdict}</p>
             </div>
             {logicSelectionText ? <p className={`max-w-sm text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Last tightened selection: {logicSelectionText.slice(0, 100)}</p> : null}
           </div>
           <div className="mt-4 grid gap-3 lg:grid-cols-2">
-            <div className={`rounded-[1rem] border p-3 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50"}`}>
-              <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Inline issues</p>
+            <div className={`rounded-md border p-3 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50"}`}>
+              <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Inline issues</p>
               <div className="mt-3 space-y-3">
                 {continuityLoading ? <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>Refreshing continuity memory…</p> : null}
                 {inlineContinuity.issues.length === 0 ? <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>No hard chapter-memory contradiction surfaced in this pass, but this scene still deserves another check for setup, recall, and causal clarity.</p> : null}
                 {inlineContinuity.issues.slice(0, 6).map((issue, index) => (
-                  <article key={`${issue.title}-${index}`} className={`rounded-[0.95rem] border p-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-white bg-white"}`}>
+                  <article key={`${issue.title}-${index}`} className={`rounded-md border p-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-white bg-white"}`}>
                     <div className="flex items-center justify-between gap-3">
                       <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{issue.title}</p>
-                      <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${issue.severity === "critical" ? isDark ? "bg-rose-500/10 text-rose-200" : "bg-rose-50 text-rose-700" : isDark ? "bg-amber-500/10 text-amber-200" : "bg-amber-50 text-amber-700"}`}>{issue.severity}</span>
+                      <span className={`rounded-full px-2.5 py-1 text-3xs font-semibold ${issue.severity === "critical" ? isDark ? "bg-rose-500/10 text-rose-200" : "bg-rose-50 text-rose-700" : isDark ? "bg-amber-500/10 text-amber-200" : "bg-amber-50 text-amber-700"}`}>{issue.severity}</span>
                     </div>
                     <p className={`mt-2 text-xs italic ${isDark ? "text-slate-400" : "text-stone-500"}`}>"{issue.snippet}"</p>
                     <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-700"}`}>{issue.explanation}</p>
@@ -319,8 +319,8 @@ export function ManuscriptNonWriteWorkspace({
                 ))}
               </div>
             </div>
-            <div className={`rounded-[1rem] border p-3 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50"}`}>
-              <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Memory bank</p>
+            <div className={`rounded-md border p-3 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50"}`}>
+              <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Memory bank</p>
               <div className="mt-3 space-y-2">
                 {inlineContinuity.memory_bank.map((item, index) => (
                   <p key={`${item}-${index}`} className={`text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-700"}`}>{item}</p>
@@ -348,7 +348,7 @@ function InfoList({
 }) {
   return (
     <div>
-      <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>{title}</p>
+      <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>{title}</p>
       <div className="mt-2 space-y-2">
         {items.length > 0 ? items.map((item, index) => (
           <p key={`${item}-${index}`} className={`text-sm ${isDark ? "text-slate-200" : "text-stone-700"}`}>{item}</p>

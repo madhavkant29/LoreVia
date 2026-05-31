@@ -19,9 +19,9 @@ function severityBadgeClass(severity: string, isDark: boolean) {
 
 function RevisionDetailCard({ item, isDark }: { item: RevisionActionItem; isDark: boolean }) {
   return (
-    <div className={`rounded-[0.9rem] border p-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white"}`}>
+    <div className={`rounded-sm border p-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white"}`}>
       <div className="flex flex-wrap items-center gap-2">
-        <span className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] ${severityBadgeClass(item.severity, isDark)}`}>
+        <span className={`rounded-full px-2.5 py-1 text-3xs font-semibold uppercase tracking-[0.18em] ${severityBadgeClass(item.severity, isDark)}`}>
           {item.severity}
         </span>
         {item.chapter_ref ? <span className={isDark ? "text-xs text-slate-500" : "text-xs text-stone-400"}>{`Chapter ${item.chapter_ref}`}</span> : null}
@@ -91,14 +91,14 @@ export function NotificationsPanel({ mode = "sidebar" }: { mode?: "sidebar" | "p
       const revision = revisionDetailsByBookId[item.book_id]
       if (loadingDetailsId === item.id) {
         return (
-          <div className={`mt-4 rounded-[1rem] border p-4 text-sm ${isDark ? "border-white/10 bg-black/20 text-slate-400" : "border-stone-200 bg-stone-50 text-stone-500"}`}>
+          <div className={`mt-4 rounded-md border p-4 text-sm ${isDark ? "border-white/10 bg-black/20 text-slate-400" : "border-stone-200 bg-stone-50 text-stone-500"}`}>
             Loading revision details...
           </div>
         )
       }
       if (detailsErrorId === item.id) {
         return (
-          <div className={`mt-4 rounded-[1rem] border p-4 text-sm ${isDark ? "border-rose-500/20 bg-rose-500/10 text-rose-200" : "border-rose-200 bg-rose-50 text-rose-700"}`}>
+          <div className={`mt-4 rounded-md border p-4 text-sm ${isDark ? "border-rose-500/20 bg-rose-500/10 text-rose-200" : "border-rose-200 bg-rose-50 text-rose-700"}`}>
             We could not load the revision details for this notification yet.
           </div>
         )
@@ -106,20 +106,20 @@ export function NotificationsPanel({ mode = "sidebar" }: { mode?: "sidebar" | "p
       if (!revision) return null
 
       return (
-        <div className={`mt-4 rounded-[1rem] border p-4 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50"}`}>
-          <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Revision Details</p>
+        <div className={`mt-4 rounded-md border p-4 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50"}`}>
+          <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Revision Details</p>
           <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{revision.summary.hero_message}</p>
           {revision.summary.recent_edit_label ? (
             <p className={`mt-2 text-sm leading-6 ${isDark ? "text-violet-200" : "text-violet-800"}`}>{revision.summary.recent_edit_label}</p>
           ) : null}
           <div className="mt-3 flex flex-wrap gap-2">
-            <span className={`rounded-full px-3 py-1 text-[11px] font-semibold ${isDark ? "bg-white/10 text-slate-200" : "border border-stone-200 bg-white text-stone-700"}`}>
+            <span className={`rounded-full px-3 py-1 text-3xs font-semibold ${isDark ? "bg-white/10 text-slate-200" : "border border-stone-200 bg-white text-stone-700"}`}>
               {revision.summary.active_item_count} active items
             </span>
-            <span className={`rounded-full px-3 py-1 text-[11px] font-semibold ${isDark ? "bg-rose-500/15 text-rose-200" : "bg-rose-50 text-rose-700"}`}>
+            <span className={`rounded-full px-3 py-1 text-3xs font-semibold ${isDark ? "bg-rose-500/15 text-rose-200" : "bg-rose-50 text-rose-700"}`}>
               {revision.summary.high_severity_count} high severity
             </span>
-            <span className={`rounded-full px-3 py-1 text-[11px] font-semibold ${isDark ? "bg-sky-500/15 text-sky-200" : "bg-sky-50 text-sky-700"}`}>
+            <span className={`rounded-full px-3 py-1 text-3xs font-semibold ${isDark ? "bg-sky-500/15 text-sky-200" : "bg-sky-50 text-sky-700"}`}>
               {revision.summary.task_ready_count} task-ready
             </span>
           </div>
@@ -138,18 +138,18 @@ export function NotificationsPanel({ mode = "sidebar" }: { mode?: "sidebar" | "p
 
     if (item.kind === "book_ready") {
       return (
-        <div className={`mt-4 rounded-[1rem] border p-4 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50"}`}>
-          <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Processing Status</p>
+        <div className={`mt-4 rounded-md border p-4 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50"}`}>
+          <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Processing Status</p>
           <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
             {analysisComplete
               ? "LoreVia has finished the full analysis pass for this manuscript."
               : "LoreVia has finished ingestion and is still completing deeper analysis for this manuscript."}
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
-            {characterCount !== null ? <span className={`rounded-full px-3 py-1 text-[11px] font-semibold ${isDark ? "bg-white/10 text-slate-200" : "border border-stone-200 bg-white text-stone-700"}`}>{characterCount} characters</span> : null}
-            {relationshipCount !== null ? <span className={`rounded-full px-3 py-1 text-[11px] font-semibold ${isDark ? "bg-white/10 text-slate-200" : "border border-stone-200 bg-white text-stone-700"}`}>{relationshipCount} relationships</span> : null}
-            {plotThreadCount !== null ? <span className={`rounded-full px-3 py-1 text-[11px] font-semibold ${isDark ? "bg-white/10 text-slate-200" : "border border-stone-200 bg-white text-stone-700"}`}>{plotThreadCount} plot threads</span> : null}
-            {continuityIssueCount !== null ? <span className={`rounded-full px-3 py-1 text-[11px] font-semibold ${isDark ? "bg-white/10 text-slate-200" : "border border-stone-200 bg-white text-stone-700"}`}>{continuityIssueCount} continuity issues</span> : null}
+            {characterCount !== null ? <span className={`rounded-full px-3 py-1 text-3xs font-semibold ${isDark ? "bg-white/10 text-slate-200" : "border border-stone-200 bg-white text-stone-700"}`}>{characterCount} characters</span> : null}
+            {relationshipCount !== null ? <span className={`rounded-full px-3 py-1 text-3xs font-semibold ${isDark ? "bg-white/10 text-slate-200" : "border border-stone-200 bg-white text-stone-700"}`}>{relationshipCount} relationships</span> : null}
+            {plotThreadCount !== null ? <span className={`rounded-full px-3 py-1 text-3xs font-semibold ${isDark ? "bg-white/10 text-slate-200" : "border border-stone-200 bg-white text-stone-700"}`}>{plotThreadCount} plot threads</span> : null}
+            {continuityIssueCount !== null ? <span className={`rounded-full px-3 py-1 text-3xs font-semibold ${isDark ? "bg-white/10 text-slate-200" : "border border-stone-200 bg-white text-stone-700"}`}>{continuityIssueCount} continuity issues</span> : null}
           </div>
         </div>
       )
@@ -157,14 +157,14 @@ export function NotificationsPanel({ mode = "sidebar" }: { mode?: "sidebar" | "p
 
     if (item.kind === "upload_processing") {
       return (
-        <div className={`mt-4 rounded-[1rem] border p-4 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50"}`}>
-          <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Processing Estimate</p>
+        <div className={`mt-4 rounded-md border p-4 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50"}`}>
+          <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Processing Estimate</p>
           <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
             LoreVia is still parsing and indexing this upload. You can leave the page while it finishes in the background.
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
-            {estimatedMinutes ? <span className={`rounded-full px-3 py-1 text-[11px] font-semibold ${isDark ? "bg-white/10 text-slate-200" : "border border-stone-200 bg-white text-stone-700"}`}>ETA {estimatedMinutes} min</span> : null}
-            {fileSizeMb !== null ? <span className={`rounded-full px-3 py-1 text-[11px] font-semibold ${isDark ? "bg-white/10 text-slate-200" : "border border-stone-200 bg-white text-stone-700"}`}>{fileSizeMb} MB upload</span> : null}
+            {estimatedMinutes ? <span className={`rounded-full px-3 py-1 text-3xs font-semibold ${isDark ? "bg-white/10 text-slate-200" : "border border-stone-200 bg-white text-stone-700"}`}>ETA {estimatedMinutes} min</span> : null}
+            {fileSizeMb !== null ? <span className={`rounded-full px-3 py-1 text-3xs font-semibold ${isDark ? "bg-white/10 text-slate-200" : "border border-stone-200 bg-white text-stone-700"}`}>{fileSizeMb} MB upload</span> : null}
           </div>
         </div>
       )
@@ -172,13 +172,13 @@ export function NotificationsPanel({ mode = "sidebar" }: { mode?: "sidebar" | "p
 
     if (item.kind === "chapter_report" || item.kind === "continuity_risk") {
       return (
-        <div className={`mt-4 rounded-[1rem] border p-4 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50"}`}>
-          <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Story Details</p>
+        <div className={`mt-4 rounded-md border p-4 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50"}`}>
+          <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Story Details</p>
           {summary ? <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{summary}</p> : null}
           {continuityFlags.length > 0 ? (
             <div className="mt-3 space-y-2">
               {continuityFlags.slice(0, 3).map((flag) => (
-                <p key={flag} className={`rounded-[0.85rem] border p-3 text-sm leading-6 ${isDark ? "border-white/10 bg-white/[0.03] text-slate-300" : "border-stone-200 bg-white text-stone-600"}`}>{flag}</p>
+                <p key={flag} className={`rounded-sm border p-3 text-sm leading-6 ${isDark ? "border-white/10 bg-white/[0.03] text-slate-300" : "border-stone-200 bg-white text-stone-600"}`}>{flag}</p>
               ))}
             </div>
           ) : null}
@@ -188,7 +188,7 @@ export function NotificationsPanel({ mode = "sidebar" }: { mode?: "sidebar" | "p
     }
 
     return (
-      <div className={`mt-4 rounded-[1rem] border p-4 text-sm leading-6 ${isDark ? "border-white/10 bg-black/20 text-slate-300" : "border-stone-200 bg-stone-50 text-stone-600"}`}>
+      <div className={`mt-4 rounded-md border p-4 text-sm leading-6 ${isDark ? "border-white/10 bg-black/20 text-slate-300" : "border-stone-200 bg-stone-50 text-stone-600"}`}>
         {item.body}
       </div>
     )
@@ -213,15 +213,15 @@ export function NotificationsPanel({ mode = "sidebar" }: { mode?: "sidebar" | "p
 
       <div className="reader-scrollbar flex-1 overflow-y-auto px-5 py-5">
         {loading ? (
-          <div className={`rounded-[1.2rem] border p-5 text-sm ${isDark ? "border-white/10 bg-white/[0.03] text-slate-400" : "border-stone-200 bg-white text-stone-500"}`}>
+          <div className={`rounded-md border p-5 text-sm ${isDark ? "border-white/10 bg-white/[0.03] text-slate-400" : "border-stone-200 bg-white text-stone-500"}`}>
             Loading notifications...
           </div>
         ) : error ? (
-          <div className={`rounded-[1.2rem] border p-5 text-sm ${isDark ? "border-rose-500/20 bg-rose-500/10 text-rose-200" : "border-rose-200 bg-rose-50 text-rose-700"}`}>
+          <div className={`rounded-md border p-5 text-sm ${isDark ? "border-rose-500/20 bg-rose-500/10 text-rose-200" : "border-rose-200 bg-rose-50 text-rose-700"}`}>
             {error}
           </div>
         ) : items.length === 0 ? (
-          <div className={`rounded-[1.2rem] border p-6 text-sm ${isDark ? "border-white/10 bg-white/[0.03] text-slate-400" : "border-stone-200 bg-white text-stone-500"}`}>
+          <div className={`rounded-md border p-6 text-sm ${isDark ? "border-white/10 bg-white/[0.03] text-slate-400" : "border-stone-200 bg-white text-stone-500"}`}>
             Nothing new yet. When LoreVia detects notable chapter changes, they'll appear here.
           </div>
         ) : (
@@ -243,7 +243,7 @@ export function NotificationsPanel({ mode = "sidebar" }: { mode?: "sidebar" | "p
               return (
                 <article
                   key={item.id}
-                  className={`rounded-[1.2rem] border p-4 transition ${item.read_at ? (isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white") : (isDark ? "border-indigo-400/30 bg-indigo-400/10" : "border-violet-200 bg-violet-50")}`}
+                  className={`rounded-md border p-4 transition ${item.read_at ? (isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white") : (isDark ? "border-indigo-400/30 bg-indigo-400/10" : "border-violet-200 bg-violet-50")}`}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
@@ -251,10 +251,10 @@ export function NotificationsPanel({ mode = "sidebar" }: { mode?: "sidebar" | "p
                       <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{item.body}</p>
                       {item.kind === "book_ready" ? (
                         <div className="mt-3 flex flex-wrap gap-2">
-                          {characterCount !== null ? <span className={`rounded-full px-3 py-1 text-[11px] font-semibold ${isDark ? "bg-white/10 text-slate-200" : "border border-stone-200 bg-white text-stone-700"}`}>{characterCount} characters</span> : null}
-                          {relationshipCount !== null ? <span className={`rounded-full px-3 py-1 text-[11px] font-semibold ${isDark ? "bg-white/10 text-slate-200" : "border border-stone-200 bg-white text-stone-700"}`}>{relationshipCount} relationships</span> : null}
-                          {plotThreadCount !== null ? <span className={`rounded-full px-3 py-1 text-[11px] font-semibold ${isDark ? "bg-white/10 text-slate-200" : "border border-stone-200 bg-white text-stone-700"}`}>{plotThreadCount} plot threads</span> : null}
-                          {continuityIssueCount !== null ? <span className={`rounded-full px-3 py-1 text-[11px] font-semibold ${isDark ? "bg-white/10 text-slate-200" : "border border-stone-200 bg-white text-stone-700"}`}>{continuityIssueCount} continuity issues</span> : null}
+                          {characterCount !== null ? <span className={`rounded-full px-3 py-1 text-3xs font-semibold ${isDark ? "bg-white/10 text-slate-200" : "border border-stone-200 bg-white text-stone-700"}`}>{characterCount} characters</span> : null}
+                          {relationshipCount !== null ? <span className={`rounded-full px-3 py-1 text-3xs font-semibold ${isDark ? "bg-white/10 text-slate-200" : "border border-stone-200 bg-white text-stone-700"}`}>{relationshipCount} relationships</span> : null}
+                          {plotThreadCount !== null ? <span className={`rounded-full px-3 py-1 text-3xs font-semibold ${isDark ? "bg-white/10 text-slate-200" : "border border-stone-200 bg-white text-stone-700"}`}>{plotThreadCount} plot threads</span> : null}
+                          {continuityIssueCount !== null ? <span className={`rounded-full px-3 py-1 text-3xs font-semibold ${isDark ? "bg-white/10 text-slate-200" : "border border-stone-200 bg-white text-stone-700"}`}>{continuityIssueCount} continuity issues</span> : null}
                         </div>
                       ) : null}
                       {item.kind === "revision_digest" ? (
@@ -262,8 +262,8 @@ export function NotificationsPanel({ mode = "sidebar" }: { mode?: "sidebar" | "p
                           {revisionTagline ? <p className={`text-xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-violet-300" : "text-violet-700"}`}>{revisionTagline}</p> : null}
                           {recentEditLabel ? <p className={`mt-2 text-sm leading-6 ${isDark ? "text-violet-200" : "text-violet-800"}`}>{recentEditLabel}</p> : null}
                           <div className="mt-2 flex flex-wrap gap-2">
-                            {activeRevisionItems !== null ? <span className={`rounded-full px-3 py-1 text-[11px] font-semibold ${isDark ? "bg-white/10 text-slate-200" : "border border-stone-200 bg-white text-stone-700"}`}>{activeRevisionItems} active items</span> : null}
-                            {highRevisionItems !== null ? <span className={`rounded-full px-3 py-1 text-[11px] font-semibold ${isDark ? "bg-rose-500/15 text-rose-200" : "bg-rose-50 text-rose-700"}`}>{highRevisionItems} high severity</span> : null}
+                            {activeRevisionItems !== null ? <span className={`rounded-full px-3 py-1 text-3xs font-semibold ${isDark ? "bg-white/10 text-slate-200" : "border border-stone-200 bg-white text-stone-700"}`}>{activeRevisionItems} active items</span> : null}
+                            {highRevisionItems !== null ? <span className={`rounded-full px-3 py-1 text-3xs font-semibold ${isDark ? "bg-rose-500/15 text-rose-200" : "bg-rose-50 text-rose-700"}`}>{highRevisionItems} high severity</span> : null}
                           </div>
                           {revisionHero ? <p className={`mt-3 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{revisionHero}</p> : null}
                           {topRevisionTitle ? <p className={`mt-2 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Top issue: {topRevisionTitle}</p> : null}

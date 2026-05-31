@@ -38,19 +38,10 @@ async def test_deliver_verification_email_uses_public_safe_url_and_shared_copy(m
 
 
 @pytest.mark.asyncio
-async def test_send_onboarding_email_renders_long_form_LoreVia_copy(monkeypatch):
+async def test_send_onboarding_email_renders_long_form_LoreVia_copy_without_promotional_gating(monkeypatch):
     captured: list[dict] = []
 
-    async def _fake_promotional_context(**_kwargs):
-        return {
-            "allowed": True,
-            "unsubscribe_url": "https://getlorevia.com/api/v1/email/unsubscribe?token=abc",
-            "preferences_url": "https://getlorevia.com/api/v1/email/preferences?token=def",
-        }
-
     monkeypatch.setattr("app.core.config.settings.APP_URL", "https://getlorevia.com/", raising=False)
-    monkeypatch.setattr("app.core.config.settings.BUSINESS_MAILING_ADDRESS", "123 Story Lane", raising=False)
-    monkeypatch.setattr(email_service, "_resolve_promotional_context", _fake_promotional_context)
     monkeypatch.setattr(email_service, "_send", lambda payload: captured.append(payload) or True)
 
     await email_service.send_onboarding_email("reader@example.com")
@@ -61,9 +52,9 @@ async def test_send_onboarding_email_renders_long_form_LoreVia_copy(monkeypatch)
     assert "readers and writers who need a more dependable way to keep track of long stories" in html
     assert "Open your library" in html
     assert "support@getlorevia.com" in html
-    assert "You're receiving this because you signed up for LoreVia." in html
-    assert "Manage email preferences" in html
-    assert captured[0]["headers"]["List-Unsubscribe-Post"] == "List-Unsubscribe=One-Click"
+    assert "You're receiving this because you signed up for LoreVia." not in html
+    assert "Manage email preferences" not in html
+    assert "headers" not in captured[0]
 
 
 @pytest.mark.asyncio
@@ -112,19 +103,10 @@ async def test_send_processing_complete_with_stats_renders_metrics_and_library_c
 
 
 @pytest.mark.asyncio
-async def test_send_trial_email_uses_pricing_cta_for_trial_ending(monkeypatch):
+async def test_send_trial_email_uses_pricing_cta_for_trial_ending_without_promotional_gating(monkeypatch):
     captured: list[dict] = []
 
-    async def _fake_promotional_context(**_kwargs):
-        return {
-            "allowed": True,
-            "unsubscribe_url": "https://getlorevia.com/api/v1/email/unsubscribe?token=abc",
-            "preferences_url": "https://getlorevia.com/api/v1/email/preferences?token=def",
-        }
-
     monkeypatch.setattr("app.core.config.settings.APP_URL", "https://getlorevia.com", raising=False)
-    monkeypatch.setattr("app.core.config.settings.BUSINESS_MAILING_ADDRESS", "123 Story Lane", raising=False)
-    monkeypatch.setattr(email_service, "_resolve_promotional_context", _fake_promotional_context)
     monkeypatch.setattr(email_service, "_send", lambda payload: captured.append(payload) or True)
 
     delivered = await email_service.send_trial_email("reader@example.com", TRIAL_EMAIL_ENDING)
@@ -135,6 +117,8 @@ async def test_send_trial_email_uses_pricing_cta_for_trial_ending(monkeypatch):
     assert "Review plans" in html
     assert "https://getlorevia.com/pricing" in html
     assert "If the workspace is helping you work with stories more clearly" in html
+    assert "Manage email preferences" not in html
+    assert "headers" not in captured[0]
 
 
 @pytest.mark.asyncio

@@ -9,7 +9,7 @@ import {
 } from "@/lib/query/cacheKeys"
 import { invalidateQueryKeys } from "@/lib/query/queryClient"
 import { normalizeBookRouteId } from "@/lib/utils/bookRoutes"
-import type { Book, BookCollaborator, BookEvents, BookNote, BookOverviewPayload, BookSeries, BookWorkType, ChapterConsistencyReport, ChapterSceneOrder, ChapterVersion, ChapterVersionDetail, CollaborationPermissions, CollaborationRole, CollaborationScope, EmotionalArcOverview, ManuscriptAnnotation, ManuscriptWorkspaceTree, NovelScene, ObsidianGraph, ObsidianNoteRelations, ObsidianPreview, ObsidianVaultNote, ObsidianVaultNoteSaveResult, PreWritingCheck, ReadabilityMetrics, RevisionIntelligence, RevisionTagSet, RevisionTagTarget, SavedQuote, SceneMetadata, SceneVersion, SceneVersionDetail, SeriesBible, StoryHealth, UserStats, WorkspaceSearchFilters, WorkspaceSearchResult, WriterWorkspace } from "@/types/book"
+import type { Book, BookCollaborator, BookEvents, BookNote, BookOverviewPayload, BookSeries, BookWorkType, ChapterConsistencyReport, ChapterSceneOrder, ChapterVersion, ChapterVersionDetail, CollaboratorActivity, CollaborationPermissions, CollaborationRole, CollaborationScope, EmotionalArcOverview, ManuscriptAnnotation, ManuscriptWorkspaceTree, NovelScene, ObsidianGraph, ObsidianNoteRelations, ObsidianPreview, ObsidianVaultNote, ObsidianVaultNoteSaveResult, PaginatedSeries, PreWritingCheck, ReadabilityMetrics, RevisionIntelligence, RevisionTagSet, RevisionTagTarget, SavedQuote, SceneMetadata, SceneVersion, SceneVersionDetail, SeriesBible, StoryHealth, UserStats, WorkspaceSearchFilters, WorkspaceSearchResult, WriterWorkspace } from "@/types/book"
 import type {
   Character,
   CharacterRepairApplyResult,
@@ -55,6 +55,8 @@ export const booksApi = {
   getOverview: (id: string) => apiClient.get<BookOverviewPayload>(bookPath(id, "/overview")).then(r => r.data),
   listCollaborators: (id: string) =>
     apiClient.get<BookCollaborator[]>(bookPath(id, "/collaborators")).then(r => r.data),
+  getCollaboratorActivity: (id: string, collaborationId: string) =>
+    apiClient.get<CollaboratorActivity>(bookPath(id, `/collaborators/${collaborationId}/activity`)).then(r => r.data),
   createCollaborator: (
     id: string,
     payload: { email: string; displayName?: string | null; role: CollaborationRole; scope: CollaborationScope; permissions?: CollaborationPermissions | null }
@@ -674,8 +676,8 @@ export const booksApi = {
       invalidateBookCache(id)
       return r.data
     }),
-  listSeries: () =>
-    apiClient.get<BookSeries[]>("/books/series").then(r => r.data),
+  listSeries: (params?: { limit?: number; offset?: number }) =>
+    apiClient.get<PaginatedSeries>("/books/series", { params }).then(r => r.data),
   getSeriesBible: (seriesId: string) =>
     apiClient.get<SeriesBible>(`/books/series/${seriesId}/bible`).then(r => r.data),
   createSeries: (payload: { name: string; description?: string | null }) =>

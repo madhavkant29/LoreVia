@@ -266,7 +266,7 @@ export function GraphViewer({
   if (renderedGraph.nodes.length === 0) {
     return (
       <div
-        className={`flex min-h-[20rem] items-center justify-center rounded-[1.35rem] border border-dashed text-sm ${
+        className={`flex min-h-[20rem] items-center justify-center rounded-lg border border-dashed text-sm ${
           isDark ? "border-white/10 bg-[#0b1220] text-slate-400" : "border-stone-300 bg-[#f8fafc] text-stone-500"
         }`}
       >
@@ -277,7 +277,7 @@ export function GraphViewer({
 
   return (
     <div
-      className={`relative overflow-hidden rounded-[1.35rem] border ${
+      className={`relative overflow-hidden rounded-lg border ${
         isDark ? "border-white/10 bg-[#0a101b]" : "border-stone-200 bg-[#f7fafc]"
       }`}
     >
@@ -294,7 +294,7 @@ export function GraphViewer({
 
       <div className="absolute inset-x-3 top-3 z-10 flex items-start justify-between gap-3">
         <div className={`rounded-2xl border px-3 py-2 backdrop-blur-md ${isDark ? "border-white/10 bg-black/35 text-slate-200" : "border-white/70 bg-white/70 text-stone-700"}`}>
-          <p className={`text-[10px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Graph View</p>
+          <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Graph View</p>
           <p className="mt-1 text-sm font-medium">{renderedGraph.nodes.length} notes | {renderedGraph.edges.length} links</p>
           {focusNode ? (
             <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>Focus: {focusNode.title}</p>
@@ -336,7 +336,7 @@ export function GraphViewer({
         </div>
       </div>
 
-      <div ref={containerRef} className={`relative z-[1] rounded-[1.35rem] ${heightClassName}`} />
+      <div ref={containerRef} className={`relative z-[1] rounded-lg ${heightClassName}`} />
 
       <div className="absolute bottom-3 left-3 z-10 flex flex-wrap gap-2">
         {[
@@ -348,7 +348,7 @@ export function GraphViewer({
         ].map((item) => (
           <div
             key={item.label}
-            className={`flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] backdrop-blur-md ${isDark ? "border-white/10 bg-black/30 text-slate-300" : "border-white/70 bg-white/70 text-stone-600"}`}
+            className={`flex items-center gap-2 rounded-full border px-3 py-1.5 text-3xs backdrop-blur-md ${isDark ? "border-white/10 bg-black/30 text-slate-300" : "border-white/70 bg-white/70 text-stone-600"}`}
           >
             <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.tone }} />
             {item.label}

@@ -3420,3 +3420,192 @@ async def get_public_user_profile(
         payload.model_dump(mode="json"),
     )
     return payload
+
+
+def is_catalog_visible_public_book(book: Book | None) -> bool:
+    return can_view_public_book(book)
+
+
+def filter_public_books_catalog(
+    books: list[dict],
+    source: str,
+    catalog_filter: str,
+    search_term: str,
+) -> list[dict]:
+    items = list(books)
+    if source:
+        items = [item for item in items if str(item.get("content_source_type") or "").strip().lower() == source]
+    if search_term:
+        items = [
+            item for item in items
+            if search_term in " ".join(
+                str(item.get(field) or "")
+                for field in ("title", "author", "author_username", "genre", "description", "source_title", "source_author")
+            ).lower()
+        ]
+    return items
+
+
+async def _active_forum_post_map(db: AsyncSession, *, book_ids: list[uuid.UUID]) -> dict[str, str]:
+    if not book_ids:
+        return {}
+    rows = (
+        await db.execute(
+            select(BookForumPost.book_id, BookForumPost.id)
+            .where(
+                BookForumPost.book_id.in_(book_ids),
+                BookForumPost.thread_type == FORUM_THREAD_TYPE_NOVEL,
+                BookForumPost.status == FORUM_POST_OPEN,
+            )
+            .order_by(BookForumPost.updated_at.desc(), BookForumPost.created_at.desc())
+        )
+    ).all()
+    mapping: dict[str, str] = {}
+    for book_id, post_id in rows:
+        key = str(book_id)
+        if key not in mapping:
+            mapping[key] = str(post_id)
+    return mapping
+
+
+async def _get_public_book_by_slug_or_id(db: AsyncSession, book_slug: str) -> Book | None:
+    if isinstance(book_slug, uuid.UUID):
+        return await db.get(Book, book_slug)
+    raw_value = str(book_slug or "").strip()
+    try:
+        return await db.get(Book, uuid.UUID(raw_value))
+    except ValueError:
+        pass
+    try:
+        normalized_slug = normalize_public_slug(raw_value)
+    except HTTPException:
+        return None
+    return (
+        await db.execute(
+            select(Book).where(Book.public_slug == normalized_slug)
+        )
+    ).scalar_one_or_none()
+
+
+async def create_public_book_manual(
+    db: AsyncSession,
+    *,
+    body: PublicBookManualIn,
+    admin_user: User,
+) -> dict[str, object]:
+    ensure_public_mode_enabled()
+    if not body.chapters:
+        raise HTTPException(400, "At least one chapter is required")
+
+    public_slug = normalize_public_slug(body.title)
+    try:
+        existing = (
+            await db.execute(
+                select(Book.id).where(Book.public_slug == public_slug)
+            )
+        ).scalar_one_or_none()
+    except Exception:
+        existing = None
+    if existing is not None:
+        raise HTTPException(409, "A public book with that slug already exists.")
+
+    book = Book(
+        id=uuid.uuid4(),
+        user_id=admin_user.id,
+        title=body.title,
+        author=body.author,
+        genre=body.genre,
+        format="manual",
+        s3_key=f"public/manual/{admin_user.id}/{body.title}".replace(" ", "-").lower(),
+        status="ready",
+        is_public=True,
+        source_kind=PUBLIC_DEMO_SOURCE_KIND,
+        public_status=PUBLIC_STATUS_PUBLISHED,
+        public_slug=public_slug,
+        published_at=datetime.now(UTC),
+        public_visibility="public",
+        content_source_type=CONTENT_SOURCE_TYPE_ADMIN_SEEDED,
+        moderation_status=MODERATION_STATUS_CLEAN,
+        source_title=body.title,
+        source_author=body.author,
+        source_public_domain_note="Public-domain demo book used to showcase LoreVia features.",
+        public_description=body.description,
+    )
+    db.add(book)
+    await db.flush()
+
+    total_tokens = 0
+    for index, chapter_in in enumerate(body.chapters, start=1):
+        chapter_token_count = count_tokens(chapter_in.text)
+        chapter_key = f"public_chapters/{book.id}/{index}.txt"
+        upload_text(chapter_key, chapter_in.text)
+        total_tokens += chapter_token_count
+        db.add(
+            Chapter(
+                book_id=book.id,
+                number=index,
+                title=chapter_in.title,
+                description=chapter_in.description,
+                s3_key=chapter_key,
+                token_count=chapter_token_count,
+                processed=False,
+            )
+        )
+
+    book.total_chapters = len(body.chapters)
+    book.total_tokens = total_tokens
+    await cache_del(key_public_books())
+    await mark_public_profile_cache_dirty(str(book.user_id))
+    return {
+        "book_id": str(book.id),
+        "status": "ready",
+        "visibility": "public",
+        "public_kind": PUBLIC_DEMO_SOURCE_KIND,
+        "approval_status": "approved",
+        "public_slug": book.public_slug,
+        "message": "Public demo is live.",
+    }
+
+
+async def append_public_chapter(
+    db: AsyncSession,
+    *,
+    book_id: uuid.UUID,
+    body: PublicChapterIn,
+    admin_user: User,
+) -> dict[str, object]:
+    ensure_public_mode_enabled()
+    book = await db.get(Book, book_id)
+    if not is_public_demo_book(book) or getattr(book, "user_id", None) != getattr(admin_user, "id", None):
+        raise HTTPException(404, "Public book not found")
+
+    next_number = (
+        await db.execute(
+            select(func.coalesce(func.max(Chapter.number), 0) + 1).where(Chapter.book_id == book.id)
+        )
+    ).scalar_one()
+    token_count = count_tokens(body.text)
+    chapter_key = f"public_chapters/{book.id}/{next_number}.txt"
+    upload_text(chapter_key, body.text)
+    db.add(
+        Chapter(
+            book_id=book.id,
+            number=next_number,
+            title=body.title,
+            description=body.description,
+            s3_key=chapter_key,
+            token_count=token_count,
+            processed=False,
+        )
+    )
+    book.total_chapters = next_number
+    book.total_tokens = (book.total_tokens or 0) + token_count
+    await cache_del(key_public_book_detail(str(book.id)))
+    await cache_del(key_public_chapter(str(book.id), next_number))
+    await cache_del(key_public_books())
+    await mark_public_profile_cache_dirty(str(book.user_id))
+    return {
+        "book_id": str(book.id),
+        "chapter_number": next_number,
+        "saved": True,
+    }

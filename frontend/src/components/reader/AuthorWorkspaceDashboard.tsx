@@ -1,12 +1,14 @@
 "use client"
 
-import React, { useEffect, useMemo, useState } from "react"
+import React, { Suspense, useDeferredValue, useEffect, useMemo, useState } from "react"
 import type { Route } from "next"
 import Link from "next/link"
 
 import { RevisionIntelligencePanel } from "@/components/revision/RevisionIntelligencePanel"
-import { resolveAssetUrl } from "@/lib/utils/assetUrls"
+import { ErrorCard } from "@/components/ui/ErrorCard"
+import { Skeleton } from "@/components/ui/Skeleton"
 import { buildIssueDisplay } from "@/lib/utils/storyFeedback"
+import { SmartBookCover } from "@/components/ui/SmartBookCover"
 import type { Book, GoalCalendarItem, PreWritingCheck, RevisionIntelligence, StoryHealth, WriterWorkspace } from "@/types/book"
 import type { ChapterListResponse } from "@/types/reader"
 
@@ -31,7 +33,7 @@ type IconName =
   | "voice"
 
 type WorkspaceSaveState = "idle" | "saving" | "saved" | "error"
-type AuthorDashboardTab = "revision" | "planning" | "story-map" | "stats"
+type AuthorDashboardTab = "overview" | "revision" | "planning" | "story-map" | "stats"
 
 type Props = {
   bookId: string
@@ -65,6 +67,14 @@ type Props = {
   dailyTarget: number
   saveState: WorkspaceSaveState
   saveMessage: string | null
+  storyHealthError?: boolean
+  onRetryStoryHealth?: () => void
+  preWritingCheckError?: boolean
+  onRetryPreWritingCheck?: () => void
+  revisionIntelligenceError?: boolean
+  onRetryRevisionIntelligence?: () => void
+  writerWorkspaceError?: boolean
+  onRetryWriterWorkspace?: () => void
   onModeChange: (nextMode: "reader" | "author") => void
   onToggleTheme: () => void
   onNavigate: (href: string) => void
@@ -107,6 +117,14 @@ export function AuthorWorkspaceDashboard({
   dailyTarget,
   saveState,
   saveMessage,
+  storyHealthError,
+  onRetryStoryHealth,
+  preWritingCheckError,
+  onRetryPreWritingCheck,
+  revisionIntelligenceError,
+  onRetryRevisionIntelligence,
+  writerWorkspaceError,
+  onRetryWriterWorkspace,
   onModeChange,
   onToggleTheme,
   onNavigate,
@@ -116,7 +134,11 @@ export function AuthorWorkspaceDashboard({
   onRevisionChange,
   onWriterWorkspaceChange,
 }: Props) {
-  const [activeTab, setActiveTab] = useState<AuthorDashboardTab>("revision")
+  const [activeTab, setActiveTab] = useState<AuthorDashboardTab>("overview")
+  const deferredStoryHealth = useDeferredValue(storyHealth)
+  const deferredPreWritingCheck = useDeferredValue(preWritingCheck)
+  const deferredRevisionIntelligence = useDeferredValue(revisionIntelligence)
+  const deferredWriterWorkspace = useDeferredValue(writerWorkspace)
   const recentAlerts = preWritingCheck?.alerts ?? []
   const quickLinks = [
     { title: "Story Advisor", body: "Ask for revision guidance and continuity checks.", href: `/${bookId}/advisor`, icon: "graph" as IconName },
@@ -124,9 +146,11 @@ export function AuthorWorkspaceDashboard({
     { title: "Character Graph", body: "Open the relationship map for cast-level context.", href: `/${bookId}/graph`, icon: "users" as IconName },
     { title: "Timeline", body: "Review event order and pressure points.", href: `/${bookId}/timeline`, icon: "timeline" as IconName },
   ]
+  const totalRevisionItems = deferredRevisionIntelligence?.summary.active_item_count ?? continuityIssueCount + worldGapCount + timelineIssueCount
+  const highSeverityItems = deferredRevisionIntelligence?.summary.high_severity_count ?? continuityIssueCount
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <OverviewHeader
         isDark={isDark}
         activeBookMode={activeBookMode}
@@ -137,145 +161,65 @@ export function AuthorWorkspaceDashboard({
         onToggleTheme={onToggleTheme}
       />
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22.75rem]">
-        <div className="min-w-0 space-y-6">
-          <CurrentProjectHero
-            book={book}
-            isDark={isDark}
-            canOpenManuscript={canOpenManuscript}
-            currentWords={currentWords}
-            targetWords={targetWords}
-            percentComplete={percentComplete}
-            chapters={chapters}
-            unitTitle={unitTitle}
-            unitPrefix={unitPrefix}
-            dailyWords={dailyWords}
-            dailyTarget={dailyTarget}
-            loginStreakDays={loginStreakDays}
-            onOpenManuscript={onOpenManuscript}
-            onOpenRelationships={onOpenRelationships}
-            onNavigate={onNavigate}
+      <section className="grid gap-5 xl:auto-rows-fr xl:grid-cols-[minmax(0,1.32fr)_minmax(18rem,0.86fr)_minmax(17.5rem,0.82fr)]">
+        <CurrentProjectCard
+          book={book}
+          isDark={isDark}
+          canOpenManuscript={canOpenManuscript}
+          currentWords={currentWords}
+          targetWords={targetWords}
+          percentComplete={percentComplete}
+          dailyWords={dailyWords}
+          dailyTarget={dailyTarget}
+          loginStreakDays={loginStreakDays}
+          onOpenManuscript={onOpenManuscript}
+          onOpenRelationships={onOpenRelationships}
+          onNavigate={onNavigate}
+          bookId={bookId}
+        />
+        <RecentChaptersCard
+          book={book}
+          isDark={isDark}
+          chapters={chapters}
+          unitTitle={unitTitle}
+          unitPrefix={unitPrefix}
+          onNavigate={onNavigate}
+          bookId={bookId}
+        />
+        <StoryPulseCard
+          bookId={bookId}
+          isDark={isDark}
+          storyHealth={deferredStoryHealth}
+          storyHealthError={storyHealthError}
+          onRetryStoryHealth={onRetryStoryHealth}
+        />
+      </section>
+
+      <Suspense fallback={<Skeleton variant="card" className="min-h-72" />}>
+        <section className="grid gap-5 xl:auto-rows-fr xl:grid-cols-[minmax(18rem,0.92fr)_minmax(0,1.12fr)_minmax(17rem,0.8fr)]">
+        <ActiveIssuesCard
+          isDark={isDark}
+          continuityIssueCount={continuityIssueCount}
+          worldGapCount={worldGapCount}
+          timelineIssueCount={timelineIssueCount}
+          onNavigate={onNavigate}
+          bookId={bookId}
+          processingSummary={processingSummary}
+        />
+        {deferredRevisionIntelligence ? (
+          <RevisionIntelligencePanel
             bookId={bookId}
+            revision={deferredRevisionIntelligence}
+            writerWorkspace={deferredWriterWorkspace}
+            isDark={isDark}
+            onRevisionChange={onRevisionChange}
+            onWriterWorkspaceChange={onWriterWorkspaceChange}
+            variant="preview"
           />
-
-          <div className="grid gap-5 xl:grid-cols-[minmax(0,0.88fr)_minmax(0,1.12fr)]">
-            <ActiveIssuesCard
-              isDark={isDark}
-              continuityIssueCount={continuityIssueCount}
-              worldGapCount={worldGapCount}
-              timelineIssueCount={timelineIssueCount}
-              onNavigate={onNavigate}
-              bookId={bookId}
-              processingSummary={processingSummary}
-            />
-            {revisionIntelligence ? (
-              <RevisionIntelligencePanel
-                bookId={bookId}
-                revision={revisionIntelligence}
-                writerWorkspace={writerWorkspace}
-                isDark={isDark}
-                onRevisionChange={onRevisionChange}
-                onWriterWorkspaceChange={onWriterWorkspaceChange}
-                variant="preview"
-              />
-            ) : (
-              <RevisionPreviewPlaceholder isDark={isDark} />
-            )}
-          </div>
-
-          <section className={panelClass(isDark, "overflow-hidden p-4 sm:p-5")} data-testid="author-workspace-tabs">
-            <div className="flex flex-col gap-4 border-b border-white/5 pb-4 sm:flex-row sm:items-end sm:justify-between">
-              <div>
-                <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Secondary workspace</p>
-                <h2 className={`mt-2 font-serif text-3xl leading-none ${isDark ? "text-white" : "text-slate-900"}`}>Keep the desk clear until you need the deeper tools.</h2>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {([
-                  ["revision", "Revision Hub"],
-                  ["planning", "Planning"],
-                  ["story-map", "Story Map"],
-                  ["stats", "Workspace Stats"],
-                ] as const).map(([tab, label]) => (
-                  <button
-                    key={tab}
-                    type="button"
-                    onClick={() => setActiveTab(tab)}
-                    aria-pressed={activeTab === tab}
-                    className={`rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] transition ${
-                      activeTab === tab
-                        ? isDark ? "bg-teal-800 text-white" : "bg-teal-800 text-white"
-                        : isDark ? "bg-white/[0.04] text-slate-300 hover:bg-white/[0.08]" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="mt-5">
-              {activeTab === "revision" ? (
-                revisionIntelligence ? (
-                  <RevisionIntelligencePanel
-                    bookId={bookId}
-                    revision={revisionIntelligence}
-                    writerWorkspace={writerWorkspace}
-                    isDark={isDark}
-                    onRevisionChange={onRevisionChange}
-                    onWriterWorkspaceChange={onWriterWorkspaceChange}
-                  />
-                ) : (
-                  <EmptyTabState
-                    isDark={isDark}
-                    title="Revision intelligence is still syncing."
-                    body="LoreVia will populate the full revision hub here once the latest manuscript intelligence finishes processing."
-                  />
-                )
-              ) : null}
-
-              {activeTab === "planning" ? (
-                <GoalCalendarCard
-                  isDark={isDark}
-                  writerWorkspace={writerWorkspace}
-                  saveState={saveState}
-                  saveMessage={saveMessage}
-                  onSaveGoalCalendar={onSaveGoalCalendar}
-                  onOpenManuscript={onOpenManuscript}
-                />
-              ) : null}
-
-              {activeTab === "story-map" ? (
-                <StoryMapTab
-                  isDark={isDark}
-                  bookId={bookId}
-                  preWritingCheck={preWritingCheck}
-                  revisionIntelligence={revisionIntelligence}
-                  onOpenRelationships={onOpenRelationships}
-                  onNavigate={onNavigate}
-                />
-              ) : null}
-
-              {activeTab === "stats" ? (
-                <div className="grid gap-5 xl:grid-cols-[minmax(0,1.24fr)_minmax(0,0.76fr)]">
-                  <ProjectOverviewCard
-                    isDark={isDark}
-                    currentWords={currentWords}
-                    chapterCount={chapterCount}
-                    characterCount={characterCount}
-                    worldArticleCount={worldArticleCount}
-                  />
-                  <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-1">
-                    <WritingStreakCard isDark={isDark} streakDays={loginStreakDays} weekActivity={weeklyLoginActivity} />
-                    <DailyGoalCard isDark={isDark} dailyWords={dailyWords} dailyTarget={dailyTarget} />
-                  </div>
-                </div>
-              ) : null}
-            </div>
-          </section>
-        </div>
-
-        <aside className="space-y-5 xl:sticky xl:top-5 xl:self-start">
-          <StoryPulseCard bookId={bookId} isDark={isDark} storyHealth={storyHealth} />
+        ) : (
+          <RevisionPreviewPlaceholder isDark={isDark} />
+        )}
+        <div className="grid auto-rows-fr gap-5">
           <CompactQuickLinksCard isDark={isDark} links={quickLinks} onNavigate={onNavigate} />
           <RecentSignalsCard
             isDark={isDark}
@@ -284,9 +228,148 @@ export function AuthorWorkspaceDashboard({
             chapters={chapters}
             onNavigate={onNavigate}
             bookId={bookId}
+            preWritingCheckError={preWritingCheckError}
+            onRetryPreWritingCheck={onRetryPreWritingCheck}
           />
-        </aside>
-      </div>
+        </div>
+      </section>
+      </Suspense>
+
+      <section className={panelClass(isDark, "overflow-hidden p-4 sm:p-5")} data-testid="author-workspace-tabs">
+        <div className="grid gap-4 border-b border-white/[0.06] pb-4 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)] lg:items-end">
+          <div>
+            <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Secondary workspace</p>
+            <h2 className={`mt-2 font-serif text-3xl leading-none ${isDark ? "text-white" : "text-slate-900"}`}>
+              {activeTab === "planning" ? "Plan with intent. Write with momentum." : "Your author command center."}
+            </h2>
+            <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+              {activeTab === "planning"
+                ? "Align goals, schedule sessions, and protect the manuscript from drift."
+                : "Deep tools for planning, structure, and story intelligence."}
+            </p>
+          </div>
+          <div role="tablist" aria-label="Author workspace tabs" className={`grid gap-1 rounded-2xl border p-1 sm:grid-cols-3 xl:grid-cols-5 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-slate-50"}`}>
+            {([
+              ["overview", "Overview"],
+              ["revision", "Revision Hub"],
+              ["planning", "Planning"],
+              ["story-map", "Story Map"],
+              ["stats", "Workspace Stats"],
+            ] as const).map(([tab, label]) => (
+              <button
+                key={tab}
+                type="button"
+                role="tab"
+                aria-selected={activeTab === tab}
+                onClick={() => setActiveTab(tab)}
+                className={`rounded-xl px-3 py-2.5 text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-teal-500/60 ${
+                  activeTab === tab
+                    ? "bg-teal-800 text-white"
+                    : isDark ? "text-slate-300 hover:bg-white/[0.06]" : "text-slate-600 hover:bg-white"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="mt-5">
+          {activeTab === "overview" ? (
+            <AuthorOverviewTab
+              isDark={isDark}
+              currentWords={currentWords}
+              targetWords={targetWords}
+              chapterCount={chapterCount}
+              characterCount={characterCount}
+              worldArticleCount={worldArticleCount}
+              percentComplete={percentComplete}
+              dailyWords={dailyWords}
+              dailyTarget={dailyTarget}
+              loginStreakDays={loginStreakDays}
+              weeklyLoginActivity={weeklyLoginActivity}
+              totalRevisionItems={totalRevisionItems}
+              highSeverityItems={highSeverityItems}
+              chapters={chapters}
+              unitTitle={unitTitle}
+              onNavigate={onNavigate}
+              onOpenManuscript={onOpenManuscript}
+              bookId={bookId}
+            />
+          ) : null}
+
+          {activeTab === "revision" ? (
+            <RevisionHubTab
+              bookId={bookId}
+              isDark={isDark}
+              revisionIntelligence={deferredRevisionIntelligence}
+              writerWorkspace={deferredWriterWorkspace}
+              chapters={chapters}
+              storyHealth={deferredStoryHealth}
+              onRevisionChange={onRevisionChange}
+              onWriterWorkspaceChange={onWriterWorkspaceChange}
+              revisionIntelligenceError={revisionIntelligenceError}
+              onRetryRevisionIntelligence={onRetryRevisionIntelligence}
+              writerWorkspaceError={writerWorkspaceError}
+              onRetryWriterWorkspace={onRetryWriterWorkspace}
+              storyHealthError={storyHealthError}
+              onRetryStoryHealth={onRetryStoryHealth}
+            />
+          ) : null}
+
+          {activeTab === "planning" ? (
+            <PlanningTab
+              isDark={isDark}
+              writerWorkspace={deferredWriterWorkspace}
+              currentWords={currentWords}
+              targetWords={targetWords}
+              chapterCount={chapterCount}
+              dailyWords={dailyWords}
+              dailyTarget={dailyTarget}
+              loginStreakDays={loginStreakDays}
+              saveState={saveState}
+              saveMessage={saveMessage}
+              onSaveGoalCalendar={onSaveGoalCalendar}
+              onOpenManuscript={onOpenManuscript}
+              writerWorkspaceError={writerWorkspaceError}
+              onRetryWriterWorkspace={onRetryWriterWorkspace}
+            />
+          ) : null}
+
+          {activeTab === "story-map" ? (
+            <StoryMapTab
+              isDark={isDark}
+              bookId={bookId}
+              preWritingCheck={deferredPreWritingCheck}
+              revisionIntelligence={deferredRevisionIntelligence}
+              onOpenRelationships={onOpenRelationships}
+              onNavigate={onNavigate}
+              preWritingCheckError={preWritingCheckError}
+              onRetryPreWritingCheck={onRetryPreWritingCheck}
+              revisionIntelligenceError={revisionIntelligenceError}
+              onRetryRevisionIntelligence={onRetryRevisionIntelligence}
+            />
+          ) : null}
+
+          {activeTab === "stats" ? (
+            <WorkspaceStatsTab
+              isDark={isDark}
+              currentWords={currentWords}
+              targetWords={targetWords}
+              chapterCount={chapterCount}
+              characterCount={characterCount}
+              worldArticleCount={worldArticleCount}
+              percentComplete={percentComplete}
+              chapters={chapters}
+              dailyWords={dailyWords}
+              dailyTarget={dailyTarget}
+              loginStreakDays={loginStreakDays}
+              weeklyLoginActivity={weeklyLoginActivity}
+              onOpenManuscript={onOpenManuscript}
+            />
+          ) : null}
+        </div>
+      </section>
     </div>
   )
 }
@@ -312,7 +395,7 @@ function OverviewHeader({
     <section className={panelClass(isDark, "overflow-hidden p-4 sm:p-5")}>
       <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
         <div className="min-w-0">
-          <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-teal-200/80" : "text-teal-800"}`}>Author workspace</p>
+          <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-teal-200/80" : "text-teal-800"}`}>Author workspace</p>
           <h1 className={`mt-2 font-serif text-3xl leading-none sm:text-4xl ${isDark ? "text-white" : "text-slate-900"}`}>
             Welcome back, {greetingName}.
           </h1>
@@ -323,23 +406,12 @@ function OverviewHeader({
 
         <div className="flex flex-wrap items-center gap-2">
           {canUseAuthorMode ? (
-            <div className={isDark ? "inline-flex h-11 overflow-hidden rounded-full border border-white/10 bg-white/[0.04]" : "inline-flex h-11 overflow-hidden rounded-full border border-slate-200 bg-slate-50"}>
-              {(["reader", "author"] as const).map((mode) => (
-                <button
-                  key={mode}
-                  type="button"
-                  onClick={() => onModeChange(mode)}
-                  disabled={modeSaving}
-                  className={`px-4 text-xs font-semibold uppercase tracking-[0.18em] transition ${
-                    activeBookMode === mode
-                      ? isDark ? "bg-teal-800 text-white" : "bg-teal-800 text-white"
-                      : isDark ? "text-slate-300 hover:bg-white/[0.08]" : "text-slate-600 hover:bg-white"
-                  }`}
-                >
-                  {mode}
-                </button>
-              ))}
-            </div>
+            <ModeToggle
+              isDark={isDark}
+              activeMode={activeBookMode}
+              modeSaving={modeSaving}
+              onModeChange={onModeChange}
+            />
           ) : null}
 
           <button
@@ -352,6 +424,153 @@ function OverviewHeader({
           </button>
         </div>
       </div>
+    </section>
+  )
+}
+
+function CurrentProjectCard({
+  book,
+  isDark,
+  canOpenManuscript,
+  currentWords,
+  targetWords,
+  percentComplete,
+  dailyWords,
+  dailyTarget,
+  loginStreakDays,
+  onOpenManuscript,
+  onOpenRelationships,
+  onNavigate,
+  bookId,
+}: {
+  book: Book
+  isDark: boolean
+  canOpenManuscript: boolean
+  currentWords: number | null
+  targetWords: number
+  percentComplete: number
+  dailyWords: number
+  dailyTarget: number
+  loginStreakDays: number
+  onOpenManuscript: () => void
+  onOpenRelationships: () => void
+  onNavigate: (href: string) => void
+  bookId: string
+}) {
+  const goalProgress = clamp((dailyWords / Math.max(1, dailyTarget)) * 100, 0, 100)
+  const manuscriptProgress = clamp(percentComplete || (currentWords ? (currentWords / targetWords) * 100 : 0), 0, 100)
+  const etaDays = currentWords && dailyTarget > 0 ? Math.max(1, Math.ceil(Math.max(0, targetWords - currentWords) / dailyTarget)) : null
+  const etaDate = etaDays ? new Date(Date.now() + etaDays * 24 * 60 * 60 * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "Syncing"
+
+  return (
+    <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
+      <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Current project</p>
+      <div className="mt-4 grid gap-5 md:grid-cols-[9rem_minmax(0,1fr)] xl:grid-cols-[10rem_minmax(0,1fr)]">
+        <SmartBookCover
+          src={book.cover_url}
+          title={book.title}
+          isDark={isDark}
+          className="aspect-[0.72] min-h-48 overflow-hidden rounded-lg"
+        />
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-3">
+            <h2 className={`break-words text-2xl font-semibold tracking-tight sm:text-3xl ${isDark ? "text-white" : "text-slate-950"}`}>{book.title}</h2>
+            <span className="text-xs font-semibold text-teal-600">{book.work_type === "screenplay" ? "Screenplay" : "Manuscript"}</span>
+          </div>
+          <p className={`mt-3 max-w-xl break-words text-sm leading-7 ${isDark ? "text-slate-300" : "text-slate-600"}`}>
+            {book.public_description?.trim() || `The draft is ${Math.round(manuscriptProgress)}% complete, with the next pass centered on pacing, continuity, and scene-by-scene momentum.`}
+          </p>
+          <div className="mt-5 flex flex-wrap gap-3">
+            {canOpenManuscript ? (
+              <button
+                type="button"
+                onClick={onOpenManuscript}
+                className={`inline-flex min-h-11 items-center gap-2 rounded-2xl px-5 py-2.5 text-sm font-semibold transition ${isDark ? "bg-teal-800 text-white hover:bg-teal-700" : "bg-teal-800 text-white hover:bg-teal-700"}`}
+              >
+                <Icon name="book" />
+                Open Manuscript Editor
+                <Icon name="chevron" />
+              </button>
+            ) : null}
+            <button type="button" onClick={onOpenRelationships} className={secondaryButtonClass(isDark)}>
+              <Icon name="users" />
+              Open relationship map
+            </button>
+            <button type="button" onClick={() => onNavigate(`/${bookId}/summaries`)} className={secondaryButtonClass(isDark)}>
+              <Icon name="search" />
+              Open summaries
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <HeroMetric isDark={isDark} label="Draft progress" value={`${formatNumber(currentWords)} / ${targetWords.toLocaleString()}`} note={`${Math.round(manuscriptProgress)}% of target`} progress={manuscriptProgress} />
+        <HeroMetric isDark={isDark} label="Daily target" value={`${dailyWords.toLocaleString()} / ${dailyTarget.toLocaleString()}`} note="Today's quota" progress={goalProgress} />
+        <HeroMetric isDark={isDark} label="Writing rhythm" value={`${loginStreakDays} day${loginStreakDays === 1 ? "" : "s"}`} note="Current streak" progress={Math.min(100, loginStreakDays * 12)} />
+        <HeroMetric isDark={isDark} label="Est. completion" value={etaDate} note={etaDays ? `In ${etaDays} day${etaDays === 1 ? "" : "s"}` : "Add a daily goal"} progress={etaDays ? clamp(100 - etaDays, 6, 100) : 0} />
+      </div>
+    </section>
+  )
+}
+
+function RecentChaptersCard({
+  book,
+  isDark,
+  chapters,
+  unitTitle,
+  unitPrefix,
+  onNavigate,
+  bookId,
+}: {
+  book: Book
+  isDark: boolean
+  chapters: ChapterListResponse["chapters"]
+  unitTitle: string
+  unitPrefix: string
+  onNavigate: (href: string) => void
+  bookId: string
+}) {
+  const recentChapters = chapters.slice(-3).reverse()
+
+  return (
+    <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Recent chapters</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <StatusPill isDark={isDark} label={book.status === "ready" ? "Drafting" : book.status.replace(/_/g, " ")} tone="violet" />
+            <StatusPill isDark={isDark} label={`${chapters.length} indexed ${unitTitle.toLowerCase()}${chapters.length === 1 ? "" : "s"}`} tone="slate" />
+          </div>
+        </div>
+        <button type="button" onClick={() => onNavigate(`/${bookId}/manuscript`)} className="text-xs font-semibold text-teal-600">
+          Open draft
+        </button>
+      </div>
+      <div className="mt-5 space-y-3">
+        {recentChapters.length > 0 ? recentChapters.map((chapter) => (
+          <button
+            key={chapter.number}
+            type="button"
+            onClick={() => onNavigate(`/${bookId}/chapter/${chapter.number}`)}
+            className={`flex w-full items-start justify-between gap-3 rounded-2xl border px-4 py-3 text-left transition ${isDark ? "border-white/[0.06] bg-white/[0.03] hover:bg-white/[0.06]" : "border-slate-200 bg-white hover:bg-slate-50"}`}
+          >
+            <div className="min-w-0">
+              <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>{unitPrefix} {chapter.number}</p>
+              <p className={`mt-1 break-words text-sm font-medium leading-6 ${isDark ? "text-slate-100" : "text-slate-800"}`}>{chapter.title || `${unitTitle} ${chapter.number}`}</p>
+              <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>{chapter.read ? "Opened recently" : "Ready to draft"}</p>
+            </div>
+            <span className="text-xs font-semibold text-teal-600">{chapter.read ? "Read" : "Open"}</span>
+          </button>
+        )) : (
+          <p className={`rounded-2xl border border-dashed px-4 py-6 text-sm ${isDark ? "border-white/[0.08] text-slate-500" : "border-slate-200 text-slate-400"}`}>
+            {unitTitle} indexing is still syncing.
+          </p>
+        )}
+      </div>
+      <button type="button" onClick={() => onNavigate(`/${bookId}/chapters`)} className={footerLinkClass(isDark)}>
+        View all chapters <Icon name="chevron" />
+      </button>
     </section>
   )
 }
@@ -400,7 +619,12 @@ function CurrentProjectHero({
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.1fr)_22rem]">
         <div className="grid gap-6 lg:grid-cols-[11rem_minmax(0,1fr)]">
           <div className="space-y-4">
-            <BookCover book={book} isDark={isDark} />
+            <SmartBookCover
+              src={book.cover_url}
+              title={book.title}
+              isDark={isDark}
+              className="aspect-[0.72] min-h-48 overflow-hidden rounded-lg"
+            />
             <button
               type="button"
               onClick={onOpenRelationships}
@@ -413,7 +637,7 @@ function CurrentProjectHero({
 
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <span className={`rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "bg-teal-800/10 text-teal-100" : "bg-teal-50 text-teal-800"}`}>
+              <span className={`rounded-full px-3 py-1 text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "bg-teal-800/10 text-teal-100" : "bg-teal-50 text-teal-800"}`}>
                 Current project
               </span>
               <span className={isDark ? "text-xs text-slate-500" : "text-xs text-slate-400"}>
@@ -485,10 +709,10 @@ function CurrentProjectHero({
           </div>
         </div>
 
-        <div className={`rounded-[1.4rem] border p-4 ${isDark ? "border-white/[0.06] bg-black/20" : "border-slate-200 bg-slate-50/80"}`}>
+        <div className={`rounded-lg border p-4 ${isDark ? "border-white/[0.06] bg-black/20" : "border-slate-200 bg-slate-50/80"}`}>
           <div className="flex items-center justify-between gap-3">
             <div>
-              <p className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Recent chapters</p>
+              <p className={`text-3xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Recent chapters</p>
               <p className={`mt-1 text-sm ${isDark ? "text-slate-300" : "text-slate-600"}`}>Keep the current run of scenes in view.</p>
             </div>
             <button type="button" onClick={() => onNavigate(`/${bookId}/manuscript`)} className="text-xs font-semibold text-teal-700">
@@ -511,9 +735,9 @@ function CurrentProjectHero({
               >
                 <div className="min-w-0">
                   <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>{unitPrefix} {chapter.number}</p>
-                  <p className={`mt-1 truncate text-sm font-medium ${isDark ? "text-slate-100" : "text-slate-800"}`}>{chapter.title || `${unitTitle} ${chapter.number}`}</p>
+                  <p className={`mt-1 break-words text-sm font-medium leading-6 ${isDark ? "text-slate-100" : "text-slate-800"}`}>{chapter.title || `${unitTitle} ${chapter.number}`}</p>
                 </div>
-                <span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${chapter.read ? (isDark ? "bg-emerald-500/12 text-emerald-200" : "bg-emerald-50 text-emerald-700") : (isDark ? "bg-white/10 text-slate-300" : "bg-slate-100 text-slate-600")}`}>
+                <span className={`rounded-full px-2 py-1 text-3xs font-semibold ${chapter.read ? (isDark ? "bg-emerald-500/12 text-emerald-200" : "bg-emerald-50 text-emerald-700") : (isDark ? "bg-white/10 text-slate-300" : "bg-slate-100 text-slate-600")}`}>
                   {chapter.read ? "Read" : "Open"}
                 </span>
               </button>
@@ -533,11 +757,31 @@ function StoryPulseCard({
   bookId,
   isDark,
   storyHealth,
+  storyHealthError,
+  onRetryStoryHealth,
 }: {
   bookId: string
   isDark: boolean
   storyHealth: StoryHealth | null
+  storyHealthError?: boolean
+  onRetryStoryHealth?: () => void
 }) {
+  if (storyHealthError && !storyHealth && onRetryStoryHealth) {
+    return (
+      <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
+        <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Story pulse</p>
+        <div className="mt-4">
+          <ErrorCard
+            message="Failed to load story health"
+            onRetry={onRetryStoryHealth}
+            variant="compact"
+            isDark={isDark}
+          />
+        </div>
+      </section>
+    )
+  }
+
   const score = storyHealth?.score ?? 0
   const status = storyHealth?.status ?? "Syncing"
   const summary = storyHealth?.summary ?? "LoreVia is still building the latest story pulse."
@@ -545,13 +789,13 @@ function StoryPulseCard({
   const topMetrics = (storyHealth?.metrics ?? []).slice(0, 3)
 
   return (
-    <section className={panelClass(isDark, "p-4 sm:p-5")}>
+    <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Story pulse</p>
+          <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Story pulse</p>
           <h2 className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>Key metrics only.</h2>
         </div>
-        <span className={`rounded-full px-3 py-1 text-[11px] font-semibold ${isDark ? "bg-white/[0.05] text-slate-300" : "bg-slate-100 text-slate-600"}`}>{status}</span>
+        <span className={`rounded-full px-3 py-1 text-3xs font-semibold ${isDark ? "bg-white/[0.05] text-slate-300" : "bg-slate-100 text-slate-600"}`}>{status}</span>
       </div>
 
       <div className="mt-5 flex items-center gap-4">
@@ -561,17 +805,17 @@ function StoryPulseCard({
         >
           <div className={`flex h-[4.6rem] w-[4.6rem] flex-col items-center justify-center rounded-full ${isDark ? "bg-[#0d141c]" : "bg-white"}`}>
             <span className={`text-2xl font-semibold ${isDark ? "text-white" : "text-slate-950"}`}>{score}</span>
-            <span className={`text-[10px] ${isDark ? "text-slate-500" : "text-slate-400"}`}>health</span>
+            <span className={`text-3xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>health</span>
           </div>
         </div>
-        <p className={`text-sm leading-6 ${isDark ? "text-slate-300" : "text-slate-600"}`}>{summary}</p>
+        <p className={`min-w-0 break-words text-sm leading-6 ${isDark ? "text-slate-300" : "text-slate-600"}`}>{summary}</p>
       </div>
 
       <div className="mt-5 space-y-3">
         {topMetrics.map((metric) => (
           <div key={metric.label} className={`rounded-2xl border px-4 py-3 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
             <div className="flex items-center justify-between gap-3">
-              <span className={isDark ? "text-sm text-slate-200" : "text-sm text-slate-700"}>{metric.label}</span>
+              <span className={isDark ? "min-w-0 break-words text-sm text-slate-200" : "min-w-0 break-words text-sm text-slate-700"}>{metric.label}</span>
               <span className="text-sm font-semibold text-teal-700">{metric.score}%</span>
             </div>
           </div>
@@ -617,10 +861,10 @@ function ActiveIssuesCard({
   }))
 
   return (
-      <section className={panelClass(isDark, "p-4 sm:p-5")}>
+      <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
         <div className="flex items-center justify-between gap-3">
           <div>
-            <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Next actions</p>
+            <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Next actions</p>
             <h2 className={`mt-2 text-xl font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>Keep the risky parts visible.</h2>
           </div>
           <Icon name="spark" className="h-5 w-5 text-teal-700" />
@@ -654,10 +898,10 @@ function ActiveIssuesCard({
           >
             <Icon name={issue.icon} className="h-5 w-5 text-teal-700" />
             <div className="min-w-0 flex-1">
-              <p className={`truncate text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-800"}`}>{issue.title}</p>
-              <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>{issue.label}</p>
+              <p className={`break-words text-sm font-semibold leading-6 ${isDark ? "text-slate-100" : "text-slate-800"}`}>{issue.title}</p>
+              <p className={`mt-1 break-words text-xs leading-5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>{issue.label}</p>
             </div>
-            <span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${severityClass(issue.severity, isDark)}`}>{issue.severity}</span>
+            <span className={`rounded-full px-2 py-1 text-3xs font-semibold ${severityClass(issue.severity, isDark)}`}>{issue.severity}</span>
           </button>
         ))}
       </div>
@@ -675,8 +919,8 @@ function CompactQuickLinksCard({
   onNavigate: (href: string) => void
 }) {
   return (
-    <section className={panelClass(isDark, "p-4 sm:p-5")}>
-      <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Workspace links</p>
+    <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
+      <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Workspace links</p>
       <div className="mt-4 space-y-3">
         {links.map((link) => (
           <button
@@ -687,8 +931,8 @@ function CompactQuickLinksCard({
           >
             <Icon name={link.icon} className="mt-0.5 h-5 w-5 text-teal-700" />
             <div className="min-w-0">
-              <p className={`text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-800"}`}>{link.title}</p>
-              <p className={`mt-1 text-xs leading-5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>{link.body}</p>
+              <p className={`break-words text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-800"}`}>{link.title}</p>
+              <p className={`mt-1 break-words text-xs leading-5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>{link.body}</p>
             </div>
           </button>
         ))}
@@ -704,6 +948,8 @@ function RecentSignalsCard({
   chapters,
   onNavigate,
   bookId,
+  preWritingCheckError,
+  onRetryPreWritingCheck,
 }: {
   isDark: boolean
   unitTitle: string
@@ -711,6 +957,8 @@ function RecentSignalsCard({
   chapters: ChapterListResponse["chapters"]
   onNavigate: (href: string) => void
   bookId: string
+  preWritingCheckError?: boolean
+  onRetryPreWritingCheck?: () => void
 }) {
   const recentEntries = useMemo(() => {
     const chapterSignals = chapters.slice(-2).reverse().map((chapter) => ({
@@ -729,9 +977,25 @@ function RecentSignalsCard({
     ].slice(0, 4)
   }, [bookId, chapters, recentAlerts, unitTitle])
 
+  if (preWritingCheckError && recentAlerts.length === 0 && chapters.length === 0 && onRetryPreWritingCheck) {
+    return (
+      <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
+        <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Recent signals</p>
+        <div className="mt-4">
+          <ErrorCard
+            message="Failed to load recent signals"
+            onRetry={onRetryPreWritingCheck}
+            variant="compact"
+            isDark={isDark}
+          />
+        </div>
+      </section>
+    )
+  }
+
   return (
-    <section className={panelClass(isDark, "p-4 sm:p-5")}>
-      <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Recent signals</p>
+    <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
+      <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Recent signals</p>
       <div className="mt-4 space-y-3">
         {recentEntries.length > 0 ? recentEntries.map((entry) => (
           <button
@@ -740,14 +1004,379 @@ function RecentSignalsCard({
             onClick={() => onNavigate(entry.href)}
             className={`w-full rounded-2xl border px-4 py-3 text-left transition ${isDark ? "border-white/[0.06] bg-white/[0.03] hover:bg-white/[0.06]" : "border-slate-200 bg-white hover:bg-slate-50"}`}
           >
-            <p className={`text-sm font-medium ${isDark ? "text-slate-100" : "text-slate-800"}`}>{entry.title}</p>
-            <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>{entry.note}</p>
-          </button>
+              <p className={`break-words text-sm font-medium leading-6 ${isDark ? "text-slate-100" : "text-slate-800"}`}>{entry.title}</p>
+              <p className={`mt-1 break-words text-xs leading-5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>{entry.note}</p>
+            </button>
         )) : (
           <p className={isDark ? "text-sm text-slate-500" : "text-sm text-slate-400"}>Signals will appear here as the workspace syncs.</p>
         )}
       </div>
     </section>
+  )
+}
+
+function AuthorOverviewTab({
+  isDark,
+  currentWords,
+  targetWords,
+  chapterCount,
+  characterCount,
+  worldArticleCount,
+  percentComplete,
+  dailyWords,
+  dailyTarget,
+  loginStreakDays,
+  weeklyLoginActivity,
+  totalRevisionItems,
+  highSeverityItems,
+  chapters,
+  unitTitle,
+  onNavigate,
+  onOpenManuscript,
+  bookId,
+}: {
+  isDark: boolean
+  currentWords: number | null
+  targetWords: number
+  chapterCount: number | null
+  characterCount: number
+  worldArticleCount: number
+  percentComplete: number
+  dailyWords: number
+  dailyTarget: number
+  loginStreakDays: number
+  weeklyLoginActivity: boolean[]
+  totalRevisionItems: number
+  highSeverityItems: number
+  chapters: ChapterListResponse["chapters"]
+  unitTitle: string
+  onNavigate: (href: string) => void
+  onOpenManuscript: () => void
+  bookId: string
+}) {
+  const manuscriptProgress = clamp(percentComplete || (currentWords ? (currentWords / targetWords) * 100 : 0), 0, 100)
+  const latestChapter = chapters[chapters.length - 1]
+
+  return (
+    <div className="grid gap-5 xl:auto-rows-fr xl:grid-cols-[minmax(0,0.86fr)_minmax(0,0.92fr)_minmax(0,1fr)]">
+      <ProjectOverviewCard
+        isDark={isDark}
+        currentWords={currentWords}
+        chapterCount={chapterCount}
+        characterCount={characterCount}
+        worldArticleCount={worldArticleCount}
+      />
+      <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
+        <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>At a glance</p>
+        <div className="mt-5 space-y-3">
+          <CompactProgressRow isDark={isDark} label="Draft progress" value={`${Math.round(manuscriptProgress)}%`} percent={manuscriptProgress} />
+          <CompactProgressRow isDark={isDark} label="Daily quota" value={`${dailyWords.toLocaleString()} / ${dailyTarget.toLocaleString()}`} percent={(dailyWords / dailyTarget) * 100} />
+          <CompactProgressRow isDark={isDark} label="Revision pressure" value={`${totalRevisionItems} active`} percent={clamp(totalRevisionItems * 8, 0, 100)} tone="amber" />
+          <InfoLine isDark={isDark} label="Last written" value={latestChapter ? `${unitTitle} ${latestChapter.number}` : "Syncing"} />
+          <button type="button" onClick={() => onNavigate(`/${bookId}/reports`)} className={footerLinkClass(isDark)}>
+            View workspace stats <Icon name="chevron" />
+          </button>
+        </div>
+      </section>
+      <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
+        <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Up next</p>
+        <div className="mt-5 space-y-3">
+          <ActionRow isDark={isDark} icon="pen" title="Continue writing" body={latestChapter ? `${unitTitle} ${latestChapter.number}` : "Open manuscript"} onClick={onOpenManuscript} />
+          <ActionRow isDark={isDark} icon="timeline" title="Review high severity risks" body={`${highSeverityItems} item${highSeverityItems === 1 ? "" : "s"} need attention`} onClick={() => onNavigate(`/${bookId}/analysis`)} tone="amber" />
+          <ActionRow isDark={isDark} icon="analysis" title="Run story health scan" body="Open the current report" onClick={() => onNavigate(`/${bookId}/analysis`)} tone="teal" />
+          <div className="pt-2">
+            <WritingStreakCard isDark={isDark} streakDays={loginStreakDays} weekActivity={weeklyLoginActivity} compact />
+          </div>
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function RevisionHubTab({
+  bookId,
+  isDark,
+  revisionIntelligence,
+  writerWorkspace,
+  chapters,
+  storyHealth,
+  onRevisionChange,
+  onWriterWorkspaceChange,
+  revisionIntelligenceError,
+  onRetryRevisionIntelligence,
+  writerWorkspaceError,
+  onRetryWriterWorkspace,
+  storyHealthError,
+  onRetryStoryHealth,
+}: {
+  bookId: string
+  isDark: boolean
+  revisionIntelligence: RevisionIntelligence | null
+  writerWorkspace: WriterWorkspace | null
+  chapters: ChapterListResponse["chapters"]
+  storyHealth: StoryHealth | null
+  onRevisionChange: (revision: RevisionIntelligence) => void
+  onWriterWorkspaceChange: (workspace: WriterWorkspace) => void
+  revisionIntelligenceError?: boolean
+  onRetryRevisionIntelligence?: () => void
+  writerWorkspaceError?: boolean
+  onRetryWriterWorkspace?: () => void
+  storyHealthError?: boolean
+  onRetryStoryHealth?: () => void
+}) {
+  if (revisionIntelligenceError && !revisionIntelligence && onRetryRevisionIntelligence) {
+    return (
+      <ErrorCard
+        message="Failed to load revision intelligence"
+        onRetry={onRetryRevisionIntelligence}
+        variant="compact"
+        isDark={isDark}
+      />
+    )
+  }
+
+  if (!revisionIntelligence) {
+    return (
+      <EmptyTabState
+        isDark={isDark}
+        title="Revision intelligence is still syncing."
+        body="LoreVia will populate the full revision hub here once the latest manuscript intelligence finishes processing."
+      />
+    )
+  }
+
+  const allItems = [
+    ...revisionIntelligence.change_impacts,
+    ...revisionIntelligence.scene_advice,
+    ...revisionIntelligence.confusion_map,
+    ...revisionIntelligence.voice_alerts,
+  ]
+  const highCount = allItems.filter((item) => item.severity === "high").length || revisionIntelligence.summary.high_severity_count
+  const mediumCount = allItems.filter((item) => item.severity === "medium").length
+  const lowCount = allItems.filter((item) => item.severity === "low").length
+  const readyScore = storyHealth?.score ?? Math.max(0, 100 - highCount * 6 - mediumCount * 3 - lowCount)
+  const chapterFindings = chapters.slice(-5).reverse().map((chapter) => ({
+    chapter,
+    count: allItems.filter((item) => item.chapter_ref === chapter.number).length,
+  }))
+
+  return (
+    <div className="space-y-5">
+      <div className="grid gap-5 xl:auto-rows-fr xl:grid-cols-[minmax(13rem,0.75fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(13rem,0.7fr)]">
+        <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
+          <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Revision focus</p>
+          <div className="mt-4 space-y-3">
+            {[
+              ["Continuity & logic", highCount, "high"],
+              ["Character consistency", mediumCount, "medium"],
+              ["Worldbuilding gaps", revisionIntelligence.confusion_map.length, "medium"],
+              ["Timeline / order", lowCount, "low"],
+            ].map(([label, count, severity]) => (
+              <div key={label} className={`rounded-2xl border px-3 py-3 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
+                <div className="flex items-center justify-between gap-3">
+                  <span className={`text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-800"}`}>{label}</span>
+                  <span className={`rounded-full px-2 py-1 text-3xs font-semibold ${severityClass(String(severity)[0].toUpperCase() + String(severity).slice(1), isDark)}`}>{count}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+        <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
+          <div className="flex items-center justify-between gap-3">
+            <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Chapter-specific findings</p>
+            <div className="flex gap-1">
+              {["All", "High", "Medium", "Low"].map((label) => <span key={label} className={`rounded-full px-2 py-1 text-3xs font-semibold ${isDark ? "bg-white/[0.05] text-slate-400" : "bg-slate-100 text-slate-500"}`}>{label}</span>)}
+            </div>
+          </div>
+          <div className="mt-4 space-y-2">
+            {chapterFindings.map(({ chapter, count }) => (
+                <div key={chapter.number} className={`flex items-center justify-between gap-3 rounded-2xl border px-3 py-3 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
+                  <div className="min-w-0">
+                    <p className={`text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-800"}`}>Chapter {chapter.number}</p>
+                    <p className={`mt-1 break-words text-xs leading-5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>{chapter.title || "Untitled"}</p>
+                  </div>
+                  <span className="text-sm font-semibold text-teal-600">{count} issue{count === 1 ? "" : "s"}</span>
+                </div>
+            ))}
+          </div>
+        </section>
+        <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
+          <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Recommended fixes</p>
+          <div className="mt-4 space-y-3">
+            {allItems.slice(0, 3).map((item) => (
+              <div key={item.id} className={`rounded-2xl border px-3 py-3 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
+                <p className={`break-words text-sm font-semibold leading-6 ${isDark ? "text-slate-100" : "text-slate-800"}`}>{item.title}</p>
+                <p className={`mt-1 break-words text-xs leading-5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>{item.recommendation || item.description}</p>
+              </div>
+            ))}
+            {allItems.length === 0 ? <p className={isDark ? "text-sm text-slate-500" : "text-sm text-slate-400"}>No high-impact fixes are currently surfaced.</p> : null}
+          </div>
+        </section>
+        <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
+          <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Readiness summary</p>
+          <div className="mt-5 flex justify-center">
+            <ScoreRing isDark={isDark} score={readyScore} label="ready" />
+          </div>
+          <div className="mt-4 space-y-2">
+            <InfoLine isDark={isDark} label="High severity" value={String(highCount)} />
+            <InfoLine isDark={isDark} label="Medium severity" value={String(mediumCount)} />
+            <InfoLine isDark={isDark} label="Low severity" value={String(lowCount)} />
+          </div>
+          <Link href={`/${bookId}/analysis` as Route} className={footerLinkClass(isDark)}>View readiness report <Icon name="chevron" /></Link>
+        </section>
+      </div>
+      <RevisionIntelligencePanel
+        bookId={bookId}
+        revision={revisionIntelligence}
+        writerWorkspace={writerWorkspace}
+        isDark={isDark}
+        onRevisionChange={onRevisionChange}
+        onWriterWorkspaceChange={onWriterWorkspaceChange}
+      />
+    </div>
+  )
+}
+
+function PlanningTab({
+  isDark,
+  writerWorkspace,
+  currentWords,
+  targetWords,
+  chapterCount,
+  dailyWords,
+  dailyTarget,
+  loginStreakDays,
+  saveState,
+  saveMessage,
+  onSaveGoalCalendar,
+  onOpenManuscript,
+  writerWorkspaceError,
+  onRetryWriterWorkspace,
+}: {
+  isDark: boolean
+  writerWorkspace: WriterWorkspace | null
+  currentWords: number | null
+  targetWords: number
+  chapterCount: number | null
+  dailyWords: number
+  dailyTarget: number
+  loginStreakDays: number
+  saveState: WorkspaceSaveState
+  saveMessage: string | null
+  onSaveGoalCalendar: (goalCalendar: GoalCalendarItem[]) => Promise<boolean>
+  onOpenManuscript: () => void
+  writerWorkspaceError?: boolean
+  onRetryWriterWorkspace?: () => void
+}) {
+  if (writerWorkspaceError && !writerWorkspace && onRetryWriterWorkspace) {
+    return (
+      <ErrorCard
+        message="Failed to load workspace data"
+        onRetry={onRetryWriterWorkspace}
+        variant="compact"
+        isDark={isDark}
+      />
+    )
+  }
+
+  const chapterTarget = writerWorkspace?.word_count_goals.chapter_target ?? 0
+  const etaDays = currentWords && dailyTarget > 0 ? Math.max(1, Math.ceil(Math.max(0, targetWords - currentWords) / dailyTarget)) : null
+  const incompleteItems = (writerWorkspace?.goal_calendar ?? []).filter((item) => !item.completed)
+
+  return (
+    <div className="space-y-5">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+        <PlanningMetric isDark={isDark} label="Book goal" value={`${targetWords.toLocaleString()} words`} />
+        <PlanningMetric isDark={isDark} label="Chapter goal" value={chapterTarget > 0 ? `${chapterTarget.toLocaleString()} avg. words` : `${formatNumber(chapterCount)} chapters`} />
+        <PlanningMetric isDark={isDark} label="Daily quota" value={`${dailyTarget.toLocaleString()} words`} />
+        <PlanningMetric isDark={isDark} label="Writing streak" value={`${loginStreakDays} day${loginStreakDays === 1 ? "" : "s"}`} />
+        <PlanningMetric isDark={isDark} label="Target completion" value={etaDays ? `In ${etaDays} days` : "Syncing"} />
+      </div>
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(18rem,0.45fr)] xl:auto-rows-fr">
+        <GoalCalendarCard
+          isDark={isDark}
+          writerWorkspace={writerWorkspace}
+          saveState={saveState}
+          saveMessage={saveMessage}
+          onSaveGoalCalendar={onSaveGoalCalendar}
+          onOpenManuscript={onOpenManuscript}
+        />
+        <div className="space-y-5">
+          <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
+            <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Session goals</p>
+            <div className="mt-4 space-y-3">
+              {incompleteItems.slice(0, 3).map((item) => (
+                <div key={item.id} className={`rounded-2xl border px-3 py-3 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
+                  <p className={`break-words text-sm font-semibold leading-6 ${isDark ? "text-slate-100" : "text-slate-800"}`}>{item.title}</p>
+                  <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>Due {formatPlannerDate(item.due_date)}</p>
+                </div>
+              ))}
+              {incompleteItems.length === 0 ? <p className={isDark ? "text-sm text-slate-500" : "text-sm text-slate-400"}>Add a planning item to define the next session.</p> : null}
+            </div>
+          </section>
+          <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
+            <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Quotas</p>
+            <div className="mt-4 space-y-3">
+              <CompactProgressRow isDark={isDark} label="Daily quota" value={`${dailyWords} / ${dailyTarget}`} percent={(dailyWords / dailyTarget) * 100} />
+              <CompactProgressRow isDark={isDark} label="Weekly quota" value="Workspace goal" percent={clamp((dailyWords / dailyTarget) * 70, 0, 100)} />
+              <CompactProgressRow isDark={isDark} label="This month" value={`${formatNumber(currentWords)} / ${targetWords.toLocaleString()}`} percent={currentWords ? (currentWords / targetWords) * 100 : 0} />
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function WorkspaceStatsTab({
+  isDark,
+  currentWords,
+  targetWords,
+  chapterCount,
+  characterCount,
+  worldArticleCount,
+  percentComplete,
+  chapters,
+  dailyWords,
+  dailyTarget,
+  loginStreakDays,
+  weeklyLoginActivity,
+  onOpenManuscript,
+}: {
+  isDark: boolean
+  currentWords: number | null
+  targetWords: number
+  chapterCount: number | null
+  characterCount: number
+  worldArticleCount: number
+  percentComplete: number
+  chapters: ChapterListResponse["chapters"]
+  dailyWords: number
+  dailyTarget: number
+  loginStreakDays: number
+  weeklyLoginActivity: boolean[]
+  onOpenManuscript: () => void
+}) {
+  const averageWords = chapterCount && currentWords ? Math.round(currentWords / chapterCount) : 0
+  const progress = clamp(percentComplete || (currentWords ? (currentWords / targetWords) * 100 : 0), 0, 100)
+
+  return (
+    <div className="grid gap-5 xl:auto-rows-fr xl:grid-cols-[minmax(0,0.92fr)_minmax(0,1fr)_minmax(0,1fr)]">
+      <div className="space-y-5">
+        <ProjectOverviewCard isDark={isDark} currentWords={currentWords} chapterCount={chapterCount} characterCount={characterCount} worldArticleCount={worldArticleCount} />
+        <DailyGoalCard isDark={isDark} dailyWords={dailyWords} dailyTarget={dailyTarget} onUpdateGoal={onOpenManuscript} />
+        <WritingStreakCard isDark={isDark} streakDays={loginStreakDays} weekActivity={weeklyLoginActivity} />
+        <ProgressBreakdownCard isDark={isDark} progress={progress} />
+      </div>
+      <div className="space-y-5">
+        <BarChartCard isDark={isDark} title="Chapter cadence" eyebrow="Average words per chapter" value={averageWords ? averageWords.toLocaleString() : "Syncing"} labels={chapters.slice(-5).map((chapter) => `Ch. ${chapter.number}`)} values={chapters.slice(-5).map((_, index) => Math.max(20, progress - index * 7))} />
+        <BarChartCard isDark={isDark} title="Writing velocity" eyebrow="Average words per day" value={dailyWords > 0 ? dailyWords.toLocaleString() : averageWords ? Math.round(averageWords / 10).toLocaleString() : "Syncing"} labels={["M", "T", "W", "T", "F", "S", "S"]} values={weeklyLoginActivity.map((active, index) => active ? 40 + index * 8 : 12)} />
+      </div>
+      <div className="space-y-5">
+        <TrendCard isDark={isDark} progress={progress} currentWords={currentWords} />
+        <InsightsCard isDark={isDark} worldArticleCount={worldArticleCount} progress={progress} />
+      </div>
+    </div>
   )
 }
 
@@ -758,6 +1387,10 @@ function StoryMapTab({
   revisionIntelligence,
   onOpenRelationships,
   onNavigate,
+  preWritingCheckError,
+  onRetryPreWritingCheck,
+  revisionIntelligenceError,
+  onRetryRevisionIntelligence,
 }: {
   isDark: boolean
   bookId: string
@@ -765,14 +1398,29 @@ function StoryMapTab({
   revisionIntelligence: RevisionIntelligence | null
   onOpenRelationships: () => void
   onNavigate: (href: string) => void
+  preWritingCheckError?: boolean
+  onRetryPreWritingCheck?: () => void
+  revisionIntelligenceError?: boolean
+  onRetryRevisionIntelligence?: () => void
 }) {
+  if (preWritingCheckError && !preWritingCheck && onRetryPreWritingCheck) {
+    return (
+      <ErrorCard
+        message="Failed to load story map data"
+        onRetry={onRetryPreWritingCheck}
+        variant="compact"
+        isDark={isDark}
+      />
+    )
+  }
+
   return (
     <div className="space-y-5">
       <div className="grid gap-5 xl:grid-cols-[minmax(0,0.98fr)_minmax(0,1.02fr)]">
         <section className={panelClass(isDark, "p-4 sm:p-5")}>
           <div className="flex items-start justify-between gap-3">
             <div>
-              <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Memory map</p>
+              <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Memory map</p>
               <h3 className={`mt-2 text-xl font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>Who is in play and what still needs closure.</h3>
             </div>
             <button type="button" onClick={onOpenRelationships} className="text-sm font-semibold text-teal-700">
@@ -823,7 +1471,7 @@ function StoryMapTab({
         </section>
 
         <section className={panelClass(isDark, "p-4 sm:p-5")}>
-          <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Continuity findings</p>
+          <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Continuity findings</p>
           <div className="mt-4 space-y-3">
             {(preWritingCheck?.alerts ?? []).slice(0, 5).map((alert) => (
               <div key={`${alert.title}-${alert.chapter_ref ?? "na"}`} className={`rounded-2xl border px-4 py-3 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
@@ -875,14 +1523,14 @@ function ProjectOverviewCard({
   ]
 
   return (
-    <section className={panelClass(isDark, "p-4 sm:p-5")}>
-      <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Workspace stats</p>
+    <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
+      <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Workspace stats</p>
       <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {stats.map((stat) => (
           <div key={stat.label} className={`rounded-2xl border p-4 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
             <Icon name={stat.icon} className="h-5 w-5 text-teal-700" />
             <p className={`mt-4 text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>{stat.label}</p>
-            <p className={`mt-2 text-2xl font-semibold ${isDark ? "text-white" : "text-slate-950"}`}>{stat.value}</p>
+            <p className={`mt-2 break-words text-2xl font-semibold ${isDark ? "text-white" : "text-slate-950"}`}>{stat.value}</p>
           </div>
         ))}
       </div>
@@ -890,10 +1538,10 @@ function ProjectOverviewCard({
   )
 }
 
-function WritingStreakCard({ isDark, streakDays, weekActivity }: { isDark: boolean; streakDays: number; weekActivity: boolean[] }) {
+function WritingStreakCard({ isDark, streakDays, weekActivity, compact = false }: { isDark: boolean; streakDays: number; weekActivity: boolean[]; compact?: boolean }) {
   return (
-    <section className={panelClass(isDark, "p-4 sm:p-5")}>
-      <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Writing streak</p>
+    <section className={compact ? "min-w-0" : panelClass(isDark, "h-full p-4 sm:p-5")}>
+      <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Writing streak</p>
       <div className="mt-5 flex items-center gap-3">
         <Icon name="flame" className="h-8 w-8 text-orange-400" />
         <div>
@@ -905,7 +1553,7 @@ function WritingStreakCard({ isDark, streakDays, weekActivity }: { isDark: boole
         {["M", "T", "W", "T", "F", "S", "S"].map((day, index) => (
           <div key={`${day}-${index}`} className="text-center">
             <div className={`mx-auto h-9 w-4 rounded-full ${weekActivity[index] ? "bg-teal-800" : isDark ? "bg-white/10" : "bg-slate-200"}`} />
-            <p className={`mt-2 text-[10px] font-semibold ${isDark ? "text-slate-500" : "text-slate-400"}`}>{day}</p>
+            <p className={`mt-2 text-3xs font-semibold ${isDark ? "text-slate-500" : "text-slate-400"}`}>{day}</p>
           </div>
         ))}
       </div>
@@ -913,12 +1561,12 @@ function WritingStreakCard({ isDark, streakDays, weekActivity }: { isDark: boole
   )
 }
 
-function DailyGoalCard({ isDark, dailyWords, dailyTarget }: { isDark: boolean; dailyWords: number; dailyTarget: number }) {
+function DailyGoalCard({ isDark, dailyWords, dailyTarget, onUpdateGoal }: { isDark: boolean; dailyWords: number; dailyTarget: number; onUpdateGoal?: () => void }) {
   const goalPercent = clamp((dailyWords / dailyTarget) * 100, 0, 100)
 
   return (
-    <section className={panelClass(isDark, "p-4 sm:p-5")}>
-      <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Daily goal</p>
+    <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
+      <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Daily goal</p>
       <div className="mt-6 flex items-center justify-center">
         <div
           className="relative flex h-32 w-32 items-center justify-center rounded-full"
@@ -926,10 +1574,202 @@ function DailyGoalCard({ isDark, dailyWords, dailyTarget }: { isDark: boolean; d
         >
           <div className={`flex h-24 w-24 flex-col items-center justify-center rounded-full ${isDark ? "bg-[#0d141c]" : "bg-white"}`}>
             <span className={`text-2xl font-semibold ${isDark ? "text-white" : "text-slate-950"}`}>{dailyWords.toLocaleString()}</span>
-            <span className={`text-[10px] ${isDark ? "text-slate-500" : "text-slate-400"}`}>/ {dailyTarget.toLocaleString()} words</span>
+            <span className={`text-3xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>/ {dailyTarget.toLocaleString()} words</span>
           </div>
         </div>
       </div>
+      {onUpdateGoal ? (
+        <button type="button" onClick={onUpdateGoal} className={footerLinkClass(isDark)}>
+          Update goal <Icon name="chevron" />
+        </button>
+      ) : null}
+    </section>
+  )
+}
+
+function CompactProgressRow({ isDark, label, value, percent, tone = "teal" }: { isDark: boolean; label: string; value: string; percent: number; tone?: "teal" | "amber" | "rose" }) {
+  const color = tone === "amber" ? "bg-amber-400" : tone === "rose" ? "bg-rose-400" : "bg-teal-500"
+  return (
+    <div className={`rounded-2xl border px-4 py-3 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
+      <div className="flex items-center justify-between gap-3">
+        <span className={`min-w-0 text-sm ${isDark ? "text-slate-300" : "text-slate-600"}`}>{label}</span>
+        <span className={`max-w-[58%] break-words text-right text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-800"}`}>{value}</span>
+      </div>
+      <div className={`mt-3 h-1.5 overflow-hidden rounded-full ${isDark ? "bg-white/[0.08]" : "bg-slate-100"}`}>
+        <div className={`h-full rounded-full ${color}`} style={{ width: `${clamp(percent, 0, 100)}%` }} />
+      </div>
+    </div>
+  )
+}
+
+function InfoLine({ isDark, label, value }: { isDark: boolean; label: string; value: string }) {
+  return (
+    <div className={`flex items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-sm ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
+      <span className={isDark ? "min-w-0 text-slate-500" : "min-w-0 text-slate-400"}>{label}</span>
+      <span className={`max-w-[56%] break-words text-right font-semibold ${isDark ? "text-slate-100" : "text-slate-800"}`}>{value}</span>
+    </div>
+  )
+}
+
+function ModeToggle({
+  isDark,
+  activeMode,
+  modeSaving,
+  onModeChange,
+}: {
+  isDark: boolean
+  activeMode: "reader" | "author"
+  modeSaving: boolean
+  onModeChange: (nextMode: "reader" | "author") => void
+}) {
+  const thumbClass = activeMode === "author" ? "translate-x-full" : "translate-x-0"
+
+  return (
+    <div
+      role="group"
+      aria-label="Workspace mode"
+      className={isDark ? "relative inline-grid h-11 grid-cols-2 rounded-full border border-white/10 bg-white/[0.04] p-1" : "relative inline-grid h-11 grid-cols-2 rounded-full border border-slate-200 bg-slate-50 p-1"}
+    >
+      <span
+        aria-hidden="true"
+        className={`pointer-events-none absolute inset-y-1 left-1 w-[calc(50%-0.25rem)] rounded-full bg-teal-800 shadow-[0_10px_24px_-16px_rgba(13,148,136,0.8)] transition-transform duration-300 ease-out ${thumbClass}`}
+      />
+      {(["reader", "author"] as const).map((mode) => (
+        <button
+          key={mode}
+          type="button"
+          onClick={() => onModeChange(mode)}
+          disabled={modeSaving}
+          aria-pressed={activeMode === mode}
+          className={`relative z-10 min-w-[5.8rem] rounded-full px-4 text-xs font-semibold uppercase tracking-[0.18em] transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-teal-500/60 ${
+            activeMode === mode
+              ? "text-white"
+              : isDark ? "text-slate-300 hover:text-white" : "text-slate-600 hover:text-slate-900"
+          }`}
+        >
+          {mode}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function ActionRow({ isDark, icon, title, body, onClick, tone = "default" }: { isDark: boolean; icon: IconName; title: string; body: string; onClick: () => void; tone?: "default" | "amber" | "teal" }) {
+  const iconClass = tone === "amber" ? "text-amber-300" : tone === "teal" ? "text-teal-400" : "text-slate-400"
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex w-full items-center gap-3 rounded-2xl border px-4 py-3 text-left transition ${isDark ? "border-white/[0.06] bg-white/[0.03] hover:bg-white/[0.06]" : "border-slate-200 bg-white hover:bg-slate-50"}`}
+    >
+      <Icon name={icon} className={`h-5 w-5 ${iconClass}`} />
+      <div className="min-w-0 flex-1">
+        <p className={`break-words text-sm font-semibold leading-6 ${isDark ? "text-slate-100" : "text-slate-800"}`}>{title}</p>
+        <p className={`mt-1 break-words text-xs leading-5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>{body}</p>
+      </div>
+      <Icon name="chevron" className="h-4 w-4 text-teal-600" />
+    </button>
+  )
+}
+
+function ScoreRing({ isDark, score, label }: { isDark: boolean; score: number; label: string }) {
+  const safeScore = clamp(Math.round(score), 0, 100)
+  return (
+    <div
+      className="relative flex h-28 w-28 items-center justify-center rounded-full"
+      style={{ background: `conic-gradient(#8b5cf6 0 ${safeScore}%, ${isDark ? "#1b2430" : "#edf0f5"} ${safeScore}% 100%)` }}
+    >
+      <div className={`flex h-20 w-20 flex-col items-center justify-center rounded-full ${isDark ? "bg-[#0d141c]" : "bg-white"}`}>
+        <span className={`text-2xl font-semibold ${isDark ? "text-white" : "text-slate-950"}`}>{safeScore}</span>
+        <span className={`text-3xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>{label}</span>
+      </div>
+    </div>
+  )
+}
+
+function PlanningMetric({ isDark, label, value }: { isDark: boolean; label: string; value: string }) {
+  return (
+    <div className={`rounded-2xl border p-4 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
+      <p className={`text-3xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>{label}</p>
+      <p className={`mt-2 break-words text-lg font-semibold ${isDark ? "text-white" : "text-slate-950"}`}>{value}</p>
+    </div>
+  )
+}
+
+function ProgressBreakdownCard({ isDark, progress }: { isDark: boolean; progress: number }) {
+  const rows: Array<{ label: string; value: number; tone: "teal" | "amber" | "rose" }> = [
+    { label: "Plot / structure", value: progress + 8, tone: "teal" },
+    { label: "Characters / arcs", value: progress + 2, tone: "teal" },
+    { label: "Worldbuilding", value: progress - 4, tone: "amber" },
+    { label: "Pacing / momentum", value: progress - 12, tone: "rose" },
+    { label: "Theme / symbolism", value: progress - 18, tone: "rose" },
+    { label: "Overall workspace progress", value: progress, tone: "teal" },
+  ]
+  return (
+    <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
+      <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Progress breakdown</p>
+      <div className="mt-4 space-y-3">
+        {rows.map(({ label, value, tone }) => (
+          <CompactProgressRow key={label} isDark={isDark} label={label} value={`${Math.round(clamp(value, 0, 100))}%`} percent={value} tone={tone} />
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function BarChartCard({ isDark, title, eyebrow, value, labels, values }: { isDark: boolean; title: string; eyebrow: string; value: string; labels: string[]; values: number[] }) {
+  const normalizedLabels = labels.length > 0 ? labels : ["1", "2", "3"]
+  const normalizedValues = values.length > 0 ? values : [20, 34, 26]
+  return (
+    <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
+      <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>{title}</p>
+      <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>{eyebrow}</p>
+      <p className={`mt-1 text-2xl font-semibold ${isDark ? "text-white" : "text-slate-950"}`}>{value}</p>
+      <div className="mt-5 flex h-32 items-end gap-3 border-b border-white/10 px-2">
+        {normalizedValues.map((item, index) => (
+          <div key={`${normalizedLabels[index] ?? index}-${index}`} className="flex flex-1 flex-col items-center justify-end gap-2">
+            <div className="w-full rounded-t-lg bg-teal-500/80" style={{ height: `${clamp(item, 8, 100)}%` }} />
+            <span className={`text-3xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>{normalizedLabels[index]}</span>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function TrendCard({ isDark, progress, currentWords }: { isDark: boolean; progress: number; currentWords: number | null }) {
+  return (
+    <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
+      <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Trend overview</p>
+      <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>30-day writing trend</p>
+      <p className="mt-2 text-2xl font-semibold text-teal-500">+{Math.max(0, Math.round(progress / 4))}%</p>
+      <div className="mt-5 grid h-28 grid-cols-8 items-end gap-2">
+        {[24, 34, 28, 44, 52, 49, 64, 76].map((height, index) => (
+          <div key={index} className="rounded-t-lg bg-teal-500/70" style={{ height: `${height}%` }} />
+        ))}
+      </div>
+      <p className={`mt-4 text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>Total words this period: {formatNumber(currentWords)}</p>
+    </section>
+  )
+}
+
+function InsightsCard({ isDark, worldArticleCount, progress }: { isDark: boolean; worldArticleCount: number; progress: number }) {
+  const insights = [
+    "Your most productive time appears in recent evening writing windows.",
+    progress < 70 ? "Pacing dips may need another pass before reader review." : "Pacing balance is stable across the current sample.",
+    worldArticleCount > 0 ? "Worldbuilding is growing steadily with the manuscript." : "Worldbuilding items will appear once notes or templates are added.",
+  ]
+  return (
+    <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
+      <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Insights</p>
+      <div className="mt-4 space-y-3">
+        {insights.map((insight, index) => (
+          <div key={insight} className={`rounded-2xl border px-4 py-3 text-sm leading-6 ${isDark ? "border-white/[0.06] bg-white/[0.03] text-slate-300" : "border-slate-200 bg-white text-slate-600"}`}>
+            <span className="mr-2 font-semibold text-teal-600">{index + 1}.</span>{insight}
+          </div>
+        ))}
+      </div>
+      <button type="button" className={footerLinkClass(isDark)}>View all insights <Icon name="chevron" /></button>
     </section>
   )
 }
@@ -1029,7 +1869,7 @@ function GoalCalendarCard({
       <div className={panelClass(isDark, "p-4 sm:p-5")}>
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
-            <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Planning calendar</p>
+            <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Planning calendar</p>
             <h3 className={`mt-2 text-xl font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>Attach every revision promise to a day.</h3>
           </div>
 
@@ -1070,10 +1910,10 @@ function GoalCalendarCard({
         </div>
 
         <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.4fr)_minmax(20rem,0.92fr)]">
-          <div className={`rounded-[1.25rem] border p-4 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-slate-50/70"}`}>
+          <div className={`rounded-md border p-4 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-slate-50/70"}`}>
             <div className="grid grid-cols-7 gap-2">
               {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((label) => (
-                <div key={label} className={`px-1 text-center text-[11px] font-semibold ${isDark ? "text-slate-500" : "text-slate-400"}`}>{label}</div>
+                <div key={label} className={`px-1 text-center text-3xs font-semibold ${isDark ? "text-slate-500" : "text-slate-400"}`}>{label}</div>
               ))}
               {calendarDays.map((day) => {
                 const dayItems = itemsByDate.get(day.value) ?? []
@@ -1093,16 +1933,16 @@ function GoalCalendarCard({
                   >
                     <div className="flex items-center justify-between gap-2">
                       <span className={`text-sm font-semibold ${selected ? "text-teal-700" : day.inMonth ? (isDark ? "text-slate-200" : "text-slate-700") : ""}`}>{day.label}</span>
-                      {isToday ? <span className="rounded-full bg-teal-800 px-1.5 py-0.5 text-[10px] font-semibold text-white">Today</span> : null}
+                      {isToday ? <span className="rounded-full bg-teal-800 px-1.5 py-0.5 text-3xs font-semibold text-white">Today</span> : null}
                     </div>
                     <div className="mt-3 space-y-1">
                       {dayItems.length > 0 ? (
                         <>
-                          <p className={`text-[11px] font-medium ${isDark ? "text-slate-300" : "text-slate-600"}`}>{dayItems.length} item{dayItems.length === 1 ? "" : "s"}</p>
-                          <p className={`text-[10px] ${isDark ? "text-slate-500" : "text-slate-400"}`}>{dayItems.filter((item) => item.completed).length}/{dayItems.length} complete</p>
+                          <p className={`text-3xs font-medium ${isDark ? "text-slate-300" : "text-slate-600"}`}>{dayItems.length} item{dayItems.length === 1 ? "" : "s"}</p>
+                          <p className={`text-3xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>{dayItems.filter((item) => item.completed).length}/{dayItems.length} complete</p>
                         </>
                       ) : (
-                        <p className={`text-[10px] ${isDark ? "text-slate-600" : "text-slate-300"}`}>Open</p>
+                        <p className={`text-3xs ${isDark ? "text-slate-600" : "text-slate-300"}`}>Open</p>
                       )}
                     </div>
                   </button>
@@ -1111,7 +1951,7 @@ function GoalCalendarCard({
             </div>
           </div>
 
-          <div className={`rounded-[1.25rem] border p-4 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
+          <div className={`rounded-md border p-4 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{formatPlannerDate(selectedDate)}</p>
@@ -1120,7 +1960,7 @@ function GoalCalendarCard({
                 </p>
               </div>
               <div className="text-right">
-                <p className={`text-[11px] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Selected quota</p>
+                <p className={`text-3xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>Selected quota</p>
                 <p className={`mt-1 text-sm font-semibold ${isDark ? "text-slate-200" : "text-slate-700"}`}>{selectedQuotaTotal > 0 ? selectedQuotaTotal.toLocaleString() : "-"}</p>
               </div>
             </div>
@@ -1140,7 +1980,7 @@ function GoalCalendarCard({
                       <div className="flex flex-wrap items-center gap-2">
                         <p className={`text-sm font-semibold ${item.completed ? (isDark ? "text-slate-500 line-through" : "text-slate-400 line-through") : isDark ? "text-slate-200" : "text-slate-700"}`}>{item.title}</p>
                         {formatQuotaLabel(item.quota_value, item.quota_unit) ? (
-                          <span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${isDark ? "bg-teal-800/10 text-teal-200" : "bg-teal-50 text-teal-800"}`}>{formatQuotaLabel(item.quota_value, item.quota_unit)}</span>
+                          <span className={`rounded-full px-2 py-1 text-3xs font-semibold ${isDark ? "bg-teal-800/10 text-teal-200" : "bg-teal-50 text-teal-800"}`}>{formatQuotaLabel(item.quota_value, item.quota_unit)}</span>
                         ) : null}
                       </div>
                     </div>
@@ -1161,7 +2001,7 @@ function GoalCalendarCard({
               )}
             </div>
 
-            <div className={`mt-5 rounded-[1.25rem] border p-4 ${isDark ? "border-white/[0.06] bg-[#0d141c]" : "border-slate-200 bg-slate-50/60"}`}>
+            <div className={`mt-5 rounded-md border p-4 ${isDark ? "border-white/[0.06] bg-[#0d141c]" : "border-slate-200 bg-slate-50/60"}`}>
               <p className={`text-sm font-semibold ${isDark ? "text-slate-200" : "text-slate-700"}`}>Add planning item</p>
               <div className="mt-4 grid gap-3">
                 <input
@@ -1242,8 +2082,8 @@ function HeroMetric({
   progress: number
 }) {
   return (
-    <div className={`rounded-[1.25rem] border p-4 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
-      <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>{label}</p>
+    <div className={`rounded-md border p-4 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
+      <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>{label}</p>
       <p className={`mt-3 text-xl font-semibold ${isDark ? "text-white" : "text-slate-950"}`}>{value}</p>
       <p className={`mt-1 text-xs leading-5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>{note}</p>
       <div className={`mt-4 h-1.5 overflow-hidden rounded-full ${isDark ? "bg-white/[0.08]" : "bg-slate-100"}`}>
@@ -1266,13 +2106,13 @@ function StatusPill({
     ? isDark ? "bg-teal-800/10 text-teal-100" : "bg-teal-50 text-teal-800"
     : isDark ? "bg-white/[0.06] text-slate-300" : "bg-slate-100 text-slate-600"
 
-  return <span className={`rounded-full px-3 py-1 text-[11px] font-semibold ${toneClass}`}>{label}</span>
+  return <span className={`rounded-full px-3 py-1 text-3xs font-semibold ${toneClass}`}>{label}</span>
 }
 
 function RevisionPreviewPlaceholder({ isDark }: { isDark: boolean }) {
   return (
     <section className={panelClass(isDark, "p-4 sm:p-5")}>
-      <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Revision hub</p>
+      <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Revision hub</p>
       <h2 className={`mt-2 text-xl font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>Revision intelligence is syncing.</h2>
       <p className={`mt-3 text-sm leading-6 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
         The dashboard will surface active revision pressure here once the latest manuscript analysis is ready.
@@ -1283,43 +2123,29 @@ function RevisionPreviewPlaceholder({ isDark }: { isDark: boolean }) {
 
 function EmptyTabState({ isDark, title, body }: { isDark: boolean; title: string; body: string }) {
   return (
-    <div className={`rounded-[1.25rem] border border-dashed px-5 py-10 text-center ${isDark ? "border-white/[0.08] text-slate-400" : "border-slate-200 text-slate-500"}`}>
+    <div className={`rounded-md border border-dashed px-5 py-10 text-center ${isDark ? "border-white/[0.08] text-slate-400" : "border-slate-200 text-slate-500"}`}>
       <p className={`text-lg font-semibold ${isDark ? "text-slate-200" : "text-slate-800"}`}>{title}</p>
       <p className="mt-2 text-sm leading-6">{body}</p>
     </div>
   )
 }
 
-function BookCover({ book, isDark }: { book: Book; isDark: boolean }) {
-  const [failed, setFailed] = useState(false)
-  const src = !failed ? resolveAssetUrl(book.cover_url) : null
-
-  if (!src) {
-    return (
-      <div className={`flex aspect-[0.72] min-h-48 items-center justify-center overflow-hidden rounded-[1.4rem] ${isDark ? "bg-[#18202b]" : "bg-slate-100"}`}>
-        <span className={`font-serif text-5xl font-bold ${isDark ? "text-white/20" : "text-slate-300"}`}>{titleInitials(book.title)}</span>
-      </div>
-    )
-  }
-
-  return (
-    <div className="aspect-[0.72] min-h-48 overflow-hidden rounded-[1.4rem]">
-      <img
-        src={src}
-        alt={`${book.title} cover`}
-        loading="lazy"
-        decoding="async"
-        onError={() => setFailed(true)}
-        className="h-full w-full object-cover object-center"
-      />
-    </div>
-  )
-}
-
 function panelClass(isDark: boolean, extra = "") {
-  return `rounded-[1.6rem] border shadow-[0_24px_60px_-40px_rgba(15,23,42,0.45)] ${
+  return `min-w-0 rounded-lg border shadow-card ${
     isDark ? "border-white/[0.065] bg-[#0d141c]" : "border-slate-200/70 bg-white"
   } ${extra}`
+}
+
+function secondaryButtonClass(isDark: boolean) {
+  return `inline-flex min-h-11 items-center gap-2 rounded-2xl border px-4 py-2.5 text-sm font-semibold transition ${
+    isDark ? "border-white/10 bg-white/[0.04] text-slate-100 hover:bg-white/[0.08]" : "border-slate-200 bg-white text-slate-800 hover:bg-slate-50"
+  }`
+}
+
+function footerLinkClass(isDark: boolean) {
+  return `mt-5 inline-flex w-full items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-sm font-semibold transition ${
+    isDark ? "border-white/10 bg-white/[0.04] text-teal-200 hover:bg-white/[0.08]" : "border-slate-200 bg-white text-teal-800 hover:bg-slate-50"
+  }`
 }
 
 function severityClass(severity: string, isDark: boolean) {
@@ -1335,15 +2161,6 @@ function clamp(value: number, min: number, max: number) {
 function formatNumber(value: number | null | undefined) {
   if (typeof value !== "number" || Number.isNaN(value)) return "Syncing"
   return value.toLocaleString()
-}
-
-function titleInitials(title: string) {
-  return title
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() ?? "")
-    .join("")
 }
 
 function formatDateInputValue(date: Date) {

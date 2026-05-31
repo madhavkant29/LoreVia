@@ -93,7 +93,7 @@ function SearchPageInner() {
 
         <div className="mt-4 flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p className={`text-[11px] font-semibold uppercase tracking-[0.28em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+            <p className={`text-3xs font-semibold uppercase tracking-[0.28em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>
               {isAuthor ? "Author workspace" : "Reader workspace"}
             </p>
             <h1 className={`mt-2 font-serif text-5xl ${isDark ? "text-white" : "text-stone-950"}`}>
@@ -122,16 +122,16 @@ function SearchPageInner() {
           ) : null}
         </div>
 
-        <div className={`mt-8 rounded-[1.8rem] border p-5 sm:p-6 ${isDark ? "border-white/10 bg-black/70" : "border-stone-200 bg-white/90"}`}>
+        <div className={`mt-8 rounded-lg border p-5 sm:p-6 ${isDark ? "border-white/10 bg-black/70" : "border-stone-200 bg-white/90"}`}>
           <div className="flex flex-col gap-3 sm:flex-row">
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               onKeyDown={(event) => event.key === "Enter" && runSearch()}
               placeholder={isAuthor ? 'Find every scene where two characters are alone together' : 'Search for a scene, clue, or character moment'}
-              className={`flex-1 rounded-[1rem] border px-4 py-3 text-sm outline-none ${isDark ? "border-white/10 bg-black text-white placeholder:text-slate-500" : "border-stone-200 bg-stone-50 text-stone-950 placeholder:text-stone-400"}`}
+              className={`flex-1 rounded-md border px-4 py-3 text-sm outline-none ${isDark ? "border-white/10 bg-black text-white placeholder:text-slate-500" : "border-stone-200 bg-stone-50 text-stone-950 placeholder:text-stone-400"}`}
             />
-            <button onClick={() => runSearch()} disabled={loading} className="rounded-[1rem] bg-[linear-gradient(135deg,#115e59,#0f766e)] px-5 py-3 text-sm font-semibold text-white disabled:opacity-50">
+            <button onClick={() => runSearch()} disabled={loading} className="rounded-md bg-[linear-gradient(135deg,#115e59,#0f766e)] px-5 py-3 text-sm font-semibold text-white disabled:opacity-50">
               {loading ? "Searching..." : isAuthor ? "Search manuscript" : "Search"}
             </button>
           </div>
@@ -170,11 +170,11 @@ function SearchPageInner() {
           ) : null}
         </div>
 
-        {error ? <div className={`mt-6 rounded-[1.4rem] border p-4 text-sm ${isDark ? "border-rose-500/20 bg-rose-500/10 text-rose-200" : "border-rose-200 bg-rose-50 text-rose-700"}`}>{error}</div> : null}
+        {error ? <div className={`mt-6 rounded-lg border p-4 text-sm ${isDark ? "border-rose-500/20 bg-rose-500/10 text-rose-200" : "border-rose-200 bg-rose-50 text-rose-700"}`}>{error}</div> : null}
 
         <div className="mt-6 space-y-4">
           {thematicResults.map((result, index) => (
-            <div key={`theme-${result.chapter_number}-${index}`} className={`rounded-[1.6rem] border p-5 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-white/90"}`}>
+            <div key={`theme-${result.chapter_number}-${index}`} className={`rounded-lg border p-5 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-white/90"}`}>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-cyan-300" : "text-cyan-700"}`}>
                   Chapter {result.chapter_number}{result.chapter_title ? ` - ${result.chapter_title}` : ""}
@@ -190,7 +190,7 @@ function SearchPageInner() {
           ))}
 
           {results.map((result, index) => (
-            <div key={`${result.chapter_num}-${index}`} className={`rounded-[1.6rem] border p-5 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-white/90"}`}>
+            <div key={`${result.chapter_num}-${index}`} className={`rounded-lg border p-5 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-white/90"}`}>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-emerald-300" : "text-emerald-700"}`}>
                   Chapter {result.chapter_num}{result.chapter_title ? ` - ${result.chapter_title}` : ""}
@@ -205,7 +205,7 @@ function SearchPageInner() {
           ))}
 
           {results.length === 0 && thematicResults.length === 0 && !loading && query ? (
-            <div className={`rounded-[1.6rem] border p-5 text-sm ${isDark ? "border-white/10 bg-white/[0.04] text-slate-400" : "border-stone-200 bg-white/90 text-stone-500"}`}>
+            <div className={`rounded-lg border p-5 text-sm ${isDark ? "border-white/10 bg-white/[0.04] text-slate-400" : "border-stone-200 bg-white/90 text-stone-500"}`}>
               No matching passages yet. Try a broader query, a character name, or a concrete scene description.
             </div>
           ) : null}

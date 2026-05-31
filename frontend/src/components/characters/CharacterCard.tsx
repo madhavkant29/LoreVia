@@ -186,12 +186,12 @@ export function CharacterCard({ character, bookId, compact = false, editable = f
           <div className="min-w-0">
             <h3 className={`font-semibold text-xl leading-tight break-words ${isDark ? "text-white" : "text-slate-900"}`}>{character.name}</h3>
             <div className="mt-2 flex flex-wrap items-center gap-2">
-              <span className={`rounded-md px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${
+              <span className={`rounded-md px-2.5 py-1 text-3xs font-semibold uppercase tracking-[0.14em] ${
                 isDark ? "bg-slate-800 text-slate-200" : "bg-slate-100 text-slate-700"
               }`}>
                 {character.role || "character"}
               </span>
-              <span className={`rounded-md px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${
+              <span className={`rounded-md px-2.5 py-1 text-3xs font-semibold uppercase tracking-[0.14em] ${
                 isDark ? "bg-slate-800 text-slate-300" : "bg-slate-100 text-slate-600"
               }`}>
                 {character.status ?? "alive"}
@@ -238,18 +238,18 @@ export function CharacterCard({ character, bookId, compact = false, editable = f
                   <div className="min-w-0">
                     <h3 className={`font-semibold text-3xl leading-tight break-words ${isDark ? "text-white" : "text-slate-900"}`}>{character.name}</h3>
                     <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <span className={`rounded-md px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${
+                      <span className={`rounded-md px-2.5 py-1 text-3xs font-semibold uppercase tracking-[0.14em] ${
                         isDark ? "bg-slate-800 text-slate-200" : "bg-slate-100 text-slate-700"
                       }`}>
                         {character.role || "character"}
                       </span>
-                      <span className={`rounded-md px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${
+                      <span className={`rounded-md px-2.5 py-1 text-3xs font-semibold uppercase tracking-[0.14em] ${
                         isDark ? "bg-slate-800 text-slate-300" : "bg-slate-100 text-slate-600"
                       }`}>
                         {character.status ?? "alive"}
                       </span>
                       {typeof character.first_chapter === "number" ? (
-                        <span className={`rounded-md px-2.5 py-1 text-[11px] font-medium ${
+                        <span className={`rounded-md px-2.5 py-1 text-3xs font-medium ${
                           isDark ? "bg-slate-800 text-slate-300" : "bg-slate-100 text-slate-600"
                         }`}>
                           ch. {character.first_chapter} debut
@@ -312,7 +312,7 @@ export function CharacterCard({ character, bookId, compact = false, editable = f
             ) : null}
 
             <div className="mt-6">
-              <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Overview</p>
+              <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Overview</p>
               <p className={`mt-2 text-base leading-8 ${isDark ? "text-slate-200" : "text-slate-700"}`}>
                 {character.description || "LoreVia is still building this profile from the text."}
               </p>
@@ -320,7 +320,7 @@ export function CharacterCard({ character, bookId, compact = false, editable = f
 
             <div className="mt-6 grid gap-4 md:grid-cols-2">
               <div className={`rounded-lg border p-5 ${isDark ? "border-slate-800 bg-slate-900/50" : "border-slate-200 bg-slate-50"}`}>
-                <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Snapshot</p>
+                <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Snapshot</p>
                 <div className="mt-4 space-y-3 text-sm">
                   {visible.slice(0, 5).map(([key, trait]) => trait ? (
                     <div key={key} className="flex items-start justify-between gap-4">
@@ -333,7 +333,7 @@ export function CharacterCard({ character, bookId, compact = false, editable = f
               </div>
 
               <div className={`rounded-lg border p-5 ${isDark ? "border-slate-800 bg-slate-900/50" : "border-slate-200 bg-slate-50"}`}>
-                <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Continuity</p>
+                <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Continuity</p>
                 <div className="mt-4 space-y-4 text-sm">
                   <div className="flex items-start justify-between gap-4">
                     <span className={isDark ? "text-slate-400" : "text-slate-500"}>Last seen</span>
@@ -358,31 +358,31 @@ export function CharacterCard({ character, bookId, compact = false, editable = f
               >
                 <div className="grid gap-4 md:grid-cols-2">
                   <label className="space-y-1">
-                    <span className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Name</span>
+                    <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Name</span>
                     <input value={draft.name} onChange={(event) => setDraft((value) => ({ ...value, name: event.target.value }))} className={`w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-slate-700 bg-slate-800 text-white" : "border-slate-300 bg-white text-slate-900"}`} />
                   </label>
                   <label className="space-y-1">
-                    <span className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Aliases</span>
+                    <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Aliases</span>
                     <input value={draft.aliases} onChange={(event) => setDraft((value) => ({ ...value, aliases: event.target.value }))} placeholder="Comma separated" className={`w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-slate-700 bg-slate-800 text-white" : "border-slate-300 bg-white text-slate-900"}`} />
                   </label>
                   <label className="space-y-1 md:col-span-2">
-                    <span className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Description</span>
+                    <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Description</span>
                     <textarea value={draft.description} onChange={(event) => setDraft((value) => ({ ...value, description: event.target.value }))} rows={4} className={`w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-slate-700 bg-slate-800 text-white" : "border-slate-300 bg-white text-slate-900"}`} />
                   </label>
                   <label className="space-y-1 md:col-span-2">
-                    <span className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Arc summary</span>
+                    <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Arc summary</span>
                     <textarea value={draft.arcSummary} onChange={(event) => setDraft((value) => ({ ...value, arcSummary: event.target.value }))} rows={3} className={`w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-slate-700 bg-slate-800 text-white" : "border-slate-300 bg-white text-slate-900"}`} />
                   </label>
                   <label className="space-y-1">
-                    <span className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Personality</span>
+                    <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Personality</span>
                     <input value={draft.personalityTags} onChange={(event) => setDraft((value) => ({ ...value, personalityTags: event.target.value }))} placeholder="Comma separated" className={`w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-slate-700 bg-slate-800 text-white" : "border-slate-300 bg-white text-slate-900"}`} />
                   </label>
                   <label className="space-y-1">
-                    <span className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Motivations</span>
+                    <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Motivations</span>
                     <input value={draft.motivations} onChange={(event) => setDraft((value) => ({ ...value, motivations: event.target.value }))} placeholder="Comma separated" className={`w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-slate-700 bg-slate-800 text-white" : "border-slate-300 bg-white text-slate-900"}`} />
                   </label>
                   <label className="space-y-1 md:col-span-2">
-                    <span className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Fears</span>
+                    <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Fears</span>
                     <input value={draft.fears} onChange={(event) => setDraft((value) => ({ ...value, fears: event.target.value }))} placeholder="Comma separated" className={`w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-slate-700 bg-slate-800 text-white" : "border-slate-300 bg-white text-slate-900"}`} />
                   </label>
                 </div>
@@ -440,7 +440,7 @@ export function CharacterCard({ character, bookId, compact = false, editable = f
                             {eventTitle(event)}
                           </p>
                         {eventDescription(event) ? <p className={isDark ? "mt-2 text-sm leading-relaxed text-slate-300" : "mt-2 text-sm leading-relaxed text-slate-600"}>{eventDescription(event)}</p> : null}
-                        <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
+                        <div className="mt-3 flex flex-wrap gap-2 text-3xs">
                           {typeof event.impact_score === "number" ? (
                             <span className={`rounded-full px-2.5 py-1 ${isDark ? "bg-slate-800 text-slate-300" : "bg-slate-100 text-slate-600"}`}>
                               impact {event.impact_score}/10

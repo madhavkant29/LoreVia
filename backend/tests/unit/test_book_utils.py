@@ -746,6 +746,35 @@ def test_normalize_imported_chapters_keeps_long_source_chapter_intact_when_struc
     assert normalized[0]["text"] == long_text
 
 
+def test_normalize_imported_chapters_keeps_images_with_matching_markers_when_split():
+    text = "\n\n".join([
+        "Opening section. [[IMAGE:cover]]",
+        " ".join(["middle"] * 3600),
+        "Closing section. [[IMAGE:map]]",
+    ])
+
+    normalized = normalize_imported_chapters(
+        [{
+            "number": 1,
+            "title": "Chapter I",
+            "text": text,
+            "images": [
+                {"marker": "[[IMAGE:cover]]", "bytes": b"cover-bytes"},
+                {"marker": "[[IMAGE:map]]", "bytes": b"map-bytes"},
+            ],
+        }],
+        chapter_number=None,
+        start_number=1,
+        replace_existing=False,
+        chunk_long_documents=True,
+        preserve_exact_structure=False,
+    )
+
+    assert len(normalized) == 2
+    assert [image["marker"] for image in normalized[0]["images"]] == ["[[IMAGE:cover]]"]
+    assert [image["marker"] for image in normalized[1]["images"]] == ["[[IMAGE:map]]"]
+
+
 def test_normalize_writer_workspace_includes_front_matter_defaults():
     workspace = normalize_writer_workspace({})
 

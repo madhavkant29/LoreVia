@@ -67,7 +67,7 @@ export default function CompareIndexPage() {
         <MarketingHeader />
 
         <section className="mx-auto max-w-7xl px-5 pb-14 pt-14 md:px-8 md:pt-20">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-[#6fae9f]">Compare LoreVia</p>
+          <p className="text-3xs font-semibold uppercase tracking-[0.32em] text-[#6fae9f]">Compare LoreVia</p>
           <h1 className="mt-5 max-w-4xl font-display text-5xl font-semibold leading-[0.95] tracking-[-0.04em] text-white md:text-7xl">
             Pick the writing workspace that matches your real bottleneck.
           </h1>
@@ -82,9 +82,9 @@ export default function CompareIndexPage() {
               <Link
                 key={item.slug}
                 href={`/compare/${item.slug}`}
-                className="rounded-[1.7rem] border border-white/10 bg-[#0d1715] p-6 transition hover:border-white/18 hover:bg-[#101a18]"
+                className="rounded-lg border border-white/10 bg-[#0d1715] p-6 transition hover:border-white/18 hover:bg-[#101a18]"
               >
-                <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-[#6fae9f]">Comparison page</p>
+                <p className="text-3xs font-semibold uppercase tracking-[0.28em] text-[#6fae9f]">Comparison page</p>
                 <h2 className="mt-4 font-display text-4xl font-semibold text-white">LoreVia vs {item.name}</h2>
                 <p className="mt-4 text-base leading-8 text-[#aeb9b3]">{item.summary}</p>
                 <span className="mt-6 inline-flex items-center gap-2 text-sm font-semibold text-[#86decd]">

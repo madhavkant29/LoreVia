@@ -3,7 +3,7 @@ import time
 import uuid
 from datetime import UTC, datetime
 
-from fastapi import Depends, HTTPException, Request
+from fastapi import Depends, Header, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,8 +12,8 @@ from app.core.database import get_db
 from app.core.redis import get_redis, key_ratelimit
 from app.models.user import User, UserRateLimitOverride
 from app.utils.billing_utils import (
-    continuity_limit_per_day,
     DAILY_LIMIT_MESSAGE,
+    continuity_limit_per_day,
     free_search_limit_per_day,
     prediction_limit_per_day,
     protected_authoring_limit_per_day,
@@ -347,6 +347,22 @@ async def rate_limit_world_building_ai(
         window=3600,
         message="World-building analysis rate limit exceeded. Please wait before running more AI requests.",
     )
+
+
+async def rate_limit_internal_job(
+    request: Request,
+    x_internal_job_secret: str | None = Header(default=None),
+):
+    if x_internal_job_secret and x_internal_job_secret.strip():
+        import hashlib
+
+        identifier = hashlib.sha256(x_internal_job_secret.encode()).hexdigest()
+    else:
+        identifier = _client_identifier(request)
+
+    ok = await _window(key_ratelimit(f"internal_job:{identifier}", "job"), 10, 60)
+    if not ok:
+        raise HTTPException(429, "Internal job rate limit exceeded. Please wait and try again.")
 
 
 async def _limit_for_user(

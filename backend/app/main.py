@@ -174,13 +174,30 @@ class SecurityHeadersMiddleware:
             nonlocal response_started
             if message["type"] == "http.response.start":
                 response_started = True
-                headers = dict(message.get("headers", []))
-                headers = apply_security_headers(
-                    headers,
+                raw_headers: list[tuple[bytes, bytes]] = message.get("headers", [])
+                security_overrides = apply_security_headers(
+                    {},
                     request_id=request_id,
                     include_hsts=not settings.DEBUG,
                 )
-                message["headers"] = list(headers.items())
+                applied: set[bytes] = set()
+                preserved: list[tuple[bytes, bytes]] = []
+                set_cookie_name = b"set-cookie"
+                for name, value in raw_headers:
+                    lower = name.lower()
+                    if lower == set_cookie_name:
+                        preserved.append((name, value))
+                        continue
+                    if lower in security_overrides:
+                        if lower not in applied:
+                            preserved.append((lower, security_overrides[lower]))
+                            applied.add(lower)
+                        continue
+                    preserved.append((name, value))
+                for sec_name, sec_value in security_overrides.items():
+                    if sec_name not in applied:
+                        preserved.append((sec_name, sec_value))
+                message["headers"] = preserved
             await send(message)
 
         try:
@@ -248,10 +265,12 @@ async def health():
 async def ready():
     from app.core.database import engine
     from app.core.redis import get_redis
+    from app.utils.schema_utils import assert_auth_schema_compatible
 
     try:
         async with engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
+            await assert_auth_schema_compatible(conn)
         r = await get_redis()
         await r.ping()
     except Exception:

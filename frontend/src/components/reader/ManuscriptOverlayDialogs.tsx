@@ -96,10 +96,10 @@ export function ManuscriptOverlayDialogs({
     <>
       {sceneEditorOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 px-4 py-8">
-          <div className={`max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-[1.6rem] border p-5 shadow-2xl ${isDark ? "border-white/10 bg-[#0b0f17] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}>
+          <div className={`max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-lg border p-5 shadow-2xl ${isDark ? "border-white/10 bg-[#0b0f17] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}>
             <div className="flex items-start justify-between gap-4">
               <div>
-                <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-emerald-300" : "text-emerald-700"}`}>Scene workspace</p>
+                <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-emerald-300" : "text-emerald-700"}`}>Scene workspace</p>
                 <h3 className="mt-2 text-2xl font-semibold">{editingScene ? "Edit chapter scene" : "New chapter scene"}</h3>
                 <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>Scenes live in the chapter file tree. Rich text, scene breaks, comments, and character mentions now share the same editor foundation as the manuscript.</p>
               </div>
@@ -112,7 +112,7 @@ export function ManuscriptOverlayDialogs({
                   value={sceneTitleDraft}
                   onChange={(event) => onSceneTitleDraftChange(event.target.value)}
                   placeholder="Scene title"
-                  className={`w-full rounded-[0.95rem] border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
+                  className={`w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
                 />
               </label>
               <label className="text-sm">
@@ -120,7 +120,7 @@ export function ManuscriptOverlayDialogs({
                 <select
                   value={sceneChapterDraft ?? ""}
                   onChange={(event) => onSceneChapterDraftChange(event.target.value ? Number(event.target.value) : null)}
-                  className={`w-full rounded-[0.95rem] border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
+                  className={`w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
                 >
                   <option value="">Unassigned / decide later</option>
                   {(workspaceTree?.chapters ?? []).map((chapter) => (
@@ -135,12 +135,12 @@ export function ManuscriptOverlayDialogs({
                 value={sceneDescriptionDraft}
                 onChange={(event) => onSceneDescriptionDraftChange(event.target.value)}
                 placeholder="Optional context for later"
-                className={`w-full rounded-[0.95rem] border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
+                className={`w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
               />
             </label>
             <label className="mt-4 block text-sm">
               <span className={`mb-2 block text-xs font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Scene body</span>
-              <div className={`overflow-hidden rounded-[1rem] border ${isDark ? "border-white/10 bg-black" : "border-stone-200 bg-white"}`}>
+              <div className={`overflow-hidden rounded-md border ${isDark ? "border-white/10 bg-black" : "border-stone-200 bg-white"}`}>
                 <EditorToolbar editorKey="scene-editor-modal" isDark={isDark} compact characters={characters} />
                 <RichTextEditor
                   editorKey="scene-editor-modal"
@@ -153,43 +153,43 @@ export function ManuscriptOverlayDialogs({
             </label>
             <p className={`mt-3 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Unsaved scene changes autosave locally and stay separate from manual scene versions.</p>
             {editingScene?.id ? (
-              <div className={`mt-5 rounded-[1.1rem] border p-4 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50"}`}>
+              <div className={`mt-5 rounded-md border p-4 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50"}`}>
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <p className={`text-[11px] font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Scene versions</p>
+                    <p className={`text-3xs font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Scene versions</p>
                     <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>Name milestones, compare them with the current scene, or restore an earlier pass.</p>
                   </div>
-                  <button onClick={onCreateSceneSnapshot} className={`rounded-full px-3 py-1.5 text-[11px] font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-white text-stone-700"}`}>Save named version</button>
+                  <button onClick={onCreateSceneSnapshot} className={`rounded-full px-3 py-1.5 text-3xs font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-white text-stone-700"}`}>Save named version</button>
                 </div>
                 <input
                   type="text"
                   value={sceneVersionNameDraft}
                   onChange={(event) => onSceneVersionNameDraftChange(event.target.value)}
                   placeholder="Example: Before tightening dialogue"
-                  className={`mt-3 w-full rounded-[0.95rem] border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
+                  className={`mt-3 w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
                 />
                 <div className="mt-3 space-y-2">
                   {sceneVersions.map((version) => (
-                    <div key={version.id} className={`rounded-[0.95rem] border px-3 py-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white"}`}>
+                    <div key={version.id} className={`rounded-md border px-3 py-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white"}`}>
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div>
                           <p className={`text-sm font-medium ${isDark ? "text-white" : "text-stone-900"}`}>{version.note || version.scene_title}</p>
                           <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>
                             {new Date(version.created_at).toLocaleString()} {version.word_count ? `· ${version.word_count} words` : ""}
                           </p>
-                          <p className={`mt-1 text-[11px] uppercase tracking-[0.12em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>{(version.snapshot_kind || "manual").replaceAll("_", " ")}</p>
+                          <p className={`mt-1 text-3xs uppercase tracking-[0.12em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>{(version.snapshot_kind || "manual").replaceAll("_", " ")}</p>
                         </div>
                         <div className="flex flex-wrap gap-2">
                           <button
                             onClick={() => onCompareSceneVersion(version.id)}
-                            className={`rounded-full px-3 py-1.5 text-[11px] font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}
+                            className={`rounded-full px-3 py-1.5 text-3xs font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}
                           >
                             Compare
                           </button>
                           <button
                             onClick={() => onRestoreSceneSnapshot(version.id)}
                             disabled={restoringSceneVersionId === version.id}
-                            className={`rounded-full px-3 py-1.5 text-[11px] font-semibold ${isDark ? "bg-amber-500/10 text-amber-200 disabled:opacity-50" : "bg-amber-50 text-amber-700 disabled:opacity-50"}`}
+                            className={`rounded-full px-3 py-1.5 text-3xs font-semibold ${isDark ? "bg-amber-500/10 text-amber-200 disabled:opacity-50" : "bg-amber-50 text-amber-700 disabled:opacity-50"}`}
                           >
                             {restoringSceneVersionId === version.id ? "Restoring..." : "Restore"}
                           </button>
@@ -197,12 +197,12 @@ export function ManuscriptOverlayDialogs({
                       </div>
                       {sceneVersionDetail?.id === version.id ? (
                         <div className="mt-3 grid gap-3 xl:grid-cols-2">
-                          <div className={`rounded-[0.8rem] border px-3 py-2 ${isDark ? "border-white/10 bg-black/30" : "border-stone-200 bg-stone-50"}`}>
-                            <p className={`text-[11px] font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Saved version</p>
+                          <div className={`rounded-sm border px-3 py-2 ${isDark ? "border-white/10 bg-black/30" : "border-stone-200 bg-stone-50"}`}>
+                            <p className={`text-3xs font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Saved version</p>
                             <p className={`mt-2 text-xs leading-5 ${isDark ? "text-slate-300" : "text-stone-700"}`}>{sceneVersionDetail.body || "No scene text stored in this version."}</p>
                           </div>
-                          <div className={`rounded-[0.8rem] border px-3 py-2 ${isDark ? "border-white/10 bg-black/30" : "border-stone-200 bg-stone-50"}`}>
-                            <p className={`text-[11px] font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Current draft</p>
+                          <div className={`rounded-sm border px-3 py-2 ${isDark ? "border-white/10 bg-black/30" : "border-stone-200 bg-stone-50"}`}>
+                            <p className={`text-3xs font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Current draft</p>
                             <p className={`mt-2 text-xs leading-5 ${isDark ? "text-slate-300" : "text-stone-700"}`}>{sceneBodyDraft || "No scene draft yet."}</p>
                           </div>
                         </div>
@@ -225,23 +225,23 @@ export function ManuscriptOverlayDialogs({
 
       {showCompileDialog && writerWorkspace && manuscriptFrontMatter ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 py-8">
-          <div className={`max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-[1.7rem] border p-6 shadow-2xl ${isDark ? "border-white/10 bg-[#0b0f17] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}>
+          <div className={`max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-lg border p-6 shadow-2xl ${isDark ? "border-white/10 bg-[#0b0f17] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}>
             <div className="flex items-start justify-between gap-4">
               <div>
-                <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-amber-300" : "text-amber-700"}`}>Compile manuscript</p>
+                <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-amber-300" : "text-amber-700"}`}>Compile manuscript</p>
                 <h3 className="mt-2 text-2xl font-semibold">Front page and submission metadata</h3>
                 <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>This template feeds the title page, headers, word count line, and export packaging before the manuscript compiles.</p>
               </div>
               <button onClick={onCloseCompileDialog} className={`rounded-full px-3 py-1.5 text-sm ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}>Close</button>
             </div>
 
-            <div className={`mt-5 rounded-[1.2rem] border p-4 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50"}`}>
+            <div className={`mt-5 rounded-md border p-4 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50"}`}>
               <div className="flex flex-wrap items-center gap-4 text-sm">
                 <span>Format: <strong>{compileFormat.toUpperCase()}</strong></span>
                 <span>Automatic manuscript word count: <strong>{fullBookWordCount.toLocaleString()}</strong></span>
                 <span>Preset: <strong>{writerWorkspace.publishing.active_preset}</strong></span>
               </div>
-              <div className={`mt-4 rounded-[1rem] border px-4 py-3 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+              <div className={`mt-4 rounded-md border px-4 py-3 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
                 <p>
                   <span className="font-semibold">Author name</span> is the full or legal name you want on submission materials.
                   <span className="font-semibold"> Pen name</span> is the public byline for this manuscript and export package.
@@ -250,7 +250,7 @@ export function ManuscriptOverlayDialogs({
                   These manuscript names are separate from your LoreVia account username.
                 </p>
               </div>
-              <label className={`mt-4 flex items-start gap-3 rounded-[1rem] border px-4 py-3 text-sm ${isDark ? "border-white/10 bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+              <label className={`mt-4 flex items-start gap-3 rounded-md border px-4 py-3 text-sm ${isDark ? "border-white/10 bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
                 <input
                   type="checkbox"
                   checked={includeSceneMetadataOnExport}
@@ -369,9 +369,9 @@ function Toggle({
 }
 
 function inputClass(isDark: boolean) {
-  return `w-full rounded-[0.95rem] border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`
+  return `w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`
 }
 
 function textareaClass(isDark: boolean) {
-  return `w-full rounded-[1rem] border px-4 py-3 text-sm leading-6 ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`
+  return `w-full rounded-md border px-4 py-3 text-sm leading-6 ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`
 }

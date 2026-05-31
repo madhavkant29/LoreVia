@@ -48,11 +48,8 @@ class Settings(BaseSettings):
 
     # Database
     DATABASE_URL: str
-    # Keep defaults conservative so the API plus Celery worker processes stay
-    # under pooled Postgres session caps in production unless env vars
-    # intentionally raise them.
-    DATABASE_POOL_SIZE: int = 1
-    DATABASE_MAX_OVERFLOW: int = 0
+    DATABASE_POOL_SIZE: int = 5
+    DATABASE_MAX_OVERFLOW: int = 5
     DATABASE_POOL_RECYCLE_SECONDS: int = 1800
     DATABASE_SQL_ECHO: bool = False
 
@@ -91,7 +88,7 @@ class Settings(BaseSettings):
     # Auth
     JWT_SECRET: str
     JWT_ALGORITHM: str = "HS256"
-    JWT_EXPIRE_MINUTES: int = 1440
+    JWT_EXPIRE_MINUTES: int = 15
     JWT_REFRESH_EXPIRE_DAYS: int = 30
 
     # Paddle
@@ -143,10 +140,10 @@ class Settings(BaseSettings):
 
     # Processing
     LAZY_PROCESS_INITIAL_CHAPTERS: int = 2
-    CHUNK_TARGET_TOKENS: int = 900
-    CHUNK_MAX_TOKENS: int = 1200
+    CHUNK_TARGET_TOKENS: int = 650
+    CHUNK_MAX_TOKENS: int = 900
     CHUNK_MIN_TOKENS: int = 260
-    CHUNK_OVERLAP_TOKENS: int = 80
+    CHUNK_OVERLAP_TOKENS: int = 120
     CHUNK_OVERLAP_RATIO: float = 0.07
     EXTRACTION_BATCH_MAX_TOKENS: int = 7000
     EXTRACTION_BATCH_MAX_CHUNKS: int = 6
@@ -158,6 +155,16 @@ class Settings(BaseSettings):
     INGESTION_CHAPTER_DISPATCH_DELAY_SECONDS: int = 1
     SEARCH_SIMILARITY_THRESHOLD: float = 0.65
     SEARCH_MAX_CONTEXT_CHUNKS: int = 3
+    READER_SEARCH_SIMILARITY_THRESHOLD: float = 0.55
+    READER_SEARCH_CANDIDATE_CHUNKS: int = 10
+    READER_SEARCH_RETURN_CHUNKS: int = 4
+    ADVISOR_GENERAL_SEARCH_SIMILARITY_THRESHOLD: float = 0.28
+    ADVISOR_GENERAL_SEARCH_CHUNKS: int = 8
+    ADVISOR_CONTINUITY_SEARCH_SIMILARITY_THRESHOLD: float = 0.22
+    ADVISOR_CONTINUITY_SEARCH_CHUNKS: int = 12
+    SERIES_CONTINUITY_SEARCH_SIMILARITY_THRESHOLD: float = 0.22
+    SERIES_CONTINUITY_SEARCH_CANDIDATE_CHUNKS: int = 10
+    SERIES_CONTINUITY_SEARCH_RETURN_CHUNKS: int = 6
     PASSWORD_RESET_TOKEN_TTL_SECONDS: int = 1800
     PASSWORD_RESET_REQUEST_COOLDOWN_SECONDS: int = 120
     EMAIL_VERIFICATION_TOKEN_TTL_SECONDS: int = 86400
@@ -218,7 +225,14 @@ def cors_middleware_options() -> dict[str, Any]:
         "allow_origins": cors_origins(),
         "allow_credentials": True,
         "allow_methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        "allow_headers": ["Authorization", "Content-Type", "Accept", "Origin"],
+        "allow_headers": [
+            "Authorization",
+            "Content-Type",
+            "Accept",
+            "Origin",
+            "X-CSRF-Token",
+            "X-Admin-CSRF-Token",
+        ],
     }
     if settings.DEBUG:
         options["allow_origin_regex"] = LOCALHOST_CORS_ORIGIN_REGEX

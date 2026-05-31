@@ -16,7 +16,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
       }`}
     >
       <div className="mx-auto flex min-h-[calc(100dvh-4rem)] max-w-5xl flex-col gap-10">
-        <header className="flex flex-wrap items-center justify-between gap-3 rounded-[1.25rem] border border-[rgba(var(--border),0.9)] bg-[rgba(255,252,247,0.82)] px-4 py-3 shadow-[0_18px_36px_-30px_rgba(58,49,37,0.18)] dark:bg-white/[0.04]">
+        <header className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-[rgba(var(--border),0.9)] bg-[rgba(255,252,247,0.82)] px-4 py-3 shadow-[0_18px_36px_-30px_rgba(58,49,37,0.18)] dark:bg-white/[0.04]">
           <Link href="/" className={`flex items-center gap-3 ${isDark ? "text-white" : "text-stone-900"}`}>
             <ThemeBrandImage variant="lockup" alt="LoreVia" className="h-11 w-auto object-contain sm:h-12" priority />
           </Link>

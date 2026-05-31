@@ -3,9 +3,12 @@ import uuid
 import pytest
 
 from app.utils.advisor_utils import (
+    advisor_retrieval_settings,
     build_story_context,
     build_advisor_world_context,
     build_fallback_advisor_suggestions,
+    classify_intent_fast,
+    classify_response_type,
     detect_advisor_world_mode,
     identify_character_mentions,
     invalidate_advisor_caches,
@@ -66,6 +69,15 @@ def test_detect_advisor_world_mode_routes_reaction_questions_to_story_integratio
     )
 
     assert mode == "story_integration"
+
+
+def test_advisor_retrieval_settings_use_continuity_profile_for_consistency_and_world_mode():
+    assert advisor_retrieval_settings("consistency", None) == (12, 0.22)
+    assert advisor_retrieval_settings("general", "gap_detection") == (12, 0.22)
+
+
+def test_advisor_retrieval_settings_use_general_profile_by_default():
+    assert advisor_retrieval_settings("general", None) == (8, 0.28)
 
 
 def test_build_advisor_world_context_compacts_alerts_suggestions_and_citations():
@@ -203,3 +215,114 @@ async def test_build_story_context_returns_cached_payload(monkeypatch):
     payload = await build_story_context(_FailingDB(), uuid.UUID(book_id), 12)
 
     assert payload == "cached-context"
+
+
+@pytest.mark.asyncio
+async def test_classify_response_type_no_llm_warning_marker():
+    result = await classify_response_type(None, "⚠️ This contradicts chapter 3")
+    assert result == "warning"
+
+
+@pytest.mark.asyncio
+async def test_classify_response_type_no_llm_contradiction_inline():
+    result = await classify_response_type(None, "Here is an analysis. ⚠️ Contradiction in the timeline")
+    assert result == "warning"
+
+
+@pytest.mark.asyncio
+async def test_classify_response_type_no_llm_opportunity_marker():
+    result = await classify_response_type(None, "✨ Here is a chance to expand the lore")
+    assert result == "opportunity"
+
+
+@pytest.mark.asyncio
+async def test_classify_response_type_no_llm_opportunity_inline():
+    result = await classify_response_type(None, "Take a look. ✨ Opportunity: unused side character")
+    assert result == "opportunity"
+
+
+@pytest.mark.asyncio
+async def test_classify_response_type_no_llm_tradeoff_marker():
+    result = await classify_response_type(None, "🔀 Option A: Kill the king. Option B: Spare him.")
+    assert result == "tradeoff"
+
+
+@pytest.mark.asyncio
+async def test_classify_response_type_no_llm_fallback_to_standard():
+    result = await classify_response_type(None, "Here is some general advice about your story pacing.")
+    assert result == "standard"
+
+
+@pytest.mark.asyncio
+async def test_classify_response_type_no_llm_empty_reply():
+    result = await classify_response_type(None, "")
+    assert result == "standard"
+
+
+def test_classify_intent_fast_plothole_exact():
+    assert classify_intent_fast("I found a plot hole in chapter 3") == "plothole"
+
+
+def test_classify_intent_fast_plothole_contradiction():
+    assert classify_intent_fast("This contradicts what happened in chapter 1") == "plothole"
+
+
+def test_classify_intent_fast_plothole_inconsistency():
+    assert classify_intent_fast("There is an inconsistency in the timeline") == "plothole"
+    assert classify_intent_fast("This doesn't make sense given the lore") == "plothole"
+
+
+def test_classify_intent_fast_direction_what_should():
+    assert classify_intent_fast("What should happen next in the story?") == "direction"
+
+
+def test_classify_intent_fast_direction_stuck():
+    assert classify_intent_fast("I am stuck on this chapter, where do I go from here?") == "direction"
+
+
+def test_classify_intent_fast_direction_next_step():
+    assert classify_intent_fast("What is the next step for my protagonist?") == "direction"
+
+
+def test_classify_intent_fast_opportunity_potential():
+    assert classify_intent_fast("Is there untapped potential in this side character?") == "opportunity"
+
+
+def test_classify_intent_fast_opportunity_expand():
+    assert classify_intent_fast("Could I expand the magic system further?") == "opportunity"
+
+
+def test_classify_intent_fast_consistency_canon():
+    assert classify_intent_fast("Does this new chapter stay consistent with the canon?") == "consistency"
+
+
+def test_classify_intent_fast_consistency_rules():
+    assert classify_intent_fast("Are there any worldbuilding rules I'm breaking?") == "consistency"
+
+
+def test_classify_intent_fast_consistency_timeline():
+    assert classify_intent_fast("Check the timeline for continuity errors") == "consistency"
+
+
+def test_classify_intent_fast_general_unknown():
+    assert classify_intent_fast("Hello, how are you doing today?") == "general"
+
+
+def test_classify_intent_fast_general_empty_string():
+    assert classify_intent_fast("") == "general"
+
+
+def test_classify_intent_fast_general_none():
+    assert classify_intent_fast(None) == "general"
+
+
+def test_classify_intent_fast_mixed_case():
+    assert classify_intent_fast("I FOUND A PLOT HOLE in my manuscript") == "plothole"
+
+
+def test_classify_intent_fast_whitespace_only():
+    assert classify_intent_fast("   ") == "general"
+
+
+def test_classify_intent_fast_direction_should_i():
+    assert classify_intent_fast("Should I kill off this character in chapter 5?") == "direction"

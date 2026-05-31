@@ -1,13 +1,25 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import Link from "next/link"
+import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import cytoscape from "cytoscape"
+
 import { booksApi } from "@/lib/api/books"
+import { readerApi } from "@/lib/api/reader"
 import { RELATIONSHIP_COLORS } from "@/lib/constants"
 import { asQueryKey, readerCacheKey } from "@/lib/query/cacheKeys"
+import { cn } from "@/lib/utils/text"
 import type { RelationshipGraph as GraphData } from "@/types/character"
-import { readerApi } from "@/lib/api/reader"
+
+import {
+  graphLabelKey,
+  graphStorageKey,
+  nodeInitial,
+  relationshipLabel,
+  sentimentLabel,
+  zoomPercentLabel,
+} from "./relationshipGraphDisplay"
 
 interface Props {
   bookId: string
@@ -30,27 +42,269 @@ type GraphNode = GraphData["nodes"][number]
 type GraphEdge = GraphData["edges"][number]
 type GraphNodeView = GraphNode & { label: string; relationshipCount: number }
 type GraphEdgeView = GraphEdge & { id: string; relationshipId?: string | null; label: string }
+type InteractionMode = "arrange" | "inspect"
+type GraphTestHandle = {
+  cy: cytoscape.Core
+  selectNode: (id: string) => void
+  selectEdge: (id: string) => void
+  clearSelection: () => void
+}
+
 const RELATIONSHIP_TYPE_OPTIONS = ["ally", "enemy", "family", "mentor", "neutral", "political", "romantic", "rival"] as const
 
-function graphStorageKey(bookId: string, chapter: number) {
-  return `lorevia:graph-layout:${bookId}:${chapter}`
+const BASE_LAYOUT = {
+  name: "cose",
+  animate: true,
+  padding: 56,
+  nodeRepulsion: () => 14500,
+  idealEdgeLength: () => 164,
+  edgeElasticity: () => 90,
+  gravity: 70,
 }
 
-function graphLabelKey(bookId: string) {
-  return `lorevia:graph-labels:${bookId}`
+function controlButtonClass(active = false) {
+  return cn(
+    "inline-flex items-center justify-center gap-2 rounded-xl border px-3 py-2 text-xs font-medium transition",
+    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/70",
+    active
+      ? "border-violet-400/40 bg-[linear-gradient(135deg,rgba(139,92,246,0.24),rgba(45,212,191,0.14))] text-white shadow-[0_10px_30px_rgba(76,29,149,0.18)]"
+      : "border-white/10 bg-white/[0.03] text-slate-200 hover:border-white/20 hover:bg-white/[0.06]"
+  )
 }
 
-function relationshipLabel(value: string | null | undefined) {
-  return (value || "connection").replaceAll("_", " ")
+function panelClass() {
+  return "rounded-lg border border-white/10 bg-[linear-gradient(180deg,rgba(10,14,24,0.98),rgba(6,8,14,0.98))] shadow-[0_24px_80px_rgba(0,0,0,0.36)]"
 }
 
-function sentimentLabel(value: unknown) {
-  if (typeof value !== "number" || Number.isNaN(value)) return null
-  if (value >= 0.45) return "Strongly positive"
-  if (value >= 0.15) return "Positive"
-  if (value <= -0.45) return "Strongly tense"
-  if (value <= -0.15) return "Tense"
-  return "Mixed or neutral"
+function GraphToolbarButton({
+  active = false,
+  ariaPressed,
+  children,
+  disabled = false,
+  icon,
+  onClick,
+}: {
+  active?: boolean
+  ariaPressed?: boolean
+  children: ReactNode
+  disabled?: boolean
+  icon: ReactNode
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={ariaPressed}
+      disabled={disabled}
+      onClick={onClick}
+      className={cn(controlButtonClass(active), disabled && "cursor-not-allowed opacity-45")}
+    >
+      {icon}
+      <span>{children}</span>
+    </button>
+  )
+}
+
+function GraphStatusPill({ icon, children }: { icon: ReactNode; children: ReactNode }) {
+  return (
+    <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs text-slate-300">
+      <span className="text-slate-400">{icon}</span>
+      <span>{children}</span>
+    </div>
+  )
+}
+
+function FilterSelect({
+  filterId,
+  filterType,
+  relationshipTypes,
+  setFilterType,
+}: {
+  filterId: string
+  filterType: string | null
+  relationshipTypes: string[]
+  setFilterType: (value: string | null) => void
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <label htmlFor={filterId} className="sr-only">Filter relationships</label>
+      <div className="relative min-w-[132px]">
+        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
+          <FilterIcon className="h-4 w-4" />
+        </span>
+        <select
+          id={filterId}
+          aria-label="Filter relationships"
+          value={filterType ?? ""}
+          onChange={(event) => setFilterType(event.target.value || null)}
+          className="w-full appearance-none rounded-xl border border-white/10 bg-[#0b1020] py-2 pl-9 pr-9 text-sm text-slate-100 transition hover:border-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/70"
+        >
+          <option value="">All</option>
+          {relationshipTypes.map((type) => (
+            <option key={type} value={type}>
+              {relationshipLabel(type)}
+            </option>
+          ))}
+        </select>
+        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-500">
+          <ChevronDownIcon className="h-4 w-4" />
+        </span>
+      </div>
+    </div>
+  )
+}
+
+function InspectorMetric({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="text-slate-300">{label}</span>
+      <span className="font-semibold text-white">{value}</span>
+    </div>
+  )
+}
+
+function InspectorSection({
+  children,
+  title,
+}: {
+  children: ReactNode
+  title: string
+}) {
+  return (
+    <section className="rounded-md border border-white/10 bg-black/20 p-4">
+      <p className="text-3xs font-semibold uppercase tracking-[0.24em] text-slate-500">{title}</p>
+      <div className="mt-3">{children}</div>
+    </section>
+  )
+}
+
+function EmptyInspector({
+  edgeCount,
+  nodeCount,
+}: {
+  edgeCount: number
+  nodeCount: number
+}) {
+  return (
+    <div className="space-y-5">
+      <div>
+        <p className="text-3xs font-semibold uppercase tracking-[0.28em] text-violet-300/85">Inspector</p>
+        <h3 className="mt-3 text-[2rem] font-semibold tracking-tight text-white">Read the map</h3>
+      </div>
+
+      <p className="text-sm leading-7 text-slate-400">
+        Select a character to inspect their role in the network, or select a connection to read the relationship note. Arrange mode is best when you want to cluster the cast your own way.
+      </p>
+
+      <InspectorSection title="Visible now">
+        <div className="space-y-3 text-sm">
+          <InspectorMetric label="Visible characters" value={nodeCount} />
+          <InspectorMetric label="Visible connections" value={edgeCount} />
+        </div>
+      </InspectorSection>
+
+      <div className="flex min-h-[220px] flex-col items-center justify-center rounded-lg border border-dashed border-white/10 bg-[radial-gradient(circle_at_top,rgba(139,92,246,0.18),transparent_38%),rgba(255,255,255,0.02)] px-6 text-center">
+        <div className="flex h-16 w-16 items-center justify-center rounded-full border border-violet-400/40 bg-violet-500/8 text-violet-200">
+          <CursorIcon className="h-7 w-7" />
+        </div>
+        <p className="mt-5 text-lg font-semibold text-white">Select a character or connection</p>
+        <p className="mt-2 max-w-xs text-sm leading-7 text-slate-400">
+          Use the graph to explore relationships between characters in your manuscript.
+        </p>
+      </div>
+
+      <InspectorSection title="Tip">
+        <p className="text-sm leading-7 text-slate-300">
+          Drag nodes to cluster related characters. Your layout is saved automatically.
+        </p>
+      </InspectorSection>
+    </div>
+  )
+}
+
+function CompactSelectionSummary({
+  selectedEdge,
+  selectedNode,
+}: {
+  selectedEdge: GraphEdgeView | null
+  selectedNode: GraphNodeView | null
+}) {
+  if (selectedNode) {
+    return <>{selectedNode.name} selected. {selectedNode.relationshipCount ?? 0} visible ties.</>
+  }
+
+  if (selectedEdge) {
+    return <>{relationshipLabel(selectedEdge.type)} selected.</>
+  }
+
+  return <>Select a node to sync the graph with the character profile.</>
+}
+
+function buildIsolatedPositions(nodes: GraphNode[]) {
+  if (nodes.length === 0) return null
+  if (nodes.length === 1) {
+    return { [nodes[0].id]: { x: 420, y: 280 } }
+  }
+
+  const centerX = 420
+  const centerY = 290
+  const radiusX = Math.min(250, 130 + nodes.length * 18)
+  const radiusY = Math.min(180, 90 + nodes.length * 14)
+
+  return Object.fromEntries(
+    nodes.map((node, index) => {
+      const angle = (-Math.PI / 2) + (index / nodes.length) * Math.PI * 2
+      return [
+        node.id,
+        {
+          x: centerX + Math.cos(angle) * radiusX,
+          y: centerY + Math.sin(angle) * radiusY,
+        },
+      ]
+    })
+  )
+}
+
+function installGraphTestHandle(cy: cytoscape.Core) {
+  if (typeof window === "undefined" || process.env.NODE_ENV === "production") return
+
+  const graphWindow = window as Window & {
+    __LOREVIA_RELATIONSHIP_GRAPH__?: GraphTestHandle
+  }
+
+  graphWindow.__LOREVIA_RELATIONSHIP_GRAPH__ = {
+    cy,
+    selectNode: (id: string) => {
+      const node = cy.getElementById(id)
+      if (node.nonempty()) {
+        node.emit("tap")
+      }
+    },
+    selectEdge: (id: string) => {
+      const directEdge = cy.getElementById(id)
+      const edge = directEdge.nonempty()
+        ? directEdge
+        : cy.edges().filter((item) => item.data("relationshipId") === id)
+      if (edge.nonempty()) {
+        edge.emit("tap")
+      }
+    },
+    clearSelection: () => {
+      cy.emit("tap", [{ target: cy }])
+    },
+  }
+}
+
+function clearGraphTestHandle(cy: cytoscape.Core) {
+  if (typeof window === "undefined" || process.env.NODE_ENV === "production") return
+
+  const graphWindow = window as Window & {
+    __LOREVIA_RELATIONSHIP_GRAPH__?: GraphTestHandle
+  }
+
+  if (graphWindow.__LOREVIA_RELATIONSHIP_GRAPH__?.cy === cy) {
+    delete graphWindow.__LOREVIA_RELATIONSHIP_GRAPH__
+  }
 }
 
 export function RelationshipGraph({
@@ -68,20 +322,23 @@ export function RelationshipGraph({
   const cyRef = useRef<cytoscape.Core | null>(null)
   const selectCharacterRef = useRef(onSelectCharacterId)
   const layoutPersistTimerRef = useRef<number | null>(null)
+  const filterId = useId()
+  const labelInputId = useId()
   const [graphData, setGraphData] = useState<GraphData | null>(null)
   const [selection, setSelection] = useState<Selection>(null)
   const [filterType, setFilterType] = useState<string | null>(null)
   const [showIsolated, setShowIsolated] = useState(authorMode)
   const [labelOverrides, setLabelOverrides] = useState<Record<string, string>>({})
-  const [interactionMode, setInteractionMode] = useState<"arrange" | "inspect">("arrange")
+  const [interactionMode, setInteractionMode] = useState<InteractionMode>("arrange")
   const [zoomLevel, setZoomLevel] = useState(1)
+  const [showGrid, setShowGrid] = useState(true)
   const [edgeDraft, setEdgeDraft] = useState({ relType: "", description: "", sentiment: "0", fromChapter: "", toChapter: "" })
   const [savingEdge, setSavingEdge] = useState(false)
   const [edgeMessage, setEdgeMessage] = useState<string | null>(null)
 
   const { data: graphQueryData = null, isLoading: loading } = useQuery<GraphData | null>({
     queryKey: asQueryKey(readerCacheKey(bookId, `relationships:${upToChapter}:${includeInactive ? "all" : "active"}`)),
-    queryFn: () => readerApi.getRelationships(bookId, upToChapter, { includeInactive }),
+    queryFn: () => readerApi.getRelationships(bookId, upToChapter, { includeInactive, include: "nodes,edges" }),
   })
 
   useEffect(() => {
@@ -90,6 +347,7 @@ export function RelationshipGraph({
 
   useEffect(() => {
     if (typeof window === "undefined") return
+
     try {
       const raw = window.localStorage.getItem(graphLabelKey(bookId))
       setLabelOverrides(raw ? JSON.parse(raw) : {})
@@ -117,14 +375,17 @@ export function RelationshipGraph({
   const filteredGraph = useMemo(() => {
     if (!graphData) return null
     const visibleEdges = graphData.edges.filter((edge) => !filterType || edge.type === filterType)
+
     if (showIsolated) {
       return { nodes: graphData.nodes, edges: visibleEdges }
     }
+
     const connected = new Set<string>()
     visibleEdges.forEach((edge) => {
       connected.add(edge.source)
       connected.add(edge.target)
     })
+
     const visibleNodes = graphData.nodes.filter((node) => connected.size === 0 || connected.has(node.id))
     return { nodes: visibleNodes, edges: visibleEdges }
   }, [graphData, filterType, showIsolated])
@@ -134,14 +395,45 @@ export function RelationshipGraph({
     return { nodeCount: filteredGraph.nodes.length, edgeCount: filteredGraph.edges.length }
   }, [filteredGraph])
 
+  const nodeLookup = useMemo(() => new Map((graphData?.nodes ?? []).map((node) => [node.id, node])), [graphData])
+
+  const selectedNode = selection?.type === "node" ? selection.data : null
+  const selectedEdge = selection?.type === "edge" ? selection.data : null
+
+  const selectedNodeConnections = useMemo(() => {
+    if (!selectedNode || !filteredGraph) return []
+
+    return filteredGraph.edges
+      .filter((edge) => edge.source === selectedNode.id || edge.target === selectedNode.id)
+      .map((edge, index) => {
+        const otherId = edge.source === selectedNode.id ? edge.target : edge.source
+        const otherNode = nodeLookup.get(otherId)
+        return {
+          id: `${otherId}-${edge.type}-${index}`,
+          label: relationshipLabel(edge.type),
+          name: otherNode?.name ?? "Unknown character",
+          chapter: edge.from_chapter,
+        }
+      })
+  }, [filteredGraph, nodeLookup, selectedNode])
+
+  const selectedEdgeParticipants = useMemo(() => {
+    if (!selectedEdge) return null
+    return {
+      source: nodeLookup.get(selectedEdge.source)?.name ?? "Unknown character",
+      target: nodeLookup.get(selectedEdge.target)?.name ?? "Unknown character",
+    }
+  }, [nodeLookup, selectedEdge])
+
   useEffect(() => {
     if (!containerRef.current || !filteredGraph || filteredGraph.nodes.length === 0) return
 
     const savedPositions = (() => {
       if (typeof window === "undefined") return null
+
       try {
         const raw = window.localStorage.getItem(graphStorageKey(bookId, upToChapter))
-        return raw ? JSON.parse(raw) as Record<string, { x: number; y: number }> : null
+        return raw ? (JSON.parse(raw) as Record<string, { x: number; y: number }>) : null
       } catch {
         return null
       }
@@ -153,14 +445,16 @@ export function RelationshipGraph({
       nodeRelationshipCount.set(edge.target, (nodeRelationshipCount.get(edge.target) || 0) + 1)
     })
 
-    const elements = [
+    const generatedPositions = !savedPositions && filteredGraph.edges.length === 0 ? buildIsolatedPositions(filteredGraph.nodes) : null
+
+    const elements: cytoscape.ElementDefinition[] = [
       ...filteredGraph.nodes.map((node) => ({
         data: {
           ...node,
           label: labelOverrides[node.id] || node.name,
           relationshipCount: nodeRelationshipCount.get(node.id) || 0,
         },
-        position: savedPositions?.[node.id],
+        position: savedPositions?.[node.id] ?? generatedPositions?.[node.id],
       })),
       ...filteredGraph.edges.map((edge, index) => ({
         data: {
@@ -173,86 +467,77 @@ export function RelationshipGraph({
     ]
 
     const hasPreset = filteredGraph.nodes.some((node) => Boolean(savedPositions?.[node.id]))
+    const shouldUsePreset = hasPreset || Boolean(generatedPositions)
 
     const cy = cytoscape({
       container: containerRef.current,
       elements,
       autoungrabify: interactionMode === "inspect",
       wheelSensitivity: 0.18,
-      layout: hasPreset
-        ? { name: "preset", fit: true, padding: 56 }
-        : {
-            name: "cose",
-            animate: true,
-            padding: 56,
-            nodeRepulsion: () => 14500,
-            idealEdgeLength: () => 164,
-            edgeElasticity: () => 90,
-            gravity: 70,
-          },
+      layout: shouldUsePreset ? { name: "preset", fit: true, padding: 96 } : BASE_LAYOUT,
       style: [
         {
           selector: "node",
           style: {
             label: "data(label)",
-            width: (ele: any) => {
+            width: (ele: cytoscape.NodeSingular) => {
               const label = String(ele.data("label") || "")
-              return Math.max(140, Math.min(244, 100 + label.length * 4.6))
+              return Math.max(98, Math.min(156, 76 + label.length * 3.6))
             },
-            height: (ele: any) => {
+            height: (ele: cytoscape.NodeSingular) => {
               const label = String(ele.data("label") || "")
-              const lines = Math.max(2, Math.ceil(label.length / 16))
-              return Math.max(98, Math.min(158, 62 + lines * 18))
+              const lines = Math.max(1, Math.ceil(label.length / 14))
+              return Math.max(52, Math.min(80, 38 + lines * 14))
             },
             shape: "round-rectangle",
-            "background-color": theme === "dark" ? "#0a0a0a" : "#fffdf9",
+            "background-color": theme === "dark" ? "#0b1020" : "#fffdf9",
             "background-opacity": 0.98,
-            "border-width": 1.5,
-            "border-color": (ele: any) => {
-              if (ele.data("graph_visibility_override") === "include") return "#0f766e"
-              if (ele.data("is_manual")) return "#b45309"
-              return theme === "dark" ? "#334155" : "#d6d3d1"
+            "border-width": 1.4,
+            "border-color": (ele: cytoscape.NodeSingular) => {
+              if (ele.data("graph_visibility_override") === "include") return "#14b8a6"
+              if (ele.data("is_manual")) return "#f59e0b"
+              return theme === "dark" ? "#6d5bd0" : "#c4b5fd"
             },
-            color: theme === "dark" ? "#e5e7eb" : "#1f2937",
-            "font-size": 13,
+            color: theme === "dark" ? "#f8fafc" : "#111827",
+            "font-size": 11,
             "font-weight": 600,
             "text-wrap": "wrap",
-            "text-max-width": "166px",
+            "text-max-width": "100px",
             "text-valign": "center",
             "text-halign": "center",
-            padding: "16px",
-            "overlay-padding": 6,
+            padding: "8px",
+            "overlay-padding": 8,
             "overlay-opacity": 0,
           },
         },
         {
           selector: "node:selected",
           style: {
-            "border-color": "#2563eb",
-            "border-width": 3,
-            "background-color": theme === "dark" ? "#171717" : "#eef4ff",
+            "border-color": "#8b5cf6",
+            "border-width": 2.6,
+            "background-color": theme === "dark" ? "#11172a" : "#eef4ff",
           },
         },
         {
           selector: "edge",
           style: {
-            width: "2.4px",
+            width: "1.6px",
             "curve-style": "bezier",
-            "line-color": (ele: any) => RELATIONSHIP_COLORS[ele.data("type")] || "#94a3b8",
-            "target-arrow-color": (ele: any) => RELATIONSHIP_COLORS[ele.data("type")] || "#94a3b8",
+            "line-color": (ele: cytoscape.EdgeSingular) => RELATIONSHIP_COLORS[ele.data("type")] || "#64748b",
+            "target-arrow-color": (ele: cytoscape.EdgeSingular) => RELATIONSHIP_COLORS[ele.data("type")] || "#64748b",
             "target-arrow-shape": "triangle",
             "target-arrow-fill": "filled",
-            opacity: 0.72,
+            opacity: 0.5,
             label: "data(label)",
-            "font-size": 10,
+            "font-size": 9,
             "font-weight": 600,
-            color: theme === "dark" ? "#9ca3af" : "#6b7280",
-            "text-background-color": theme === "dark" ? "#000000" : "#ffffff",
-            "text-background-opacity": 0.96,
-            "text-background-padding": "4px",
+            color: theme === "dark" ? "#94a3b8" : "#6b7280",
+            "text-background-color": theme === "dark" ? "#04050b" : "#ffffff",
+            "text-background-opacity": 0.94,
+            "text-background-padding": "3px",
             "text-background-shape": "roundrectangle",
             "text-rotation": "autorotate",
-            "arrow-scale": 0.9,
+            "arrow-scale": 0.8,
             "source-endpoint": "outside-to-node",
             "target-endpoint": "outside-to-node",
           },
@@ -260,8 +545,8 @@ export function RelationshipGraph({
         {
           selector: "edge:selected",
           style: {
-            width: "4px",
-            opacity: 1,
+            width: "3.2px",
+            opacity: 0.96,
           },
         },
       ],
@@ -270,6 +555,7 @@ export function RelationshipGraph({
     cy.userPanningEnabled(true)
     cy.userZoomingEnabled(true)
     cy.boxSelectionEnabled(false)
+
     if (compact) {
       window.setTimeout(() => {
         if (!cy.destroyed()) {
@@ -279,23 +565,28 @@ export function RelationshipGraph({
           }
           setZoomLevel(cy.zoom())
         }
-      }, hasPreset ? 30 : 260)
+      }, shouldUsePreset ? 30 : 260)
     } else {
       setZoomLevel(cy.zoom())
     }
 
-    cy.on("tap", "node", (evt) => {
-      const nextSelection = { type: "node", data: evt.target.data() as GraphNodeView } as const
+    cy.on("tap", "node", (event) => {
+      const nextSelection = { type: "node", data: event.target.data() as GraphNodeView } as const
       setSelection(nextSelection)
       selectCharacterRef.current?.(nextSelection.data.id)
     })
-    cy.on("tap", "edge", (evt) => setSelection({ type: "edge", data: evt.target.data() as GraphEdgeView }))
-    cy.on("tap", (evt) => {
-      if (evt.target === cy) {
+
+    cy.on("tap", "edge", (event) => {
+      setSelection({ type: "edge", data: event.target.data() as GraphEdgeView })
+    })
+
+    cy.on("tap", (event) => {
+      if (event.target === cy) {
         setSelection(null)
         cy.elements().unselect()
       }
     })
+
     cy.on("dragfree", "node", () => {
       const positions = Object.fromEntries(cy.nodes().map((node) => [node.id(), node.position()]))
       if (typeof window !== "undefined") {
@@ -308,23 +599,28 @@ export function RelationshipGraph({
         }, 180)
       }
     })
+
     cy.on("zoom", () => {
       setZoomLevel(cy.zoom())
     })
 
     cyRef.current = cy
+    installGraphTestHandle(cy)
+
     return () => {
       if (layoutPersistTimerRef.current) {
         window.clearTimeout(layoutPersistTimerRef.current)
         layoutPersistTimerRef.current = null
       }
+
       const positions = Object.fromEntries(cy.nodes().map((node) => [node.id(), node.position()]))
       if (typeof window !== "undefined") {
         window.localStorage.setItem(graphStorageKey(bookId, upToChapter), JSON.stringify(positions))
       }
+      clearGraphTestHandle(cy)
       cy.destroy()
     }
-  }, [bookId, upToChapter, compact, filteredGraph, interactionMode, labelOverrides, theme])
+  }, [bookId, compact, filteredGraph, interactionMode, labelOverrides, theme, upToChapter])
 
   useEffect(() => {
     const cy = cyRef.current
@@ -344,7 +640,20 @@ export function RelationshipGraph({
         duration: 220,
       })
     }
-  }, [compact, focusCharacterId, filteredGraph])
+  }, [compact, filteredGraph, focusCharacterId])
+
+  useEffect(() => {
+    if (!selectedEdge) return
+
+    setEdgeDraft({
+      relType: selectedEdge.type || "",
+      description: selectedEdge.description || "",
+      sentiment: typeof selectedEdge.sentiment === "number" ? String(selectedEdge.sentiment) : "0",
+      fromChapter: typeof selectedEdge.from_chapter === "number" ? String(selectedEdge.from_chapter) : "",
+      toChapter: typeof selectedEdge.to_chapter === "number" ? String(selectedEdge.to_chapter) : "",
+    })
+    setEdgeMessage(null)
+  }, [selectedEdge])
 
   function updateNodeLabel(nodeId: string, value: string) {
     const fallback = graphData?.nodes.find((node) => node.id === nodeId)?.name || value
@@ -368,19 +677,13 @@ export function RelationshipGraph({
     if (typeof window !== "undefined") {
       window.localStorage.removeItem(graphStorageKey(bookId, upToChapter))
     }
-    cyRef.current?.layout({
-      name: "cose",
-      animate: true,
-      padding: 56,
-      nodeRepulsion: () => 14500,
-      idealEdgeLength: () => 164,
-      edgeElasticity: () => 90,
-      gravity: 70,
-    }).run()
+
+    cyRef.current?.layout(BASE_LAYOUT).run()
   }
 
   function focusSelection() {
     if (!cyRef.current || selection?.type !== "node") return
+
     const node = cyRef.current.getElementById(selection.data.id)
     if (node.nonempty()) {
       cyRef.current.animate({
@@ -391,9 +694,14 @@ export function RelationshipGraph({
     }
   }
 
+  function fitCanvas() {
+    cyRef.current?.fit(undefined, compact ? 72 : 96)
+  }
+
   function adjustZoom(direction: "in" | "out") {
     const cy = cyRef.current
     if (!cy) return
+
     const factor = direction === "in" ? 1.18 : 1 / 1.18
     const nextZoom = Math.max(0.3, Math.min(2.4, cy.zoom() * factor))
     cy.zoom({ level: nextZoom, position: { x: cy.width() / 2, y: cy.height() / 2 } })
@@ -403,28 +711,104 @@ export function RelationshipGraph({
   function resetZoom() {
     const cy = cyRef.current
     if (!cy) return
+
     cy.zoom({ level: 1, position: { x: cy.width() / 2, y: cy.height() / 2 } })
     setZoomLevel(cy.zoom())
   }
 
-  const selectedNode = selection?.type === "node" ? selection.data : null
-  const selectedEdge = selection?.type === "edge" ? selection.data : null
+  async function saveEdgeCorrection() {
+    if (!selectedEdge?.relationshipId) return
 
-  useEffect(() => {
-    if (!selectedEdge) return
-    setEdgeDraft({
-      relType: selectedEdge.type || "",
-      description: selectedEdge.description || "",
-      sentiment: typeof selectedEdge.sentiment === "number" ? String(selectedEdge.sentiment) : "0",
-      fromChapter: typeof selectedEdge.from_chapter === "number" ? String(selectedEdge.from_chapter) : "",
-      toChapter: typeof selectedEdge.to_chapter === "number" ? String(selectedEdge.to_chapter) : "",
-    })
+    setSavingEdge(true)
     setEdgeMessage(null)
-  }, [selectedEdge])
+
+    try {
+      const updated = await booksApi.updateRelationship(bookId, selectedEdge.relationshipId, {
+        relType: edgeDraft.relType.trim(),
+        description: edgeDraft.description.trim() || null,
+        sentiment: edgeDraft.sentiment === "" ? null : Number(edgeDraft.sentiment),
+        fromChapter: edgeDraft.fromChapter === "" ? null : Number(edgeDraft.fromChapter),
+        toChapter: edgeDraft.toChapter === "" ? null : Number(edgeDraft.toChapter),
+      })
+
+      setGraphData((current) => {
+        if (!current) return current
+
+        const nextGraph = {
+          ...current,
+          edges: current.edges.map((edge) =>
+            edge.id === selectedEdge.relationshipId
+              ? {
+                  ...edge,
+                  type: updated.rel_type,
+                  description: updated.description,
+                  sentiment: updated.sentiment,
+                  from_chapter: updated.from_chapter,
+                  to_chapter: updated.to_chapter,
+                  status: (typeof updated.to_chapter === "number" && updated.to_chapter < upToChapter ? "ended" : "ongoing") as "ended" | "ongoing",
+                }
+              : edge
+          ),
+        }
+        onGraphDataChange?.(nextGraph)
+        return nextGraph
+      })
+
+      setSelection((current) =>
+        current?.type === "edge"
+          ? {
+              type: "edge",
+              data: {
+                ...current.data,
+                type: updated.rel_type,
+                description: updated.description,
+                sentiment: updated.sentiment,
+                from_chapter: updated.from_chapter,
+                to_chapter: updated.to_chapter,
+              },
+            }
+          : current
+      )
+      setEdgeMessage("Relationship correction saved.")
+    } catch {
+      setEdgeMessage("Could not save the relationship correction.")
+    } finally {
+      setSavingEdge(false)
+    }
+  }
+
+  async function deleteSelectedRelationship() {
+    if (!selectedEdge?.relationshipId) return
+
+    setSavingEdge(true)
+    setEdgeMessage(null)
+
+    try {
+      await booksApi.deleteRelationship(bookId, selectedEdge.relationshipId)
+
+      setGraphData((current) => {
+        if (!current) return current
+
+        const nextGraph = {
+          ...current,
+          edges: current.edges.filter((edge) => edge.id !== selectedEdge.relationshipId),
+        }
+        onGraphDataChange?.(nextGraph)
+        return nextGraph
+      })
+
+      setSelection(null)
+      setEdgeMessage("Relationship removed.")
+    } catch {
+      setEdgeMessage("Could not remove the relationship.")
+    } finally {
+      setSavingEdge(false)
+    }
+  }
 
   if (loading) {
     return (
-      <div className={`rounded-[1.75rem] border p-8 text-sm ${theme === "dark" ? "border-white/10 bg-white/[0.03] text-slate-300" : "border-slate-200 bg-white text-slate-600"}`}>
+      <div className="rounded-lg border border-white/10 bg-white/[0.03] p-8 text-sm text-slate-300 shadow-[0_24px_80px_rgba(0,0,0,0.32)]">
         Building the relationship graph...
       </div>
     )
@@ -432,268 +816,418 @@ export function RelationshipGraph({
 
   if (compact) {
     return (
-      <section className={`rounded-[1.2rem] border p-3 ${theme === "dark" ? "border-white/10 bg-[#06070a]" : "border-slate-200 bg-white"}`}>
+      <section className="rounded-lg border border-white/10 bg-[#060915] p-3 text-slate-100 shadow-[0_16px_50px_rgba(0,0,0,0.24)]">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 className={`text-base font-semibold ${theme === "dark" ? "text-white" : "text-slate-900"}`}>Relationship graph</h2>
-            <p className={`mt-1 text-xs leading-5 ${theme === "dark" ? "text-slate-400" : "text-slate-500"}`}>
+            <h2 className="text-base font-semibold text-white">Relationship graph</h2>
+            <p className="mt-1 text-xs leading-5 text-slate-400">
               Zoomed out by default. Tap a node to sync the profile.
             </p>
           </div>
-          <div className={`rounded-full border px-3 py-1.5 text-xs font-medium ${theme === "dark" ? "border-white/10 bg-white/[0.03] text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600"}`}>
-            {graphStats.nodeCount} cast • {graphStats.edgeCount} ties
+          <div className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs font-medium text-slate-300">
+            {graphStats.nodeCount} cast - {graphStats.edgeCount} ties
           </div>
         </div>
 
-        <div className="mt-3 flex flex-wrap gap-2">
-          <button
-            onClick={() => setFilterType(null)}
-            className={`rounded-full px-3 py-1.5 text-xs font-medium ${filterType === null ? "bg-slate-900 text-white" : theme === "dark" ? "border border-white/10 text-slate-300 hover:bg-white/5" : "border border-slate-300 text-slate-700 hover:bg-slate-50"}`}
-          >
-            All
-          </button>
-          {relationshipTypes.map((type) => (
-            <button
-              key={type}
-              onClick={() => setFilterType(type)}
-              className={`rounded-full px-3 py-1.5 text-xs font-medium ${filterType === type ? "text-white" : theme === "dark" ? "border border-white/10 text-slate-300 hover:bg-white/5" : "border border-slate-300 text-slate-700 hover:bg-slate-50"}`}
-              style={filterType === type ? { backgroundColor: RELATIONSHIP_COLORS[type] || "#475569" } : undefined}
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+          <FilterSelect filterId={filterId} filterType={filterType} relationshipTypes={relationshipTypes} setFilterType={setFilterType} />
+          <div className="flex flex-wrap gap-2">
+            <GraphToolbarButton icon={<FitIcon className="h-4 w-4" />} onClick={fitCanvas}>Fit</GraphToolbarButton>
+            <GraphToolbarButton icon={<MinusIcon className="h-4 w-4" />} onClick={() => adjustZoom("out")}>Zoom out</GraphToolbarButton>
+            <GraphToolbarButton
+              active={showIsolated}
+              ariaPressed={showIsolated}
+              icon={<EyeIcon className="h-4 w-4" />}
+              onClick={() => setShowIsolated((current) => !current)}
             >
-              {relationshipLabel(type)}
-            </button>
-          ))}
-        </div>
-
-        <div className="mt-3 flex flex-wrap gap-2">
-          <button onClick={() => cyRef.current?.fit(undefined, 72)} className={`rounded-full px-3 py-1.5 text-xs font-medium ${theme === "dark" ? "border border-white/10 text-slate-200 hover:bg-white/10" : "border border-slate-300 text-slate-700 hover:bg-slate-50"}`}>Fit</button>
-          <button onClick={() => adjustZoom("out")} className={`rounded-full px-3 py-1.5 text-xs font-medium ${theme === "dark" ? "border border-white/10 text-slate-200 hover:bg-white/10" : "border border-slate-300 text-slate-700 hover:bg-slate-50"}`}>Zoom out</button>
-          <button onClick={() => setShowIsolated((current) => !current)} className={`rounded-full px-3 py-1.5 text-xs font-medium ${theme === "dark" ? "border border-white/10 text-slate-200 hover:bg-white/10" : "border border-slate-300 text-slate-700 hover:bg-slate-50"}`}>{showIsolated ? "Hide isolated" : "Show isolated"}</button>
-          <button onClick={resetLayout} className={`rounded-full px-3 py-1.5 text-xs font-medium ${theme === "dark" ? "border border-white/10 text-slate-200 hover:bg-white/10" : "border border-slate-300 text-slate-700 hover:bg-slate-50"}`}>Reset</button>
+              {showIsolated ? "Hide isolated" : "Show isolated"}
+            </GraphToolbarButton>
+            <GraphToolbarButton icon={<ResetIcon className="h-4 w-4" />} onClick={resetLayout}>Reset</GraphToolbarButton>
+          </div>
         </div>
 
         {filteredGraph && filteredGraph.nodes.length > 0 ? (
-          <div
-            ref={containerRef}
-            className={`mt-3 h-[260px] min-h-[260px] rounded-[1rem] border ${theme === "dark" ? "border-white/5 bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.07),_transparent_30%),linear-gradient(180deg,#000000_0%,#0a0a0a_100%)]" : "border-slate-200 bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.09),_transparent_26%),linear-gradient(180deg,#f8fafc_0%,#f5f5f4_100%)]"}`}
-            style={{ cursor: interactionMode === "arrange" ? "grab" : "default" }}
-          />
+          <div className="relative mt-3 overflow-hidden rounded-md border border-white/10 bg-[#050814]">
+            <div
+              aria-hidden="true"
+              className={cn(
+                "pointer-events-none absolute inset-0 transition-opacity",
+                showGrid ? "opacity-100" : "opacity-0"
+              )}
+              style={{
+                backgroundImage:
+                  "radial-gradient(circle at 1px 1px, rgba(148,163,184,0.18) 1px, transparent 0)",
+                backgroundSize: "22px 22px",
+              }}
+            />
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(109,91,208,0.18),transparent_42%),linear-gradient(180deg,rgba(5,8,20,0.88),rgba(3,5,11,0.98))]"
+            />
+            <div
+              ref={containerRef}
+              className="relative z-10 h-[260px] min-h-[260px]"
+              style={{ cursor: interactionMode === "arrange" ? "grab" : "default" }}
+            />
+          </div>
         ) : (
-          <div className={`mt-3 flex min-h-[220px] items-center justify-center rounded-[1rem] border text-center ${theme === "dark" ? "border-white/5 bg-[linear-gradient(180deg,#000000_0%,#0a0a0a_100%)] text-slate-400" : "border-slate-200 bg-[linear-gradient(180deg,#f8fafc_0%,#f5f5f4_100%)] text-slate-500"}`}>
+          <div className="mt-3 flex min-h-[220px] items-center justify-center rounded-md border border-white/10 bg-[linear-gradient(180deg,#050814_0%,#03050b_100%)] text-center text-slate-400">
             <div className="max-w-sm space-y-2 px-6">
-              <p className="text-base font-semibold">No graphable relationships yet</p>
+              <p className="text-base font-semibold text-white">No graphable relationships yet</p>
               <p className="text-sm leading-6">Read further or clear the active filter to see more of the character network.</p>
             </div>
           </div>
         )}
 
-        <div className={`mt-3 rounded-[1rem] border p-3 text-xs leading-5 ${theme === "dark" ? "border-white/10 bg-white/[0.03] text-slate-400" : "border-slate-200 bg-slate-50 text-slate-500"}`}>
-          {selectedNode
-            ? `${selectedNode.name} selected • ${selectedNode.relationshipCount ?? 0} visible ties`
-            : selectedEdge
-              ? `${relationshipLabel(selectedEdge.type)} selected`
-              : "Select a node to focus the cast summary and relationship map."}
+        <div className="mt-3 rounded-md border border-white/10 bg-white/[0.03] p-3 text-xs leading-5 text-slate-300">
+          <CompactSelectionSummary selectedNode={selectedNode} selectedEdge={selectedEdge} />
         </div>
       </section>
     )
   }
 
   return (
-    <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
-      <section className={`rounded-[1.9rem] border p-4 ${theme === "dark" ? "border-white/10 bg-[#050505]" : "border-slate-200 bg-white"}`}>
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 className={`text-lg font-semibold ${theme === "dark" ? "text-white" : "text-slate-900"}`}>Relationship graph</h2>
-            <p className={`mt-1 text-sm ${theme === "dark" ? "text-slate-400" : "text-slate-500"}`}>Arrange the map to match how you read it. Drag nodes, zoom the canvas, and keep a saved layout on this device.</p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <button
-              onClick={() => setInteractionMode((current) => current === "arrange" ? "inspect" : "arrange")}
-              className={`rounded-full px-3 py-2 text-xs font-medium ${interactionMode === "arrange" ? "bg-slate-900 text-white" : theme === "dark" ? "border border-white/10 text-slate-200 hover:bg-white/10" : "border border-slate-300 text-slate-700 hover:bg-slate-50"}`}
-            >
-              {interactionMode === "arrange" ? "Arrange mode" : "Inspect mode"}
-            </button>
-            <button onClick={() => setShowIsolated((current) => !current)} className={`rounded-full px-3 py-2 text-xs font-medium ${theme === "dark" ? "border border-white/10 text-slate-200 hover:bg-white/10" : "border border-slate-300 text-slate-700 hover:bg-slate-50"}`}>
-              {showIsolated ? "Hide isolated" : "Show isolated"}
-            </button>
-            <button onClick={() => adjustZoom("out")} className={`rounded-full px-3 py-2 text-xs font-medium ${theme === "dark" ? "border border-white/10 text-slate-200 hover:bg-white/10" : "border border-slate-300 text-slate-700 hover:bg-slate-50"}`}>Zoom out</button>
-            <button onClick={() => adjustZoom("in")} className={`rounded-full px-3 py-2 text-xs font-medium ${theme === "dark" ? "border border-white/10 text-slate-200 hover:bg-white/10" : "border border-slate-300 text-slate-700 hover:bg-slate-50"}`}>Zoom in</button>
-            <button onClick={resetZoom} className={`rounded-full px-3 py-2 text-xs font-medium ${theme === "dark" ? "border border-white/10 text-slate-200 hover:bg-white/10" : "border border-slate-300 text-slate-700 hover:bg-slate-50"}`}>Reset zoom</button>
-            <button onClick={() => cyRef.current?.fit(undefined, 56)} className={`rounded-full px-3 py-2 text-xs font-medium ${theme === "dark" ? "border border-white/10 text-slate-200 hover:bg-white/10" : "border border-slate-300 text-slate-700 hover:bg-slate-50"}`}>Fit</button>
-            <button onClick={focusSelection} disabled={selection?.type !== "node"} className={`rounded-full px-3 py-2 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50 ${theme === "dark" ? "border border-white/10 text-slate-200 hover:bg-white/10" : "border border-slate-300 text-slate-700 hover:bg-slate-50"}`}>Center selection</button>
-            <button onClick={resetLayout} className={`rounded-full px-3 py-2 text-xs font-medium ${theme === "dark" ? "border border-white/10 text-slate-200 hover:bg-white/10" : "border border-slate-300 text-slate-700 hover:bg-slate-50"}`}>Reset layout</button>
-          </div>
-        </div>
+    <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+      <section className={cn(panelClass(), "p-4 md:p-5")}>
+        <div className="flex flex-col gap-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="max-w-2xl">
+              <p className="text-3xs font-semibold uppercase tracking-[0.28em] text-violet-300/85">Relationship graph</p>
+              <h2 className="mt-3 text-2xl font-semibold tracking-tight text-white">Relationship graph</h2>
+              <p className="mt-2 text-sm leading-7 text-slate-400">
+                Arrange the map to match how you read it. Drag nodes, zoom the canvas, and keep a saved layout on this device.
+              </p>
+            </div>
 
-        <div className={`mb-4 flex flex-wrap items-center gap-3 rounded-[1.2rem] border px-4 py-3 text-xs ${theme === "dark" ? "border-white/10 bg-white/[0.03] text-slate-300" : "border-slate-200 bg-stone-50 text-slate-600"}`}>
-          <span className="font-medium">{graphStats.nodeCount} characters</span>
-          <span className="opacity-60">•</span>
-          <span className="font-medium">{graphStats.edgeCount} connections</span>
-          <span className="opacity-60">•</span>
-          <span>{showIsolated ? "Isolated cast members stay visible." : "Only connected cast members are visible."}</span>
-          <span className="opacity-60">•</span>
-          <span>{interactionMode === "arrange" ? "Nodes are draggable right now." : "Nodes are locked so you can inspect without accidental movement."}</span>
-        </div>
-
-        <div className="mb-4 flex flex-wrap gap-2">
-          <button
-            onClick={() => setFilterType(null)}
-            className={`rounded-full px-3 py-1.5 text-xs font-medium ${filterType === null ? "bg-slate-900 text-white" : theme === "dark" ? "border border-white/10 text-slate-300 hover:bg-white/5" : "border border-slate-300 text-slate-700 hover:bg-slate-50"}`}
-          >
-            All
-          </button>
-          {relationshipTypes.map((type) => (
-            <button
-              key={type}
-              onClick={() => setFilterType(type)}
-              className={`rounded-full px-3 py-1.5 text-xs font-medium ${filterType === type ? "text-white" : theme === "dark" ? "border border-white/10 text-slate-300 hover:bg-white/5" : "border border-slate-300 text-slate-700 hover:bg-slate-50"}`}
-              style={filterType === type ? { backgroundColor: RELATIONSHIP_COLORS[type] || "#475569" } : undefined}
-            >
-              {relationshipLabel(type)}
-            </button>
-          ))}
-        </div>
-
-        {filteredGraph && filteredGraph.nodes.length > 0 ? (
-          <div
-            ref={containerRef}
-            className={`h-[58vh] min-h-[380px] rounded-[1.5rem] border md:h-[72vh] md:min-h-[560px] ${theme === "dark" ? "border-white/5 bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.06),_transparent_30%),linear-gradient(180deg,#000000_0%,#0a0a0a_100%)]" : "border-slate-200 bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.09),_transparent_26%),linear-gradient(180deg,#f8fafc_0%,#f5f5f4_100%)]"}`}
-            style={{ cursor: interactionMode === "arrange" ? "grab" : "default" }}
-          />
-        ) : (
-          <div className={`flex h-[40vh] min-h-[340px] items-center justify-center rounded-[1.5rem] border text-center ${theme === "dark" ? "border-white/5 bg-[linear-gradient(180deg,#000000_0%,#0a0a0a_100%)] text-slate-400" : "border-slate-200 bg-[linear-gradient(180deg,#f8fafc_0%,#f5f5f4_100%)] text-slate-500"}`}>
-            <div className="max-w-sm space-y-2 px-6">
-              <p className="text-lg font-semibold">No graphable relationships yet</p>
-              <p className="text-sm leading-6">Read further or clear the active filter to see more of the character network.</p>
+            <div className="flex flex-wrap gap-2">
+              <GraphToolbarButton
+                active={interactionMode === "arrange"}
+                ariaPressed={interactionMode === "arrange"}
+                icon={<ArrangeIcon className="h-4 w-4" />}
+                onClick={() => setInteractionMode((current) => (current === "arrange" ? "inspect" : "arrange"))}
+              >
+                {interactionMode === "arrange" ? "Arrange mode" : "Inspect mode"}
+              </GraphToolbarButton>
+              <GraphToolbarButton
+                active={showIsolated}
+                ariaPressed={showIsolated}
+                icon={<EyeIcon className="h-4 w-4" />}
+                onClick={() => setShowIsolated((current) => !current)}
+              >
+                {showIsolated ? "Hide isolated" : "Show isolated"}
+              </GraphToolbarButton>
+              <GraphToolbarButton icon={<MinusIcon className="h-4 w-4" />} onClick={() => adjustZoom("out")}>Zoom out</GraphToolbarButton>
+              <GraphToolbarButton icon={<PlusIcon className="h-4 w-4" />} onClick={() => adjustZoom("in")}>Zoom in</GraphToolbarButton>
+              <GraphToolbarButton icon={<ScopeIcon className="h-4 w-4" />} onClick={resetZoom}>Reset zoom</GraphToolbarButton>
+              <GraphToolbarButton icon={<FitIcon className="h-4 w-4" />} onClick={fitCanvas}>Fit</GraphToolbarButton>
+              <GraphToolbarButton
+                disabled={selection?.type !== "node"}
+                icon={<TargetIcon className="h-4 w-4" />}
+                onClick={focusSelection}
+              >
+                Center selection
+              </GraphToolbarButton>
+              <GraphToolbarButton icon={<ResetIcon className="h-4 w-4" />} onClick={resetLayout}>Reset layout</GraphToolbarButton>
             </div>
           </div>
-        )}
+
+          <div className="flex flex-wrap gap-2">
+            <GraphStatusPill icon={<UsersIcon className="h-4 w-4" />}>
+              <span className="font-medium text-white">{graphStats.nodeCount}</span> characters
+            </GraphStatusPill>
+            <GraphStatusPill icon={<LinksIcon className="h-4 w-4" />}>
+              <span className="font-medium text-white">{graphStats.edgeCount}</span> connections
+            </GraphStatusPill>
+            <GraphStatusPill icon={<EyeIcon className="h-4 w-4" />}>
+              {showIsolated ? "Isolated cast members stay visible." : "Only connected cast members are visible."}
+            </GraphStatusPill>
+            <GraphStatusPill icon={<HandIcon className="h-4 w-4" />}>
+              {interactionMode === "arrange" ? "Nodes are draggable right now." : "Nodes are locked for inspection."}
+            </GraphStatusPill>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <FilterSelect filterId={filterId} filterType={filterType} relationshipTypes={relationshipTypes} setFilterType={setFilterType} />
+
+            <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs text-slate-300">
+              <ScopeIcon className="h-4 w-4 text-slate-400" />
+              <span>Zoom {zoomPercentLabel(zoomLevel)}</span>
+            </div>
+          </div>
+
+          {filteredGraph && filteredGraph.nodes.length > 0 ? (
+            <div className="relative overflow-hidden rounded-lg border border-white/10 bg-[#040712]">
+              <div
+                aria-hidden="true"
+                className={cn(
+                  "pointer-events-none absolute inset-0 transition-opacity",
+                  showGrid ? "opacity-100" : "opacity-0"
+                )}
+                style={{
+                  backgroundImage:
+                    "radial-gradient(circle at 1px 1px, rgba(148,163,184,0.18) 1px, transparent 0)",
+                  backgroundSize: "22px 22px",
+                }}
+              />
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(109,91,208,0.18),transparent_42%),linear-gradient(180deg,rgba(5,8,20,0.88),rgba(3,5,11,0.98))]"
+              />
+
+              <div className="absolute right-4 top-4 z-20 flex items-center gap-2">
+                <button
+                  type="button"
+                  aria-pressed={showGrid}
+                  onClick={() => setShowGrid((current) => !current)}
+                  className={controlButtonClass(showGrid)}
+                >
+                  <GridIcon className="h-4 w-4" />
+                  <span>Grid</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => adjustZoom("out")}
+                  className={controlButtonClass()}
+                  aria-label="Zoom out"
+                >
+                  <MinusIcon className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => adjustZoom("in")}
+                  className={controlButtonClass()}
+                  aria-label="Zoom in"
+                >
+                  <PlusIcon className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div
+                ref={containerRef}
+                className="relative z-10 h-[56vh] min-h-[380px] md:h-[70vh] md:min-h-[560px]"
+                style={{ cursor: interactionMode === "arrange" ? "grab" : "default" }}
+              />
+
+              <div className="pointer-events-none absolute bottom-4 left-4 z-20 flex flex-wrap gap-2">
+                <div className="rounded-full border border-white/10 bg-black/35 px-3 py-1.5 text-xs text-slate-300 backdrop-blur">
+                  Saved layout on this device
+                </div>
+                {filteredGraph.edges.length === 0 ? (
+                  <div className="rounded-full border border-white/10 bg-black/35 px-3 py-1.5 text-xs text-slate-300 backdrop-blur">
+                    No relationships extracted yet. Characters remain visible so you can arrange the cast.
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          ) : (
+            <div className="flex h-[40vh] min-h-[340px] items-center justify-center rounded-lg border border-white/10 bg-[linear-gradient(180deg,#050814_0%,#03050b_100%)] text-center text-slate-400">
+              <div className="max-w-sm space-y-2 px-6">
+                <p className="text-lg font-semibold text-white">No graphable relationships yet</p>
+                <p className="text-sm leading-6">Read further or clear the active filter to see more of the character network.</p>
+              </div>
+            </div>
+          )}
+        </div>
       </section>
 
-      <aside className={`rounded-[1.9rem] border p-5 xl:sticky xl:top-6 xl:max-h-[84vh] xl:overflow-y-auto ${theme === "dark" ? "border-white/10 bg-white/[0.03] text-slate-200" : "border-slate-200 bg-white text-slate-800"}`}>
+      <aside className={cn(panelClass(), "p-5 xl:sticky xl:top-6 xl:max-h-[84vh] xl:overflow-y-auto")}>
         {selectedNode ? (
           <div className="space-y-5">
-            <div>
-              <p className={`text-xs uppercase tracking-[0.2em] ${theme === "dark" ? "text-slate-500" : "text-slate-500"}`}>Character</p>
-              <h3 className="mt-2 text-2xl font-semibold">{selectedNode.name}</h3>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {selectedNode.is_manual ? <span className={`rounded-full px-3 py-1 text-[11px] ${theme === "dark" ? "bg-amber-500/12 text-amber-100" : "bg-amber-50 text-amber-700"}`}>manual</span> : null}
-                {selectedNode.graph_visibility_override === "include" ? <span className={`rounded-full px-3 py-1 text-[11px] ${theme === "dark" ? "bg-emerald-500/12 text-emerald-100" : "bg-emerald-50 text-emerald-700"}`}>forced visible</span> : null}
-                {typeof selectedNode.visibility_score === "number" ? <span className={`rounded-full px-3 py-1 text-[11px] ${theme === "dark" ? "bg-white/[0.05] text-slate-300" : "bg-slate-100 text-slate-700"}`}>score {selectedNode.visibility_score}</span> : null}
+            <div className="flex items-start gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-violet-400/30 bg-violet-500/10 text-lg font-semibold text-violet-100">
+                {nodeInitial(selectedNode.name)}
+              </div>
+              <div className="min-w-0">
+                <p className="text-3xs font-semibold uppercase tracking-[0.28em] text-violet-300/85">Character</p>
+                <h3 className="mt-2 truncate text-[1.9rem] font-semibold tracking-tight text-white">{selectedNode.name}</h3>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {selectedNode.role ? (
+                    <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-3xs text-slate-200">{selectedNode.role}</span>
+                  ) : null}
+                  {selectedNode.is_manual ? (
+                    <span className="rounded-full border border-amber-400/20 bg-amber-500/12 px-3 py-1 text-3xs text-amber-100">manual</span>
+                  ) : null}
+                  {selectedNode.graph_visibility_override === "include" ? (
+                    <span className="rounded-full border border-teal-400/20 bg-teal-500/12 px-3 py-1 text-3xs text-teal-100">forced visible</span>
+                  ) : null}
+                  {typeof selectedNode.visibility_score === "number" ? (
+                    <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-3xs text-slate-300">score {selectedNode.visibility_score}</span>
+                  ) : null}
+                </div>
               </div>
             </div>
 
-            <div className={`rounded-[1.2rem] border p-4 ${theme === "dark" ? "border-white/10 bg-black/20" : "border-slate-200 bg-slate-50"}`}>
-              <label className={`mb-2 block text-xs uppercase tracking-[0.16em] ${theme === "dark" ? "text-slate-500" : "text-slate-500"}`}>Display label</label>
+            <InspectorSection title="Quick view">
+              <div className="space-y-3 text-sm text-slate-300">
+                {typeof selectedNode.mention_count === "number" ? <InspectorMetric label="Mentions" value={selectedNode.mention_count} /> : null}
+                <InspectorMetric label="Connections in view" value={selectedNode.relationshipCount ?? 0} />
+                <InspectorMetric label="First chapter" value={selectedNode.first_chapter} />
+              </div>
+            </InspectorSection>
+
+            <div className="flex flex-wrap gap-2">
+              <button type="button" onClick={focusSelection} className={controlButtonClass(true)}>
+                <TargetIcon className="h-4 w-4" />
+                <span>Center node</span>
+              </button>
+              <Link href={`/${bookId}/characters`} className={controlButtonClass()}>
+                <UsersIcon className="h-4 w-4" />
+                <span>Open characters workspace</span>
+              </Link>
+            </div>
+
+            <InspectorSection title="Display label">
+              <label htmlFor={labelInputId} className="sr-only">Display label</label>
               <input
+                id={labelInputId}
                 value={labelOverrides[selectedNode.id] || selectedNode.name}
-                onChange={(e) => updateNodeLabel(selectedNode.id, e.target.value)}
-                className={`w-full rounded-xl border px-3 py-2 text-sm ${theme === "dark" ? "border-white/10 bg-black/20 text-white" : "border-slate-300 bg-white text-slate-900"}`}
+                onChange={(event) => updateNodeLabel(selectedNode.id, event.target.value)}
+                className="w-full rounded-xl border border-white/10 bg-[#0b1020] px-3 py-2 text-sm text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/70"
               />
               <button
+                type="button"
                 onClick={() => clearLabelOverride(selectedNode)}
-                className={`mt-2 text-xs font-medium ${theme === "dark" ? "text-slate-400 hover:text-white" : "text-slate-500 hover:text-slate-900"}`}
+                className="mt-3 text-xs font-medium text-slate-400 transition hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/70"
               >
                 Reset to canonical name
               </button>
-            </div>
+            </InspectorSection>
 
-            <div className={`rounded-[1.2rem] border p-4 ${theme === "dark" ? "border-white/10 bg-black/20" : "border-slate-200 bg-slate-50"}`}>
-              <p className={`text-xs uppercase tracking-[0.16em] ${theme === "dark" ? "text-slate-500" : "text-slate-500"}`}>Reading note</p>
-              <p className={`mt-3 text-sm leading-7 ${theme === "dark" ? "text-slate-300" : "text-slate-600"}`}>{selectedNode.description || "No narrative summary has been saved yet."}</p>
-            </div>
+            <InspectorSection title="Reading note">
+              <p className="text-sm leading-7 text-slate-300">
+                {selectedNode.description || "No narrative summary has been saved yet."}
+              </p>
+            </InspectorSection>
 
             {"arc_summary" in selectedNode && selectedNode.arc_summary ? (
-              <div className={`rounded-[1.2rem] border p-4 ${theme === "dark" ? "border-white/10 bg-black/20" : "border-slate-200 bg-slate-50"}`}>
-                <p className={`text-xs uppercase tracking-[0.16em] ${theme === "dark" ? "text-slate-500" : "text-slate-500"}`}>Arc summary</p>
-                <p className={`mt-3 text-sm leading-7 ${theme === "dark" ? "text-slate-300" : "text-slate-600"}`}>{selectedNode.arc_summary}</p>
-              </div>
+              <InspectorSection title="Arc summary">
+                <p className="text-sm leading-7 text-slate-300">{selectedNode.arc_summary}</p>
+              </InspectorSection>
             ) : null}
 
             {selectedNode.aliases?.length ? (
-              <div>
-                <p className={`text-xs uppercase tracking-[0.16em] ${theme === "dark" ? "text-slate-500" : "text-slate-500"}`}>Aliases</p>
-                <div className="mt-3 flex flex-wrap gap-2">
+              <InspectorSection title="Aliases">
+                <div className="flex flex-wrap gap-2">
                   {selectedNode.aliases.map((alias) => (
-                    <span key={alias} className={`rounded-full px-3 py-1.5 text-xs ${theme === "dark" ? "bg-white/8 text-slate-200" : "bg-slate-100 text-slate-700"}`}>
+                    <span key={alias} className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs text-slate-200">
                       {alias}
                     </span>
                   ))}
                 </div>
-              </div>
+              </InspectorSection>
             ) : null}
 
-            {selectedNode.personality_tags?.length ? <p className="text-sm leading-7"><span className="font-medium">Disposition:</span> {selectedNode.personality_tags.join(", ")}</p> : null}
-            {selectedNode.motivations?.length ? <p className="text-sm leading-7"><span className="font-medium">Motivations:</span> {selectedNode.motivations.join(", ")}</p> : null}
-            {selectedNode.fears?.length ? <p className="text-sm leading-7"><span className="font-medium">Fears:</span> {selectedNode.fears.join(", ")}</p> : null}
+            {selectedNode.personality_tags?.length ? (
+              <InspectorSection title="Disposition">
+                <p className="text-sm leading-7 text-slate-300">{selectedNode.personality_tags.join(", ")}</p>
+              </InspectorSection>
+            ) : null}
 
-            <div className={`rounded-[1.2rem] border p-4 text-sm ${theme === "dark" ? "border-white/10 bg-black/20 text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600"}`}>
-              <div className="flex items-center justify-between gap-3">
-                <span>Connections in view</span>
-                <span className="font-semibold">{selectedNode.relationshipCount ?? 0}</span>
-              </div>
-            </div>
+            {selectedNode.motivations?.length ? (
+              <InspectorSection title="Motivations">
+                <p className="text-sm leading-7 text-slate-300">{selectedNode.motivations.join(", ")}</p>
+              </InspectorSection>
+            ) : null}
+
+            {selectedNode.fears?.length ? (
+              <InspectorSection title="Fears">
+                <p className="text-sm leading-7 text-slate-300">{selectedNode.fears.join(", ")}</p>
+              </InspectorSection>
+            ) : null}
+
+            {selectedNodeConnections.length > 0 ? (
+              <InspectorSection title="Visible connections">
+                <div className="space-y-3">
+                  {selectedNodeConnections.map((connection) => (
+                    <div key={connection.id} className="flex items-start justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.02] px-3 py-2 text-sm">
+                      <div>
+                        <p className="font-medium text-white">{connection.name}</p>
+                        <p className="mt-1 text-xs text-slate-400">{connection.label}</p>
+                      </div>
+                      {typeof connection.chapter === "number" ? (
+                        <span className="text-xs text-slate-500">Ch. {connection.chapter}</span>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              </InspectorSection>
+            ) : null}
           </div>
         ) : selectedEdge ? (
           <div className="space-y-5">
             <div>
-              <p className={`text-xs uppercase tracking-[0.2em] ${theme === "dark" ? "text-slate-500" : "text-slate-500"}`}>Connection</p>
-              <h3 className="mt-2 text-2xl font-semibold">{relationshipLabel(selectedEdge.type)}</h3>
+              <p className="text-3xs font-semibold uppercase tracking-[0.28em] text-violet-300/85">Connection</p>
+              <h3 className="mt-3 text-[1.9rem] font-semibold tracking-tight text-white">{relationshipLabel(selectedEdge.type)}</h3>
+              {selectedEdgeParticipants ? (
+                <p className="mt-3 text-sm leading-7 text-slate-400">
+                  {selectedEdgeParticipants.source} {"->"} {selectedEdgeParticipants.target}
+                </p>
+              ) : null}
             </div>
 
-            <div className={`rounded-[1.2rem] border p-4 ${theme === "dark" ? "border-white/10 bg-black/20" : "border-slate-200 bg-slate-50"}`}>
-              <p className={`text-xs uppercase tracking-[0.16em] ${theme === "dark" ? "text-slate-500" : "text-slate-500"}`}>Relationship note</p>
-              <p className={`mt-3 text-sm leading-7 ${theme === "dark" ? "text-slate-300" : "text-slate-600"}`}>{selectedEdge.description || "No explicit relationship note has been saved yet."}</p>
-            </div>
+            <InspectorSection title="Relationship note">
+              <p className="text-sm leading-7 text-slate-300">
+                {selectedEdge.description || "No explicit relationship note has been saved yet."}
+              </p>
+            </InspectorSection>
 
-            {typeof selectedEdge.from_chapter === "number" ? <p className="text-sm"><span className="font-medium">First tracked:</span> Chapter {selectedEdge.from_chapter}</p> : null}
-            {typeof selectedEdge.to_chapter === "number" ? <p className="text-sm"><span className="font-medium">Ended:</span> Chapter {selectedEdge.to_chapter}</p> : null}
-            {selectedEdge.status ? <p className="text-sm"><span className="font-medium">Status:</span> {selectedEdge.status}</p> : null}
-
-            {sentimentLabel(selectedEdge.sentiment) ? (
-              <div className={`rounded-[1.2rem] border p-4 text-sm ${theme === "dark" ? "border-white/10 bg-black/20 text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600"}`}>
-                <div className="flex items-center justify-between gap-3">
-                  <span>Emotional direction</span>
-                  <span className="font-semibold">{sentimentLabel(selectedEdge.sentiment)}</span>
-                </div>
+            <InspectorSection title="Network detail">
+              <div className="space-y-3 text-sm text-slate-300">
+                {typeof selectedEdge.from_chapter === "number" ? <InspectorMetric label="First tracked" value={selectedEdge.from_chapter} /> : null}
+                {typeof selectedEdge.to_chapter === "number" ? <InspectorMetric label="Ends chapter" value={selectedEdge.to_chapter} /> : null}
+                {selectedEdge.status ? (
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-slate-300">Status</span>
+                    <span className="font-semibold capitalize text-white">{selectedEdge.status}</span>
+                  </div>
+                ) : null}
+                {sentimentLabel(selectedEdge.sentiment) ? (
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-slate-300">Emotional direction</span>
+                    <span className="font-semibold text-white">{sentimentLabel(selectedEdge.sentiment)}</span>
+                  </div>
+                ) : null}
               </div>
-            ) : null}
+            </InspectorSection>
 
             {authorMode && selectedEdge.relationshipId ? (
-              <div className={`rounded-[1.2rem] border p-4 ${theme === "dark" ? "border-white/10 bg-black/20" : "border-slate-200 bg-slate-50"}`}>
-                <div className="mb-3">
-                  <p className={`text-xs uppercase tracking-[0.16em] ${theme === "dark" ? "text-slate-500" : "text-slate-500"}`}>Author correction</p>
-                  <p className={`mt-2 text-sm leading-6 ${theme === "dark" ? "text-slate-400" : "text-slate-500"}`}>
-                    Correct the extracted relationship if the manuscript context is clearer than the model guess.
-                  </p>
-                </div>
-                <div className="space-y-3">
+              <InspectorSection title="Author correction">
+                <p className="text-sm leading-6 text-slate-400">
+                  Correct the extracted relationship if the manuscript context is clearer than the model guess.
+                </p>
+
+                <div className="mt-4 space-y-3">
                   <label className="block">
-                    <span className={`mb-1 block text-xs ${theme === "dark" ? "text-slate-400" : "text-slate-500"}`}>Type</span>
+                    <span className="mb-1 block text-xs text-slate-400">Type</span>
                     <select
                       value={edgeDraft.relType}
                       onChange={(event) => setEdgeDraft((value) => ({ ...value, relType: event.target.value }))}
-                      className={`w-full rounded-xl border px-3 py-2 text-sm ${theme === "dark" ? "border-white/10 bg-black/20 text-white" : "border-slate-300 bg-white text-slate-900"}`}
+                      className="w-full rounded-xl border border-white/10 bg-[#0b1020] px-3 py-2 text-sm text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/70"
                     >
                       {edgeDraft.relType && !RELATIONSHIP_TYPE_OPTIONS.includes(edgeDraft.relType as (typeof RELATIONSHIP_TYPE_OPTIONS)[number]) ? (
                         <option value={edgeDraft.relType}>{relationshipLabel(edgeDraft.relType)}</option>
                       ) : null}
                       {RELATIONSHIP_TYPE_OPTIONS.map((type) => (
-                        <option key={type} value={type}>{relationshipLabel(type)}</option>
+                        <option key={type} value={type}>
+                          {relationshipLabel(type)}
+                        </option>
                       ))}
                     </select>
                   </label>
+
                   <label className="block">
-                    <span className={`mb-1 block text-xs ${theme === "dark" ? "text-slate-400" : "text-slate-500"}`}>Relationship note</span>
+                    <span className="mb-1 block text-xs text-slate-400">Relationship note</span>
                     <textarea
                       value={edgeDraft.description}
                       onChange={(event) => setEdgeDraft((value) => ({ ...value, description: event.target.value }))}
                       rows={4}
-                      className={`w-full rounded-xl border px-3 py-2 text-sm ${theme === "dark" ? "border-white/10 bg-black/20 text-white" : "border-slate-300 bg-white text-slate-900"}`}
+                      className="w-full rounded-xl border border-white/10 bg-[#0b1020] px-3 py-2 text-sm text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/70"
                     />
                   </label>
+
                   <div className="grid gap-3 sm:grid-cols-3">
                     <label className="block">
-                      <span className={`mb-1 block text-xs ${theme === "dark" ? "text-slate-400" : "text-slate-500"}`}>Sentiment</span>
+                      <span className="mb-1 block text-xs text-slate-400">Sentiment</span>
                       <input
                         type="number"
                         min={-1}
@@ -701,143 +1235,214 @@ export function RelationshipGraph({
                         step={0.1}
                         value={edgeDraft.sentiment}
                         onChange={(event) => setEdgeDraft((value) => ({ ...value, sentiment: event.target.value }))}
-                        className={`w-full rounded-xl border px-3 py-2 text-sm ${theme === "dark" ? "border-white/10 bg-black/20 text-white" : "border-slate-300 bg-white text-slate-900"}`}
+                        className="w-full rounded-xl border border-white/10 bg-[#0b1020] px-3 py-2 text-sm text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/70"
                       />
                     </label>
                     <label className="block">
-                      <span className={`mb-1 block text-xs ${theme === "dark" ? "text-slate-400" : "text-slate-500"}`}>From chapter</span>
+                      <span className="mb-1 block text-xs text-slate-400">From chapter</span>
                       <input
                         type="number"
                         min={1}
                         value={edgeDraft.fromChapter}
                         onChange={(event) => setEdgeDraft((value) => ({ ...value, fromChapter: event.target.value }))}
-                        className={`w-full rounded-xl border px-3 py-2 text-sm ${theme === "dark" ? "border-white/10 bg-black/20 text-white" : "border-slate-300 bg-white text-slate-900"}`}
+                        className="w-full rounded-xl border border-white/10 bg-[#0b1020] px-3 py-2 text-sm text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/70"
                       />
                     </label>
                     <label className="block">
-                      <span className={`mb-1 block text-xs ${theme === "dark" ? "text-slate-400" : "text-slate-500"}`}>Ends chapter</span>
+                      <span className="mb-1 block text-xs text-slate-400">Ends chapter</span>
                       <input
                         type="number"
                         min={1}
                         value={edgeDraft.toChapter}
                         onChange={(event) => setEdgeDraft((value) => ({ ...value, toChapter: event.target.value }))}
                         placeholder="Leave blank if ongoing"
-                        className={`w-full rounded-xl border px-3 py-2 text-sm ${theme === "dark" ? "border-white/10 bg-black/20 text-white" : "border-slate-300 bg-white text-slate-900"}`}
+                        className="w-full rounded-xl border border-white/10 bg-[#0b1020] px-3 py-2 text-sm text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/70"
                       />
                     </label>
                   </div>
-                  {edgeMessage ? <p className={`text-sm ${edgeMessage.includes("saved") || edgeMessage.includes("removed") ? "text-emerald-500" : "text-red-500"}`}>{edgeMessage}</p> : null}
-                  <button
-                    type="button"
-                    disabled={savingEdge}
-                    onClick={async () => {
-                      if (!selectedEdge.relationshipId) return
-                      setSavingEdge(true)
-                      setEdgeMessage(null)
-                      try {
-                        const updated = await booksApi.updateRelationship(bookId, selectedEdge.relationshipId, {
-                          relType: edgeDraft.relType.trim(),
-                          description: edgeDraft.description.trim() || null,
-                          sentiment: edgeDraft.sentiment === "" ? null : Number(edgeDraft.sentiment),
-                          fromChapter: edgeDraft.fromChapter === "" ? null : Number(edgeDraft.fromChapter),
-                          toChapter: edgeDraft.toChapter === "" ? null : Number(edgeDraft.toChapter),
-                        })
-                        setGraphData((current) => {
-                          if (!current) return current
-                          const nextGraph = {
-                            ...current,
-                            edges: current.edges.map((edge) => edge.id === selectedEdge.relationshipId ? {
-                              ...edge,
-                              type: updated.rel_type,
-                              description: updated.description,
-                              sentiment: updated.sentiment,
-                              from_chapter: updated.from_chapter,
-                              to_chapter: updated.to_chapter,
-                              status: (typeof updated.to_chapter === "number" && updated.to_chapter < upToChapter ? "ended" : "ongoing") as "ended" | "ongoing",
-                            } : edge),
-                          }
-                          onGraphDataChange?.(nextGraph)
-                          return nextGraph
-                        })
-                        setSelection((current) => current?.type === "edge" ? {
-                          type: "edge",
-                          data: {
-                            ...current.data,
-                            type: updated.rel_type,
-                            description: updated.description,
-                            sentiment: updated.sentiment,
-                            from_chapter: updated.from_chapter,
-                            to_chapter: updated.to_chapter,
-                          },
-                        } : current)
-                        setEdgeMessage("Relationship correction saved.")
-                      } catch {
-                        setEdgeMessage("Could not save the relationship correction.")
-                      } finally {
-                        setSavingEdge(false)
-                      }
-                    }}
-                    className="rounded-full bg-slate-900 px-4 py-2 text-xs font-semibold text-white disabled:opacity-60"
-                  >
-                    {savingEdge ? "Saving..." : "Save correction"}
-                  </button>
-                  <button
-                    type="button"
-                    disabled={savingEdge}
-                    onClick={async () => {
-                      if (!selectedEdge.relationshipId) return
-                      setSavingEdge(true)
-                      setEdgeMessage(null)
-                      try {
-                        await booksApi.deleteRelationship(bookId, selectedEdge.relationshipId)
-                        setGraphData((current) => {
-                          if (!current) return current
-                          const nextGraph = {
-                            ...current,
-                            edges: current.edges.filter((edge) => edge.id !== selectedEdge.relationshipId),
-                          }
-                          onGraphDataChange?.(nextGraph)
-                          return nextGraph
-                        })
-                        setSelection(null)
-                        setEdgeMessage("Relationship removed.")
-                      } catch {
-                        setEdgeMessage("Could not remove the relationship.")
-                      } finally {
-                        setSavingEdge(false)
-                      }
-                    }}
-                    className={`rounded-full px-4 py-2 text-xs font-semibold ${theme === "dark" ? "border border-rose-500/30 text-rose-200 hover:bg-rose-500/12" : "border border-rose-200 text-rose-700 hover:bg-rose-50"}`}
-                  >
-                    Delete relationship
-                  </button>
+
+                  {edgeMessage ? (
+                    <p className={cn("text-sm", edgeMessage.includes("saved") || edgeMessage.includes("removed") ? "text-emerald-400" : "text-rose-300")}>
+                      {edgeMessage}
+                    </p>
+                  ) : null}
+
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={savingEdge}
+                      onClick={() => void saveEdgeCorrection()}
+                      className={cn(controlButtonClass(true), savingEdge && "opacity-60")}
+                    >
+                      <CheckIcon className="h-4 w-4" />
+                      <span>{savingEdge ? "Saving..." : "Save correction"}</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={savingEdge}
+                      onClick={() => void deleteSelectedRelationship()}
+                      className={cn(
+                        "inline-flex items-center justify-center gap-2 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-medium text-rose-100 transition",
+                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300/70",
+                        savingEdge && "opacity-60"
+                      )}
+                    >
+                      <TrashIcon className="h-4 w-4" />
+                      <span>Delete relationship</span>
+                    </button>
+                  </div>
                 </div>
-              </div>
+              </InspectorSection>
             ) : null}
           </div>
         ) : (
-          <div className="space-y-4">
-            <div>
-              <p className={`text-xs uppercase tracking-[0.2em] ${theme === "dark" ? "text-slate-500" : "text-slate-500"}`}>Inspector</p>
-              <h3 className="mt-2 text-2xl font-semibold">Read the map</h3>
-            </div>
-            <p className={`text-sm leading-7 ${theme === "dark" ? "text-slate-400" : "text-slate-500"}`}>
-              Select a character to inspect their role in the network, or select a connection to read the relationship note. Arrange mode is best when you want to cluster the cast your own way.
-            </p>
-            <div className={`rounded-[1.2rem] border p-4 text-sm ${theme === "dark" ? "border-white/10 bg-black/20 text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600"}`}>
-              <div className="flex items-center justify-between gap-3">
-                <span>Visible characters</span>
-                <span className="font-semibold">{graphStats.nodeCount}</span>
-              </div>
-              <div className="mt-3 flex items-center justify-between gap-3">
-                <span>Visible connections</span>
-                <span className="font-semibold">{graphStats.edgeCount}</span>
-              </div>
-            </div>
-          </div>
+          <EmptyInspector edgeCount={graphStats.edgeCount} nodeCount={graphStats.nodeCount} />
         )}
       </aside>
     </div>
+  )
+}
+
+function ArrangeIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M7 7h4v4H7zM13 7h4v4h-4zM7 13h4v4H7zM13 13h4v4h-4z" />
+    </svg>
+  )
+}
+
+function CheckIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M5 12.5l4.2 4.2L19 7" />
+    </svg>
+  )
+}
+
+function ChevronDownIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M6 9l6 6 6-6" />
+    </svg>
+  )
+}
+
+function CursorIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M5 4l5.5 14 2.3-5.3L18 10 5 4z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12.5 12.7L17 18" />
+    </svg>
+  )
+}
+
+function EyeIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M2.5 12s3.4-6 9.5-6 9.5 6 9.5 6-3.4 6-9.5 6-9.5-6-9.5-6z" />
+      <circle cx="12" cy="12" r="2.8" />
+    </svg>
+  )
+}
+
+function FilterIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16l-6 7v5l-4 2v-7L4 6z" />
+    </svg>
+  )
+}
+
+function FitIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M8 4H4v4M16 4h4v4M20 16v4h-4M4 16v4h4" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 9l-5-5M15 9l5-5M15 15l5 5M9 15l-5 5" />
+    </svg>
+  )
+}
+
+function GridIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M8 8h.01M12 8h.01M16 8h.01M8 12h.01M12 12h.01M16 12h.01M8 16h.01M12 16h.01M16 16h.01" />
+    </svg>
+  )
+}
+
+function HandIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M8 11V6a1.5 1.5 0 013 0v4M11 10V4.8a1.5 1.5 0 013 0V10M14 10V6.4a1.5 1.5 0 013 0v6.8l1.2-.9a1.6 1.6 0 012.3.4c.4.6.3 1.5-.2 2l-4.1 4.5a4 4 0 01-3 1.3h-2.5a4 4 0 01-3.7-2.5L5 13.5A1.7 1.7 0 016.5 11H8z" />
+    </svg>
+  )
+}
+
+function LinksIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M10 14l4-4M7 17H6a4 4 0 010-8h3M17 7h1a4 4 0 010 8h-3" />
+    </svg>
+  )
+}
+
+function MinusIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14" />
+    </svg>
+  )
+}
+
+function PlusIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14M5 12h14" />
+    </svg>
+  )
+}
+
+function ResetIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M20 11a8 8 0 10-2.34 5.66L20 14M20 14v-5h-5" />
+    </svg>
+  )
+}
+
+function ScopeIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <circle cx="11" cy="11" r="6" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M20 20l-4.2-4.2" />
+    </svg>
+  )
+}
+
+function TargetIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <circle cx="12" cy="12" r="7" />
+      <circle cx="12" cy="12" r="2.5" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 2v3M12 19v3M2 12h3M19 12h3" />
+    </svg>
+  )
+}
+
+function TrashIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M4 7h16M9 7V5h6v2M8 7l.7 11.2A2 2 0 0010.7 20h2.6a2 2 0 001.99-1.8L16 7" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M10 11v5M14 11v5" />
+    </svg>
+  )
+}
+
+function UsersIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 11a3 3 0 100-6 3 3 0 000 6zM4 19a5 5 0 0110 0M17 11a2.5 2.5 0 100-5M15.5 15.5A4.5 4.5 0 0120 20" />
+    </svg>
   )
 }
 

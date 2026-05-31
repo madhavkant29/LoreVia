@@ -3,17 +3,32 @@ Helper functions for grounded intelligence answers and citations.
 """
 from __future__ import annotations
 
+import hashlib
 import re
 import uuid
 from typing import Any, cast
 
-from sqlalchemy import select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.engine.search.semantic import semantic_search
 from app.models.book import Book, Chapter, SeriesBook
 from app.models.character import Character
-from app.models.intelligence import ChapterSummary, CharacterRelationship, PlotThread
+from app.models.intelligence import ChapterSummary, CharacterRelationship, PlotThread, WikiEntry
+
+
+def _cosine_similarity(left, right) -> float:
+    if left is None or right is None:
+        return 0.0
+    if len(left) != len(right):
+        return 0.0
+    dot = sum(a * b for a, b in zip(left, right))
+    left_mag = sum(a * a for a in left) ** 0.5
+    right_mag = sum(b * b for b in right) ** 0.5
+    if left_mag == 0 or right_mag == 0:
+        return 0.0
+    similarity = dot / (left_mag * right_mag)
+    return float(similarity)
 
 
 def build_grounded_citation(
@@ -465,3 +480,123 @@ def score_voice_match(profile: dict[str, Any], sample_metrics: dict[str, Any]) -
             signals.append(f"{label} is {direction} than the established baseline")
     score = max(0, int(round(100 - min(85, penalties * 10))))
     return score, signals[:4]
+
+
+CROSS_BOOK_SIMILARITY_THRESHOLD = 0.9
+CROSS_BOOK_MATCH_LIMIT = 20
+
+
+async def compute_cross_book_snapshot_hash(
+    db: AsyncSession,
+    book_ids: list[uuid.UUID],
+) -> str:
+    parts: list[str] = []
+    for bid in sorted(book_ids, key=str):
+        char_result = await db.execute(
+            select(func.count(), func.max(Character.created_at))
+            .where(Character.book_id == bid, Character.embedding.is_not(None))
+        )
+        char_count, char_max_ts = char_result.one()
+        parts.append(f"char:{char_count}:{char_max_ts}")
+
+        wiki_result = await db.execute(
+            select(func.count(), func.max(WikiEntry.created_at))
+            .where(WikiEntry.book_id == bid, WikiEntry.embedding.is_not(None))
+        )
+        wiki_count, wiki_max_ts = wiki_result.one()
+        parts.append(f"wiki:{wiki_count}:{wiki_max_ts}")
+
+    return hashlib.md5("|".join(parts).encode()).hexdigest()[:12]
+
+
+async def get_cross_book_character_matches(
+    db: AsyncSession,
+    book_ids: list[uuid.UUID],
+    threshold: float = CROSS_BOOK_SIMILARITY_THRESHOLD,
+    limit: int = CROSS_BOOK_MATCH_LIMIT,
+) -> list[dict[str, object]]:
+    rows = await db.execute(
+        text("""
+            SELECT
+                c1.id::text       AS left_id,
+                c1.name           AS left_name,
+                c1.book_id::text  AS left_book_id,
+                c2.id::text       AS right_id,
+                c2.name           AS right_name,
+                c2.book_id::text  AS right_book_id,
+                1 - (c1.embedding <=> c2.embedding) AS similarity
+            FROM characters c1
+            JOIN characters c2
+                ON c1.book_id < c2.book_id
+               AND c1.embedding IS NOT NULL
+               AND c2.embedding IS NOT NULL
+            WHERE c1.book_id = ANY(:book_ids)
+              AND c2.book_id = ANY(:book_ids)
+              AND 1 - (c1.embedding <=> c2.embedding) >= :threshold
+            ORDER BY similarity DESC
+            LIMIT :lim
+        """),
+        {
+            "book_ids": [str(bid) for bid in book_ids],
+            "threshold": threshold,
+            "lim": limit,
+        },
+    )
+    return [
+        {
+            "left_book_id": row.left_book_id,
+            "left_name": row.left_name,
+            "right_book_id": row.right_book_id,
+            "right_name": row.right_name,
+            "similarity": round(float(row.similarity), 3),
+        }
+        for row in rows.fetchall()
+    ]
+
+
+async def get_cross_book_wiki_matches(
+    db: AsyncSession,
+    book_ids: list[uuid.UUID],
+    threshold: float = CROSS_BOOK_SIMILARITY_THRESHOLD,
+    limit: int = CROSS_BOOK_MATCH_LIMIT,
+) -> list[dict[str, object]]:
+    rows = await db.execute(
+        text("""
+            SELECT
+                w1.id::text       AS left_id,
+                w1.name           AS left_name,
+                w1.book_id::text  AS left_book_id,
+                w2.id::text       AS right_id,
+                w2.name           AS right_name,
+                w2.book_id::text  AS right_book_id,
+                w1.entry_type     AS left_entry_type,
+                w2.entry_type     AS right_entry_type,
+                1 - (w1.embedding <=> w2.embedding) AS similarity
+            FROM wiki_entries w1
+            JOIN wiki_entries w2
+                ON w1.book_id < w2.book_id
+               AND w1.embedding IS NOT NULL
+               AND w2.embedding IS NOT NULL
+            WHERE w1.book_id = ANY(:book_ids)
+              AND w2.book_id = ANY(:book_ids)
+              AND 1 - (w1.embedding <=> w2.embedding) >= :threshold
+            ORDER BY similarity DESC
+            LIMIT :lim
+        """),
+        {
+            "book_ids": [str(bid) for bid in book_ids],
+            "threshold": threshold,
+            "lim": limit,
+        },
+    )
+    return [
+        {
+            "left_book_id": row.left_book_id,
+            "left_name": row.left_name,
+            "right_book_id": row.right_book_id,
+            "right_name": row.right_name,
+            "similarity": round(float(row.similarity), 3),
+            "entry_type": row.left_entry_type or row.right_entry_type,
+        }
+        for row in rows.fetchall()
+    ]

@@ -13,6 +13,17 @@ from app.core.redis import (
 from app.core.security import create_access_token, create_refresh_token, hash_password
 from app.models.book import Book
 from app.models.user import User
+from app.utils.auth_csrf import AUTH_CSRF_COOKIE_NAME, AUTH_CSRF_HEADER_NAME, create_auth_csrf_token
+
+
+def cookie_auth_headers(*cookies: str, csrf_token: str | None = None) -> dict[str, str]:
+    resolved_csrf = csrf_token or create_auth_csrf_token()
+    cookie_parts = [f"{AUTH_CSRF_COOKIE_NAME}={resolved_csrf}", *cookies]
+    return {
+        "Cookie": "; ".join(cookie_parts),
+        AUTH_CSRF_HEADER_NAME: resolved_csrf,
+        "Origin": "https://getlorevia.com",
+    }
 
 
 @pytest.mark.asyncio
@@ -113,7 +124,7 @@ async def test_supabase_oauth_requires_terms_for_new_users(client, monkeypatch):
 
         @staticmethod
         def json():
-            return {"email": "oauth-new@lorevia.app"}
+            return {"id": str(uuid.uuid4()), "email": "oauth-new@lorevia.app"}
 
     class FakeAsyncClient:
         def __init__(self, timeout):
@@ -143,12 +154,14 @@ async def test_supabase_oauth_requires_terms_for_new_users(client, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_supabase_oauth_allows_existing_user_without_terms(client, db, monkeypatch):
+    supabase_auth_id = uuid.uuid4()
+
     class FakeResponse:
         status_code = 200
 
         @staticmethod
         def json():
-            return {"email": "oauth-existing@lorevia.app"}
+            return {"id": str(supabase_auth_id), "email": "oauth-existing@lorevia.app"}
 
     class FakeAsyncClient:
         def __init__(self, timeout):
@@ -185,16 +198,20 @@ async def test_supabase_oauth_allows_existing_user_without_terms(client, db, mon
     assert response.status_code == 200
     assert response.json()["email"] == "oauth-existing@lorevia.app"
     assert response.json()["email_verified"] is True
+    await db.refresh(existing_user)
+    assert existing_user.supabase_auth_id == supabase_auth_id
 
 
 @pytest.mark.asyncio
 async def test_supabase_oauth_creates_new_user_and_allows_missing_username(client, monkeypatch):
+    supabase_auth_id = uuid.uuid4()
+
     class FakeResponse:
         status_code = 200
 
         @staticmethod
         def json():
-            return {"email": "oauth-created@lorevia.app"}
+            return {"id": str(supabase_auth_id), "email": "oauth-created@lorevia.app"}
 
     class FakeAsyncClient:
         def __init__(self, timeout):
@@ -222,6 +239,7 @@ async def test_supabase_oauth_creates_new_user_and_allows_missing_username(clien
     assert response.json()["email"] == "oauth-created@lorevia.app"
     assert response.json()["username"] is None
     assert response.json()["email_verified"] is True
+    assert response.json()["id"] == str(supabase_auth_id)
 
 
 @pytest.mark.asyncio
@@ -231,7 +249,7 @@ async def test_supabase_oauth_recovers_local_debug_user_without_terms_or_device_
 
         @staticmethod
         def json():
-            return {"email": "oauth-local-recovery@lorevia.app"}
+            return {"id": str(uuid.uuid4()), "email": "oauth-local-recovery@lorevia.app"}
 
     class FakeAsyncClient:
         def __init__(self, timeout):
@@ -288,7 +306,10 @@ async def test_refresh_and_logout_use_cookies(client):
 
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr("app.api.v1.routes.auth.refresh_session_active", fake_session_active)
-        refreshed = await client.post("/api/v1/auth/refresh", json={"refresh_token": refresh_token})
+        refreshed = await client.post(
+            "/api/v1/auth/refresh",
+            headers=cookie_auth_headers(f"lorevia_refresh_token={refresh_token}"),
+        )
     assert refreshed.status_code == 200
     refresh_body = refreshed.json()
     assert "access_token" not in refresh_body
@@ -297,7 +318,10 @@ async def test_refresh_and_logout_use_cookies(client):
     me = await client.get("/api/v1/auth/me", headers={"Cookie": f"lorevia_access_token={access_token}"})
     assert me.status_code == 200
 
-    logout = await client.post("/api/v1/auth/logout", headers={"Cookie": f"lorevia_access_token={access_token}"})
+    logout = await client.post(
+        "/api/v1/auth/logout",
+        headers=cookie_auth_headers(f"lorevia_access_token={access_token}"),
+    )
     assert logout.status_code == 200
 
     after_logout = await client.get("/api/v1/auth/me")
@@ -335,7 +359,7 @@ async def test_username_update_can_recover_from_refresh_cookie_only(client, db):
         mp.setattr("app.api.deps.auth.refresh_session_active", fake_session_active)
         response = await client.patch(
             "/api/v1/auth/me/username?username=refreshonly2",
-            headers={"Cookie": f"lorevia_refresh_token={refresh_token}"},
+            headers=cookie_auth_headers(f"lorevia_refresh_token={refresh_token}"),
         )
     assert response.status_code == 200
     assert response.json()["username"] == "refreshonly2"
@@ -364,12 +388,10 @@ async def test_username_update_falls_back_from_stale_access_cookie(client, db):
         mp.setattr("app.api.deps.auth.refresh_session_active", fake_session_active)
         response = await client.patch(
             "/api/v1/auth/me/username?username=fallback_user",
-            headers={
-                "Cookie": (
-                    f"lorevia_access_token={stale_access_token}; "
-                    f"lorevia_refresh_token={refresh_token}"
-                )
-            },
+            headers=cookie_auth_headers(
+                f"lorevia_access_token={stale_access_token}",
+                f"lorevia_refresh_token={refresh_token}",
+            ),
         )
 
     assert response.status_code == 200
@@ -392,7 +414,7 @@ async def test_username_update_allows_existing_user_to_rename_and_me_returns_upd
 
     user_id = str(register_response.json()["id"])
     access_token = create_access_token(user_id)
-    headers = {"Cookie": f"lorevia_access_token={access_token}"}
+    headers = cookie_auth_headers(f"lorevia_access_token={access_token}")
 
     rename_response = await client.patch("/api/v1/auth/me/username?username=renamed_writer", headers=headers)
     assert rename_response.status_code == 200
@@ -426,7 +448,7 @@ async def test_username_update_rejects_duplicate_username_for_existing_user(clie
     access_token = create_access_token(str(second.id))
     response = await client.patch(
         "/api/v1/auth/me/username?username=first_writer",
-        headers={"Cookie": f"lorevia_access_token={access_token}"},
+        headers=cookie_auth_headers(f"lorevia_access_token={access_token}"),
     )
 
     assert response.status_code == 400
@@ -449,11 +471,59 @@ async def test_username_update_rejects_invalid_username_for_existing_user(client
     access_token = create_access_token(str(user.id))
     response = await client.patch(
         "/api/v1/auth/me/username?username=bad name",
-        headers={"Cookie": f"lorevia_access_token={access_token}"},
+        headers=cookie_auth_headers(f"lorevia_access_token={access_token}"),
     )
 
     assert response.status_code == 400
     assert response.json()["detail"] == "Username can only contain letters, numbers, underscores, and hyphens"
+
+
+@pytest.mark.asyncio
+async def test_cookie_authenticated_write_requires_csrf_header(client):
+    register_response = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "csrf-required@lorevia.app",
+            "username": "csrfrequired",
+            "password": "SafePass123!@#",
+            "accepted_terms": True,
+            "device_id": "csrf-required-device1",
+        },
+    )
+    assert register_response.status_code == 201
+
+    access_token = create_access_token(str(register_response.json()["id"]))
+    response = await client.patch(
+        "/api/v1/auth/me/username?username=csrfrequired2",
+        headers={"Cookie": f"lorevia_access_token={access_token}"},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Invalid CSRF token."
+
+
+@pytest.mark.asyncio
+async def test_refresh_with_cookie_requires_csrf_header(client):
+    register_response = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "csrf-refresh@lorevia.app",
+            "username": "csrfrefresh",
+            "password": "SafePass123!@#",
+            "accepted_terms": True,
+            "device_id": "csrf-refresh-device01",
+        },
+    )
+    assert register_response.status_code == 201
+
+    refresh_token = create_refresh_token(str(register_response.json()["id"]), session_id="csrf-refresh-session")
+    response = await client.post(
+        "/api/v1/auth/refresh",
+        headers={"Cookie": f"lorevia_refresh_token={refresh_token}"},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Invalid CSRF token."
 
 
 @pytest.mark.asyncio
@@ -504,7 +574,7 @@ async def test_supabase_oauth_blocks_new_user_when_device_trial_limit_is_reached
 
         @staticmethod
         def json():
-            return {"email": "oauth-blocked@lorevia.app"}
+            return {"id": str(uuid.uuid4()), "email": "oauth-blocked@lorevia.app"}
 
     class FakeAsyncClient:
         def __init__(self, timeout):
@@ -558,12 +628,14 @@ async def test_supabase_oauth_blocks_new_user_when_device_trial_limit_is_reached
 
 @pytest.mark.asyncio
 async def test_supabase_oauth_handles_legacy_user_with_missing_reading_mode(client, db, monkeypatch):
+    supabase_auth_id = uuid.uuid4()
+
     class FakeResponse:
         status_code = 200
 
         @staticmethod
         def json():
-            return {"email": "oauth-legacy@lorevia.app"}
+            return {"id": str(supabase_auth_id), "email": "oauth-legacy@lorevia.app"}
 
     class FakeAsyncClient:
         def __init__(self, timeout):
@@ -602,6 +674,30 @@ async def test_supabase_oauth_handles_legacy_user_with_missing_reading_mode(clie
     assert response.status_code == 200
     assert response.json()["email"] == "oauth-legacy@lorevia.app"
     assert response.json()["reading_mode"] == "casual"
+    await db.refresh(legacy_user)
+    assert legacy_user.supabase_auth_id == supabase_auth_id
+
+
+@pytest.mark.asyncio
+async def test_me_accepts_access_token_with_supabase_auth_subject(client, db):
+    supabase_auth_id = uuid.uuid4()
+    user = User(
+        email="supabase-subject@lorevia.app",
+        username="supabasesubject",
+        supabase_auth_id=supabase_auth_id,
+        password_hash=hash_password("SafePass123!@#"),
+        legal_accepted_at=datetime.now(UTC),
+        legal_version="2026-04",
+        email_verified_at=datetime.now(UTC),
+    )
+    db.add(user)
+    await db.commit()
+
+    access_token = create_access_token(str(supabase_auth_id))
+    response = await client.get("/api/v1/auth/me", headers={"Cookie": f"lorevia_access_token={access_token}"})
+
+    assert response.status_code == 200
+    assert response.json()["email"] == "supabase-subject@lorevia.app"
 
 
 @pytest.mark.asyncio

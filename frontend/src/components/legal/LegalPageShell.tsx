@@ -88,7 +88,7 @@ export function LegalHero({
 }: Pick<LegalPageShellProps, "eyebrow" | "title" | "description" | "effectiveDate" | "notice">) {
   return (
     <section className="py-14 sm:py-18">
-      <p className={`text-[11px] font-semibold uppercase tracking-[0.32em] ${legalAccent}`}>{eyebrow}</p>
+      <p className={`text-3xs font-semibold uppercase tracking-[0.32em] ${legalAccent}`}>{eyebrow}</p>
       <h1 className="mt-5 max-w-4xl text-[2.55rem] font-semibold leading-[1.02] tracking-[-0.045em] text-stone-950 sm:text-[3.45rem] lg:text-[3.75rem]">
         {title}
       </h1>
@@ -112,7 +112,7 @@ export function LegalNotice({ children }: { children: ReactNode }) {
 export function LegalTableOfContents({ sections }: { sections: ReadonlyArray<LegalSectionContent> }) {
   return (
     <nav aria-labelledby="legal-toc" className="border-t border-[rgba(var(--border),0.9)] py-8">
-      <h2 id="legal-toc" className="text-[11px] font-semibold uppercase tracking-[0.32em] text-stone-500">
+      <h2 id="legal-toc" className="text-3xs font-semibold uppercase tracking-[0.32em] text-stone-500">
         Table of contents
       </h2>
       <ol className="mt-6 grid gap-x-12 gap-y-4 md:grid-cols-2">
@@ -124,7 +124,7 @@ export function LegalTableOfContents({ sections }: { sections: ReadonlyArray<Leg
             <li key={`toc-${id}`}>
               <a
                 href={`#${id}`}
-                className="group grid grid-cols-[2.5rem_1fr] gap-4 text-[15px] leading-7 text-stone-600 transition hover:text-stone-950"
+                className="group grid grid-cols-[2.5rem_1fr] gap-4 text-base leading-7 text-stone-600 transition hover:text-stone-950"
               >
                 <span className={legalAccent}>{number}</span>
                 <span>{section.title}</span>
@@ -178,7 +178,7 @@ export function LegalRightRail({ items }: { items: ReadonlyArray<LegalRailItem> 
       {items.map((item, index) => {
         const content = (
           <>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-stone-500">{item.label}</p>
+            <p className="text-3xs font-semibold uppercase tracking-[0.28em] text-stone-500">{item.label}</p>
             <p className="mt-3 break-words text-base font-medium text-stone-950">{item.value}</p>
             {item.detail ? <p className="mt-2 text-sm leading-6 text-stone-600">{item.detail}</p> : null}
           </>

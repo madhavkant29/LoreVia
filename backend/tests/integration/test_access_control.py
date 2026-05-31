@@ -22,9 +22,9 @@ def _mock_storage_uploads(monkeypatch):
 
     monkeypatch.setattr("app.core.storage.upload_book_bytes", _fake_upload_book_bytes)
     # Celery's @task decorator yields a lazy proxy in tests; stubbing the whole
-    # task object is more reliable than patching proxy attributes.
+    # Patch the actual task module (consistent with conftest.py).
     monkeypatch.setattr(
-        "app.api.v1.routes.books.process_book_task",
+        "app.workers.tasks.extraction_tasks.process_book_task",
         SimpleNamespace(apply_async=_noop_apply_async),
     )
 
@@ -410,7 +410,7 @@ async def test_story_scoped_collaboration_limits_shared_book_access(client, db):
     assert create.status_code == 201
     assert create.json()["scope"]["chapter_end"] == 2
 
-    shared_books = await client.get("/api/v1/books", headers=collaborator_headers)
+    shared_books = await client.get("/api/v1/books/", headers=collaborator_headers)
     assert shared_books.status_code == 200
     shared_payload = shared_books.json()
     assert shared_payload[0]["id"] == str(book.id)
@@ -427,7 +427,7 @@ async def test_story_scoped_collaboration_limits_shared_book_access(client, db):
 
     characters = await client.get(f"/api/v1/books/{book.id}/characters", headers=collaborator_headers)
     continuity = await client.get(f"/api/v1/books/{book.id}/chapter-reports", headers=collaborator_headers)
-    assert characters.status_code == 200
+    assert characters.status_code == 403
     assert continuity.status_code == 403
 
 
@@ -596,7 +596,7 @@ async def test_collaboration_manuscript_export_respects_selected_chapter_scope(c
         captured["chapters"] = chapters
         return b"docx-bytes"
 
-    monkeypatch.setattr("app.api.v1.routes.books.manuscript_docx", _fake_manuscript_docx)
+    monkeypatch.setattr("app.api.v1.routes.books.exports.manuscript_docx", _fake_manuscript_docx)
     monkeypatch.setattr(
         "app.api.v1.routes.books.storage.download_book",
         lambda _key: b'{"text":"Body text","html":"<p>Body text</p>"}',

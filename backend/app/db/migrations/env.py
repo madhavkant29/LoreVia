@@ -93,6 +93,39 @@ def _destructive_upgrade_still_has_runtime_impact(path: Path) -> bool:
                 indexes = _index_names(inspector, "beta_read_assignments")
                 return "awarded_at" in columns or "ix_beta_read_assignments_awarded_at" in indexes
 
+            if path.name == "20260529_drop_users_login_activity_dates.py":
+                if "users" not in tables:
+                    return False
+                return "login_activity_dates" in _column_names(inspector, "users")
+
+            if path.name == "20260530_remove_orphaned_indexes.py":
+                impact = False
+                for index_name, table_name in (
+                    ("ix_book_chunks_chunk_index", "book_chunks"),
+                    ("ix_character_relationships_character_a_id", "character_relationships"),
+                    ("ix_character_relationships_character_b_id", "character_relationships"),
+                    ("ix_character_relationships_from_chapter", "character_relationships"),
+                    ("ix_character_relationships_to_chapter", "character_relationships"),
+                    ("ix_character_states_at_chapter", "character_states"),
+                    ("ix_characters_book_visibility_approval", "characters"),
+                    ("ix_characters_first_chapter", "characters"),
+                    ("ix_characters_last_seen_chapter", "characters"),
+                    ("ix_characters_name", "characters"),
+                    ("ix_characters_role", "characters"),
+                    ("ix_novel_scenes_book_id_chapter_number_status", "novel_scenes"),
+                    ("ix_reading_progress_book_id", "reading_progress"),
+                    ("ix_reading_sessions_book_id", "reading_sessions"),
+                    ("ix_wiki_entries_entry_type", "wiki_entries"),
+                    ("ix_world_elements_book_id_element_type", "world_elements"),
+                ):
+                    if table_name in tables and index_name in _index_names(inspector, table_name):
+                        impact = True
+                        break
+                if not impact and "users" in tables:
+                    if "login_activity_dates" in _column_names(inspector, "users"):
+                        impact = True
+                return impact
+
             return True
     finally:
         engine.dispose()

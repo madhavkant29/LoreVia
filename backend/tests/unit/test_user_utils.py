@@ -1,5 +1,6 @@
 from datetime import UTC, date, datetime
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -9,9 +10,10 @@ from app.utils.user_utils import (
     build_writing_dashboard_stats,
     current_daily_word_count,
     current_daily_word_goal,
-    login_activity_dates,
+    get_login_activity_dates_from_table,
     normalize_writing_entry_title,
     record_login_activity,
+    record_login_activity_row,
 )
 
 
@@ -24,7 +26,6 @@ def _user_stub(**overrides):
         "last_login_date": None,
         "login_streak_days": 0,
         "longest_login_streak_days": 0,
-        "login_activity_dates": [],
     }
     payload.update(overrides)
     return SimpleNamespace(**payload)
@@ -54,7 +55,6 @@ def test_record_login_activity_increments_streak_on_consecutive_days():
         last_login_date=date(2026, 5, 6),
         login_streak_days=3,
         longest_login_streak_days=4,
-        login_activity_dates=[date(2026, 5, 5), date(2026, 5, 6)],
     )
 
     record_login_activity(user, now=datetime(2026, 5, 7, 8, 30, tzinfo=UTC))
@@ -62,7 +62,6 @@ def test_record_login_activity_increments_streak_on_consecutive_days():
     assert user.last_login_date == date(2026, 5, 7)
     assert user.login_streak_days == 4
     assert user.longest_login_streak_days == 4
-    assert login_activity_dates(user)[-1] == date(2026, 5, 7)
 
 
 def test_record_login_activity_does_not_double_count_same_day():
@@ -70,14 +69,12 @@ def test_record_login_activity_does_not_double_count_same_day():
         last_login_date=date(2026, 5, 7),
         login_streak_days=2,
         longest_login_streak_days=2,
-        login_activity_dates=[date(2026, 5, 6), date(2026, 5, 7)],
     )
 
     record_login_activity(user, now=datetime(2026, 5, 7, 17, 45, tzinfo=UTC))
 
     assert user.login_streak_days == 2
     assert user.longest_login_streak_days == 2
-    assert login_activity_dates(user) == [date(2026, 5, 6), date(2026, 5, 7)]
 
 
 def test_normalize_writing_entry_title_prefers_explicit_title():
@@ -246,3 +243,108 @@ async def test_build_writing_dashboard_stats_returns_cached_payload(monkeypatch)
     stats = await build_writing_dashboard_stats(_FakeDB([]), user, now=datetime(2026, 5, 14, 12, 0, tzinfo=UTC))
 
     assert stats == cached_payload
+
+
+class FakeAsyncSession:
+    def __init__(self):
+        self.added: list = []
+        self.flushed = False
+        self.committed = False
+        self._query_results: list = []
+
+    def add(self, instance):
+        self.added.append(instance)
+
+    async def flush(self):
+        self.flushed = True
+
+    async def commit(self):
+        self.committed = True
+
+    async def execute(self, *_args, **_kwargs):
+        return _Result(self._query_results)
+
+    def set_query_results(self, results: list):
+        self._query_results = list(results)
+
+
+class FakeActivityRow:
+    def __init__(self, login_date, user_id="user-1"):
+        self.user_id = user_id
+        self.login_date = login_date
+        self.ip_hash = None
+        self.device_id = None
+        self.created_at = datetime.now(UTC)
+
+
+@pytest.mark.asyncio
+async def test_record_login_activity_row_adds_to_db():
+    db = FakeAsyncSession()
+    row = await record_login_activity_row(db, "user-1", date(2026, 5, 29))
+
+    assert len(db.added) == 1
+    assert db.added[0].user_id == "user-1"
+    assert db.added[0].login_date == date(2026, 5, 29)
+    assert db.flushed
+    assert row is db.added[0]
+
+
+@pytest.mark.asyncio
+async def test_record_login_activity_row_stores_ip_hash_and_device_id():
+    db = FakeAsyncSession()
+    await record_login_activity_row(
+        db, "user-1", date(2026, 5, 29),
+        ip_hash="abc123hash",
+        device_id="device-xyz",
+    )
+
+    assert db.added[0].ip_hash == "abc123hash"
+    assert db.added[0].device_id == "device-xyz"
+
+
+@pytest.mark.asyncio
+async def test_get_login_activity_dates_from_table_returns_sorted_dates():
+    db = FakeAsyncSession()
+    db.set_query_results([
+        date(2026, 5, 29),
+        date(2026, 5, 27),
+        date(2026, 5, 28),
+    ])
+
+    dates = await get_login_activity_dates_from_table(db, "user-1")
+    assert dates == [date(2026, 5, 27), date(2026, 5, 28), date(2026, 5, 29)]
+
+
+@pytest.mark.asyncio
+async def test_get_login_activity_dates_from_table_deduplicates_dates():
+    db = FakeAsyncSession()
+    db.set_query_results([
+        date(2026, 5, 29),
+        date(2026, 5, 29),
+        date(2026, 5, 28),
+    ])
+
+    dates = await get_login_activity_dates_from_table(db, "user-1")
+    assert dates == [date(2026, 5, 28), date(2026, 5, 29)]
+
+
+@pytest.mark.asyncio
+async def test_get_login_activity_dates_from_table_empty_returns_empty():
+    db = FakeAsyncSession()
+    db.set_query_results([])
+
+    dates = await get_login_activity_dates_from_table(db, "user-1")
+    assert dates == []
+
+
+@pytest.mark.asyncio
+async def test_record_login_activity_updates_streak_fields():
+    user = _user_stub(
+        last_login_date=date(2026, 5, 28),
+        login_streak_days=3,
+        longest_login_streak_days=3,
+    )
+
+    record_login_activity(user, now=datetime(2026, 5, 29, 12, 0, tzinfo=UTC))
+
+    assert user.login_streak_days == 4

@@ -12,7 +12,7 @@ import { asQueryKey, booksSeriesCacheKey } from "@/lib/query/cacheKeys"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { renderMarkdownHtml } from "@/lib/utils/richText"
-import type { BookSeries } from "@/types/book"
+import type { BookSeries, PaginatedSeries } from "@/types/book"
 import type { AdvisorMessage, AdvisorResponse } from "@/types/intelligence"
 
 const SUGGESTED_QUESTIONS = [
@@ -29,11 +29,12 @@ export default function SeriesAskPage() {
   const user = useAuthStore((state) => state.user)
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
-  const { data: seriesList = [] } = useQuery<BookSeries[]>({
+  const { data: paginatedSeries } = useQuery<PaginatedSeries>({
     queryKey: asQueryKey(booksSeriesCacheKey()),
     queryFn: () => booksApi.listSeries(),
     enabled: Boolean(seriesId),
   })
+  const seriesList = paginatedSeries?.items ?? []
   const [askQuery, setAskQuery] = useState("")
   const [askMessages, setAskMessages] = useState<AdvisorMessage[]>([])
   const [askResponse, setAskResponse] = useState<AdvisorResponse | null>(null)
@@ -86,7 +87,7 @@ export default function SeriesAskPage() {
   if (!user || !isPaidTier(user.tier)) {
     return (
       <div className={`min-h-screen flex items-center justify-center px-4 ${isDark ? "bg-[#0a0a0a]" : "bg-[#f5efe6]"}`}>
-        <div className={`rounded-[2rem] border p-8 max-w-md ${isDark ? "border-white/10 bg-white/5" : "border-amber-300 bg-amber-50"}`}>
+        <div className={`rounded-lg border p-8 max-w-md ${isDark ? "border-white/10 bg-white/5" : "border-amber-300 bg-amber-50"}`}>
           <h1 className={`text-3xl font-serif ${isDark ? "text-white" : "text-stone-900"}`}>Series intelligence</h1>
           <p className={`mt-3 text-sm leading-7 ${isDark ? "text-gray-300" : "text-stone-700"}`}>
             Series mode is reserved for paid plans.

@@ -59,9 +59,9 @@ export default function TimelinePage() {
             : "A spoiler-safe structural map of the story so far."}
         </p>
 
-        {error ? <div className={`mt-6 rounded-[1.5rem] border p-5 text-sm ${isDark ? "border-amber-400/30 bg-amber-500/10 text-amber-200" : "border-amber-300 bg-amber-50 text-amber-800"}`}>{error}</div> : null}
-        {!error && loading ? <div className={`mt-6 rounded-[1.6rem] border p-5 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-300" : "border-stone-200 bg-white/70 text-stone-600"}`}>Building your timeline...</div> : null}
-        {!error && !loading && chapterCount === 0 ? <div className={`mt-6 rounded-[1.6rem] border p-5 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-300" : "border-stone-200 bg-white/70 text-stone-600"}`}>No major-event data is ready yet.</div> : null}
+        {error ? <div className={`mt-6 rounded-lg border p-5 text-sm ${isDark ? "border-amber-400/30 bg-amber-500/10 text-amber-200" : "border-amber-300 bg-amber-50 text-amber-800"}`}>{error}</div> : null}
+        {!error && loading ? <div className={`mt-6 rounded-lg border p-5 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-300" : "border-stone-200 bg-white/70 text-stone-600"}`}>Building your timeline...</div> : null}
+        {!error && !loading && chapterCount === 0 ? <div className={`mt-6 rounded-lg border p-5 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-300" : "border-stone-200 bg-white/70 text-stone-600"}`}>No major-event data is ready yet.</div> : null}
 
         {chapterCount > 0 ? (
           <>
@@ -72,7 +72,7 @@ export default function TimelinePage() {
               <MetricCard label="Relationship shifts" value={String(timeline?.relationship_markers.length ?? 0)} isDark={isDark} />
             </div>
 
-            <div className={`mt-10 overflow-x-auto rounded-[2rem] border ${isDark ? "border-white/[0.06] bg-black/70" : "border-stone-200 bg-white/90"}`}>
+            <div className={`mt-10 overflow-x-auto rounded-lg border ${isDark ? "border-white/[0.06] bg-black/70" : "border-stone-200 bg-white/90"}`}>
               <div className="min-w-max">
                 <ChapterHeader chapters={chapters} isDark={isDark} />
                 <TimelineSection

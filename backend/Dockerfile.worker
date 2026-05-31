@@ -24,8 +24,13 @@ RUN chmod +x worker-start.sh
 # Start as root so the entrypoint can normalize any mounted local-storage
 # volume before dropping back to the non-root app user.
 ENTRYPOINT ["./worker-start.sh"]
-# CMD overridden per Railway service:
-# extraction: celery -A app.workers.celery_app worker -Q extraction,extraction_priority -c 4
-# analysis:   celery -A app.workers.celery_app worker -Q analysis,analysis_priority,embedding -c 2
-# intelligence: celery -A app.workers.celery_app worker -Q intelligence -c 1
+# CMD overridden per deployment service. Required workers in production:
+#   worker-extraction:   celery -A app.workers.celery_app worker -n worker-extraction@%h -Q extraction,extraction_priority -c 4
+#   worker-analysis:     celery -A app.workers.celery_app worker -n worker-analysis@%h -Q analysis,analysis_priority,embedding -c 2
+#   worker-intelligence: celery -A app.workers.celery_app worker -n worker-intelligence@%h -Q intelligence -c 1
+#   celery-beat:         celery -A app.workers.celery_app beat --loglevel=info
+#
+# Priority queues (extraction_priority, analysis_priority) are consumed by the
+# same workers that handle standard queues so Architect-tier tasks run alongside
+# standard tasks rather than accumulating in undrained queues.
 CMD ["celery", "-A", "app.workers.celery_app", "worker", "-Q", "extraction,extraction_priority", "--loglevel=info", "-c", "4"]

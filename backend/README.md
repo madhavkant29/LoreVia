@@ -46,6 +46,7 @@ Notes:
 
 - Prefer Docker Compose Local so tests run against the repo's pinned app image, Postgres, Redis, and extensions.
 - Some backend tests are DB-backed and require a safe local test database plus required extensions such as `pgvector`.
+- Local Docker Compose now reserves `lorevia` for the running app and `lorevia_test` for pytest via `TEST_DATABASE_URL`.
 - Backend tests are intended to pass in non-production environments; do not point them at production infrastructure.
 - Use `scripts/schema_drift_audit.sql` against dev or prod when you need a quick schema/head consistency check.
 
@@ -67,3 +68,19 @@ Notes:
 ```powershell
 docker compose -f docker-compose-local.yml exec -T api pytest tests\unit\test_auth_deps.py tests\unit\test_core_security.py tests\unit\test_security_utils.py tests\integration\test_security_headers.py -v
 ```
+
+## Retrieval tuning workflow
+
+Use the non-production retrieval tools from the repo root:
+
+```powershell
+docker compose -f docker-compose-local.yml exec -T api python scripts/evaluate_retrieval.py --cases scripts/retrieval_eval_cases.sample.json
+docker compose -f docker-compose-local.yml exec -T api python scripts/rebuild_book_chunks.py --book-id <book-uuid>
+docker compose -f docker-compose-local.yml exec -T api python scripts/rebuild_book_chunks.py --book-id <book-uuid> --apply --confirm-apply REBUILD_BOOK_CHUNKS
+```
+
+Recommended comparison order:
+
+1. Run the eval harness on the baseline case file.
+2. Rebuild chunks for the target manuscript with the current chunking settings.
+3. Run the eval harness again and compare `Recall@5`, `MRR@5`, and average retrieved context count.

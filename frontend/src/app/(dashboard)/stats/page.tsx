@@ -33,10 +33,10 @@ export default function StatsPage() {
   return (
     <WorkspacePage className="min-h-0 bg-transparent">
       <div className="space-y-8 pb-12">
-        <section className="overflow-hidden rounded-[1.9rem] border-2 border-slate-200 bg-white p-6 shadow-[0_24px_64px_-50px_rgba(15,23,42,0.18)] dark:border-slate-700/70 dark:bg-[#10171d] sm:p-8 lg:p-10">
+        <section className="overflow-hidden rounded-lg border-2 border-slate-200 bg-white p-6 shadow-card dark:border-slate-700/70 dark:bg-[#10171d] sm:p-8 lg:p-10">
           <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_240px] lg:items-center">
             <div className="min-w-0">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-[#1f615d] dark:text-[#69c6b1]">Stats dashboard</p>
+              <p className="text-3xs font-semibold uppercase tracking-[0.28em] text-[#1f615d] dark:text-[#69c6b1]">Stats dashboard</p>
               <h1 className="mt-4 max-w-[700px] font-display text-[3rem] leading-[0.94] tracking-[-0.06em] text-stone-950 dark:text-[#f3ede4] sm:text-[4rem]">
                 Writing momentum,
                 <br className="hidden sm:block" />
@@ -48,7 +48,7 @@ export default function StatsPage() {
             </div>
 
             <div className="flex justify-start lg:justify-end">
-              <div className="min-w-0 rounded-[1.3rem] border-2 border-slate-200 bg-[#fcfcfb] px-5 py-5 dark:border-slate-700/70 dark:bg-[#131c23]">
+              <div className="min-w-0 rounded-lg border-2 border-slate-200 bg-[#fcfcfb] px-5 py-5 dark:border-slate-700/70 dark:bg-[#131c23]">
                 <div className="flex items-center gap-4">
                   <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-2 border-slate-200 bg-emerald-50 text-[#1f615d] dark:border-slate-700/70 dark:bg-[#18242a] dark:text-[#69c6b1]">
                     <LeafIcon />
@@ -79,7 +79,7 @@ export default function StatsPage() {
           <>
             <section className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.55fr)_320px]">
               <div className="min-w-0 space-y-6">
-                <section className="overflow-hidden rounded-[1.7rem] border-2 border-slate-200 bg-white p-5 shadow-[0_24px_64px_-50px_rgba(15,23,42,0.18)] dark:border-slate-700/70 dark:bg-[#10171d] sm:p-6">
+                <section className="overflow-hidden rounded-lg border-2 border-slate-200 bg-white p-5 shadow-card dark:border-slate-700/70 dark:bg-[#10171d] sm:p-6">
                   <div className="flex items-start gap-3">
                     <span className="mt-1 text-stone-500 dark:text-slate-400">
                       <TrendIcon />
@@ -104,7 +104,7 @@ export default function StatsPage() {
                   </div>
                 </section>
 
-                <section className="overflow-hidden rounded-[1.7rem] border-2 border-slate-200 bg-white p-5 shadow-[0_24px_64px_-50px_rgba(15,23,42,0.18)] dark:border-slate-700/70 dark:bg-[#10171d] sm:p-6">
+                <section className="overflow-hidden rounded-lg border-2 border-slate-200 bg-white p-5 shadow-card dark:border-slate-700/70 dark:bg-[#10171d] sm:p-6">
                   <WritingHeatmapPanel
                     heatmap={heatmap}
                     entriesTodayCount={stats.writing.entries_today.length}
@@ -113,11 +113,11 @@ export default function StatsPage() {
               </div>
 
               <div className="min-w-0 space-y-6">
-                <section className="overflow-hidden rounded-[1.7rem] border-2 border-slate-200 bg-white p-5 shadow-[0_24px_64px_-50px_rgba(15,23,42,0.18)] dark:border-slate-700/70 dark:bg-[#10171d] sm:p-6">
+                <section className="overflow-hidden rounded-lg border-2 border-slate-200 bg-white p-5 shadow-card dark:border-slate-700/70 dark:bg-[#10171d] sm:p-6">
                   <EntriesTodayPanel entries={stats.writing.entries_today} />
                 </section>
 
-                <section className="overflow-hidden rounded-[1.7rem] border-2 border-slate-200 bg-white p-5 shadow-[0_24px_64px_-50px_rgba(15,23,42,0.18)] dark:border-slate-700/70 dark:bg-[#10171d] sm:p-6">
+                <section className="overflow-hidden rounded-lg border-2 border-slate-200 bg-white p-5 shadow-card dark:border-slate-700/70 dark:bg-[#10171d] sm:p-6">
                   <div className="flex items-start gap-3">
                     <span className="mt-1 text-stone-500 dark:text-slate-400">
                       <TargetIcon />
@@ -130,7 +130,7 @@ export default function StatsPage() {
                     </div>
                   </div>
 
-                  <div className="mt-5 min-w-0 overflow-hidden rounded-[1.35rem] border-2 border-slate-200 bg-[#fcfcfb] p-4 dark:border-slate-700/70 dark:bg-[#121920]">
+                  <div className="mt-5 min-w-0 overflow-hidden rounded-lg border-2 border-slate-200 bg-[#fcfcfb] p-4 dark:border-slate-700/70 dark:bg-[#121920]">
                     <div className="grid gap-4">
                       <ProgressSummary
                         label="Today"
@@ -148,7 +148,7 @@ export default function StatsPage() {
               </div>
             </section>
 
-            <section className="overflow-hidden rounded-[1.7rem] border-2 border-slate-200 bg-white p-5 shadow-[0_24px_64px_-50px_rgba(15,23,42,0.18)] dark:border-slate-700/70 dark:bg-[#10171d] sm:p-6">
+            <section className="overflow-hidden rounded-lg border-2 border-slate-200 bg-white p-5 shadow-card dark:border-slate-700/70 dark:bg-[#10171d] sm:p-6">
               <div className="flex items-start gap-3">
                 <span className="mt-1 text-stone-500 dark:text-slate-400">
                   <StackIcon />
@@ -196,7 +196,7 @@ function WritingStatCard({
       : "Calendar window"
 
   return (
-    <article className="min-w-0 overflow-hidden rounded-[1.35rem] border-2 border-slate-200 bg-[#fcfcfb] p-4 dark:border-slate-700/70 dark:bg-[#121920]">
+    <article className="min-w-0 overflow-hidden rounded-lg border-2 border-slate-200 bg-[#fcfcfb] p-4 dark:border-slate-700/70 dark:bg-[#121920]">
       <div className="flex items-center gap-2 text-stone-600 dark:text-slate-400">
         <CalendarIcon />
         <p className="text-[0.95rem] font-medium">{label}</p>
@@ -279,7 +279,7 @@ function WritingHeatmapPanel({
             {heatmap.months.map((month) => (
               <div
                 key={`${month.label}-${month.column}`}
-                className="text-[10px] font-medium text-stone-500 dark:text-slate-400"
+                className="text-3xs font-medium text-stone-500 dark:text-slate-400"
                 style={{ gridColumnStart: month.column + 1 }}
               >
                 {month.label}
@@ -290,7 +290,7 @@ function WritingHeatmapPanel({
           <div className="mt-2 flex gap-2">
             <div className="grid gap-1">
               {HEATMAP_WEEKDAY_LABELS.map((label) => (
-                <div key={label} className="flex h-[0.9rem] items-center text-[10px] text-stone-500 dark:text-slate-400">
+                <div key={label} className="flex h-[0.9rem] items-center text-3xs text-stone-500 dark:text-slate-400">
                   {label}
                 </div>
               ))}
@@ -355,7 +355,7 @@ function EntriesTodayPanel({ entries }: { entries: WritingEntry[] }) {
 
       <div className="mt-5 space-y-3">
         {entries.length === 0 ? (
-          <div className="flex min-h-[320px] flex-col items-center justify-center rounded-[1.35rem] border-2 border-slate-200 bg-[#fcfcfb] px-6 py-8 text-center dark:border-slate-700/70 dark:bg-[#121920]">
+          <div className="flex min-h-[320px] flex-col items-center justify-center rounded-lg border-2 border-slate-200 bg-[#fcfcfb] px-6 py-8 text-center dark:border-slate-700/70 dark:bg-[#121920]">
             <div className="flex h-24 w-24 items-center justify-center rounded-full border-2 border-slate-200 bg-[#f4f7f6] text-stone-700 dark:border-slate-700/70 dark:bg-[#182028] dark:text-slate-300">
               <DocumentIcon large />
             </div>
@@ -368,7 +368,7 @@ function EntriesTodayPanel({ entries }: { entries: WritingEntry[] }) {
           entries.map((entry) => (
             <div
               key={`${entry.book_id ?? "book"}-${entry.chapter_number ?? "chapter"}-${entry.title}`}
-              className="flex min-w-0 items-center justify-between gap-4 overflow-hidden rounded-[1.35rem] border-2 border-slate-200 bg-[#fcfcfb] px-4 py-3 dark:border-slate-700/70 dark:bg-[#121920]"
+              className="flex min-w-0 items-center justify-between gap-4 overflow-hidden rounded-lg border-2 border-slate-200 bg-[#fcfcfb] px-4 py-3 dark:border-slate-700/70 dark:bg-[#121920]"
             >
               <div className="min-w-0">
                 <p className="truncate text-lg font-medium text-stone-950 dark:text-[#fff6ea]">{entry.title}</p>
@@ -397,7 +397,7 @@ function ProgressSummary({
   const progressPct = target > 0 ? Math.max(0, Math.min(100, Math.round((current / target) * 100))) : 0
 
   return (
-    <div className="min-w-0 overflow-hidden rounded-[1.35rem] border-2 border-slate-200 bg-[rgba(255,255,255,0.44)] p-4 dark:border-slate-700/70 dark:bg-[rgba(255,255,255,0.03)]">
+    <div className="min-w-0 overflow-hidden rounded-lg border-2 border-slate-200 bg-[rgba(255,255,255,0.44)] p-4 dark:border-slate-700/70 dark:bg-[rgba(255,255,255,0.03)]">
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm font-semibold text-[rgb(var(--foreground))]">{label}</p>
         <p className="text-xs text-[rgb(var(--muted-foreground))]">{progressPct}%</p>
@@ -417,7 +417,7 @@ function ProgressSummary({
 
 function WorkspaceTotalsCard({ label, value, note }: { label: string; value: string; note: string }) {
   return (
-    <article className="min-w-0 rounded-[1.25rem] border-2 border-slate-200 bg-[#fcfcfb] p-5 dark:border-slate-700/70 dark:bg-[#121920]">
+    <article className="min-w-0 rounded-md border-2 border-slate-200 bg-[#fcfcfb] p-5 dark:border-slate-700/70 dark:bg-[#121920]">
       <div className="flex flex-col gap-4">
         <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-2 border-slate-200 bg-[#f4f7f6] text-[#1f615d] dark:border-slate-700/70 dark:bg-[#182028] dark:text-[#69c6b1]">
           <TotalsIcon />

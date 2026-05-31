@@ -10,19 +10,23 @@ import re
 import uuid
 from collections import Counter, defaultdict
 from collections.abc import Hashable, Mapping, Sequence
+from datetime import UTC, datetime
 from difflib import SequenceMatcher
 from typing import Any, cast
 
 import bleach  # type: ignore[import-untyped]
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm.exc import UnmappedInstanceError
+from sqlalchemy.orm import object_session, selectinload
 
 from app.engine.character.entity_filters import (
+    COMMON_NON_NAME_WORDS,
     VISIBILITY_THRESHOLD,
     character_visibility_score,
     complex_character_score,
     compute_all_subtype_scores,
+    entity_words,
     gag_character_score,
     is_displayable_character_entity,
 )
@@ -41,6 +45,7 @@ from app.models.book import Chapter
 from app.models.character import (
     Character,
     CharacterCandidate,
+    CharacterDecisionEvent,
     CharacterDuplicateSuggestion,
     CharacterMention,
     CharacterRelationshipCandidate,
@@ -55,6 +60,7 @@ from app.models.intelligence import (
     QuoteEntry,
     WikiEntry,
 )
+from app.utils.relationship_utils import repair_relationship_timelines
 
 BLEACH_EMPTY_TAGS: Any = frozenset()
 CHARACTER_CANDIDATE_PENDING = "pending"
@@ -70,6 +76,42 @@ CHARACTER_RELATIONSHIP_CANDIDATE_ACCEPTED = "accepted"
 CHARACTER_RELATIONSHIP_CANDIDATE_REJECTED = "rejected"
 CHARACTER_RELATIONSHIP_CANDIDATE_RESOLVED = "resolved"
 CHARACTER_RELATIONSHIP_CANDIDATE_MERGED = "merged"
+CHARACTER_VISIBILITY_VISIBLE = "visible"
+CHARACTER_VISIBILITY_QUARANTINED = "quarantined"
+CHARACTER_VISIBILITY_NOISE = "noise"
+VALID_CHARACTER_VISIBILITY_STATES = {
+    CHARACTER_VISIBILITY_VISIBLE,
+    CHARACTER_VISIBILITY_QUARANTINED,
+    CHARACTER_VISIBILITY_NOISE,
+}
+CHARACTER_APPROVAL_APPROVED = "approved"
+CHARACTER_APPROVAL_PENDING_REVIEW = "pending_review"
+CHARACTER_APPROVAL_REJECTED = "rejected"
+CHARACTER_APPROVAL_PROTECTED = "protected"
+VALID_CHARACTER_APPROVAL_STATES = {
+    CHARACTER_APPROVAL_APPROVED,
+    CHARACTER_APPROVAL_PENDING_REVIEW,
+    CHARACTER_APPROVAL_REJECTED,
+    CHARACTER_APPROVAL_PROTECTED,
+}
+CHARACTER_APPROVAL_SOURCE_MANUAL_REVIEW = "manual_review"
+CHARACTER_APPROVAL_SOURCE_DETERMINISTIC_AUTO = "deterministic_auto"
+CHARACTER_APPROVAL_SOURCE_BACKFILL_REVIEW = "backfill_review"
+CHARACTER_APPROVAL_SOURCE_LEGACY_IMPORT = "legacy_import"
+VALID_CHARACTER_APPROVAL_SOURCES = {
+    CHARACTER_APPROVAL_SOURCE_MANUAL_REVIEW,
+    CHARACTER_APPROVAL_SOURCE_DETERMINISTIC_AUTO,
+    CHARACTER_APPROVAL_SOURCE_BACKFILL_REVIEW,
+    CHARACTER_APPROVAL_SOURCE_LEGACY_IMPORT,
+}
+CHARACTER_TRUST_TIER_VISIBLE = "visible"
+CHARACTER_TRUST_TIER_REVIEW_ONLY = "review_only"
+CHARACTER_TRUST_TIER_REPAIRED_NOISE = "repaired_noise"
+VALID_CHARACTER_TRUST_TIERS = {
+    CHARACTER_TRUST_TIER_VISIBLE,
+    CHARACTER_TRUST_TIER_REVIEW_ONLY,
+    CHARACTER_TRUST_TIER_REPAIRED_NOISE,
+}
 ROLE_ONLY_REFERENCE_WORDS = {
     "aunt", "brother", "captain", "chief", "chief clerk", "clerk", "doctor", "father", "headmaster",
     "lady", "lord", "master", "mentor", "mother", "mr", "mrs", "ms", "nurse", "professor", "servant",
@@ -77,14 +119,82 @@ ROLE_ONLY_REFERENCE_WORDS = {
 }
 FAMILY_ROLE_WORDS = {"aunt", "brother", "father", "mother", "sister", "uncle"}
 
-# ─── Display filter ───────────────────────────────────────────────────────────
 
-def is_displayable_character(char: Character) -> bool:
+def normalize_character_trust_tier(value: object | None) -> str | None:
+    cleaned = str(value or "").strip().casefold()
+    return cleaned if cleaned in VALID_CHARACTER_TRUST_TIERS else None
+
+
+def normalize_character_visibility_state(value: object | None) -> str | None:
+    cleaned = str(value or "").strip().casefold()
+    return cleaned if cleaned in VALID_CHARACTER_VISIBILITY_STATES else None
+
+
+def normalize_character_approval_state(value: object | None) -> str | None:
+    cleaned = str(value or "").strip().casefold()
+    return cleaned if cleaned in VALID_CHARACTER_APPROVAL_STATES else None
+
+
+def normalize_character_approval_source(value: object | None) -> str | None:
+    cleaned = str(value or "").strip().casefold()
+    return cleaned if cleaned in VALID_CHARACTER_APPROVAL_SOURCES else None
+
+
+def _clean_reason_code_values(values: Sequence[object] | None) -> list[str]:
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for raw in values or []:
+        item = str(raw or "").strip()
+        key = item.casefold()
+        if not item or key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(item)
+    return cleaned
+
+
+def character_governance(char: Character) -> tuple[str, str, str | None, list[str]]:
+    metadata = dict(getattr(char, "analysis_metadata", None) or {})
+    visibility_state = normalize_character_visibility_state(getattr(char, "visibility_state", None))
+    approval_state = normalize_character_approval_state(getattr(char, "approval_state", None))
+    approval_source = normalize_character_approval_source(getattr(char, "approval_source", None))
+    approval_reason_codes = _clean_reason_code_values(getattr(char, "approval_reason_codes", None))
+    if visibility_state and approval_state:
+        return visibility_state, approval_state, approval_source, approval_reason_codes
+
+    explicit_tier = normalize_character_trust_tier(metadata.get("trust_tier"))
+    explicit_reasons = clean_string_list(cast(list[str] | None, metadata.get("trust_reasons")))
+    if getattr(char, "is_manual", False) or metadata.get("user_curated") or metadata.get("protected_from_repair"):
+        return (
+            CHARACTER_VISIBILITY_VISIBLE,
+            CHARACTER_APPROVAL_PROTECTED,
+            CHARACTER_APPROVAL_SOURCE_MANUAL_REVIEW,
+            ["manual_or_curated"],
+        )
+    if explicit_tier == CHARACTER_TRUST_TIER_REVIEW_ONLY:
+        return (
+            CHARACTER_VISIBILITY_QUARANTINED,
+            CHARACTER_APPROVAL_PENDING_REVIEW,
+            CHARACTER_APPROVAL_SOURCE_LEGACY_IMPORT,
+            explicit_reasons,
+        )
+    if explicit_tier == CHARACTER_TRUST_TIER_REPAIRED_NOISE:
+        return (
+            CHARACTER_VISIBILITY_NOISE,
+            CHARACTER_APPROVAL_REJECTED,
+            CHARACTER_APPROVAL_SOURCE_LEGACY_IMPORT,
+            explicit_reasons,
+        )
     name = " ".join((char.name or "").split())
-    if not name:
-        return False
-    if getattr(char, "is_manual", False):
-        return True
+    words = entity_words(name)
+    normalized_words = [word.casefold() for word in words]
+    single_token = len(normalized_words) == 1
+    common_single_token = single_token and normalized_words[0] in COMMON_NON_NAME_WORDS
+    role_only_single_token = single_token and normalized_words[0] in ROLE_ONLY_REFERENCE_WORDS
+    mention_count = int(getattr(char, "mention_count", 0) or 0)
+    grounding_passage_count = int(metadata.get("grounding_passage_count") or metadata.get("evidence_count") or mention_count or 0)
+    quality_flags = {str(flag).strip() for flag in (metadata.get("quality_flags") or []) if str(flag).strip()}
+    has_profile = _character_has_meaningful_profile_data(char)
     score = character_visibility_score(
         name,
         role=char.role,
@@ -97,10 +207,89 @@ def is_displayable_character(char: Character) -> bool:
         trait_state=char.trait_state or {},
         relationship_count=0,
     )
-    return score >= VISIBILITY_THRESHOLD and is_displayable_character_entity(
+    legacy_reasons: list[str] = []
+    if score < VISIBILITY_THRESHOLD:
+        legacy_reasons.append("visibility_score_below_threshold")
+    if common_single_token:
+        legacy_reasons.append("common_single_token")
+    if role_only_single_token and not has_profile:
+        legacy_reasons.append("role_only_single_token")
+    if single_token and grounding_passage_count <= 1 and mention_count <= 1 and not has_profile:
+        legacy_reasons.append("thin_single_token_grounding")
+    if "generic_summary" in quality_flags and grounding_passage_count <= 1 and not has_profile:
+        legacy_reasons.append("generic_low_grounding")
+    if legacy_reasons and (
+        common_single_token
+        or role_only_single_token
+        or score < VISIBILITY_THRESHOLD
+        or "thin_single_token_grounding" in legacy_reasons
+    ):
+        return (
+            CHARACTER_VISIBILITY_QUARANTINED,
+            CHARACTER_APPROVAL_PENDING_REVIEW,
+            CHARACTER_APPROVAL_SOURCE_LEGACY_IMPORT,
+            legacy_reasons,
+        )
+    return (
+        CHARACTER_VISIBILITY_VISIBLE,
+        CHARACTER_APPROVAL_APPROVED,
+        approval_source or CHARACTER_APPROVAL_SOURCE_LEGACY_IMPORT,
+        explicit_reasons or ["legacy_visible"],
+    )
+
+
+def _character_has_meaningful_profile_data(char: Character) -> bool:
+    if any(
+        isinstance(value, dict) and str(value.get("value") or "").strip()
+        for value in (char.trait_state or {}).values()
+    ):
+        return True
+    if any(
+        str(getattr(char, field, "") or "").strip()
+        for field in ("goal", "lie_they_believe", "backstory_wound", "arc_type", "archetype")
+    ):
+        return True
+    if any(getattr(char, field, None) for field in ("personality_tags", "motivations", "fears", "growth_events")):
+        return True
+    arc_summary = clean_optional_text(getattr(char, "arc_summary", None))
+    return bool(arc_summary and arc_summary.casefold() not in {"appearance not yet described", "background character", "is a character", "mysterious figure", "normal character", "plain character", "supporting character", "this character is a character", "protagonist", "antagonist", "puppet master", "tragic figure", "unknown character"})
+
+
+def infer_character_trust_tier(char: Character) -> tuple[str, list[str]]:
+    visibility_state, approval_state, _approval_source, approval_reason_codes = character_governance(char)
+    if visibility_state == CHARACTER_VISIBILITY_VISIBLE and approval_state in {
+        CHARACTER_APPROVAL_APPROVED,
+        CHARACTER_APPROVAL_PROTECTED,
+    }:
+        return CHARACTER_TRUST_TIER_VISIBLE, approval_reason_codes or ["approval_visible"]
+    if visibility_state == CHARACTER_VISIBILITY_NOISE or approval_state == CHARACTER_APPROVAL_REJECTED:
+        return CHARACTER_TRUST_TIER_REPAIRED_NOISE, approval_reason_codes or ["approval_rejected"]
+    if visibility_state == CHARACTER_VISIBILITY_QUARANTINED or approval_state == CHARACTER_APPROVAL_PENDING_REVIEW:
+        return CHARACTER_TRUST_TIER_REVIEW_ONLY, approval_reason_codes or ["approval_pending_review"]
+
+    metadata = dict(getattr(char, "analysis_metadata", None) or {})
+    explicit_tier = normalize_character_trust_tier(metadata.get("trust_tier"))
+    explicit_reasons = clean_string_list(cast(list[str] | None, metadata.get("trust_reasons")))
+    if getattr(char, "is_manual", False) or metadata.get("user_curated") or metadata.get("protected_from_repair"):
+        return CHARACTER_TRUST_TIER_VISIBLE, ["manual_or_curated"]
+    if explicit_tier is not None:
+        return explicit_tier, explicit_reasons
+
+    name = " ".join((char.name or "").split())
+    words = entity_words(name)
+    normalized_words = [word.casefold() for word in words]
+    single_token = len(normalized_words) == 1
+    common_single_token = single_token and normalized_words[0] in COMMON_NON_NAME_WORDS
+    role_only_single_token = single_token and normalized_words[0] in ROLE_ONLY_REFERENCE_WORDS
+    mention_count = int(getattr(char, "mention_count", 0) or 0)
+    grounding_passage_count = int(metadata.get("grounding_passage_count") or metadata.get("evidence_count") or mention_count or 0)
+    quality_flags = {str(flag).strip() for flag in (metadata.get("quality_flags") or []) if str(flag).strip()}
+    has_profile = _character_has_meaningful_profile_data(char)
+    score = character_visibility_score(
         name,
         role=char.role,
         aliases=char.aliases or [],
+        arc_summary=char.arc_summary,
         personality_tags=char.personality_tags or [],
         motivations=char.motivations or [],
         fears=char.fears or [],
@@ -108,6 +297,42 @@ def is_displayable_character(char: Character) -> bool:
         trait_state=char.trait_state or {},
         relationship_count=0,
     )
+
+    reasons: list[str] = []
+    if score < VISIBILITY_THRESHOLD:
+        reasons.append("visibility_score_below_threshold")
+    if common_single_token:
+        reasons.append("common_single_token")
+    if role_only_single_token and not has_profile:
+        reasons.append("role_only_single_token")
+    if single_token and grounding_passage_count <= 1 and mention_count <= 1 and not has_profile:
+        reasons.append("thin_single_token_grounding")
+    if "generic_summary" in quality_flags and grounding_passage_count <= 1 and not has_profile:
+        reasons.append("generic_low_grounding")
+
+    if reasons and (common_single_token or role_only_single_token or score < VISIBILITY_THRESHOLD or "thin_single_token_grounding" in reasons):
+        return CHARACTER_TRUST_TIER_REVIEW_ONLY, reasons
+    return CHARACTER_TRUST_TIER_VISIBLE, reasons
+
+
+def is_cast_visible_character(char: Character) -> bool:
+    visibility_state, approval_state, _approval_source, _reasons = character_governance(char)
+    return visibility_state == CHARACTER_VISIBILITY_VISIBLE and approval_state in {
+        CHARACTER_APPROVAL_APPROVED,
+        CHARACTER_APPROVAL_PROTECTED,
+    }
+
+# ─── Display filter ───────────────────────────────────────────────────────────
+
+def is_displayable_character(char: Character) -> bool:
+    name = " ".join((char.name or "").split())
+    if not name:
+        return False
+    if getattr(char, "is_manual", False):
+        return True
+    if not is_cast_visible_character(char):
+        return False
+    return True
 
 
 # ─── Status derivation ────────────────────────────────────────────────────────
@@ -257,10 +482,175 @@ def clean_string_list(values: list[str] | None) -> list[str]:
     return cleaned
 
 
+def _clean_int_list(values: Sequence[object] | None) -> list[int]:
+    cleaned: list[int] = []
+    seen: set[int] = set()
+    for raw in values or []:
+        try:
+            item = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if item <= 0 or item in seen:
+            continue
+        seen.add(item)
+        cleaned.append(item)
+    return cleaned
+
+
+def build_character_dossier_summary(
+    *,
+    name: str | None,
+    aliases: Sequence[object] | None = None,
+    evidence: Mapping[str, Any] | None = None,
+    fallback_chapter_numbers: Sequence[int] | None = None,
+    reason_codes: Sequence[object] | None = None,
+) -> dict[str, Any]:
+    clean_name = clean_optional_text(name) or ""
+    clean_aliases = clean_string_list([str(alias) for alias in aliases or []])
+    entity_aliases = clean_string_list(
+        [str(alias) for alias in ((evidence or {}).get("entity") or {}).get("aliases") or []]
+    ) if isinstance((evidence or {}).get("entity"), Mapping) else []
+    merged_aliases = dedupe_preserve_order([*clean_aliases, *entity_aliases])
+    words = entity_words(clean_name)
+    single_token = len(words) == 1
+    common_single_token = single_token and words[0].casefold() in COMMON_NON_NAME_WORDS
+    role_only_single_token = single_token and words[0].casefold() in ROLE_ONLY_REFERENCE_WORDS
+    evidence_map = dict(evidence or {})
+    verifier = evidence_map.get("verifier") if isinstance(evidence_map.get("verifier"), Mapping) else {}
+    local = verifier.get("local") if isinstance(verifier, Mapping) and isinstance(verifier.get("local"), Mapping) else {}
+    final = verifier.get("final") if isinstance(verifier, Mapping) and isinstance(verifier.get("final"), Mapping) else {}
+    cluster_names = clean_string_list([str(item) for item in evidence_map.get("cluster_names") or []])
+    chapter_numbers = _clean_int_list(
+        [
+            *(evidence_map.get("shared_chapters") or []),
+            *(evidence_map.get("chapter_numbers") or []),
+            *(fallback_chapter_numbers or []),
+        ]
+    )
+    mention_count = max(
+        1 if clean_name else 0,
+        int(evidence_map.get("cluster_mention_count") or 0),
+        int(evidence_map.get("mention_count") or 0),
+        int(evidence_map.get("strong_mention_count") or 0),
+        len(chapter_numbers),
+    )
+    person_ner_support = int(local.get("person_ner_mentions") or 0)
+    non_person_signal_count = int(local.get("non_person_ner_mentions") or 0)
+    sentence_start_mentions = int(local.get("sentence_start_mentions") or 0)
+    mid_sentence_mentions = int(local.get("mid_sentence_mentions") or 0)
+    dialogue_attribution_support = 1 if evidence_map.get("has_dialogue_or_action") else 0
+    resolver_status = clean_optional_text(evidence_map.get("resolver_status")) or ""
+    resolved_reason_codes = _clean_reason_code_values(reason_codes or evidence_map.get("resolver_reasons") or [])
+    resolver_ambiguity_count = int(
+        resolver_status in {"ambiguous", "matched_needs_review", "held_for_review"}
+        or any("ambiguous" in reason.casefold() or "needs_review" in reason.casefold() for reason in resolved_reason_codes)
+    )
+    alias_link_support = int(bool(merged_aliases or len(cluster_names) > 1))
+    canonical_name = clean_optional_text(((evidence_map.get("entity") or {}) if isinstance(evidence_map.get("entity"), Mapping) else {}).get("canonical_name"))
+    full_name_link_support = int(bool(canonical_name and canonical_name.casefold() != clean_name.casefold()))
+    conflict_signal_count = int(
+        bool(evidence_map.get("anti_merge_names"))
+        or any("conflict" in reason.casefold() for reason in resolved_reason_codes)
+    )
+
+    strict_auto_reason_codes: list[str] = []
+    if role_only_single_token:
+        strict_auto_reason_codes.append("role_only_reference")
+    if common_single_token:
+        strict_auto_reason_codes.append("sentence_start_common_word")
+    if non_person_signal_count > 0:
+        strict_auto_reason_codes.append("non_person_ner_signal")
+    if resolver_ambiguity_count > 0:
+        strict_auto_reason_codes.append("conflicts_with_existing_character")
+    if single_token and person_ner_support <= 0:
+        strict_auto_reason_codes.append("single_token_ambiguous")
+    if len(chapter_numbers) < 2 and mention_count < 3:
+        strict_auto_reason_codes.append("insufficient_cross_chapter_support")
+    strict_auto_reason_codes = dedupe_preserve_order(strict_auto_reason_codes)
+
+    strict_auto_eligible = False
+    if not strict_auto_reason_codes and clean_name:
+        final_band = str(final.get("confidence_band") or "").strip().casefold()
+        if single_token:
+            strict_auto_eligible = (
+                final_band == "accept"
+                and len(chapter_numbers) >= 2
+                and mention_count >= 3
+                and person_ner_support >= 1
+                and mid_sentence_mentions >= 1
+                and dialogue_attribution_support >= 1
+            )
+        else:
+            strict_auto_eligible = (
+                final_band == "accept"
+                and (
+                    (len(chapter_numbers) >= 2 and person_ner_support >= 1)
+                    or (mention_count >= 2 and person_ner_support >= 1 and (alias_link_support >= 1 or full_name_link_support >= 1 or dialogue_attribution_support >= 1))
+                )
+            )
+        if not strict_auto_eligible:
+            strict_auto_reason_codes.append("insufficient_cross_chapter_support")
+
+    return {
+        "normalized_name": normalize_character_name(clean_name),
+        "single_token": single_token,
+        "common_single_token": common_single_token,
+        "role_only_single_token": role_only_single_token,
+        "mention_count": mention_count,
+        "distinct_chapter_count": len(chapter_numbers),
+        "chapter_numbers": chapter_numbers,
+        "sentence_start_mentions": sentence_start_mentions,
+        "mid_sentence_mentions": mid_sentence_mentions,
+        "dialogue_attribution_support": dialogue_attribution_support,
+        "person_ner_support": person_ner_support,
+        "alias_link_support": alias_link_support,
+        "full_name_link_support": full_name_link_support,
+        "resolver_ambiguity_count": resolver_ambiguity_count,
+        "conflict_signal_count": conflict_signal_count,
+        "non_person_signal_count": non_person_signal_count,
+        "strict_auto_eligible": strict_auto_eligible,
+        "strict_auto_reason_codes": dedupe_preserve_order(strict_auto_reason_codes),
+        "summary_reason_codes": dedupe_preserve_order([*resolved_reason_codes, *strict_auto_reason_codes]),
+    }
+
+
+def build_candidate_dossier_summary(candidate: CharacterCandidate) -> dict[str, Any]:
+    return build_character_dossier_summary(
+        name=candidate.proposed_name,
+        aliases=candidate.aliases or [],
+        evidence=candidate.evidence or {},
+        fallback_chapter_numbers=[int(candidate.chapter_number or 0)],
+        reason_codes=candidate.reason_codes or [],
+    )
+
+
+def build_character_record_dossier_summary(char: Character) -> dict[str, Any]:
+    metadata = dict(getattr(char, "analysis_metadata", None) or {})
+    evidence: dict[str, Any] = {
+        "cluster_mention_count": int(getattr(char, "mention_count", 0) or 0),
+        "chapter_numbers": [
+            chapter
+            for chapter in [int(getattr(char, "first_chapter", 0) or 0), int(getattr(char, "last_seen_chapter", 0) or 0)]
+            if chapter > 0
+        ],
+        "resolver_reasons": metadata.get("trust_reasons") or [],
+    }
+    return build_character_dossier_summary(
+        name=char.name,
+        aliases=char.aliases or [],
+        evidence=evidence,
+        fallback_chapter_numbers=[int(getattr(char, "first_chapter", 0) or 0), int(getattr(char, "last_seen_chapter", 0) or 0)],
+        reason_codes=getattr(char, "approval_reason_codes", None) or metadata.get("trust_reasons") or [],
+    )
+
+
 def build_character_analysis_payload(char: Character) -> dict[str, Any]:
     metadata = dict(getattr(char, "analysis_metadata", None) or {})
     mention_count = int(getattr(char, "mention_count", 0) or 0)
     is_manual = bool(getattr(char, "is_manual", False))
+    trust_tier, trust_reasons = infer_character_trust_tier(char)
+    visibility_state, approval_state, approval_source, approval_reason_codes = character_governance(char)
+    dossier_summary = build_character_record_dossier_summary(char)
 
     if "grounding_passage_count" in metadata and metadata.get("grounding_passage_count") is not None:
         grounding_passage_count = int(metadata.get("grounding_passage_count") or 0)
@@ -315,7 +705,7 @@ def build_character_analysis_payload(char: Character) -> dict[str, Any]:
         "persistence_reason": persistence_reason,
         "evidence_count": evidence_count,
         "summary_quality": summary_quality,
-        "needs_review": bool(metadata.get("needs_review")) or bool(quality_flags),
+        "needs_review": bool(metadata.get("needs_review")) or bool(quality_flags) or approval_state == CHARACTER_APPROVAL_PENDING_REVIEW,
         "rejected_duplicate_candidates": rejected_duplicate_candidates,
         "quality_flags": quality_flags,
         "grounding_passage_count": grounding_passage_count,
@@ -336,17 +726,28 @@ def build_character_analysis_payload(char: Character) -> dict[str, Any]:
         "cluster_mention_count": int(metadata.get("cluster_mention_count") or 0),
         "resolver_status": str(metadata.get("resolver_status") or "").strip() or None,
         "review_note": str(metadata.get("review_note") or "").strip() or None,
+        "visibility_state": visibility_state,
+        "approval_state": approval_state,
+        "approval_source": approval_source,
+        "approval_reason_codes": approval_reason_codes,
+        "dossier_summary": dossier_summary,
+        "trust_tier": trust_tier,
+        "trust_reasons": trust_reasons,
     }
 
 
 def is_protected_character(char: Character | None) -> bool:
     if char is None:
         return False
+    _visibility_state, approval_state, _approval_source, _reason_codes = character_governance(char)
+    if approval_state == CHARACTER_APPROVAL_PROTECTED:
+        return True
     metadata = dict(getattr(char, "analysis_metadata", None) or {})
     return bool(getattr(char, "is_manual", False) or metadata.get("protected_from_repair"))
 
 
-def serialize_character_detail(char: Character) -> dict[str, Any]:
+def serialize_character_detail(char: Character, *, skip_analysis_metadata: bool = False) -> dict[str, Any]:
+    visibility_state, approval_state, approval_source, approval_reason_codes = character_governance(char)
     return {
         "id": char.id,
         "book_id": char.book_id,
@@ -371,7 +772,13 @@ def serialize_character_detail(char: Character) -> dict[str, Any]:
         "character_type": getattr(char, "character_type", None),
         "character_type_score": getattr(char, "character_type_score", None),
         "subtype_scores": getattr(char, "subtype_scores", None) or {},
-        "analysis_metadata": build_character_analysis_payload(char),
+        "analysis_metadata": None if skip_analysis_metadata else build_character_analysis_payload(char),
+        "visibility_state": visibility_state,
+        "approval_state": approval_state,
+        "approval_source": approval_source,
+        "approval_reason_codes": approval_reason_codes,
+        "approval_updated_at": getattr(char, "approval_updated_at", None),
+        "is_manual": getattr(char, "is_manual", False),
         "created_at": getattr(char, "created_at"),
     }
 
@@ -386,9 +793,13 @@ def serialize_book_character(
     voice_profile: CharacterVoiceProfile | None,
     total_chapters: int | None,
     tags: list[str] | None = None,
+    skip_arc_tracker: bool = False,
+    skip_analysis_metadata: bool = False,
+    skip_tags: bool = False,
 ) -> dict[str, Any]:
     relationship_summaries = dedupe_preserve_order(rel_summaries.get(str(char.id), []))
-    return {
+    visibility_state, approval_state, approval_source, approval_reason_codes = character_governance(char)
+    result: dict[str, Any] = {
         "id": str(char.id),
         "book_id": str(char.book_id),
         "name": char.name,
@@ -421,19 +832,31 @@ def serialize_book_character(
         "character_type": char.character_type,
         "character_type_score": char.character_type_score,
         "subtype_scores": char.subtype_scores or {},
-        "analysis_metadata": build_character_analysis_payload(char),
+        "visibility_state": visibility_state,
+        "approval_state": approval_state,
+        "approval_source": approval_source,
+        "approval_reason_codes": approval_reason_codes,
+        "approval_updated_at": getattr(char, "approval_updated_at", None),
         "is_manual": getattr(char, "is_manual", False),
         "graph_visibility_override": get_graph_visibility_override(char),
-        "tags": tags or [],
-        "arc_tracker": build_character_arc_tracker(
+    }
+    if skip_analysis_metadata:
+        result["analysis_metadata"] = None
+    else:
+        result["analysis_metadata"] = build_character_analysis_payload(char)
+    result["tags"] = [] if skip_tags else (tags or [])
+    if skip_arc_tracker:
+        result["arc_tracker"] = None
+    else:
+        result["arc_tracker"] = build_character_arc_tracker(
             char,
             states=states,
             relationships=relationships,
             counterpart_names=counterpart_names,
             voice_profile=voice_profile,
             total_chapters=total_chapters,
-        ),
-    }
+        )
+    return result
 
 
 def serialize_reader_character(
@@ -443,6 +866,7 @@ def serialize_reader_character(
     relationship_summaries: list[str] | None = None,
 ) -> dict[str, Any]:
     resolved_traits = dict(cast(dict[str, Any], trait_snapshot or char.trait_state or {}))
+    visibility_state, approval_state, approval_source, approval_reason_codes = character_governance(char)
     return {
         "id": str(char.id),
         "name": char.name,
@@ -468,6 +892,11 @@ def serialize_reader_character(
         "mention_count": char.mention_count or 0,
         "is_manual": getattr(char, "is_manual", False),
         "analysis_metadata": build_character_analysis_payload(char),
+        "visibility_state": visibility_state,
+        "approval_state": approval_state,
+        "approval_source": approval_source,
+        "approval_reason_codes": approval_reason_codes,
+        "approval_updated_at": getattr(char, "approval_updated_at", None),
         "goal": char.goal,
         "lie_they_believe": char.lie_they_believe,
         "backstory_wound": char.backstory_wound,
@@ -640,6 +1069,47 @@ def _character_entity_matches_cluster(candidate: Mapping[str, Any], cluster: Map
     return bool(candidate_keys & cluster_keys)
 
 
+def _cluster_verifier_summary(cluster: Sequence[Mapping[str, Any]]) -> dict[str, Any] | None:
+    verdicts: list[str] = []
+    reasons: list[str] = []
+    for item in cluster:
+        evidence = item.get("evidence") if isinstance(item.get("evidence"), dict) else {}
+        verifier = evidence.get("verifier") if isinstance(evidence, dict) else {}
+        final = verifier.get("final") if isinstance(verifier, dict) else {}
+        if not isinstance(final, dict):
+            continue
+        verdict = str(final.get("confidence_band") or "").strip()
+        if verdict:
+            verdicts.append(verdict)
+        for reason in final.get("reasons") or []:
+            cleaned = str(reason or "").strip()
+            if cleaned and cleaned not in reasons:
+                reasons.append(cleaned)
+    if not verdicts:
+        return None
+    unique = set(verdicts)
+    if unique == {"accept"}:
+        band = "accept"
+        is_person_like = True
+    elif unique == {"reject"}:
+        band = "reject"
+        is_person_like = False
+    else:
+        band = "review"
+        is_person_like = False
+    return {
+        "local_summary": {
+            "member_verdicts": verdicts,
+        },
+        "llm": {"used": any("llm_" in reason for reason in reasons)},
+        "final": {
+            "confidence_band": band,
+            "is_person_like": is_person_like,
+            "reasons": reasons,
+        },
+    }
+
+
 def cluster_character_entities(entities: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     clusters: list[list[dict[str, Any]]] = []
     for raw in entities:
@@ -700,6 +1170,9 @@ def cluster_character_entities(entities: Sequence[Mapping[str, Any]]) -> list[di
                 "snippets": clean_string_list(passages)[:6],
             }
         )
+        verifier_summary = _cluster_verifier_summary(cluster)
+        if verifier_summary is not None:
+            evidence["verifier"] = verifier_summary
         primary["evidence"] = evidence
         primary["resolver_status"] = str(evidence.get("resolver_status") or "single")
         primary["canonical_confidence"] = max(
@@ -902,6 +1375,7 @@ def serialize_character_candidate(candidate: CharacterCandidate) -> dict[str, An
         "resolver_reasons": _coerce_string_list(normalized_evidence.get("resolver_reasons")),
         "canonical_confidence": _coerce_float(normalized_evidence.get("canonical_confidence")),
         "grounding_coverage": _coerce_float(normalized_evidence.get("grounding_coverage")),
+        "dossier_summary": build_candidate_dossier_summary(candidate),
         "snippets": _coerce_string_list(normalized_evidence.get("snippets")),
         "source_batch_key": candidate.source_batch_key,
         "created_at": candidate.created_at,
@@ -973,12 +1447,30 @@ def serialize_character_relationship_candidate(
     }
 
 
+def serialize_character_decision_event(event: CharacterDecisionEvent) -> dict[str, Any]:
+    return {
+        "id": str(event.id),
+        "book_id": str(event.book_id),
+        "character_id": str(event.character_id),
+        "actor_user_id": str(event.actor_user_id) if event.actor_user_id else None,
+        "action": event.action,
+        "visibility_state": event.visibility_state,
+        "approval_state": event.approval_state,
+        "approval_source": event.approval_source,
+        "reason_codes": _clean_reason_codes(event.reason_codes or []),
+        "evidence": dict(event.evidence or {}),
+        "created_at": event.created_at,
+    }
+
+
 def build_character_review_payload(
     candidates: Sequence[CharacterCandidate],
     duplicate_suggestions: Sequence[CharacterDuplicateSuggestion],
     relationship_candidates: Sequence[CharacterRelationshipCandidate] | None = None,
     *,
     character_map: Mapping[uuid.UUID, Character] | None = None,
+    shadow_characters: Sequence[Character] | None = None,
+    decision_events: Sequence[CharacterDecisionEvent] | None = None,
 ) -> dict[str, Any]:
     relationship_candidates = relationship_candidates or []
     serialized_candidates = [serialize_character_candidate(candidate) for candidate in candidates]
@@ -994,10 +1486,20 @@ def build_character_review_payload(
         serialize_character_relationship_candidate(candidate)
         for candidate in relationship_candidates
     ]
+    serialized_shadow_characters = [
+        serialize_character_detail(character)
+        for character in shadow_characters or []
+    ]
+    serialized_decision_events = [
+        serialize_character_decision_event(event)
+        for event in decision_events or []
+    ]
     return {
         "candidates": serialized_candidates,
         "duplicate_suggestions": serialized_duplicates,
         "relationship_candidates": serialized_relationship_candidates,
+        "shadow_characters": serialized_shadow_characters,
+        "decision_events": serialized_decision_events,
         "counts": {
             "pending_candidates": sum(
                 1 for item in candidates if str(item.status or "") == CHARACTER_CANDIDATE_PENDING
@@ -1066,11 +1568,26 @@ async def list_character_review_data(
         )
     ).scalars().all()
     character_map = {item.id: item for item in character_rows if item.id is not None}
+    shadow_characters = [
+        item
+        for item in character_rows
+        if item.id is not None and not is_cast_visible_character(item)
+    ]
+    decision_events = (
+        await db.execute(
+            select(CharacterDecisionEvent)
+            .where(CharacterDecisionEvent.book_id == book_id)
+            .order_by(CharacterDecisionEvent.created_at.desc())
+            .limit(40)
+        )
+    ).scalars().all()
     return build_character_review_payload(
         candidates,
         duplicate_suggestions,
         relationship_candidates,
         character_map=character_map,
+        shadow_characters=shadow_characters,
+        decision_events=decision_events,
     )
 
 
@@ -1181,6 +1698,8 @@ def append_character_review_audit_entry(
     *,
     action: str,
     details: Mapping[str, Any] | None = None,
+    actor_user_id: uuid.UUID | None = None,
+    reason_codes: Sequence[object] | None = None,
 ) -> None:
     metadata = dict(character.analysis_metadata or {})
     entries = list(metadata.get("review_audit") or [])
@@ -1193,6 +1712,65 @@ def append_character_review_audit_entry(
     metadata["review_audit"] = entries[-12:]
     metadata["user_reviewed"] = True
     character.analysis_metadata = metadata
+    try:
+        session = object_session(character)
+    except UnmappedInstanceError:
+        session = None
+    if session is not None and character.id is not None:
+        visibility_state, approval_state, approval_source, _approval_reason_codes = character_governance(character)
+        session.add(
+            CharacterDecisionEvent(
+                book_id=character.book_id,
+                character_id=character.id,
+                actor_user_id=actor_user_id,
+                action=action,
+                visibility_state=visibility_state,
+                approval_state=approval_state,
+                approval_source=approval_source,
+                reason_codes=_clean_reason_code_values(reason_codes),
+                evidence=dict(details or {}),
+            )
+        )
+
+
+def set_character_review_state(
+    character: Character,
+    *,
+    visibility_state: str,
+    approval_state: str,
+    approval_source: str | None,
+    reason_codes: Sequence[object] | None = None,
+    action: str | None = None,
+    details: Mapping[str, Any] | None = None,
+    actor_user_id: uuid.UUID | None = None,
+) -> None:
+    normalized_visibility = normalize_character_visibility_state(visibility_state) or CHARACTER_VISIBILITY_QUARANTINED
+    normalized_approval = normalize_character_approval_state(approval_state) or CHARACTER_APPROVAL_PENDING_REVIEW
+    normalized_source = normalize_character_approval_source(approval_source) or CHARACTER_APPROVAL_SOURCE_MANUAL_REVIEW
+    character.visibility_state = normalized_visibility
+    character.approval_state = normalized_approval
+    character.approval_source = normalized_source
+    character.approval_reason_codes = _clean_reason_code_values(reason_codes)
+    character.approval_updated_at = datetime.now(UTC)
+    metadata = dict(character.analysis_metadata or {})
+    metadata["user_reviewed"] = True
+    metadata["trust_tier"] = (
+        CHARACTER_TRUST_TIER_VISIBLE
+        if normalized_visibility == CHARACTER_VISIBILITY_VISIBLE and normalized_approval in {CHARACTER_APPROVAL_APPROVED, CHARACTER_APPROVAL_PROTECTED}
+        else CHARACTER_TRUST_TIER_REPAIRED_NOISE
+        if normalized_visibility == CHARACTER_VISIBILITY_NOISE or normalized_approval == CHARACTER_APPROVAL_REJECTED
+        else CHARACTER_TRUST_TIER_REVIEW_ONLY
+    )
+    metadata["trust_reasons"] = _clean_reason_code_values(reason_codes)
+    character.analysis_metadata = metadata
+    if action:
+        append_character_review_audit_entry(
+            character,
+            action=action,
+            details=details,
+            actor_user_id=actor_user_id,
+            reason_codes=reason_codes,
+        )
 
 
 def mark_character_curated(
@@ -1213,6 +1791,15 @@ def mark_character_curated(
         else:
             metadata.pop("review_note", None)
     character.analysis_metadata = metadata
+    set_character_review_state(
+        character,
+        visibility_state=CHARACTER_VISIBILITY_VISIBLE,
+        approval_state=CHARACTER_APPROVAL_PROTECTED,
+        approval_source=CHARACTER_APPROVAL_SOURCE_MANUAL_REVIEW,
+        reason_codes=["manual_or_curated"],
+        action="character_curated",
+        details={"protected_from_repair": bool(metadata.get("protected_from_repair"))},
+    )
 
 
 def _clean_text_list(values: Sequence[object] | None) -> list[str]:
@@ -1367,15 +1954,97 @@ def _candidate_entity_payload(candidate: CharacterCandidate) -> dict[str, Any]:
     return payload
 
 
+def _approve_character_from_review(
+    character: Character,
+    *,
+    reason_codes: Sequence[object] | None = None,
+    action: str,
+    details: Mapping[str, Any] | None = None,
+) -> None:
+    set_character_review_state(
+        character,
+        visibility_state=CHARACTER_VISIBILITY_VISIBLE,
+        approval_state=CHARACTER_APPROVAL_APPROVED,
+        approval_source=CHARACTER_APPROVAL_SOURCE_MANUAL_REVIEW,
+        reason_codes=reason_codes,
+        action=action,
+        details=details,
+    )
+
+
+def _quarantine_character_for_review(
+    character: Character,
+    *,
+    reason_codes: Sequence[object] | None = None,
+    action: str,
+    details: Mapping[str, Any] | None = None,
+    approval_source: str = CHARACTER_APPROVAL_SOURCE_MANUAL_REVIEW,
+) -> None:
+    set_character_review_state(
+        character,
+        visibility_state=CHARACTER_VISIBILITY_QUARANTINED,
+        approval_state=CHARACTER_APPROVAL_PENDING_REVIEW,
+        approval_source=approval_source,
+        reason_codes=reason_codes,
+        action=action,
+        details=details,
+    )
+
+
+def reject_character_as_noise(
+    character: Character,
+    *,
+    reason_codes: Sequence[object] | None = None,
+    action: str,
+    details: Mapping[str, Any] | None = None,
+    actor_user_id: uuid.UUID | None = None,
+) -> None:
+    set_character_review_state(
+        character,
+        visibility_state=CHARACTER_VISIBILITY_NOISE,
+        approval_state=CHARACTER_APPROVAL_REJECTED,
+        approval_source=CHARACTER_APPROVAL_SOURCE_MANUAL_REVIEW,
+        reason_codes=reason_codes,
+        action=action,
+        details=details,
+        actor_user_id=actor_user_id,
+    )
+
+
 async def promote_character_candidate(
     db: AsyncSession,
     *,
     candidate: CharacterCandidate,
 ) -> Character:
     entity = _candidate_entity_payload(candidate)
+    if candidate.matched_character_id is not None:
+        existing = await db.get(Character, candidate.matched_character_id)
+        if existing is not None and existing.book_id == candidate.book_id:
+            updated = merge_profile_fields(existing, {
+                **entity,
+                "first_chapter": min(int(candidate.chapter_number or 1), int(existing.first_chapter or 1)),
+                "last_seen_chapter": max(int(existing.last_seen_chapter or existing.first_chapter or 1), int(candidate.chapter_number or 1)),
+            })
+            for key, value in updated.items():
+                setattr(existing, key, value)
+            _approve_character_from_review(
+                existing,
+                reason_codes=["review_candidate_promoted", *list(candidate.reason_codes or [])],
+                action="character_review_promoted",
+                details={"candidate_id": str(candidate.id)},
+            )
+            candidate.status = CHARACTER_CANDIDATE_ACCEPTED
+            return existing
+
     character = Character(**build_character_profile(entity, candidate.book_id, int(candidate.chapter_number or 1)))
     db.add(character)
     await db.flush()
+    _approve_character_from_review(
+        character,
+        reason_codes=["review_candidate_promoted", *list(candidate.reason_codes or [])],
+        action="character_review_promoted",
+        details={"candidate_id": str(candidate.id)},
+    )
     candidate.matched_character_id = character.id
     candidate.status = CHARACTER_CANDIDATE_PROMOTED
     return character
@@ -1396,6 +2065,20 @@ async def attach_character_candidate(
         setattr(character, key, value)
     candidate.matched_character_id = character.id
     candidate.status = CHARACTER_CANDIDATE_ACCEPTED
+    if character.approval_state == CHARACTER_APPROVAL_PENDING_REVIEW or character.visibility_state != CHARACTER_VISIBILITY_VISIBLE:
+        _approve_character_from_review(
+            character,
+            reason_codes=["review_candidate_attached", *list(candidate.reason_codes or [])],
+            action="character_review_attached",
+            details={"candidate_id": str(candidate.id)},
+        )
+    else:
+        append_character_review_audit_entry(
+            character,
+            action="character_candidate_attached",
+            details={"candidate_id": str(candidate.id)},
+            reason_codes=["review_candidate_attached", *list(candidate.reason_codes or [])],
+        )
     return character
 
 
@@ -1424,6 +2107,12 @@ async def demote_character_to_review_candidate(
         [row.mention_text for row in mention_rows if clean_optional_text(row.mention_text)]
     )[:6]
     metadata = dict(character.analysis_metadata or {})
+    _quarantine_character_for_review(
+        character,
+        reason_codes=["manual_demoted_for_review", *list(reason_codes or [])],
+        action="character_demoted_for_review",
+        details={"review_note": clean_optional_text(review_note)},
+    )
     candidate = await record_character_candidate(
         db,
         book_id=character.book_id,
@@ -1431,7 +2120,7 @@ async def demote_character_to_review_candidate(
         raw_name=character.name,
         proposed_name=character.name,
         aliases=character.aliases or [],
-        matched_character_id=None,
+        matched_character_id=character.id,
         status=CHARACTER_CANDIDATE_PENDING,
         confidence=max(0, min(100, int(round(float(metadata.get("canonical_confidence") or 0) * 100)))),
         reason_codes=["manual_demoted_for_review", *list(reason_codes or [])],
@@ -1457,7 +2146,6 @@ async def demote_character_to_review_candidate(
         },
         source_batch_key=f"manual-demote:{character.book_id}:{character.id}",
     )
-    await db.delete(character)
     await db.flush()
     return candidate
 
@@ -1961,6 +2649,11 @@ def build_manual_character(
         arc_type=clean_optional_text(arc_type),
         arc_summary=clean_optional_text(arc_summary),
         is_manual=True,
+        visibility_state=CHARACTER_VISIBILITY_VISIBLE,
+        approval_state=CHARACTER_APPROVAL_PROTECTED,
+        approval_source=CHARACTER_APPROVAL_SOURCE_MANUAL_REVIEW,
+        approval_reason_codes=["manual_character"],
+        approval_updated_at=datetime.now(UTC),
     )
     apply_manual_character_description(character, description)
     return character
@@ -2658,6 +3351,8 @@ async def merge_characters(
         raise ValueError("Characters must belong to the same book")
     if primary.id == secondary.id:
         return primary
+    primary_visibility, primary_approval, primary_source, primary_reason_codes = character_governance(primary)
+    secondary_visibility, secondary_approval, secondary_source, secondary_reason_codes = character_governance(secondary)
 
     merged = merge_profile_fields(primary, secondary)
     merged_manual_description = _merge_character_descriptions(
@@ -2746,6 +3441,27 @@ async def merge_characters(
 
     await _merge_character_references(db, primary=primary, secondary=secondary, book_id=book_id)
     await _dedupe_relationships(db, book_id)
+    if primary_approval == CHARACTER_APPROVAL_PROTECTED or secondary_approval == CHARACTER_APPROVAL_PROTECTED:
+        merged_visibility = CHARACTER_VISIBILITY_VISIBLE
+        merged_approval = CHARACTER_APPROVAL_PROTECTED
+        merged_source = CHARACTER_APPROVAL_SOURCE_MANUAL_REVIEW
+    elif primary_visibility == CHARACTER_VISIBILITY_VISIBLE or secondary_visibility == CHARACTER_VISIBILITY_VISIBLE:
+        merged_visibility = CHARACTER_VISIBILITY_VISIBLE
+        merged_approval = CHARACTER_APPROVAL_APPROVED
+        merged_source = primary_source or secondary_source or CHARACTER_APPROVAL_SOURCE_MANUAL_REVIEW
+    else:
+        merged_visibility = CHARACTER_VISIBILITY_QUARANTINED
+        merged_approval = CHARACTER_APPROVAL_PENDING_REVIEW
+        merged_source = primary_source or secondary_source or CHARACTER_APPROVAL_SOURCE_MANUAL_REVIEW
+    set_character_review_state(
+        primary,
+        visibility_state=merged_visibility,
+        approval_state=merged_approval,
+        approval_source=merged_source,
+        reason_codes=[*primary_reason_codes, *secondary_reason_codes, "merged_character_record"],
+        action="character_merged",
+        details={"secondary_character_id": str(secondary.id)},
+    )
     await db.delete(secondary)
     await db.flush()
     update_character_classification(primary)
@@ -2753,23 +3469,7 @@ async def merge_characters(
 
 
 async def _dedupe_relationships(db: AsyncSession, book_id: uuid.UUID) -> None:
-    rels_result = await db.execute(select(CharacterRelationship).where(CharacterRelationship.book_id == book_id))
-    rels = rels_result.scalars().all()
-    seen: set[tuple[str, str, str, int | None, int | None, str]] = set()
-    for rel in rels:
-        pair = sorted([str(rel.character_a_id), str(rel.character_b_id)])
-        key = (
-            pair[0],
-            pair[1],
-            rel.rel_type or "",
-            rel.from_chapter,
-            rel.to_chapter,
-            (rel.description or "").strip().lower(),
-        )
-        if key in seen:
-            await db.delete(rel)
-            continue
-        seen.add(key)
+    await repair_relationship_timelines(db, book_id=book_id)
 
 
 def _clean_tracker_text(value: object | None) -> str | None:

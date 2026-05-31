@@ -3,11 +3,16 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from contextlib import asynccontextmanager
 import json
+import os
 import uuid
+from collections.abc import AsyncIterator
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.engine import make_url
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import selectinload
 
 from app.core.database import AsyncSessionLocal
@@ -23,8 +28,30 @@ def _parser_character_diagnostics(book: Book) -> dict[str, Any]:
     return parser.get("character_extraction") if isinstance(parser.get("character_extraction"), dict) else {}
 
 
+def _async_database_url(raw_url: str) -> str:
+    url = make_url(raw_url.replace("postgresql://", "postgresql+psycopg://", 1))
+    return url.render_as_string(hide_password=False)
+
+
+@asynccontextmanager
+async def _diagnostics_session() -> AsyncIterator[AsyncSession]:
+    test_database_url = os.getenv("TEST_DATABASE_URL")
+    if not test_database_url:
+        async with AsyncSessionLocal() as db:
+            yield db
+        return
+
+    engine = create_async_engine(_async_database_url(test_database_url), echo=False)
+    session_local = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    try:
+        async with session_local() as db:
+            yield db
+    finally:
+        await engine.dispose()
+
+
 async def build_report(book_id: uuid.UUID, compare_after_repair_json: str | None = None) -> dict[str, Any]:
-    async with AsyncSessionLocal() as db:
+    async with _diagnostics_session() as db:
         book = await db.get(Book, book_id)
         if book is None:
             raise SystemExit(f"Book not found: {book_id}")

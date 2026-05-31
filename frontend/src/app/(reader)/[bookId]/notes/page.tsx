@@ -19,7 +19,7 @@ const ObsidianNotesEditor = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="rounded-[1.8rem] border border-dashed py-24 text-center text-sm text-inherit">
+      <div className="rounded-lg border border-dashed py-24 text-center text-sm text-inherit">
         Loading vault notes workspace...
       </div>
     ),
@@ -30,7 +30,7 @@ const AuthorToolsNav = dynamic(
   () => import("@/components/layout/AuthorToolsNav").then((module) => module.AuthorToolsNav),
   {
     ssr: false,
-    loading: () => <div className="rounded-[1.8rem] border border-dashed p-8" />,
+    loading: () => <div className="rounded-lg border border-dashed p-8" />,
   }
 )
 
@@ -95,11 +95,13 @@ export default function BookNotesPage() {
             bookData={book}
             title="Notes workflow"
             description="Keep the vault tree, manuscript, export studio, and continuity tools one click away while you edit."
+            variant="rail"
+            railSize="compact"
           />
 
           <div className="space-y-8">
             {notesLoading ? (
-              <div className={`rounded-[1.8rem] border border-dashed py-24 text-center ${isDark ? "border-white/10 text-slate-400" : "border-stone-300 text-stone-500"}`}>Loading vault notes workspace...</div>
+              <div className={`rounded-lg border border-dashed py-24 text-center ${isDark ? "border-white/10 text-slate-400" : "border-stone-300 text-stone-500"}`}>Loading vault notes workspace...</div>
             ) : (
               <>
                 <ObsidianNotesEditor
@@ -110,10 +112,10 @@ export default function BookNotesPage() {
                   isDark={isDark}
                 />
 
-                <section className={`rounded-[1.8rem] border p-6 ${isDark ? "border-white/10 bg-white/5" : "border-white/70 bg-white/82"}`}>
+                <section className={`rounded-lg border p-6 ${isDark ? "border-white/10 bg-white/5" : "border-white/70 bg-white/82"}`}>
               <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
                 <div>
-                  <p className={`text-[11px] font-semibold uppercase tracking-[0.28em] ${isDark ? "text-amber-300" : "text-amber-700"}`}>Existing notes</p>
+                  <p className={`text-3xs font-semibold uppercase tracking-[0.28em] ${isDark ? "text-amber-300" : "text-amber-700"}`}>Existing notes</p>
                   <h2 className={`mt-2 font-serif text-3xl ${isDark ? "text-white" : "text-stone-950"}`}>Chapter-linked manuscript notes</h2>
                   <p className={`mt-2 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
                     Your original manuscript notes still live here. The Obsidian vault is additive, not a replacement.
@@ -142,20 +144,20 @@ export default function BookNotesPage() {
               <div className="mt-5 grid gap-4 lg:grid-cols-2">
                 {bookNotes.length === 0 ? (
                   !secondaryDataEnabled || bookNotesLoading ? (
-                    <div className={`rounded-[1.25rem] border border-dashed px-5 py-10 text-center text-sm ${isDark ? "border-white/10 text-slate-400" : "border-stone-300 text-stone-500"}`}>
+                    <div className={`rounded-md border border-dashed px-5 py-10 text-center text-sm ${isDark ? "border-white/10 text-slate-400" : "border-stone-300 text-stone-500"}`}>
                       Loading chapter-linked notes...
                     </div>
                   ) : (
-                  <div className={`rounded-[1.25rem] border border-dashed px-5 py-10 text-center text-sm ${isDark ? "border-white/10 text-slate-400" : "border-stone-300 text-stone-500"}`}>
+                  <div className={`rounded-md border border-dashed px-5 py-10 text-center text-sm ${isDark ? "border-white/10 text-slate-400" : "border-stone-300 text-stone-500"}`}>
                     No chapter-linked notes saved for this book yet.
                   </div>
                   )
                 ) : (
                   bookNotes.map((note) => (
-                    <article key={note.id} className={`rounded-[1.25rem] border p-5 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50/70"}`}>
+                    <article key={note.id} className={`rounded-md border p-5 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50/70"}`}>
                       <div className="flex items-start justify-between gap-3">
                         <div>
-                          <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>
+                          <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>
                             {note.chapter_number ? `Chapter ${note.chapter_number}${note.chapter_title ? ` - ${note.chapter_title}` : ""}` : "Whole-book note"}
                           </p>
                           <h3 className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{note.title || "Untitled note"}</h3>

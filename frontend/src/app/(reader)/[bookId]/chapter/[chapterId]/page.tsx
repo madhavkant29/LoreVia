@@ -1,8 +1,39 @@
-"use client"
-import { useParams } from "next/navigation"
-import { ReaderView } from "@/components/reader/ReaderView"
+import { HydrationBoundary, QueryClient, dehydrate } from "@tanstack/react-query"
+import { headers } from "next/headers"
+import { serverApi } from "@/lib/api/server"
+import { readerCacheKey } from "@/lib/query/cacheKeys"
+import { ChapterClient } from "./ChapterClient"
 
-export default function ChapterPage() {
-  const { bookId, chapterId } = useParams<{ bookId: string; chapterId: string }>()
-  return <ReaderView bookId={bookId} chapterNum={parseInt(chapterId)} />
+export default async function ChapterPage({
+  params,
+}: {
+  params: Promise<{ bookId: string; chapterId: string }>
+}) {
+  const { bookId, chapterId } = await params
+  const chapterNum = parseInt(chapterId)
+  const cookieHeader = (await headers()).get("cookie") ?? null
+
+  const queryClient = new QueryClient()
+
+  try {
+    await queryClient.prefetchQuery({
+      queryKey: readerCacheKey(bookId, chapterNum),
+      queryFn: async () => {
+        const chapter = await serverApi.getChapter(bookId, chapterNum, cookieHeader)
+        if (chapter === null) {
+          throw new Error("Chapter prefetch unavailable")
+        }
+        return chapter
+      },
+      staleTime: 60_000,
+    })
+  } catch {
+    // Prefetch failed — let the client fetch it instead
+  }
+
+  return (
+    <HydrationBoundary state={dehydrate(queryClient)}>
+      <ChapterClient bookId={bookId} chapterNum={chapterNum} />
+    </HydrationBoundary>
+  )
 }

@@ -2,7 +2,14 @@ import uuid
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
-from app.utils.notification_utils import BookReadyStats, build_book_ready_notification, build_revision_digest_notification
+import pytest
+
+from app.utils.notification_utils import (
+    BookReadyStats,
+    _book_ready_diagnostic_totals,
+    build_book_ready_notification,
+    build_revision_digest_notification,
+)
 
 
 def test_build_revision_digest_notification_includes_revision_summary():
@@ -151,3 +158,30 @@ def test_build_book_ready_notification_marks_partial_analysis_failure():
     assert "analysis pipeline failed" in notification.body
     assert notification.data["analysis_status"] == "failed"
     assert notification.data["retry_actions"] == ["retry_analysis"]
+
+
+@pytest.mark.parametrize(
+    ("writer_workspace", "expected"),
+    [
+        (
+            {
+                "processing": {
+                    "parser_diagnostics": {
+                        "character_extraction": {
+                            "totals": {
+                                "saved_characters": 4,
+                                "relationships_persisted": 2,
+                            }
+                        }
+                    }
+                }
+            },
+            (4, 2),
+        ),
+        ({}, (0, 0)),
+        ({"processing": {"parser_diagnostics": {"character_extraction": {}}}}, (0, 0)),
+    ],
+)
+def test_book_ready_diagnostic_totals_reads_extraction_totals(writer_workspace, expected):
+    book = SimpleNamespace(writer_workspace=writer_workspace)
+    assert _book_ready_diagnostic_totals(book) == expected

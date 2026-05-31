@@ -9,6 +9,7 @@ from fastapi.responses import Response
 from pydantic import ValidationError
 
 from app.api.v1.routes import advisor
+from app.utils import advisor_utils as advisor_utils_module
 from app.schemas.advisor import (
     AdvisorMessage,
     AdvisorRequest,
@@ -136,6 +137,8 @@ def _patch_route_caches(monkeypatch, cache: _AsyncCache) -> None:
     monkeypatch.setattr(advisor, "set_editorial_review_cache", cache.set)
     monkeypatch.setattr(advisor, "get_proactive_scan_cache", cache.get)
     monkeypatch.setattr(advisor, "set_proactive_scan_cache", cache.set)
+    monkeypatch.setattr(advisor_utils_module, "get_proactive_scan_cache", cache.get)
+    monkeypatch.setattr(advisor_utils_module, "set_proactive_scan_cache", cache.set)
     monkeypatch.setattr(advisor, "get_prose_tighten_cache", cache.get)
     monkeypatch.setattr(advisor, "set_prose_tighten_cache", cache.set)
     monkeypatch.setattr(advisor, "get_voice_consistency_cache", cache.get)
@@ -580,8 +583,9 @@ async def test_advisor_suggestions_adds_sparse_proactive_audit(monkeypatch):
 
     _patch_route_caches(monkeypatch, cache)
     monkeypatch.setattr(advisor, "AsyncOpenAI", lambda api_key: client)
-    monkeypatch.setattr(advisor, "build_story_context", _fake_story_context)
-    monkeypatch.setattr(advisor, "make_editorial_cache_key", lambda *_args: "scan-cache")
+    monkeypatch.setattr(advisor_utils_module, "AsyncOpenAI", lambda api_key: client)
+    monkeypatch.setattr(advisor_utils_module, "build_story_context", _fake_story_context)
+    monkeypatch.setattr(advisor_utils_module, "make_editorial_cache_key", lambda *_args: "scan-cache")
     monkeypatch.setattr(advisor.settings, "OPENAI_API_KEY", "test-key", raising=False)
     monkeypatch.setattr(advisor.settings, "OPENAI_INTEL_MODEL", "gpt-test", raising=False)
 
@@ -644,8 +648,10 @@ async def test_editorial_review_validates_cache_and_happy_path(monkeypatch):
 
     cache = _AsyncCache()
     client = _FakeClient('{"overall_verdict":"Needs polish"}')
+    search_calls: list[dict] = []
 
     async def _fake_semantic_search(*_args, **_kwargs):
+        search_calls.append(dict(_kwargs))
         return [{"chapter_num": 2, "chapter_title": "Storm", "chunk_index": 7, "text": "Passage", "score": 0.81}]
 
     async def _fake_story_context(*_args, **_kwargs):
@@ -669,6 +675,8 @@ async def test_editorial_review_validates_cache_and_happy_path(monkeypatch):
 
     assert payload["review"]["overall_verdict"] == '{"overall_verdict":"Needs polish"}'
     assert payload["retrieved_passages"][0]["chunk_index"] == 7
+    assert search_calls[0]["limit"] == 8
+    assert search_calls[0]["similarity_threshold"] == 0.28
     assert cache.set_calls
     assert client.closed is True
 
@@ -766,7 +774,7 @@ async def test_manuscript_synopsis_requires_chapters_and_returns_coverage(monkey
 
     db = _FakeDB(
         get_values=[book],
-        execute_values=[_Result(all_rows=[(1, "Start", "s3://one"), (2, None, None)])],
+        execute_values=[_Result(all_rows=[(1, "Start", "s3://one", 1), (2, None, None, 1)])],
     )
     client = _FakeClient('{"synopsis":"Short"}')
     monkeypatch.setattr(advisor, "download_book", lambda _key: b"Chapter text")
@@ -775,13 +783,71 @@ async def test_manuscript_synopsis_requires_chapters_and_returns_coverage(monkey
 
     monkeypatch.setattr(advisor, "build_story_context", _fake_story_context)
     monkeypatch.setattr(advisor, "AsyncOpenAI", lambda api_key: client)
-    monkeypatch.setattr(advisor, "normalize_synopsis_result", lambda raw, _spoiler: {"synopsis": raw})
+    monkeypatch.setattr(advisor, "normalize_synopsis_result", lambda raw, _spoiler: {"spoiler_level": "minimal", "synopsis": raw, "focus_points": []})
 
     payload = await advisor.manuscript_synopsis(book_id, db=db, current_user=SimpleNamespace(id=user_id))
 
-    assert payload["synopsis"].startswith("{")
-    assert payload["coverage_chapters"] == [1, 2]
+    assert payload.synopsis.startswith("{")
+    assert payload.coverage_chapters == [1, 2]
+    assert payload.cached is False
     assert client.closed is True
+
+
+@pytest.mark.asyncio
+async def test_manuscript_synopsis_caching(monkeypatch):
+    book_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    book = SimpleNamespace(id=book_id, user_id=user_id, title="Atlas", total_chapters=6)
+
+    db = _FakeDB(
+        get_values=[book],
+        execute_values=[
+            _Result(all_rows=[(1, "Start", "s3://one", 1), (2, "Next", "s3://two", 1)]),
+        ],
+    )
+    client = _FakeClient('{"synopsis":"A short synopsis."}', '{"synopsis":"Should not be called"}')
+    monkeypatch.setattr(advisor, "download_book", lambda _key: b"Chapter text")
+    monkeypatch.setattr(advisor, "AsyncOpenAI", lambda api_key: client)
+
+    async def _fake_story_context(*_args, **_kwargs):
+        return "Story context"
+
+    monkeypatch.setattr(advisor, "build_story_context", _fake_story_context)
+    monkeypatch.setattr(
+        advisor,
+        "normalize_synopsis_result",
+        lambda raw, _spoiler: {"spoiler_level": "minimal", "synopsis": raw, "focus_points": ["premise"]},
+    )
+
+    stored_payload: dict | None = None
+
+    async def _fake_set_synopsis_cache(bk_id, spoiler, ch, payload):
+        nonlocal stored_payload
+        stored_payload = payload
+
+    monkeypatch.setattr(advisor, "set_synopsis_cache", _fake_set_synopsis_cache)
+
+    payload1 = await advisor.manuscript_synopsis(book_id, db=db, current_user=SimpleNamespace(id=user_id))
+    assert payload1.cached is False
+    assert len(client.calls) == 1
+
+    async def _fake_get_synopsis_cache(bk_id, spoiler, ch):
+        if stored_payload is not None:
+            return stored_payload
+        return None
+
+    monkeypatch.setattr(advisor, "get_synopsis_cache", _fake_get_synopsis_cache)
+
+    db2 = _FakeDB(
+        get_values=[book],
+        execute_values=[
+            _Result(all_rows=[(1, "Start", "s3://one", 1), (2, "Next", "s3://two", 1)]),
+        ],
+    )
+    payload2 = await advisor.manuscript_synopsis(book_id, db=db2, current_user=SimpleNamespace(id=user_id))
+    assert payload2.cached is True
+    assert len(client.calls) == 1
+    assert payload1.synopsis == payload2.synopsis
 
 
 @pytest.mark.asyncio
@@ -831,8 +897,10 @@ async def test_voice_consistency_review_builds_character_matches(monkeypatch):
         ],
     )
     client = _FakeClient('{"overall":"steady"}')
+    search_calls: list[dict] = []
 
     async def _fake_semantic_search(*_args, **_kwargs):
+        search_calls.append(dict(_kwargs))
         return [{"chapter_num": 2, "chapter_title": "Storm", "chunk_index": 5, "text": "Excerpt", "score": 0.88}]
 
     async def _fake_story_context(*_args, **_kwargs):
@@ -859,7 +927,222 @@ async def test_voice_consistency_review_builds_character_matches(monkeypatch):
     assert payload["characters_reviewed"] == ["Iris"]
     assert payload["character_matches"][0]["character_name"] == "Iris"
     assert payload["character_matches"][0]["closest_other_character"] == "Milo"
+    assert search_calls[0]["limit"] == 8
+    assert search_calls[0]["similarity_threshold"] == 0.28
     assert client.closed is True
+
+
+@pytest.mark.asyncio
+async def test_voice_consistency_review_respects_selected_character(monkeypatch):
+    book_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    char_id = uuid.uuid4()
+    other_id = uuid.uuid4()
+    book = SimpleNamespace(id=book_id, user_id=user_id, title="Atlas", total_chapters=9)
+    profile = SimpleNamespace(
+        character_id=char_id,
+        sample_dialogue_count=2,
+        sample_word_count=50,
+        avg_sentence_length=8,
+        avg_word_length_x100=420,
+        contraction_rate_x1000=10,
+        question_rate_x1000=20,
+        exclamation_rate_x1000=5,
+        ellipsis_rate_x1000=0,
+        dash_rate_x1000=1,
+        uppercase_rate_x1000=0,
+        formality_score_x1000=500,
+        lexical_complexity_x1000=550,
+        emotional_intensity_x1000=600,
+    )
+    other_profile = SimpleNamespace(
+        character_id=other_id,
+        sample_dialogue_count=3,
+        sample_word_count=60,
+        avg_sentence_length=9,
+        avg_word_length_x100=430,
+        contraction_rate_x1000=11,
+        question_rate_x1000=18,
+        exclamation_rate_x1000=4,
+        ellipsis_rate_x1000=0,
+        dash_rate_x1000=1,
+        uppercase_rate_x1000=0,
+        formality_score_x1000=490,
+        lexical_complexity_x1000=540,
+        emotional_intensity_x1000=590,
+    )
+    db = _FakeDB(
+        get_values=[book],
+        execute_values=[
+            _Result(
+                mappings=[
+                    {"id": char_id, "name": "Iris"},
+                    {"id": other_id, "name": "Milo"},
+                ]
+            ),
+            _Result(scalars=[profile, other_profile]),
+        ],
+    )
+    client = _FakeClient('{"overall_verdict":"steady","issues":[]}')
+
+    async def _fake_semantic_search(*_args, **_kwargs):
+        return []
+
+    async def _fake_story_context(*_args, **_kwargs):
+        return "Story context"
+
+    monkeypatch.setattr(advisor, "semantic_search", _fake_semantic_search)
+    monkeypatch.setattr(advisor, "build_story_context", _fake_story_context)
+    monkeypatch.setattr(advisor, "identify_character_mentions", lambda _text, rows: rows)
+    monkeypatch.setattr(advisor, "extract_dialogue_samples_by_character", lambda *_args: {"Iris": ["Hello there."]})
+    monkeypatch.setattr(advisor, "build_character_voice_context", lambda chars: f"chars:{len(chars)}")
+    monkeypatch.setattr(advisor, "normalize_voice_consistency_result", lambda _raw: {"issues": [], "overall_verdict": "steady"})
+    monkeypatch.setattr(advisor, "compute_voice_metrics", lambda samples: {"sample_dialogue_count": len(samples)})
+    monkeypatch.setattr(advisor, "score_voice_match", lambda _profile, metrics: (87 if metrics["sample_dialogue_count"] else 52, ["cadence"]))
+    monkeypatch.setattr(advisor, "AsyncOpenAI", lambda api_key: client)
+
+    payload = await advisor.voice_consistency_review(
+        book_id,
+        body=VoiceConsistencyRequest(text="Iris says hello.", chapter_num=3, character_id=char_id),
+        db=db,
+        current_user=SimpleNamespace(id=user_id),
+        _=None,
+    )
+
+    assert payload["characters_reviewed"] == ["Iris"]
+    assert [item["character_name"] for item in payload["character_matches"]] == ["Iris"]
+    assert payload["warnings"] == []
+    assert client.closed is True
+
+
+@pytest.mark.asyncio
+async def test_voice_consistency_review_rejects_character_from_another_book(monkeypatch):
+    book_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    selected_id = uuid.uuid4()
+    other_id = uuid.uuid4()
+    book = SimpleNamespace(id=book_id, user_id=user_id, title="Atlas", total_chapters=9)
+    db = _FakeDB(
+        get_values=[book],
+        execute_values=[
+            _Result(mappings=[{"id": other_id, "name": "Milo"}]),
+        ],
+    )
+
+    async def _fake_semantic_search(*_args, **_kwargs):
+        return []
+
+    async def _fake_story_context(*_args, **_kwargs):
+        return "Story context"
+
+    monkeypatch.setattr(advisor, "semantic_search", _fake_semantic_search)
+    monkeypatch.setattr(advisor, "build_story_context", _fake_story_context)
+
+    with pytest.raises(HTTPException) as exc:
+        await advisor.voice_consistency_review(
+            book_id,
+            body=VoiceConsistencyRequest(text="Iris says hello.", chapter_num=3, character_id=selected_id),
+            db=db,
+            current_user=SimpleNamespace(id=user_id),
+            _=None,
+        )
+
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "Selected character does not belong to this book."
+
+
+@pytest.mark.asyncio
+async def test_voice_consistency_review_warns_when_selected_character_needs_full_passage_fallback(monkeypatch):
+    book_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    char_id = uuid.uuid4()
+    other_id = uuid.uuid4()
+    book = SimpleNamespace(id=book_id, user_id=user_id, title="Atlas", total_chapters=9)
+    profile = SimpleNamespace(
+        character_id=char_id,
+        sample_dialogue_count=2,
+        sample_word_count=50,
+        avg_sentence_length=8,
+        avg_word_length_x100=420,
+        contraction_rate_x1000=10,
+        question_rate_x1000=20,
+        exclamation_rate_x1000=5,
+        ellipsis_rate_x1000=0,
+        dash_rate_x1000=1,
+        uppercase_rate_x1000=0,
+        formality_score_x1000=500,
+        lexical_complexity_x1000=550,
+        emotional_intensity_x1000=600,
+    )
+    other_profile = SimpleNamespace(
+        character_id=other_id,
+        sample_dialogue_count=3,
+        sample_word_count=60,
+        avg_sentence_length=9,
+        avg_word_length_x100=430,
+        contraction_rate_x1000=11,
+        question_rate_x1000=18,
+        exclamation_rate_x1000=4,
+        ellipsis_rate_x1000=0,
+        dash_rate_x1000=1,
+        uppercase_rate_x1000=0,
+        formality_score_x1000=490,
+        lexical_complexity_x1000=540,
+        emotional_intensity_x1000=590,
+    )
+    db = _FakeDB(
+        get_values=[book],
+        execute_values=[
+            _Result(
+                mappings=[
+                    {"id": char_id, "name": "Iris"},
+                    {"id": other_id, "name": "Milo"},
+                ]
+            ),
+            _Result(scalars=[profile, other_profile]),
+        ],
+    )
+    client = _FakeClient('{"overall_verdict":"steady","issues":[]}')
+
+    async def _fake_semantic_search(*_args, **_kwargs):
+        return []
+
+    async def _fake_story_context(*_args, **_kwargs):
+        return "Story context"
+
+    monkeypatch.setattr(advisor, "semantic_search", _fake_semantic_search)
+    monkeypatch.setattr(advisor, "build_story_context", _fake_story_context)
+    monkeypatch.setattr(advisor, "extract_dialogue_samples_by_character", lambda *_args: {})
+    monkeypatch.setattr(advisor, "build_character_voice_context", lambda chars: f"chars:{len(chars)}")
+    monkeypatch.setattr(advisor, "normalize_voice_consistency_result", lambda _raw: {"issues": [], "overall_verdict": "steady"})
+    monkeypatch.setattr(advisor, "compute_voice_metrics", lambda samples: {"sample_dialogue_count": len(samples)})
+    monkeypatch.setattr(advisor, "score_voice_match", lambda _profile, metrics: (71 if metrics["sample_dialogue_count"] else 52, ["cadence"]))
+    monkeypatch.setattr(advisor, "AsyncOpenAI", lambda api_key: client)
+
+    payload = await advisor.voice_consistency_review(
+        book_id,
+        body=VoiceConsistencyRequest(text="Iris says hello.", chapter_num=3, character_id=char_id),
+        db=db,
+        current_user=SimpleNamespace(id=user_id),
+        _=None,
+    )
+
+    assert payload["characters_reviewed"] == ["Iris"]
+    assert payload["warnings"] == [
+        "Dialogue could not be confidently attributed to Iris; the review used the full submitted passage instead."
+    ]
+    assert payload["character_matches"][0]["sample_dialogue_count"] == 1
+    assert client.closed is True
+
+
+def test_make_editorial_cache_key_varies_with_character_selection():
+    book_id = uuid.uuid4()
+    text = "Same passage"
+
+    auto_key = advisor.make_editorial_cache_key(book_id, text, 4)
+    selected_key = advisor.make_editorial_cache_key(book_id, text, 4, uuid.uuid4())
+
+    assert auto_key != selected_key
 
 
 @pytest.mark.asyncio
@@ -1015,11 +1298,11 @@ async def test_series_continuity_check_handles_no_prior_books_and_full_review(mo
     async def _fake_story_context(*_args, **_kwargs):
         return "Series context"
 
-    async def _fake_embed_text(_text, **_kwargs):
-        return [0.4, 0.2]
+    async def _fake_series_hits(*_args, **_kwargs):
+        return [{"text": "Earlier clue", "chapter_num": 4, "chapter_title": "Vault", "book_title": "Book One", "relevance": 0.8}]
 
     monkeypatch.setattr(advisor, "build_series_story_context", _fake_story_context)
-    monkeypatch.setattr(advisor, "embed_text", _fake_embed_text)
+    monkeypatch.setattr(advisor, "retrieve_series_continuity_passages", _fake_series_hits)
     monkeypatch.setattr(advisor, "normalize_series_continuity_result", lambda raw: {"overall_verdict": raw})
     monkeypatch.setattr(advisor, "AsyncOpenAI", lambda api_key: client)
     db = _FakeDB(
@@ -1027,7 +1310,6 @@ async def test_series_continuity_check_handles_no_prior_books_and_full_review(mo
         execute_values=[
             _Result(all_rows=[SimpleNamespace(book_id=prior_id, position=1), SimpleNamespace(book_id=book_id, position=2)]),
             _Result(all_rows=[SimpleNamespace(id=prior_id, title="Book One")]),
-            _Result(fetchall_rows=[SimpleNamespace(text="Earlier clue", chapter_num=4, chapter_title="Vault", book_title="Book One", relevance=0.8)]),
         ],
     )
 

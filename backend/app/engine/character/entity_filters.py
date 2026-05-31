@@ -34,6 +34,17 @@ NUMBER_WORDS = {
     "first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth",
 }
 
+SINGLE_TOKEN_DISCOURSE_WORDS = frozenset({
+    "absolutely", "actually", "again", "aha", "ahaha", "about", "according",
+    "also", "clean", "dammit", "during", "fine", "flatly", "good", "hadn",
+    "having", "heh", "hmph", "hunh", "however", "language", "looking",
+    "maybe", "moreover", "neither", "next", "nothing", "okay", "optimistic",
+    "parent", "please", "really", "scary", "send", "setting", "sheesh",
+    "someone", "staring", "still", "stop", "sure", "sunday", "swings",
+    "take", "thanks", "though", "true", "understood", "unfortunately",
+    "very", "wait", "whether",
+})
+
 COMMON_NON_NAME_WORDS = {
     # High-frequency English words that often appear capitalized at sentence start
     # and should almost never be treated as character entities.
@@ -45,7 +56,7 @@ COMMON_NON_NAME_WORDS = {
     "their", "them", "then", "there", "these", "they", "this", "those", "to",
     "too", "up", "us", "was", "we", "were", "what", "when", "where", "which",
     "who", "why", "well", "would", "with", "without", "you", "your",
-}
+} | set(SINGLE_TOKEN_DISCOURSE_WORDS)
 
 NON_NAME_PATTERNS = (
     re.compile(r"^(on|in|at|by|for|of|to|from)\s+\w+$", re.IGNORECASE),
@@ -214,9 +225,16 @@ def _single_token_name(name: str | None) -> str | None:
     return words[0].casefold()
 
 
-def _single_token_has_grounded_support(evidence: dict | None) -> bool:
+def _single_token_has_grounded_support(
+    name: str | None,
+    evidence: dict | None,
+    *,
+    stopwords: frozenset[str] = frozenset(COMMON_NON_NAME_WORDS),
+) -> bool:
     if not isinstance(evidence, dict):
         return False
+    single_token = _single_token_name(name)
+    is_common_word = bool(single_token and single_token in stopwords)
     mention_count = int(evidence.get("mention_count") or 0)
     strong_mention_count = int(evidence.get("strong_mention_count") or 0)
     has_dialogue_or_action = bool(evidence.get("has_dialogue_or_action"))
@@ -225,12 +243,14 @@ def _single_token_has_grounded_support(evidence: dict | None) -> bool:
     return bool(
         strong_mention_count >= 2
         or (
-            mention_count >= 2
+            not is_common_word
+            and mention_count >= 2
             and has_dialogue_or_action
             and (appears_multiple_times or has_physical_description)
         )
         or (
-            strong_mention_count >= 1
+            not is_common_word
+            and strong_mention_count >= 1
             and (
                 has_dialogue_or_action
                 or has_physical_description
@@ -310,7 +330,7 @@ def character_persistence_decision(
     strong_single_token_profile = profile_score >= 2 and _has_meaningful_text(arc_summary)
 
     if _single_token_name(name):
-        if not _single_token_has_grounded_support(evidence) and not strong_single_token_profile:
+        if not _single_token_has_grounded_support(name, evidence, stopwords=stopwords) and not strong_single_token_profile:
             reasons.append("single_token_needs_stronger_support")
         if support_score < 3 and profile_score == 0 and not strong_single_token_profile:
             reasons.append("single_token_lacks_profile_evidence")
@@ -325,7 +345,7 @@ def character_persistence_decision(
     if support_score < 2 and profile_score == 0:
         reasons.append("no_profile_or_passage_signal")
 
-    if _single_token_name(name) and not _single_token_has_grounded_support(evidence) and not strong_single_token_profile:
+    if _single_token_name(name) and not _single_token_has_grounded_support(name, evidence, stopwords=stopwords) and not strong_single_token_profile:
         reasons.append("single_token_requires_more_evidence")
 
     allowed = not reasons
@@ -433,6 +453,44 @@ def ner_entity_score(name: str) -> int:
     # Pick the longest entity span as the primary classification.
     best = max(doc.ents, key=lambda e: len(e.text), default=None)
     return NER_LABEL_SCORES.get(best.label_, 0) if best else 0
+
+
+@functools.lru_cache(maxsize=4096)
+def contextual_ner_entity_label(text: str, target_name: str) -> str | None:
+    """Return the best-matching NER label for a target mention inside context."""
+    if not text or not target_name:
+        return None
+    nlp = _get_nlp()
+    if nlp is None:
+        return None
+
+    target_norm = normalize_entity_name(target_name)
+    if not target_norm:
+        return None
+
+    doc = nlp(text.strip())
+    best_label: str | None = None
+    best_score = -1
+    for ent in doc.ents:
+        ent_norm = normalize_entity_name(ent.text)
+        if not ent_norm:
+            continue
+
+        score = -1
+        if ent_norm == target_norm:
+            score = 4
+        elif target_norm.startswith(ent_norm) or ent_norm.startswith(target_norm):
+            score = 3
+        elif target_norm in ent_norm or ent_norm in target_norm:
+            score = 2
+        elif set(ent_norm.split()) & set(target_norm.split()):
+            score = 1
+
+        if score > best_score:
+            best_score = score
+            best_label = ent.label_
+
+    return best_label
 
 
 # ─── Composite visibility scoring constants ───────────────────────────────────

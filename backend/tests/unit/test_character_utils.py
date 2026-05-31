@@ -9,7 +9,11 @@ from app.models.user import User
 from app.utils.character_utils import (
     backfill_character_first_chapters_for_chapter_text,
     build_character_analysis_payload,
+    build_character_dossier_summary,
     find_earliest_character_mention_chapters,
+    infer_character_trust_tier,
+    is_cast_visible_character,
+    set_character_review_state,
 )
 
 
@@ -53,6 +57,94 @@ def test_build_character_analysis_payload_preserves_manual_character_reason():
     assert payload["persistence_reason"] == "manual_character"
     assert payload["confidence_band"] == "medium"
     assert payload["quality_flags"] == []
+
+
+def test_build_character_analysis_payload_marks_common_single_token_as_review_only():
+    character = Character(
+        book_id=uuid.uuid4(),
+        name="Actually",
+        first_chapter=1,
+        mention_count=1,
+        is_manual=False,
+    )
+    character.analysis_metadata = {
+        "quality_flags": ["generic_summary", "light_grounding"],
+        "grounding_passage_count": 1,
+    }
+
+    payload = build_character_analysis_payload(character)
+
+    assert payload["trust_tier"] == "review_only"
+    assert "common_single_token" in payload["trust_reasons"]
+    assert payload["needs_review"] is True
+
+
+def test_infer_character_trust_tier_keeps_grounded_single_name_visible():
+    character = Character(
+        book_id=uuid.uuid4(),
+        name="Grete",
+        first_chapter=1,
+        mention_count=2,
+        personality_tags=["sharp"],
+    )
+    character.analysis_metadata = {
+        "grounding_passage_count": 2,
+        "quality_flags": [],
+    }
+
+    trust_tier, reasons = infer_character_trust_tier(character)
+
+    assert trust_tier == "visible"
+    assert reasons == ["legacy_visible"]
+    assert is_cast_visible_character(character) is True
+
+
+def test_build_character_dossier_summary_requires_cross_chapter_support_for_single_tokens():
+    dossier = build_character_dossier_summary(
+        name="Grete",
+        aliases=[],
+        evidence={
+            "mention_count": 2,
+            "chapter_numbers": [1],
+            "has_dialogue_or_action": True,
+            "verifier": {
+                "local": {
+                    "person_ner_mentions": 1,
+                    "mid_sentence_mentions": 1,
+                },
+                "final": {
+                    "confidence_band": "accept",
+                },
+            },
+        },
+    )
+
+    assert dossier["strict_auto_eligible"] is False
+    assert "insufficient_cross_chapter_support" in dossier["strict_auto_reason_codes"]
+
+
+def test_set_character_review_state_controls_cast_visibility():
+    character = Character(
+        book_id=uuid.uuid4(),
+        name="Actually",
+        first_chapter=1,
+        mention_count=1,
+    )
+
+    set_character_review_state(
+        character,
+        visibility_state="quarantined",
+        approval_state="pending_review",
+        approval_source="manual_review",
+        reason_codes=["sentence_start_common_word"],
+    )
+
+    payload = build_character_analysis_payload(character)
+
+    assert character.visibility_state == "quarantined"
+    assert character.approval_state == "pending_review"
+    assert is_cast_visible_character(character) is False
+    assert payload["approval_reason_codes"] == ["sentence_start_common_word"]
 
 
 @pytest.mark.asyncio

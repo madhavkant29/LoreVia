@@ -291,6 +291,7 @@ export default function AuthorLoopPage() {
             description="Move from manuscript upload to beta feedback without losing citations, edits, or trust."
             mode={book?.mode ?? "author"}
             variant="rail"
+            railSize="compact"
           />
         </div>
 
@@ -316,7 +317,7 @@ export default function AuthorLoopPage() {
           <section className="grid gap-3 xl:grid-cols-6">
             {steps.map((step) => (
               <div key={step.id} className={`rounded-md border p-4 ${toneClasses(isDark, step.tone)}`}>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.22em]">{step.label}</p>
+                <p className="text-3xs font-semibold uppercase tracking-[0.22em]">{step.label}</p>
                 <p className="mt-2 text-sm leading-6">{step.detail}</p>
               </div>
             ))}
@@ -342,11 +343,11 @@ export default function AuthorLoopPage() {
                 <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-slate-600"}`}>DOCX, PDF, EPUB, TXT, and Markdown only. This step stays private, shows processing status, and does not expose public sharing.</p>
                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
                   <div className={`rounded-md border p-3 ${isDark ? "border-white/[0.06] bg-black/20" : "border-slate-200 bg-white"}`}>
-                    <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Privacy</p>
+                    <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Privacy</p>
                     <p className={`mt-2 text-sm ${isDark ? "text-slate-300" : "text-slate-600"}`}>Your manuscript is processed inside your workspace. Beta readers only get chapter-scoped access later if you explicitly invite them.</p>
                   </div>
                   <div className={`rounded-md border p-3 ${isDark ? "border-white/[0.06] bg-black/20" : "border-slate-200 bg-white"}`}>
-                    <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Processing</p>
+                    <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Processing</p>
                     <p className={`mt-2 text-sm ${isDark ? "text-slate-300" : "text-slate-600"}`}>
                       {book?.processing?.stage || book?.processing?.status
                         ? `${book.processing.stage ?? book.processing.status}${typeof book.processing.progress_pct === "number" ? ` / ${Math.round(book.processing.progress_pct)}%` : ""}`
@@ -382,7 +383,7 @@ export default function AuthorLoopPage() {
                           {character.aliases.length > 0 ? ` / aliases: ${character.aliases.join(", ")}` : ""}
                         </p>
                       </div>
-                      <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${character.description ? (isDark ? "bg-emerald-500/12 text-emerald-200" : "bg-emerald-50 text-emerald-700") : (isDark ? "bg-amber-500/12 text-amber-200" : "bg-amber-50 text-amber-700")}`}>
+                      <span className={`rounded-full px-2 py-1 text-3xs font-semibold ${character.description ? (isDark ? "bg-emerald-500/12 text-emerald-200" : "bg-emerald-50 text-emerald-700") : (isDark ? "bg-amber-500/12 text-amber-200" : "bg-amber-50 text-amber-700")}`}>
                         {character.description ? "Profile ready" : "Needs editing"}
                       </span>
                     </div>
@@ -419,10 +420,10 @@ export default function AuthorLoopPage() {
               {issueCards.length > 0 ? issueCards.slice(0, 8).map((issue) => (
                 <div key={issue.id} className={`rounded-md border p-4 ${isDark ? "border-white/[0.06] bg-[#101720]" : "border-slate-200 bg-slate-50"}`}>
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${severityClasses(isDark, issue.severity)}`}>{issue.severity}</span>
-                    <span className={`text-[11px] ${isDark ? "text-slate-500" : "text-slate-500"}`}>{issue.sourceLabel}</span>
-                    <span className={`text-[11px] ${isDark ? "text-slate-500" : "text-slate-500"}`}>{issue.citation}</span>
-                    <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${isDark ? "bg-white/8 text-slate-300" : "bg-white text-slate-600"}`}>{issue.confidence}</span>
+                    <span className={`rounded-full px-2 py-1 text-3xs font-semibold ${severityClasses(isDark, issue.severity)}`}>{issue.severity}</span>
+                    <span className={`text-3xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>{issue.sourceLabel}</span>
+                    <span className={`text-3xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>{issue.citation}</span>
+                    <span className={`rounded-full px-2 py-1 text-3xs font-semibold ${isDark ? "bg-white/8 text-slate-300" : "bg-white text-slate-600"}`}>{issue.confidence}</span>
                   </div>
                   <div className="mt-3 grid gap-3 xl:grid-cols-[minmax(0,1fr)_14rem]">
                     <div>
@@ -558,11 +559,11 @@ export default function AuthorLoopPage() {
                         {selectedFeedbackItems.length > 0 ? selectedFeedbackItems.map((item) => (
                           <div key={item.id} className={`rounded-md border p-4 ${isDark ? "border-white/[0.06] bg-[#101720]" : "border-slate-200 bg-slate-50"}`}>
                             <div className="flex flex-wrap items-center gap-2">
-                              <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${feedbackStatusClasses(isDark, item.author_status)}`}>{item.author_status.replace(/_/g, " ")}</span>
-                              <span className={`text-[11px] ${isDark ? "text-slate-500" : "text-slate-500"}`}>
+                              <span className={`rounded-full px-2 py-1 text-3xs font-semibold ${feedbackStatusClasses(isDark, item.author_status)}`}>{item.author_status.replace(/_/g, " ")}</span>
+                              <span className={`text-3xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>
                                 {item.chapter_number ? `Chapter ${item.chapter_number}` : "Book-wide"}
                               </span>
-                              {item.question_prompt ? <span className={`text-[11px] ${isDark ? "text-slate-500" : "text-slate-500"}`}>Prompt-linked</span> : null}
+                              {item.question_prompt ? <span className={`text-3xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>Prompt-linked</span> : null}
                             </div>
                             <p className={`mt-3 text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{item.question_prompt || item.anchor_text || "Reader feedback"}</p>
                             {item.body ? <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-slate-600"}`}>{item.body}</p> : null}
@@ -619,7 +620,7 @@ export default function AuthorLoopPage() {
 function MetricCard({ isDark, label, value }: { isDark: boolean; label: string; value: string }) {
   return (
     <div className={`rounded-md border p-3 ${isDark ? "border-white/[0.06] bg-[#101720]" : "border-slate-200 bg-slate-50"}`}>
-      <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>{label}</p>
+      <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>{label}</p>
       <p className={`mt-2 text-xl font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{value}</p>
     </div>
   )

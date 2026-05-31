@@ -4,12 +4,12 @@ on:
   push:
     paths:
       - 'backend/app/db/migrations/versions/**'
-      - 'backend/app/db/env.py'
+      - 'backend/app/db/migrations/env.py'
       - 'backend/app/models/**'
   pull_request:
     paths:
       - 'backend/app/db/migrations/versions/**'
-      - 'backend/app/db/env.py'
+      - 'backend/app/db/migrations/env.py'
       - 'backend/app/models/**'
 
 permissions:
@@ -57,6 +57,7 @@ jobs:
       env:
         DATABASE_URL: postgresql://postgres:postgres@localhost:5432/lorevia_migration_test
         REDIS_URL: redis://localhost:6379/0
+        ALEMBIC_ALLOW_DESTRUCTIVE_UPGRADES: "1"
         S3_BUCKET: test-bucket
         AWS_ACCESS_KEY_ID: test-key
         AWS_SECRET_ACCESS_KEY: test-secret
@@ -71,6 +72,7 @@ jobs:
       env:
         DATABASE_URL: postgresql://postgres:postgres@localhost:5432/lorevia_migration_test
         REDIS_URL: redis://localhost:6379/0
+        ALEMBIC_ALLOW_DESTRUCTIVE_UPGRADES: "1"
         ALEMBIC_ALLOW_DESTRUCTIVE_DOWNGRADES: "1"
         S3_BUCKET: test-bucket
         AWS_ACCESS_KEY_ID: test-key
@@ -156,6 +158,7 @@ jobs:
         DATABASE_URL: ${{ secrets.DATABASE_URL }}
         ALEMBIC_DATABASE_URL: ${{ secrets.DATABASE_URL }}
         ALEMBIC_CONFIRM_REMOTE: YES_I_AM_SURE
+        ALEMBIC_ALLOW_DESTRUCTIVE_UPGRADES: ${{ vars.ALEMBIC_ALLOW_DESTRUCTIVE_UPGRADES }}
         REDIS_URL: redis://localhost:6379/0
         S3_BUCKET: test-bucket
         AWS_ACCESS_KEY_ID: test-key

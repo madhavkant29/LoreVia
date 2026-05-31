@@ -45,6 +45,7 @@ from app.models.intelligence import ChapterSummary, PlotThread
 from app.models.progress import ReadingProgress
 from app.services.summary_service import get_or_generate_summary
 from app.utils.book_utils import (
+    build_book_access_context,
     collaboration_allows_chapter,
     deserialize_manuscript_content,
     normalize_collaboration_scope,
@@ -525,8 +526,14 @@ async def summary_visible_chapter_set(
     db: AsyncSession,
     book: Book,
     current_user,
+    collaborator=None,
+    *,
+    availability: dict[int, bool] | None = None,
 ) -> set[int]:
-    if book.mode == "author":
+    access = build_book_access_context(book, user_id=current_user.id, collaborator=collaborator)
+    if access.workspace_shell == "author":
+        if availability is not None:
+            return {chapter for chapter, available in availability.items() if available}
         return await full_available_chapter_set(db, book, current_user)
     read_set = await read_chapter_set(db, current_user.id, book.id)
     return await read_available_chapter_set(db, book, current_user, read_set)
@@ -536,8 +543,10 @@ async def timeline_visible_chapter_set(
     db: AsyncSession,
     book: Book,
     current_user,
+    collaborator=None,
 ) -> set[int]:
-    if book.mode == "author":
+    access = build_book_access_context(book, user_id=current_user.id, collaborator=collaborator)
+    if access.workspace_shell == "author":
         return await full_available_chapter_set(db, book, current_user)
     read_set = await read_chapter_set(db, current_user.id, book.id)
     if not read_set:
@@ -553,16 +562,18 @@ async def build_reading_progress_payload(
     book: Book,
     current_user,
     collaborator=None,
+    progress: ReadingProgress | None = None,
 ) -> dict[str, Any]:
     scope = normalize_collaboration_scope(collaborator.scope) if collaborator else None
-    progress = (
-        await db.execute(
-            select(ReadingProgress).where(
-                ReadingProgress.user_id == current_user.id,
-                ReadingProgress.book_id == book.id,
+    if progress is None:
+        progress = (
+            await db.execute(
+                select(ReadingProgress).where(
+                    ReadingProgress.user_id == current_user.id,
+                    ReadingProgress.book_id == book.id,
+                )
             )
-        )
-    ).scalar()
+        ).scalar()
 
     total = book.total_chapters or 0
     current_chapter = progress.current_chapter if progress else 1
@@ -599,16 +610,19 @@ async def build_chapter_list_payload(
     book: Book,
     current_user,
     collaborator=None,
+    progress: ReadingProgress | None = None,
+    intelligence_map: dict[int, bool] | None = None,
 ) -> dict[str, Any]:
     collaboration_scope = normalize_collaboration_scope(collaborator.scope) if collaborator else None
-    progress = (
-        await db.execute(
-            select(ReadingProgress).where(
-                ReadingProgress.user_id == current_user.id,
-                ReadingProgress.book_id == book.id,
+    if progress is None:
+        progress = (
+            await db.execute(
+                select(ReadingProgress).where(
+                    ReadingProgress.user_id == current_user.id,
+                    ReadingProgress.book_id == book.id,
+                )
             )
-        )
-    ).scalar()
+        ).scalar()
     read_upto = progress.current_chapter if progress else 0
     read_set = set(progress.chapters_read or []) if progress else set()
 
@@ -641,8 +655,10 @@ async def build_chapter_list_payload(
             ],
         }
 
-    intelligence_map = await chapter_intelligence_map(db, book, current_user)
-    if book.mode == "author":
+    if intelligence_map is None:
+        intelligence_map = await chapter_intelligence_map(db, book, current_user)
+    access = build_book_access_context(book, user_id=current_user.id, collaborator=collaborator)
+    if access.workspace_shell == "author":
         author_visible = [chapter for chapter, available in intelligence_map.items() if available]
         if author_visible:
             read_upto = max(author_visible)
@@ -662,7 +678,7 @@ async def build_chapter_list_payload(
                 "title": chapter.title,
                 "processed": chapter.processed,
                 "intelligence_available": intelligence_map.get(chapter.number, True),
-                "read": book.mode == "author" or chapter.number in read_set,
+                "read": access.workspace_shell == "author" or chapter.number in read_set,
                 "analysis_status": chapter_analysis_status(chapter),
                 "tags": tags_by_chapter.get(chapter.id, []),
             }
@@ -677,24 +693,30 @@ async def build_summary_collection_payload(
     book: Book,
     current_user,
     collaborator=None,
+    progress: ReadingProgress | None = None,
+    intelligence_map: dict[int, bool] | None = None,
 ) -> dict[str, Any]:
-    progress = (
-        await db.execute(
-            select(ReadingProgress).where(
-                ReadingProgress.user_id == current_user.id,
-                ReadingProgress.book_id == book.id,
+    if progress is None:
+        progress = (
+            await db.execute(
+                select(ReadingProgress).where(
+                    ReadingProgress.user_id == current_user.id,
+                    ReadingProgress.book_id == book.id,
+                )
             )
-        )
-    ).scalar()
+        ).scalar()
     read_upto = progress.current_chapter if progress else 0
-    available_set = await summary_visible_chapter_set(db, book, current_user)
+    available_set = await summary_visible_chapter_set(
+        db, book, current_user, collaborator, availability=intelligence_map
+    )
     if collaborator is not None:
         available_set = {chapter for chapter in available_set if collaboration_allows_chapter(collaborator, chapter)}
 
     if not available_set:
         return {"read_upto": 0, "summaries": []}
 
-    if book.mode == "author":
+    access = build_book_access_context(book, user_id=current_user.id, collaborator=collaborator)
+    if access.workspace_shell == "author":
         read_upto = max(available_set)
 
     chapters = (
@@ -735,7 +757,7 @@ async def build_summary_collection_payload(
             {
                 "chapter_number": chapter.number,
                 "chapter_title": chapter.title,
-                "read": book.mode == "author" or chapter.number <= read_upto,
+                "read": access.workspace_shell == "author" or chapter.number <= read_upto,
                 "available": str(chapter.id) in summary_by_chapter_id,
                 "status": (
                     "ready"

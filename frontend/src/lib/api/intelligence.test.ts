@@ -60,6 +60,19 @@ describe("intelligence api", () => {
     })
   })
 
+  it("posts selected character ids for voice consistency checks when provided", async () => {
+    await intelligenceApi.voiceConsistencyReview("book-1", "Passage text", {
+      chapterNum: 4,
+      characterId: "char-1",
+    })
+
+    expect(postMock).toHaveBeenCalledWith("/intelligence/book-1/advisor/voice-consistency", {
+      text: "Passage text",
+      chapter_num: 4,
+      character_id: "char-1",
+    })
+  })
+
   it("polls advisor tasks until the result is ready", async () => {
     postMock.mockResolvedValueOnce({ data: { task_id: "task-1", status: "queued", cached: false } })
     getMock

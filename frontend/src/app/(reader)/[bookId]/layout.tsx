@@ -4,7 +4,7 @@ import { Suspense, useEffect } from "react"
 import type { Route } from "next"
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation"
 
-import { useCachedBookDetail } from "@/lib/hooks/useBookDetail"
+import { useBookDetail } from "@/lib/hooks/useBookDetail"
 import { getBookRouteSegment, normalizeBookRouteId, replaceBookRouteSegment } from "@/lib/utils/bookRoutes"
 
 const canonicalBookRouteCache = new Map<string, string>()
@@ -30,6 +30,21 @@ function setCachedCanonicalRouteSegment(bookId: string, segment: string) {
   window.sessionStorage.setItem(getCanonicalRouteCacheKey(bookId), segment)
 }
 
+function isReaderShellRoute(pathname: string, bookSegment: string) {
+  const parts = pathname.split("/").filter(Boolean)
+  const bookIndex = parts.findIndex((part) => part === bookSegment)
+  const normalized = bookIndex >= 0 ? `/${parts.slice(bookIndex + 1).join("/")}`.replace(/\/$/, "") : ""
+  return (
+    normalized === "/" ||
+    normalized.startsWith("/chapter/") ||
+    normalized === "/chapters" ||
+    normalized === "/summaries" ||
+    normalized === "/search" ||
+    normalized === "/timeline" ||
+    normalized === "/beta-feedback"
+  )
+}
+
 export default function BookLayout({ children }: { children: React.ReactNode }) {
   return (
     <Suspense fallback={children}>
@@ -44,7 +59,7 @@ function BookLayoutInner({ children }: { children: React.ReactNode }) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const normalizedBookId = normalizeBookRouteId(bookId)
-  const { data: cachedBook = null } = useCachedBookDetail(normalizedBookId)
+  const { data: book = null } = useBookDetail(normalizedBookId, { staleTime: 30_000 })
 
   useEffect(() => {
     if (!bookId || !pathname) return
@@ -54,7 +69,7 @@ function BookLayoutInner({ children }: { children: React.ReactNode }) {
       return
     }
 
-    const canonicalSegment = cachedCanonicalSegment ?? (cachedBook ? getBookRouteSegment(cachedBook) : null)
+    const canonicalSegment = cachedCanonicalSegment ?? (book ? getBookRouteSegment(book) : null)
     if (!canonicalSegment) {
       return
     }
@@ -70,7 +85,18 @@ function BookLayoutInner({ children }: { children: React.ReactNode }) {
       const query = searchParams.toString()
       router.replace((query ? `${nextPath}?${query}` : nextPath) as Route)
     }
-  }, [bookId, cachedBook, normalizedBookId, pathname, router, searchParams])
+  }, [book, bookId, normalizedBookId, pathname, router, searchParams])
+
+  useEffect(() => {
+    if (!bookId || !pathname || !book) return
+    if (book.access_class !== "reader_collaborator" || book.workspace_shell !== "reader") return
+    if (isReaderShellRoute(pathname, bookId)) return
+
+    const target = `/${bookId}?access=reader-workspace`
+    if (pathname !== `/${bookId}`) {
+      router.replace(target as Route)
+    }
+  }, [book, bookId, pathname, router])
 
   return <>{children}</>
 }

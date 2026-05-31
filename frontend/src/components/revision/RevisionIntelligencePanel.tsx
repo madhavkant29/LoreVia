@@ -49,7 +49,7 @@ function mergeGoalCalendar(existing: GoalCalendarItem[], additions: GoalCalendar
 function SectionFrame({ title, body, isDark, children }: { title: string; body: string; isDark: boolean; children: React.ReactNode }) {
   return (
     <section className={`rounded-md border p-5 ${isDark ? "border-white/[0.06] bg-white/[0.025]" : "border-slate-200/70 bg-slate-50/60"}`}>
-      <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>{title}</p>
+      <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>{title}</p>
       <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-slate-600"}`}>{body}</p>
       <div className="mt-4">{children}</div>
     </section>
@@ -76,8 +76,8 @@ function RevisionItemCard({
   return (
     <div className={`rounded-md border p-4 ${isDark ? "border-white/[0.06] bg-[#101720]" : "border-slate-200 bg-white"}`}>
       <div className="flex flex-wrap items-center gap-2">
-        <span className={`rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] ${severityBadgeClass(item.severity, isDark)}`}>{item.severity}</span>
-        <span className={`rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] ${statusBadgeClass(item.status, isDark)}`}>{item.status.replace("_", " ")}</span>
+        <span className={`rounded-full px-2 py-1 text-3xs font-semibold uppercase tracking-[0.18em] ${severityBadgeClass(item.severity, isDark)}`}>{item.severity}</span>
+        <span className={`rounded-full px-2 py-1 text-3xs font-semibold uppercase tracking-[0.18em] ${statusBadgeClass(item.status, isDark)}`}>{item.status.replace("_", " ")}</span>
         {item.chapter_ref ? <span className={isDark ? "text-xs text-slate-500" : "text-xs text-slate-400"}>{`Chapter ${item.chapter_ref}`}</span> : null}
       </div>
       <p className={`mt-3 text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{item.title}</p>
@@ -280,7 +280,7 @@ export function RevisionIntelligencePanel({
         <div className="border-b px-5 py-5">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Revision hub</p>
+              <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Revision hub</p>
               <h2 className={`mt-2 text-xl font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>Revision pressure at a glance.</h2>
               <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-slate-600"}`}>{revision.summary.hero_message}</p>
             </div>
@@ -336,7 +336,7 @@ export function RevisionIntelligencePanel({
     return (
       <section className={panelClass(isDark)}>
         <div className="border-b px-5 py-5">
-          <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Story map details</p>
+          <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Story map details</p>
           <h2 className={`mt-2 text-xl font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>Knowledge state, timeline clarity, and reader friction.</h2>
         </div>
 
@@ -450,7 +450,7 @@ export function RevisionIntelligencePanel({
     <section className={panelClass(isDark)}>
         <div className="flex flex-col gap-4 border-b px-5 py-5 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Revision command center</p>
+          <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Revision command center</p>
           <h2 className={`mt-2 text-2xl font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>Know what your edit breaks before your readers do.</h2>
           <p className={`mt-2 max-w-3xl text-sm leading-7 ${isDark ? "text-slate-300" : "text-slate-600"}`}>{revision.summary.hero_message}</p>
           {revision.summary.recent_edit_label ? (
@@ -505,7 +505,7 @@ export function RevisionIntelligencePanel({
                   <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-slate-600"}`}>{genreCheck.rationale}</p>
                   <div className="mt-3 flex flex-wrap gap-2">
                     {genreCheck.checks.map((check) => (
-                      <span key={check} className={`rounded-full px-3 py-1 text-[11px] font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-slate-100 text-slate-700"}`}>{check}</span>
+                      <span key={check} className={`rounded-full px-3 py-1 text-3xs font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-slate-100 text-slate-700"}`}>{check}</span>
                     ))}
                   </div>
                 </div>
@@ -530,7 +530,7 @@ export function RevisionIntelligencePanel({
                       <div key={`${revisionPass.title}-${item.id}`} className={`rounded-md border px-3 py-3 ${isDark ? "border-white/[0.05] bg-black/20" : "border-slate-200 bg-slate-50"}`}>
                         <div className="flex items-center justify-between gap-3">
                           <p className={`text-sm font-medium ${isDark ? "text-slate-200" : "text-slate-700"}`}>{item.title}</p>
-                          <span className={`rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] ${statusBadgeClass(item.status, isDark)}`}>{item.status.replace("_", " ")}</span>
+                          <span className={`rounded-full px-2 py-1 text-3xs font-semibold uppercase tracking-[0.16em] ${statusBadgeClass(item.status, isDark)}`}>{item.status.replace("_", " ")}</span>
                         </div>
                       </div>
                     )) : <p className={isDark ? "text-sm text-slate-500" : "text-sm text-slate-400"}>This pass is clear for now.</p>}

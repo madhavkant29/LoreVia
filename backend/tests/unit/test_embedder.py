@@ -1,0 +1,201 @@
+import json
+import uuid
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+from app.core import redis as redis_utils
+
+
+def _stub_embedding_response(embedding: list[float]) -> MagicMock:
+    item = MagicMock()
+    item.embedding = embedding
+    r = MagicMock()
+    r.data = [item]
+    return r
+
+
+class _FakeRedis:
+    def __init__(self):
+        self.values: dict[str, str] = {}
+
+    async def get(self, key):
+        return self.values.get(key)
+
+    async def setex(self, key, ttl, value):
+        self.values[key] = value
+
+    async def set(self, key, value, ex=None, nx=None):
+        self.values[key] = value
+        return True
+
+    async def delete(self, *keys):
+        for key in keys:
+            self.values.pop(key, None)
+
+
+@pytest.mark.asyncio
+async def test_embed_text_hits_redis_cache_skips_openai(monkeypatch):
+    fake_redis = _FakeRedis()
+    monkeypatch.setattr(redis_utils, "get_redis", AsyncMock(return_value=fake_redis))
+
+    cached_vector = [0.1, 0.2, 0.3]
+    cache_key = redis_utils.key_embedding_cache(
+        feature="semantic_search_query",
+        model="text-embedding-3-small",
+        text="test query",
+    )
+    fake_redis.values[cache_key] = json.dumps(cached_vector)
+
+    mock_client = MagicMock()
+    mock_client.close = AsyncMock()
+
+    from app.engine.embeddings.embedder import embed_text
+
+    with patch("app.engine.embeddings.embedder.get_client", return_value=mock_client):
+        result = await embed_text(
+            "test query",
+            db=None,
+            user_id=uuid.uuid4(),
+            book_id=uuid.uuid4(),
+            feature="semantic_search_query",
+        )
+
+    assert result == cached_vector
+    assert mock_client.embeddings.create.call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_embed_text_cache_miss_calls_openai_and_writes_cache(monkeypatch):
+    fake_redis = _FakeRedis()
+    monkeypatch.setattr(redis_utils, "get_redis", AsyncMock(return_value=fake_redis))
+
+    expected_vector = [0.4, 0.5, 0.6]
+    mock_client = MagicMock()
+    mock_client.close = AsyncMock()
+    mock_client.embeddings = MagicMock()
+    mock_client.embeddings.create = AsyncMock(return_value=_stub_embedding_response(expected_vector))
+
+    from app.engine.embeddings.embedder import embed_text
+
+    with patch("app.engine.embeddings.embedder.get_client", return_value=mock_client):
+        result = await embed_text(
+            "novel query",
+            db=None,
+            feature="semantic_search_query",
+        )
+
+    assert result == expected_vector
+    assert mock_client.embeddings.create.call_count >= 1
+
+    cache_key = redis_utils.key_embedding_cache(
+        feature="semantic_search_query",
+        model="text-embedding-3-small",
+        text="novel query",
+    )
+    assert cache_key in fake_redis.values
+    cached = json.loads(fake_redis.values[cache_key])
+    assert cached == expected_vector
+
+
+@pytest.mark.asyncio
+async def test_embed_text_different_features_use_separate_cache(monkeypatch):
+    fake_redis = _FakeRedis()
+    monkeypatch.setattr(redis_utils, "get_redis", AsyncMock(return_value=fake_redis))
+
+    vector_search = [0.1, 0.2]
+    vector_character = [0.3, 0.4]
+
+    responses = iter([_stub_embedding_response(vector_search), _stub_embedding_response(vector_character)])
+    call_count = 0
+
+    mock_client = MagicMock()
+    mock_client.close = AsyncMock()
+    mock_client.embeddings = MagicMock()
+
+    async def _fake_create(**kwargs):
+        nonlocal call_count
+        call_count += 1
+        return next(responses)
+
+    mock_client.embeddings.create = _fake_create
+
+    from app.engine.embeddings.embedder import embed_text
+
+    with patch("app.engine.embeddings.embedder.get_client", return_value=mock_client):
+        r1 = await embed_text("same text", feature="semantic_search_query")
+        r2 = await embed_text("same text", feature="character_embedding")
+
+    assert r1 == vector_search
+    assert r2 == vector_character
+    assert call_count == 2
+
+    key_search = redis_utils.key_embedding_cache(
+        feature="semantic_search_query",
+        model="text-embedding-3-small",
+        text="same text",
+    )
+    key_char = redis_utils.key_embedding_cache(
+        feature="character_embedding",
+        model="text-embedding-3-small",
+        text="same text",
+    )
+    assert key_search != key_char
+    assert json.loads(fake_redis.values[key_search]) == vector_search
+    assert json.loads(fake_redis.values[key_char]) == vector_character
+
+
+@pytest.mark.asyncio
+async def test_embed_text_same_query_twice_one_api_call(monkeypatch):
+    fake_redis = _FakeRedis()
+    monkeypatch.setattr(redis_utils, "get_redis", AsyncMock(return_value=fake_redis))
+
+    expected_vector = [0.7, 0.8, 0.9]
+    call_count = 0
+
+    mock_client = MagicMock()
+    mock_client.close = AsyncMock()
+    mock_client.embeddings = MagicMock()
+
+    async def _fake_create(**kwargs):
+        nonlocal call_count
+        call_count += 1
+        return _stub_embedding_response(expected_vector)
+
+    mock_client.embeddings.create = _fake_create
+
+    from app.engine.embeddings.embedder import embed_text
+
+    with patch("app.engine.embeddings.embedder.get_client", return_value=mock_client):
+        r1 = await embed_text("what happened to the amulet", feature="semantic_search_query")
+        r2 = await embed_text("what happened to the amulet", feature="semantic_search_query")
+
+    assert r1 == expected_vector
+    assert r2 == expected_vector
+    assert call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_embed_text_empty_string(monkeypatch):
+    fake_redis = _FakeRedis()
+    monkeypatch.setattr(redis_utils, "get_redis", AsyncMock(return_value=fake_redis))
+
+    expected_vector = [0.0, 0.0]
+    mock_client = MagicMock()
+    mock_client.close = AsyncMock()
+    mock_client.embeddings = MagicMock()
+    mock_client.embeddings.create = AsyncMock(return_value=_stub_embedding_response(expected_vector))
+
+    from app.engine.embeddings.embedder import embed_text
+
+    with patch("app.engine.embeddings.embedder.get_client", return_value=mock_client):
+        result = await embed_text("", feature="embedding")
+
+    assert result == expected_vector
+
+    cache_key = redis_utils.key_embedding_cache(
+        feature="embedding",
+        model="text-embedding-3-small",
+        text="",
+    )
+    assert cache_key in fake_redis.values

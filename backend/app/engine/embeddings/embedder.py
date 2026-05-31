@@ -1,11 +1,15 @@
+import logging
 import uuid
 
 from openai import AsyncOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.redis import get_embedding_cache, set_embedding_cache
 from app.parsers.chunker import count_tokens
 from app.utils.llm_usage_utils import create_tracked_embedding
+
+log = logging.getLogger("lorevia.embedder")
 
 
 def get_client() -> AsyncOpenAI:
@@ -22,6 +26,16 @@ async def embed_text(
     book_id: uuid.UUID | None = None,
     feature: str = "embedding",
 ) -> list[float]:
+    normalized = (text or "")[:8000]
+
+    cached = await get_embedding_cache(
+        feature=feature,
+        model=settings.OPENAI_EMBED_MODEL,
+        text=normalized,
+    )
+    if cached is not None:
+        return cached
+
     client = get_client()
     try:
         r = await create_tracked_embedding(
@@ -31,9 +45,17 @@ async def embed_text(
             db=db,
             user_id=user_id,
             book_id=book_id,
-            input=text[:8000],
+            input=normalized,
         )
-        return r.data[0].embedding
+        result = r.data[0].embedding
+
+        await set_embedding_cache(
+            feature=feature,
+            model=settings.OPENAI_EMBED_MODEL,
+            text=normalized,
+            vector=result,
+        )
+        return result
     finally:
         await client.close()
 
@@ -106,6 +128,18 @@ async def embed_character(
         db=db,
         feature="character_embedding",
     )
+
+
+def build_chunk_embedding_text(
+    *,
+    chapter_number: int | None,
+    chapter_title: str | None,
+    text: str,
+) -> str:
+    title = (chapter_title or "Untitled").strip() or "Untitled"
+    chapter_label = f"Chapter {chapter_number}: {title}" if chapter_number is not None else f"Chapter: {title}"
+    body = (text or "").strip()
+    return f"{chapter_label}\n\n{body}" if body else chapter_label
 
 
 def build_character_embedding_text(

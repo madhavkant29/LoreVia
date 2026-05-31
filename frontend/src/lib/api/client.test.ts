@@ -69,6 +69,7 @@ describe("api client", () => {
     buildDailyCapEventDetailMock.mockReset()
     dispatchDailyCapEventMock.mockReset()
     vi.restoreAllMocks()
+    vi.unstubAllGlobals()
     delete process.env.NEXT_PUBLIC_API_URL
   })
 
@@ -88,10 +89,28 @@ describe("api client", () => {
     await loadClientModule()
 
     expect(axiosCreateMock).toHaveBeenCalledWith({
-      baseURL: "/api/v1",
+      baseURL: "http://localhost:8000/api/v1",
       headers: { "Content-Type": "application/json" },
       withCredentials: true,
     })
+  })
+
+  it("uses the backend origin directly for localhost browser sessions", async () => {
+    const originalWindow = globalThis.window
+    const originalVitest = process.env.VITEST
+    delete process.env.VITEST
+    vi.stubGlobal("window", { location: { hostname: "localhost", origin: "http://localhost:3000" } })
+
+    await loadClientModule()
+
+    expect(axiosCreateMock).toHaveBeenCalledWith({
+      baseURL: "http://localhost:8000/api/v1",
+      headers: { "Content-Type": "application/json" },
+      withCredentials: true,
+    })
+
+    vi.stubGlobal("window", originalWindow)
+    if (originalVitest) process.env.VITEST = originalVitest
   })
 
   it("removes uppercase content-type headers from FormData requests", async () => {
@@ -129,6 +148,54 @@ describe("api client", () => {
     expect(config?.headers).toEqual({ "Content-Type": "application/json" })
   })
 
+  it("adds the auth csrf header to unsafe requests when the cookie is present", async () => {
+    const { captured } = await loadClientModule()
+    const originalDocument = globalThis.document
+    vi.stubGlobal("document", { cookie: "lorevia_csrf=csrf-token" })
+
+    const config = captured.request?.({
+      method: "post",
+      url: "/books/1",
+      headers: {},
+    })
+
+    expect(config?.headers).toEqual({ "X-CSRF-Token": "csrf-token" })
+    vi.stubGlobal("document", originalDocument)
+  })
+
+  it("uses the last matching auth csrf cookie when duplicate values are present", async () => {
+    const { captured } = await loadClientModule()
+    const originalDocument = globalThis.document
+    vi.stubGlobal("document", { cookie: "lorevia_csrf=stale-token; lorevia_csrf=fresh-token" })
+
+    const config = captured.request?.({
+      method: "patch",
+      url: "/auth/me/username",
+      headers: {},
+    })
+
+    expect(config?.headers).toEqual({ "X-CSRF-Token": "fresh-token" })
+    vi.stubGlobal("document", originalDocument)
+  })
+
+  it("adds the admin csrf header alongside the auth csrf header for admin writes", async () => {
+    const { captured } = await loadClientModule()
+    const originalDocument = globalThis.document
+    vi.stubGlobal("document", { cookie: "lorevia_csrf=csrf-token; lorevia_admin_csrf=admin-token" })
+
+    const config = captured.request?.({
+      method: "post",
+      url: "/admin/access",
+      headers: {},
+    })
+
+    expect(config?.headers).toEqual({
+      "X-CSRF-Token": "csrf-token",
+      "X-Admin-CSRF-Token": "admin-token",
+    })
+    vi.stubGlobal("document", originalDocument)
+  })
+
   it("passes successful responses through unchanged", async () => {
     const { captured } = await loadClientModule()
     const response = { data: { ok: true } }
@@ -159,6 +226,8 @@ describe("api client", () => {
   it("refreshes and retries non-auth 401 responses", async () => {
     const { captured, apiClientMock } = await loadClientModule()
     const originalRequest: { url: string; _retry?: boolean } = { url: "/books/1" }
+    const originalDocument = globalThis.document
+    vi.stubGlobal("document", { cookie: "lorevia_csrf=csrf-token" })
     axiosPostMock.mockResolvedValue({ data: {} })
     apiClientMock.mockResolvedValue({ data: { retried: true } })
 
@@ -167,10 +236,14 @@ describe("api client", () => {
       response: { status: 401 },
     })
 
-    expect(axiosPostMock).toHaveBeenCalledWith("/api/v1/auth/refresh", null, { withCredentials: true })
+    expect(axiosPostMock).toHaveBeenCalledWith("/api/v1/auth/refresh", null, {
+      withCredentials: true,
+      headers: { "X-CSRF-Token": "csrf-token" },
+    })
     expect(originalRequest._retry).toBe(true)
     expect(apiClientMock).toHaveBeenCalledWith(originalRequest)
     expect(result).toEqual({ data: { retried: true } })
+    vi.stubGlobal("document", originalDocument)
   })
 
   it("uses the configured api base for refresh requests", async () => {
@@ -185,7 +258,7 @@ describe("api client", () => {
       response: { status: 401 },
     })
 
-    expect(axiosPostMock).toHaveBeenCalledWith("/api/v1/auth/refresh", null, { withCredentials: true })
+    expect(axiosPostMock).toHaveBeenCalledWith("http://localhost:8000/api/v1/auth/refresh", null, { withCredentials: true })
   })
 
   it("does not refresh auth me failures", async () => {

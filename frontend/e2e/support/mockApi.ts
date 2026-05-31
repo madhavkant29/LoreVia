@@ -7,11 +7,13 @@ import type { PublicForumPost } from "@/types/public"
 type SessionMode = "authenticated" | "guest"
 type LoginMode = "success" | "unauthorized"
 type AdminMode = "none" | "moderation" | "billing" | "super" | "owner"
+type VoiceConsistencyMode = "success" | "backend-error" | "weak-attribution" | "selected-character"
 
 type MockOptions = {
   session?: SessionMode
   login?: LoginMode
   admin?: AdminMode
+  voiceConsistency?: VoiceConsistencyMode
 }
 
 const ADMIN_TEST_SESSION_COOKIE = "lorevia_admin_test_session"
@@ -1314,6 +1316,12 @@ const characterReviewPayload = {
       confidence: 61,
       reason_codes: ["possible_role_label", "needs_review"],
       evidence: {},
+      dossier_summary: {
+        mention_count: 1,
+        distinct_chapter_count: 1,
+        strict_auto_eligible: false,
+        strict_auto_reason_codes: ["role_only_reference", "insufficient_cross_chapter_support"],
+      },
       source_batch_key: "batch-1",
       created_at: "2026-05-14T10:00:00Z",
       updated_at: "2026-05-14T10:00:00Z",
@@ -1351,6 +1359,41 @@ const characterReviewPayload = {
       source_batch_key: "relationship-batch-1",
       created_at: "2026-05-14T10:00:00Z",
       updated_at: "2026-05-14T10:00:00Z",
+    },
+  ],
+  shadow_characters: [
+    {
+      id: "char-gregors-sister",
+      book_id: "book-1",
+      name: "Gregor's sister",
+      aliases: [],
+      role: null,
+      first_chapter: 2,
+      last_seen_chapter: 2,
+      mention_count: 1,
+      analysis_metadata: {
+        approval_state: "pending_review",
+        approval_source: "backfill_review",
+        approval_reason_codes: ["role_only_reference"],
+        trust_tier: "review_only",
+        trust_reasons: ["role_only_single_token"],
+      },
+      is_manual: false,
+    },
+  ],
+  decision_events: [
+    {
+      id: "decision-1",
+      book_id: "book-1",
+      character_id: "char-gregors-sister",
+      actor_user_id: null,
+      action: "character_demoted_for_review",
+      visibility_state: "quarantined",
+      approval_state: "pending_review",
+      approval_source: "backfill_review",
+      reason_codes: ["role_only_reference"],
+      evidence: {},
+      created_at: "2026-05-14T10:00:00Z",
     },
   ],
   counts: {
@@ -1978,6 +2021,7 @@ const voiceConsistency = {
   },
   retrieved_passages: [],
   characters_reviewed: ["Nora Vale"],
+  warnings: [],
   character_matches: [
     {
       character_name: "Nora Vale",
@@ -1987,6 +2031,58 @@ const voiceConsistency = {
       strongest_signals: ["more formal phrasing", "heavier exposition"],
       closest_other_character: "Kael",
       closest_other_score: 44,
+    },
+  ],
+}
+
+const selectedCharacterVoiceConsistency = {
+  review: {
+    overall_verdict: "Gregor's voice holds together, but one beat drifts toward explanation over reaction.",
+    issues: [
+      {
+        character_name: "Gregor",
+        severity: "moderate",
+        title: "Gregor slips into abstract explanation",
+        description: "The passage briefly trades Gregor's self-effacing immediacy for a cooler, more analytical sentence.",
+        evidence: "Gregor usually sounds careful and inward, even when he is rationalizing what the family needs from him.",
+        suggestion: "Keep the line closer to Gregor's anxious interior voice and shorten the explanatory phrasing.",
+        intentionality_prompt: "If the shift is intentional, add a clearer cue that Gregor is distancing himself from the moment.",
+      },
+    ],
+  },
+  retrieved_passages: [],
+  characters_reviewed: ["Gregor"],
+  warnings: [],
+  character_matches: [
+    {
+      character_name: "Gregor",
+      match_score: 74,
+      baseline_sample_size: 5,
+      sample_dialogue_count: 2,
+      strongest_signals: ["careful cadence", "self-effacing phrasing"],
+      closest_other_character: "Grete",
+      closest_other_score: 38,
+    },
+  ],
+}
+
+const weakAttributionVoiceConsistency = {
+  review: {
+    overall_verdict: "Grete's emotional line still reads coherently, but the attribution signal is thin in this excerpt.",
+    issues: [],
+  },
+  retrieved_passages: [],
+  characters_reviewed: ["Grete"],
+  warnings: ["Dialogue could not be confidently attributed to Grete; the review used the full submitted passage instead."],
+  character_matches: [
+    {
+      character_name: "Grete",
+      match_score: 61,
+      baseline_sample_size: 4,
+      sample_dialogue_count: 1,
+      strongest_signals: ["higher emotional pressure", "broader phrasing"],
+      closest_other_character: "Gregor",
+      closest_other_score: 41,
     },
   ],
 }
@@ -2046,6 +2142,7 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
   const session = options.session ?? "authenticated"
   const login = options.login ?? "success"
   const admin = options.admin ?? "none"
+  const voiceConsistencyMode = options.voiceConsistency ?? "success"
   const adminCookieMode = admin === "none" ? "guest" : admin
   await page.context().addCookies([
     {
@@ -2066,6 +2163,9 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
   let mockBetaReads = JSON.parse(JSON.stringify(initialBetaReads))
   let mockBetaReadQuestions = JSON.parse(JSON.stringify(initialBetaReadQuestions))
   let mockBetaReadFeedbackItems = JSON.parse(JSON.stringify(initialBetaReadFeedbackItems))
+  let mockCharacterBibleCharacters: Character[] = JSON.parse(JSON.stringify(characterBibleCharacters))
+  let mockCharacterReviewPayload = JSON.parse(JSON.stringify(characterReviewPayload))
+  let mockRelationshipGraph = JSON.parse(JSON.stringify(relationshipGraph))
   let mockNotes = JSON.parse(JSON.stringify(notes))
   let mockManuscriptAnnotations = JSON.parse(JSON.stringify(manuscriptAnnotations))
   let mockEmailPreferences: EmailPreferences = {
@@ -2481,18 +2581,52 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
     }
 
     if (path === "/api/v1/books/book-1/characters" && method === "GET") {
-      return json(route, characterBibleCharacters)
+      return json(route, mockCharacterBibleCharacters)
     }
 
     if (path === "/api/v1/books/book-1/character-review" && method === "GET") {
-      return json(route, characterReviewPayload)
+      return json(route, mockCharacterReviewPayload)
+    }
+
+    if (path === "/api/v1/books/book-1/character-review/reprocess" && method === "GET") {
+      return json(route, {
+        book_id: "book-1",
+        dry_run: true,
+        allow_merge_safe_pairs: true,
+        allow_demote_obvious_noise: true,
+        planned_merges: [["char-gregors-sister", "char-grete"]],
+        planned_demotions: [],
+        skipped_protected_merge_pairs: [],
+        skipped_protected_demotions: [],
+        updated_first_chapters: { "char-grete": 1 },
+        updated_last_seen_chapters: { "char-grete": 4 },
+        character_labels: { "char-gregors-sister": "Gregor's sister", "char-grete": "Grete" },
+        pending_duplicate_suggestions: 0,
+        pending_relationship_candidates: 1,
+        unresolved_relationship_deltas: {},
+      })
+    }
+
+    if (path === "/api/v1/books/book-1/character-review/reprocess" && method === "POST") {
+      return json(route, {
+        book_id: "book-1",
+        merged_pairs: [["char-gregors-sister", "char-grete"]],
+        demoted_character_ids: [],
+        skipped_protected_merge_pairs: [],
+        skipped_protected_demotions: [],
+        first_chapter_recomputes: { "char-grete": 1 },
+        last_seen_chapter_recomputes: { "char-grete": 4 },
+        character_labels: { "char-gregors-sister": "Gregor's sister", "char-grete": "Grete" },
+        duplicate_suggestion_delta: { pending: 0 },
+        unresolved_relationship_deltas: {},
+      })
     }
 
     const relationshipReviewMatch = path.match(/^\/api\/v1\/books\/book-1\/relationship-review\/([^/]+)\/(attach-a|attach-b|accept|resolve|reject)$/)
     if (relationshipReviewMatch && method === "POST") {
       const [, candidateId, action] = relationshipReviewMatch
-      const candidate = characterReviewPayload.relationship_candidates.find(
-        (item: typeof characterReviewPayload.relationship_candidates[number]) => item.id === candidateId,
+      const candidate = mockCharacterReviewPayload.relationship_candidates.find(
+        (item: typeof mockCharacterReviewPayload.relationship_candidates[number]) => item.id === candidateId,
       )
       if (!candidate) {
         return notFound(route)
@@ -2516,8 +2650,8 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
         : action === "resolve"
           ? "resolved"
           : "rejected"
-      characterReviewPayload.counts.pending_relationship_candidates = characterReviewPayload.relationship_candidates.filter(
-        (item: typeof characterReviewPayload.relationship_candidates[number]) => item.status === "pending",
+      mockCharacterReviewPayload.counts.pending_relationship_candidates = mockCharacterReviewPayload.relationship_candidates.filter(
+        (item: typeof mockCharacterReviewPayload.relationship_candidates[number]) => item.status === "pending",
       ).length
 
       return json(route, {
@@ -2542,7 +2676,7 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
         personality_tags?: string[]
       } | null
       const created: Character = {
-        id: `char-manual-${characterBibleCharacters.length + 1}`,
+        id: `char-manual-${mockCharacterBibleCharacters.length + 1}`,
         book_id: "book-1",
         name: payload?.name ?? "Manual Character",
         aliases: payload?.aliases ?? [],
@@ -2564,7 +2698,7 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
         arc_summary: payload?.arc_summary ?? null,
         relationship_summaries: [],
       }
-      characterBibleCharacters.push(created)
+      mockCharacterBibleCharacters.push(created)
       return json(route, created, 201)
     }
 
@@ -2901,7 +3035,7 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
     }
 
     if (path === "/api/v1/reader/book-1/relationships" && method === "GET") {
-      return json(route, relationshipGraph)
+      return json(route, mockRelationshipGraph)
     }
 
     if (path === "/api/v1/books/book-1/cover" && method === "GET") {
@@ -2975,6 +3109,26 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
     }
 
     if (path === "/api/v1/intelligence/book-1/advisor/voice-consistency" && method === "POST") {
+      if (voiceConsistencyMode === "backend-error") {
+        return route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ detail: "Voice review is temporarily unavailable." }),
+        })
+      }
+      if (voiceConsistencyMode === "weak-attribution") {
+        return json(route, weakAttributionVoiceConsistency)
+      }
+      if (voiceConsistencyMode === "selected-character") {
+        return json(route, selectedCharacterVoiceConsistency)
+      }
+      const payload = route.request().postDataJSON() as { character_id?: string } | null
+      if (payload?.character_id === "char-gregor") {
+        return json(route, selectedCharacterVoiceConsistency)
+      }
+      if (payload?.character_id === "char-grete") {
+        return json(route, weakAttributionVoiceConsistency)
+      }
       return json(route, voiceConsistency)
     }
 

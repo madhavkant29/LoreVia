@@ -32,7 +32,7 @@ export function PublicContentHeader({
   ] as const
 
   return (
-    <header className="border-b border-[rgba(var(--border),0.76)] bg-[rgba(248,244,236,0.84)] backdrop-blur-xl dark:bg-[rgba(3,7,18,0.82)]">
+    <header className="sticky top-0 z-30 border-b border-[rgba(var(--border),0.82)] bg-[rgba(243,244,246,0.9)] backdrop-blur-xl dark:bg-[rgba(23,27,29,0.88)]">
       <div className="app-container flex h-[78px] items-center justify-between gap-4">
         <Link href="/" aria-label="LoreVia home" className="transition hover:opacity-90">
           <ThemeBrandImage variant="lockup" alt="LoreVia" className="h-10 w-auto" priority />
@@ -47,8 +47,8 @@ export function PublicContentHeader({
                 href={item.href}
                 className={`rounded-full px-4 py-2 text-sm font-medium transition ${
                   isActive
-                    ? "bg-white/80 text-foreground shadow-sm dark:bg-white/10"
-                    : "text-foreground/70 hover:text-foreground"
+                    ? "border border-[rgba(var(--border),0.84)] bg-white text-foreground shadow-[0_10px_24px_-22px_rgba(15,23,42,0.4)] dark:bg-white/10"
+                    : "text-foreground/70 hover:bg-white/70 hover:text-foreground dark:hover:bg-white/5"
                 }`}
               >
                 {item.label}

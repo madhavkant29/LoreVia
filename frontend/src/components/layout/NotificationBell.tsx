@@ -3,7 +3,7 @@
 import Link from "next/link"
 import dynamic from "next/dynamic"
 import React from "react"
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useNotificationsState } from "@/lib/hooks/useNotifications"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 
@@ -17,6 +17,8 @@ const NotificationsPanel = dynamic(
 
 export function NotificationBell({ enabled = true }: { enabled?: boolean }) {
   const [open, setOpen] = useState(false)
+  const toggleButtonRef = useRef<HTMLButtonElement | null>(null)
+  const panelRef = useRef<HTMLElement | null>(null)
   const { theme } = usePreferencesStore()
   const { unreadCount } = useNotificationsState(10, {
     enabled: enabled || open,
@@ -32,6 +34,37 @@ export function NotificationBell({ enabled = true }: { enabled?: boolean }) {
     : "border-border bg-card text-foreground hover:bg-muted"
   const ariaLabel = hasUnread ? `Open notifications, ${unreadCount} unread` : "Open notifications"
 
+  useEffect(() => {
+    if (!open) {
+      return
+    }
+
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target
+      if (!(target instanceof Node)) {
+        return
+      }
+      if (toggleButtonRef.current?.contains(target) || panelRef.current?.contains(target)) {
+        return
+      }
+      setOpen(false)
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpen(false)
+      }
+    }
+
+    document.addEventListener("mousedown", handlePointerDown)
+    document.addEventListener("keydown", handleKeyDown)
+
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown)
+      document.removeEventListener("keydown", handleKeyDown)
+    }
+  }, [open])
+
   return (
     <>
       <Link
@@ -41,13 +74,14 @@ export function NotificationBell({ enabled = true }: { enabled?: boolean }) {
       >
         <BellIcon hasUnread={hasUnread} />
         {badgeLabel ? (
-          <span className="absolute -right-0.5 -top-0.5 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-semibold text-white ring-2 ring-background shadow-sm shadow-rose-500/30">
+          <span className="absolute -right-0.5 -top-0.5 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-3xs font-semibold text-white ring-2 ring-background shadow-sm shadow-rose-500/30">
             {badgeLabel}
           </span>
         ) : null}
       </Link>
 
       <button
+        ref={toggleButtonRef}
         type="button"
         onClick={() => setOpen((current) => !current)}
         className={`relative hidden h-10 w-10 items-center justify-center rounded-xl border transition-colors lg:flex ${buttonTone}`}
@@ -55,7 +89,7 @@ export function NotificationBell({ enabled = true }: { enabled?: boolean }) {
       >
         <BellIcon hasUnread={hasUnread} />
         {badgeLabel ? (
-          <span className="absolute -right-0.5 -top-0.5 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-semibold text-white ring-2 ring-background shadow-sm shadow-rose-500/30">
+          <span className="absolute -right-0.5 -top-0.5 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-3xs font-semibold text-white ring-2 ring-background shadow-sm shadow-rose-500/30">
             {badgeLabel}
           </span>
         ) : null}
@@ -63,13 +97,11 @@ export function NotificationBell({ enabled = true }: { enabled?: boolean }) {
 
       {open ? (
         <>
-          <button
-            type="button"
-            onClick={() => setOpen(false)}
-            className="fixed inset-0 z-40 hidden bg-black/30 lg:block"
-            aria-label="Close notifications"
-          />
-          <aside className={`fixed right-0 top-0 z-50 hidden h-screen w-[26rem] border-l shadow-[-24px_0_70px_-38px_rgba(0,0,0,0.5)] lg:block ${isDark ? "border-white/10 bg-[#050505]" : "border-stone-200 bg-stone-50"}`}>
+          <div className="fixed inset-0 z-40 hidden bg-black/30 lg:block" aria-hidden="true" />
+          <aside
+            ref={panelRef}
+            className={`fixed right-0 top-0 z-50 hidden h-screen w-[26rem] border-l shadow-modal lg:block ${isDark ? "border-white/10 bg-[#050505]" : "border-stone-200 bg-stone-50"}`}
+          >
             <NotificationsPanel mode="sidebar" />
           </aside>
         </>

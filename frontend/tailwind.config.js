@@ -100,12 +100,11 @@ module.exports = {
         display: ["var(--font-newsreader)", "Iowan Old Style", "Georgia", "serif"],
       },
       borderRadius: {
-        sm: "4px",
-        DEFAULT: "6px",
-        md: "8px",
-        lg: "12px",
-        xl: "14px",
-        "2xl": "18px",
+        sm: "8px",
+        DEFAULT: "10px",
+        md: "16px",
+        lg: "28px",
+        xl: "36px",
       },
       boxShadow: {
         sm: "0 1px 2px 0 rgb(0 0 0 / 0.05)",
@@ -113,6 +112,12 @@ module.exports = {
         md: "0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)",
         lg: "0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)",
         xl: "0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)",
+        card: "var(--shadow-card)",
+        dropdown: "var(--shadow-dropdown)",
+        modal: "var(--shadow-modal)",
+      },
+      fontSize: {
+        "3xs": ["10px", { lineHeight: "0.75rem" }],
       },
       transitionTimingFunction: {
         "ease-out": "cubic-bezier(0.215, 0.61, 0.355, 1)",

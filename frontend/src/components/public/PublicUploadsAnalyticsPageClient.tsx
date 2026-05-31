@@ -20,7 +20,7 @@ function formatCompactDate(value?: string | null) {
 function AnalyticsCard({ label, value, note, isDark }: { label: string; value: string; note: string; isDark: boolean }) {
   return (
     <article className={`rounded-2xl border p-5 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-white"}`}>
-      <p className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{label}</p>
+      <p className={`text-3xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{label}</p>
       <p className="mt-3 text-3xl font-semibold">{value}</p>
       <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-600"}`}>{note}</p>
     </article>
@@ -100,7 +100,7 @@ export function PublicUploadsAnalyticsPageClient({ overview }: { overview: Publi
                 href={`/public/${book.public_slug || book.id}` as Route}
                 className={`rounded-2xl border p-4 transition ${isDark ? "border-white/10 bg-black/20 hover:bg-white/[0.04]" : "border-stone-200 bg-stone-50 hover:bg-stone-100"}`}
               >
-                <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>
+                <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>
                   {book.genre || "Unspecified genre"}
                 </p>
                 <h3 className="mt-3 text-lg font-semibold">{book.title}</h3>

@@ -79,7 +79,7 @@ export default function CrossBookWikiPage() {
           <Link href="/library" className={pillClass(isDark)}>Library</Link>
         </div>
 
-        <section className={`rounded-[2rem] border p-6 shadow-[0_28px_100px_-56px_rgba(15,23,42,0.45)] ${isDark ? "border-white/10 bg-[linear-gradient(145deg,#0f172a,#0a1020_55%,#13243a)]" : "border-white/70 bg-[linear-gradient(145deg,#ffffff,#f8fbff_55%,#edf4ff)]"}`}>
+        <section className={`rounded-lg border p-6 shadow-modal ${isDark ? "border-white/10 bg-[linear-gradient(145deg,#0f172a,#0a1020_55%,#13243a)]" : "border-white/70 bg-[linear-gradient(145deg,#ffffff,#f8fbff_55%,#edf4ff)]"}`}>
           <p className={`text-xs font-semibold uppercase tracking-[0.32em] ${isDark ? "text-sky-200" : "text-sky-700"}`}>Cross-book wiki</p>
           <h1 className={`mt-3 font-serif text-5xl leading-tight ${isDark ? "text-white" : "text-slate-950"}`}>Find connections across your series</h1>
           <p className={`mt-4 max-w-3xl text-sm leading-7 ${isDark ? "text-stone-300" : "text-slate-600"}`}>
@@ -87,7 +87,7 @@ export default function CrossBookWikiPage() {
           </p>
 
           <div className="mt-6 grid gap-4 lg:grid-cols-[1fr_auto] lg:items-start">
-            <div className={`rounded-[1.4rem] border p-4 ${isDark ? "border-white/10 bg-black/20" : "border-slate-200 bg-white/85"}`}>
+            <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-black/20" : "border-slate-200 bg-white/85"}`}>
               <label className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-stone-400" : "text-slate-500"}`}>Search matches</label>
               <input
                 value={query}
@@ -111,7 +111,7 @@ export default function CrossBookWikiPage() {
                 ))}
               </div>
 
-              <div className={`mt-4 rounded-[1.2rem] border p-4 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-slate-200 bg-slate-50"}`}>
+              <div className={`mt-4 rounded-md border p-4 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-slate-200 bg-slate-50"}`}>
                 <div className="flex items-center justify-between">
                   <label className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-stone-400" : "text-slate-500"}`}>Similarity threshold: {threshold}%</label>
                   <span className={`text-xs ${isDark ? "text-stone-500" : "text-slate-500"}`}>Only show matches above this score</span>
@@ -152,9 +152,9 @@ export default function CrossBookWikiPage() {
         </section>
 
         {loading ? (
-          <div className={`rounded-[1.8rem] border border-dashed py-20 text-center ${isDark ? "border-white/10 text-stone-400" : "border-slate-300 text-slate-500"}`}>Loading cross-book connections...</div>
+          <div className={`rounded-lg border border-dashed py-20 text-center ${isDark ? "border-white/10 text-stone-400" : "border-slate-300 text-slate-500"}`}>Loading cross-book connections...</div>
         ) : matches.length === 0 ? (
-          <div className={`rounded-[1.8rem] border p-8 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-slate-200 bg-white/85"}`}>
+          <div className={`rounded-lg border p-8 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-slate-200 bg-white/85"}`}>
             <h2 className={`text-2xl font-semibold ${isDark ? "text-white" : "text-slate-950"}`}>No matches found</h2>
             <p className={`mt-3 max-w-2xl text-sm leading-7 ${isDark ? "text-stone-300" : "text-slate-600"}`}>
               {intelligenceData?.comparison_book_ids.length === 0 || (intelligenceData?.comparison_book_ids.length ?? 0) < 2
@@ -164,7 +164,7 @@ export default function CrossBookWikiPage() {
             </p>
           </div>
         ) : (
-          <section className={`overflow-hidden rounded-[1.8rem] border ${isDark ? "border-white/10 bg-white/[0.04]" : "border-slate-200 bg-white/85"}`}>
+          <section className={`overflow-hidden rounded-lg border ${isDark ? "border-white/10 bg-white/[0.04]" : "border-slate-200 bg-white/85"}`}>
             <div className={`grid grid-cols-[1fr_1fr_auto] gap-3 px-5 py-4 text-sm ${isDark ? "border-b border-white/10 text-stone-300" : "border-b border-slate-200 text-slate-600"}`}>
               <p className="font-semibold uppercase tracking-[0.22em]">This book</p>
               <p className="font-semibold uppercase tracking-[0.22em]">Connected to</p>

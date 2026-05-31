@@ -6,6 +6,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.beta_reads import BetaReadAssignmentOut
 from app.schemas.reader import ChapterListResponseOut, ReadingProgressOut, SummaryCollectionResponseOut
 
 
@@ -36,6 +37,8 @@ CollaborationRoleLiteral = Literal[
     "reader_only",
     "co_writer",
 ]
+BookAccessClassLiteral = Literal["owner", "author_collaborator", "reader_collaborator"]
+WorkspaceShellLiteral = Literal["author", "reader"]
 TagTargetLiteral = Literal[
     "chapter",
     "scene",
@@ -58,6 +61,9 @@ class BookOut(BaseModel):
     work_type: str
     status: str
     mode: str
+    workspace_shell: WorkspaceShellLiteral = "reader"
+    access_class: BookAccessClassLiteral = "owner"
+    can_switch_workspace_mode: bool = True
     source_kind: str
     preserve_chapter_numbers: bool = False
     preserve_source_chapters: bool = False
@@ -107,9 +113,9 @@ class BookOut(BaseModel):
 
 class BookOverviewOut(BaseModel):
     book: BookOut
-    progress: ReadingProgressOut
-    chapter_list: ChapterListResponseOut
-    summary_collection: SummaryCollectionResponseOut
+    progress: ReadingProgressOut | None = None
+    chapter_list: ChapterListResponseOut | None = None
+    summary_collection: SummaryCollectionResponseOut | None = None
 
 
 class BookForumMetadataBody(BaseModel):
@@ -294,6 +300,45 @@ class BookCollaboratorOut(BaseModel):
     updated_at: datetime
 
 
+class ChapterBetaFeedbackOut(BaseModel):
+    id: str
+    assignment_id: str
+    collaborator_id: str | None = None
+    reader_user_id: str | None = None
+    reader_email: str
+    reader_display_name: str
+    task_label: str
+    kind: str
+    chapter_number: int | None = None
+    anchor_text: str | None = None
+    body: str | None = None
+    author_status: str = "open"
+    created_at: datetime
+    updated_at: datetime
+
+
+class CollaboratorActivityItemOut(BaseModel):
+    id: str
+    kind: str
+    title: str
+    body: str | None = None
+    chapter_number: int | None = None
+    chapter_title: str | None = None
+    assignment_id: str | None = None
+    feedback_item_id: str | None = None
+    annotation_id: str | None = None
+    created_at: datetime
+
+
+class CollaboratorActivityOut(BaseModel):
+    collaborator: BookCollaboratorOut
+    assignments: list[BetaReadAssignmentOut] = Field(default_factory=list)
+    items: list[CollaboratorActivityItemOut] = Field(default_factory=list)
+    chapter_comment_count: int = 0
+    annotation_count: int = 0
+    latest_activity_at: datetime | None = None
+
+
 class CharacterMergeBody(BaseModel):
     primary_id: uuid.UUID
     secondary_id: uuid.UUID
@@ -359,13 +404,17 @@ class StoryHealthOut(BaseModel):
 
 
 class ManuscriptImportResult(BaseModel):
+    status: str = "imported"
     book_id: str
     imported_chapters: list[int]
+    chapters_created: int = 0
+    analysis_dispatched: int = 0
+    analysis_tasks: list[dict[str, Any]] = Field(default_factory=list)
     chapter_content_versions: dict[int, int] = Field(default_factory=dict)
     total_chapters: int
     mode: str
     source_kind: str
-    chapter_reports: list[ChapterConsistencyReport] = []
+    chapter_reports: list[ChapterConsistencyReport] = Field(default_factory=list)
 
 
 class PreWritingCharacterOut(BaseModel):
@@ -442,12 +491,27 @@ class ChapterVersionOut(BaseModel):
     word_count: int | None = None
     note: str | None = None
     snapshot_kind: str = "manual"
+    restore_status: str | None = None
+    restore_error: str | None = None
+    restore_task_id: str | None = None
+    restore_started_at: datetime | None = None
+    restore_completed_at: datetime | None = None
     created_at: datetime
 
 
 class ChapterVersionDetailOut(ChapterVersionOut):
     text: str
     html: str | None = None
+
+
+class ChapterVersionRestoreStatusOut(BaseModel):
+    id: str
+    chapter_number: int
+    restore_status: str | None = None
+    restore_error: str | None = None
+    restore_task_id: str | None = None
+    restore_started_at: datetime | None = None
+    restore_completed_at: datetime | None = None
 
 
 class SceneVersionOut(BaseModel):

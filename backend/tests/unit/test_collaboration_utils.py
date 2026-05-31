@@ -3,6 +3,7 @@ from fastapi import HTTPException
 
 from app.schemas.books import CollaborationScope
 from app.utils.book_utils import (
+    build_book_access_context,
     collaboration_allows_chapter,
     collaboration_can_comment,
     collaboration_can_edit,
@@ -71,6 +72,15 @@ def test_collaboration_permissions_follow_role_defaults():
     assert permissions["can_edit_manuscript"] is True
     assert permissions["can_export"] is True
     assert permissions["can_comment"] is True
+
+    beta_reader_permissions = normalize_collaboration_permissions(
+        None,
+        role="beta_reader",
+        scope={"chapter_start": None, "chapter_end": None},
+    )
+    assert beta_reader_permissions["can_view_story_bible"] is False
+    assert beta_reader_permissions["can_run_ai_scans"] is False
+    assert beta_reader_permissions["can_comment"] is True
 
 
 def test_collaboration_permissions_honor_selected_chapter_override():
@@ -162,3 +172,21 @@ def test_normalizers_clean_email_and_reject_unknown_role():
 
     with pytest.raises(HTTPException):
         normalize_collaboration_role("owner")
+
+
+def test_access_context_forces_reader_shell_for_reader_roles():
+    owner_book = type("BookStub", (), {"mode": "author", "user_id": "owner"})()
+    collaborator = _Collaborator(
+        {"chapter_start": 2, "chapter_end": 4, "character_bible": False, "continuity_report": False, "reader_confusion_report": False},
+        role="beta_reader",
+        permissions={"can_comment": True, "can_edit_manuscript": False},
+    )
+
+    owner_access = build_book_access_context(owner_book, user_id="owner", collaborator=None)
+    collaborator_access = build_book_access_context(owner_book, user_id="reader", collaborator=collaborator)
+
+    assert owner_access.workspace_shell == "author"
+    assert owner_access.access_class == "owner"
+    assert collaborator_access.workspace_shell == "reader"
+    assert collaborator_access.access_class == "reader_collaborator"
+    assert collaborator_access.can_switch_workspace_mode is False

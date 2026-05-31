@@ -23,23 +23,58 @@ from app.utils.email_utils import (
     can_send_email,
     get_or_create_email_preference,
 )
+from app.utils.logging.logger import get_logger
 
 resend.api_key = settings.RESEND_API_KEY
 
 _PUBLIC_APP_URL = "https://getlorevia.com"
 _LOCAL_EMAIL_HOSTS = {"localhost", "127.0.0.1", "::1"}
+log = get_logger("lorevia.email")
+
+
+def _mask_email_address(email: str) -> str:
+    local_part, separator, domain = email.strip().partition("@")
+    if not separator:
+        return "[invalid-email]"
+    if not local_part:
+        return f"***@{domain}"
+    if len(local_part) == 1:
+        return f"{local_part}***@{domain}"
+    return f"{local_part[0]}***{local_part[-1]}@{domain}"
 
 
 def _send(payload: dict[str, Any]) -> bool:
     # Disable email sending in debug/test environments
     if settings.DEBUG:
+        log.info(
+            "email_send_skipped_debug",
+            extra={
+                "subject": str(payload.get("subject") or ""),
+                "recipient": _mask_email_address(str(payload.get("to") or "")),
+            },
+        )
         return True
 
     try:
-        resend.Emails.send(cast(Any, payload))
+        response = resend.Emails.send(cast(Any, payload))
+        log.info(
+            "email_send_succeeded",
+            extra={
+                "subject": str(payload.get("subject") or ""),
+                "recipient": _mask_email_address(str(payload.get("to") or "")),
+                "provider_message_id": getattr(response, "id", None),
+            },
+        )
         return True
     except Exception:
         # Email delivery should never block auth or reading flows.
+        log.exception(
+            "email_send_failed",
+            extra={
+                "subject": str(payload.get("subject") or ""),
+                "recipient": _mask_email_address(str(payload.get("to") or "")),
+            },
+        )
         return False
 
 
@@ -209,6 +244,13 @@ async def _resolve_promotional_context(
         return {"allowed": True}
 
     if not (settings.BUSINESS_MAILING_ADDRESS or "").strip():
+        log.warning(
+            "promotional_email_suppressed_missing_business_mailing_address",
+            extra={
+                "category": category,
+                "recipient": _mask_email_address(email),
+            },
+        )
         return None
 
     normalized_email = email.strip().lower()
@@ -217,11 +259,25 @@ async def _resolve_promotional_context(
             await db.execute(select(User).where(func.lower(User.email) == normalized_email))
         ).scalar_one_or_none()
         if user is None:
+            log.warning(
+                "promotional_email_suppressed_missing_user",
+                extra={
+                    "category": category,
+                    "recipient": _mask_email_address(normalized_email),
+                },
+            )
             return None
         preference = await get_or_create_email_preference(db, user=user, email=normalized_email)
         await db.commit()
         await db.refresh(preference)
         if not can_send_email(preference, category):
+            log.info(
+                "promotional_email_suppressed_by_preferences",
+                extra={
+                    "category": category,
+                    "recipient": _mask_email_address(normalized_email),
+                },
+            )
             return None
         links = await build_email_preference_links(user)
         return {
@@ -280,6 +336,12 @@ def _render_stats_grid(stats: list[tuple[str, str]]) -> str:
             "</td>"
         )
     return "<table role=\"presentation\" cellspacing=\"0\" cellpadding=\"0\" style=\"margin:8px -8px 10px;\"><tr>" + "".join(cards) + "</tr></table>"
+
+
+def _trial_email_category(email_type: str) -> str:
+    if email_type in {TRIAL_EMAIL_STARTED, TRIAL_EMAIL_ENDING, TRIAL_EMAIL_ENDED}:
+        return EMAIL_CATEGORY_TRANSACTIONAL
+    return EMAIL_CATEGORY_PRODUCT_UPDATES
 
 
 async def send_processing_complete_with_stats(
@@ -396,7 +458,7 @@ async def send_onboarding_email(email: str) -> None:
     await _send_categorized_email(
         email=email,
         subject="Welcome to LoreVia",
-        category=EMAIL_CATEGORY_PRODUCT_UPDATES,
+        category=EMAIL_CATEGORY_TRANSACTIONAL,
         html=_render_email(
             preheader="Your LoreVia workspace is ready. Start by adding one book, manuscript, or draft.",
             eyebrow="Welcome to LoreVia",
@@ -500,7 +562,7 @@ async def send_trial_email(email: str, email_type: str) -> bool:
     return await _send_categorized_email(
         email=email,
         subject=template["subject"],
-        category=EMAIL_CATEGORY_PRODUCT_UPDATES,
+        category=_trial_email_category(email_type),
         html=_render_email(
             preheader=template["preheader"],
             eyebrow=template["eyebrow"],

@@ -15,12 +15,14 @@ log = logging.getLogger("lorevia.redis")
 
 ADVISOR_CACHE_TTL_SECONDS = 10 * 60
 PROACTIVE_SCAN_CACHE_TTL_SECONDS = 5 * 60
+SUGGESTION_SCAN_CACHE_TTL_SECONDS = 10 * 60
 BOOK_AGGREGATE_CACHE_TTL_SECONDS = 2 * 60
 STORY_CONTEXT_CACHE_TTL_SECONDS = 10 * 60
 USER_DASHBOARD_CACHE_TTL_SECONDS = 2 * 60
 READER_DERIVED_CACHE_TTL_SECONDS = 2 * 60
 PUBLIC_PROFILE_CACHE_TTL_SECONDS = 5 * 60
 PUBLIC_FORUM_COMMENTS_CACHE_TTL_SECONDS = 2 * 60
+SYNOPSIS_CACHE_TTL_SECONDS = 7 * 86400  # 604800
 
 
 def _hash_ephemeral_token(token: str) -> str:
@@ -284,6 +286,47 @@ def key_extraction_inflight(book_id: str, chapter_number: int) -> str:
     return f"extraction:inflight:{book_id}:{chapter_number}"
 
 
+def key_extraction_inflight_book(book_id: str) -> str:
+    return f"extraction:inflight_book:{book_id}"
+
+
+INFLIGHT_BOOK_TTL_SECONDS = 3600
+
+_DELETE_IF_OWNER_SCRIPT = """
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+    return redis.call("DEL", KEYS[1])
+else
+    return 0
+end
+"""
+
+
+async def cache_delete_if_owner(key: str, owner_token: str) -> bool:
+    r = await get_redis()
+    serialized = json.dumps(owner_token, default=str)
+    eval_method = getattr(r, "eval", None)
+    if callable(eval_method):
+        result = await eval_method(_DELETE_IF_OWNER_SCRIPT, 1, key, serialized)
+        return bool(result)
+
+    # Test fakes do not implement Lua eval; fall back to a simple ownership check.
+    current_owner = await r.get(key)
+    if isinstance(current_owner, bytes):
+        current_owner = current_owner.decode()
+    
+    # Compare the actual stored value with the serialized token
+    # Handle both JSON-serialized and raw string values for test compatibility
+    if current_owner == serialized or current_owner == owner_token:
+        deleted = await r.delete(key)
+        return bool(deleted)
+    
+    return False
+
+
+def key_cron_lock(task_name: str) -> str:
+    return f"cron:lock:{task_name}"
+
+
 def key_chapter_recovery_inflight(chapter_id: str) -> str:
     return f"chapter_recovery:inflight:{chapter_id}"
 
@@ -367,6 +410,10 @@ def key_voice_consistency_cache(book_id: str, cache_key: str) -> str:
 
 def key_proactive_scan_cache(book_id: str, cache_key: str) -> str:
     return f"advisor:book:{book_id}:proactive:{cache_key}"
+
+
+def key_suggestion_scan_cache(book_id: str, cache_key: str) -> str:
+    return f"advisor:book:{book_id}:suggestions:{cache_key}"
 
 
 def key_series_advisor_response_cache(series_id: str, cache_key: str) -> str:
@@ -499,6 +546,36 @@ async def set_proactive_scan_cache(book_id: str, cache_key: str, payload: object
         key_proactive_scan_cache(book_id, cache_key),
         payload,
         PROACTIVE_SCAN_CACHE_TTL_SECONDS,
+    )
+
+
+async def get_suggestion_scan_cache(book_id: str, cache_key: str) -> dict | None:
+    payload = await _cache_get_json_best_effort(key_suggestion_scan_cache(book_id, cache_key))
+    return payload if isinstance(payload, dict) else None
+
+
+async def set_suggestion_scan_cache(book_id: str, cache_key: str, payload: object) -> None:
+    await _cache_set_json_best_effort(
+        key_suggestion_scan_cache(book_id, cache_key),
+        payload,
+        SUGGESTION_SCAN_CACHE_TTL_SECONDS,
+    )
+
+
+def key_synopsis_cache(book_id: str, spoiler_level: str, content_hash: str) -> str:
+    return f"advisor:book:{book_id}:synopsis:{spoiler_level}:{content_hash}"
+
+
+async def get_synopsis_cache(book_id: str, spoiler_level: str, content_hash: str) -> dict | None:
+    payload = await _cache_get_json_best_effort(key_synopsis_cache(book_id, spoiler_level, content_hash))
+    return payload if isinstance(payload, dict) else None
+
+
+async def set_synopsis_cache(book_id: str, spoiler_level: str, content_hash: str, payload: object) -> None:
+    await _cache_set_json_best_effort(
+        key_synopsis_cache(book_id, spoiler_level, content_hash),
+        payload,
+        SYNOPSIS_CACHE_TTL_SECONDS,
     )
 
 
@@ -740,3 +817,46 @@ def key_public_forum_posts(version: int, q: str, page: int, page_size: int) -> s
 
 def key_public_forum_post_detail(version: int, post_id: str) -> str:
     return f"public:forum:post:v{version}:{post_id}"
+
+
+EMBEDDING_CACHE_TTL_SECONDS = 30 * 60
+
+
+def key_embedding_cache(*, feature: str, model: str, text: str) -> str:
+    text_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    return f"embedding:{model}:{feature}:{text_hash}"
+
+
+async def get_embedding_cache(*, feature: str, model: str, text: str) -> list[float] | None:
+    payload = await _cache_get_json_best_effort(key_embedding_cache(feature=feature, model=model, text=text))
+    if isinstance(payload, list) and all(isinstance(v, (int, float)) for v in payload):
+        return [float(v) for v in payload]
+    return None
+
+
+async def set_embedding_cache(*, feature: str, model: str, text: str, vector: list[float]) -> None:
+    await _cache_set_json_best_effort(
+        key_embedding_cache(feature=feature, model=model, text=text),
+        vector,
+        EMBEDDING_CACHE_TTL_SECONDS,
+    )
+
+
+CROSS_BOOK_INTEL_CACHE_TTL_SECONDS = 30 * 60
+
+
+def key_cross_book_intelligence(books_hash: str, snapshot_hash: str) -> str:
+    return f"cross_book_intelligence:{books_hash}:{snapshot_hash}"
+
+
+async def get_cross_book_intelligence_cache(books_hash: str, snapshot_hash: str) -> dict | None:
+    payload = await _cache_get_json_best_effort(key_cross_book_intelligence(books_hash, snapshot_hash))
+    return payload if isinstance(payload, dict) else None
+
+
+async def set_cross_book_intelligence_cache(books_hash: str, snapshot_hash: str, payload: object) -> None:
+    await _cache_set_json_best_effort(
+        key_cross_book_intelligence(books_hash, snapshot_hash),
+        payload,
+        CROSS_BOOK_INTEL_CACHE_TTL_SECONDS,
+    )

@@ -1,11 +1,13 @@
 "use client"
+import dynamic from "next/dynamic"
 import { useState, useEffect, useRef, useMemo } from "react"
+
 import { useReader } from "@/lib/hooks/useReader"
 import type { ReaderFontFamily } from "@/lib/utils/readerTypography"
 import { ReaderToolbar } from "./ReaderToolbar"
 import { ChapterText } from "./ChapterText"
-import { ContextPanel } from "./ContextPanel"
-import { SummaryPanel } from "./SummaryPanel"
+import { ReaderQuickRail } from "./ReaderQuickRail"
+import { ReadingProgressRail } from "./ReadingProgressRail"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import type { ReaderDisplayStyle } from "@/types/reader"
 
@@ -20,12 +22,28 @@ interface ReaderBookmark {
   savedAt: string
 }
 
+const ContextPanel = dynamic(
+  () => import("./ContextPanel").then((module) => module.ContextPanel),
+  { ssr: false }
+)
+
+const SummaryPanel = dynamic(
+  () => import("./SummaryPanel").then((module) => module.SummaryPanel),
+  { ssr: false }
+)
+
+const ReaderChapterFeedback = dynamic(
+  () => import("./ReaderChapterFeedback").then((module) => module.ReaderChapterFeedback),
+  { ssr: false }
+)
+
 export function ReaderView({ bookId, chapterNum }: Props) {
   const { data, loading, error, tap, contextResult, contextLoading, clearContext, saveProgress } = useReader(bookId, chapterNum)
-  const { theme: appTheme, setTheme: setAppTheme } = usePreferencesStore()
+  const { setTheme: setAppTheme } = usePreferencesStore()
   const [showSummary, setShowSummary] = useState(false)
+  const [showFeedbackPanel, setShowFeedbackPanel] = useState(false)
   const [selectedQuote, setSelectedQuote] = useState<string | null>(null)
-  const [theme, setTheme] = useState<ReaderTheme>(appTheme)
+  const [theme, setTheme] = useState<ReaderTheme>("dark")
   const [fontSize, setFontSize] = useState(20)
   const [fontFamily, setFontFamily] = useState<ReaderFontFamily>("serif")
   const [displayStyle, setDisplayStyle] = useState<ReaderDisplayStyle>("published")
@@ -45,7 +63,19 @@ export function ReaderView({ bookId, chapterNum }: Props) {
   }, [])
 
   useEffect(() => {
-    const storedTheme = window.localStorage.getItem("reader-theme") || window.localStorage.getItem("app-theme")
+    setShowFeedbackPanel(false)
+
+    if (typeof window !== "undefined" && "requestIdleCallback" in window) {
+      const idleId = window.requestIdleCallback(() => setShowFeedbackPanel(true), { timeout: 1800 })
+      return () => window.cancelIdleCallback(idleId)
+    }
+
+    const timeoutId = globalThis.setTimeout(() => setShowFeedbackPanel(true), 1200)
+    return () => globalThis.clearTimeout(timeoutId)
+  }, [bookId, chapterNum])
+
+  useEffect(() => {
+    const storedTheme = window.localStorage.getItem("reader-theme")
     if (storedTheme === "light" || storedTheme === "dark") setTheme(storedTheme)
     setSelectedQuote(null)
     setScrollPct(0)
@@ -59,9 +89,7 @@ export function ReaderView({ bookId, chapterNum }: Props) {
     const storedDisplayStyle = window.localStorage.getItem("reader-display-style")
     if (storedDisplayStyle === "relaxed" || storedDisplayStyle === "published") setDisplayStyle(storedDisplayStyle)
 
-    if (!storedTheme) {
-      setTheme(window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
-    }
+    if (!storedTheme) setTheme("dark")
 
     const bookmarkKey = `reader-bookmark:${bookId}`
     const bookmark = window.localStorage.getItem(bookmarkKey)
@@ -82,10 +110,6 @@ export function ReaderView({ bookId, chapterNum }: Props) {
     window.addEventListener("resize", updateQuoteModeCapability)
     return () => window.removeEventListener("resize", updateQuoteModeCapability)
   }, [bookId, chapterNum])
-
-  useEffect(() => {
-    setTheme(appTheme)
-  }, [appTheme])
 
   useEffect(() => {
     window.localStorage.setItem("reader-theme", theme)
@@ -163,7 +187,7 @@ export function ReaderView({ bookId, chapterNum }: Props) {
     restoreBookmarkRef.current = bookmark
   }, [bookId, chapterNum, data, scrollPct, selectedQuote])
 
-  const toggleTheme = () => setTheme(current => current === "dark" ? "light" : "dark")
+  const toggleTheme = () => setTheme((current) => current === "dark" ? "light" : "dark")
   const clearPanel = () => {
     clearContext()
     setSelectedQuote(null)
@@ -177,15 +201,36 @@ export function ReaderView({ bookId, chapterNum }: Props) {
 
   const totalWords = countWords(chapterText)
   const wordsRead = totalWords > 0 ? Math.min(totalWords, Math.max(0, Math.round(totalWords * scrollPct))) : 0
+  const progressPercent = totalWords > 0 ? Math.round(scrollPct * 100) : null
   const hasActiveContext = Boolean(contextResult || selectedQuote)
   const showMobileSheet = canUseQuoteMode && (hasActiveContext || contextLoading)
 
-  if (loading) return <div className="flex justify-center py-20 text-gray-400">Loading chapter...</div>
-  if (error || !data) return <div className="flex justify-center py-20 text-gray-400">{error ?? "Chapter not found"}</div>
+  if (loading) {
+    return (
+      <div className="reader-display-shell flex min-h-[100dvh] items-center justify-center bg-[#080d17] px-6 text-slate-300">
+        <div className="w-full max-w-md rounded-lg border border-white/10 bg-white/[0.03] px-8 py-10 text-center shadow-[0_24px_80px_-56px_rgba(45,212,191,0.35)]">
+          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-teal-300/40 border-t-teal-200" />
+          <p className="mt-5 text-sm uppercase tracking-[0.22em] text-slate-500">Reader</p>
+          <p className="mt-3 text-lg text-slate-100">Loading chapter...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (error || !data) {
+    return (
+      <div className="reader-display-shell flex min-h-[100dvh] items-center justify-center bg-[#080d17] px-6 text-slate-300">
+        <div className="w-full max-w-md rounded-lg border border-white/10 bg-white/[0.03] px-8 py-10 text-center shadow-[0_24px_80px_-56px_rgba(79,70,229,0.4)]">
+          <p className="text-sm uppercase tracking-[0.22em] text-slate-500">Reader</p>
+          <p className="mt-3 text-lg text-slate-100">{error ?? "Chapter not found"}</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className={`reader-display-shell flex h-[100dvh] min-h-[100dvh] overflow-hidden transition-colors ${theme === "dark"
-        ? "bg-[radial-gradient(circle_at_top,#20253f,#0b1020_58%,#090b12)] text-stone-100"
+        ? "bg-[#070c16] text-stone-100"
         : "bg-[linear-gradient(180deg,#fcf7ef_0%,#f7f2eb_45%,#f3efe9_100%)] text-slate-950"
       }`}>
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -208,28 +253,56 @@ export function ReaderView({ bookId, chapterNum }: Props) {
           quoteModeEnabled={quoteModeEnabled}
           canUseQuoteMode={canUseQuoteMode}
           onToggleQuoteMode={toggleQuoteMode}
+          progressPercent={progressPercent}
         />
-        <div ref={scrollRef} className="reader-scrollbar min-h-0 flex-1 overflow-y-auto overscroll-y-contain">
-          <ChapterText
-            bookId={bookId}
-            chapterNum={chapterNum}
-            chapterTitle={data.chapter_title}
-            totalChapters={data.total_chapters ?? null}
-            canCopyManuscript={data.can_copy_manuscript ?? true}
-            textUrl={data.text_url}
-            textContent={data.text_content ?? null}
-            htmlContent={data.html_content ?? null}
-            media={data.media ?? []}
-            characters={data.characters}
-            onTap={tap}
-            onQuoteSelect={(text) => setSelectedQuote(text)}
-            theme={theme}
-            fontSize={fontSize}
-            fontFamily={fontFamily}
-            displayStyle={displayStyle}
-            quoteModeEnabled={quoteModeEnabled}
-            canUseQuoteMode={canUseQuoteMode}
-          />
+        <div
+          ref={scrollRef}
+          className={`reader-scrollbar min-h-0 flex-1 overflow-y-auto overscroll-y-contain ${theme === "dark" ? "bg-[radial-gradient(circle_at_top,rgba(29,78,216,0.075),transparent_16%),linear-gradient(180deg,#070c16_0%,#0a1120_100%)]" : ""}`}
+        >
+          <div className="mx-auto w-full max-w-[1620px] px-4 pb-12 pt-4 sm:px-6 lg:px-8 xl:px-10">
+            <div className="grid gap-6 xl:grid-cols-[64px_minmax(0,1fr)_88px] xl:items-start">
+              <ReaderQuickRail
+                bookId={bookId}
+                chapterNum={chapterNum}
+                theme={theme}
+                onSummary={() => setShowSummary(true)}
+              />
+              <ChapterText
+                bookId={bookId}
+                chapterNum={chapterNum}
+                chapterTitle={data.chapter_title}
+                totalChapters={data.total_chapters ?? null}
+                canCopyManuscript={data.can_copy_manuscript ?? true}
+                textUrl={data.text_url}
+                textContent={data.text_content ?? null}
+                htmlContent={data.html_content ?? null}
+                media={data.media ?? []}
+                characters={data.characters}
+                onTap={tap}
+                onQuoteSelect={(text) => setSelectedQuote(text)}
+                theme={theme}
+                fontSize={fontSize}
+                fontFamily={fontFamily}
+                displayStyle={displayStyle}
+                quoteModeEnabled={quoteModeEnabled}
+                canUseQuoteMode={canUseQuoteMode}
+              />
+              <ReadingProgressRail
+                theme={theme}
+                progressPercent={progressPercent}
+                wordsRead={wordsRead}
+                totalWords={totalWords}
+              />
+            </div>
+            {showFeedbackPanel ? (
+              <ReaderChapterFeedback
+                bookId={bookId}
+                chapterNum={chapterNum}
+                theme={theme}
+                chapterFeedback={data.beta_feedback ?? []}
+              />
+            ) : null}
+          </div>
         </div>
       </div>
 

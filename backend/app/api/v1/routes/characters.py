@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,6 +10,7 @@ from app.models.book import Book
 from app.models.character import Character, CharacterState
 from app.schemas.character import CharacterOut
 from app.utils.character_utils import serialize_character_detail
+from app.utils.sparse_utils import include_requested
 
 router = APIRouter()
 
@@ -17,6 +18,7 @@ router = APIRouter()
 @router.get("/{character_id}", response_model=CharacterOut)
 async def get_character(
     character_id: uuid.UUID,
+    include: str | None = Query(None, description="Comma-separated sub-objects: analysis_metadata"),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -26,7 +28,7 @@ async def get_character(
     book = await db.get(Book, char.book_id)
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
-    return serialize_character_detail(char)
+    return serialize_character_detail(char, skip_analysis_metadata=not include_requested(include, "analysis_metadata"))
 
 
 @router.get("/{character_id}/state")

@@ -57,6 +57,8 @@ Manual Docker Compose deployment:
 docker compose -f docker-compose.yml up -d --build redis nginx backend worker-extraction worker-analysis worker-intelligence celery-beat
 ```
 
+Only use the manual Compose command to restart an already-migrated release. Use `./deploy.sh` whenever application code or Alembic revisions change so the schema is upgraded before the containers restart.
+
 ## Verification
 
 Redis container health:

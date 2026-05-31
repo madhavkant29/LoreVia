@@ -6,8 +6,11 @@ import type { Route } from "next"
 import Link from "next/link"
 
 import { AuthorFeatureComponent } from "@/components/billing/AuthorFeatureComponent"
+import { ThemeBrandImage } from "@/components/layout/ThemeBrandImage"
+import { Button } from "@/components/ui/Button"
 import { canUseAuthorFeatures } from "@/lib/billing/plans"
 import { useCachedBookDetail } from "@/lib/hooks/useBookDetail"
+import { useNavigationPrefetch } from "@/lib/hooks/useNavigationPrefetch"
 import { useAuthStore } from "@/lib/stores/authStore"
 import type { Book } from "@/types/book"
 import type { CollaborationPermissions } from "@/types/book"
@@ -33,7 +36,6 @@ type NavIcon =
   | "chapters"
   | "pen"
   | "voice"
-  | "plus"
   | "spark"
   | "quill"
   | "chat"
@@ -48,6 +50,8 @@ type NavIcon =
   | "notes"
   | "quote"
   | "files"
+  | "plus"
+  | "chevron-right"
 
 type NavItem = {
   id: string
@@ -64,12 +68,13 @@ type NavSection = {
   authorOnly?: boolean
 }
 
+const READER_SHELL_ITEM_IDS = new Set(["overview", "read", "chapters", "summaries", "search", "timeline", "beta-feedback"])
+
 function canSeeCollaboratorItem(itemId: string, permissions: CollaborationPermissions | null) {
   if (!permissions) return false
   switch (itemId) {
     case "manuscript":
     case "scenes":
-    case "add-scene":
       return permissions.can_edit_manuscript
     case "advisor":
     case "editorial-review":
@@ -96,7 +101,7 @@ function canSeeCollaboratorItem(itemId: string, permissions: CollaborationPermis
 
 const NAV_SECTIONS = (bookId: string, currentChapter = 1): NavSection[] => [
   {
-    title: "Manuscript",
+    title: "Story",
     items: [
       { id: "overview", label: "Overview", href: `/${bookId}` as Route, tone: "Home", helper: "See progress, next steps, and the latest signals around this book.", icon: "book" },
       { id: "read", label: "Preview Draft", href: `/${bookId}/chapter/${currentChapter}` as Route, tone: "Continue", helper: "Open the current draft in reading view and pick up where the story last left off.", icon: "read" },
@@ -109,7 +114,7 @@ const NAV_SECTIONS = (bookId: string, currentChapter = 1): NavSection[] => [
     items: [
       { id: "manuscript", label: "Manuscript Editor", href: `/${bookId}/manuscript` as Route, tone: "Drafting", helper: "Write, revise, and shape the working manuscript with your drafting tools close by.", icon: "pen" },
       { id: "scenes", label: "Scene Workspace", href: `/${bookId}/scenes` as Route, tone: "File tree", helper: "Organize scenes, reorder structure, and manage the story at a scene-by-scene level.", icon: "files" },
-      { id: "add-scene", label: "Add Scene", href: `/${bookId}/scenes` as Route, tone: "Create", helper: "Start a new scene and drop it into the manuscript flow without breaking momentum.", icon: "plus" },
+
     ],
   },
   {
@@ -132,6 +137,7 @@ const NAV_SECTIONS = (bookId: string, currentChapter = 1): NavSection[] => [
       { id: "search", label: "Search Passages", href: `/${bookId}/search` as Route, tone: "Find", helper: "Search the manuscript for names, lines, or moments without manually scanning chapters.", icon: "search" },
       { id: "timeline", label: "Major Events", href: `/${bookId}/timeline` as Route, tone: "Plot", helper: "Review key events in sequence so the story timeline stays easy to reason about.", icon: "events" },
       { id: "summaries", label: "Recaps", href: `/${bookId}/summaries` as Route, tone: "Recap", helper: "Read chapter and story recaps when you need context fast before editing.", icon: "summary" },
+      { id: "beta-feedback", label: "Feedback", href: `/${bookId}/beta-feedback` as Route, tone: "Review", helper: "Leave chapter comments and open your assignment feedback without leaving the reading flow.", icon: "users" },
       { id: "quotes", label: "Saved Quotes", href: "/quotes" as Route, tone: "Highlights", helper: "Revisit memorable lines and collected excerpts pulled from this and other projects.", icon: "quote" },
       { id: "analysis", label: "Analysis", href: `/${bookId}/analysis` as Route, tone: "Advanced", helper: "Open deeper analysis views for broader manuscript diagnostics and story signals.", icon: "analysis" },
     ],
@@ -141,8 +147,7 @@ const NAV_SECTIONS = (bookId: string, currentChapter = 1): NavSection[] => [
     authorOnly: true,
     items: [
       { id: "notes", label: "Notes", href: `/${bookId}/notes` as Route, tone: "Vault", helper: "Keep book-specific notes, reminders, and reference details beside the draft.", icon: "notes" },
-      { id: "author-loop", label: "Author Loop", href: `/${bookId}/author-loop` as Route, tone: "Launch flow", helper: "Move through LoreVia's guided author workflow for revision and decision-making.", icon: "spark" },
-      { id: "beta-feedback", label: "Beta Feedback", href: `/${bookId}/beta-feedback` as Route, tone: "Collaborator loop", helper: "Review outside feedback and turn beta-reader notes into concrete next steps.", icon: "users" },
+      { id: "author-loop", label: "Author Lens", href: `/${bookId}/author-loop` as Route, tone: "Launch flow", helper: "Move through LoreVia's guided author workflow for revision and decision-making.", icon: "spark" },
       { id: "collaboration", label: "Collaborators", href: `/${bookId}/collaboration` as Route, tone: "Invite", helper: "Manage who can access the book and what each collaborator is allowed to do.", icon: "users" },
       { id: "export", label: "Import & Export", href: `/${bookId}/export` as Route, tone: "Files", helper: "Bring files in, send drafts out, and package the manuscript for other workflows.", icon: "files" },
     ],
@@ -166,16 +171,21 @@ export function AuthorToolsNav({
   const book = bookData ?? cachedBook
   const collaborationRole = book?.collaboration_role ?? null
   const collaborationPermissions = book?.collaboration_permissions ?? null
+  const currentShell = book?.workspace_shell ?? mode
   const isOwnerSession = !collaborationRole
   const hasOwnAuthorAccess = canUseAuthorFeatures(tier)
   const hasFreeSampleIntelligenceAccess = tier === "free"
   const hasCollaboratorAccess = Boolean(collaborationRole && collaborationPermissions)
-  const showAuthorSections = mode === "author" && (isOwnerSession || hasOwnAuthorAccess || hasCollaboratorAccess)
+  const showAuthorSections = currentShell === "author" && (isOwnerSession || hasOwnAuthorAccess || hasCollaboratorAccess)
+  const { prefetchByNavId } = useNavigationPrefetch(bookId)
 
   const sections = useMemo(
     () =>
       NAV_SECTIONS(bookId, currentChapter)
         .filter((section) => {
+          if (currentShell === "reader") {
+            return !section.authorOnly
+          }
           if (showAuthorSections || !section.authorOnly) {
             return true
           }
@@ -184,6 +194,9 @@ export function AuthorToolsNav({
         .map((section) => ({
           ...section,
           items: section.items.filter((item) => {
+            if (currentShell === "reader") {
+              return READER_SHELL_ITEM_IDS.has(item.id)
+            }
             if (!showAuthorSections && hasFreeSampleIntelligenceAccess) {
               return item.id === "advisor" || item.id === "editorial-review"
             }
@@ -192,45 +205,149 @@ export function AuthorToolsNav({
           }),
         }))
         .filter((section) => section.items.length > 0),
-    [bookId, collaborationPermissions, collaborationRole, currentChapter, hasFreeSampleIntelligenceAccess, hasOwnAuthorAccess, showAuthorSections]
+    [bookId, collaborationPermissions, collaborationRole, currentChapter, currentShell, hasFreeSampleIntelligenceAccess, hasOwnAuthorAccess, showAuthorSections]
   )
   const rail = variant === "rail"
-  const collapsedRailWidth = railSize === "compact" ? "w-[4.35rem]" : "w-[4.9rem]"
-  const expandedRailWidth = railSize === "compact" ? "hover:w-[16.5rem] focus-within:w-[16.5rem]" : "hover:w-[18.5rem] focus-within:w-[18.5rem]"
+  const [isPinnedOpen, setIsPinnedOpen] = useState(false)
+  const collapsedRailWidth = railSize === "compact" ? "xl:w-[4.35rem]" : "xl:w-[4.9rem]"
+  const expandedRailWidth = railSize === "compact" ? "xl:w-[16.5rem]" : "xl:w-[18.5rem]"
+  const hoverExpandedRailWidth = railSize === "compact" ? "xl:group-hover/navwrap:w-[16.5rem] xl:group-focus-within/navwrap:w-[16.5rem]" : "xl:group-hover/navwrap:w-[18.5rem] xl:group-focus-within/navwrap:w-[18.5rem]"
   const containerClass = rail
-    ? `group/rail sticky top-24 z-20 flex h-[calc(100vh-7.5rem)] ${collapsedRailWidth} flex-col overflow-hidden rounded-[1.6rem] border p-3 shadow-[0_22px_54px_-42px_rgba(58,49,37,0.24)] transition-[width,background-color,border-color,box-shadow] duration-300 ${expandedRailWidth} ${
-        isDark ? "border-white/10 bg-[#1b2024]/96 text-white hover:border-white/14 hover:bg-[#1f2528]/96" : "border-[rgba(var(--border),0.9)] bg-[rgba(255,252,247,0.96)] text-stone-950 hover:border-stone-300 hover:bg-white"
+    ? `group/rail z-20 flex w-full flex-col overflow-hidden rounded-lg border p-3 shadow-[0_22px_54px_-42px_rgba(58,49,37,0.24)] transition-[width,background-color,border-color,box-shadow] duration-300 xl:h-[calc(100vh-7.5rem)] ${isPinnedOpen ? expandedRailWidth : `${collapsedRailWidth} ${hoverExpandedRailWidth}`} ${
+        isDark ? "border-white/10 bg-[#0b1220]/96 text-white xl:hover:border-white/14 xl:hover:bg-[#101826]/96" : "border-[rgba(var(--border),0.9)] bg-[rgba(255,252,247,0.96)] text-stone-950 xl:hover:border-stone-300 xl:hover:bg-white"
       }`
-    : `rounded-2xl border p-4 ${isDark ? "border-white/10 bg-[#1b2024]/96" : "border-[rgba(var(--border),0.9)] bg-[rgba(255,252,247,0.96)]"}`
-  const labelVisibility = rail ? "opacity-0 group-hover/rail:opacity-100 group-focus-within/rail:opacity-100" : "opacity-100"
+    : `sticky top-5 rounded-lg border p-4 ${isDark ? "border-white/10 bg-[rgba(8,14,24,0.9)]" : "border-[rgba(var(--border),0.9)] bg-[rgba(255,252,247,0.96)]"}`
+  const labelVisibility = rail
+    ? isPinnedOpen
+      ? "opacity-100"
+      : "opacity-100 xl:opacity-0 xl:group-hover/navwrap:opacity-100 xl:group-focus-within/navwrap:opacity-100"
+    : "opacity-100"
   const helperVisibility = rail
-    ? "max-h-0 translate-y-1 opacity-0 group-hover/rail:max-h-20 group-hover/rail:translate-y-0 group-hover/rail:opacity-100 group-focus-within/rail:max-h-20 group-focus-within/rail:translate-y-0 group-focus-within/rail:opacity-100"
-    : "max-h-20 opacity-100"
+    ? isPinnedOpen
+      ? "max-h-20 translate-y-0 opacity-100"
+      : "max-h-20 translate-y-0 opacity-100 xl:max-h-0 xl:translate-y-1 xl:opacity-0 xl:group-hover/navwrap:max-h-20 xl:group-hover/navwrap:translate-y-0 xl:group-hover/navwrap:opacity-100 xl:group-focus-within/navwrap:max-h-20 xl:group-focus-within/navwrap:translate-y-0 xl:group-focus-within/navwrap:opacity-100"
+    : "max-h-0 opacity-0"
+
+  if (rail) {
+    return (
+      <div className="group/navwrap relative xl:sticky xl:top-5 xl:self-start" data-testid={`author-tools-nav-${variant}`}>
+        <div
+          aria-hidden="true"
+          className="absolute inset-y-4 left-0 z-20 hidden w-4 xl:block"
+        />
+        <Button
+          variant="secondary"
+          size="sm"
+          aria-label={isPinnedOpen ? "Collapse sidebar" : "Expand sidebar"}
+          data-testid="author-nav-rail-toggle"
+          onClick={() => setIsPinnedOpen((current) => !current)}
+          className="absolute left-0 top-8 z-30 hidden h-10 w-10 -translate-x-1/2 rounded-full shadow-[0_16px_34px_-24px_rgba(0,0,0,0.75)] xl:flex"
+        >
+          <span className={`transition-transform duration-200 ${isPinnedOpen ? "rotate-180" : ""}`}>
+            <NavSvg icon="chevron-right" />
+          </span>
+        </Button>
+        <aside className={containerClass}>
+          <NavHeader isDark={isDark} labelVisibility={labelVisibility} title={title} />
+          <p className={`mt-3 line-clamp-2 px-1 text-xs leading-5 transition-opacity duration-200 ${labelVisibility} ${isDark ? "text-slate-500" : "text-stone-500"}`}>
+            {description}
+          </p>
+
+          <div className={`mt-5 space-y-5 ${rail ? "min-h-0 flex-1 overflow-y-auto overflow-x-hidden pr-1" : "max-h-[calc(100vh-12rem)] overflow-y-auto pr-1"}`}>
+            {sections.map((section) => {
+              const sectionMarkup = (
+              <div>
+                <p className={`mb-2 px-1 text-3xs font-semibold uppercase tracking-[0.24em] transition-opacity duration-200 ${labelVisibility} ${isDark ? "text-slate-600" : "text-stone-400"}`}>
+                  {section.title}
+                </p>
+                <div className="space-y-1">
+                  {section.items.map((item) => {
+                    const selected = item.id === active
+                    return (
+                      <Link
+                        key={item.id}
+                        href={item.href}
+                        title={item.label}
+                        data-testid={`author-nav-item-${item.id}`}
+                        onMouseEnter={() => prefetchByNavId(item.id)}
+                        onFocus={() => prefetchByNavId(item.id)}
+                        className={`group/item flex min-h-[3.1rem] items-start gap-3 rounded-md border px-2.5 py-2.5 text-sm outline-none transition-[background-color,border-color,color,box-shadow,transform] duration-200 focus-visible:ring-2 focus-visible:ring-offset-0 ${
+                          selected
+                            ? isDark
+                              ? "border-white/12 bg-[linear-gradient(135deg,rgba(94,234,212,0.14),rgba(129,140,248,0.16))] text-white shadow-[0_18px_38px_-28px_rgba(94,234,212,0.18)]"
+                              : "bg-teal-800 text-white shadow-[0_18px_34px_-26px_rgba(58,49,37,0.22)]"
+                            : isDark
+                              ? "border-transparent text-slate-300 hover:border-white/8 hover:bg-white/[0.05] hover:text-white focus-visible:ring-white/25"
+                              : "border-transparent text-stone-600 hover:border-stone-200 hover:bg-stone-100 focus-visible:ring-stone-300 hover:text-stone-950"
+                        }`}
+                      >
+                        <span className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-sm border transition-colors ${
+                          selected
+                            ? isDark
+                              ? "border-white/15 bg-white/10 text-teal-100"
+                              : "border-white/20 bg-white/15 text-white"
+                            : isDark
+                              ? "border-white/[0.06] bg-white/[0.04] text-slate-200 group-hover/item:bg-white/[0.08]"
+                              : "border-stone-200 bg-white text-stone-700 group-hover/item:border-stone-300"
+                        }`}>
+                          <NavSvg icon={item.icon} />
+                        </span>
+                        <span className={`min-w-0 flex-1 transition-opacity duration-200 ${labelVisibility}`}>
+                          <span className="block truncate font-semibold">{item.label}</span>
+                          <span className={`mt-0.5 block truncate text-3xs uppercase tracking-[0.18em] ${selected ? (isDark ? "text-slate-300" : "text-white/70") : (isDark ? "text-slate-500" : "text-stone-400")}`}>
+                            {item.tone}
+                          </span>
+                          <span
+                            data-testid={`author-nav-helper-${item.id}`}
+                            className={`mt-1.5 block overflow-hidden text-3xs leading-4 transition-all duration-200 ${helperVisibility} ${
+                              selected
+                                ? isDark
+                                  ? "text-slate-200"
+                                  : "text-white/80"
+                                : isDark
+                                  ? "text-slate-400"
+                                  : "text-stone-500"
+                            }`}
+                          >
+                            {item.helper}
+                          </span>
+                        </span>
+                      </Link>
+                    )
+                  })}
+                </div>
+              </div>
+              )
+              return section.authorOnly ? (
+                <AuthorFeatureComponent key={section.title} locked={null} allowAccess={hasCollaboratorAccess}>
+                  {sectionMarkup}
+                </AuthorFeatureComponent>
+              ) : (
+                <div key={section.title}>{sectionMarkup}</div>
+              )
+            })}
+          </div>
+        </aside>
+      </div>
+    )
+  }
 
   return (
     <aside className={containerClass} data-testid={`author-tools-nav-${variant}`}>
-      <div className="flex items-center gap-3 px-1">
-        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border shadow-sm ${isDark ? "border-white/10 bg-white/5 text-slate-100" : "border-stone-200 bg-stone-50 text-stone-900"}`}>
-          <NavSvg icon="book" />
-        </div>
-        <div className={`min-w-0 transition-opacity duration-200 ${labelVisibility}`}>
-          <p className={`text-[10px] font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>LoreVia</p>
-          <h2 className={`truncate text-sm font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{title}</h2>
-        </div>
-      </div>
+      <NavHeader isDark={isDark} labelVisibility={labelVisibility} title={title} />
 
       <p className={`mt-3 line-clamp-2 px-1 text-xs leading-5 transition-opacity duration-200 ${labelVisibility} ${isDark ? "text-slate-500" : "text-stone-500"}`}>
         {description}
       </p>
 
-      <div className={`mt-5 space-y-5 ${rail ? "min-h-0 flex-1 overflow-y-auto overflow-x-hidden pr-1" : ""}`}>
+      <div className={`mt-5 space-y-5 ${rail ? "min-h-0 flex-1 overflow-y-auto overflow-x-hidden pr-1" : "max-h-[calc(100vh-12rem)] overflow-y-auto pr-1"}`}>
         {sections.map((section) => {
           const sectionMarkup = (
           <div>
-            <p className={`mb-2 px-1 text-[10px] font-semibold uppercase tracking-[0.24em] transition-opacity duration-200 ${labelVisibility} ${isDark ? "text-slate-600" : "text-stone-400"}`}>
+            <p className={`mb-2 px-1 text-3xs font-semibold uppercase tracking-[0.24em] transition-opacity duration-200 ${labelVisibility} ${isDark ? "text-slate-600" : "text-stone-400"}`}>
               {section.title}
             </p>
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               {section.items.map((item) => {
                 const selected = item.id === active
                 return (
@@ -239,20 +356,22 @@ export function AuthorToolsNav({
                     href={item.href}
                     title={item.label}
                     data-testid={`author-nav-item-${item.id}`}
-                    className={`group/item flex min-h-[4rem] items-start gap-3 rounded-2xl px-2.5 py-2.5 text-sm outline-none transition-[background-color,color,box-shadow,transform] duration-200 focus-visible:ring-2 focus-visible:ring-offset-0 ${
+                    onMouseEnter={() => prefetchByNavId(item.id)}
+                    onFocus={() => prefetchByNavId(item.id)}
+                    className={`group/item flex min-h-[3.1rem] items-start gap-3 rounded-md border px-2.5 py-2.5 text-sm outline-none transition-[background-color,border-color,color,box-shadow,transform] duration-200 focus-visible:ring-2 focus-visible:ring-offset-0 ${
                       selected
                         ? isDark
-                          ? "bg-white text-stone-950 shadow-[0_18px_38px_-28px_rgba(255,255,255,0.45)]"
+                          ? "border-white/12 bg-[linear-gradient(135deg,rgba(94,234,212,0.14),rgba(129,140,248,0.16))] text-white shadow-[0_18px_38px_-28px_rgba(94,234,212,0.18)]"
                           : "bg-teal-800 text-white shadow-[0_18px_34px_-26px_rgba(58,49,37,0.22)]"
                         : isDark
-                          ? "text-slate-300 hover:bg-white/[0.07] hover:text-white focus-visible:ring-white/25"
-                          : "text-stone-600 hover:bg-stone-100 focus-visible:ring-stone-300 hover:text-stone-950"
+                          ? "border-transparent text-slate-300 hover:border-white/8 hover:bg-white/[0.05] hover:text-white focus-visible:ring-white/25"
+                          : "border-transparent text-stone-600 hover:border-stone-200 hover:bg-stone-100 focus-visible:ring-stone-300 hover:text-stone-950"
                     }`}
                   >
-                    <span className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border transition-colors ${
+                    <span className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-sm border transition-colors ${
                       selected
                         ? isDark
-                          ? "border-stone-200/70 bg-stone-100 text-stone-950"
+                          ? "border-white/15 bg-white/10 text-teal-100"
                           : "border-white/20 bg-white/15 text-white"
                         : isDark
                           ? "border-white/[0.06] bg-white/[0.04] text-slate-200 group-hover/item:bg-white/[0.08]"
@@ -262,15 +381,15 @@ export function AuthorToolsNav({
                     </span>
                     <span className={`min-w-0 flex-1 transition-opacity duration-200 ${labelVisibility}`}>
                       <span className="block truncate font-semibold">{item.label}</span>
-                      <span className={`mt-0.5 block truncate text-[10px] uppercase tracking-[0.18em] ${selected ? (isDark ? "text-stone-700" : "text-white/70") : (isDark ? "text-slate-600" : "text-stone-400")}`}>
+                      <span className={`mt-0.5 block truncate text-3xs uppercase tracking-[0.18em] ${selected ? (isDark ? "text-slate-300" : "text-white/70") : (isDark ? "text-slate-500" : "text-stone-400")}`}>
                         {item.tone}
                       </span>
                       <span
                         data-testid={`author-nav-helper-${item.id}`}
-                        className={`mt-1.5 block overflow-hidden text-[11px] leading-4 transition-all duration-200 ${helperVisibility} ${
+                        className={`mt-1.5 block overflow-hidden text-3xs leading-4 transition-all duration-200 ${rail ? helperVisibility : selected ? "max-h-20 opacity-100" : "max-h-0 opacity-0"} ${
                           selected
                             ? isDark
-                              ? "text-stone-700"
+                              ? "text-slate-200"
                               : "text-white/80"
                             : isDark
                               ? "text-slate-400"
@@ -299,6 +418,28 @@ export function AuthorToolsNav({
   )
 }
 
+function NavHeader({
+  isDark,
+  labelVisibility,
+  title,
+}: {
+  isDark: boolean
+  labelVisibility: string
+  title: string
+}) {
+  return (
+    <div className="flex items-center gap-3 px-1">
+      <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border shadow-sm ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-stone-50"}`}>
+        <ThemeBrandImage variant="icon" mode={isDark ? "dark" : "light"} className="h-5 w-5 object-contain" />
+      </div>
+      <div className={`min-w-0 transition-opacity duration-200 ${labelVisibility}`}>
+        <ThemeBrandImage variant="lockup" mode={isDark ? "dark" : "light"} className="h-5 w-auto object-contain" />
+        <h2 className={`mt-2 truncate text-sm font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{title}</h2>
+      </div>
+    </div>
+  )
+}
+
 function NavSvg({ icon }: { icon: NavIcon }) {
   const common = "h-4 w-4"
   switch (icon) {
@@ -312,8 +453,6 @@ function NavSvg({ icon }: { icon: NavIcon }) {
       return <svg className={common} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v8" /><path strokeLinecap="round" strokeLinejoin="round" d="M8.5 8.5a3.5 3.5 0 107 0" /><path strokeLinecap="round" strokeLinejoin="round" d="M6 11a6 6 0 0012 0" /><path strokeLinecap="round" strokeLinejoin="round" d="M9 20h6" /><path strokeLinecap="round" strokeLinejoin="round" d="M12 17v3" /></svg>
     case "quill":
       return <svg className={common} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M20 7c0 6-5 11-11 11H4v-5C4 7 9 2 15 2c2.5 0 5 2.5 5 5z" /><path strokeLinecap="round" strokeLinejoin="round" d="M13 11l4-4" /></svg>
-    case "plus":
-      return <svg className={common} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.9}><path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14M5 12h14" /></svg>
     case "spark":
       return <svg className={common} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3zM18 16l.8 2.2L21 19l-2.2.8L18 22l-.8-2.2L15 19l2.2-.8L18 16z" /></svg>
     case "chat":
@@ -340,6 +479,10 @@ function NavSvg({ icon }: { icon: NavIcon }) {
       return <svg className={common} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M9 9H6v4h3v5l-4-3V9a3 3 0 013-3h1v3zM18 9h-3v4h3v5l-4-3V9a3 3 0 013-3h1v3z" /></svg>
     case "files":
       return <svg className={common} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M4 7h6l2 2h8v9a2 2 0 01-2 2H6a2 2 0 01-2-2V7z" /><path strokeLinecap="round" strokeLinejoin="round" d="M12 13h5M14.5 10.5L17 13l-2.5 2.5" /></svg>
+    case "plus":
+      return <svg className={common} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14M5 12h14" /></svg>
+    case "chevron-right":
+      return <svg className={common} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="m9 6 6 6-6 6" /></svg>
     case "book":
     default:
       return <svg className={common} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M6 4h9a3 3 0 013 3v13H8a2 2 0 01-2-2V4z" /><path strokeLinecap="round" strokeLinejoin="round" d="M8 18h10M9 8h5" /></svg>

@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import weakref
 
+import pytest
+
 from app.core import redis as redis_module
 from app.utils import worker_async_utils
 
@@ -107,3 +109,44 @@ class _FakeRedisClient:
             return False
         self.store[key] = str(value)
         return True
+
+    async def delete(self, *keys):
+        deleted = 0
+        for key in keys:
+            if key in self.store:
+                deleted += 1
+                del self.store[key]
+        return deleted
+
+
+@pytest.mark.asyncio
+async def test_cache_delete_if_owner_falls_back_when_eval_is_unavailable(monkeypatch):
+    fake_redis = _FakeRedisClient()
+    fake_redis.store["worker:lock"] = "owner-1"
+
+    async def _fake_get_redis():
+        return fake_redis
+
+    monkeypatch.setattr(redis_module, "get_redis", _fake_get_redis)
+
+    deleted = await redis_module.cache_delete_if_owner("worker:lock", "owner-1")
+
+    print(f"DEBUG: deleted={deleted}, store={fake_redis.store}")
+    assert deleted is True
+    assert "worker:lock" not in fake_redis.store
+
+
+@pytest.mark.asyncio
+async def test_cache_delete_if_owner_preserves_key_for_other_owner_without_eval(monkeypatch):
+    fake_redis = _FakeRedisClient()
+    fake_redis.store["worker:lock"] = "owner-1"
+
+    async def _fake_get_redis():
+        return fake_redis
+
+    monkeypatch.setattr(redis_module, "get_redis", _fake_get_redis)
+
+    deleted = await redis_module.cache_delete_if_owner("worker:lock", "owner-2")
+
+    assert deleted is False
+    assert fake_redis.store["worker:lock"] == "owner-1"

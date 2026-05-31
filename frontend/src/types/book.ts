@@ -2,6 +2,8 @@ export type BookStatus = "pending" | "processing" | "ready" | "failed"
 export type BookFormat = "pdf" | "epub" | "docx" | "doc" | "fountain" | "txt" | "md" | "manual"
 export type BookWorkType = "novel" | "screenplay" | "other"
 export type RevisionTagTarget = "chapter" | "scene" | "character" | "note" | "comment" | "plot_thread" | "world_note"
+export type WorkspaceShell = "reader" | "author"
+export type BookAccessClass = "owner" | "author_collaborator" | "reader_collaborator"
 
 import type { ChapterListResponse, ReadingProgress, SummaryCollectionResponse } from "./reader"
 
@@ -14,6 +16,9 @@ export interface Book {
   work_type: BookWorkType
   status: BookStatus
   mode: "reader" | "author"
+  workspace_shell: WorkspaceShell
+  access_class: BookAccessClass
+  can_switch_workspace_mode: boolean
   source_kind?: string
   preserve_chapter_numbers?: boolean
   preserve_source_chapters?: boolean
@@ -108,12 +113,42 @@ export interface BookCollaborator {
   updated_at: string
 }
 
+export interface CollaboratorActivityItem {
+  id: string
+  kind: string
+  title: string
+  body?: string | null
+  chapter_number?: number | null
+  chapter_title?: string | null
+  assignment_id?: string | null
+  feedback_item_id?: string | null
+  annotation_id?: string | null
+  created_at: string
+}
+
+export interface CollaboratorActivity {
+  collaborator: BookCollaborator
+  assignments: import("./betaRead").BetaReadAssignment[]
+  items: CollaboratorActivityItem[]
+  chapter_comment_count: number
+  annotation_count: number
+  latest_activity_at?: string | null
+}
+
 export interface BookSeries {
   id: string
   name: string
   description: string | null
   created_at: string
   books: Book[]
+}
+
+export interface PaginatedSeries {
+  items: BookSeries[]
+  total: number
+  limit: number
+  offset: number
+  has_more: boolean
 }
 
 export interface SeriesBibleEpisode {
@@ -912,6 +947,34 @@ export interface CharacterEvent {
   growth_direction: string
   growth_magnitude: number
   is_major: boolean
+}
+
+export interface BookEventsItem {
+  type: "major" | "character"
+  chapter_number: number
+  chapter_title: string | null
+  event_title: string
+  description: string
+  importance?: number
+  involved_characters?: string[] | null
+  involved_character_names?: string[] | null
+  event_type?: string | null
+  character_id?: string
+  character_name?: string
+  impact_score?: number
+  role?: string | null
+  accomplishments?: string[]
+  growth_direction?: string
+  growth_magnitude?: number
+  is_major?: boolean
+}
+
+export interface BookEventsPaginated {
+  items: BookEventsItem[]
+  total: number
+  limit: number
+  offset: number
+  has_more: boolean
 }
 
 export interface BookEvents {

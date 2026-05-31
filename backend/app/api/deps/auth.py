@@ -19,12 +19,13 @@ from app.services.admin_service import (
     principal_scope_snapshot,
     record_admin_audit_event,
 )
-from app.utils.auth_utils import current_token_version
+from app.utils.auth_utils import current_token_version, get_user_for_auth_subject
 from app.utils.auth_cookies import (
     REFRESH_TOKEN_COOKIE_NAME,
     get_auth_token,
     set_access_cookie,
 )
+from app.utils.auth_csrf import enforce_cookie_csrf
 from app.utils.admin_security import validate_admin_csrf_token
 from app.utils.request_context import set_request_user_id
 
@@ -72,7 +73,9 @@ def _decode_refresh_payload(token: str | None) -> dict[str, Any] | None:
 
 async def _load_user_from_claims(user_id: str, claimed_version: int, db: AsyncSession) -> User:
     try:
-        user = await db.get(User, uuid.UUID(user_id))
+        user = await get_user_for_auth_subject(db, user_id)
+    except ValueError:
+        raise HTTPException(401, "Invalid or expired token")
     except Exception:
         log.exception("database_unavailable_during_auth", extra={"user_id": user_id})
         raise HTTPException(503, "Authentication service temporarily unavailable")
@@ -97,6 +100,7 @@ async def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer),
     db: AsyncSession = Depends(get_db),
 ) -> User:
+    enforce_cookie_csrf(request)
     access_token = get_auth_token(request, credentials.credentials if credentials else None)
     access_payload = _decode_access_payload(access_token)
     if access_payload:
@@ -133,7 +137,7 @@ async def get_current_user(
     if not session_active:
         raise HTTPException(401, "Session expired. Please sign in again.")
 
-    set_access_cookie(response, create_access_token(user_id, claimed_version))
+    set_access_cookie(response, create_access_token(str(user.id), claimed_version))
     return user
 
 

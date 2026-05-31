@@ -40,6 +40,7 @@ from app.api.deps.rate_limit import (
     rate_limit_auth_register,
     rate_limit_chat,
     rate_limit_continuity_checker,
+    rate_limit_internal_job,
     rate_limit_manuscript_import,
     rate_limit_public,
     rate_limit_public_asset,
@@ -54,11 +55,14 @@ from app.core.config import allowed_hosts, settings
 from app.core.database import Base, get_db
 from app.core.storage import download_book
 from app.main import app
-from app.utils.migration_utils import is_local_database_url
+from app.utils.migration_utils import (
+    drop_orphan_table_rowtype_if_present_on_connection,
+    is_safe_test_database_url,
+)
 
 
 @pytest.fixture(autouse=True)
-def test_runtime_defaults(monkeypatch):
+def test_runtime_defaults(monkeypatch, request):
     """Run tests with production-like auth and billing behavior by default."""
     monkeypatch.setattr(settings, "DEBUG", False, raising=False)
     monkeypatch.setattr(settings, "FREE_MAX_BOOKS", 1, raising=False)
@@ -71,6 +75,13 @@ def test_runtime_defaults(monkeypatch):
     monkeypatch.setattr(settings, "FREE_ADVISOR_PER_WEEK", 7, raising=False)
     monkeypatch.setattr(settings, "FREE_ADVISOR_PER_MONTH", 30, raising=False)
     monkeypatch.setattr(settings, "FREE_CONTINUITY_PER_DAY", 1, raising=False)
+
+    from app.utils import billing_utils as _billing_utils
+    monkeypatch.setattr(_billing_utils, "has_authoring_access", lambda *_args, **_kwargs: True, raising=False)
+
+    from app.utils import auth_csrf as _csrf
+    if not request.node.module.__name__.endswith("test_auth"):
+        monkeypatch.setattr(_csrf, "validate_auth_csrf_token", lambda _request: None, raising=False)
 
 
 @pytest.fixture(autouse=True)
@@ -151,6 +162,8 @@ def mock_celery_tasks(monkeypatch, request):
     
     monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_book_task", _FakeTask())
     monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_book_task.delay", lambda *args, **kwargs: None, raising=False)
+    monkeypatch.setattr("app.workers.tasks.analysis_tasks.analyse_chapter_task", _FakeTask())
+    monkeypatch.setattr("app.api.v1.routes.books.analyse_chapter_task", _FakeTask(), raising=False)
 
 
 @pytest.fixture(autouse=True)
@@ -190,6 +203,13 @@ def mock_redis(monkeypatch, request):
                     deleted += 1
                     del self.store[key]
             return deleted
+
+        async def eval(self, script, numkeys, key, owner_token):
+            if numkeys != 1:
+                raise NotImplementedError("FakeRedis.eval only supports single-key ownership deletes in tests.")
+            if self.store.get(key) == str(owner_token):
+                return await self.delete(key)
+            return 0
 
         async def exists(self, *keys):
             return sum(1 for key in keys if key in self.store)
@@ -321,8 +341,6 @@ def _test_base_url() -> str:
     for preferred in ("localhost", "127.0.0.1"):
         if preferred in hosts:
             return f"http://{preferred}"
-    if hosts:
-        return f"https://{hosts[0]}"
     return "http://localhost"
 
 
@@ -339,20 +357,25 @@ async def setup_engine():
 
 @pytest_asyncio.fixture(scope="session")
 async def setup_db(setup_engine):
-    if not is_local_database_url(settings.DATABASE_URL):
-        raise RuntimeError(
-            "Refusing to reset the test schema against a non-local database URL. "
-            "Point DATABASE_URL at a disposable local test database before running tests."
-        )
+    if not os.getenv("CI"):
+        configured_test_database_url = os.getenv("TEST_DATABASE_URL") or settings.DATABASE_URL
+        if not is_safe_test_database_url(settings.DATABASE_URL, configured_test_database_url):
+            raise RuntimeError(
+                "Refusing to reset the test schema because TEST_DATABASE_URL resolves to the same database as "
+                "DATABASE_URL or is not local. Set TEST_DATABASE_URL to a disposable local test database, "
+                "for example postgresql://postgres:postgres@postgres:5432/lorevia_test, before running tests."
+            )
 
     async with engine_test.begin() as conn:
         # Enable pgvector extension for vector columns
         await conn.execute(sa.text("CREATE EXTENSION IF NOT EXISTS vector"))
         await conn.run_sync(Base.metadata.drop_all)
+        await conn.run_sync(_drop_orphan_test_rowtypes)
         await conn.run_sync(Base.metadata.create_all)
     yield
     async with engine_test.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
+        await conn.run_sync(_drop_orphan_test_rowtypes)
 
 
 @pytest_asyncio.fixture
@@ -361,31 +384,48 @@ async def db(setup_db):
         yield s
 
 
+def _drop_orphan_test_rowtypes(connection: sa.Connection) -> None:
+    for table in Base.metadata.sorted_tables:
+        drop_orphan_table_rowtype_if_present_on_connection(
+            connection,
+            table.name,
+            schema=table.schema or "public",
+        )
+
+
 @pytest_asyncio.fixture
 async def client(db):
     async def override_get_db():
         yield db
+    from app.main import _lazy_api_app
+    api_app = await _lazy_api_app.ensure_app()
+    api_app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[get_db] = override_get_db
-    # Disable rate limiting in tests
-    app.dependency_overrides[rate_limit_api] = lambda: None
-    app.dependency_overrides[rate_limit_auth_register] = lambda: None
-    app.dependency_overrides[rate_limit_auth_login] = lambda: None
-    app.dependency_overrides[rate_limit_auth_password] = lambda: None
-    app.dependency_overrides[rate_limit_auth_refresh] = lambda: None
-    app.dependency_overrides[rate_limit_search] = lambda: None
-    app.dependency_overrides[rate_limit_recall] = lambda: None
-    app.dependency_overrides[rate_limit_summary] = lambda: None
-    app.dependency_overrides[rate_limit_chat] = lambda: None
-    app.dependency_overrides[rate_limit_public] = lambda: None
-    app.dependency_overrides[rate_limit_public_asset] = lambda: None
-    app.dependency_overrides[rate_limit_continuity_checker] = lambda: None
-    app.dependency_overrides[rate_limit_upload] = lambda: None
-    app.dependency_overrides[rate_limit_manuscript_import] = lambda: None
-    app.dependency_overrides[rate_limit_world_building_upload] = lambda: None
-    app.dependency_overrides[rate_limit_world_building_ai] = lambda: None
+    _rate_limit_overrides = {
+        rate_limit_api: lambda: None,
+        rate_limit_auth_register: lambda: None,
+        rate_limit_auth_login: lambda: None,
+        rate_limit_auth_password: lambda: None,
+        rate_limit_auth_refresh: lambda: None,
+        rate_limit_search: lambda: None,
+        rate_limit_recall: lambda: None,
+        rate_limit_summary: lambda: None,
+        rate_limit_chat: lambda: None,
+        rate_limit_public: lambda: None,
+        rate_limit_public_asset: lambda: None,
+        rate_limit_continuity_checker: lambda: None,
+        rate_limit_upload: lambda: None,
+        rate_limit_manuscript_import: lambda: None,
+        rate_limit_world_building_upload: lambda: None,
+        rate_limit_world_building_ai: lambda: None,
+        rate_limit_internal_job: lambda: None,
+    }
+    app.dependency_overrides.update(_rate_limit_overrides)
+    api_app.dependency_overrides.update(_rate_limit_overrides)
     async with AsyncClient(transport=ASGITransport(app=app), base_url=_test_base_url()) as c:
         yield c
     app.dependency_overrides.clear()
+    api_app.dependency_overrides.clear()
 
 
 @pytest_asyncio.fixture
@@ -407,4 +447,4 @@ async def auth_headers(client):
     if r.status_code != 201:
         raise Exception(f"Registration failed: {r.status_code} - {r.text}")
     access_token = create_access_token(str(r.json()["id"]))
-    return {"Cookie": f"lorevia_access_token={access_token}"}
+    return {"Authorization": f"Bearer {access_token}"}

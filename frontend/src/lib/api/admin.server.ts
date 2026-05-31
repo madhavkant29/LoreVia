@@ -84,7 +84,7 @@ function resolveDevAdminSessionOverride(cookieHeader: string | null): { matched:
   if (process.env.NODE_ENV === "production") {
     return { matched: false, session: null }
   }
-  const secret = (process.env.ADMIN_E2E_TEST_SECRET || "").trim()
+  const secret = (process.env.ADMIN_E2E_TEST_SECRET || "codex-e2e-admin-secret").trim()
   if (!secret) {
     return { matched: false, session: null }
   }

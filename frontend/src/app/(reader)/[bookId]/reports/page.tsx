@@ -41,14 +41,14 @@ export default function ChapterReportsPage() {
         </div>
 
         {loading ? (
-          <div className={`mt-8 rounded-[1.6rem] border p-5 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-300" : "border-stone-200 bg-white/70 text-stone-600"}`}>
+          <div className={`mt-8 rounded-lg border p-5 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-300" : "border-stone-200 bg-white/70 text-stone-600"}`}>
             Loading reports...
           </div>
         ) : null}
 
         <div className="mt-8 space-y-4">
           {reports.map((report) => (
-            <div key={`${report.chapter_number}-${report.chapter_title ?? "untitled"}`} className={`rounded-[1.6rem] border p-5 ${isDark ? "border-white/10 bg-black/60" : "border-stone-200 bg-white/90"}`}>
+            <div key={`${report.chapter_number}-${report.chapter_title ?? "untitled"}`} className={`rounded-lg border p-5 ${isDark ? "border-white/10 bg-black/60" : "border-stone-200 bg-white/90"}`}>
               <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-emerald-300" : "text-emerald-700"}`}>
                 Chapter {report.chapter_number}{report.chapter_title ? ` - ${report.chapter_title}` : ""}
               </p>
@@ -60,7 +60,7 @@ export default function ChapterReportsPage() {
                 <ReportGroup title="Threads resolved" items={report.plot_threads_resolved} isDark={isDark} empty="No threads resolved." />
               </div>
               {report.continuity_flags.length > 0 ? (
-                <div className={`mt-4 rounded-[1rem] border p-4 ${isDark ? "border-amber-500/20 bg-amber-500/10" : "border-amber-200 bg-amber-50"}`}>
+                <div className={`mt-4 rounded-md border p-4 ${isDark ? "border-amber-500/20 bg-amber-500/10" : "border-amber-200 bg-amber-50"}`}>
                   <p className={`text-xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-amber-200" : "text-amber-800"}`}>Continuity flags</p>
                   <div className="mt-2 space-y-2">
                     {report.continuity_flags.map((flag) => (
@@ -89,7 +89,7 @@ function ReportGroup({
   empty: string
 }) {
   return (
-    <div className={`rounded-[1rem] border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
+    <div className={`rounded-md border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
       <p className={`text-xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>{title}</p>
       <div className="mt-2 space-y-2">
         {items.length > 0 ? items.map((item) => (

@@ -27,11 +27,14 @@ export type AnswerPage = {
   description: string
   publishedAt: string
   publishedLabel: string
+  readTime: string
   articleSlug: string
   demoSlug?: string
+  intro: string
   shortAnswer: string
   quickSteps: string[]
   whyItMatters: string
+  sections: ContentSection[]
 }
 
 export type DemoPage = {
@@ -40,10 +43,12 @@ export type DemoPage = {
   description: string
   publishedAt: string
   publishedLabel: string
+  readTime: string
   sourceWork: string
   sourceAuthor: string
   articleSlug: string
   answerSlugs: string[]
+  intro: string
   featuredInsight: string
   sections: ContentSection[]
 }
@@ -386,8 +391,11 @@ export const answerPages: AnswerPage[] = [
     description: "A short system for tracking trust, conflict, history, and changing loyalties between characters.",
     publishedAt: "2026-05-14",
     publishedLabel: "May 14, 2026",
+    readTime: "4 min read",
     articleSlug: "how-to-track-characters-in-a-novel",
     demoSlug: "pride-and-prejudice-relationship-map",
+    intro:
+      "When authors say they lose track of relationships, they usually do not mean they forgot who knows whom. They mean the emotional state between two characters has become blurry. The manuscript knows they are siblings, rivals, ex-lovers, or allies, but it no longer shows exactly when trust broke, when tension softened, or why a reaction now feels different from three chapters earlier.",
     shortAnswer:
       "Track the relationship itself, not just the two characters involved. Give each important bond a short record with current status, major shifts, scene references, and unresolved tension so you can see how it changes over the course of the book.",
     quickSteps: [
@@ -397,6 +405,27 @@ export const answerPages: AnswerPage[] = [
     ],
     whyItMatters:
       "Relationship continuity is one of the fastest ways readers notice emotional inconsistency, especially in romance, family drama, and multi-POV fiction.",
+    sections: [
+      {
+        heading: "Track movement, not labels",
+        body: [
+          "A label like enemies, friends, or in love is not enough for revision. What matters is movement. Record the current level of trust, the pressure currently acting on the bond, and the last event that changed how the characters read each other.",
+          "That lets you spot scenes where the dialogue assumes warmth the story has not earned yet, or where a conflict should still be sharper because no real repair happened on the page.",
+        ],
+        bullets: [
+          "Current status and the last scene that proved it",
+          "What each person wants from the other right now",
+          "What misunderstanding, resentment, or promise is still unresolved",
+        ],
+      },
+      {
+        heading: "Use scene evidence whenever the bond shifts",
+        body: [
+          "Relationship notes become useful when they point back to the manuscript. If a reconciliation happens in chapter twelve, record chapter twelve. If a secret changes the balance of power, note where that knowledge transfer actually happens.",
+          "This keeps the tracker grounded. It also gives you a fast way to check whether later scenes are reacting to the relationship that exists on the page, not the one you remember from your outline.",
+        ],
+      },
+    ],
   },
   {
     slug: "how-do-i-remember-small-details-in-a-long-manuscript",
@@ -404,8 +433,11 @@ export const answerPages: AnswerPage[] = [
     description: "A practical answer for tracking details like injuries, clothing, objects, weather, and side promises.",
     publishedAt: "2026-05-14",
     publishedLabel: "May 14, 2026",
+    readTime: "4 min read",
     articleSlug: "how-to-track-characters-in-a-novel",
     demoSlug: "gregor-samsa-character-tracker",
+    intro:
+      "The details authors forget are rarely the dramatic centerpiece of the story. They are the small facts that quietly build trust with the reader: who limps after the fight, which ring belonged to the mother, whether the rain already started, or what promise was made in passing two chapters ago. Those details feel minor until they contradict each other.",
     shortAnswer:
       "Do not rely on memory once the draft gets long. Put small details into a searchable canon with chapter references so you can verify them quickly instead of rereading half the book every time a detail comes back.",
     quickSteps: [
@@ -415,6 +447,27 @@ export const answerPages: AnswerPage[] = [
     ],
     whyItMatters:
       "Tiny details are often the first cracks readers notice because they signal that the larger story may also be unstable.",
+    sections: [
+      {
+        heading: "Choose details by risk, not by volume",
+        body: [
+          "You do not need to log every cup of tea or every item in a room. Track the details that can break continuity later: visible injuries, heirlooms, passwords, weather conditions, missing objects, recurring clothing, or offhand promises that will matter if they disappear.",
+          "This keeps the system lean enough to use. A good canon is selective. It stores the facts most likely to create reader confusion if they drift during revision.",
+        ],
+      },
+      {
+        heading: "Make retrieval faster than rereading",
+        body: [
+          "The tracker has to beat your fallback habit, which is usually opening old chapters and hunting by instinct. If a note includes the chapter, scene, and brief context, you can confirm the fact in seconds instead of losing momentum.",
+          "That matters most during revision, because a long manuscript creates dozens of moments where a returning detail needs to be checked before the next scene can be trusted.",
+        ],
+        bullets: [
+          "Store the fact in the words you would search later",
+          "Keep the chapter or scene citation beside it",
+          "Re-check detail notes after merges, cuts, and timeline changes",
+        ],
+      },
+    ],
   },
   {
     slug: "how-do-i-avoid-plot-holes-in-my-story",
@@ -422,8 +475,11 @@ export const answerPages: AnswerPage[] = [
     description: "A concise workflow for catching missing cause-and-effect, broken setup/payoff, and unresolved story logic.",
     publishedAt: "2026-05-14",
     publishedLabel: "May 14, 2026",
+    readTime: "4 min read",
     articleSlug: "how-to-avoid-continuity-errors-when-writing-a-novel",
     demoSlug: "dracula-story-timeline-tracker",
+    intro:
+      "Most plot holes are not giant conceptual disasters. They are ordinary logic gaps that opened during drafting or revision: a character acts on information they never received, a solution arrives before the setup exists, or a major event changes nothing afterward. The way to avoid them is to inspect cause, access, and consequence at every turning point.",
     shortAnswer:
       "Audit every major turning point for setup, consequence, and reader knowledge. Most plot holes appear when a story event happens without enough cause, without the right information being available, or without later consequences being acknowledged.",
     quickSteps: [
@@ -433,6 +489,27 @@ export const answerPages: AnswerPage[] = [
     ],
     whyItMatters:
       "A plot hole is usually a continuity problem with story logic rather than surface details.",
+    sections: [
+      {
+        heading: "Interrogate the event from three angles",
+        body: [
+          "When a scene feels wrong, ask three direct questions. What caused this event? Who had the knowledge or access needed for it? What should this event change going forward? If one answer is thin, the problem is probably not style. It is structure.",
+          "This method is practical because it applies to action scenes, mysteries, romance turns, reveals, and quieter emotional pivots. The genre changes, but cause-and-effect discipline does not.",
+        ],
+      },
+      {
+        heading: "Look for holes after revision, not only after drafting",
+        body: [
+          "Large edits create fresh logic problems. Delete a setup scene, move an explanation, soften a motivation, or shorten the travel time and you may open a new hole downstream without noticing it immediately.",
+          "That is why plot-hole checking belongs inside revision passes. Treat every structural change as a reason to review the scenes that depend on it, especially revelations, reversals, and endings.",
+        ],
+        bullets: [
+          "Turning points should have visible setup",
+          "Characters should not act on missing knowledge",
+          "Big events should leave consequences behind them",
+        ],
+      },
+    ],
   },
   {
     slug: "how-do-authors-manage-timelines",
@@ -440,8 +517,11 @@ export const answerPages: AnswerPage[] = [
     description: "A short answer on tracking elapsed time, travel duration, flashbacks, and overlapping scenes.",
     publishedAt: "2026-05-14",
     publishedLabel: "May 14, 2026",
+    readTime: "4 min read",
     articleSlug: "how-to-avoid-continuity-errors-when-writing-a-novel",
     demoSlug: "dracula-story-timeline-tracker",
+    intro:
+      "A manuscript can feel temporally correct while the actual math is broken. Characters seem to move naturally until you realize they crossed a country overnight, healed too quickly, or learned information before the relevant scene occurred. Authors manage timelines by externalizing time into something visible and checkable instead of keeping it in intuition alone.",
     shortAnswer:
       "Authors manage timelines by anchoring scenes to concrete markers: day counts, travel time, seasonal clues, holidays, injuries healing, and where each POV overlaps with the others. Once those anchors exist, timeline problems become visible instead of intuitive.",
     quickSteps: [
@@ -451,6 +531,27 @@ export const answerPages: AnswerPage[] = [
     ],
     whyItMatters:
       "Timeline drift is one of the most common causes of accidental continuity errors in long fiction.",
+    sections: [
+      {
+        heading: "Anchor scenes to observable markers",
+        body: [
+          "You do not need a complicated spreadsheet to start. You need anchors. That can be sunrise, a festival date, a bus ride, a wound healing over three days, or an email sent after midnight. Those anchors create real spacing between scenes.",
+          "Once every major chapter has one or two markers, impossible sequences start revealing themselves. You can see whether the chronology supports the story instead of merely sounding plausible.",
+        ],
+      },
+      {
+        heading: "Track overlap when multiple threads run at once",
+        body: [
+          "Timelines get harder when several POVs, flashbacks, or epistolary documents interact. In those cases, the question is not only what happened when, but also what each character could know at that moment.",
+          "A reliable timeline therefore tracks both elapsed time and knowledge transfer. That combination helps catch reveals that arrive too early and convergences that happen before the separate strands truly line up.",
+        ],
+        bullets: [
+          "Elapsed time between scenes",
+          "Travel and recovery duration",
+          "Moments where knowledge moves from one thread to another",
+        ],
+      },
+    ],
   },
   {
     slug: "what-is-manuscript-analysis",
@@ -458,7 +559,10 @@ export const answerPages: AnswerPage[] = [
     description: "A direct explanation of what manuscript analysis does for fiction authors and why it matters.",
     publishedAt: "2026-05-14",
     publishedLabel: "May 14, 2026",
+    readTime: "4 min read",
     articleSlug: "what-is-a-story-bible-and-do-you-need-one",
+    intro:
+      "For fiction authors, manuscript analysis is not a vague AI promise. It is the practical act of turning the draft into information you can inspect. Instead of seeing only pages, you start seeing recurring characters, scene relationships, unresolved threads, timeline anchors, and continuity pressure points that can support revision decisions.",
     shortAnswer:
       "Manuscript analysis means turning the draft into something you can inspect, search, and reason about. For authors, that usually includes extracting characters, scenes, relationships, recurring facts, unresolved threads, and continuity risks from the manuscript itself.",
     quickSteps: [
@@ -468,6 +572,22 @@ export const answerPages: AnswerPage[] = [
     ],
     whyItMatters:
       "Good manuscript analysis turns a long novel from a blur of pages into a workable editorial system.",
+    sections: [
+      {
+        heading: "The point is inspection, not automation theater",
+        body: [
+          "A useful analysis layer gives you questions you can actually answer: where a character last appeared, which scenes moved a relationship, what promises still lack payoff, or whether a world rule is drifting. If the output cannot support those questions, it is not helping the manuscript.",
+          "That is why grounded evidence matters. Authors need analysis tied back to chapters and scenes, not disconnected summaries that sound confident but cannot be verified.",
+        ],
+      },
+      {
+        heading: "It becomes most valuable during revision",
+        body: [
+          "Drafting is often about momentum. Revision is about remembering what the book has already committed to. Manuscript analysis is strongest in that second phase because it gives shape to a long draft that has become difficult to hold in working memory.",
+          "Once the manuscript becomes searchable as story data, continuity review, story-bible upkeep, and beta-reader preparation all become faster and more defensible.",
+        ],
+      },
+    ],
   },
   {
     slug: "what-is-a-continuity-checker-for-fiction",
@@ -475,8 +595,11 @@ export const answerPages: AnswerPage[] = [
     description: "A quick definition of continuity checking for novels and how it differs from grammar tools.",
     publishedAt: "2026-05-14",
     publishedLabel: "May 14, 2026",
+    readTime: "4 min read",
     articleSlug: "how-to-avoid-continuity-errors-when-writing-a-novel",
     demoSlug: "dracula-story-timeline-tracker",
+    intro:
+      "A continuity checker for fiction is not trying to improve your sentences. It is trying to protect the internal truth of the story. That means monitoring the facts, relationships, timing, and world rules the manuscript has already established so later scenes do not quietly contradict them.",
     shortAnswer:
       "A continuity checker for fiction looks for contradictions inside the story itself. Instead of fixing spelling or grammar, it helps authors catch broken facts, timeline conflicts, dropped promises, character inconsistencies, and world-rule drift.",
     quickSteps: [
@@ -486,6 +609,27 @@ export const answerPages: AnswerPage[] = [
     ],
     whyItMatters:
       "Grammar tools improve sentences. Continuity tools protect the logic of the book.",
+    sections: [
+      {
+        heading: "Continuity checking covers more than plot",
+        body: [
+          "Authors often hear continuity and think only of plot holes, but the scope is wider. It includes injuries, travel time, relationship memory, object placement, ages, weather, magical limits, and what each character knows at any given point.",
+          "That wider view matters because readers usually experience continuity as trust. When small facts stop aligning, the story starts to feel less solid even before a major contradiction appears.",
+        ],
+      },
+      {
+        heading: "The best checker points back to scenes",
+        body: [
+          "A warning is only useful if you can verify it quickly. Good continuity support therefore pairs the possible conflict with the scenes that created the original fact and the scene that may now contradict it.",
+          "That makes the tool editorially useful. It helps you decide whether the new chapter should change, whether the older canon should be revised, or whether the apparent contradiction is actually intentional.",
+        ],
+        bullets: [
+          "Fact continuity",
+          "Timeline continuity",
+          "Relationship and knowledge continuity",
+        ],
+      },
+    ],
   },
   {
     slug: "how-do-i-organize-chapters-and-scenes",
@@ -493,7 +637,10 @@ export const answerPages: AnswerPage[] = [
     description: "A short guide for keeping chapters readable, searchable, and revision-friendly.",
     publishedAt: "2026-05-14",
     publishedLabel: "May 14, 2026",
+    readTime: "4 min read",
     articleSlug: "what-is-a-story-bible-and-do-you-need-one",
+    intro:
+      "Chapter organization becomes a real editorial problem once a draft grows beyond a few clean acts. Authors stop needing a simple order list and start needing a way to understand what each scene is doing, what information it establishes, and what later chapters depend on it. Good organization makes revision possible at speed.",
     shortAnswer:
       "Organize chapters and scenes by function, not just order. Each scene should clearly show whose goal is active, what changes, and what information it establishes so later revision is easier to trace.",
     quickSteps: [
@@ -503,6 +650,27 @@ export const answerPages: AnswerPage[] = [
     ],
     whyItMatters:
       "A clear scene structure makes it much easier to track continuity and prepare a manuscript for outside readers.",
+    sections: [
+      {
+        heading: "Treat scenes as units of change",
+        body: [
+          "A scene should be easy to identify by what shifts inside it. That could be a decision, a revealed fact, a failed attempt, a relationship turn, or a new threat. When scenes are labeled only by chapter number, revision forces you to reread constantly.",
+          "When they are labeled by POV, location, and narrative function, you can move through the manuscript with much more editorial clarity.",
+        ],
+      },
+      {
+        heading: "Preserve the history of structural edits",
+        body: [
+          "Organization also means remembering what changed. If chapter eight was split, if a bridge scene was cut, or if two conversations were merged, make that visible somewhere in your notes or tracker.",
+          "Those decisions often explain later continuity problems. A scene system that remembers structural history is far more useful than one that only records the manuscript as it currently looks.",
+        ],
+        bullets: [
+          "POV and location",
+          "Purpose of the scene",
+          "Facts, promises, or emotional changes established there",
+        ],
+      },
+    ],
   },
   {
     slug: "how-do-i-track-character-arcs",
@@ -510,8 +678,11 @@ export const answerPages: AnswerPage[] = [
     description: "A concise answer on tracking emotional and behavioral change across the draft.",
     publishedAt: "2026-05-14",
     publishedLabel: "May 14, 2026",
+    readTime: "4 min read",
     articleSlug: "how-to-track-characters-in-a-novel",
     demoSlug: "gregor-samsa-character-tracker",
+    intro:
+      "A character arc becomes hard to manage when it exists only as a feeling. You know the protagonist is changing, but you cannot point to the precise scenes that challenged their belief, escalated the pressure, or earned the final transformation. Arc tracking fixes that by turning emotional development into a traceable sequence.",
     shortAnswer:
       "Track character arcs as a sequence of pressure points, not a summary paragraph. Note the belief or wound the character begins with, the scenes that challenge it, the choices that reveal change, and the final state they reach by the end.",
     quickSteps: [
@@ -521,6 +692,27 @@ export const answerPages: AnswerPage[] = [
     ],
     whyItMatters:
       "Arc tracking keeps emotional development from going flat or skipping steps between chapters.",
+    sections: [
+      {
+        heading: "Map the pressure points that force change",
+        body: [
+          "An arc is easier to follow when you identify the scenes that actually apply pressure. These are not every scene the character appears in. They are the scenes that expose a flaw, test a belief, or force a choice that reveals a different self.",
+          "If those moments are visible in sequence, you can tell whether the ending lands naturally or whether a transformation is being declared without enough narrative support.",
+        ],
+      },
+      {
+        heading: "Track internal change beside external events",
+        body: [
+          "Plots are noisy. Battles, arguments, mysteries, and twists can hide the emotional line if you only track external action. Arc notes should therefore record what the event did to the character's worldview, not only what happened on the surface.",
+          "That is especially useful in revision, where an external scene may survive but its emotional effect may have shifted after neighboring scenes were cut or rewritten.",
+        ],
+        bullets: [
+          "Starting belief or wound",
+          "Scenes that challenge it",
+          "Choice points that prove the change",
+        ],
+      },
+    ],
   },
   {
     slug: "how-do-i-create-a-story-bible-automatically",
@@ -528,8 +720,11 @@ export const answerPages: AnswerPage[] = [
     description: "A practical answer about using manuscript analysis to generate and maintain a story bible.",
     publishedAt: "2026-05-14",
     publishedLabel: "May 14, 2026",
+    readTime: "4 min read",
     articleSlug: "what-is-a-story-bible-and-do-you-need-one",
     demoSlug: "pride-and-prejudice-relationship-map",
+    intro:
+      "Automation only helps if it starts from the manuscript itself. A story bible generated from memory tends to reproduce the same gaps the author already has. A story bible generated from the draft can surface the canon that is actually on the page and make upkeep far less fragile during revision.",
     shortAnswer:
       "Start from the manuscript and extract the recurring facts that matter: characters, aliases, locations, relationships, timeline anchors, and unresolved threads. Then keep those entries linked back to the scenes that proved them so the bible stays grounded.",
     quickSteps: [
@@ -539,6 +734,27 @@ export const answerPages: AnswerPage[] = [
     ],
     whyItMatters:
       "Automation matters because the hardest part of a story bible is keeping it current after the manuscript changes.",
+    sections: [
+      {
+        heading: "Generate the entries authors usually abandon",
+        body: [
+          "The best automation targets the parts writers do not consistently maintain by hand: aliases, chapter references, relationship links, recurring locations, and unresolved threads. Those are the records that quietly go stale when the manuscript shifts.",
+          "If the system can produce those entries from the draft, the bible stops being a second project and starts acting like living editorial infrastructure.",
+        ],
+      },
+      {
+        heading: "Keep the bible tied to evidence",
+        body: [
+          "A generated story bible still needs grounding. Each entry should be traceable back to the text that established it. Otherwise the author cannot tell whether a note reflects canon, inference, or a stale earlier draft.",
+          "That scene-level grounding is what keeps automatic generation useful after multiple revisions. It lets authors refresh the bible without losing trust in it.",
+        ],
+        bullets: [
+          "Characters and aliases",
+          "Locations and world rules",
+          "Timeline anchors and unresolved threads",
+        ],
+      },
+    ],
   },
   {
     slug: "how-do-i-prepare-a-manuscript-for-beta-readers",
@@ -546,7 +762,10 @@ export const answerPages: AnswerPage[] = [
     description: "A short answer on continuity cleanup, reader packets, and the notes authors should make before outside feedback starts.",
     publishedAt: "2026-05-14",
     publishedLabel: "May 14, 2026",
+    readTime: "4 min read",
     articleSlug: "best-writing-software-for-fiction-authors",
+    intro:
+      "Beta readers are most helpful when they are reacting to the story you meant to show them, not tripping over fixable confusion you already suspected. Preparation is therefore less about polishing every sentence and more about removing avoidable friction, clarifying your questions, and making the manuscript easy to read as a draft in progress.",
     shortAnswer:
       "Do a continuity pass before sending the draft out, define the questions you most want answered, and prepare a light support packet with character names, context, and any boundaries around spoilers or unfinished arcs.",
     quickSteps: [
@@ -556,6 +775,27 @@ export const answerPages: AnswerPage[] = [
     ],
     whyItMatters:
       "A better-prepared manuscript gets more useful reader feedback and fewer avoidable continuity comments.",
+    sections: [
+      {
+        heading: "Clean the draft before asking for reactions",
+        body: [
+          "Beta readers should not be spending their attention on the contradictions you already know how to fix. Run a quick continuity pass first, especially on names, timeline drift, missing setup, and obvious scene-order confusion.",
+          "That pass does not need to be perfectionist. Its job is to remove the avoidable noise that would otherwise dilute the feedback you actually need.",
+        ],
+      },
+      {
+        heading: "Guide the feedback without scripting it",
+        body: [
+          "Readers give stronger notes when they know what kind of help you want. Tell them whether you are most concerned about pacing, motivation, confusion, emotional payoff, or the clarity of the ending.",
+          "A light packet with character names, context, and response questions is usually enough. Too much explanation can flatten the authentic reader experience you are trying to test.",
+        ],
+        bullets: [
+          "State the feedback priorities clearly",
+          "Give only the context needed to read well",
+          "Keep your own revision questions visible while responses come in",
+        ],
+      },
+    ],
   },
 ]
 
@@ -567,6 +807,7 @@ export const demoPages: DemoPage[] = [
       "A public-domain workflow example showing how LoreVia-style character tracking can follow transformations, family tension, and identity drift scene by scene.",
     publishedAt: "2026-05-14",
     publishedLabel: "May 14, 2026",
+    readTime: "5 min read",
     sourceWork: "The Metamorphosis",
     sourceAuthor: "Franz Kafka",
     articleSlug: "how-to-track-characters-in-a-novel",
@@ -574,6 +815,8 @@ export const demoPages: DemoPage[] = [
       "how-do-i-remember-small-details-in-a-long-manuscript",
       "how-do-i-track-character-arcs",
     ],
+    intro:
+      "This demo is useful because Gregor Samsa changes so dramatically that a flat character sheet would fail almost immediately. A real tracker has to preserve both the visible facts of his transformation and the emotional facts surrounding it: who still treats him as family, who shifts into duty, who shifts into disgust, and how Gregor's own sense of self collapses under those reactions.",
     featuredInsight:
       "Gregor's transformation is not only physical. A tracking system also surfaces how his family's language, fear, and obligation change around him.",
     sections: [
@@ -581,6 +824,7 @@ export const demoPages: DemoPage[] = [
         heading: "What the character record captures",
         body: [
           "A strong character tracker would capture Gregor's physical change, his role as provider, his shrinking agency, and the exact points where family members stop relating to him as a son and begin responding to him as a problem.",
+          "That matters because the novella's tragedy is not only the event of transformation. It is the steady revision of Gregor's social identity. A useful record would show when care becomes management, when embarrassment becomes hostility, and when Gregor's own internal language can no longer protect his earlier self-image.",
         ],
         bullets: [
           "First transformation event",
@@ -596,6 +840,13 @@ export const demoPages: DemoPage[] = [
           "This is the same reason authors should track injuries, grief responses, or escalating resentment in their own drafts. Emotional continuity often lives in repeated small changes.",
         ],
       },
+      {
+        heading: "What LoreVia-style analysis would surface",
+        body: [
+          "A manuscript intelligence workflow could flag the clustered scenes where Gregor loses agency, track the vocabulary different family members use for him, and connect those moments to the broader arc of obligation inside the household. That turns a famous literary effect into something inspectable instead of purely intuitive.",
+          "For working authors, the value is practical: once that pattern is visible in a demo, it becomes easier to imagine doing the same kind of tracking inside an original manuscript with less obvious but equally important emotional drift.",
+        ],
+      },
     ],
   },
   {
@@ -605,6 +856,7 @@ export const demoPages: DemoPage[] = [
       "A public-domain example showing how LoreVia-style timeline tracking can organize travel, diary entries, letters, and overlapping events in a complex manuscript.",
     publishedAt: "2026-05-14",
     publishedLabel: "May 14, 2026",
+    readTime: "5 min read",
     sourceWork: "Dracula",
     sourceAuthor: "Bram Stoker",
     articleSlug: "how-to-avoid-continuity-errors-when-writing-a-novel",
@@ -612,6 +864,8 @@ export const demoPages: DemoPage[] = [
       "how-do-authors-manage-timelines",
       "what-is-a-continuity-checker-for-fiction",
     ],
+    intro:
+      "Dracula works well as a public demo because the book already behaves like a continuity stress test. Its journals, letters, newspaper clippings, and travel sequences force the reader to align separate records into one coherent chronology. That makes it a near-perfect example of why timeline tracking is a real editorial tool rather than administrative decoration.",
     featuredInsight:
       "Dracula is a perfect timeline demo because its letters, journals, and travel windows force the reader to reconcile overlapping accounts across multiple narrators.",
     sections: [
@@ -619,6 +873,7 @@ export const demoPages: DemoPage[] = [
         heading: "What the timeline system surfaces",
         body: [
           "A timeline tracker can line up journal entries, train travel, off-page movement, and the moments when one narrator learns what another already knows. That quickly exposes impossible travel windows or delayed knowledge transfer.",
+          "Because Dracula uses distributed records, the timeline is doing double duty. It has to manage elapsed time and narrative perspective at once. A good system would therefore show both when something happened and who could responsibly know it at that moment.",
         ],
         bullets: [
           "Date and time anchors from diaries and letters",
@@ -634,6 +889,13 @@ export const demoPages: DemoPage[] = [
           "If your own draft includes flashbacks, travel, or staggered reveals, a timeline tracker is not optional admin. It is structural support.",
         ],
       },
+      {
+        heading: "How the demo translates to modern revision work",
+        body: [
+          "In a LoreVia-style demo, the point is not to summarize Dracula for the sake of summary. It is to show the editorial view an author would want: dated events arranged in order, travel assumptions made explicit, and points of contradiction or ambiguity made easy to inspect.",
+          "Once authors see that view on a familiar text, the workflow becomes concrete. The same timeline logic can support thrillers, romances with staggered timelines, fantasy quests, or any manuscript where chronology quietly controls plausibility.",
+        ],
+      },
     ],
   },
   {
@@ -643,6 +905,7 @@ export const demoPages: DemoPage[] = [
       "A public-domain example showing how LoreVia-style relationship tracking can map conflict, prejudice, reversals, and social pressure through a novel.",
     publishedAt: "2026-05-14",
     publishedLabel: "May 14, 2026",
+    readTime: "5 min read",
     sourceWork: "Pride and Prejudice",
     sourceAuthor: "Jane Austen",
     articleSlug: "what-is-a-story-bible-and-do-you-need-one",
@@ -650,6 +913,8 @@ export const demoPages: DemoPage[] = [
       "how-do-i-track-character-relationships-in-a-novel",
       "how-do-i-create-a-story-bible-automatically",
     ],
+    intro:
+      "Pride and Prejudice is an excellent relationship demo because nearly every major turn depends on revised perception. Affection, embarrassment, pride, social ambition, and family pressure all change the meaning of earlier scenes. A relationship map lets those shifts stay visible instead of dissolving into a general memory that the book is \"about\" Elizabeth and Darcy.",
     featuredInsight:
       "A relationship map shows not just who is connected, but how misread motives, social status, and shifting respect change the emotional geometry of the novel.",
     sections: [
@@ -657,6 +922,7 @@ export const demoPages: DemoPage[] = [
         heading: "What the relationship map captures",
         body: [
           "A relationship graph for Pride and Prejudice would track courtship pressure, family expectations, social friction, and the major reversals that change how Elizabeth, Darcy, Jane, Bingley, and Lady Catherine interact.",
+          "The key value is not simply knowing who is linked. It is preserving the shape of those links over time. The map should show when misunderstanding is dominant, when respect begins to replace irritation, and when external social pressure alters what a character can safely do.",
         ],
         bullets: [
           "Current relationship status",
@@ -670,6 +936,13 @@ export const demoPages: DemoPage[] = [
         body: [
           "Relationship-rich novels depend on momentum between people, not just events. When that momentum is not tracked, revisions can accidentally flatten or rush the emotional logic that makes the book satisfying.",
           "This is why a story bible should contain relationship movement, not only static world facts.",
+        ],
+      },
+      {
+        heading: "What an author can borrow from this demo",
+        body: [
+          "The practical lesson is that relationship tracking is not limited to romance classics. Any manuscript with family tension, rivalry, shifting alliances, or social pressure can benefit from the same method. What matters is that the bond itself receives an editable record.",
+          "That kind of record becomes especially valuable during revision, when a cut scene or softened exchange can accidentally change how fast a relationship develops without the author noticing until readers point it out.",
         ],
       },
     ],
@@ -738,4 +1011,53 @@ export function getLatestContentPublishedAt(): string {
   return [...blogArticles, ...answerPages, ...demoPages]
     .map((entry) => entry.publishedAt)
     .sort((left, right) => right.localeCompare(left))[0]
+}
+
+function countWords(value: string): number {
+  return value
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean).length
+}
+
+function countSectionWords(sections: ContentSection[]): number {
+  return sections.reduce((total, section) => {
+    const bodyWords = section.body.reduce((bodyTotal, paragraph) => bodyTotal + countWords(paragraph), 0)
+    const bulletWords = (section.bullets ?? []).reduce((bulletTotal, bullet) => bulletTotal + countWords(bullet), 0)
+    const highlightWords = section.highlight ? countWords(section.highlight) : 0
+
+    return total + countWords(section.heading) + bodyWords + bulletWords + highlightWords
+  }, 0)
+}
+
+export function getContentWordCount(entry: BlogArticle | AnswerPage | DemoPage): number {
+  if ("question" in entry) {
+    return (
+      countWords(entry.question) +
+      countWords(entry.description) +
+      countWords(entry.intro) +
+      countWords(entry.shortAnswer) +
+      countWords(entry.whyItMatters) +
+      entry.quickSteps.reduce((total, step) => total + countWords(step), 0) +
+      countSectionWords(entry.sections)
+    )
+  }
+
+  if ("sourceWork" in entry) {
+    return (
+      countWords(entry.title) +
+      countWords(entry.description) +
+      countWords(entry.intro) +
+      countWords(entry.featuredInsight) +
+      countSectionWords(entry.sections)
+    )
+  }
+
+  return (
+    countWords(entry.title) +
+    countWords(entry.description) +
+    countWords(entry.intro) +
+    entry.highlights.reduce((total, highlight) => total + countWords(highlight), 0) +
+    countSectionWords(entry.sections)
+  )
 }

@@ -89,7 +89,7 @@ export default function CompleteUsernamePage() {
 
   return (
     <div
-      className={`rounded-[2rem] border p-8 shadow-[0_28px_90px_-55px_rgba(15,23,42,0.28)] backdrop-blur ${
+      className={`rounded-lg border p-8 shadow-[0_28px_90px_-55px_rgba(15,23,42,0.28)] backdrop-blur ${
         isDark ? "border-white/10 bg-white/5" : "border-white/80 bg-white/92"
       }`}
     >

@@ -107,8 +107,11 @@ def _is_obvious_noise_character(character: Character) -> tuple[bool, tuple[str, 
     return obvious_noise, reasons
 
 
-async def build_noise_report(book_id: uuid.UUID | None = None) -> dict:
-    async with AsyncSessionLocal() as db:
+async def build_noise_report(book_id: uuid.UUID | None = None, db=None) -> dict:
+    close_db = db is None
+    if db is None:
+        db = AsyncSessionLocal()
+    try:
         stmt = (
             select(Character)
             .options(
@@ -151,6 +154,9 @@ async def build_noise_report(book_id: uuid.UUID | None = None) -> dict:
             "noise_count": len(findings),
             "books": grouped,
         }
+    finally:
+        if close_db:
+            await db.close()
 
 
 async def apply_noise_cleanup(book_id: uuid.UUID | None = None) -> dict:

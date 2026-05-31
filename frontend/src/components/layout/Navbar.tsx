@@ -1,14 +1,18 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import type { Route } from "next"
 import { usePathname, useRouter } from "next/navigation"
 
+import { Button } from "@/components/ui/Button"
 import { authApi } from "@/lib/api/auth"
+import { booksApi } from "@/lib/api/books"
 import { BrandLockup } from "@/components/layout/BrandLockup"
 import { ChatLauncher } from "@/components/layout/ChatLauncher"
 import { NotificationBell } from "@/components/layout/NotificationBell"
+import { asQueryKey, booksListCacheKey } from "@/lib/query/cacheKeys"
+import { queryClient } from "@/lib/query/queryClient"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 
@@ -92,6 +96,17 @@ export function Navbar() {
     return source.slice(0, 1).toUpperCase()
   }, [user?.email, user?.username])
 
+  const libraryPrefetchedRef = useRef(false)
+
+  const handleLibraryPrefetch = useCallback(() => {
+    if (libraryPrefetchedRef.current) return
+    libraryPrefetchedRef.current = true
+    queryClient.prefetchQuery({
+      queryKey: asQueryKey(booksListCacheKey(true)),
+      queryFn: () => booksApi.list(true),
+    })
+  }, [])
+
   const publicProfileHref = user?.username ? (`/public/writers/${user.username}` as Route) : null
 
   return (
@@ -111,21 +126,18 @@ export function Navbar() {
 
             {showUserChrome ? (
               <div className="relative" ref={profileMenuRef}>
-                <button
-                  type="button"
+                <Button
+                  variant={profileMenuOpen ? "primary" : "secondary"}
+                  size="sm"
                   onClick={() => setProfileMenuOpen((value) => !value)}
                   aria-label="Open profile menu"
-                  className={`flex h-10 w-10 items-center justify-center rounded-full border text-sm font-semibold transition-colors duration-150 ${
-                    profileMenuOpen
-                      ? "border-teal-700/20 bg-teal-700/10 text-teal-800 dark:text-teal-200"
-                      : "border-[rgba(var(--border),0.9)] bg-[rgba(255,252,247,0.85)] text-[rgb(var(--foreground))] hover:bg-[rgba(255,252,247,1)] dark:bg-white/[0.04]"
-                  }`}
+                  className="h-10 w-10 rounded-full"
                 >
                   {profileInitial}
-                </button>
+                </Button>
 
                 {profileMenuOpen ? (
-                  <div className={`absolute right-0 top-full z-40 mt-2 w-72 overflow-hidden rounded-[1.25rem] border shadow-[0_18px_40px_-26px_rgba(58,49,37,0.28)] ${isDark ? "border-white/10 bg-[#1f2528]" : "border-[rgba(var(--border),0.9)] bg-[rgba(255,252,247,0.98)]"}`}>
+                  <div className={`absolute right-0 top-full z-40 mt-2 w-72 overflow-hidden rounded-md border shadow-[0_18px_40px_-26px_rgba(58,49,37,0.28)] ${isDark ? "border-white/10 bg-[#1f2528]" : "border-[rgba(var(--border),0.9)] bg-[rgba(255,252,247,0.98)]"}`}>
                     <div className={`border-b px-4 py-4 ${isDark ? "border-white/10" : "border-[rgba(var(--border),0.9)]"}`}>
                       <p className="text-base font-semibold">{user.username ? `@${user.username}` : user.email}</p>
                       <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-stone-600"}`}>{user.email}</p>
@@ -143,22 +155,25 @@ export function Navbar() {
                           Public writer profile
                         </Link>
                       ) : null}
-                      <button
-                        type="button"
+                      <Button
+                        variant="ghost"
+                        size="md"
                         onClick={() => void handleLogout()}
-                        className={`block w-full rounded-xl px-3 py-2.5 text-left text-sm ${isDark ? "text-rose-300 hover:bg-rose-500/10" : "text-rose-600 hover:bg-rose-50"}`}
+                        className={`w-full justify-start rounded-xl ${isDark ? "text-rose-300 hover:bg-rose-500/10" : "text-rose-600 hover:bg-rose-50"}`}
                       >
                         Sign out
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 ) : null}
               </div>
             ) : null}
 
-            <button
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={toggleTheme}
-              className="group relative flex h-10 w-10 items-center justify-center rounded-xl border border-[rgba(var(--border),0.9)] bg-[rgba(255,252,247,0.82)] hover:bg-[rgba(255,252,247,1)] transition-colors duration-150 dark:bg-white/[0.04]"
+              className="h-10 w-10 rounded-xl"
               aria-label="Toggle theme"
             >
               {isDark ? (
@@ -170,16 +185,18 @@ export function Navbar() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
                 </svg>
               )}
-            </button>
+            </Button>
 
-            <button
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() => setMobileMenuOpen((v) => !v)}
-              className="lg:hidden flex h-10 w-10 items-center justify-center rounded-xl border border-[rgba(var(--border),0.9)] bg-[rgba(255,252,247,0.82)] text-[rgb(var(--foreground))] dark:bg-white/[0.04]"
+              className="h-10 w-10 rounded-xl lg:hidden"
             >
               <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={mobileMenuOpen ? "M6 18L18 6M6 6l12 12" : "M4 6h16M4 12h16M4 18h16"} />
               </svg>
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -201,6 +218,8 @@ export function Navbar() {
                 key={item.href}
                 href={item.href}
                 onClick={() => setMobileMenuOpen(false)}
+                onMouseEnter={item.href === "/library" ? handleLibraryPrefetch : undefined}
+                onFocus={item.href === "/library" ? handleLibraryPrefetch : undefined}
                 className={`relative rounded-xl px-4 py-2 text-sm font-semibold tracking-tight transition-colors duration-150 ${
                   pathname === item.href
                     ? "bg-teal-700/10 text-teal-800 dark:bg-teal-400/15 dark:text-teal-200"

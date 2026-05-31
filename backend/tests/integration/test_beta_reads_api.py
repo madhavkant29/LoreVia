@@ -7,8 +7,9 @@ import pytest
 from sqlalchemy import select
 
 from app.core.security import create_access_token
+from app.utils.auth_csrf import AUTH_CSRF_COOKIE_NAME, AUTH_CSRF_HEADER_NAME, create_auth_csrf_token
 from app.models.beta_read import BetaReadAssignment
-from app.models.book import Book, BookCollaborator
+from app.models.book import Book, BookCollaborator, Chapter
 from app.models.intelligence import Notification
 from app.models.progress import ReadingProgress
 from app.models.user import User
@@ -16,7 +17,12 @@ from app.utils.beta_read_utils import run_beta_read_jobs
 
 
 def _auth_headers(user_id: uuid.UUID) -> dict[str, str]:
-    return {"Cookie": f"lorevia_access_token={create_access_token(str(user_id))}"}
+    csrf_token = create_auth_csrf_token()
+    return {
+        "Cookie": f"lorevia_access_token={create_access_token(str(user_id))}; {AUTH_CSRF_COOKIE_NAME}={csrf_token}",
+        AUTH_CSRF_HEADER_NAME: csrf_token,
+        "Origin": "https://getlorevia.com",
+    }
 
 
 async def _create_user(db, *, email: str, tier: str) -> User:
@@ -49,6 +55,19 @@ async def _create_book(db, *, author_id: uuid.UUID) -> Book:
     await db.commit()
     await db.refresh(book)
     return book
+
+
+async def _add_book_chapter(db, *, book_id: uuid.UUID, chapter_number: int) -> Chapter:
+    chapter = Chapter(
+        book_id=book_id,
+        number=chapter_number,
+        title=f"Chapter {chapter_number}",
+        s3_key=f"books/chapter-{chapter_number}.json",
+    )
+    db.add(chapter)
+    await db.commit()
+    await db.refresh(chapter)
+    return chapter
 
 
 @pytest.mark.asyncio
@@ -161,6 +180,165 @@ async def test_beta_read_flow_requires_review_and_tracks_feedback_completion(cli
 
     assert author_detail.json()["assignment"]["book_average_rating"] == 4.5
     assert author_detail.json()["assignment"]["book_rating_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_reader_chapter_payload_surfaces_beta_comments_for_author_and_only_own_comments_for_reader(client, db, monkeypatch):
+    author = await _create_user(db, email="author-chapter-comments@lorevia.test", tier="author")
+    first_reader = await _create_user(db, email="reader-one@lorevia.test", tier="reader")
+    second_reader = await _create_user(db, email="reader-two@lorevia.test", tier="reader")
+    book = await _create_book(db, author_id=author.id)
+    await _add_book_chapter(db, book_id=book.id, chapter_number=1)
+
+    db.add_all([
+        ReadingProgress(user_id=first_reader.id, book_id=book.id, current_chapter=1, chapters_read=[1], scroll_pct=1.0),
+        ReadingProgress(user_id=second_reader.id, book_id=book.id, current_chapter=1, chapters_read=[1], scroll_pct=1.0),
+    ])
+    await db.commit()
+
+    monkeypatch.setattr(
+        "app.services.chapter_recovery_service.deserialize_manuscript_content",
+        lambda _raw: {"text": "Lantern fire cracked across the bridge.", "html": "<p>Lantern fire cracked across the bridge.</p>"},
+    )
+    monkeypatch.setattr(
+        "app.services.chapter_recovery_service.download_book",
+        lambda _key: b"stored chapter payload",
+    )
+
+    first_assignment = await client.post(
+        f"/api/v1/books/{book.id}/beta-reads",
+        headers=_auth_headers(author.id),
+        json={
+            "reader_email": first_reader.email,
+            "task_label": "First pass",
+            "window_days": 7,
+            "required_feedback_item_count": 1,
+        },
+    )
+    second_assignment = await client.post(
+        f"/api/v1/books/{book.id}/beta-reads",
+        headers=_auth_headers(author.id),
+        json={
+            "reader_email": second_reader.email,
+            "task_label": "Second pass",
+            "window_days": 7,
+            "required_feedback_item_count": 1,
+        },
+    )
+    assert first_assignment.status_code == 201
+    assert second_assignment.status_code == 201
+
+    first_assignment_id = first_assignment.json()["id"]
+    second_assignment_id = second_assignment.json()["id"]
+
+    first_comment = await client.post(
+        f"/api/v1/beta-reads/{first_assignment_id}/feedback-items",
+        headers=_auth_headers(first_reader.id),
+        json={
+            "kind": "chapter_comment",
+            "chapter_number": 1,
+            "body": "The bridge argument lands, but I wanted one more line before the reveal.",
+        },
+    )
+    second_comment = await client.post(
+        f"/api/v1/beta-reads/{second_assignment_id}/feedback-items",
+        headers=_auth_headers(second_reader.id),
+        json={
+            "kind": "chapter_comment",
+            "chapter_number": 1,
+            "body": "The closing beat is clear, but the turn into it still feels abrupt.",
+        },
+    )
+    assert first_comment.status_code == 201
+    assert second_comment.status_code == 201
+
+    author_chapter = await client.get(f"/api/v1/reader/{book.id}/chapter/1", headers=_auth_headers(author.id))
+    first_reader_chapter = await client.get(f"/api/v1/reader/{book.id}/chapter/1", headers=_auth_headers(first_reader.id))
+
+    assert author_chapter.status_code == 200
+    assert first_reader_chapter.status_code == 200
+
+    author_feedback = author_chapter.json()["beta_feedback"]
+    reader_feedback = first_reader_chapter.json()["beta_feedback"]
+
+    assert len(author_feedback) == 2
+    assert {item["body"] for item in author_feedback} == {
+        "The bridge argument lands, but I wanted one more line before the reveal.",
+        "The closing beat is clear, but the turn into it still feels abrupt.",
+    }
+    assert len(reader_feedback) == 1
+    assert reader_feedback[0]["body"] == "The bridge argument lands, but I wanted one more line before the reveal."
+    assert reader_feedback[0]["task_label"] == "First pass"
+
+
+@pytest.mark.asyncio
+async def test_collaborator_activity_endpoint_includes_beta_feedback_timeline(client, db):
+    author = await _create_user(db, email="author-collab-activity@lorevia.test", tier="author")
+    reader = await _create_user(db, email="reader-collab-activity@lorevia.test", tier="reader")
+    book = await _create_book(db, author_id=author.id)
+
+    db.add(
+        ReadingProgress(
+            user_id=reader.id,
+            book_id=book.id,
+            current_chapter=1,
+            chapters_read=[1],
+            scroll_pct=1.0,
+        )
+    )
+    await db.commit()
+
+    create_response = await client.post(
+        f"/api/v1/books/{book.id}/beta-reads",
+        headers=_auth_headers(author.id),
+        json={
+            "reader_email": reader.email,
+            "task_label": "Activity timeline pass",
+            "window_days": 7,
+            "required_progress_pct": 100,
+            "required_comment_count": 1,
+            "required_feedback_item_count": 1,
+        },
+    )
+    assert create_response.status_code == 201
+    assignment_payload = create_response.json()
+    assignment_id = assignment_payload["id"]
+    collaborator_id = assignment_payload["collaborator_id"]
+    assert collaborator_id is not None
+
+    comment_response = await client.post(
+        f"/api/v1/beta-reads/{assignment_id}/feedback-items",
+        headers=_auth_headers(reader.id),
+        json={
+            "kind": "chapter_comment",
+            "chapter_number": 1,
+            "body": "The midpoint is strong once the argument reaches the lantern room.",
+        },
+    )
+    assert comment_response.status_code == 201
+
+    submit_response = await client.post(
+        f"/api/v1/beta-reads/{assignment_id}/submit-feedback",
+        headers=_auth_headers(reader.id),
+        json={
+            "final_feedback": "The emotional center held and the ending turn was memorable.",
+            "final_rating": 4.0,
+        },
+    )
+    assert submit_response.status_code == 200
+
+    activity_response = await client.get(
+        f"/api/v1/books/{book.id}/collaborators/{collaborator_id}/activity",
+        headers=_auth_headers(author.id),
+    )
+    assert activity_response.status_code == 200
+    payload = activity_response.json()
+
+    assert payload["collaborator"]["email"] == reader.email
+    assert payload["chapter_comment_count"] == 1
+    assert payload["assignments"][0]["id"] == assignment_id
+    assert {item["kind"] for item in payload["items"]} >= {"chapter_comment", "beta_read_submitted"}
+    assert any(item["body"] == "The midpoint is strong once the argument reaches the lantern room." for item in payload["items"])
 
 
 @pytest.mark.asyncio
@@ -560,7 +738,7 @@ async def test_expired_beta_read_revokes_book_invite_access(client, db):
     )
     assert create_response.status_code == 201
 
-    before_expiry = await client.get("/api/v1/books", headers=_auth_headers(reader.id))
+    before_expiry = await client.get("/api/v1/books/", headers=_auth_headers(reader.id))
     assert before_expiry.status_code == 200
     assert any(item["id"] == str(book.id) for item in before_expiry.json())
 
@@ -584,7 +762,7 @@ async def test_expired_beta_read_revokes_book_invite_access(client, db):
     await db.refresh(collaborator)
     assert collaborator.invite_status == "revoked"
 
-    after_expiry = await client.get("/api/v1/books", headers=_auth_headers(reader.id))
+    after_expiry = await client.get("/api/v1/books/", headers=_auth_headers(reader.id))
     assert after_expiry.status_code == 200
     assert all(item["id"] != str(book.id) for item in after_expiry.json())
 

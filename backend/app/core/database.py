@@ -9,10 +9,6 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-_LOCAL_DEBUG_POOL_SIZE = 5
-_LOCAL_DEBUG_MAX_OVERFLOW = 5
-
-
 def _build_engine_config() -> tuple[str, dict]:
     url = make_url(settings.DATABASE_URL.replace("postgresql://", "postgresql+psycopg://"))
     return url.render_as_string(hide_password=False), {"prepare_threshold": None}
@@ -21,10 +17,6 @@ def _build_engine_config() -> tuple[str, dict]:
 def _effective_pool_settings() -> tuple[int, int]:
     pool_size = max(1, int(settings.DATABASE_POOL_SIZE))
     max_overflow = max(0, int(settings.DATABASE_MAX_OVERFLOW))
-
-    if settings.DEBUG and pool_size == 1 and max_overflow == 0:
-        return _LOCAL_DEBUG_POOL_SIZE, _LOCAL_DEBUG_MAX_OVERFLOW
-
     return pool_size, max_overflow
 
 
