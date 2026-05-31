@@ -228,6 +228,10 @@ async def fallback_character_mentions(
         user_id=user_id,
         book_id=book_id,
     )
+    for character in filtered:
+        evidence = dict(character.get("evidence") if isinstance(character.get("evidence"), dict) else {})
+        evidence["deterministic_fallback"] = True
+        character["evidence"] = evidence
     return {
         "characters": _apply_anti_merge_hints(chunk_text, filtered),
         "relationships": [],
