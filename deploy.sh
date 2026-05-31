@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 APP_DIR="${APP_DIR:-/opt/lorevia/current}"
+DEPLOY_BRANCH="${DEPLOY_BRANCH:-main}"
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}"
 COMPOSE_ENV_FILE="${COMPOSE_ENV_FILE:-./backend/.env}"
 COMPOSE="docker compose --env-file ${COMPOSE_ENV_FILE} -f ${COMPOSE_FILE}"
@@ -48,8 +49,8 @@ enable_systemd_unit() {
 cd "${APP_DIR}"
 
 git fetch --prune origin
-git checkout main
-git pull --ff-only origin main
+git checkout "${DEPLOY_BRANCH}"
+git pull --ff-only origin "${DEPLOY_BRANCH}"
 
 if [[ "${RUN_TESTS:-0}" == "1" ]]; then
   docker compose -f docker-compose-local.yml exec -T api pytest tests/integration/test_beta_reads_api.py tests/unit/test_trial_email_service.py -v
@@ -85,9 +86,18 @@ fi
 ${COMPOSE} build --pull
 
 run_alembic() {
+  local alembic_env_args=()
+  if [[ -n "${ALEMBIC_ALLOW_DESTRUCTIVE_UPGRADES:-}" ]]; then
+    alembic_env_args+=(-e ALEMBIC_ALLOW_DESTRUCTIVE_UPGRADES="${ALEMBIC_ALLOW_DESTRUCTIVE_UPGRADES}")
+  fi
+  if [[ -n "${ALEMBIC_ALLOW_DESTRUCTIVE_DOWNGRADES:-}" ]]; then
+    alembic_env_args+=(-e ALEMBIC_ALLOW_DESTRUCTIVE_DOWNGRADES="${ALEMBIC_ALLOW_DESTRUCTIVE_DOWNGRADES}")
+  fi
+
   ${COMPOSE} run --rm \
     -e ALEMBIC_DATABASE_URL="${ALEMBIC_DATABASE_URL}" \
     -e ALEMBIC_CONFIRM_REMOTE="${ALEMBIC_CONFIRM_REMOTE}" \
+    "${alembic_env_args[@]}" \
     backend python -m alembic "$@"
 }
 

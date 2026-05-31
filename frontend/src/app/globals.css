@@ -594,6 +594,13 @@ body::before {
     text-indent: 1.1em;
   }
 
+  .reader-display-published .book-layout__chapter-heading + .book-layout__body > .book-block--paragraph:first-child,
+  .reader-display-published .book-layout__body > .book-block--paragraph:first-child,
+  .reader-display-published .book-layout__body.note-rich-content p:first-child,
+  .reader-display-published .book-layout__body .scene-break + .book-block--paragraph {
+    text-indent: 0;
+  }
+
   .reader-display-published .book-special-block,
   .reader-display-published .book-layout__body.note-rich-content blockquote {
     margin-inline: 0;

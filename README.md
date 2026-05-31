@@ -161,7 +161,9 @@ Notes:
 - In Paddle Checkout settings, set the default payment link to your public HTTPS checkout page, such as `https://getlorevia.com/checkout` on the Hetzner deployment or `http://localhost:3000/checkout` in local sandbox testing.
 - Trial lifecycle emails can be run from a scheduler with `python backend/scripts/run_due_trial_emails.py --limit 100` or through the protected internal job endpoint.
 
-Production deployment notes for the Hetzner VPS live in [ops/production-firewall-and-monitoring.md](/C:/Users/madha/.vscode/prod/LoreVia2/ops/production-firewall-and-monitoring.md), [docs/hetzner-redis-operations.md](/C:/Users/madha/.vscode/prod/LoreVia2/docs/hetzner-redis-operations.md), and [docs/hetzner-service-management.md](/C:/Users/madha/.vscode/prod/LoreVia2/docs/hetzner-service-management.md). Production Compose reads runtime variables from `backend/.env` through each service `env_file`, so plain `docker compose -f docker-compose.yml up -d --build` works without extra env export steps.
+Production deployment notes for the Hetzner VPS live in [ops/production-firewall-and-monitoring.md](/C:/Users/madha/.vscode/prod/LoreVia2/ops/production-firewall-and-monitoring.md), [docs/hetzner-redis-operations.md](/C:/Users/madha/.vscode/prod/LoreVia2/docs/hetzner-redis-operations.md), and [docs/hetzner-service-management.md](/C:/Users/madha/.vscode/prod/LoreVia2/docs/hetzner-service-management.md). Use `./deploy.sh` for production releases so the database backup, Alembic upgrade, and post-migration verification run before new containers start. Plain `docker compose -f docker-compose.yml up -d --build` is only for restarting an already-migrated release.
+
+`deploy.sh` deploys `main` by default. Set `DEPLOY_BRANCH` explicitly only for a reviewed non-default release, such as a temporary hotfix deployment.
 
 ### 2. Create frontend environment file
 

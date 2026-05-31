@@ -1701,12 +1701,14 @@ export default function CharactersPage() {
 
   function openReviewQueue() {
     setCreating(false)
+    setReviewDataEnabled(true)
     setWorkspaceMode("review")
     setPageMenuOpen(false)
   }
 
   function openDuplicateReview(targetCharacterId?: string) {
     setCreating(false)
+    setReviewDataEnabled(true)
     setWorkspaceMode("duplicates")
     setManualMergePrimaryId("")
     setManualMergeSecondaryId("")

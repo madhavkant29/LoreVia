@@ -2,6 +2,8 @@ import { expect, test, type Page } from "@playwright/test"
 
 import { installMockApi } from "./support/mockApi"
 
+const BOOK_ROUTE = "/sky-of-ash--book-1"
+
 function watchBrowserSignals(page: Page) {
   const consoleMessages: string[] = []
   const pageErrors: string[] = []
@@ -228,7 +230,7 @@ test("stats page shows the writing dashboard and todays entries", async ({ page 
 
 test("book overview opens the manuscript editor", async ({ page }) => {
   await installMockApi(page)
-  await page.goto("/book-1")
+  await page.goto(BOOK_ROUTE)
 
   await expect(page.getByText("Open Manuscript Editor")).toBeVisible()
   await expect(page.getByText("Your author command center.")).toBeVisible()
@@ -254,7 +256,7 @@ test("book overview opens the manuscript editor", async ({ page }) => {
 test("book overview shows the nav panel on mobile", async ({ page }) => {
   await installMockApi(page)
   await page.setViewportSize({ width: 390, height: 844 })
-  await page.goto("/book-1")
+  await page.goto(BOOK_ROUTE)
 
   const mobileNavPanel = page.locator('[data-testid="author-tools-nav-panel"]')
   await expect(mobileNavPanel).toBeVisible()
@@ -264,7 +266,7 @@ test("book overview shows the nav panel on mobile", async ({ page }) => {
 
 test("book overview keeps world-gap issue language constructive", async ({ page }) => {
   await installMockApi(page)
-  await page.goto("/book-1")
+  await page.goto(BOOK_ROUTE)
 
   await expect(page.getByRole("button", { name: /World Gaps.*2 review targets queued/i })).toBeVisible()
 })
@@ -281,7 +283,7 @@ test("notifications surface revision digest guidance", async ({ page }) => {
 
 test("manuscript workspace loads core drafting surfaces", async ({ page }) => {
   await installMockApi(page)
-  await page.goto("/book-1/manuscript")
+  await page.goto(`${BOOK_ROUTE}/manuscript`)
 
   await expect(page.getByRole("heading", { name: "Sky of Ash" }).first()).toBeVisible()
   await expect(page.getByPlaceholder("Search chapters")).toBeVisible()
@@ -291,7 +293,7 @@ test("manuscript workspace loads core drafting surfaces", async ({ page }) => {
 
 test("manuscript workspace switches into paged preview for chapter and full-book views", async ({ page }) => {
   await installMockApi(page)
-  await page.goto("/book-1/manuscript")
+  await page.goto(`${BOOK_ROUTE}/manuscript`)
 
   const dismissCookies = page.getByRole("button", { name: /not now/i })
   if (await dismissCookies.isVisible().catch(() => false)) {
@@ -317,7 +319,7 @@ test("manuscript workspace switches into paged preview for chapter and full-book
 
 test("manuscript workspace reorders chapter scenes within the sidebar", async ({ page }) => {
   await installMockApi(page)
-  await page.goto("/book-1/manuscript")
+  await page.goto(`${BOOK_ROUTE}/manuscript`)
 
   const dismissCookies = page.getByRole("button", { name: /not now/i })
   if (await dismissCookies.isVisible().catch(() => false)) {
@@ -341,7 +343,7 @@ test("manuscript workspace reorders chapter scenes within the sidebar", async ({
 
 test("manuscript workspace surfaces chapter annotations in the notes rail", async ({ page }) => {
   await installMockApi(page)
-  await page.goto("/book-1/manuscript")
+  await page.goto(`${BOOK_ROUTE}/manuscript`)
   await page.getByRole("button", { name: /Chapter 2 The Ember Gate/i }).click()
   await expect(page.locator('[data-editor-key="chapter-2"]')).toBeVisible()
 
@@ -352,7 +354,7 @@ test("manuscript workspace surfaces chapter annotations in the notes rail", asyn
 
 test("collaboration workspace creates a story-scoped share", async ({ page }) => {
   await installMockApi(page)
-  await page.goto("/book-1/collaboration")
+  await page.goto(`${BOOK_ROUTE}/collaboration`)
 
   await expect(page.getByRole("heading", { name: "Sky of Ash sharing" })).toBeVisible()
   await expect(page.getByRole("combobox")).toHaveValue("beta_reader")
@@ -391,7 +393,7 @@ test("collaboration workspace creates a story-scoped share", async ({ page }) =>
 
 test("reader published layout applies book typography without mobile overflow", async ({ page }) => {
   await installMockApi(page)
-  await page.goto("/book-1/chapter/2")
+  await page.goto(`${BOOK_ROUTE}/chapter/2`)
 
   await expect(page.getByRole("button", { name: "Published" })).toHaveAttribute("aria-pressed", "true")
   await expect(page.locator(".book-layout__body")).toBeVisible()
@@ -445,14 +447,14 @@ test("reader published layout applies book typography without mobile overflow", 
 test("book overview renders the shared book cover asset", async ({ page }) => {
   await installMockApi(page)
 
-  await page.goto("/book-1")
+  await page.goto(BOOK_ROUTE)
   await expect(page.getByAltText("Sky of Ash cover").first()).toBeVisible()
 })
 
 test("reader renders inline images from asset urls and base64 fallback", async ({ page }) => {
   await installMockApi(page)
 
-  await page.goto("/book-1/chapter/2")
+  await page.goto(`${BOOK_ROUTE}/chapter/2`)
   await expect(page.getByAltText("Ash bridge sketch")).toBeVisible()
   await expect(page.getByText("Fallback inset")).toBeVisible()
 })
@@ -461,7 +463,7 @@ test("character review surfaces unresolved relationship candidates in duplicate 
   const { consoleMessages, pageErrors } = watchBrowserSignals(page)
   await installMockApi(page)
 
-  await page.goto("/book-1/characters")
+  await page.goto(`${BOOK_ROUTE}/characters`)
   await expect(page.getByRole("heading", { name: "Character Bible" })).toBeVisible()
   await page.getByRole("button", { name: /^Review duplicates$/i }).click()
   await expect(page.getByText("Relationship review")).toBeVisible()
@@ -473,7 +475,7 @@ test("character review surfaces unresolved relationship candidates in duplicate 
 
 test("world gap workspace surfaces consistency flags and the coverage watchlist", async ({ page }) => {
   await installMockApi(page)
-  await page.goto("/book-1/world-gap")
+  await page.goto(`${BOOK_ROUTE}/world-gap`)
 
   await expect(page.getByRole("heading", { name: "Grouped inconsistencies and cleanup notes" })).toBeVisible()
   await expect(page.getByText("Consistency flags")).toBeVisible()
@@ -484,7 +486,7 @@ test("world gap workspace surfaces consistency flags and the coverage watchlist"
 
 test("advisor continuity scan shows metadata and proactive audit cards", async ({ page }) => {
   await installMockApi(page)
-  await page.goto("/book-1/advisor")
+  await page.goto(`${BOOK_ROUTE}/advisor`)
 
   const dismissCookies = page.getByRole("button", { name: /not now/i })
   if (await dismissCookies.isVisible().catch(() => false)) {
@@ -502,7 +504,7 @@ test("advisor continuity scan shows metadata and proactive audit cards", async (
 test("voice consistency runs without the max-depth console loop", async ({ page }) => {
   const { consoleMessages, pageErrors } = watchBrowserSignals(page)
   await installMockApi(page)
-  await page.goto("/book-1/voice")
+  await page.goto(`${BOOK_ROUTE}/voice`)
 
   await expect(page.getByRole("heading", { name: /sky of ash voice consistency/i })).toBeVisible()
   await expect(page.getByRole("heading", { name: "The Ember Gate" })).toBeVisible()
@@ -523,7 +525,7 @@ test("voice consistency runs without the max-depth console loop", async ({ page 
 
 test("voice consistency can target a selected character", async ({ page }) => {
   await installMockApi(page, { voiceConsistency: "selected-character" })
-  await page.goto("/book-1/voice")
+  await page.goto(`${BOOK_ROUTE}/voice`)
 
   await expect(page.getByRole("heading", { name: /sky of ash voice consistency/i })).toBeVisible()
   await expect(page.locator("textarea")).toContainText("Nora crossed the ember gate")
@@ -542,7 +544,7 @@ test("voice consistency can target a selected character", async ({ page }) => {
 
 test("voice consistency warns when selected-character attribution is weak", async ({ page }) => {
   await installMockApi(page, { voiceConsistency: "weak-attribution" })
-  await page.goto("/book-1/voice")
+  await page.goto(`${BOOK_ROUTE}/voice`)
 
   await expect(page.getByRole("heading", { name: /sky of ash voice consistency/i })).toBeVisible()
   await expect(page.locator("textarea")).toContainText("Nora crossed the ember gate")
@@ -560,7 +562,7 @@ test("voice consistency warns when selected-character attribution is weak", asyn
 test("voice consistency surfaces backend errors instead of failing silently", async ({ page }) => {
   await installMockApi(page, { voiceConsistency: "backend-error" })
 
-  await page.goto("/book-1/voice")
+  await page.goto(`${BOOK_ROUTE}/voice`)
   await expect(page.getByRole("heading", { name: /sky of ash voice consistency/i })).toBeVisible()
   await expect(page.locator("textarea")).toContainText("Nora crossed the ember gate")
   await expect(page.getByRole("button", { name: /run voice review/i })).toBeEnabled()
@@ -576,7 +578,7 @@ test("voice consistency surfaces backend errors instead of failing silently", as
 test("character bible exposes manual merge without duplicate-key warnings", async ({ page }) => {
   const { consoleMessages, pageErrors } = watchBrowserSignals(page)
   await installMockApi(page)
-  await page.goto("/book-1/characters")
+  await page.goto(`${BOOK_ROUTE}/characters`)
 
   await expect(page.getByRole("heading", { name: "Character Bible" })).toBeVisible()
   await expect(page.getByRole("button", { name: /^Review duplicates$/i })).toBeVisible()
@@ -601,7 +603,7 @@ test("character bible exposes manual merge without duplicate-key warnings", asyn
 test("character bible can add a manual character", async ({ page }) => {
   const { consoleMessages, pageErrors } = watchBrowserSignals(page)
   await installMockApi(page)
-  await page.goto("/book-1/characters")
+  await page.goto(`${BOOK_ROUTE}/characters`)
 
   await expect(page.getByRole("heading", { name: "Character Bible" })).toBeVisible()
   const addCharacterButton = page.getByRole("button", { name: /^add character$/i }).first()
@@ -625,7 +627,7 @@ test("character bible can add a manual character", async ({ page }) => {
 
 test("character bible review queue workspace renders candidate controls without overflow", async ({ page }) => {
   await installMockApi(page)
-  await page.goto("/book-1/characters")
+  await page.goto(`${BOOK_ROUTE}/characters`)
 
   const reviewQueueButton = page.getByRole("button", { name: /^review queue$/i })
   await expect(reviewQueueButton).toBeVisible()
@@ -645,7 +647,7 @@ test("character bible review queue workspace renders candidate controls without 
 test("relationship graph inspector responds to node and edge selection", async ({ page }) => {
   const { consoleMessages, pageErrors } = watchBrowserSignals(page)
   await installMockApi(page)
-  await page.goto("/book-1/graph")
+  await page.goto(`${BOOK_ROUTE}/graph`)
 
   const dismissCookies = page.getByRole("button", { name: /not now/i })
   if (await dismissCookies.isVisible().catch(() => false)) {
@@ -691,7 +693,7 @@ test("relationship graph inspector responds to node and edge selection", async (
 
 test("character bible repair workspace renders preview controls without overflow", async ({ page }) => {
   await installMockApi(page)
-  await page.goto("/book-1/characters")
+  await page.goto(`${BOOK_ROUTE}/characters`)
 
   const repairWorkspaceButton = page.getByRole("button", { name: /^repair workspace$/i })
   await expect(repairWorkspaceButton).toBeVisible()
