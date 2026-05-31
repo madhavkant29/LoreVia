@@ -4,7 +4,7 @@ import uuid
 from datetime import UTC, datetime
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -180,6 +180,11 @@ async def _issue_email_verification(user: User) -> tuple[bool, str]:
     return await deliver_verification_email(user.email, token)
 
 
+def _schedule_onboarding_email(background_tasks: BackgroundTasks | None, email: str) -> None:
+    if background_tasks is not None:
+        background_tasks.add_task(send_onboarding_email, email)
+
+
 @router.post("/register", response_model=RegisterOut, status_code=201)
 async def register(
     body: RegisterBody,
@@ -262,6 +267,7 @@ async def login(
 async def oauth_supabase(
     body: SupabaseOAuthBody,
     response: Response,
+    background_tasks: BackgroundTasks = None,
     db: AsyncSession = Depends(get_db),
     _: None = Depends(rate_limit_auth_login),
 ):
@@ -355,7 +361,7 @@ async def oauth_supabase(
                 await db.refresh(existing)
 
         if created:
-            await send_onboarding_email(existing.email)
+            _schedule_onboarding_email(background_tasks, existing.email)
 
         await _record_login_activity(db, existing)
         await db.commit()
@@ -471,6 +477,7 @@ async def refresh(
 async def verify_email(
     body: VerifyEmailBody,
     response: Response,
+    background_tasks: BackgroundTasks = None,
     db: AsyncSession = Depends(get_db),
     _: None = Depends(rate_limit_auth_password),
 ):
@@ -489,7 +496,7 @@ async def verify_email(
         await db.refresh(user)
         await schedule_trial_email_events(db, user)
         await db.commit()
-        await send_onboarding_email(user.email)
+        _schedule_onboarding_email(background_tasks, user.email)
 
     await _record_login_activity(db, user)
     await db.commit()
