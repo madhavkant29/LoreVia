@@ -106,7 +106,7 @@ describe("admin server api", () => {
     const { getAdminSessionServer } = await import("./admin.server")
     const session = await getAdminSessionServer()
 
-    expect(fetchMock).toHaveBeenCalledWith("http://localhost:8000/api/v1/admin/session", {
+    expect(fetchMock).toHaveBeenCalledWith("http://localhost:3000/api/v1/admin/session", {
       cache: "no-store",
       headers: { cookie: "lorevia_access_token=token" },
     })
