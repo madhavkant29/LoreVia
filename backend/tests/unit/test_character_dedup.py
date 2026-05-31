@@ -17,6 +17,7 @@ from app.models.intelligence import (
 from app.models.user import User
 from app.utils.character_utils import (
     apply_manual_character_description,
+    build_character_dossier_summary,
     cluster_character_entities,
     compose_character_description,
     description_similarity,
@@ -193,6 +194,64 @@ def test_cluster_character_entities_keeps_distinct_nearby_names_separate():
     clustered = cluster_character_entities(entities)
 
     assert [item["name"] for item in clustered] == ["Gregor Samsa", "Grete"]
+
+
+def test_cluster_character_entities_prefers_full_name_over_repeated_given_name():
+    entities = [
+        {
+            "name": "Gregor",
+            "aliases": [],
+            "confidence": 0.92,
+            "traits": {},
+            "evidence": {
+                "mention_count": 2,
+                "strong_mention_count": 2,
+                "snippets": ["Gregor paced the room. Gregor watched the door."],
+            },
+        },
+        {
+            "name": "Gregor Samsa",
+            "aliases": [],
+            "confidence": 0.92,
+            "traits": {},
+            "evidence": {
+                "mention_count": 1,
+                "strong_mention_count": 1,
+                "snippets": ["Gregor Samsa woke before dawn."],
+            },
+        },
+    ]
+
+    clustered = cluster_character_entities(entities)
+
+    assert clustered[0]["name"] == "Gregor Samsa"
+    assert "Gregor" in clustered[0]["aliases"]
+
+
+def test_dossier_allows_strong_deterministic_fallback_with_full_name_alias():
+    summary = build_character_dossier_summary(
+        name="Gregor",
+        aliases=["Gregor Samsa"],
+        evidence={
+            "deterministic_fallback": True,
+            "mention_count": 3,
+            "strong_mention_count": 2,
+            "has_dialogue_or_action": True,
+            "cluster_names": ["Gregor", "Gregor Samsa"],
+            "verifier": {
+                "local": {
+                    "person_ner_mentions": 0,
+                    "non_person_ner_mentions": 0,
+                    "sentence_start_mentions": 1,
+                    "mid_sentence_mentions": 1,
+                },
+                "final": {"confidence_band": "accept", "reasons": ["subject_action_context"]},
+            },
+        },
+    )
+
+    assert summary["strict_auto_eligible"] is True
+    assert "single_token_ambiguous" not in summary["strict_auto_reason_codes"]
 
 
 def test_resolve_character_reference_from_roster_uses_context_to_match_family_role_reference():

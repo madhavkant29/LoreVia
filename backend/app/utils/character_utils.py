@@ -534,6 +534,7 @@ def build_character_dossier_summary(
         int(evidence_map.get("strong_mention_count") or 0),
         len(chapter_numbers),
     )
+    strong_mention_count = int(evidence_map.get("strong_mention_count") or 0)
     person_ner_support = int(local.get("person_ner_mentions") or 0)
     non_person_signal_count = int(local.get("non_person_ner_mentions") or 0)
     sentence_start_mentions = int(local.get("sentence_start_mentions") or 0)
@@ -546,11 +547,26 @@ def build_character_dossier_summary(
         or any("ambiguous" in reason.casefold() or "needs_review" in reason.casefold() for reason in resolved_reason_codes)
     )
     alias_link_support = int(bool(merged_aliases or len(cluster_names) > 1))
+    full_name_alias_support = int(any(len(entity_words(alias)) >= 2 for alias in [*merged_aliases, *cluster_names]))
     canonical_name = clean_optional_text(((evidence_map.get("entity") or {}) if isinstance(evidence_map.get("entity"), Mapping) else {}).get("canonical_name"))
     full_name_link_support = int(bool(canonical_name and canonical_name.casefold() != clean_name.casefold()))
     conflict_signal_count = int(
         bool(evidence_map.get("anti_merge_names"))
         or any("conflict" in reason.casefold() for reason in resolved_reason_codes)
+    )
+    final_band = str(final.get("confidence_band") or "").strip().casefold()
+    deterministic_fallback = bool(evidence_map.get("deterministic_fallback"))
+    strong_fallback_support = bool(
+        deterministic_fallback
+        and final_band == "accept"
+        and mention_count >= 3
+        and strong_mention_count >= 2
+        and dialogue_attribution_support >= 1
+        and (
+            person_ner_support >= 1
+            or (single_token and full_name_alias_support >= 1)
+            or not single_token
+        )
     )
 
     strict_auto_reason_codes: list[str] = []
@@ -562,7 +578,7 @@ def build_character_dossier_summary(
         strict_auto_reason_codes.append("non_person_ner_signal")
     if resolver_ambiguity_count > 0:
         strict_auto_reason_codes.append("conflicts_with_existing_character")
-    if single_token and person_ner_support <= 0:
+    if single_token and person_ner_support <= 0 and not strong_fallback_support:
         strict_auto_reason_codes.append("single_token_ambiguous")
     if len(chapter_numbers) < 2 and mention_count < 3:
         strict_auto_reason_codes.append("insufficient_cross_chapter_support")
@@ -570,8 +586,9 @@ def build_character_dossier_summary(
 
     strict_auto_eligible = False
     if not strict_auto_reason_codes and clean_name:
-        final_band = str(final.get("confidence_band") or "").strip().casefold()
-        if single_token:
+        if strong_fallback_support:
+            strict_auto_eligible = True
+        elif single_token:
             strict_auto_eligible = (
                 final_band == "accept"
                 and len(chapter_numbers) >= 2
@@ -1132,6 +1149,7 @@ def cluster_character_entities(entities: Sequence[Mapping[str, Any]]) -> list[di
             cluster,
             key=lambda item: (
                 0 if is_role_only_character_name(_entity_display_name(item)) else 1,
+                int(len(entity_words(_entity_display_name(item))) >= 2),
                 int((_mention_entity_evidence(item).get("strong_mention_count") or 0)),
                 int((_mention_entity_evidence(item).get("mention_count") or 0)),
                 float(item.get("confidence") or 0.0),
