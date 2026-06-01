@@ -193,6 +193,14 @@ export function PublicForumPageClient({
       setComposerStatus(composerThreadType === "novel" ? "Choose an eligible manuscript, headline, and discussion brief first." : "Add a headline and body before opening a general discussion.")
       return
     }
+    if (headline.trim().length < 3) {
+      setComposerStatus("Headline must be at least 3 characters long.")
+      return
+    }
+    if (body.trim().length < 20) {
+      setComposerStatus("Discussion brief must be at least 20 characters long.")
+      return
+    }
     if (composerThreadType === "novel" && !canOpenPublicDiscussions) {
       setComposerStatus("Novel discussions require Trial, Author, or Architect access.")
       return

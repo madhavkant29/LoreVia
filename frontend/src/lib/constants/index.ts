@@ -18,7 +18,7 @@ export function resolveApiBase() {
   // the backend's HttpOnly auth cookies. Calling the backend directly avoids
   // that cookie-stripping path while still remaining same-site on localhost.
   if (isLocalDevBrowser()) {
-    return "http://localhost:8000/api/v1"
+    return "http://127.0.0.1:8000/api/v1"
   }
 
   if (typeof window !== "undefined") {
@@ -37,7 +37,7 @@ export const API_BASE = resolveApiBase()
 
 export function resolveApiOrigin() {
   if (isLocalDevBrowser()) {
-    return "http://localhost:8000"
+    return "http://127.0.0.1:8000"
   }
 
   if (typeof window !== "undefined" && window.location?.origin) {
@@ -53,7 +53,7 @@ export function resolveApiOrigin() {
     }
   }
 
-  return "http://localhost:8000"
+  return "http://127.0.0.1:8000"
 }
 
 export const CONFIDENCE_THRESHOLDS = {
