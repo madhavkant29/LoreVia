@@ -1448,8 +1448,20 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
         )
 
         if await _book_processing_complete(db, book.id):
-            ready_stats = await collect_book_ready_stats(db, book)
             book.status = "ready"
+            book.writer_workspace = update_book_processing_state(
+                book,
+                status="running",
+                stage="extraction",
+                total_chapters=processing_total,
+                completed_chapters=processed_count,
+                started_at=get_processing_started_at(book),
+                queue_wait_ms=queue_wait_ms,
+                chapter_number=chapter_number,
+                chapter_title=chapter.title,
+                parser_diagnostics=extraction_diagnostics,
+            )
+            ready_stats = await collect_book_ready_stats(db, book)
             processing_status, processing_stage = processing_state_for_completed_extraction(
                 analysis_complete=ready_stats.analysis_complete,
             )
