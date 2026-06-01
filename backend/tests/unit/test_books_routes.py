@@ -1612,7 +1612,7 @@ async def test_character_routes_cover_crud_and_exports(monkeypatch):
             description=" Trusts ",
             from_chapter=2,
         ),
-        db=_FakeDB(get_values=[character, secondary], execute_values=[_Result(scalars=[])]),
+        db=_FakeDB(get_values=[character, secondary], execute_values=[_Result(scalars=[]), _Result(scalars=[])]),
         current_user=user,
     )
     assert created_rel["rel_type"] == "ally"
@@ -1687,7 +1687,7 @@ async def test_character_routes_cover_crud_and_exports(monkeypatch):
             description="Household strain",
             from_chapter=3,
         ),
-        db=_FakeDB(get_values=[accepted_candidate, character, secondary], execute_values=[_Result(scalars=[])]),
+        db=_FakeDB(get_values=[accepted_candidate, character, secondary], execute_values=[_Result(scalars=[]), _Result(scalars=[])]),
         current_user=user,
     )
     assert accepted["rel_type"] == "family"
