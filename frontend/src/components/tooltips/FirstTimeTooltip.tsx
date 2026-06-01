@@ -36,7 +36,8 @@ export function FirstTimeTooltip({
   if (!isVisible) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 py-8">
+    <div className="mx-auto w-full max-w-[1500px] px-4 pt-5 sm:px-6 lg:px-8">
+      <div className="flex justify-end">
       <div
         className={`w-full max-w-md rounded-2xl border p-6 shadow-2xl ${
           isDark
@@ -74,6 +75,7 @@ export function FirstTimeTooltip({
             Got it
           </button>
         </div>
+      </div>
       </div>
     </div>
   )

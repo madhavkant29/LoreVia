@@ -9,7 +9,10 @@ from sqlalchemy.exc import IntegrityError
 
 from app.core.database import AsyncSessionLocal
 from app.models.user import PaddleWebhookEvent, RefundReview, Subscription, User
-from app.services.email_service import send_subscription_confirmation
+from app.services.email_service import (
+    send_subscription_cancellation,
+    send_subscription_confirmation,
+)
 from app.services.refund_service import (
     REFUND_STATUS_APPROVED,
     REFUND_STATUS_PROVIDER_FOLLOWUP_REQUIRED,
@@ -37,6 +40,8 @@ WEBHOOK_STATUS_IGNORED = "ignored"
 WEBHOOK_STATUS_FAILED = "failed"
 SERVICE_ACTIVE_STATUSES = {"active", "trialing"}
 CANCELED_STATUSES = {"canceled", "cancelled"}
+SUBSCRIPTION_CONFIRMATION_EMAIL = "subscription_confirmation"
+SUBSCRIPTION_CANCELLATION_EMAIL = "subscription_cancellation"
 
 
 async def process_paddle_webhook(event: dict[str, Any]) -> dict[str, Any]:
@@ -156,7 +161,7 @@ async def _process_claimed_webhook(
                 return {"received": True, "ignored": True}
 
             data = payload.get("data") or {}
-            email_job = None
+            email_job: tuple[str, str, str] | None = None
             if event_type.startswith("adjustment."):
                 await apply_adjustment_webhook(
                     db,
@@ -182,11 +187,14 @@ async def _process_claimed_webhook(
             raise
 
     if email_job is not None:
-        email_address, plan_tier = email_job
+        email_kind, email_address, plan_tier = email_job
         try:
-            await send_subscription_confirmation(email_address, plan_tier)
+            if email_kind == SUBSCRIPTION_CONFIRMATION_EMAIL:
+                await send_subscription_confirmation(email_address, plan_tier)
+            elif email_kind == SUBSCRIPTION_CANCELLATION_EMAIL:
+                await send_subscription_cancellation(email_address, plan_tier)
         except Exception:
-            logger.exception("Failed to send subscription confirmation for Paddle event %s", event_id)
+            logger.exception("Failed to send subscription lifecycle email for Paddle event %s", event_id)
 
     return {"received": True}
 
@@ -198,7 +206,7 @@ async def _apply_subscription_change(
     event_type: str,
     data: dict[str, Any],
     context: dict[str, Any],
-) -> tuple[str, str] | None:
+) -> tuple[str, str, str] | None:
     subscription: Subscription | None = context["subscription"]
     customer_id = context["customer_id"]
     subscription_id = context["subscription_id"]
@@ -272,7 +280,24 @@ async def _apply_subscription_change(
         and previous_user_tier == "free"
     ):
         if user and user.email:
-            return (user.email, next_tier or previous_user_tier or "free")
+            return (
+                SUBSCRIPTION_CONFIRMATION_EMAIL,
+                user.email,
+                next_tier or previous_user_tier or "free",
+            )
+
+    if (
+        event_type == "subscription.canceled"
+        and previous_status not in CANCELED_STATUSES
+        and next_status in CANCELED_STATUSES
+        and user
+        and user.email
+    ):
+        return (
+            SUBSCRIPTION_CANCELLATION_EMAIL,
+            user.email,
+            tier_from_plan_code(plan_to_store, plan_price_id) or previous_user_tier or plan_to_store,
+        )
 
     return None
 

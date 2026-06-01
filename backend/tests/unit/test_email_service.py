@@ -58,6 +58,25 @@ async def test_send_onboarding_email_renders_long_form_LoreVia_copy_without_prom
 
 
 @pytest.mark.asyncio
+async def test_send_subscription_cancellation_uses_transactional_copy_and_pricing_cta(monkeypatch):
+    captured: list[dict] = []
+
+    monkeypatch.setattr("app.core.config.settings.APP_URL", "https://getlorevia.com", raising=False)
+    monkeypatch.setattr(email_service, "_send", lambda payload: captured.append(payload) or True)
+
+    await email_service.send_subscription_cancellation("reader@example.com", "author")
+
+    html = captured[0]["html"]
+    assert captured[0]["subject"] == "Your LoreVia Author subscription has ended"
+    assert "Your paid plan has been canceled" in html
+    assert "future billing for this subscription should be stopped" in html
+    assert "Review plans" in html
+    assert "https://getlorevia.com/pricing" in html
+    assert "Manage email preferences" not in html
+    assert "headers" not in captured[0]
+
+
+@pytest.mark.asyncio
 async def test_deliver_password_reset_email_uses_query_token_and_security_language(monkeypatch):
     captured: list[dict] = []
 

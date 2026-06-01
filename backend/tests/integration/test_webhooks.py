@@ -264,6 +264,72 @@ async def test_paddle_webhook_deduplicates_processed_events_and_sends_confirmati
 
 
 @pytest.mark.asyncio
+async def test_paddle_webhook_sends_cancellation_email_only_for_final_cancellation(client, db, monkeypatch):
+    secret = "pdl_secret_test"
+    timestamp = 1_700_000_000
+    user = await _create_user(db)
+    sent_emails: list[tuple[str, str]] = []
+
+    async def _fake_send_subscription_cancellation(email: str, plan: str) -> None:
+        sent_emails.append((email, plan))
+
+    _patch_service_session(monkeypatch, db)
+    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_WEBHOOK_SECRET", secret, raising=False)
+    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_WEBHOOK_TOLERANCE_SECONDS", 300, raising=False)
+    monkeypatch.setattr(
+        "app.services.paddle_webhook_service.send_subscription_cancellation",
+        _fake_send_subscription_cancellation,
+    )
+
+    activated_payload = _event_payload(
+        event_id="evt_activate_for_cancel_email",
+        event_type="subscription.activated",
+        user_id=user.id,
+        status="active",
+    )
+    activated_body, activated_signature = _sign_payload(activated_payload, timestamp, secret)
+    monkeypatch.setattr("app.services.paddle_service.time.time", lambda: timestamp + 60)
+    activated_response = await client.post(
+        "/api/v1/webhooks/paddle",
+        content=activated_body,
+        headers={"Paddle-Signature": activated_signature, "Content-Type": "application/json"},
+    )
+
+    scheduled_payload = _event_payload(
+        event_id="evt_cancel_scheduled_email",
+        event_type="subscription.canceled",
+        user_id=user.id,
+        status="active",
+    )
+    scheduled_body, scheduled_signature = _sign_payload(scheduled_payload, timestamp + 1, secret)
+    monkeypatch.setattr("app.services.paddle_service.time.time", lambda: timestamp + 61)
+    scheduled_response = await client.post(
+        "/api/v1/webhooks/paddle",
+        content=scheduled_body,
+        headers={"Paddle-Signature": scheduled_signature, "Content-Type": "application/json"},
+    )
+
+    final_payload = _event_payload(
+        event_id="evt_cancel_final_email",
+        event_type="subscription.canceled",
+        user_id=user.id,
+        status="canceled",
+    )
+    final_body, final_signature = _sign_payload(final_payload, timestamp + 2, secret)
+    monkeypatch.setattr("app.services.paddle_service.time.time", lambda: timestamp + 62)
+    final_response = await client.post(
+        "/api/v1/webhooks/paddle",
+        content=final_body,
+        headers={"Paddle-Signature": final_signature, "Content-Type": "application/json"},
+    )
+
+    assert activated_response.status_code == 200
+    assert scheduled_response.status_code == 200
+    assert final_response.status_code == 200
+    assert sent_emails == [(user.email, "author")]
+
+
+@pytest.mark.asyncio
 async def test_paddle_webhook_failed_event_can_retry_successfully(client, db, monkeypatch):
     secret = "pdl_secret_test"
     timestamp = 1_700_000_000
