@@ -1,6 +1,5 @@
 import type { Metadata, Viewport } from "next"
 import "./globals.css"
-import { QueryProvider } from "@/components/app/QueryProvider"
 import { PostHogClientProvider } from "@/components/analytics/PostHogClient"
 import { SiteFooter } from "@/components/layout/SiteFooter"
 import { JsonLdScript } from "@/components/seo/JsonLdScript"
@@ -120,12 +119,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <JsonLdScript id="organization-jsonld" data={organizationJsonLd} />
       </head>
       <body className="antialiased">
-        <QueryProvider>
-          <PostHogClientProvider>
-            {children}
-            <SiteFooter />
-          </PostHogClientProvider>
-        </QueryProvider>
+        <PostHogClientProvider>
+          {children}
+          <SiteFooter />
+        </PostHogClientProvider>
       </body>
     </html>
   )

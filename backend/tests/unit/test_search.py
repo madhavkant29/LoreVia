@@ -1,6 +1,7 @@
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from sqlalchemy.exc import ProgrammingError
 
 
 @pytest.mark.asyncio
@@ -77,3 +78,24 @@ async def test_semantic_search_uses_candidate_limit_and_threshold():
     params = mock_db.execute.await_args.args[1]
     assert params["lim"] == 10
     assert params["thr"] == 0.55
+
+
+@pytest.mark.asyncio
+async def test_semantic_search_returns_empty_results_when_pgvector_extension_is_missing():
+    import uuid
+
+    from app.engine.search.semantic import semantic_search
+
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock(
+        side_effect=ProgrammingError(
+            "SELECT 1",
+            {},
+            Exception('type "vector" does not exist'),
+        )
+    )
+
+    with patch("app.engine.search.semantic.embed_text", AsyncMock(return_value=[0.1] * 1536)):
+        results = await semantic_search(mock_db, uuid.uuid4(), "test query", max_chapter=5)
+
+    assert results == []

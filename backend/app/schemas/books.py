@@ -98,6 +98,7 @@ class BookOut(BaseModel):
     public_share_requested_at: datetime | None = None
     public_share_approved_at: datetime | None = None
     copyright_warning: bool
+    is_editor_project: bool = False
     archived_at: datetime | None
     hidden_at: datetime | None
     created_at: datetime
@@ -415,6 +416,28 @@ class ManuscriptImportResult(BaseModel):
     mode: str
     source_kind: str
     chapter_reports: list[ChapterConsistencyReport] = Field(default_factory=list)
+
+
+class EmptyProjectBody(BaseModel):
+    title: str = Field(..., min_length=1, max_length=255)
+    author: str | None = Field(None, max_length=255)
+    genre: str | None = Field(None, max_length=100)
+    work_type: str | None = None
+    series_ids: list[str] | None = Field(default_factory=list)
+
+
+class EmptyProjectOut(BaseModel):
+    book_id: str
+    status: str
+    mode: str
+    is_editor_project: bool = True
+
+
+class ManuscriptReprocessOut(BaseModel):
+    book_id: str
+    status: str
+    chapters_queued: int = 0
+    total_words: int = 0
 
 
 class PreWritingCharacterOut(BaseModel):

@@ -24,8 +24,9 @@ LoreVia2/
 
 ## Deployment Note
 
-- Treat the current deployment target as **Render** unless the user explicitly says this has changed.
-- Prefer Render-aware guidance for public hostnames, custom domains, `onrender.com` subdomains, and private/public service exposure.
+- Treat the current deployment target as a **VPS** unless the user explicitly says this has changed.
+- Do not assume Render-specific infrastructure, `onrender.com` hostnames, or Render-managed env behavior.
+- When discussing production incidents, do not claim env overrides or platform-level settings exist unless they have been verified from the VPS deployment configuration or explicitly confirmed by the user.
 
 ---
 

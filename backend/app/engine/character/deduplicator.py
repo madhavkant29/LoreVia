@@ -1,13 +1,17 @@
+import logging
 import re
 import uuid
 from collections.abc import Iterable
 
 from sqlalchemy import select, text
+from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.engine.embeddings.embedder import embed_character
 from app.models.character import Character
 from app.utils.character_utils import has_conflicting_title_identity, has_shared_surname, name_similarity
+
+log = logging.getLogger(__name__)
 
 ALIAS_STOPWORDS = {
     "after", "and", "are", "around", "association", "but", "considering", "creation",
@@ -312,18 +316,24 @@ async def find_similar(
     excluded_ids: Iterable[uuid.UUID] | None = None,
 ) -> uuid.UUID | None:
     max_distance = max(0.0, 1 - threshold)
-    result = await db.execute(
-        text("""
-            SELECT id, embedding <=> CAST(:emb AS vector) AS distance
-            FROM characters
-            WHERE book_id = :bid
-              AND embedding IS NOT NULL
-              AND embedding <=> CAST(:emb AS vector) < :max_distance
-            ORDER BY embedding <=> CAST(:emb AS vector) ASC
-            LIMIT 10
-        """),
-        {"emb": str(embedding), "bid": str(book_id), "max_distance": max_distance},
-    )
+    try:
+        result = await db.execute(
+            text("""
+                SELECT id, embedding <=> CAST(:emb AS vector) AS distance
+                FROM characters
+                WHERE book_id = :bid
+                  AND embedding IS NOT NULL
+                  AND embedding <=> CAST(:emb AS vector) < :max_distance
+                ORDER BY embedding <=> CAST(:emb AS vector) ASC
+                LIMIT 10
+            """),
+            {"emb": str(embedding), "bid": str(book_id), "max_distance": max_distance},
+        )
+    except ProgrammingError as exc:
+        if 'type "vector" does not exist' in str(getattr(exc, "orig", exc)).lower():
+            log.warning("find_similar_pgvector_unavailable book_id=%s", book_id)
+            return None
+        raise
     excluded = {str(item) for item in (excluded_ids or [])}
     for row in result.fetchall():
         if str(row[0]) not in excluded:

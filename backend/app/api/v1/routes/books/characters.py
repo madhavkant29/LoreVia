@@ -797,6 +797,7 @@ async def accept_relationship_candidate(
         from_chapter=from_chapter,
         to_chapter=body.to_chapter,
     )
+    relationship.edited_by_author = True
     candidate.matched_character_a_id = relationship_a.id
     candidate.matched_character_b_id = relationship_b.id
     candidate.status = CHARACTER_RELATIONSHIP_CANDIDATE_ACCEPTED
@@ -938,6 +939,7 @@ async def create_book_relationship(
         from_chapter=body.from_chapter,
         to_chapter=body.to_chapter,
     )
+    relationship.edited_by_author = True
     await db.commit()
     await mark_book_cache_dirty(str(book.id))
     await db.refresh(relationship)
@@ -977,6 +979,7 @@ async def update_book_relationship(
         to_chapter=body.to_chapter,
         relationship_id=relationship.id,
     )
+    relationship.edited_by_author = True
     await db.commit()
     await mark_book_cache_dirty(str(book.id))
     await db.refresh(relationship)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -102,4 +103,33 @@ async def test_list_notifications_syncs_revision_digests_by_default(monkeypatch)
         current_user=SimpleNamespace(id=user_id),
     )
 
+    assert sync_calls == [(user_id, 6)]
+
+
+@pytest.mark.asyncio
+async def test_mark_all_notifications_read_uses_plain_integer_limit(monkeypatch):
+    sync_calls: list[tuple[uuid.UUID, int]] = []
+
+    async def _fake_sync(_db, user_id, *, limit):
+        sync_calls.append((user_id, limit))
+
+    monkeypatch.setattr(notifications, "sync_revision_digest_notifications", _fake_sync)
+
+    user_id = uuid.uuid4()
+    pending_notification = _notification(user_id=user_id)
+    db = _FakeDB(
+        execute_values=[
+            _Result(scalars=[pending_notification]),
+            _Result(scalars=[pending_notification]),
+            _Result(scalar_one=1),
+        ]
+    )
+    db.commit = AsyncMock()
+
+    payload = await notifications.mark_all_notifications_read(
+        db=db,
+        current_user=SimpleNamespace(id=user_id),
+    )
+
+    assert payload.unread_count == 1
     assert sync_calls == [(user_id, 6)]

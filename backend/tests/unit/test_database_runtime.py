@@ -32,7 +32,7 @@ def test_initialize_postgres_session_sets_public_search_path() -> None:
 
     _initialize_postgres_session(connection)
 
-    assert connection.cursor_instance.executed == ["SET search_path TO public"]
+    assert connection.cursor_instance.executed == ["SET search_path TO public, extensions"]
     assert connection.cursor_instance.closed is True
 
 
@@ -61,5 +61,5 @@ def test_initialize_postgres_session_closes_non_context_cursor() -> None:
 
     _initialize_postgres_session(connection)
 
-    assert connection.cursor_instance.executed == ["SET search_path TO public"]
+    assert connection.cursor_instance.executed == ["SET search_path TO public, extensions"]
     assert connection.cursor_instance.closed is True

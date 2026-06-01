@@ -147,7 +147,7 @@ export interface CharacterCandidate {
   normalized_name: string
   aliases: string[]
   matched_character_id?: string | null
-  status: "pending" | "accepted" | "rejected" | "promoted" | "merged"
+  status: "pending" | "accepted" | "rejected" | "promoted" | "merged" | "suppressed"
   confidence: number
   reason_codes: string[]
   evidence: Record<string, unknown>
@@ -201,6 +201,11 @@ export interface CharacterRepairPreview {
   character_labels: Record<string, string>
   pending_duplicate_suggestions: number
   pending_relationship_candidates: number
+  pending_character_candidates_suppressed: number
+  pending_character_candidates_kept: number
+  pending_relationship_candidates_suppressed: number
+  pending_relationship_candidates_kept: number
+  protected_manual_records_skipped: number
   unresolved_relationship_deltas: Record<string, number>
 }
 
@@ -210,6 +215,12 @@ export interface CharacterRepairApplyResult {
   demoted_character_ids: string[]
   skipped_protected_merge_pairs: Array<[string, string]>
   skipped_protected_demotions: string[]
+  pending_character_candidates_suppressed?: number
+  pending_character_candidates_kept?: number
+  pending_relationship_candidates_suppressed?: number
+  pending_relationship_candidates_kept?: number
+  suppressed_character_candidate_ids?: string[]
+  suppressed_relationship_candidate_ids?: string[]
   first_chapter_recomputes: Record<string, number>
   last_seen_chapter_recomputes: Record<string, number>
   character_labels: Record<string, string>
@@ -241,7 +252,7 @@ export interface CharacterRelationshipCandidate {
   rel_type?: string | null
   sentiment?: number | null
   description?: string | null
-  status: "pending" | "accepted" | "rejected" | "resolved" | "merged"
+  status: "pending" | "accepted" | "rejected" | "resolved" | "merged" | "suppressed"
   reason_codes: string[]
   evidence: Record<string, unknown>
   source_batch_key?: string | null

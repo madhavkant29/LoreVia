@@ -2743,6 +2743,14 @@ def require_book_owner_access(
     return build_book_access_context(book, user_id=user.id, collaborator=None)
 
 
+def assert_editor_project_not_rebuilding(book: Book) -> None:
+    if getattr(book, "is_editor_project", False):
+        from app.services.editor_project_service import get_rebuild_run_id
+
+        if get_rebuild_run_id(book) is not None:
+            raise HTTPException(409, "Cannot edit the manuscript while reprocessing is in progress.")
+
+
 def require_author_shell_access(
     book: Book,
     user: User,
@@ -6007,6 +6015,7 @@ async def book_out(
         public_share_requested_at=getattr(book, "public_share_requested_at", None),
         public_share_approved_at=getattr(book, "public_share_approved_at", None),
         copyright_warning=book.copyright_warning,
+        is_editor_project=bool(getattr(book, "is_editor_project", False)),
         archived_at=book.archived_at,
         hidden_at=book.hidden_at,
         created_at=book.created_at,
@@ -7326,7 +7335,7 @@ async def purge_chapter_derived_content(
     chapter_number: int,
     chapter_id: uuid.UUID | None = None,
 ) -> None:
-    from app.models.character import CharacterState
+    from app.models.character import CharacterState, Character
     from app.models.intelligence import BookChunk, ChapterSummary, CharacterRelationship
 
     if chapter_id is not None:
@@ -7339,7 +7348,12 @@ async def purge_chapter_derived_content(
         )
     )
     await db.execute(
-        delete(CharacterState).where(CharacterState.at_chapter == chapter_number)
+        delete(CharacterState).where(
+            CharacterState.character_id.in_(
+                select(Character.id).where(Character.book_id == book_id)
+            ),
+            CharacterState.at_chapter == chapter_number,
+        )
     )
     await db.execute(
         delete(NovelScene).where(

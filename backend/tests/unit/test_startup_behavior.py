@@ -78,6 +78,8 @@ async def test_ready_checks_database_and_redis(monkeypatch) -> None:
     redis_checked = False
 
     class _FakeConnection:
+        _execute_call_count = 0
+
         async def __aenter__(self):
             return self
 
@@ -86,8 +88,14 @@ async def test_ready_checks_database_and_redis(monkeypatch) -> None:
 
         async def execute(self, statement):
             nonlocal db_checked
+            self._execute_call_count += 1
+            expected = (
+                "SELECT 1"
+                if self._execute_call_count == 1
+                else "SELECT '[0,0,0]'::vector"
+            )
+            assert str(statement) == expected
             db_checked = True
-            assert str(statement) == "SELECT 1"
 
     class _FakeEngine:
         def connect(self):

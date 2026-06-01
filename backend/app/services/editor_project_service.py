@@ -1,0 +1,368 @@
+"""Editor-project service: rebuild orchestration for empty-origin books.
+
+Rebuild resets all generated intelligence and re-runs extraction + analysis
+from saved editor chapters. Curated (author-edited) data is preserved.
+"""
+
+from __future__ import annotations
+
+import logging
+import uuid
+from datetime import UTC, datetime
+from typing import Any
+
+from sqlalchemy import delete, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.config import settings
+from app.core.redis import (
+    mark_book_cache_dirty,
+    mark_user_dashboard_cache_dirty,
+)
+from app.models.book import Book, Chapter
+from app.models.character import (
+    Character,
+    CharacterCandidate,
+    CharacterDuplicateSuggestion,
+    CharacterMention,
+    CharacterState,
+    CharacterVoiceProfile,
+)
+from app.models.intelligence import (
+    BookChunk,
+    ChapterSummary,
+    CharacterRelationship,
+    PlotThread,
+    WikiEntry,
+    WorldGapAnalysis,
+    WorldElement,
+)
+from app.models.tag import CustomTag
+from app.utils.advisor_utils import invalidate_advisor_caches_for_book
+from app.utils.ingestion_utils import build_chapter_dispatch_plan
+
+log = logging.getLogger("lorevia.editor_project")
+
+CHARACTER_CANDIDATE_PENDING = "pending"
+CHARACTER_CANDIDATE_SUPPRESSED = "suppressed"
+
+
+async def reset_generated_data(db: AsyncSession, book: Book) -> dict[str, int]:
+    """Delete all generated intelligence rows for a book.
+
+    PRESERVES: chapters, novel scenes, versions, notes, annotations,
+    world-building documents, canon overrides, world notes, curated world
+    elements, curated relationships, curated plot threads, anchor characters
+    (manual or referenced by curated data), and authored custom tags.
+    """
+    from app.utils.character_utils import CHARACTER_CANDIDATE_PENDING, CHARACTER_CANDIDATE_SUPPRESSED
+
+    counts: dict[str, int] = {}
+
+    _book_id = book.id
+    chapter_ids_result = await db.execute(
+        select(Chapter.id).where(Chapter.book_id == _book_id)
+    )
+    chapter_ids = [row[0] for row in chapter_ids_result.all()]
+
+    # --- Delete generated rows that are never curated ---
+
+    result = await db.execute(delete(BookChunk).where(BookChunk.book_id == _book_id))
+    counts["book_chunks"] = result.rowcount
+
+    if chapter_ids:
+        result = await db.execute(
+            delete(ChapterSummary).where(ChapterSummary.chapter_id.in_(chapter_ids))
+        )
+        counts["chapter_summaries"] = result.rowcount
+
+    result = await db.execute(delete(WikiEntry).where(WikiEntry.book_id == _book_id))
+    counts["wiki_entries"] = result.rowcount
+
+    result = await db.execute(delete(WorldGapAnalysis).where(WorldGapAnalysis.book_id == _book_id))
+    counts["world_gap_analyses"] = result.rowcount
+
+    result = await db.execute(
+        delete(CharacterCandidate).where(
+            CharacterCandidate.book_id == _book_id,
+            CharacterCandidate.status.in_(
+                (CHARACTER_CANDIDATE_PENDING, CHARACTER_CANDIDATE_SUPPRESSED)
+            ),
+        )
+    )
+    counts["character_candidates"] = result.rowcount
+
+    result = await db.execute(
+        delete(CharacterMention).where(CharacterMention.book_id == _book_id)
+    )
+    counts["character_mentions"] = result.rowcount
+
+    result = await db.execute(
+        delete(CharacterDuplicateSuggestion).where(
+            CharacterDuplicateSuggestion.book_id == _book_id
+        )
+    )
+    counts["duplicate_suggestions"] = result.rowcount
+
+    result = await db.execute(
+        delete(CharacterVoiceProfile).where(CharacterVoiceProfile.book_id == _book_id)
+    )
+    counts["voice_profiles"] = result.rowcount
+
+    # --- Delete generated world elements, preserve curated ---
+
+    result = await db.execute(
+        delete(WorldElement).where(
+            WorldElement.book_id == _book_id,
+            WorldElement.edited_by_author == False,
+        )
+    )
+    counts["world_elements"] = result.rowcount
+
+    # --- Delete non-curated relationships, preserve curated ---
+
+    result = await db.execute(
+        delete(CharacterRelationship).where(
+            CharacterRelationship.book_id == _book_id,
+            CharacterRelationship.edited_by_author == False,
+        )
+    )
+    counts["relationships"] = result.rowcount
+
+    # --- Delete non-curated plot threads, preserve curated ---
+
+    result = await db.execute(
+        delete(PlotThread).where(
+            PlotThread.book_id == _book_id,
+            PlotThread.edited_by_author == False,
+        )
+    )
+    counts["plot_threads"] = result.rowcount
+
+    # --- Handle characters: preserve anchors, delete rest ---
+
+    character_counts = await _reset_characters_for_book(db, _book_id)
+    counts.update(character_counts)
+
+    # --- Delete CharacterState for remaining (anchor) characters ---
+
+    anchor_ids_result = await db.execute(
+        select(Character.id).where(Character.book_id == _book_id)
+    )
+    anchor_ids = [row[0] for row in anchor_ids_result.all()]
+    if anchor_ids:
+        result = await db.execute(
+            delete(CharacterState).where(CharacterState.character_id.in_(anchor_ids))
+        )
+        counts["character_states"] = result.rowcount
+
+    await db.flush()
+    return counts
+
+
+async def _reset_characters_for_book(db: AsyncSession, book_id: uuid.UUID) -> dict[str, int]:
+    """Delete generated characters, reset counters on anchor characters."""
+    counts: dict[str, int] = {}
+
+    anchor_ids = await _resolve_character_anchor_ids(db, book_id)
+
+    all_chars_result = await db.execute(
+        select(Character.id, Character.is_manual).where(Character.book_id == book_id)
+    )
+    all_chars = all_chars_result.all()
+
+    deleted = 0
+    for char_id, is_manual in all_chars:
+        if char_id in anchor_ids:
+            await db.execute(
+                select(Character).where(Character.id == char_id)
+            )
+            char_result = await db.execute(
+                select(Character).where(Character.id == char_id)
+            )
+            char = char_result.scalar_one_or_none()
+            if char is not None:
+                char.mention_count = 0
+                char.last_seen_chapter = None
+                char.analysis_metadata = {}
+                char.growth_events = []
+        else:
+            await db.execute(delete(Character).where(Character.id == char_id))
+            deleted += 1
+
+    counts["characters_deleted"] = deleted
+    counts["characters_preserved"] = len(anchor_ids)
+    return counts
+
+
+async def _resolve_character_anchor_ids(db: AsyncSession, book_id: uuid.UUID) -> set[uuid.UUID]:
+    """Find character IDs that should be preserved as extraction anchors.
+
+    Anchors are characters that are:
+      - manually created (is_manual == True), OR
+      - referenced by a curated relationship (edited_by_author == True), OR
+      - have authored custom tags (entity_type == "character")
+    """
+    anchors: set[uuid.UUID] = set()
+
+    manual_result = await db.execute(
+        select(Character.id).where(
+            Character.book_id == book_id,
+            Character.is_manual == True,
+        )
+    )
+    anchors.update(row[0] for row in manual_result.all())
+
+    curated_rel_a = await db.execute(
+        select(CharacterRelationship.character_a_id).where(
+            CharacterRelationship.book_id == book_id,
+            CharacterRelationship.edited_by_author == True,
+        )
+    )
+    curated_rel_b = await db.execute(
+        select(CharacterRelationship.character_b_id).where(
+            CharacterRelationship.book_id == book_id,
+            CharacterRelationship.edited_by_author == True,
+        )
+    )
+    anchors.update(row[0] for row in curated_rel_a.all())
+    anchors.update(row[0] for row in curated_rel_b.all())
+
+    tagged_char_ids = await db.execute(
+        select(CustomTag.entity_id).where(
+            CustomTag.book_id == book_id,
+            CustomTag.entity_type == "character",
+        )
+    )
+    anchors.update(row[0] for row in tagged_char_ids.all())
+
+    return anchors
+
+
+async def prepare_rebuild(db: AsyncSession, book: Book) -> str:
+    """Reset generated data and mark the book as processing with a new run ID.
+
+    Returns the new rebuild_run_id string.
+    """
+    rebuild_run_id = uuid.uuid4().hex
+    counts = await reset_generated_data(db, book)
+
+    workspace = dict(book.writer_workspace) if isinstance(book.writer_workspace, dict) else {}
+    from app.utils.book_utils import normalize_writer_workspace
+
+    workspace = normalize_writer_workspace(workspace)
+    now = datetime.now(UTC)
+    workspace["processing"] = {
+        "status": "processing",
+        "stage": "extraction",
+        "rebuild_run_id": rebuild_run_id,
+        "chapters_completed": 0,
+        "chapters_total": book.total_chapters,
+        "started_at": now.isoformat(),
+        "updated_at": now.isoformat(),
+    }
+    book.writer_workspace = workspace
+    book.status = "processing"
+
+    await db.commit()
+    await db.refresh(book)
+
+    await mark_book_cache_dirty(str(book.id))
+    await mark_user_dashboard_cache_dirty(book.user_id)
+    await invalidate_advisor_caches_for_book(db, book_id=book.id)
+
+    log.info(
+        "editor_rebuild_prepared book_id=%s rebuild_run_id=%s counts=%s",
+        book.id,
+        rebuild_run_id,
+        counts,
+    )
+    return rebuild_run_id
+
+
+async def dispatch_rebuild(db: AsyncSession, book: Book) -> tuple[int, int]:
+    """Queue chapter processing tasks for rebuild.
+
+    Returns (chapters_queued, total_words).
+    """
+    from app.utils.queue_utils import queue_for_user
+    from app.workers.tasks.extraction_tasks import process_chapter_task
+    from app.models.user import User
+
+    user = await db.get(User, book.user_id)
+
+    chapters_result = await db.execute(
+        select(Chapter)
+        .where(Chapter.book_id == book.id)
+        .order_by(Chapter.number.asc())
+    )
+    chapters = chapters_result.scalars().all()
+
+    total_words = 0
+    chapter_numbers: list[int] = []
+    for ch in chapters:
+        wc = ch.word_count or 0
+        total_words += wc
+        if wc > 0:
+            chapter_numbers.append(ch.number)
+
+    if not chapter_numbers:
+        await _transition_to_ready(db, book)
+        return 0, 0
+
+    book.total_chapters = len(chapter_numbers)
+    workspace = dict(book.writer_workspace) if isinstance(book.writer_workspace, dict) else {}
+    if isinstance(workspace.get("processing"), dict):
+        workspace["processing"]["chapters_total"] = len(chapter_numbers)
+        workspace["processing"]["status"] = "processing"
+        workspace["processing"]["stage"] = "extraction"
+    book.writer_workspace = workspace
+    await db.commit()
+
+    dispatch_plan = build_chapter_dispatch_plan(
+        chapter_numbers,
+        eager_limit=settings.LAZY_PROCESS_INITIAL_CHAPTERS,
+        dispatch_window=settings.INGESTION_CHAPTER_DISPATCH_WINDOW,
+        dispatch_delay_seconds=settings.INGESTION_CHAPTER_DISPATCH_DELAY_SECONDS,
+    )
+
+    for dispatch in dispatch_plan:
+        process_chapter_task.apply_async(
+            args=[str(book.id), dispatch.chapter_number],
+            queue=queue_for_user(user, "extraction") if user else "extraction",
+            countdown=dispatch.countdown,
+        )
+
+    log.info(
+        "editor_rebuild_dispatched book_id=%s chapters=%s total_words=%s",
+        book.id,
+        len(dispatch_plan),
+        total_words,
+    )
+    return len(dispatch_plan), total_words
+
+
+async def _transition_to_ready(db: AsyncSession, book: Book) -> None:
+    """Mark a zero-chapter editor project as ready."""
+    workspace = dict(book.writer_workspace) if isinstance(book.writer_workspace, dict) else {}
+    workspace["processing"] = {"is_fully_ready": True}
+    book.writer_workspace = workspace
+    book.status = "ready"
+    await db.commit()
+
+
+def get_rebuild_run_id(book: Book) -> str | None:
+    """Extract the current rebuild_run_id from the book's processing state."""
+    workspace = book.writer_workspace if isinstance(book.writer_workspace, dict) else {}
+    processing = workspace.get("processing") if isinstance(workspace, dict) else None
+    if not processing:
+        return None
+    return processing.get("rebuild_run_id")
+
+
+def is_editor_project_processing(book: Book) -> bool:
+    """Check if an editor project is currently rebuilding."""
+    if not getattr(book, "is_editor_project", False):
+        return False
+    rebuild_id = get_rebuild_run_id(book)
+    return rebuild_id is not None

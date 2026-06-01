@@ -10,14 +10,150 @@ from app.models.character import Character, CharacterCandidate, CharacterDecisio
 from app.models.user import User
 from app.utils.character_utils import (
     CHARACTER_CANDIDATE_PENDING,
+    CHARACTER_CANDIDATE_SUPPRESSED,
     CHARACTER_RELATIONSHIP_CANDIDATE_PENDING,
+    CHARACTER_RELATIONSHIP_CANDIDATE_SUPPRESSED,
     build_character_roster_snapshot,
     build_character_review_payload,
+    can_auto_persist_character_candidate,
+    decide_character_candidate_disposition,
+    decide_relationship_candidate_disposition,
     record_character_candidate,
     record_character_mention,
     record_relationship_candidate,
     score_duplicate_characters,
 )
+
+
+def test_disposition_gate_suppresses_weak_verifier_review_candidate():
+    disposition = decide_character_candidate_disposition(
+        name="Chapitre",
+        reason_codes=["mention_verifier_review"],
+        evidence={
+            "mention_count": 1,
+            "verifier": {
+                "final": {
+                    "confidence_band": "review",
+                    "is_person_like": False,
+                    "reasons": ["sentence_start_capitalization_only"],
+                }
+            },
+        },
+    )
+
+    assert disposition.status == CHARACTER_CANDIDATE_SUPPRESSED
+    assert disposition.action == "suppress"
+    assert "mention_verifier_review_suppressed" in disposition.reason_codes
+
+
+def test_disposition_gate_allows_llm_confirmed_person_into_review():
+    disposition = decide_character_candidate_disposition(
+        name="Mira",
+        confidence=0.52,
+        reason_codes=["candidate_dossier_needs_review"],
+        evidence={
+            "mention_count": 1,
+            "strong_mention_count": 1,
+            "has_dialogue_or_action": True,
+            "verifier": {
+                "llm": {"used": True, "is_person_like": True, "confidence": 0.83},
+                "final": {
+                    "confidence_band": "accept",
+                    "is_person_like": True,
+                    "reasons": ["llm_confirmed_person"],
+                },
+            },
+        },
+    )
+
+    assert disposition.status == CHARACTER_CANDIDATE_PENDING
+    assert disposition.visible_review_allowed is True
+
+
+def test_auto_persist_gate_blocks_first_pass_full_name_without_strong_identity_grounding():
+    assert can_auto_persist_character_candidate(
+        name="Anna Sergeyevna",
+        aliases=[],
+        evidence={
+            "mention_count": 3,
+            "strong_mention_count": 2,
+            "has_dialogue_or_action": True,
+            "has_physical_description": True,
+            "verifier": {
+                "local": {
+                    "person_ner_mentions": 1,
+                    "mid_sentence_mentions": 1,
+                },
+                "final": {
+                    "confidence_band": "accept",
+                    "is_person_like": True,
+                    "reasons": [],
+                }
+            },
+        },
+    ) is False
+
+
+def test_auto_persist_gate_allows_obvious_fallback_name_with_shared_identity_support():
+    assert can_auto_persist_character_candidate(
+        name="Gregor Samsa",
+        aliases=["Gregor"],
+        evidence={
+            "mention_count": 3,
+            "strong_mention_count": 2,
+            "has_dialogue_or_action": True,
+            "has_physical_description": True,
+            "deterministic_fallback": True,
+            "cluster_names": ["Gregor Samsa", "Gregor"],
+            "entity": {"canonical_name": "Gregor"},
+            "verifier": {
+                "local": {
+                    "person_ner_mentions": 1,
+                    "mid_sentence_mentions": 1,
+                },
+                "final": {
+                    "confidence_band": "accept",
+                    "is_person_like": True,
+                    "reasons": [],
+                }
+            },
+        },
+    ) is True
+
+
+def test_disposition_gate_suppresses_rejected_verifier_candidate():
+    disposition = decide_character_candidate_disposition(
+        name="Mais",
+        reason_codes=["mention_verifier_rejected"],
+        evidence={
+            "mention_count": 1,
+            "verifier": {
+                "final": {
+                    "confidence_band": "reject",
+                    "is_person_like": False,
+                    "reasons": ["interjection_like_usage"],
+                }
+            },
+        },
+    )
+
+    assert disposition.status == CHARACTER_CANDIDATE_SUPPRESSED
+    assert disposition.action == "reject"
+    assert "mention_verifier_rejected" in disposition.reason_codes
+
+
+def test_relationship_disposition_suppresses_noise_endpoint():
+    disposition = decide_relationship_candidate_disposition(
+        raw_character_a="Gregor",
+        raw_character_b="Texte",
+        left_resolved=True,
+        right_resolved=False,
+        reason_codes=["relationship_unresolved", "character_b_missing"],
+        evidence={"relationship": {"description": "Texte appears as a heading."}},
+    )
+
+    assert disposition.status == CHARACTER_RELATIONSHIP_CANDIDATE_SUPPRESSED
+    assert "character_b_suppressed" in disposition.reason_codes
 
 
 def test_build_character_roster_snapshot_marks_manual_anchors():
@@ -343,6 +479,36 @@ def test_build_character_review_payload_includes_relationship_candidates():
 
     assert payload["counts"]["pending_relationship_candidates"] == 1
     assert payload["relationship_candidates"][0]["raw_character_a"] == "Grete"
+
+
+def test_build_character_review_payload_does_not_count_suppressed_candidates_as_pending():
+    candidate = CharacterCandidate(
+        id=uuid.UUID("00000000-0000-0000-0000-000000000121"),
+        book_id=uuid.UUID("00000000-0000-0000-0000-000000000010"),
+        chapter_number=1,
+        raw_name="Texte",
+        proposed_name="Texte",
+        normalized_name="texte",
+        status=CHARACTER_CANDIDATE_SUPPRESSED,
+        confidence=0,
+        reason_codes=["common_single_token_suppressed"],
+        evidence={},
+    )
+    relationship_candidate = CharacterRelationshipCandidate(
+        id=uuid.UUID("00000000-0000-0000-0000-000000000122"),
+        book_id=candidate.book_id,
+        chapter_number=1,
+        raw_character_a="Gregor",
+        raw_character_b="Texte",
+        status=CHARACTER_RELATIONSHIP_CANDIDATE_SUPPRESSED,
+        reason_codes=["character_b_suppressed"],
+        evidence={},
+    )
+
+    payload = build_character_review_payload([candidate], [], [relationship_candidate])
+
+    assert payload["counts"]["pending_candidates"] == 0
+    assert payload["counts"]["pending_relationship_candidates"] == 0
 
 
 def test_build_character_review_payload_surfaces_structured_candidate_and_duplicate_evidence():

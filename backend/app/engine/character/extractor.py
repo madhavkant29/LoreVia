@@ -134,6 +134,7 @@ async def extract_characters_and_relationships(
     user_id: uuid.UUID | None = None,
     book_id: uuid.UUID | None = None,
     known_characters: list[dict] | None = None,
+    usage_db=None,
 ) -> dict:
     candidate_names = _candidate_names(chunk_text)
     candidate_hint = (
@@ -154,6 +155,7 @@ async def extract_characters_and_relationships(
         usage_feature="character_relationship_extraction",
         usage_user_id=user_id,
         usage_book_id=book_id,
+        usage_db=usage_db,
     )
     try:
         parsed = json.loads(raw)
@@ -177,6 +179,7 @@ async def extract_characters_and_relationships(
             rejected_characters=rejected_characters,
             user_id=user_id,
             book_id=book_id,
+            usage_db=usage_db,
         )
         characters = _apply_anti_merge_hints(chunk_text, characters)
         return {
@@ -198,6 +201,7 @@ async def extract_characters_and_relationships(
             rejected_characters=rejected_characters,
             user_id=user_id,
             book_id=book_id,
+            usage_db=usage_db,
         )
         return {
             "characters": _apply_anti_merge_hints(chunk_text, characters),
@@ -211,6 +215,7 @@ async def fallback_character_mentions(
     *,
     user_id: uuid.UUID | None = None,
     book_id: uuid.UUID | None = None,
+    usage_db=None,
 ) -> dict:
     candidate_names = _candidate_names(chunk_text, allow_review_singletons=True)
     rejected_characters: list[dict] = []
@@ -227,13 +232,28 @@ async def fallback_character_mentions(
         rejected_characters=rejected_characters,
         user_id=user_id,
         book_id=book_id,
+        usage_db=usage_db,
     )
+    fallback_verified: list[dict] = []
     for character in filtered:
         evidence = dict(character.get("evidence") if isinstance(character.get("evidence"), dict) else {})
+        verifier = dict(evidence.get("verifier") if isinstance(evidence.get("verifier"), dict) else {})
+        final = dict(verifier.get("final") if isinstance(verifier.get("final"), dict) else {})
+        if final.get("confidence_band") == "review":
+            _record_rejected_character(
+                rejected_characters,
+                stage="deterministic_fallback",
+                name=str(character.get("name") or ""),
+                reason="fallback_review_candidate_unconfirmed",
+                confidence=float(character.get("confidence") or 0.0),
+                evidence=evidence,
+            )
+            continue
         evidence["deterministic_fallback"] = True
         character["evidence"] = evidence
+        fallback_verified.append(character)
     return {
-        "characters": _apply_anti_merge_hints(chunk_text, filtered),
+        "characters": _apply_anti_merge_hints(chunk_text, fallback_verified),
         "relationships": [],
         "rejected_characters": rejected_characters,
     }
@@ -674,6 +694,7 @@ async def _verify_review_candidates_with_llm(
     *,
     user_id: uuid.UUID | None = None,
     book_id: uuid.UUID | None = None,
+    usage_db=None,
 ) -> dict[str, dict]:
     if not candidates:
         return {}
@@ -707,6 +728,7 @@ async def _verify_review_candidates_with_llm(
         usage_feature="character_mention_verification",
         usage_user_id=user_id,
         usage_book_id=book_id,
+        usage_db=usage_db,
     )
     try:
         parsed = json.loads(raw)
@@ -744,6 +766,7 @@ async def _apply_contextual_mention_verification(
     rejected_characters: list[dict] | None = None,
     user_id: uuid.UUID | None = None,
     book_id: uuid.UUID | None = None,
+    usage_db=None,
 ) -> list[dict]:
     if not characters:
         return []
@@ -808,6 +831,7 @@ async def _apply_contextual_mention_verification(
         reviewed_candidates,
         user_id=user_id,
         book_id=book_id,
+        usage_db=usage_db,
     )
     for character in verified:
         evidence = dict(character.get("evidence") if isinstance(character.get("evidence"), dict) else {})
@@ -956,6 +980,15 @@ def _candidate_viability_band(
     return None
 
 
+def _appears_as_nonpossessive_apostrophe_fragment(text: str, token: str) -> bool:
+    escaped = re.escape(token)
+    apostrophe = r"['\u2019]"
+    return bool(
+        re.search(rf"(?<![A-Za-z]){escaped}{apostrophe}(?!s\b)[A-Za-z]", text)
+        or re.search(rf"[A-Za-z]{apostrophe}{escaped}(?![A-Za-z])", text)
+    )
+
+
 def _candidate_names(text: str, *, allow_review_singletons: bool = False) -> list[str]:
     candidates: list[str] = []
     candidates.extend(HONORIFIC_RE.findall(text))
@@ -979,6 +1012,7 @@ def _candidate_names(text: str, *, allow_review_singletons: bool = False) -> lis
         token
         for token in SINGLE_NAME_RE.findall(text)
         if token not in NAME_STOPWORDS and token.casefold() not in COMMON_NON_NAME_WORDS and token.lower() not in {"the", "this", "that"}
+        and not _appears_as_nonpossessive_apostrophe_fragment(text, token)
         and not (
             token in full_name_last_tokens
             and not re.search(rf"\b{re.escape(token)}\b", masked_full_name_text)

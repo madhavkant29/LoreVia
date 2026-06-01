@@ -7,7 +7,6 @@ import { useQuery } from "@tanstack/react-query"
 import Link from "next/link"
 import { useParams } from "next/navigation"
 
-import { ObsidianVaultPreview } from "@/components/reader/ObsidianVaultPreview"
 import { booksApi } from "@/lib/api/books"
 import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
 import { worldBuildingApi } from "@/lib/api/worldBuilding"
@@ -19,6 +18,13 @@ const AuthorToolsNav = dynamic(
   {
     ssr: false,
     loading: () => <div className="rounded-lg border border-dashed p-8" />,
+  }
+)
+
+const ObsidianVaultPreview = dynamic(
+  () => import("@/components/reader/ObsidianVaultPreview").then((module) => module.ObsidianVaultPreview),
+  {
+    loading: () => null,
   }
 )
 

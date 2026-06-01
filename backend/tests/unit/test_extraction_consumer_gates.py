@@ -147,7 +147,7 @@ def test_character_save_decision_rejects_review_band_from_mention_verifier():
     assert "mention_verifier_review" in decision.reasons
 
 
-def test_can_auto_save_character_allows_accept_band_from_mention_verifier():
+def test_can_auto_save_character_blocks_first_pass_single_token_even_when_verifier_accepts_it():
     entity = {
         "name": "Grete",
         "entity_type": "person",
@@ -173,7 +173,7 @@ def test_can_auto_save_character_allows_accept_band_from_mention_verifier():
         },
     }
 
-    assert _can_auto_save_character(entity) is True
+    assert _can_auto_save_character(entity) is False
     assert _should_update_existing_character(entity) is True
 
 

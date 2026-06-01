@@ -10,6 +10,7 @@ import re
 import uuid
 from collections import Counter, defaultdict
 from collections.abc import Hashable, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from difflib import SequenceMatcher
 from typing import Any, cast
@@ -68,6 +69,7 @@ CHARACTER_CANDIDATE_ACCEPTED = "accepted"
 CHARACTER_CANDIDATE_REJECTED = "rejected"
 CHARACTER_CANDIDATE_PROMOTED = "promoted"
 CHARACTER_CANDIDATE_MERGED = "merged"
+CHARACTER_CANDIDATE_SUPPRESSED = "suppressed"
 CHARACTER_DUPLICATE_PENDING = "pending"
 CHARACTER_DUPLICATE_ACCEPTED = "accepted"
 CHARACTER_DUPLICATE_DISMISSED = "dismissed"
@@ -76,6 +78,7 @@ CHARACTER_RELATIONSHIP_CANDIDATE_ACCEPTED = "accepted"
 CHARACTER_RELATIONSHIP_CANDIDATE_REJECTED = "rejected"
 CHARACTER_RELATIONSHIP_CANDIDATE_RESOLVED = "resolved"
 CHARACTER_RELATIONSHIP_CANDIDATE_MERGED = "merged"
+CHARACTER_RELATIONSHIP_CANDIDATE_SUPPRESSED = "suppressed"
 CHARACTER_VISIBILITY_VISIBLE = "visible"
 CHARACTER_VISIBILITY_QUARANTINED = "quarantined"
 CHARACTER_VISIBILITY_NOISE = "noise"
@@ -118,6 +121,20 @@ ROLE_ONLY_REFERENCE_WORDS = {
     "sister", "teacher", "uncle",
 }
 FAMILY_ROLE_WORDS = {"aunt", "brother", "father", "mother", "sister", "uncle"}
+
+CHARACTER_DISPOSITION_PROMOTE_UPDATE = "promote/update"
+CHARACTER_DISPOSITION_QUEUE_REVIEW = "queue_review"
+CHARACTER_DISPOSITION_SUPPRESS = "suppress"
+CHARACTER_DISPOSITION_REJECT = "reject"
+
+
+@dataclass(frozen=True)
+class CharacterCandidateDisposition:
+    action: str
+    status: str
+    reason_codes: tuple[str, ...]
+    evidence: dict[str, Any]
+    visible_review_allowed: bool = False
 
 
 def normalize_character_trust_tier(value: object | None) -> str | None:
@@ -641,6 +658,288 @@ def build_candidate_dossier_summary(candidate: CharacterCandidate) -> dict[str, 
     )
 
 
+def _verifier_final_from_evidence(evidence: Mapping[str, Any] | None) -> Mapping[str, Any]:
+    verifier = (evidence or {}).get("verifier")
+    if not isinstance(verifier, Mapping):
+        return {}
+    final = verifier.get("final")
+    return final if isinstance(final, Mapping) else {}
+
+
+def _verifier_llm_from_evidence(evidence: Mapping[str, Any] | None) -> Mapping[str, Any]:
+    verifier = (evidence or {}).get("verifier")
+    if not isinstance(verifier, Mapping):
+        return {}
+    llm = verifier.get("llm")
+    return llm if isinstance(llm, Mapping) else {}
+
+
+def _candidate_llm_confirmed_person(evidence: Mapping[str, Any] | None) -> bool:
+    llm = _verifier_llm_from_evidence(evidence)
+    final = _verifier_final_from_evidence(evidence)
+    return bool(
+        llm.get("is_person_like") is True
+        or "llm_confirmed_person" in {
+            str(reason).strip()
+            for reason in (final.get("reasons") or [])
+            if str(reason).strip()
+        }
+    )
+
+
+def _candidate_strongly_grounded(summary: Mapping[str, Any], evidence: Mapping[str, Any]) -> bool:
+    if bool(summary.get("common_single_token")) or bool(summary.get("role_only_single_token")):
+        return False
+    if int(summary.get("non_person_signal_count") or 0) > 0:
+        return False
+    mention_count = int(summary.get("mention_count") or 0)
+    strong_mentions = int(evidence.get("strong_mention_count") or 0)
+    person_ner_support = int(summary.get("person_ner_support") or 0)
+    dialogue_support = int(summary.get("dialogue_attribution_support") or 0)
+    distinct_chapters = int(summary.get("distinct_chapter_count") or 0)
+    mid_sentence = int(summary.get("mid_sentence_mentions") or 0)
+    single_token = bool(summary.get("single_token"))
+    if bool(summary.get("strict_auto_eligible")):
+        return True
+    if single_token:
+        return bool(
+            (
+                mention_count >= 3
+                and strong_mentions >= 2
+                and mid_sentence >= 1
+                and (person_ner_support >= 1 or dialogue_support >= 1 or distinct_chapters >= 2)
+            )
+            or (
+                mention_count >= 2
+                and strong_mentions >= 1
+                and (
+                    dialogue_support >= 1
+                    or bool(evidence.get("has_physical_description"))
+                    or bool(evidence.get("appears_multiple_times"))
+                    or person_ner_support >= 1
+                )
+            )
+        )
+    return bool(
+        mention_count >= 2
+        and (
+            person_ner_support >= 1
+            or strong_mentions >= 2
+            or dialogue_support >= 1
+            or distinct_chapters >= 2
+            or int(summary.get("alias_link_support") or 0) >= 1
+            or int(summary.get("full_name_link_support") or 0) >= 1
+        )
+    )
+
+
+def can_auto_persist_character_candidate(
+    *,
+    name: str | None,
+    aliases: Sequence[object] | None = None,
+    evidence: Mapping[str, Any] | None = None,
+) -> bool:
+    evidence_map = dict(evidence or {})
+    summary = build_character_dossier_summary(
+        name=name,
+        aliases=aliases,
+        evidence=evidence_map,
+        reason_codes=_clean_reason_code_values(evidence_map.get("resolver_reasons") or []),
+    )
+    if not bool(summary.get("strict_auto_eligible")):
+        return False
+    if not _candidate_strongly_grounded(summary, evidence_map):
+        return False
+
+    llm_confirmed = _candidate_llm_confirmed_person(evidence_map)
+    mention_count = int(summary.get("mention_count") or 0)
+    distinct_chapters = int(summary.get("distinct_chapter_count") or 0)
+    single_token = bool(summary.get("single_token"))
+    person_ner_support = int(summary.get("person_ner_support") or 0)
+    alias_link_support = int(summary.get("alias_link_support") or 0)
+    full_name_link_support = int(summary.get("full_name_link_support") or 0)
+    dialogue_support = int(summary.get("dialogue_attribution_support") or 0)
+    strong_mentions = int(evidence_map.get("strong_mention_count") or 0)
+    has_physical_description = bool(evidence_map.get("has_physical_description"))
+    deterministic_fallback = bool(evidence_map.get("deterministic_fallback"))
+    shared_identity_support = bool(
+        person_ner_support >= 1 or alias_link_support >= 1 or full_name_link_support >= 1
+    )
+
+    if single_token:
+        return bool(
+            llm_confirmed
+            and mention_count >= 3
+            and distinct_chapters >= 2
+            and strong_mentions >= 2
+            and dialogue_support >= 1
+            and shared_identity_support
+        )
+
+    if llm_confirmed:
+        return bool(
+            mention_count >= 2
+            and strong_mentions >= 1
+            and (
+                shared_identity_support
+                or dialogue_support >= 1
+                or has_physical_description
+                or distinct_chapters >= 2
+            )
+        )
+
+    if distinct_chapters >= 2 and mention_count >= 2 and (
+        shared_identity_support
+        or dialogue_support >= 1
+        or has_physical_description
+    ):
+        return True
+
+    return bool(
+        deterministic_fallback
+        and mention_count >= 2
+        and strong_mentions >= 1
+        and dialogue_support >= 1
+        and (shared_identity_support or has_physical_description)
+    )
+
+
+def decide_character_candidate_disposition(
+    *,
+    name: str | None,
+    aliases: Sequence[object] | None = None,
+    confidence: object | None = None,
+    reason_codes: Sequence[object] | None = None,
+    evidence: Mapping[str, Any] | None = None,
+    matched_character_id: uuid.UUID | None = None,
+    intended_action: str | None = None,
+) -> CharacterCandidateDisposition:
+    evidence_map = dict(evidence or {})
+    reasons = _clean_reason_code_values(reason_codes)
+    final = _verifier_final_from_evidence(evidence_map)
+    final_band = str(final.get("confidence_band") or "").strip().casefold()
+    final_reasons = _clean_reason_code_values(final.get("reasons") if isinstance(final, Mapping) else [])
+    all_reasons = dedupe_preserve_order([*reasons, *final_reasons])
+    summary = build_character_dossier_summary(
+        name=name,
+        aliases=aliases,
+        evidence=evidence_map,
+        reason_codes=all_reasons,
+    )
+    evidence_map["disposition_summary"] = dict(summary)
+    normalized_reasons = {reason.casefold() for reason in all_reasons}
+    llm_confirmed = _candidate_llm_confirmed_person(evidence_map)
+    strongly_grounded = _candidate_strongly_grounded(summary, evidence_map)
+    visible_review_allowed = bool(llm_confirmed or strongly_grounded)
+
+    suppress_reasons: list[str] = []
+    if final_band == "review" or "mention_verifier_review" in normalized_reasons:
+        suppress_reasons.append("mention_verifier_review_suppressed")
+    if "fallback_review_candidate_unconfirmed" in normalized_reasons:
+        suppress_reasons.append("fallback_review_candidate_unconfirmed")
+    if bool(summary.get("common_single_token")):
+        suppress_reasons.append("common_single_token_suppressed")
+    if bool(summary.get("role_only_single_token")) and not visible_review_allowed:
+        suppress_reasons.append("role_only_single_token_suppressed")
+    if (
+        bool(summary.get("single_token"))
+        and int(summary.get("sentence_start_mentions") or 0) >= int(summary.get("mention_count") or 0)
+        and int(summary.get("mid_sentence_mentions") or 0) <= 0
+        and not visible_review_allowed
+    ):
+        suppress_reasons.append("sentence_start_capitalization_suppressed")
+    if "single_token_ambiguous" in {
+        str(reason).casefold()
+        for reason in summary.get("strict_auto_reason_codes") or []
+    } and not visible_review_allowed:
+        suppress_reasons.append("weak_single_token_suppressed")
+    if final_band == "reject" or "mention_verifier_rejected" in normalized_reasons:
+        action = CHARACTER_DISPOSITION_REJECT
+        status = CHARACTER_CANDIDATE_SUPPRESSED if intended_action != CHARACTER_DISPOSITION_REJECT else CHARACTER_CANDIDATE_REJECTED
+        disposition_reasons = dedupe_preserve_order(["mention_verifier_rejected", *all_reasons])
+    elif suppress_reasons and not visible_review_allowed:
+        action = CHARACTER_DISPOSITION_SUPPRESS
+        status = CHARACTER_CANDIDATE_SUPPRESSED
+        disposition_reasons = dedupe_preserve_order([*suppress_reasons, *all_reasons])
+    elif intended_action == CHARACTER_DISPOSITION_PROMOTE_UPDATE:
+        action = CHARACTER_DISPOSITION_PROMOTE_UPDATE
+        status = CHARACTER_CANDIDATE_ACCEPTED if matched_character_id else CHARACTER_CANDIDATE_PROMOTED
+        disposition_reasons = all_reasons or ["candidate_strongly_grounded"]
+    elif visible_review_allowed:
+        action = CHARACTER_DISPOSITION_QUEUE_REVIEW
+        status = CHARACTER_CANDIDATE_PENDING
+        disposition_reasons = all_reasons or ["candidate_visible_review_allowed"]
+    else:
+        action = CHARACTER_DISPOSITION_SUPPRESS
+        status = CHARACTER_CANDIDATE_SUPPRESSED
+        disposition_reasons = dedupe_preserve_order(["insufficient_visible_review_grounding", *all_reasons])
+
+    evidence_map["candidate_disposition"] = {
+        "action": action,
+        "status": status,
+        "visible_review_allowed": visible_review_allowed,
+        "llm_confirmed_person": llm_confirmed,
+        "strongly_grounded": strongly_grounded,
+        "reasons": disposition_reasons,
+    }
+    return CharacterCandidateDisposition(
+        action=action,
+        status=status,
+        reason_codes=tuple(disposition_reasons),
+        evidence=evidence_map,
+        visible_review_allowed=visible_review_allowed,
+    )
+
+
+def decide_relationship_candidate_disposition(
+    *,
+    raw_character_a: str | None,
+    raw_character_b: str | None,
+    left_resolved: bool,
+    right_resolved: bool,
+    reason_codes: Sequence[object] | None = None,
+    evidence: Mapping[str, Any] | None = None,
+) -> CharacterCandidateDisposition:
+    evidence_map = dict(evidence or {})
+    reasons = _clean_reason_code_values(reason_codes)
+    suppress_reasons: list[str] = []
+    for label, raw_name, resolved in (
+        ("character_a", raw_character_a, left_resolved),
+        ("character_b", raw_character_b, right_resolved),
+    ):
+        if resolved:
+            continue
+        disposition = decide_character_candidate_disposition(
+            name=raw_name,
+            aliases=[],
+            confidence=0,
+            reason_codes=[*reasons, f"{label}_unresolved"],
+            evidence={"mention_count": 1, "resolver_reasons": reasons},
+        )
+        if disposition.status == CHARACTER_CANDIDATE_SUPPRESSED:
+            suppress_reasons.append(f"{label}_suppressed")
+    if suppress_reasons:
+        status = CHARACTER_RELATIONSHIP_CANDIDATE_SUPPRESSED
+        action = CHARACTER_DISPOSITION_SUPPRESS
+        disposition_reasons = dedupe_preserve_order([*suppress_reasons, *reasons])
+    else:
+        status = CHARACTER_RELATIONSHIP_CANDIDATE_PENDING
+        action = CHARACTER_DISPOSITION_QUEUE_REVIEW
+        disposition_reasons = reasons or ["relationship_unresolved"]
+    evidence_map["relationship_candidate_disposition"] = {
+        "action": action,
+        "status": status,
+        "reasons": disposition_reasons,
+    }
+    return CharacterCandidateDisposition(
+        action=action,
+        status=status,
+        reason_codes=tuple(disposition_reasons),
+        evidence=evidence_map,
+        visible_review_allowed=status == CHARACTER_RELATIONSHIP_CANDIDATE_PENDING,
+    )
+
+
 def build_character_record_dossier_summary(char: Character) -> dict[str, Any]:
     metadata = dict(getattr(char, "analysis_metadata", None) or {})
     evidence: dict[str, Any] = {
@@ -1089,10 +1388,28 @@ def _character_entity_matches_cluster(candidate: Mapping[str, Any], cluster: Map
 def _cluster_verifier_summary(cluster: Sequence[Mapping[str, Any]]) -> dict[str, Any] | None:
     verdicts: list[str] = []
     reasons: list[str] = []
+    local_totals = {
+        "mention_count": 0,
+        "person_context_mentions": 0,
+        "mid_sentence_mentions": 0,
+        "sentence_start_mentions": 0,
+        "subject_action_mentions": 0,
+        "person_ner_mentions": 0,
+        "non_person_ner_mentions": 0,
+        "interjection_like_mentions": 0,
+    }
+    local_windows: list[dict[str, Any]] = []
     for item in cluster:
         evidence = item.get("evidence") if isinstance(item.get("evidence"), dict) else {}
         verifier = evidence.get("verifier") if isinstance(evidence, dict) else {}
+        local = verifier.get("local") if isinstance(verifier, dict) else {}
         final = verifier.get("final") if isinstance(verifier, dict) else {}
+        if isinstance(local, dict):
+            for field in local_totals:
+                local_totals[field] += int(local.get(field) or 0)
+            for window in local.get("windows") or []:
+                if isinstance(window, dict):
+                    local_windows.append(dict(window))
         if not isinstance(final, dict):
             continue
         verdict = str(final.get("confidence_band") or "").strip()
@@ -1115,6 +1432,10 @@ def _cluster_verifier_summary(cluster: Sequence[Mapping[str, Any]]) -> dict[str,
         band = "review"
         is_person_like = False
     return {
+        "local": {
+            **local_totals,
+            "windows": local_windows[:8],
+        },
         "local_summary": {
             "member_verdicts": verdicts,
         },
@@ -1145,18 +1466,46 @@ def cluster_character_entities(entities: Sequence[Mapping[str, Any]]) -> list[di
 
     aggregated: list[dict[str, Any]] = []
     for cluster in clusters:
-        ranked = sorted(
-            cluster,
-            key=lambda item: (
-                0 if is_role_only_character_name(_entity_display_name(item)) else 1,
-                int(len(entity_words(_entity_display_name(item))) >= 2),
+        def _family_role_like_display(display_name: str) -> bool:
+            _family_anchor, family_role = family_role_reference(display_name)
+            return bool(
+                family_role
+                or re.search(
+                    r"(?:'s|\u2019s|\bs\b)\s+(?:aunt|brother|father|mother|sister|uncle)\b",
+                    display_name.casefold(),
+                )
+            )
+
+        def _cluster_primary_rank(item: Mapping[str, Any]) -> tuple[int, int, int, int, float]:
+            display_name = _entity_display_name(item)
+            family_role_like = _family_role_like_display(display_name)
+            proper_name = (
+                not is_role_only_character_name(display_name)
+                and not family_role_like
+            )
+            return (
+                1 if proper_name else 0,
+                int(len(entity_words(display_name)) >= 2 and not family_role_like),
                 int((_mention_entity_evidence(item).get("strong_mention_count") or 0)),
                 int((_mention_entity_evidence(item).get("mention_count") or 0)),
                 float(item.get("confidence") or 0.0),
-            ),
+            )
+
+        ranked = sorted(
+            cluster,
+            key=_cluster_primary_rank,
             reverse=True,
         )
         primary = dict(ranked[0])
+        if _family_role_like_display(_entity_display_name(primary)):
+            proper_ranked = [
+                item
+                for item in ranked
+                if not _family_role_like_display(_entity_display_name(item))
+                and not is_role_only_character_name(_entity_display_name(item))
+            ]
+            if proper_ranked:
+                primary = dict(proper_ranked[0])
         cluster_names = clean_string_list([_entity_display_name(item) for item in cluster])
         cluster_aliases = merge_list_values(*(item.get("aliases") if isinstance(item.get("aliases"), list) else [] for item in cluster))
         merged_traits: dict[str, Any] = {}
@@ -1589,7 +1938,9 @@ async def list_character_review_data(
     shadow_characters = [
         item
         for item in character_rows
-        if item.id is not None and not is_cast_visible_character(item)
+        if item.id is not None
+        and not is_cast_visible_character(item)
+        and character_governance(item)[1] == CHARACTER_APPROVAL_PENDING_REVIEW
     ]
     decision_events = (
         await db.execute(

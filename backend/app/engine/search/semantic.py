@@ -2,13 +2,21 @@
 Semantic search over book chunks using pgvector.
 Spoiler-gated to user's current chapter.
 """
+import logging
 import uuid
 
 from sqlalchemy import text
+from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.engine.embeddings.embedder import embed_text
+
+log = logging.getLogger(__name__)
+
+
+def _pgvector_extension_missing(exc: ProgrammingError) -> bool:
+    return 'type "vector" does not exist' in str(getattr(exc, "orig", exc)).lower()
 
 
 def summarize_search_text(text: str, max_length: int = 180) -> str:
@@ -71,31 +79,41 @@ async def semantic_search(
         settings.SEARCH_SIMILARITY_THRESHOLD if similarity_threshold is None else similarity_threshold
     )
 
-    rows = await db.execute(
-        text("""
-            SELECT
-                bc.text,
-                bc.chunk_index,
-                ch.number  AS chapter_num,
-                ch.title   AS chapter_title,
-                1 - (bc.embedding <=> CAST(:emb AS vector)) AS relevance
-            FROM book_chunks bc
-            JOIN chapters ch ON ch.id = bc.chapter_id
-            WHERE bc.book_id = :bid
-              AND ch.number <= :max_ch
-              AND bc.embedding IS NOT NULL
-              AND 1 - (bc.embedding <=> CAST(:emb AS vector)) > :thr
-            ORDER BY relevance DESC
-            LIMIT :lim
-        """),
-        {
-            "emb": str(query_embedding),
-            "bid": str(book_id),
-            "max_ch": max_chapter,
-            "thr": threshold,
-            "lim": retrieval_limit,
-        },
-    )
+    try:
+        rows = await db.execute(
+            text("""
+                SELECT
+                    bc.text,
+                    bc.chunk_index,
+                    ch.number  AS chapter_num,
+                    ch.title   AS chapter_title,
+                    1 - (bc.embedding <=> CAST(:emb AS vector)) AS relevance
+                FROM book_chunks bc
+                JOIN chapters ch ON ch.id = bc.chapter_id
+                WHERE bc.book_id = :bid
+                  AND ch.number <= :max_ch
+                  AND bc.embedding IS NOT NULL
+                  AND 1 - (bc.embedding <=> CAST(:emb AS vector)) > :thr
+                ORDER BY relevance DESC
+                LIMIT :lim
+            """),
+            {
+                "emb": str(query_embedding),
+                "bid": str(book_id),
+                "max_ch": max_chapter,
+                "thr": threshold,
+                "lim": retrieval_limit,
+            },
+        )
+    except ProgrammingError as exc:
+        if _pgvector_extension_missing(exc):
+            log.warning(
+                "semantic_search_pgvector_unavailable book_id=%s max_chapter=%s",
+                book_id,
+                max_chapter,
+            )
+            return []
+        raise
 
     results = []
     for row in rows.fetchall():

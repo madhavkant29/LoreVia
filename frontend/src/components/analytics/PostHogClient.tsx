@@ -1,13 +1,19 @@
 "use client"
 
+import dynamic from "next/dynamic"
 import { usePathname } from "next/navigation"
 import React from "react"
-import CookieConsent, { getCookieConsentValue } from "react-cookie-consent"
 import {
   ANALYTICS_CONSENT_COOKIE,
+  getAnalyticsConsentValue,
   hasAnalyticsConsent,
   shouldShowAnalyticsConsentBanner,
 } from "@/lib/analytics/posthogConsent"
+
+const CookieConsent = dynamic(
+  () => import("react-cookie-consent").then((module) => module.default),
+  { ssr: false, loading: () => null },
+)
 
 function isBrowserAnalyticsEnabled() {
   return typeof window !== "undefined" && Boolean(process.env.NEXT_PUBLIC_POSTHOG_KEY)
@@ -33,7 +39,7 @@ async function initPostHog() {
   await posthogInitPromise
 }
 
-export function PostHogClientProvider({ children }: { children: React.ReactNode }) {
+export function PostHogClient() {
   const [hydrated, setHydrated] = React.useState(false)
   const [consentValue, setConsentValue] = React.useState<string | undefined>(undefined)
   const pathname = usePathname()
@@ -45,7 +51,7 @@ export function PostHogClientProvider({ children }: { children: React.ReactNode 
       return
     }
 
-    const consent = getCookieConsentValue(ANALYTICS_CONSENT_COOKIE) || undefined
+    const consent = getAnalyticsConsentValue(document.cookie)
     setConsentValue(consent)
     setHydrated(true)
 
@@ -72,7 +78,6 @@ export function PostHogClientProvider({ children }: { children: React.ReactNode 
 
   return (
     <>
-      {children}
       {showBanner ? (
         <CookieConsent
           visible={showBanner ? "show" : "hidden"}
@@ -116,3 +121,11 @@ export function PostHogClientProvider({ children }: { children: React.ReactNode 
   )
 }
 
+export function PostHogClientProvider({ children }: { children: React.ReactNode }) {
+  return (
+    <>
+      {children}
+      <PostHogClient />
+    </>
+  )
+}

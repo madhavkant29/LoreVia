@@ -165,6 +165,36 @@ def test_candidate_names_excludes_discourse_singletons_with_action_nearby():
     assert "Maybe" not in candidates
 
 
+def test_candidate_names_excludes_french_sentence_starters_and_pronouns():
+    source_text = (
+        "Chapitre 2\n"
+        "Texte extrait. Mais elle regarde la porte. Nous attendons. Vous viendrez plus tard. "
+        "Pourquoi les rideaux rouges et violet tremblent-ils ? Jaune, le ciel paraissait malade."
+    )
+
+    candidates = _candidate_names(source_text, allow_review_singletons=True)
+
+    assert "Chapitre" not in candidates
+    assert "Mais" not in candidates
+    assert "Elle" not in candidates
+    assert "Nous" not in candidates
+    assert "Vous" not in candidates
+    assert "Texte" not in candidates
+    assert "Pourquoi" not in candidates
+    assert "Rouges" not in candidates
+    assert "Violet" not in candidates
+    assert "Jaune" not in candidates
+
+
+def test_candidate_names_excludes_french_apostrophe_fragments():
+    source_text = "Aujourd'hui, Quelqu'un cria dans le couloir."
+
+    candidates = _candidate_names(source_text, allow_review_singletons=True)
+
+    assert "Aujourd" not in candidates
+    assert "Quelqu" not in candidates
+
+
 @pytest.mark.asyncio
 async def test_fallback_character_mentions_recovers_single_name_characters():
     source_text = "Gregor Samsa woke before dawn. Gregor paced the room while his sister Grete called to him twice."
@@ -240,6 +270,30 @@ async def test_fallback_character_mentions_rejects_review_candidate_when_llm_rej
     assert recovered["characters"] == []
     assert recovered["rejected_characters"]
     assert recovered["rejected_characters"][0]["stage"] == "mention_verifier"
+
+
+@pytest.mark.asyncio
+async def test_fallback_character_mentions_drops_unconfirmed_review_candidate(monkeypatch):
+    monkeypatch.setattr(
+        "app.engine.character.extractor._local_mention_verifier",
+        lambda *_args, **_kwargs: {
+            "confidence_band": "review",
+            "is_person_like": False,
+            "reasons": ["ambiguous_single_token_mention"],
+            "windows": [{"text": "Mother paused in the doorway."}],
+        },
+    )
+
+    async def _fake_verify(*_args, **_kwargs):
+        return {}
+
+    monkeypatch.setattr("app.engine.character.extractor._verify_review_candidates_with_llm", _fake_verify)
+
+    recovered = await fallback_character_mentions("Mother paused in the doorway.")
+
+    assert recovered["characters"] == []
+    assert recovered["rejected_characters"]
+    assert recovered["rejected_characters"][0]["stage"] == "deterministic_fallback"
 
 
 def test_apply_anti_merge_hints_marks_same_sentence_characters_as_distinct():

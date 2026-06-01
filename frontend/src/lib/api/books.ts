@@ -816,4 +816,17 @@ export const booksApi = {
     invalidateBookCache(id)
     return r.data
   }),
+  createEmptyProject: (body: { title: string; author?: string | null; genre?: string | null; work_type?: string | null; series_ids?: string[] | null }) =>
+    apiClient.post<{ book_id: string; status: string; mode: string; is_editor_project: boolean }>("/books/empty-project", body).then(r => {
+      void invalidateQueryKeys("books:list:")
+      void invalidateQueryKeys(booksStatsCacheKey())
+      return r.data
+    }),
+  reprocessManuscript: (bookId: string) =>
+    apiClient.post<{ book_id: string; status: string; chapters_queued: number; total_words: number }>(
+      bookPath(bookId, "/manuscript/reprocess")
+    ).then(r => {
+      invalidateBookCache(bookId)
+      return r.data
+    }),
 }

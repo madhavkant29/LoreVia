@@ -28,6 +28,7 @@ from app.schemas.books import (
     WorkspaceSearchResultOut,
 )
 from app.utils.book_utils import (
+    assert_editor_project_not_rebuilding,
     build_manuscript_workspace_tree,
     build_scene_chapter_import_text,
     collaboration_allows_chapter,
@@ -241,6 +242,7 @@ async def create_novel_scene(
         raise HTTPException(403, "This share cannot create scenes for that chapter.")
     if collaborator is None:
         require_author_access(current_user)
+    assert_editor_project_not_rebuilding(book)
     return await save_novel_scene(
         db,
         book=book,
@@ -281,6 +283,7 @@ async def update_novel_scene(
             raise HTTPException(403, "This share cannot move scenes into that chapter.")
     if collaborator is None:
         require_author_access(current_user)
+    assert_editor_project_not_rebuilding(book)
     return await save_novel_scene(
         db,
         book=book,
@@ -319,6 +322,7 @@ async def remove_novel_scene(
             raise HTTPException(403, "This share cannot remove scenes from that chapter.")
     if collaborator is None:
         require_author_access(current_user)
+    assert_editor_project_not_rebuilding(book)
     await delete_novel_scene(db, book=book, scene_id=scene_id)
     return Response(status_code=204)
 
@@ -424,6 +428,7 @@ async def restore_saved_scene_version(
         raise HTTPException(403, "This share cannot edit the manuscript.")
     if collaborator is None:
         require_author_access(current_user)
+    assert_editor_project_not_rebuilding(book)
     if collaborator is not None:
         version_payload = await get_scene_version_content(db, book=book, version_id=version_id)
         if version_payload["chapter_number"] is not None and not collaboration_allows_chapter(collaborator, version_payload["chapter_number"]):
@@ -447,6 +452,7 @@ async def update_chapter_scene_order(
         raise HTTPException(403, "This share cannot reorder scenes in that chapter.")
     if collaborator is None:
         require_author_access(current_user)
+    assert_editor_project_not_rebuilding(book)
     return await reorder_chapter_novel_scenes(
         db,
         book=book,
@@ -471,7 +477,8 @@ async def create_chapter_snapshot(
         raise HTTPException(403, "This share cannot snapshot that chapter.")
     if collaborator is None:
         require_author_access(current_user)
-    chapter = (
+    assert_editor_project_not_rebuilding(book)
+    version = (
         await db.execute(
             select(Chapter).where(Chapter.book_id == book.id, Chapter.number == chapter_number)
         )
@@ -639,6 +646,7 @@ async def insert_scene_into_chapter(
         raise HTTPException(403, "This share cannot insert into that chapter.")
     if collaborator is None:
         require_author_access(current_user)
+    assert_editor_project_not_rebuilding(book)
     scene = (
         await db.execute(
             select(NovelScene).where(NovelScene.book_id == book.id, NovelScene.id == scene_id)

@@ -85,6 +85,7 @@ class Book(Base):
         index=True,
     )
     copyright_warning: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_editor_project: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     writer_workspace: Mapped[dict | None] = mapped_column(JSONB, default=dict)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     hidden_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

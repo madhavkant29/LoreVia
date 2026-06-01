@@ -1,6 +1,8 @@
 import uuid
+from unittest.mock import AsyncMock, patch
 
 import pytest
+from sqlalchemy.exc import ProgrammingError
 
 from app.utils.advisor_utils import (
     advisor_retrieval_settings,
@@ -14,6 +16,7 @@ from app.utils.advisor_utils import (
     invalidate_advisor_caches,
     invalidate_advisor_caches_for_book,
     normalize_proactive_scan_result,
+    retrieve_series_continuity_passages,
 )
 
 
@@ -326,3 +329,23 @@ def test_classify_intent_fast_whitespace_only():
 
 def test_classify_intent_fast_direction_should_i():
     assert classify_intent_fast("Should I kill off this character in chapter 5?") == "direction"
+
+
+@pytest.mark.asyncio
+async def test_retrieve_series_continuity_passages_returns_empty_when_pgvector_extension_is_missing():
+    class _FakeDB:
+        async def execute(self, *_args, **_kwargs):
+            raise ProgrammingError(
+                "SELECT 1",
+                {},
+                Exception('type "vector" does not exist'),
+            )
+
+    with patch("app.utils.advisor_utils.embed_text", AsyncMock(return_value=[0.1] * 1536)):
+        payload = await retrieve_series_continuity_passages(
+            db=_FakeDB(),
+            prior_book_ids=[uuid.uuid4()],
+            query="where did this canon start",
+        )
+
+    assert payload == []

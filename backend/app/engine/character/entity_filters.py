@@ -43,6 +43,15 @@ SINGLE_TOKEN_DISCOURSE_WORDS = frozenset({
     "someone", "staring", "still", "stop", "sure", "sunday", "swings",
     "take", "thanks", "though", "true", "understood", "unfortunately",
     "very", "wait", "whether",
+    "amenez", "anges", "aucune", "aujourd", "avez", "bien", "bienvenue",
+    "cessez", "cette", "chapitre", "dans", "depuis", "dixit", "elle",
+    "encore", "entendu", "extrait", "finir", "gardes", "inutile", "jaune",
+    "jaunes", "laisse", "maintenant", "mais", "merci", "nous", "peine",
+    "personne", "pourquoi", "pourrais", "pourtant", "quelqu", "quelle",
+    "refusant", "regarde", "rien", "rouges", "sachant", "sais",
+    "salutations", "soudain", "tant", "tandis", "texte", "toujours",
+    "toutefois", "tous", "viendrez", "viens", "violet", "violets",
+    "violettes", "votre", "voulez", "vous",
 })
 
 COMMON_NON_NAME_WORDS = {

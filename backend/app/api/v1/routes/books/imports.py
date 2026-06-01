@@ -7,19 +7,22 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from sqlalchemy import and_, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .core import _clean_text, _read_upload_bounded, _validate_cover_magic, log
+from .core import _clean_optional_text, _clean_text, _read_upload_bounded, _validate_cover_magic, log
 from app.api.deps.auth import get_current_user
 from app.api.deps.rate_limit import rate_limit_manuscript_import, rate_limit_upload
 from app.api.deps.subscription import check_upload_limit
 from app.core import storage
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.redis import mark_user_dashboard_cache_dirty
+from app.core.redis import mark_book_cache_dirty, mark_user_dashboard_cache_dirty
 from app.models.book import Book, Chapter, Series, SeriesBook
 from app.models.progress import ReadingProgress
 from app.schemas.books import (
     ChapterConsistencyReport,
+    EmptyProjectBody,
+    EmptyProjectOut,
     ManuscriptImportResult,
+    ManuscriptReprocessOut,
     ReadabilityMetricsOut,
     ReadabilityRequestBody,
 )
@@ -28,6 +31,7 @@ from app.utils.billing_utils import require_author_access
 from app.utils.book_utils import (
     _append_recent_revision_edit,
     as_bool,
+    assert_editor_project_not_rebuilding,
     clean_manuscript_html,
     deserialize_manuscript_content,
     estimate_readability,
@@ -56,6 +60,7 @@ from app.utils.user_utils import add_daily_word_progress, build_writing_activity
 from app.workers.consumers.extraction_consumer import _process_chapter
 from app.workers.tasks.analysis_tasks import analyse_chapter_task
 from app.workers.tasks.extraction_tasks import process_book_task
+from app.services.book_service import create_editor_project
 
 router = APIRouter()
 
@@ -167,6 +172,57 @@ async def upload_book_endpoint(
             "copyright_warning": False, "visibility": visibility, "mode": mode}
 
 
+@router.post("/empty-project", response_model=EmptyProjectOut)
+async def create_empty_project(
+    body: EmptyProjectBody,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    require_author_access(current_user)
+    title = _clean_text(body.title)
+    if not title:
+        raise HTTPException(400, "Title is required")
+    author = _clean_optional_text(body.author)
+    genre = _clean_optional_text(body.genre)
+    work_type = normalize_book_work_type(body.work_type, default="novel")
+
+    await check_upload_limit(db, current_user, requested_uploads=1)
+
+    series_ids = body.series_ids or []
+    selected_series = await resolve_owned_series_ids(db, current_user.id, series_ids)
+
+    book_id = uuid.uuid4()
+    book = await create_editor_project(
+        db,
+        current_user.id,
+        book_id=book_id,
+        title=title,
+        genre=genre,
+        author=author,
+        work_type=work_type,
+    )
+
+    for index, series in enumerate(selected_series):
+        membership = SeriesBook(series_id=series.id, book_id=book.id)
+        db.add(membership)
+        if index == 0:
+            book.primary_series_id = series.id
+            book.series_name = series.name
+            book.series_order = None
+
+    await db.commit()
+    await db.refresh(book)
+    await mark_book_cache_dirty(str(book.id))
+    await mark_user_dashboard_cache_dirty(current_user.id)
+
+    return EmptyProjectOut(
+        book_id=str(book.id),
+        status=book.status,
+        mode=book.mode,
+        is_editor_project=book.is_editor_project,
+    )
+
+
 @router.post("/{book_id}/manuscript/import", response_model=ManuscriptImportResult)
 async def import_manuscript_content(
     book_id: uuid.UUID,
@@ -186,6 +242,7 @@ async def import_manuscript_content(
 ):
     book = await get_owned_book(db, book_id, current_user.id)
     require_author_access(current_user)
+    assert_editor_project_not_rebuilding(book)
     if not text and not files:
         raise HTTPException(400, "Provide text or one or more files")
 
@@ -543,3 +600,45 @@ async def manuscript_readability(
     require_author_access(current_user)
     _ = book
     return ReadabilityMetricsOut(**estimate_readability(body.text))
+
+
+@router.post("/{book_id}/manuscript/reprocess", response_model=ManuscriptReprocessOut)
+async def reprocess_manuscript(
+    book_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
+
+    if not getattr(book, "is_editor_project", False):
+        raise HTTPException(400, "Only editor projects can be reprocessed")
+
+    from app.services.editor_project_service import (
+        is_editor_project_processing,
+        prepare_rebuild,
+        dispatch_rebuild,
+    )
+
+    if is_editor_project_processing(book):
+        raise HTTPException(409, "A rebuild is already in progress for this project")
+
+    chapters = (
+        await db.execute(
+            select(Chapter)
+            .where(Chapter.book_id == book.id, Chapter.word_count > 0)
+        )
+    ).scalars().all()
+
+    if not chapters:
+        raise HTTPException(400, "Save at least one chapter before reprocessing")
+
+    await prepare_rebuild(db, book)
+    chapters_queued, total_words = await dispatch_rebuild(db, book)
+
+    return ManuscriptReprocessOut(
+        book_id=str(book.id),
+        status="processing",
+        chapters_queued=chapters_queued,
+        total_words=total_words,
+    )

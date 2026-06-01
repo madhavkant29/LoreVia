@@ -1004,6 +1004,11 @@ export default function CharactersPage() {
       character_labels: {},
       pending_duplicate_suggestions: 0,
       pending_relationship_candidates: 0,
+      pending_character_candidates_suppressed: 0,
+      pending_character_candidates_kept: 0,
+      pending_relationship_candidates_suppressed: 0,
+      pending_relationship_candidates_kept: 0,
+      protected_manual_records_skipped: 0,
       unresolved_relationship_deltas: {},
     }), [bookId])
   const {

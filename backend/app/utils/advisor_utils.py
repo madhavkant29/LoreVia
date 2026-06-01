@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import re
 import uuid
 from collections.abc import AsyncIterator
@@ -15,6 +16,7 @@ from typing import Any
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
 from sqlalchemy import func, select
+from sqlalchemy.exc import ProgrammingError
 from sqlalchemy import text as sql_text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -49,6 +51,8 @@ from app.models.intelligence import ChapterSummary, CharacterRelationship, PlotT
 from app.utils.plot_thread_utils import derive_plot_thread_status, is_plot_thread_open
 from app.utils.llm_usage_utils import create_tracked_chat_completion, record_llm_usage_counts
 from app.utils.world_building_utils import build_world_logic_response, classify_world_intent
+
+log = logging.getLogger(__name__)
 
 
 # ─── Advisor response cache ───────────────────────────────────────────────────
@@ -315,26 +319,36 @@ async def retrieve_series_continuity_passages(
         else int(return_limit)
     )
     prior_book_id_strs = ", ".join(f"'{bid}'" for bid in prior_book_ids)
-    rows = await db.execute(
-        sql_text(f"""
-            SELECT bc.text, ch.number AS chapter_num, ch.title AS chapter_title,
-                   b.title AS book_title,
-                   1 - (bc.embedding <=> CAST(:emb AS vector)) AS relevance
-            FROM book_chunks bc
-            JOIN chapters ch ON ch.id = bc.chapter_id
-            JOIN books b ON b.id = bc.book_id
-            WHERE bc.book_id IN ({prior_book_id_strs})
-              AND bc.embedding IS NOT NULL
-              AND 1 - (bc.embedding <=> CAST(:emb AS vector)) > :threshold
-            ORDER BY relevance DESC
-            LIMIT :lim
-        """),
-        {
-            "emb": str(query_emb),
-            "threshold": threshold,
-            "lim": retrieval_limit,
-        },
-    )
+    try:
+        rows = await db.execute(
+            sql_text(f"""
+                SELECT bc.text, ch.number AS chapter_num, ch.title AS chapter_title,
+                       b.title AS book_title,
+                       1 - (bc.embedding <=> CAST(:emb AS vector)) AS relevance
+                FROM book_chunks bc
+                JOIN chapters ch ON ch.id = bc.chapter_id
+                JOIN books b ON b.id = bc.book_id
+                WHERE bc.book_id IN ({prior_book_id_strs})
+                  AND bc.embedding IS NOT NULL
+                  AND 1 - (bc.embedding <=> CAST(:emb AS vector)) > :threshold
+                ORDER BY relevance DESC
+                LIMIT :lim
+            """),
+            {
+                "emb": str(query_emb),
+                "threshold": threshold,
+                "lim": retrieval_limit,
+            },
+        )
+    except ProgrammingError as exc:
+        if 'type "vector" does not exist' in str(getattr(exc, "orig", exc)).lower():
+            log.warning(
+                "series_continuity_pgvector_unavailable book_id=%s prior_books=%s",
+                book_id,
+                [str(item) for item in prior_book_ids],
+            )
+            return []
+        raise
     return [
         {
             "text": row.text,

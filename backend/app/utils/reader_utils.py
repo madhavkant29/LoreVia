@@ -1058,6 +1058,7 @@ async def update_plot_thread_note(
 
     cleaned = str(bleach.clean(" ".join(str(note or "").split()).strip(), tags=BLEACH_EMPTY_TAGS, strip=True)) or None
     thread.note = cleaned
+    thread.edited_by_author = True
     if status is not None:
         normalized_status = normalize_plot_thread_status(status, default=thread.status)
         thread.status = normalized_status

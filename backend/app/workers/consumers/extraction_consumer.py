@@ -37,7 +37,14 @@ from app.engine.character.extractor import extract_characters_and_relationships,
 from app.engine.character.profile_builder import build_character_profile, update_profile
 from app.engine.embeddings.embedder import build_character_embedding_text, build_chunk_embedding_text, embed_batch
 from app.models.book import Book, Chapter, ChapterMedia
-from app.models.character import Character, CharacterMention, CharacterState, CharacterVoiceProfile
+from app.models.character import (
+    Character,
+    CharacterCandidate,
+    CharacterMention,
+    CharacterRelationshipCandidate,
+    CharacterState,
+    CharacterVoiceProfile,
+)
 from app.models.intelligence import BookChunk, CharacterRelationship
 from app.models.user import User
 from app.parsers.chunker import ChunkingConfig, chunk_text, count_tokens
@@ -49,10 +56,15 @@ from app.utils.character_utils import (
     CHARACTER_APPROVAL_SOURCE_DETERMINISTIC_AUTO,
     CHARACTER_VISIBILITY_VISIBLE,
     CHARACTER_CANDIDATE_PENDING,
+    CHARACTER_CANDIDATE_SUPPRESSED,
     CHARACTER_RELATIONSHIP_CANDIDATE_PENDING,
+    CHARACTER_RELATIONSHIP_CANDIDATE_SUPPRESSED,
     build_character_mention_cluster_key,
     build_character_dossier_summary,
+    can_auto_persist_character_candidate,
     cluster_character_entities,
+    decide_character_candidate_disposition,
+    decide_relationship_candidate_disposition,
     build_character_roster_snapshot,
     find_earliest_character_mention_chapters,
     is_cast_visible_character,
@@ -188,6 +200,27 @@ async def _record_relationship_review_candidates(
     right_resolution = "resolved" if len(right_matches) == 1 else ("ambiguous" if len(right_matches) > 1 else "missing")
 
     if left_name and right_name and (len(left_matches) != 1 or len(right_matches) != 1):
+        reason_codes = [
+            "relationship_unresolved",
+            f"character_a_{left_resolution}",
+            f"character_b_{right_resolution}",
+        ]
+        evidence = _relationship_evidence_payload(
+            rel,
+            chapter_number=chapter_number,
+            counterpart_name=right_name or left_name or None,
+            counterpart_character_id=right_matches[0] if len(right_matches) == 1 else left_matches[0] if len(left_matches) == 1 else None,
+            unresolved_side="both" if len(left_matches) != 1 and len(right_matches) != 1 else ("character_a" if len(left_matches) != 1 else "character_b"),
+            resolution=f"{left_resolution}:{right_resolution}",
+        )
+        disposition = decide_relationship_candidate_disposition(
+            raw_character_a=left_name,
+            raw_character_b=right_name,
+            left_resolved=len(left_matches) == 1,
+            right_resolved=len(right_matches) == 1,
+            reason_codes=reason_codes,
+            evidence=evidence,
+        )
         candidate = await record_relationship_candidate(
             db,
             book_id=book_id,
@@ -199,23 +232,12 @@ async def _record_relationship_review_candidates(
             rel_type=str(rel.get("rel_type") or rel.get("type") or rel.get("relationship") or "connection").strip() or None,
             sentiment=rel.get("sentiment"),
             description=str(rel.get("description") or "").strip() or None,
-            status=CHARACTER_RELATIONSHIP_CANDIDATE_PENDING,
-            reason_codes=[
-                "relationship_unresolved",
-                f"character_a_{left_resolution}",
-                f"character_b_{right_resolution}",
-            ],
-            evidence=_relationship_evidence_payload(
-                rel,
-                chapter_number=chapter_number,
-                counterpart_name=right_name or left_name or None,
-                counterpart_character_id=right_matches[0] if len(right_matches) == 1 else left_matches[0] if len(left_matches) == 1 else None,
-                unresolved_side="both" if len(left_matches) != 1 and len(right_matches) != 1 else ("character_a" if len(left_matches) != 1 else "character_b"),
-                resolution=f"{left_resolution}:{right_resolution}",
-            ),
+            status=disposition.status,
+            reason_codes=disposition.reason_codes,
+            evidence=disposition.evidence,
             source_batch_key=f"{relationship_key}:relationship",
         )
-        if candidate is not None:
+        if candidate is not None and candidate.status == CHARACTER_RELATIONSHIP_CANDIDATE_PENDING:
             created += 1
 
     return created
@@ -587,6 +609,14 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
         log.info("Skipping chapter processing for hidden book %s", book.id)
         return
 
+    if getattr(book, "is_editor_project", False):
+        from app.services.editor_project_service import get_rebuild_run_id
+
+        rebuild_id = get_rebuild_run_id(book)
+        if not rebuild_id:
+            log.info("Skipping stale editor-project extraction book_id=%s", book.id)
+            return
+
     chapter_number = int(ch_data["number"])
     inflight_key = key_extraction_inflight(str(book.id), chapter_number)
     if not await cache_set_if_absent(
@@ -677,6 +707,22 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                 CharacterMention.chapter_number == chapter_number,
             )
         )
+        await db.execute(
+            delete(CharacterCandidate).where(
+                CharacterCandidate.book_id == book.id,
+                CharacterCandidate.chapter_number == chapter_number,
+                CharacterCandidate.status.in_((CHARACTER_CANDIDATE_PENDING, CHARACTER_CANDIDATE_SUPPRESSED)),
+            )
+        )
+        await db.execute(
+            delete(CharacterRelationshipCandidate).where(
+                CharacterRelationshipCandidate.book_id == book.id,
+                CharacterRelationshipCandidate.chapter_number == chapter_number,
+                CharacterRelationshipCandidate.status.in_(
+                    (CHARACTER_RELATIONSHIP_CANDIDATE_PENDING, CHARACTER_RELATIONSHIP_CANDIDATE_SUPPRESSED)
+                ),
+            )
+        )
 
         chunk_started = time.perf_counter()
         chunks = chunk_text(
@@ -765,6 +811,7 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                     user_id=book.user_id,
                     book_id=book.id,
                     known_characters=roster_snapshot,
+                    usage_db=db,
                 )
                 for batch_text in extraction_batch_texts
             ),
@@ -824,7 +871,12 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                     batch_index,
                     exc_info=result,
                 )
-                result = await fallback_character_mentions(batch_text, book_id=book.id)
+                result = await fallback_character_mentions(
+                    batch_text,
+                    user_id=book.user_id,
+                    book_id=book.id,
+                    usage_db=db,
+                )
                 extraction_fallback_batches += 1
                 extraction_fallback_character_count += len(result.get("characters", []))
             result = cast(dict[str, Any], result)
@@ -889,24 +941,19 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
 
             existing_id = matching_ids[0] if len(matching_ids) == 1 else None
             decision = _character_save_decision(entity)
-            candidate_evidence = _candidate_record_evidence(entity)
             manual_review_reason = _entity_requires_manual_review(entity)
             existing_match = next((item for item in existing_characters if item.id == existing_id), None) if existing_id is not None else None
 
             if len(matching_ids) > 1:
                 ambiguous_entity_count += 1
                 quarantined_candidate_count += 1
-                await record_character_candidate(
+                status, reasons, _evidence = await _record_character_disposition_candidate(
                     db,
                     book_id=book.id,
                     chapter_number=chapter_number,
-                    raw_name=str(entity.get("name") or ""),
-                    proposed_name=str(entity.get("name") or ""),
-                    aliases=entity.get("aliases") if isinstance(entity.get("aliases"), list) else [],
-                    status=CHARACTER_CANDIDATE_PENDING,
-                    confidence=entity.get("confidence"),
+                    entity=entity,
+                    matched_character_id=None,
                     reason_codes=["ambiguous_roster_match"],
-                    evidence=candidate_evidence,
                     source_batch_key=entity_source_batch_key,
                 )
                 await _record_cluster_member_candidates(
@@ -916,7 +963,7 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                     entity=entity,
                     matched_character_id=None,
                     reason_code="ambiguous_roster_match",
-                    status=CHARACTER_CANDIDATE_PENDING,
+                    status=status,
                 )
                 await _record_entity_cluster_mentions(
                     db,
@@ -924,8 +971,8 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                     chapter_number=chapter_number,
                     entity=entity,
                     matched_character_id=None,
-                    resolver_status="ambiguous",
-                    resolver_reasons=["ambiguous_roster_match"],
+                    resolver_status="suppressed" if status == CHARACTER_CANDIDATE_SUPPRESSED else "ambiguous",
+                    resolver_reasons=reasons,
                 )
                 continue
 
@@ -933,18 +980,13 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                 if existing_match is not None and not is_cast_visible_character(existing_match):
                     reasons = ["matched_quarantined_character", *list(decision.reasons or [])]
                     quarantined_candidate_count += 1
-                    await record_character_candidate(
+                    status, resolved_reasons, _evidence = await _record_character_disposition_candidate(
                         db,
                         book_id=book.id,
                         chapter_number=chapter_number,
-                        raw_name=str(entity.get("name") or ""),
-                        proposed_name=str(entity.get("name") or ""),
-                        aliases=entity.get("aliases") if isinstance(entity.get("aliases"), list) else [],
+                        entity=entity,
                         matched_character_id=existing_id,
-                        status=CHARACTER_CANDIDATE_PENDING,
-                        confidence=entity.get("confidence"),
                         reason_codes=reasons,
-                        evidence=candidate_evidence,
                         source_batch_key=entity_source_batch_key,
                     )
                     await _record_entity_cluster_mentions(
@@ -953,8 +995,8 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                         chapter_number=chapter_number,
                         entity=entity,
                         matched_character_id=existing_id,
-                        resolver_status="matched_needs_review",
-                        resolver_reasons=reasons,
+                        resolver_status="suppressed" if status == CHARACTER_CANDIDATE_SUPPRESSED else "matched_needs_review",
+                        resolver_reasons=resolved_reasons,
                     )
                     continue
                 if not decision.allowed or not _should_update_existing_character(entity):
@@ -964,18 +1006,13 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                     if manual_review_reason:
                         strict_hold_count += 1
                     quarantined_candidate_count += 1
-                    await record_character_candidate(
+                    status, resolved_reasons, _evidence = await _record_character_disposition_candidate(
                         db,
                         book_id=book.id,
                         chapter_number=chapter_number,
-                        raw_name=str(entity.get("name") or ""),
-                        proposed_name=str(entity.get("name") or ""),
-                        aliases=entity.get("aliases") if isinstance(entity.get("aliases"), list) else [],
+                        entity=entity,
                         matched_character_id=existing_id,
-                        status=CHARACTER_CANDIDATE_PENDING,
-                        confidence=entity.get("confidence"),
                         reason_codes=reasons,
-                        evidence=candidate_evidence,
                         source_batch_key=entity_source_batch_key,
                     )
                     await _record_entity_cluster_mentions(
@@ -984,8 +1021,8 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                         chapter_number=chapter_number,
                         entity=entity,
                         matched_character_id=existing_id,
-                        resolver_status="matched_needs_review",
-                        resolver_reasons=reasons,
+                        resolver_status="suppressed" if status == CHARACTER_CANDIDATE_SUPPRESSED else "matched_needs_review",
+                        resolver_reasons=resolved_reasons,
                     )
                     continue
 
@@ -1030,17 +1067,13 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                 if manual_review_reason:
                     strict_hold_count += 1
                 quarantined_candidate_count += 1
-                await record_character_candidate(
+                status, resolved_reasons, _evidence = await _record_character_disposition_candidate(
                     db,
                     book_id=book.id,
                     chapter_number=chapter_number,
-                    raw_name=str(entity.get("name") or ""),
-                    proposed_name=str(entity.get("name") or ""),
-                    aliases=entity.get("aliases") if isinstance(entity.get("aliases"), list) else [],
-                    status=CHARACTER_CANDIDATE_PENDING,
-                    confidence=entity.get("confidence"),
+                    entity=entity,
+                    matched_character_id=None,
                     reason_codes=reasons,
-                    evidence=candidate_evidence,
                     source_batch_key=entity_source_batch_key,
                 )
                 await _record_cluster_member_candidates(
@@ -1049,8 +1082,8 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                     chapter_number=chapter_number,
                     entity=entity,
                     matched_character_id=None,
-                    reason_code=reasons[0],
-                    status=CHARACTER_CANDIDATE_PENDING,
+                    reason_code=resolved_reasons[0] if resolved_reasons else reasons[0],
+                    status=status,
                 )
                 await _record_entity_cluster_mentions(
                     db,
@@ -1058,8 +1091,8 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                     chapter_number=chapter_number,
                     entity=entity,
                     matched_character_id=None,
-                    resolver_status="held_for_review",
-                    resolver_reasons=reasons,
+                    resolver_status="suppressed" if status == CHARACTER_CANDIDATE_SUPPRESSED else "held_for_review",
+                    resolver_reasons=resolved_reasons,
                 )
                 continue
 
@@ -1084,17 +1117,13 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
             if len(matching_ids) > 1:
                 ambiguous_entity_count += 1
                 quarantined_candidate_count += 1
-                await record_character_candidate(
+                status, reasons, _evidence = await _record_character_disposition_candidate(
                     db,
                     book_id=book.id,
                     chapter_number=chapter_number,
-                    raw_name=str(entity.get("name") or ""),
-                    proposed_name=str(entity.get("name") or ""),
-                    aliases=entity.get("aliases") if isinstance(entity.get("aliases"), list) else [],
-                    status=CHARACTER_CANDIDATE_PENDING,
-                    confidence=entity.get("confidence"),
+                    entity=entity,
+                    matched_character_id=None,
                     reason_codes=["ambiguous_roster_match_after_cluster"],
-                    evidence=_candidate_record_evidence(entity),
                     source_batch_key=entity_source_batch_key,
                 )
                 await _record_entity_cluster_mentions(
@@ -1103,8 +1132,8 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                     chapter_number=chapter_number,
                     entity=entity,
                     matched_character_id=None,
-                    resolver_status="ambiguous",
-                    resolver_reasons=["ambiguous_roster_match_after_cluster"],
+                    resolver_status="suppressed" if status == CHARACTER_CANDIDATE_SUPPRESSED else "ambiguous",
+                    resolver_reasons=reasons,
                 )
                 continue
             if len(matching_ids) == 1:
@@ -1886,6 +1915,42 @@ def _candidate_record_evidence(entity: dict) -> dict[str, Any]:
     return evidence
 
 
+async def _record_character_disposition_candidate(
+    db,
+    *,
+    book_id: uuid.UUID,
+    chapter_number: int,
+    entity: dict[str, Any],
+    matched_character_id: uuid.UUID | None,
+    reason_codes: list[str],
+    source_batch_key: str | None,
+) -> tuple[str, list[str], dict[str, Any]]:
+    evidence = _candidate_record_evidence(entity)
+    disposition = decide_character_candidate_disposition(
+        name=str(entity.get("name") or ""),
+        aliases=entity.get("aliases") if isinstance(entity.get("aliases"), list) else [],
+        confidence=entity.get("confidence"),
+        reason_codes=reason_codes,
+        evidence=evidence,
+        matched_character_id=matched_character_id,
+    )
+    await record_character_candidate(
+        db,
+        book_id=book_id,
+        chapter_number=chapter_number,
+        raw_name=str(entity.get("name") or ""),
+        proposed_name=str(entity.get("name") or ""),
+        aliases=entity.get("aliases") if isinstance(entity.get("aliases"), list) else [],
+        matched_character_id=matched_character_id,
+        status=disposition.status,
+        confidence=entity.get("confidence"),
+        reason_codes=disposition.reason_codes,
+        evidence=disposition.evidence,
+        source_batch_key=source_batch_key,
+    )
+    return disposition.status, list(disposition.reason_codes), disposition.evidence
+
+
 def _blocked_character_ids(
     chars: list[Character],
     entity: dict,
@@ -2081,6 +2146,24 @@ def _character_save_decision(entity: dict):
                 score=decision.score,
                 reasons=tuple([
                     "candidate_dossier_needs_review",
+                    *[
+                        str(reason).strip()
+                        for reason in (dossier_summary.get("strict_auto_reason_codes") or [])
+                        if str(reason).strip()
+                    ],
+                    *decision.reasons,
+                ]),
+            )
+        if not can_auto_persist_character_candidate(
+            name=entity.get("name"),
+            aliases=entity.get("aliases") if isinstance(entity.get("aliases"), list) else [],
+            evidence=evidence,
+        ):
+            return CharacterPersistenceDecision(
+                allowed=False,
+                score=decision.score,
+                reasons=tuple([
+                    "initial_auto_persist_requires_stronger_grounding",
                     *[
                         str(reason).strip()
                         for reason in (dossier_summary.get("strict_auto_reason_codes") or [])

@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -298,3 +299,57 @@ async def test_cancel_subscription_immediately_posts_immediate_effective_date(mo
     assert payload == {"id": "sub_123", "status": "canceled"}
     assert captured["url"] == "https://api.paddle.com/subscriptions/sub_123/cancel"
     assert captured["json"] == {"effective_from": "immediately"}
+
+
+@pytest.mark.asyncio
+async def test_get_or_create_customer_reuses_existing_customer_on_duplicate_email(monkeypatch):
+    requests: list[tuple[str, dict | None]] = []
+
+    class FakeResponse:
+        def __init__(self, *, status_code=200, payload=None):
+            self.status_code = status_code
+            self._payload = payload or {}
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise paddle_service.httpx.HTTPStatusError(
+                    "duplicate customer",
+                    request=SimpleNamespace(),
+                    response=self,
+                )
+
+        def json(self):
+            return self._payload
+
+    class FakeAsyncClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, url, headers=None, json=None):
+            requests.append((url, json))
+            return FakeResponse(
+                status_code=409,
+                payload={
+                    "error": {
+                        "code": "customer_already_exists",
+                        "detail": "customer email conflicts with customer of id ctm_01ghbk4xjn4qdsmstcwzgcgg35",
+                    }
+                },
+            )
+
+        async def get(self, url, headers=None, params=None):
+            requests.append((url, params))
+            raise AssertionError("email lookup should not run when conflict payload already includes the customer id")
+
+    monkeypatch.setattr("app.services.paddle_service.httpx.AsyncClient", lambda timeout=20.0: FakeAsyncClient())
+    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_API_KEY", "pdl_test_key", raising=False)
+
+    customer_id = await paddle_service.get_or_create_customer("author@getlorevia.com")
+
+    assert customer_id == "ctm_01ghbk4xjn4qdsmstcwzgcgg35"
+    assert requests == [
+        ("https://api.paddle.com/customers", {"email": "author@getlorevia.com"}),
+    ]

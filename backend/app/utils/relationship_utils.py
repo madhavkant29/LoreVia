@@ -308,7 +308,8 @@ async def normalize_relationship_pair_timeline(
         if relationship.id is None:
             db.add(relationship)
     for relationship in removed:
-        await db.delete(relationship)
+        if not getattr(relationship, "edited_by_author", False):
+            await db.delete(relationship)
     await db.flush()
     return kept, removed
 
@@ -333,6 +334,17 @@ async def upsert_relationship_timeline_state(
         if target_relationship is None:
             raise ValueError("Relationship not found")
     if target_relationship is None:
+        _existing_curated = await db.execute(
+            select(CharacterRelationship).where(
+                CharacterRelationship.book_id == book_id,
+                CharacterRelationship.character_a_id == left_id,
+                CharacterRelationship.character_b_id == right_id,
+                CharacterRelationship.edited_by_author == True,
+            ).limit(1)
+        )
+        if _existing_curated.scalar_one_or_none() is not None:
+            curated = _existing_curated.scalar_one_or_none()
+            return curated, False
         target_relationship = CharacterRelationship(
             book_id=book_id,
             character_a_id=left_id,
@@ -344,6 +356,9 @@ async def upsert_relationship_timeline_state(
             to_chapter=to_chapter,
         )
         db.add(target_relationship)
+
+    if getattr(target_relationship, "edited_by_author", False):
+        return target_relationship, False
 
     target_relationship.book_id = book_id
     target_relationship.character_a_id = left_id
@@ -431,7 +446,8 @@ async def repair_relationship_timelines(
             if current_state != original_state:
                 repaired_pairs += 1
         for relationship in removed:
-            await db.delete(relationship)
+            if not getattr(relationship, "edited_by_author", False):
+                await db.delete(relationship)
 
     candidate_rows = (
         await db.execute(
