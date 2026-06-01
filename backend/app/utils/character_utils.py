@@ -568,7 +568,7 @@ def build_character_dossier_summary(
     )
     strong_mention_count = int(evidence_map.get("strong_mention_count") or 0)
     person_ner_support = int(local.get("person_ner_mentions") or 0)
-    non_person_signal_count = int(local.get("non_person_ner_mentions") or 0)
+    raw_non_person_signal_count = int(local.get("non_person_ner_mentions") or 0)
     sentence_start_mentions = int(local.get("sentence_start_mentions") or 0)
     mid_sentence_mentions = int(local.get("mid_sentence_mentions") or 0)
     dialogue_attribution_support = 1 if evidence_map.get("has_dialogue_or_action") else 0
@@ -592,6 +592,11 @@ def build_character_dossier_summary(
         or any("conflict" in reason.casefold() for reason in resolved_reason_codes)
     )
     final_band = str(final.get("confidence_band") or "").strip().casefold()
+    non_person_signal_count = (
+        max(0, raw_non_person_signal_count - person_ner_support)
+        if final_band == "accept"
+        else raw_non_person_signal_count
+    )
     deterministic_fallback = bool(evidence_map.get("deterministic_fallback"))
     strong_fallback_support = bool(
         deterministic_fallback
@@ -675,6 +680,7 @@ def build_character_dossier_summary(
         "full_name_link_support": full_name_link_support,
         "resolver_ambiguity_count": resolver_ambiguity_count,
         "conflict_signal_count": conflict_signal_count,
+        "raw_non_person_signal_count": raw_non_person_signal_count,
         "non_person_signal_count": non_person_signal_count,
         "first_pass_full_name_eligible": first_pass_full_name_eligible,
         "strict_auto_eligible": strict_auto_eligible,

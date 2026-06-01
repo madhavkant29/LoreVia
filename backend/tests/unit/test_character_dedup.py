@@ -290,6 +290,34 @@ def test_dossier_allows_strong_deterministic_fallback_with_full_name_alias():
     assert "single_token_ambiguous" not in summary["strict_auto_reason_codes"]
 
 
+def test_dossier_offsets_incidental_non_person_ner_label_when_person_evidence_is_stronger():
+    summary = build_character_dossier_summary(
+        name="Gregor Samsa",
+        aliases=["Gregor"],
+        evidence={
+            "deterministic_fallback": True,
+            "mention_count": 3,
+            "strong_mention_count": 3,
+            "has_dialogue_or_action": True,
+            "cluster_names": ["Gregor Samsa", "Gregor"],
+            "verifier": {
+                "local": {
+                    "person_ner_mentions": 2,
+                    "non_person_ner_mentions": 1,
+                    "sentence_start_mentions": 3,
+                    "mid_sentence_mentions": 0,
+                },
+                "final": {"confidence_band": "accept", "reasons": []},
+            },
+        },
+    )
+
+    assert summary["raw_non_person_signal_count"] == 1
+    assert summary["non_person_signal_count"] == 0
+    assert summary["strict_auto_eligible"] is True
+    assert "non_person_ner_signal" not in summary["strict_auto_reason_codes"]
+
+
 def test_resolve_character_reference_from_roster_uses_context_to_match_family_role_reference():
     grete = Character(
         id=uuid.uuid4(),
