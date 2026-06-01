@@ -33,12 +33,14 @@ function RevisionDetailCard({ item, isDark }: { item: RevisionActionItem; isDark
   )
 }
 
-export function NotificationsPanel({ mode = "sidebar" }: { mode?: "sidebar" | "page" }) {
+export function NotificationsPanel({ mode = "sidebar", enabled = true }: { mode?: "sidebar" | "page"; enabled?: boolean }) {
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
   const { items, unreadCount, loading, error, markRead, markAllRead, refresh } = useNotificationsState(40, {
+    enabled,
     pollMs: 60_000,
     refreshOnFocus: true,
+    syncRevisionDigests: mode === "page" && enabled,
   })
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [loadingDetailsId, setLoadingDetailsId] = useState<string | null>(null)

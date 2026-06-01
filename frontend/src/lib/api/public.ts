@@ -54,12 +54,13 @@ export const publicApi = {
       event_type: payload.eventType,
       ...(typeof payload.chapterNumber === "number" ? { chapter_number: payload.chapterNumber } : {}),
     }).then(() => undefined),
-  listForumPosts: (query?: string, page = 1, pageSize = 20) =>
+  listForumPosts: (query?: string, page = 1, pageSize = 20, threadType?: "general" | "novel") =>
     apiClient.get<PublicForumPostListResponse>("/public/forum/posts", {
       params: {
         ...(query?.trim() ? { q: query.trim() } : {}),
         page,
         page_size: pageSize,
+        ...(threadType ? { thread_type: threadType } : {}),
       },
     }).then((response) => response.data),
   listRankedBetaNovels: (options?: { ranking?: string; timeWindow?: string; query?: string; page?: number; pageSize?: number }) =>

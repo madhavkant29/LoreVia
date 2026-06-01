@@ -12,7 +12,14 @@ from sqlalchemy import func, select
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
-from app.core.redis import cache_del, cache_set, cache_set_if_absent, key_analysis_inflight, key_chapter_summary
+from app.core.redis import (
+    cache_del,
+    cache_set,
+    cache_set_if_absent,
+    key_analysis_inflight,
+    key_analysis_queued,
+    key_chapter_summary,
+)
 from app.engine.analysis.plot_tracker import extract_plot_threads
 from app.engine.analysis.summariser import derive_summary_modes_from_detailed, generate_summary
 from app.models.book import Book, Chapter
@@ -292,6 +299,7 @@ async def analyse_chapter(
             raise
         finally:
             await cache_del(inflight_key)
+            await cache_del(key_analysis_queued(chapter_id))
 
 
 async def _upsert_plot_threads(db, book: Book, chapter: Chapter, threads: list[dict[str, Any]]) -> None:

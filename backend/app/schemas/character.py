@@ -42,6 +42,7 @@ class CharacterOut(BaseModel):
     book_id: uuid.UUID
     name: str
     aliases: list[str] | None
+    alias_records: list[dict] = Field(default_factory=list)
     role: str | None
     first_chapter: int
     trait_state: dict | None
@@ -137,8 +138,30 @@ class CharacterDuplicateSuggestionOut(BaseModel):
     primary_is_curated: bool = False
     secondary_is_curated: bool = False
     status: str
+    dismissal_reason: str | None = None
+    auto_dismissed: bool = False
     created_at: datetime
     updated_at: datetime
+
+
+class CharacterAliasBody(BaseModel):
+    alias_text: str = Field(..., min_length=1)
+    alias_kind: str = "user_confirmed"
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+
+
+class CharacterAliasOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    book_id: uuid.UUID
+    character_id: uuid.UUID
+    alias_text: str
+    normalized_alias: str
+    alias_kind: str
+    source: str
+    confidence: float
+    created_at: datetime
 
 
 class CharacterRelationshipCandidateOut(BaseModel):
@@ -186,4 +209,5 @@ class CharacterReviewOut(BaseModel):
     relationship_candidates: list[CharacterRelationshipCandidateOut] = Field(default_factory=list)
     shadow_characters: list[CharacterOut] = Field(default_factory=list)
     decision_events: list[CharacterDecisionEventOut] = Field(default_factory=list)
+    auto_actions_summary: dict[str, int] = Field(default_factory=dict)
     counts: CharacterReviewCountsOut = Field(default_factory=CharacterReviewCountsOut)

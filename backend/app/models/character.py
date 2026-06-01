@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import ARRAY, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, UniqueConstraint, func
+from sqlalchemy import ARRAY, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -12,6 +12,18 @@ from app.core.database import Base
 class Character(Base):
     __tablename__ = "characters"
     __table_args__ = (
+        Index(
+            "uq_characters_book_normalized_active",
+            "book_id",
+            "normalized_name",
+            unique=True,
+            postgresql_where=text(
+                "normalized_name is not null "
+                "and merged_into_character_id is null "
+                "and visibility_state in ('visible', 'quarantined') "
+                "and approval_state not in ('rejected')"
+            ),
+        ),
         Index(
             "ix_characters_embedding_ivfflat",
             "embedding",
@@ -25,6 +37,7 @@ class Character(Base):
     book_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
 
     name: Mapped[str] = mapped_column(String, nullable=False)
+    normalized_name: Mapped[str | None] = mapped_column(String, index=True)
     aliases: Mapped[list[str] | None] = mapped_column(ARRAY(String))
     role: Mapped[str | None] = mapped_column(String)       # mc | sc | background
     first_chapter: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -64,6 +77,14 @@ class Character(Base):
     approval_source: Mapped[str | None] = mapped_column(String)
     approval_reason_codes: Mapped[list[str] | None] = mapped_column(ARRAY(String))
     approval_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    merged_into_character_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("characters.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    is_auto_suppressed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    suppression_reason: Mapped[str | None] = mapped_column(String)
 
     # pgvector identity anchor
     embedding: Mapped[list[float] | None] = mapped_column(Vector(1536))
@@ -111,6 +132,12 @@ class Character(Base):
     decision_events = relationship(
         "CharacterDecisionEvent",
         foreign_keys="CharacterDecisionEvent.character_id",
+        back_populates="character",
+        cascade="all, delete-orphan",
+    )
+    alias_records = relationship(
+        "CharacterAlias",
+        foreign_keys="CharacterAlias.character_id",
         back_populates="character",
         cascade="all, delete-orphan",
     )
@@ -236,6 +263,98 @@ class CharacterMention(Base):
     matched_character = relationship("Character", back_populates="mention_records")
 
 
+class CharacterAlias(Base):
+    __tablename__ = "character_aliases"
+    __table_args__ = (
+        UniqueConstraint(
+            "book_id",
+            "character_id",
+            "normalized_alias",
+            name="uq_character_aliases_book_char_alias",
+        ),
+        Index("ix_character_aliases_book_norm_alias", "book_id", "normalized_alias"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    book_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False)
+    character_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("characters.id", ondelete="CASCADE"), nullable=False, index=True)
+    alias_text: Mapped[str] = mapped_column(String, nullable=False)
+    normalized_alias: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    alias_kind: Mapped[str] = mapped_column(String, nullable=False, default="unspecified", server_default="unspecified")
+    source: Mapped[str] = mapped_column(String, nullable=False, default="extraction", server_default="extraction")
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.5, server_default="0.5")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    character = relationship("Character", back_populates="alias_records")
+
+
+class CharacterSuppression(Base):
+    __tablename__ = "character_suppressions"
+    __table_args__ = (
+        Index("ix_character_suppressions_book_normalized_text", "book_id", "normalized_text"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    book_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
+    character_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("characters.id", ondelete="SET NULL"), nullable=True, index=True)
+    chapter_number: Mapped[int | None] = mapped_column(Integer)
+    surface_text: Mapped[str] = mapped_column(String, nullable=False)
+    normalized_text: Mapped[str] = mapped_column(String, nullable=False)
+    candidate_kind: Mapped[str | None] = mapped_column(String)
+    reason: Mapped[str] = mapped_column(String, nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default="0")
+    evidence_quote: Mapped[str | None] = mapped_column(String)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class CharacterIdentityConstraint(Base):
+    __tablename__ = "character_identity_constraints"
+    __table_args__ = (
+        UniqueConstraint(
+            "book_id",
+            "left_character_id",
+            "right_character_id",
+            "constraint_type",
+            name="uq_character_identity_constraints",
+        ),
+        Index("ix_character_identity_constraints_book_type", "book_id", "constraint_type"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    book_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
+    left_character_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("characters.id", ondelete="CASCADE"), nullable=False)
+    right_character_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("characters.id", ondelete="CASCADE"), nullable=False)
+    left_text: Mapped[str] = mapped_column(String, nullable=False)
+    right_text: Mapped[str] = mapped_column(String, nullable=False)
+    constraint_type: Mapped[str] = mapped_column(String, nullable=False)
+    reason: Mapped[str | None] = mapped_column(String)
+    source: Mapped[str] = mapped_column(String, nullable=False, default="system", server_default="system")
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=1.0, server_default="1")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class CharacterIdentityAction(Base):
+    __tablename__ = "character_identity_actions"
+    __table_args__ = (
+        Index("ix_character_identity_actions_book_created_at", "book_id", "created_at"),
+        Index("ix_character_identity_actions_source_character", "source_character_id"),
+        Index("ix_character_identity_actions_target_character", "target_character_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    book_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
+    action_type: Mapped[str] = mapped_column(String, nullable=False)
+    source_character_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("characters.id", ondelete="SET NULL"), nullable=True)
+    target_character_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("characters.id", ondelete="SET NULL"), nullable=True)
+    surface_text: Mapped[str | None] = mapped_column(String)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default="0")
+    reason: Mapped[str | None] = mapped_column(String)
+    reversible: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    reversible_data: Mapped[dict | None] = mapped_column(JSONB, default=dict)
+    repair_run_id: Mapped[str | None] = mapped_column(String)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 class CharacterDecisionEvent(Base):
     __tablename__ = "character_decision_events"
     __table_args__ = (
@@ -286,6 +405,8 @@ class CharacterDuplicateSuggestion(Base):
     reasons: Mapped[list[str] | None] = mapped_column(ARRAY(String))
     shared_evidence: Mapped[dict | None] = mapped_column(JSONB, default=dict)
     status: Mapped[str] = mapped_column(String, nullable=False, default="pending", server_default="pending")
+    dismissal_reason: Mapped[str | None] = mapped_column(String)
+    auto_dismissed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

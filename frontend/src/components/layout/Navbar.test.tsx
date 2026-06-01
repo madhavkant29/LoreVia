@@ -6,6 +6,8 @@ const useAuthStoreMock = vi.hoisted(() => vi.fn())
 const usePreferencesStoreMock = vi.hoisted(() => vi.fn())
 const replaceMock = vi.hoisted(() => vi.fn())
 const logoutApiMock = vi.hoisted(() => vi.fn())
+const prefetchChatsSidebarDataMock = vi.hoisted(() => vi.fn())
+const prefetchNotificationsSidebarDataMock = vi.hoisted(() => vi.fn())
 
 vi.mock("next/link", () => ({
   default: ({ href, children, ...props }: { href: string; children: React.ReactNode }) => (
@@ -46,6 +48,11 @@ vi.mock("@/lib/stores/preferencesStore", () => ({
   usePreferencesStore: usePreferencesStoreMock,
 }))
 
+vi.mock("@/lib/query/sidebarPrefetch", () => ({
+  prefetchChatsSidebarData: prefetchChatsSidebarDataMock,
+  prefetchNotificationsSidebarData: prefetchNotificationsSidebarDataMock,
+}))
+
 import { Navbar } from "./Navbar"
 
 let container: HTMLDivElement | null = null
@@ -67,6 +74,8 @@ describe("Navbar", () => {
     usePreferencesStoreMock.mockReset()
     logoutApiMock.mockReset()
     replaceMock.mockReset()
+    prefetchChatsSidebarDataMock.mockReset()
+    prefetchNotificationsSidebarDataMock.mockReset()
     container = null
     root = null
   })

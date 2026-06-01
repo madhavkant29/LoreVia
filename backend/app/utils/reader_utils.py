@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import re
 import uuid
 from typing import Any
@@ -17,7 +18,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.redis import cache_del, cache_set_if_absent, key_analysis_inflight
+from app.core.redis import cache_del, cache_set_if_absent, key_analysis_queued
 from app.core.security import create_asset_token
 from app.core.storage import download_book, get_presigned_url
 from app.engine.character.deduplicator import names_equivalent
@@ -50,10 +51,11 @@ from app.utils.book_utils import (
     deserialize_manuscript_content,
     normalize_collaboration_scope,
 )
-from app.utils.ingestion_utils import ANALYSIS_INFLIGHT_TTL_SECONDS, build_analysis_chapter_state
+from app.utils.ingestion_utils import ANALYSIS_INFLIGHT_TTL_SECONDS
 from app.utils.ingestion_utils import apply_chapter_number_strategy
 
 BLEACH_EMPTY_TAGS: Any = frozenset()
+log = logging.getLogger("lorevia.reader_utils")
 
 # ─── Character stopwords / filter sets ───────────────────────────────────────
 
@@ -739,11 +741,13 @@ async def build_summary_collection_payload(
         for row in summary_rows
     }
 
+    queued_chapter_ids: set[uuid.UUID] = set()
     for chapter in chapters:
         chapter_key = str(chapter.id)
         if chapter_key in summary_by_chapter_id:
             continue
-        await queue_analysis_if_missing(db, chapter, current_user)
+        if await queue_analysis_if_missing(db, chapter, current_user):
+            queued_chapter_ids.add(chapter.id)
         summary_data = await get_or_generate_summary(db, book.id, chapter.number, "short")
         if summary_data and summary_data.get("status") == "ready":
             summary_by_chapter_id[chapter_key] = {
@@ -762,6 +766,8 @@ async def build_summary_collection_payload(
                 "status": (
                     "ready"
                     if str(chapter.id) in summary_by_chapter_id
+                    else "queued"
+                    if chapter.id in queued_chapter_ids
                     else str((chapter_analysis_status(chapter) or {}).get("status") or "pending")
                 ),
                 "content": summary_by_chapter_id.get(str(chapter.id), {}).get("content"),
@@ -772,39 +778,35 @@ async def build_summary_collection_payload(
     }
 
 
-async def queue_analysis_if_missing(db: AsyncSession, chapter: Chapter, current_user=None) -> None:
+async def queue_analysis_if_missing(db: AsyncSession, chapter: Chapter, current_user=None) -> bool:
     if await chapter_has_detailed_summary(db, chapter.id):
-        return
+        return False
     analysis_state = chapter.analysis_state if isinstance(chapter.analysis_state, dict) else {}
     if str(analysis_state.get("status") or "").strip() in {"queued", "running"}:
-        return
-    inflight_key = key_analysis_inflight(str(chapter.id))
+        return False
+    queued_key = key_analysis_queued(str(chapter.id))
     if not await cache_set_if_absent(
-        inflight_key,
+        queued_key,
         {"chapter_id": str(chapter.id)},
         ANALYSIS_INFLIGHT_TTL_SECONDS,
     ):
-        return
+        return False
     from app.workers.tasks.analysis_tasks import analyse_chapter_task
     try:
-        raw = download_book(chapter.s3_key)
-        chapter_text = str(deserialize_manuscript_content(raw).get("text") or "").strip()
-    except Exception:
-        await cache_del(inflight_key)
-        return
-    if not chapter_text:
-        await cache_del(inflight_key)
-        return
-    chapter.analysis_state = build_analysis_chapter_state(
-        analysis_state,
-        status="queued",
-        increment_attempt=True,
-    )
-    await db.commit()
-    analyse_chapter_task.apply_async(
-        args=[str(chapter.id), chapter_text, chapter.title or ""],
-        queue=queue_for_user(current_user, "analysis") if current_user else "analysis",
-    )
+        analyse_chapter_task.apply_async(
+            args=[str(chapter.id), str(chapter.book_id)],
+            kwargs={"is_reprocessing": False},
+            queue=queue_for_user(current_user, "analysis") if current_user else "analysis",
+        )
+    except Exception as exc:
+        await cache_del(queued_key)
+        log.warning(
+            "analysis_queue_dispatch_failed chapter_id=%s error=%s",
+            chapter.id,
+            exc,
+        )
+        return False
+    return True
 
 
 async def chapter_has_detailed_summary(db: AsyncSession, chapter_id: uuid.UUID) -> bool:

@@ -1931,6 +1931,7 @@ def _public_forum_post_select_statement(
     q: str | None = None,
     viewer_user_id: uuid.UUID | None = None,
     post_id: uuid.UUID | None = None,
+    thread_type: str | None = None,
 ):
     rating_subquery = _public_forum_rating_summary_subquery()
     comment_subquery = _public_forum_comment_count_subquery()
@@ -1976,6 +1977,8 @@ def _public_forum_post_select_statement(
         statement = statement.outerjoin(viewer_post_reaction_subquery, viewer_post_reaction_subquery.c.post_id == BookForumPost.id)
 
     statement = statement.where(*_public_forum_visibility_filters())
+    if thread_type and thread_type in VALID_FORUM_THREAD_TYPES:
+        statement = statement.where(BookForumPost.thread_type == thread_type)
     search_clause = _public_forum_search_clause(q)
     if search_clause is not None:
         statement = statement.where(search_clause)
@@ -2850,14 +2853,18 @@ async def list_public_forum_posts(
     q: str | None = None,
     page: int = 1,
     page_size: int = DEFAULT_PUBLIC_FORUM_PAGE_SIZE,
+    thread_type: str | None = None,
     current_user: User | None = None,
 ) -> PublicForumPostListOut:
     normalized_page, normalized_page_size = _normalize_public_forum_pagination(page, page_size)
+    visibility_filters = list(_public_forum_visibility_filters())
+    if thread_type and thread_type in VALID_FORUM_THREAD_TYPES:
+        visibility_filters.append(BookForumPost.thread_type == thread_type)
     total_statement = (
         select(func.count(BookForumPost.id))
         .outerjoin(Book, Book.id == BookForumPost.book_id)
         .join(User, User.id == BookForumPost.author_user_id)
-        .where(*_public_forum_visibility_filters())
+        .where(*visibility_filters)
     )
     search_clause = _public_forum_search_clause(q)
     if search_clause is not None:
@@ -2867,6 +2874,7 @@ async def list_public_forum_posts(
     statement = _public_forum_post_select_statement(
         q=q,
         viewer_user_id=current_user.id if current_user is not None else None,
+        thread_type=thread_type,
     ).order_by(
         literal_column("discoverability_score").desc(),
         User.reputation_score.desc(),

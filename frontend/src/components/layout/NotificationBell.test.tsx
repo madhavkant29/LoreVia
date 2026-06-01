@@ -4,6 +4,8 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 
 const useNotificationsStateMock = vi.hoisted(() => vi.fn())
 const usePreferencesStoreMock = vi.hoisted(() => vi.fn())
+const useAuthStoreMock = vi.hoisted(() => vi.fn())
+const prefetchNotificationsSidebarDataMock = vi.hoisted(() => vi.fn())
 
 vi.mock("next/link", () => ({
   default: ({ href, children, ...props }: { href: string; children: ReactNode }) => (
@@ -14,11 +16,19 @@ vi.mock("next/link", () => ({
 }))
 
 vi.mock("@/components/layout/NotificationsPanel", () => ({
-  NotificationsPanel: () => <aside data-testid="notifications-panel" />,
+  NotificationsPanel: ({ enabled }: { enabled?: boolean }) => <aside data-enabled={String(enabled)} data-testid="notifications-panel" />,
 }))
 
 vi.mock("@/lib/hooks/useNotifications", () => ({
   useNotificationsState: useNotificationsStateMock,
+}))
+
+vi.mock("@/lib/query/sidebarPrefetch", () => ({
+  prefetchNotificationsSidebarData: prefetchNotificationsSidebarDataMock,
+}))
+
+vi.mock("@/lib/stores/authStore", () => ({
+  useAuthStore: useAuthStoreMock,
 }))
 
 vi.mock("@/lib/stores/preferencesStore", () => ({
@@ -46,6 +56,8 @@ describe("NotificationBell", () => {
     }
     useNotificationsStateMock.mockReset()
     usePreferencesStoreMock.mockReset()
+    useAuthStoreMock.mockReset()
+    prefetchNotificationsSidebarDataMock.mockReset()
     container = null
     root = null
   })
@@ -53,6 +65,7 @@ describe("NotificationBell", () => {
   it("shows an unread badge and highlights the bell when notifications are waiting", () => {
     useNotificationsStateMock.mockReturnValue({ unreadCount: 12 })
     usePreferencesStoreMock.mockReturnValue({ theme: "light" })
+    useAuthStoreMock.mockReturnValue({ user: { id: "user-1" } })
 
     const view = renderNotificationBell()
 
@@ -71,6 +84,7 @@ describe("NotificationBell", () => {
   it("keeps the bell neutral when there are no unread notifications", () => {
     useNotificationsStateMock.mockReturnValue({ unreadCount: 0 })
     usePreferencesStoreMock.mockReturnValue({ theme: "dark" })
+    useAuthStoreMock.mockReturnValue({ user: { id: "user-1" } })
 
     const view = renderNotificationBell()
 
@@ -79,9 +93,10 @@ describe("NotificationBell", () => {
     expect(view.querySelector("button")?.getAttribute("aria-label")).toBe("Toggle notifications")
   })
 
-  it("loads the sidebar panel only after the desktop bell is opened", async () => {
+  it("mounts the sidebar panel only after the desktop bell is opened", async () => {
     useNotificationsStateMock.mockReturnValue({ unreadCount: 0 })
     usePreferencesStoreMock.mockReturnValue({ theme: "light" })
+    useAuthStoreMock.mockReturnValue({ user: { id: "user-1" } })
 
     const view = renderNotificationBell()
 
@@ -94,13 +109,17 @@ describe("NotificationBell", () => {
       toggleButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
       await Promise.resolve()
     })
+    await flushDynamicPanel()
 
-    expect(view.querySelector('[data-testid="notifications-panel"]')).not.toBeNull()
+    const panelShell = view.querySelector('aside[aria-hidden="false"]')
+    expect(panelShell).not.toBeNull()
+    expect(panelShell?.className).toContain("translate-x-0")
   })
 
-  it("closes the notifications sidebar when clicking outside it", async () => {
+  it("keeps the notifications sidebar mounted but hidden when clicking outside it", async () => {
     useNotificationsStateMock.mockReturnValue({ unreadCount: 0 })
     usePreferencesStoreMock.mockReturnValue({ theme: "light" })
+    useAuthStoreMock.mockReturnValue({ user: { id: "user-1" } })
 
     const view = renderNotificationBell()
     const toggleButton = view.querySelector("button")
@@ -109,20 +128,24 @@ describe("NotificationBell", () => {
       toggleButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
       await Promise.resolve()
     })
+    await flushDynamicPanel()
 
-    expect(view.querySelector('[data-testid="notifications-panel"]')).not.toBeNull()
+    expect(view.querySelector('aside[aria-hidden="false"]')).not.toBeNull()
 
     await act(async () => {
       document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }))
       await Promise.resolve()
     })
 
-    expect(view.querySelector('[data-testid="notifications-panel"]')).toBeNull()
+    const panelShell = view.querySelector('aside[aria-hidden="true"]')
+    expect(panelShell?.getAttribute("aria-hidden")).toBe("true")
+    expect(panelShell?.className).toContain("pointer-events-none")
   })
 
   it("defers notification queries until the bell is enabled or opened", async () => {
     useNotificationsStateMock.mockReturnValue({ unreadCount: 0 })
     usePreferencesStoreMock.mockReturnValue({ theme: "light" })
+    useAuthStoreMock.mockReturnValue({ user: { id: "user-1" } })
 
     const view = renderNotificationBell({ enabled: false })
 
@@ -140,6 +163,7 @@ describe("NotificationBell", () => {
       toggleButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
       await Promise.resolve()
     })
+    await flushDynamicPanel()
 
     expect(useNotificationsStateMock).toHaveBeenLastCalledWith(10, {
       enabled: true,
@@ -147,6 +171,21 @@ describe("NotificationBell", () => {
       refreshOnFocus: true,
       syncRevisionDigests: true,
     })
+  })
+
+  it("prefetches sidebar notification data before opening the bell", () => {
+    useNotificationsStateMock.mockReturnValue({ unreadCount: 0 })
+    usePreferencesStoreMock.mockReturnValue({ theme: "light" })
+    useAuthStoreMock.mockReturnValue({ user: { id: "user-1" } })
+
+    const view = renderNotificationBell()
+    const toggleButton = view.querySelector("button")
+
+    act(() => {
+      toggleButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+    })
+
+    expect(prefetchNotificationsSidebarDataMock).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -160,4 +199,12 @@ function renderNotificationBell({ enabled }: { enabled?: boolean } = {}) {
   })
 
   return container
+}
+
+async function flushDynamicPanel() {
+  await act(async () => {
+    await Promise.resolve()
+    await Promise.resolve()
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+  })
 }

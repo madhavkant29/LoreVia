@@ -46,6 +46,14 @@ export function notificationsCacheKey(limit: number) {
   return `notifications:list:${limit}`
 }
 
+export function socialConversationsCacheKey() {
+  return "social:conversations"
+}
+
+export function socialRelationshipsCacheKey() {
+  return "social:relationships"
+}
+
 export function asQueryKey(key: string) {
   return [key] as const
 }

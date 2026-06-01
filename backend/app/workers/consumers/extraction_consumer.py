@@ -49,6 +49,8 @@ from app.models.intelligence import BookChunk, CharacterRelationship
 from app.models.user import User
 from app.parsers.chunker import ChunkingConfig, chunk_text, count_tokens
 from app.services.email_service import send_processing_complete_with_stats
+from app.services.character_identity.repair import CharacterIdentityRepairJob
+from app.services.character_identity.resolver import resolve_character_mention
 from app.utils.billing_utils import has_paid_reading_access
 from app.utils.book_utils import parse_book_upload_for_ingestion, refresh_screenplay_scene_rows
 from app.utils.character_utils import (
@@ -943,6 +945,99 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
             decision = _character_save_decision(entity)
             manual_review_reason = _entity_requires_manual_review(entity)
             existing_match = next((item for item in existing_characters if item.id == existing_id), None) if existing_id is not None else None
+            identity_resolution = await resolve_character_mention(
+                db,
+                book_id=book.id,
+                chapter_number=chapter_number,
+                surface_text=str(entity.get("name") or ""),
+                evidence=_candidate_record_evidence(entity),
+            )
+            if identity_resolution.action == "auto_suppress":
+                quarantined_candidate_count += 1
+                await _record_cluster_member_candidates(
+                    db,
+                    book_id=book.id,
+                    chapter_number=chapter_number,
+                    entity=entity,
+                    matched_character_id=None,
+                    reason_code=identity_resolution.reason,
+                    status=CHARACTER_CANDIDATE_SUPPRESSED,
+                )
+                await _record_entity_cluster_mentions(
+                    db,
+                    book_id=book.id,
+                    chapter_number=chapter_number,
+                    entity=entity,
+                    matched_character_id=None,
+                    resolver_status="suppressed",
+                    resolver_reasons=[identity_resolution.reason],
+                )
+                continue
+            if identity_resolution.action in {"auto_alias", "auto_merge"} and identity_resolution.target_character_id:
+                resolved_target = next(
+                    (item for item in existing_characters if item.id == identity_resolution.target_character_id),
+                    None,
+                )
+                if resolved_target is None:
+                    resolved_target = await db.get(Character, identity_resolution.target_character_id)
+                    if resolved_target is not None and resolved_target.book_id == book.id:
+                        existing_characters.append(resolved_target)
+                        _refresh_character_key_cache(character_key_cache, resolved_target)
+                if resolved_target is not None and resolved_target.book_id == book.id:
+                    if not is_cast_visible_character(resolved_target):
+                        quarantined_candidate_count += 1
+                        status, resolved_reasons, _evidence = await _record_character_disposition_candidate(
+                            db,
+                            book_id=book.id,
+                            chapter_number=chapter_number,
+                            entity=entity,
+                            matched_character_id=resolved_target.id,
+                            reason_codes=["matched_quarantined_character", identity_resolution.reason],
+                            source_batch_key=entity_source_batch_key,
+                        )
+                        await _record_entity_cluster_mentions(
+                            db,
+                            book_id=book.id,
+                            chapter_number=chapter_number,
+                            entity=entity,
+                            matched_character_id=resolved_target.id,
+                            resolver_status="suppressed" if status == CHARACTER_CANDIDATE_SUPPRESSED else "matched_needs_review",
+                            resolver_reasons=resolved_reasons,
+                        )
+                        continue
+                    accepted = await _accept_existing_character_match(
+                        db,
+                        book_id=book.id,
+                        chapter_number=chapter_number,
+                        entity=entity,
+                        existing_id=resolved_target.id,
+                        existing_characters=existing_characters,
+                        character_key_cache=character_key_cache,
+                        pending_first_chapter_candidates=pending_first_chapter_candidates,
+                        pending_first_chapter_updates=pending_first_chapter_updates,
+                        reason_code=identity_resolution.reason,
+                        source_batch_key=entity_source_batch_key,
+                    )
+                    if accepted:
+                        saved_character_count += 1
+                        await _record_entity_cluster_mentions(
+                            db,
+                            book_id=book.id,
+                            chapter_number=chapter_number,
+                            entity=entity,
+                            matched_character_id=resolved_target.id,
+                            resolver_status=identity_resolution.action,
+                            resolver_reasons=[identity_resolution.reason],
+                        )
+                        await _record_cluster_member_candidates(
+                            db,
+                            book_id=book.id,
+                            chapter_number=chapter_number,
+                            entity=entity,
+                            matched_character_id=resolved_target.id,
+                            reason_code=identity_resolution.reason,
+                        )
+                    continue
 
             if len(matching_ids) > 1:
                 ambiguous_entity_count += 1
@@ -1312,6 +1407,7 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
             key_cache=character_key_cache,
             persisted_signatures=persisted_relationship_signatures,
         )
+        repair_result = await CharacterIdentityRepairJob(db, book_id=book.id).apply()
         duplicate_suggestions = await refresh_character_duplicate_suggestions(db, book_id=book.id, characters=existing_characters)
         if pending_first_chapter_candidates:
             earliest_started = time.perf_counter()
@@ -1364,6 +1460,10 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
             "relationship_review_candidates": relationship_review_candidate_count,
             "relationships_persisted": persisted_relationship_count,
             "duplicate_suggestions": sum(1 for item in duplicate_suggestions if str(item.status or "") == "pending"),
+            "identity_auto_merged": repair_result.auto_merged,
+            "identity_auto_aliases": repair_result.auto_aliases,
+            "identity_auto_suppressed": repair_result.auto_suppressed,
+            "identity_blocked_suggestions": repair_result.blocked_suggestions,
             "chapter_media_count": chapter_media_count,
             "media_marker_count": media_marker_count,
             "cover_available": bool(book.cover_s3_key),
@@ -1716,6 +1816,7 @@ async def _promote_new_character_from_entity(
     ]
     entity["dossier_summary"] = dossier_summary
     profile = build_character_profile(entity, book_id, chapter_number)
+    profile["normalized_name"] = normalize_character_name(str(profile.get("name") or "")) or None
     char = Character(**profile, embedding=embedding)
     db.add(char)
     await db.flush()

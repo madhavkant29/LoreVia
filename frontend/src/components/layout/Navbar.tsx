@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
-import dynamic from "next/dynamic"
 import type { Route } from "next"
 import { usePathname, useRouter } from "next/navigation"
 
@@ -10,21 +9,13 @@ import { Button } from "@/components/ui/Button"
 import { authApi } from "@/lib/api/auth"
 import { booksApi } from "@/lib/api/books"
 import { BrandLockup } from "@/components/layout/BrandLockup"
-import { NotificationBellShell } from "@/components/layout/NotificationBellShell"
+import { ChatLauncher } from "@/components/layout/ChatLauncher"
+import { NotificationBell } from "@/components/layout/NotificationBell"
 import { asQueryKey, booksListCacheKey } from "@/lib/query/cacheKeys"
 import { queryClient } from "@/lib/query/queryClient"
+import { prefetchChatsSidebarData, prefetchNotificationsSidebarData } from "@/lib/query/sidebarPrefetch"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
-
-const ChatLauncher = dynamic(
-  () => import("@/components/layout/ChatLauncher").then((module) => module.ChatLauncher),
-  { ssr: false, loading: () => null }
-)
-
-const NotificationBell = dynamic(
-  () => import("@/components/layout/NotificationBell").then((module) => module.NotificationBell),
-  { ssr: false, loading: () => <NotificationBellShell /> }
-)
 
 function formatMemberSince(value?: string | null) {
   if (!value) return "Unknown"
@@ -41,6 +32,7 @@ export function Navbar() {
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
   const [badgeQueriesEnabled, setBadgeQueriesEnabled] = useState(false)
   const profileMenuRef = useRef<HTMLDivElement | null>(null)
+  const sidebarPrefetchedRef = useRef(false)
   const router = useRouter()
   const pathname = usePathname()
 
@@ -86,6 +78,11 @@ export function Navbar() {
 
     const handle = scheduleEnablement(() => {
       setBadgeQueriesEnabled(true)
+      if (!sidebarPrefetchedRef.current) {
+        sidebarPrefetchedRef.current = true
+        void prefetchNotificationsSidebarData()
+        void prefetchChatsSidebarData()
+      }
     })
 
     return () => cancelEnablement(handle)

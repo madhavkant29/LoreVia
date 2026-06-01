@@ -5,6 +5,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 const useAuthStoreMock = vi.hoisted(() => vi.fn())
 const usePreferencesStoreMock = vi.hoisted(() => vi.fn())
 const useChatUnreadCountMock = vi.hoisted(() => vi.fn())
+const prefetchChatsSidebarDataMock = vi.hoisted(() => vi.fn())
 
 vi.mock("next/link", () => ({
   default: ({ href, children, ...props }: { href: string; children: ReactNode }) => (
@@ -15,7 +16,7 @@ vi.mock("next/link", () => ({
 }))
 
 vi.mock("@/components/layout/ChatsPanel", () => ({
-  ChatsPanel: () => <aside data-testid="chats-panel" />,
+  ChatsPanel: ({ enabled }: { enabled?: boolean }) => <aside data-enabled={String(enabled)} data-testid="chats-panel" />,
 }))
 
 vi.mock("@/lib/stores/authStore", () => ({
@@ -28,6 +29,10 @@ vi.mock("@/lib/stores/preferencesStore", () => ({
 
 vi.mock("@/lib/hooks/useChatUnreadCount", () => ({
   useChatUnreadCount: useChatUnreadCountMock,
+}))
+
+vi.mock("@/lib/query/sidebarPrefetch", () => ({
+  prefetchChatsSidebarData: prefetchChatsSidebarDataMock,
 }))
 
 import { ChatLauncher } from "./ChatLauncher"
@@ -52,6 +57,7 @@ describe("ChatLauncher", () => {
     useAuthStoreMock.mockReset()
     usePreferencesStoreMock.mockReset()
     useChatUnreadCountMock.mockReset()
+    prefetchChatsSidebarDataMock.mockReset()
     container = null
     root = null
   })
@@ -85,7 +91,7 @@ describe("ChatLauncher", () => {
     }
   })
 
-  it("loads the chats sidebar only after the desktop launcher is opened", async () => {
+  it("mounts the chats sidebar only after the desktop launcher is opened", async () => {
     useAuthStoreMock.mockReturnValue({ user: { id: "user-1" } })
     usePreferencesStoreMock.mockReturnValue({ theme: "light" })
     useChatUnreadCountMock.mockReturnValue({ unreadCount: 0, hydrated: true })
@@ -101,11 +107,14 @@ describe("ChatLauncher", () => {
       toggleButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
       await Promise.resolve()
     })
+    await flushDynamicPanel()
 
-    expect(view.querySelector('[data-testid="chats-panel"]')).not.toBeNull()
+    const panelShell = view.querySelector('aside[aria-hidden="false"]')
+    expect(panelShell).not.toBeNull()
+    expect(panelShell?.className).toContain("translate-x-0")
   })
 
-  it("closes the chats sidebar when clicking outside it", async () => {
+  it("keeps the chats sidebar mounted but hidden when clicking outside it", async () => {
     useAuthStoreMock.mockReturnValue({ user: { id: "user-1" } })
     usePreferencesStoreMock.mockReturnValue({ theme: "light" })
     useChatUnreadCountMock.mockReturnValue({ unreadCount: 0, hydrated: true })
@@ -117,15 +126,18 @@ describe("ChatLauncher", () => {
       toggleButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
       await Promise.resolve()
     })
+    await flushDynamicPanel()
 
-    expect(view.querySelector('[data-testid="chats-panel"]')).not.toBeNull()
+    expect(view.querySelector('aside[aria-hidden="false"]')).not.toBeNull()
 
     await act(async () => {
       document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }))
       await Promise.resolve()
     })
 
-    expect(view.querySelector('[data-testid="chats-panel"]')).toBeNull()
+    const panelShell = view.querySelector('aside[aria-hidden="true"]')
+    expect(panelShell?.getAttribute("aria-hidden")).toBe("true")
+    expect(panelShell?.className).toContain("pointer-events-none")
   })
 
   it("defers unread queries until the launcher is enabled or opened", async () => {
@@ -148,12 +160,28 @@ describe("ChatLauncher", () => {
       toggleButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
       await Promise.resolve()
     })
+    await flushDynamicPanel()
 
     expect(useChatUnreadCountMock).toHaveBeenLastCalledWith({
       enabled: true,
       pollMs: false,
       refreshOnFocus: true,
     })
+  })
+
+  it("prefetches sidebar chat data before opening the launcher", () => {
+    useAuthStoreMock.mockReturnValue({ user: { id: "user-1" } })
+    usePreferencesStoreMock.mockReturnValue({ theme: "light" })
+    useChatUnreadCountMock.mockReturnValue({ unreadCount: 0, hydrated: true })
+
+    const view = renderChatLauncher()
+    const toggleButton = view.querySelector("button")
+
+    act(() => {
+      toggleButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+    })
+
+    expect(prefetchChatsSidebarDataMock).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -167,4 +195,12 @@ function renderChatLauncher({ enabled }: { enabled?: boolean } = {}) {
   })
 
   return container
+}
+
+async function flushDynamicPanel() {
+  await act(async () => {
+    await Promise.resolve()
+    await Promise.resolve()
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+  })
 }

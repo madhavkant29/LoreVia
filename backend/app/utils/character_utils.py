@@ -16,7 +16,7 @@ from difflib import SequenceMatcher
 from typing import Any, cast
 
 import bleach  # type: ignore[import-untyped]
-from sqlalchemy import or_, select
+from sqlalchemy import inspect, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.exc import UnmappedInstanceError
 from sqlalchemy.orm import object_session, selectinload
@@ -32,6 +32,7 @@ from app.engine.character.entity_filters import (
     is_displayable_character_entity,
 )
 from app.engine.character.extractor import extract_characters_and_relationships
+from app.engine.character.extractor import _is_title_only_name
 from app.engine.character.profile_builder import (
     build_character_profile,
     build_description,
@@ -45,14 +46,24 @@ from app.engine.character.profile_builder import (
 from app.models.book import Chapter
 from app.models.character import (
     Character,
+    CharacterAlias,
     CharacterCandidate,
     CharacterDecisionEvent,
     CharacterDuplicateSuggestion,
+    CharacterIdentityAction,
+    CharacterIdentityConstraint,
     CharacterMention,
     CharacterRelationshipCandidate,
     CharacterState,
+    CharacterSuppression,
     CharacterVoiceProfile,
 )
+from app.services.character_identity.constraints import (
+    has_blocking_identity_constraint,
+)
+from app.services.character_identity.merge import add_character_alias, record_identity_action
+from app.services.character_identity.normalization import first_name_token
+from app.services.character_identity.suppression import suppress_candidate
 from app.models.intelligence import (
     BookChunk,
     ChapterSummary,
@@ -333,6 +344,8 @@ def infer_character_trust_tier(char: Character) -> tuple[str, list[str]]:
 
 
 def is_cast_visible_character(char: Character) -> bool:
+    if getattr(char, "merged_into_character_id", None) is not None:
+        return False
     visibility_state, approval_state, _approval_source, _reasons = character_governance(char)
     return visibility_state == CHARACTER_VISIBILITY_VISIBLE and approval_state in {
         CHARACTER_APPROVAL_APPROVED,
@@ -344,6 +357,8 @@ def is_cast_visible_character(char: Character) -> bool:
 def is_displayable_character(char: Character) -> bool:
     name = " ".join((char.name or "").split())
     if not name:
+        return False
+    if getattr(char, "merged_into_character_id", None) is not None:
         return False
     if getattr(char, "is_manual", False):
         return True
@@ -840,6 +855,11 @@ def decide_character_candidate_disposition(
         suppress_reasons.append("fallback_review_candidate_unconfirmed")
     if bool(summary.get("common_single_token")):
         suppress_reasons.append("common_single_token_suppressed")
+    if _is_title_only_name(name or ""):
+        suppress_reasons.append("title_only_fragment_suppressed")
+    family_anchor, family_role = family_role_reference(name or "")
+    if family_anchor and family_role and matched_character_id is None and not visible_review_allowed:
+        suppress_reasons.append("kinship_descriptor_unresolved_suppressed")
     if bool(summary.get("role_only_single_token")) and not visible_review_allowed:
         suppress_reasons.append("role_only_single_token_suppressed")
     if (
@@ -1063,6 +1083,36 @@ def is_protected_character(char: Character | None) -> bool:
     return bool(getattr(char, "is_manual", False) or metadata.get("protected_from_repair"))
 
 
+def serialize_character_alias_record(alias: CharacterAlias) -> dict[str, Any]:
+    return {
+        "id": str(alias.id),
+        "book_id": str(alias.book_id),
+        "character_id": str(alias.character_id),
+        "alias_text": alias.alias_text,
+        "normalized_alias": alias.normalized_alias,
+        "alias_kind": alias.alias_kind,
+        "source": alias.source,
+        "confidence": float(alias.confidence or 0.0),
+        "created_at": alias.created_at,
+    }
+
+
+def serialize_character_alias_records(char: Character) -> list[dict[str, Any]]:
+    try:
+        if "alias_records" in inspect(char).unloaded:
+            return []
+    except Exception:
+        return []
+    records = getattr(char, "alias_records", None) or []
+    return [
+        serialize_character_alias_record(alias)
+        for alias in sorted(
+            records,
+            key=lambda item: (str(item.alias_kind or ""), str(item.alias_text or "").casefold()),
+        )
+    ]
+
+
 def serialize_character_detail(char: Character, *, skip_analysis_metadata: bool = False) -> dict[str, Any]:
     visibility_state, approval_state, approval_source, approval_reason_codes = character_governance(char)
     return {
@@ -1070,6 +1120,7 @@ def serialize_character_detail(char: Character, *, skip_analysis_metadata: bool 
         "book_id": char.book_id,
         "name": char.name,
         "aliases": getattr(char, "aliases", None) or [],
+        "alias_records": serialize_character_alias_records(char),
         "role": getattr(char, "role", None),
         "first_chapter": getattr(char, "first_chapter", 0),
         "trait_state": getattr(char, "trait_state", None) or {},
@@ -1188,6 +1239,7 @@ def serialize_reader_character(
         "id": str(char.id),
         "name": char.name,
         "aliases": char.aliases or [],
+        "alias_records": serialize_character_alias_records(char),
         "role": char.role,
         "first_chapter": char.first_chapter,
         "last_seen_chapter": char.last_seen_chapter,
@@ -1787,6 +1839,8 @@ def serialize_character_duplicate_suggestion(
         "primary_is_curated": bool(shared_evidence.get("primary_is_curated")),
         "secondary_is_curated": bool(shared_evidence.get("secondary_is_curated")),
         "status": suggestion.status,
+        "dismissal_reason": getattr(suggestion, "dismissal_reason", None),
+        "auto_dismissed": bool(getattr(suggestion, "auto_dismissed", False)),
         "created_at": suggestion.created_at,
         "updated_at": suggestion.updated_at,
     }
@@ -1842,13 +1896,20 @@ def build_character_review_payload(
 ) -> dict[str, Any]:
     relationship_candidates = relationship_candidates or []
     serialized_candidates = [serialize_character_candidate(candidate) for candidate in candidates]
+    visible_duplicate_suggestions = [
+        suggestion
+        for suggestion in duplicate_suggestions
+        if str(suggestion.status or "") == CHARACTER_DUPLICATE_PENDING
+        and int(suggestion.confidence or 0) >= 75
+        and not bool(getattr(suggestion, "auto_dismissed", False))
+    ]
     serialized_duplicates = [
         serialize_character_duplicate_suggestion(
             suggestion,
             primary=(character_map or {}).get(suggestion.primary_character_id),
             secondary=(character_map or {}).get(suggestion.secondary_character_id),
         )
-        for suggestion in duplicate_suggestions
+        for suggestion in visible_duplicate_suggestions
     ]
     serialized_relationship_candidates = [
         serialize_character_relationship_candidate(candidate)
@@ -1874,7 +1935,7 @@ def build_character_review_payload(
             ),
             "pending_duplicate_suggestions": sum(
                 1
-                for item in duplicate_suggestions
+                for item in visible_duplicate_suggestions
                 if str(item.status or "") == CHARACTER_DUPLICATE_PENDING
             ),
             "pending_relationship_candidates": sum(
@@ -1883,6 +1944,7 @@ def build_character_review_payload(
                 if str(item.status or "") == CHARACTER_RELATIONSHIP_CANDIDATE_PENDING
             ),
         },
+        "auto_actions_summary": {},
     }
 
 
@@ -1910,7 +1972,11 @@ async def list_character_review_data(
     duplicate_suggestions = (
         await db.execute(
             select(CharacterDuplicateSuggestion)
-            .where(CharacterDuplicateSuggestion.book_id == book_id)
+            .where(
+                CharacterDuplicateSuggestion.book_id == book_id,
+                CharacterDuplicateSuggestion.status == CHARACTER_DUPLICATE_PENDING,
+                CharacterDuplicateSuggestion.confidence >= 75,
+            )
             .order_by(CharacterDuplicateSuggestion.confidence.desc(), CharacterDuplicateSuggestion.created_at)
         )
     ).scalars().all()
@@ -1932,7 +1998,9 @@ async def list_character_review_data(
     ).scalars().all()
     character_rows = (
         await db.execute(
-            select(Character).where(Character.book_id == book_id)
+            select(Character)
+            .options(selectinload(Character.alias_records))
+            .where(Character.book_id == book_id)
         )
     ).scalars().all()
     character_map = {item.id: item for item in character_rows if item.id is not None}
@@ -1940,9 +2008,16 @@ async def list_character_review_data(
         item
         for item in character_rows
         if item.id is not None
+        and getattr(item, "merged_into_character_id", None) is None
         and not is_cast_visible_character(item)
         and character_governance(item)[1] == CHARACTER_APPROVAL_PENDING_REVIEW
     ]
+    identity_actions = (
+        await db.execute(
+            select(CharacterIdentityAction.action_type).where(CharacterIdentityAction.book_id == book_id)
+        )
+    ).scalars().all()
+    auto_actions_summary = dict(Counter(identity_actions))
     decision_events = (
         await db.execute(
             select(CharacterDecisionEvent)
@@ -1951,7 +2026,7 @@ async def list_character_review_data(
             .limit(40)
         )
     ).scalars().all()
-    return build_character_review_payload(
+    payload = build_character_review_payload(
         candidates,
         duplicate_suggestions,
         relationship_candidates,
@@ -1959,6 +2034,8 @@ async def list_character_review_data(
         shadow_characters=shadow_characters,
         decision_events=decision_events,
     )
+    payload["auto_actions_summary"] = auto_actions_summary
+    return payload
 
 
 async def record_character_candidate(
@@ -2601,7 +2678,7 @@ def score_duplicate_characters(
 
     if left_name == right_name:
         reasons.append("Exact name match")
-        score += 0.48
+        score += 0.95
     if left_name in right_aliases or right_name in left_aliases:
         reasons.append("Primary name appears in alias list")
         score += 0.30
@@ -2656,7 +2733,7 @@ def score_duplicate_characters(
         reasons.append("Related embedding similarity")
         score += 0.06
 
-    if score < 0.34:
+    if score < 0.75:
         return None
 
     primary = left if int(left.mention_count or 0) >= int(right.mention_count or 0) else right
@@ -2692,6 +2769,131 @@ async def refresh_character_duplicate_suggestions(
                 .order_by(Character.first_chapter, Character.name)
             )
         ).scalars().all()
+    characters = [
+        character
+        for character in characters
+        if getattr(character, "merged_into_character_id", None) is None
+        and character_governance(character)[0] != CHARACTER_VISIBILITY_NOISE
+        and character_governance(character)[1] != CHARACTER_APPROVAL_REJECTED
+    ]
+
+    exact_groups: dict[str, list[Character]] = defaultdict(list)
+    for character in characters:
+        normalized = normalize_character_name(character.name)
+        if normalized:
+            character.normalized_name = normalized
+            exact_groups[normalized].append(character)
+
+    merged_any = False
+    for exact_matches in exact_groups.values():
+        if len(exact_matches) < 2:
+            continue
+        ordered = sorted(
+            exact_matches,
+            key=lambda item: (int(item.mention_count or 0), -int(item.first_chapter or 0)),
+            reverse=True,
+        )
+        primary = ordered[0]
+        for secondary in ordered[1:]:
+            if is_protected_character(secondary):
+                continue
+            if await has_blocking_identity_constraint(
+                db,
+                book_id=book_id,
+                left_character_id=primary.id,
+                right_character_id=secondary.id,
+            ):
+                continue
+            await merge_characters(db, primary.id, secondary.id, book_id)
+            merged_any = True
+
+    if merged_any:
+        characters = (
+            await db.execute(
+                select(Character)
+                .where(Character.book_id == book_id)
+                .order_by(Character.first_chapter, Character.name)
+            )
+        ).scalars().all()
+        characters = [
+            character
+            for character in characters
+            if getattr(character, "merged_into_character_id", None) is None
+            and character_governance(character)[0] != CHARACTER_VISIBILITY_NOISE
+            and character_governance(character)[1] != CHARACTER_APPROVAL_REJECTED
+        ]
+
+    full_name_by_first: dict[str, list[Character]] = defaultdict(list)
+    single_token_characters: list[Character] = []
+    for character in characters:
+        tokens = normalize_character_name(character.name).split()
+        if len(tokens) == 1:
+            single_token_characters.append(character)
+        elif len(tokens) >= 2:
+            full_name_by_first[tokens[0]].append(character)
+
+    for alias_character in single_token_characters:
+        token = first_name_token(alias_character.name)
+        full_matches = full_name_by_first.get(token) or []
+        if not full_matches or is_protected_character(alias_character):
+            continue
+        target = sorted(full_matches, key=lambda item: int(item.mention_count or 0), reverse=True)[0]
+        if int(target.mention_count or 0) < int(alias_character.mention_count or 0):
+            continue
+        if await has_blocking_identity_constraint(
+            db,
+            book_id=book_id,
+            left_character_id=alias_character.id,
+            right_character_id=target.id,
+        ):
+            continue
+        await add_character_alias(
+            db,
+            character=target,
+            alias_text=alias_character.name,
+            alias_kind="first_name",
+            source="duplicate_refresh",
+            confidence=0.9,
+        )
+        alias_character.merged_into_character_id = target.id
+        alias_character.is_auto_suppressed = True
+        alias_character.suppression_reason = "single_token_first_name_alias"
+        set_character_review_state(
+            alias_character,
+            visibility_state=CHARACTER_VISIBILITY_NOISE,
+            approval_state=CHARACTER_APPROVAL_REJECTED,
+            approval_source=CHARACTER_APPROVAL_SOURCE_DETERMINISTIC_AUTO,
+            reason_codes=["single_token_first_name_alias"],
+            action="character_auto_alias_suppressed",
+            details={"target_character_id": str(target.id)},
+        )
+        mention_rows = (
+            await db.execute(
+                select(CharacterMention).where(
+                    CharacterMention.book_id == book_id,
+                    CharacterMention.matched_character_id == alias_character.id,
+                )
+            )
+        ).scalars().all()
+        for mention in mention_rows:
+            mention.matched_character_id = target.id
+        await suppress_candidate(
+            db,
+            book_id=book_id,
+            character_id=alias_character.id,
+            surface_text=alias_character.name,
+            candidate_kind="alias",
+            reason="single_token_first_name_alias",
+            confidence=0.9,
+        )
+
+    characters = [
+        character
+        for character in characters
+        if getattr(character, "merged_into_character_id", None) is None
+        and character_governance(character)[0] != CHARACTER_VISIBILITY_NOISE
+        and character_governance(character)[1] != CHARACTER_APPROVAL_REJECTED
+    ]
 
     existing_suggestions = (
         await db.execute(
@@ -2717,6 +2919,13 @@ async def refresh_character_duplicate_suggestions(
                 continue
             primary = cast(Character, suggestion["primary"])
             secondary = cast(Character, suggestion["secondary"])
+            if await has_blocking_identity_constraint(
+                db,
+                book_id=book_id,
+                left_character_id=primary.id,
+                right_character_id=secondary.id,
+            ):
+                continue
             pair_key = (str(primary.id), str(secondary.id))
             active_pairs.add(pair_key)
             existing = existing_by_pair.get(pair_key)
@@ -2737,6 +2946,8 @@ async def refresh_character_duplicate_suggestions(
         if pair_key in active_pairs or existing.status == CHARACTER_DUPLICATE_ACCEPTED:
             continue
         existing.status = CHARACTER_DUPLICATE_DISMISSED
+        existing.auto_dismissed = True
+        existing.dismissal_reason = existing.dismissal_reason or "duplicate_score_below_threshold"
 
     await db.flush()
     return (
@@ -3730,6 +3941,7 @@ async def merge_characters(
         _manual_character_description_value(secondary.trait_state),
     )
     primary.aliases = merged["aliases"]
+    primary.normalized_name = normalize_character_name(primary.name) or None
     primary.role = merged["role"]
     primary.first_chapter = merged["first_chapter"]
     primary.last_seen_chapter = merged["last_seen_chapter"]
@@ -3810,6 +4022,108 @@ async def merge_characters(
             await db.delete(rel)
 
     await _merge_character_references(db, primary=primary, secondary=secondary, book_id=book_id)
+    mention_rows = (
+        await db.execute(
+            select(CharacterMention).where(
+                CharacterMention.book_id == book_id,
+                CharacterMention.matched_character_id == secondary.id,
+            )
+        )
+    ).scalars().all()
+    for mention in mention_rows:
+        mention.matched_character_id = primary.id
+
+    alias_rows = (
+        await db.execute(
+            select(CharacterAlias).where(
+                CharacterAlias.book_id == book_id,
+                CharacterAlias.character_id == secondary.id,
+            )
+        )
+    ).scalars().all()
+    existing_primary_aliases = {
+        normalize_character_name(alias.alias_text)
+        for alias in (
+            await db.execute(
+                select(CharacterAlias).where(
+                    CharacterAlias.book_id == book_id,
+                    CharacterAlias.character_id == primary.id,
+                )
+            )
+        ).scalars().all()
+    }
+    for alias in alias_rows:
+        if alias.normalized_alias in existing_primary_aliases:
+            await db.delete(alias)
+        else:
+            alias.character_id = primary.id
+            existing_primary_aliases.add(alias.normalized_alias)
+
+    suppression_rows = (
+        await db.execute(
+            select(CharacterSuppression).where(
+                CharacterSuppression.book_id == book_id,
+                CharacterSuppression.character_id == secondary.id,
+            )
+        )
+    ).scalars().all()
+    for suppression in suppression_rows:
+        suppression.character_id = primary.id
+
+    constraint_rows = (
+        await db.execute(
+            select(CharacterIdentityConstraint).where(
+                CharacterIdentityConstraint.book_id == book_id,
+                or_(
+                    CharacterIdentityConstraint.left_character_id == secondary.id,
+                    CharacterIdentityConstraint.right_character_id == secondary.id,
+                ),
+            )
+        )
+    ).scalars().all()
+    for constraint in constraint_rows:
+        if constraint.left_character_id == secondary.id:
+            constraint.left_character_id = primary.id
+            constraint.left_text = primary.name
+        if constraint.right_character_id == secondary.id:
+            constraint.right_character_id = primary.id
+            constraint.right_text = primary.name
+        if constraint.left_character_id == constraint.right_character_id:
+            await db.delete(constraint)
+
+    suggestion_rows = (
+        await db.execute(
+            select(CharacterDuplicateSuggestion).where(
+                CharacterDuplicateSuggestion.book_id == book_id,
+                or_(
+                    CharacterDuplicateSuggestion.primary_character_id == secondary.id,
+                    CharacterDuplicateSuggestion.secondary_character_id == secondary.id,
+                ),
+            )
+        )
+    ).scalars().all()
+    for suggestion in suggestion_rows:
+        next_primary_id = primary.id if suggestion.primary_character_id == secondary.id else suggestion.primary_character_id
+        next_secondary_id = primary.id if suggestion.secondary_character_id == secondary.id else suggestion.secondary_character_id
+        if next_primary_id == next_secondary_id:
+            suggestion.status = CHARACTER_DUPLICATE_ACCEPTED
+            continue
+        existing_conflict = (
+            await db.execute(
+                select(CharacterDuplicateSuggestion).where(
+                    CharacterDuplicateSuggestion.book_id == book_id,
+                    CharacterDuplicateSuggestion.id != suggestion.id,
+                    CharacterDuplicateSuggestion.primary_character_id == next_primary_id,
+                    CharacterDuplicateSuggestion.secondary_character_id == next_secondary_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if existing_conflict is not None:
+            await db.delete(suggestion)
+            continue
+        suggestion.primary_character_id = next_primary_id
+        suggestion.secondary_character_id = next_secondary_id
+
     await _dedupe_relationships(db, book_id)
     if primary_approval == CHARACTER_APPROVAL_PROTECTED or secondary_approval == CHARACTER_APPROVAL_PROTECTED:
         merged_visibility = CHARACTER_VISIBILITY_VISIBLE
@@ -3832,7 +4146,36 @@ async def merge_characters(
         action="character_merged",
         details={"secondary_character_id": str(secondary.id)},
     )
-    await db.delete(secondary)
+    secondary.merged_into_character_id = primary.id
+    secondary.normalized_name = None
+    secondary.is_auto_suppressed = True
+    secondary.suppression_reason = "merged_character_record"
+    set_character_review_state(
+        secondary,
+        visibility_state=CHARACTER_VISIBILITY_NOISE,
+        approval_state=CHARACTER_APPROVAL_REJECTED,
+        approval_source=CHARACTER_APPROVAL_SOURCE_DETERMINISTIC_AUTO,
+        reason_codes=["merged_into_character", *secondary_reason_codes],
+        action="character_soft_merged",
+        details={"primary_character_id": str(primary.id)},
+    )
+    await record_identity_action(
+        db,
+        book_id=book_id,
+        action_type="auto_merge",
+        source_character_id=secondary.id,
+        target_character_id=primary.id,
+        surface_text=secondary.name,
+        confidence=0.95,
+        reason="merged_character_record",
+        reversible=True,
+        reversible_data={
+            "secondary_name": secondary.name,
+            "secondary_aliases": secondary.aliases or [],
+            "secondary_visibility_state": secondary_visibility,
+            "secondary_approval_state": secondary_approval,
+        },
+    )
     await db.flush()
     update_character_classification(primary)
     return primary
