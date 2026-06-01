@@ -213,6 +213,37 @@ def test_can_auto_save_character_blocks_first_pass_single_token_even_when_verifi
     assert _should_update_existing_character(entity) is True
 
 
+def test_can_auto_save_character_allows_strong_deterministic_fallback_single_token_with_full_name_alias():
+    entity = {
+        "name": "Gregor",
+        "aliases": ["Gregor Samsa"],
+        "entity_type": "person",
+        "confidence": 0.94,
+        "evidence": {
+            "mention_count": 3,
+            "strong_mention_count": 2,
+            "has_dialogue_or_action": True,
+            "has_physical_description": False,
+            "appears_multiple_times": True,
+            "deterministic_fallback": True,
+            "cluster_names": ["Gregor", "Gregor Samsa"],
+            "verifier": {
+                "local": {
+                    "person_ner_mentions": 0,
+                    "mid_sentence_mentions": 1,
+                },
+                "final": {
+                    "confidence_band": "accept",
+                    "is_person_like": True,
+                    "reasons": [],
+                }
+            },
+        },
+    }
+
+    assert _can_auto_save_character(entity) is True
+
+
 def test_should_update_existing_character_allows_borderline_but_supported_updates():
     entity = {
         "name": "Houko-chan",

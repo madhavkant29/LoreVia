@@ -775,6 +775,8 @@ def can_auto_persist_character_candidate(
     evidence: Mapping[str, Any] | None = None,
 ) -> bool:
     evidence_map = dict(evidence or {})
+    cluster_names = clean_string_list(evidence_map.get("cluster_names") if isinstance(evidence_map.get("cluster_names"), list) else [])
+    alias_names = [str(alias).strip() for alias in (aliases or []) if str(alias).strip()]
     summary = build_character_dossier_summary(
         name=name,
         aliases=aliases,
@@ -797,11 +799,21 @@ def can_auto_persist_character_candidate(
     strong_mentions = int(evidence_map.get("strong_mention_count") or 0)
     has_physical_description = bool(evidence_map.get("has_physical_description"))
     deterministic_fallback = bool(evidence_map.get("deterministic_fallback"))
+    full_name_alias_support = bool(
+        any(len(entity_words(alias)) >= 2 for alias in [*alias_names, *cluster_names])
+    )
     shared_identity_support = bool(
         person_ner_support >= 1 or alias_link_support >= 1 or full_name_link_support >= 1
     )
 
     if single_token:
+        if deterministic_fallback and full_name_alias_support:
+            return bool(
+                mention_count >= 3
+                and strong_mentions >= 2
+                and dialogue_support >= 1
+                and shared_identity_support
+            )
         return bool(
             llm_confirmed
             and mention_count >= 3
