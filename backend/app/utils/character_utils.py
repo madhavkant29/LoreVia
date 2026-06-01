@@ -62,7 +62,7 @@ from app.services.character_identity.constraints import (
     has_blocking_identity_constraint,
 )
 from app.services.character_identity.merge import add_character_alias, record_identity_action
-from app.services.character_identity.normalization import first_name_token
+from app.services.character_identity.normalization import assign_unique_active_normalized_names, first_name_token
 from app.services.character_identity.suppression import suppress_candidate
 from app.models.intelligence import (
     BookChunk,
@@ -576,7 +576,12 @@ def build_character_dossier_summary(
     resolved_reason_codes = _clean_reason_code_values(reason_codes or evidence_map.get("resolver_reasons") or [])
     resolver_ambiguity_count = int(
         resolver_status in {"ambiguous", "matched_needs_review", "held_for_review"}
-        or any("ambiguous" in reason.casefold() or "needs_review" in reason.casefold() for reason in resolved_reason_codes)
+        or any(
+            "conflict" in reason.casefold()
+            or "needs_review" in reason.casefold()
+            or reason.casefold() in {"ambiguous_identity_match", "ambiguous_roster_match"}
+            for reason in resolved_reason_codes
+        )
     )
     alias_link_support = int(bool(merged_aliases or len(cluster_names) > 1))
     full_name_alias_support = int(any(len(entity_words(alias)) >= 2 for alias in [*merged_aliases, *cluster_names]))
@@ -600,6 +605,19 @@ def build_character_dossier_summary(
             or not single_token
         )
     )
+    first_pass_full_name_eligible = bool(
+        not single_token
+        and final_band in {"", "accept"}
+        and mention_count >= 2
+        and strong_mention_count >= 1
+        and non_person_signal_count <= 0
+        and resolver_ambiguity_count <= 0
+        and (
+            person_ner_support >= 1
+            or dialogue_attribution_support >= 1
+            or bool(evidence_map.get("has_physical_description"))
+        )
+    )
 
     strict_auto_reason_codes: list[str] = []
     if role_only_single_token:
@@ -618,7 +636,7 @@ def build_character_dossier_summary(
 
     strict_auto_eligible = False
     if clean_name:
-        if strong_fallback_support:
+        if strong_fallback_support or first_pass_full_name_eligible:
             strict_auto_eligible = True
         elif not strict_auto_reason_codes:
             if single_token:
@@ -658,6 +676,7 @@ def build_character_dossier_summary(
         "resolver_ambiguity_count": resolver_ambiguity_count,
         "conflict_signal_count": conflict_signal_count,
         "non_person_signal_count": non_person_signal_count,
+        "first_pass_full_name_eligible": first_pass_full_name_eligible,
         "strict_auto_eligible": strict_auto_eligible,
         "strict_auto_reason_codes": dedupe_preserve_order(strict_auto_reason_codes),
         "summary_reason_codes": dedupe_preserve_order([*resolved_reason_codes, *strict_auto_reason_codes]),
@@ -791,6 +810,9 @@ def can_auto_persist_character_candidate(
             and dialogue_support >= 1
             and shared_identity_support
         )
+
+    if bool(summary.get("first_pass_full_name_eligible")):
+        return True
 
     if llm_confirmed:
         return bool(
@@ -1422,6 +1444,16 @@ def _character_entity_matches_cluster(candidate: Mapping[str, Any], cluster: Map
     cluster_aliases = _entity_aliases(cluster)
     if not candidate_name or not cluster_name:
         return False
+    candidate_title = _leading_title(candidate_name)
+    cluster_title = _leading_title(cluster_name)
+    if (candidate_title or cluster_title) and partition_identity_key(candidate_name) != partition_identity_key(cluster_name):
+        return False
+    candidate_family_role = family_role_reference(candidate_name)[1]
+    cluster_family_role = family_role_reference(cluster_name)[1]
+    if candidate_family_role or cluster_family_role:
+        return normalize_character_name(candidate_name) == normalize_character_name(cluster_name)
+    if is_role_only_character_name(candidate_name) or is_role_only_character_name(cluster_name):
+        return normalize_character_name(candidate_name) == normalize_character_name(cluster_name)
     if names_equivalent(candidate_name, candidate_aliases, cluster_name, cluster_aliases):
         return True
 
@@ -1573,10 +1605,10 @@ def cluster_character_entities(entities: Sequence[Mapping[str, Any]]) -> list[di
             strong_mentions += int(item_evidence.get("strong_mention_count") or 0)
             passages.extend(clean_string_list(item_evidence.get("snippets") if isinstance(item_evidence.get("snippets"), list) else []))
 
-        primary["aliases"] = [
-            alias for alias in merge_list_values(cluster_aliases, cluster_names)
-            if normalize_character_name(alias) != normalize_character_name(primary.get("name"))
-        ]
+        primary["aliases"] = filter_character_identity_aliases(
+            primary.get("name"),
+            merge_list_values(cluster_aliases, cluster_names),
+        )
         primary["traits"] = merged_traits
         primary["confidence"] = max(float(item.get("confidence") or 0.0) for item in cluster)
         evidence.update(
@@ -1683,12 +1715,13 @@ def resolve_character_reference_from_roster(
     for character in characters:
         aliases = clean_string_list(character.aliases or [])
         score = 0
-        if names_equivalent(candidate_name, [], character.name, aliases):
-            score += 90
-        elif normalized_candidate == normalize_character_name(character.name):
-            score += 85
-        elif normalized_candidate and normalized_candidate in {normalize_character_name(alias) for alias in aliases}:
-            score += 82
+        if not candidate_role:
+            if names_equivalent(candidate_name, [], character.name, aliases):
+                score += 90
+            elif normalized_candidate == normalize_character_name(character.name):
+                score += 85
+            elif normalized_candidate and normalized_candidate in {normalize_character_name(alias) for alias in aliases}:
+                score += 82
 
         joined_names = [character.name, *aliases]
         if context_text and any(
@@ -2781,7 +2814,6 @@ async def refresh_character_duplicate_suggestions(
     for character in characters:
         normalized = normalize_character_name(character.name)
         if normalized:
-            character.normalized_name = normalized
             exact_groups[normalized].append(character)
 
     merged_any = False
@@ -2822,6 +2854,7 @@ async def refresh_character_duplicate_suggestions(
             and character_governance(character)[0] != CHARACTER_VISIBILITY_NOISE
             and character_governance(character)[1] != CHARACTER_APPROVAL_REJECTED
         ]
+    assign_unique_active_normalized_names(characters)
 
     full_name_by_first: dict[str, list[Character]] = defaultdict(list)
     single_token_characters: list[Character] = []
@@ -3000,6 +3033,29 @@ def has_conflicting_title_identity(name1: str | None, name2: str | None) -> bool
     left_group = _TITLE_IDENTITY_GROUPS.get(_leading_title(name1))
     right_group = _TITLE_IDENTITY_GROUPS.get(_leading_title(name2))
     return bool(left_group and right_group and left_group != right_group)
+
+
+def filter_character_identity_aliases(name: str | None, aliases: Sequence[object] | None) -> list[str]:
+    canonical_tokens = _name_tokens(name)
+    if not canonical_tokens:
+        return []
+
+    filtered: list[str] = []
+    for alias in clean_string_list([str(item) for item in aliases or []]):
+        alias_tokens = _name_tokens(alias)
+        if not alias_tokens or alias_tokens == canonical_tokens:
+            continue
+        if family_role_reference(alias)[1] or is_role_only_character_name(alias):
+            continue
+        if _leading_title(alias) and partition_identity_key(alias) != partition_identity_key(name):
+            continue
+        if len(alias_tokens) == 1:
+            if len(canonical_tokens) < 2 or alias_tokens[0] != canonical_tokens[0]:
+                continue
+        elif set(alias_tokens) != set(canonical_tokens):
+            continue
+        filtered.append(alias)
+    return filtered
 
 
 def _name_tokens(name: str | None) -> list[str]:

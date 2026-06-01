@@ -9,7 +9,7 @@ from app.models.character import Character, CharacterCandidate, CharacterRelatio
 from app.models.intelligence import CharacterRelationship, Notification
 from app.models.user import User
 from app.workers.consumers import extraction_consumer
-from app.workers.consumers.extraction_consumer import _process_chapter, process_book
+from app.workers.consumers.extraction_consumer import _claim_book_completion, _process_chapter, process_book
 
 
 def _embedding_for(text_count: int) -> list[list[float]]:
@@ -23,6 +23,40 @@ def _bind_worker_session(monkeypatch, db) -> None:
     worker_session_factory = async_sessionmaker(db.bind, class_=AsyncSession, expire_on_commit=False)
     monkeypatch.setattr(extraction_consumer, "AsyncSessionLocal", worker_session_factory)
     monkeypatch.setitem(process_book.__globals__, "AsyncSessionLocal", worker_session_factory)
+
+
+@pytest.mark.asyncio
+async def test_claim_book_completion_skips_already_ready_book(db):
+    user = User(email="completion-claim@lorevia.app", username="completion-claim", password_hash="hash")
+    db.add(user)
+    await db.flush()
+    book = Book(
+        user_id=user.id,
+        title="Completion Claim",
+        format="pdf",
+        s3_key="books/completion-claim.pdf",
+        status="processing",
+        total_chapters=1,
+    )
+    db.add(book)
+    await db.flush()
+    db.add(
+        Chapter(
+            book_id=book.id,
+            number=1,
+            title="Chapter 1",
+            s3_key="books/completion-claim/chapter-1.txt",
+            processed=True,
+        )
+    )
+    await db.flush()
+
+    assert await _claim_book_completion(db, book.id) is True
+
+    book.status = "ready"
+    await db.flush()
+
+    assert await _claim_book_completion(db, book.id) is False
 
 
 @pytest.mark.asyncio
@@ -604,7 +638,7 @@ async def test_upload_pipeline_routes_low_confidence_new_character_into_review_q
 
 
 @pytest.mark.asyncio
-async def test_upload_pipeline_keeps_first_pass_locally_accepted_full_name_out_of_saved_cast(client, db, auth_headers, monkeypatch):
+async def test_upload_pipeline_promotes_grounded_first_pass_full_name(client, db, auth_headers, monkeypatch):
     captured_book_tasks: list[dict] = []
 
     class _ProcessBookTask:
@@ -694,10 +728,10 @@ async def test_upload_pipeline_keeps_first_pass_locally_accepted_full_name_out_o
         await db.execute(select(CharacterCandidate).where(CharacterCandidate.book_id == book_id).order_by(CharacterCandidate.proposed_name.asc()))
     ).scalars().all()
 
-    assert persisted_characters == []
+    assert [character.name for character in persisted_characters] == ["Anna Sergeyevna"]
     assert [candidate.proposed_name for candidate in candidate_rows] == ["Anna Sergeyevna"]
-    assert candidate_rows[0].status == "pending"
-    assert "initial_auto_persist_requires_stronger_grounding" in (candidate_rows[0].reason_codes or [])
+    assert candidate_rows[0].status == "promoted"
+    assert candidate_rows[0].matched_character_id == persisted_characters[0].id
 
 
 @pytest.mark.asyncio
@@ -908,13 +942,16 @@ async def test_upload_pipeline_collapses_same_batch_full_name_and_short_name_dup
         await db.execute(select(CharacterCandidate).where(CharacterCandidate.book_id == book_id).order_by(CharacterCandidate.proposed_name.asc()))
     ).scalars().all()
 
-    assert persisted_characters == []
+    assert [character.name for character in persisted_characters] == ["Gregor Samsa"]
+    assert persisted_characters[0].aliases == ["Gregor"]
     assert relationships == []
     assert [candidate.proposed_name for candidate in candidate_rows] == ["Gregor", "Gregor Samsa", "Grete"]
     candidate_statuses = {candidate.proposed_name: candidate.status for candidate in candidate_rows}
-    assert candidate_statuses == {"Gregor": "pending", "Gregor Samsa": "pending", "Grete": "suppressed"}
+    assert candidate_statuses == {"Gregor": "accepted", "Gregor Samsa": "promoted", "Grete": "suppressed"}
     gregor_samsa_candidate = next(candidate for candidate in candidate_rows if candidate.proposed_name == "Gregor Samsa")
-    assert "candidate_dossier_needs_review" in (gregor_samsa_candidate.reason_codes or [])
+    assert gregor_samsa_candidate.matched_character_id == persisted_characters[0].id
+    gregor_candidate = next(candidate for candidate in candidate_rows if candidate.proposed_name == "Gregor")
+    assert gregor_candidate.matched_character_id == persisted_characters[0].id
     grete_candidate = next(candidate for candidate in candidate_rows if candidate.proposed_name == "Grete")
     assert "weak_single_token_suppressed" in (grete_candidate.reason_codes or [])
     assert len(relationship_candidates) == 1

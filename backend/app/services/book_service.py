@@ -62,6 +62,7 @@ async def create_editor_project(
         source_kind="manual",
         is_editor_project=True,
         writer_workspace=workspace,
+        total_chapters=0,
     )
     db.add(book)
     await db.flush()

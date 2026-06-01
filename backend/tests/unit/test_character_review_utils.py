@@ -1,6 +1,4 @@
 import uuid
-from typing import cast
-
 import numpy as np
 import pytest
 from sqlalchemy import select
@@ -70,7 +68,7 @@ def test_disposition_gate_allows_llm_confirmed_person_into_review():
     assert disposition.visible_review_allowed is True
 
 
-def test_auto_persist_gate_blocks_first_pass_full_name_without_strong_identity_grounding():
+def test_auto_persist_gate_allows_grounded_first_pass_full_name():
     assert can_auto_persist_character_candidate(
         name="Anna Sergeyevna",
         aliases=[],
@@ -91,7 +89,32 @@ def test_auto_persist_gate_blocks_first_pass_full_name_without_strong_identity_g
                 }
             },
         },
-    ) is False
+    ) is True
+
+
+def test_auto_persist_gate_allows_grounded_full_name_with_soft_multi_token_ambiguity():
+    assert can_auto_persist_character_candidate(
+        name="Gregor Samsa",
+        aliases=[],
+        evidence={
+            "mention_count": 77,
+            "strong_mention_count": 38,
+            "has_dialogue_or_action": True,
+            "has_physical_description": True,
+            "verifier": {
+                "local": {
+                    "person_ner_mentions": 1,
+                    "non_person_ner_mentions": 0,
+                    "mid_sentence_mentions": 48,
+                },
+                "final": {
+                    "confidence_band": "accept",
+                    "is_person_like": True,
+                    "reasons": ["llm_confirmed_person", "ambiguous_multi_token_mention"],
+                },
+            },
+        },
+    ) is True
 
 
 def test_auto_persist_gate_allows_obvious_fallback_name_with_shared_identity_support():
@@ -179,7 +202,7 @@ def test_build_character_roster_snapshot_marks_manual_anchors():
     assert snapshot[0]["is_manual"] is True
 
 
-def test_score_duplicate_characters_returns_backend_review_signal():
+def test_score_duplicate_characters_hides_first_name_alias_pair_below_review_threshold():
     primary = Character(
         id=uuid.UUID("00000000-0000-0000-0000-000000000001"),
         book_id=uuid.UUID("00000000-0000-0000-0000-000000000010"),
@@ -201,14 +224,10 @@ def test_score_duplicate_characters_returns_backend_review_signal():
 
     suggestion = score_duplicate_characters(primary, secondary)
 
-    assert suggestion is not None
-    assert suggestion["primary"].name == "Tsubasa Hanekawa"
-    assert suggestion["secondary"].name == "Tsubasa"
-    assert suggestion["confidence"] >= 34
-    assert "Primary name appears in alias list" in suggestion["reasons"]
+    assert suggestion is None
 
 
-def test_score_duplicate_characters_boosts_shared_grounded_cluster_evidence():
+def test_score_duplicate_characters_hides_descriptor_pair_below_review_threshold():
     primary = Character(
         id=uuid.UUID("00000000-0000-0000-0000-000000000011"),
         book_id=uuid.UUID("00000000-0000-0000-0000-000000000010"),
@@ -237,9 +256,7 @@ def test_score_duplicate_characters_boosts_shared_grounded_cluster_evidence():
         right_evidence={"cluster_keys": {"grete"}, "chapter_numbers": {1, 2}},
     )
 
-    assert suggestion is not None
-    assert "Shared mention clusters" in suggestion["reasons"]
-    assert suggestion["shared_evidence"]["shared_cluster_keys"] == ["grete"]
+    assert suggestion is None
 
 
 def test_score_duplicate_characters_uses_embedding_similarity_signal():
@@ -256,7 +273,7 @@ def test_score_duplicate_characters_uses_embedding_similarity_signal():
     secondary = Character(
         id=uuid.UUID("00000000-0000-0000-0000-000000000022"),
         book_id=primary.book_id,
-        name="Anna",
+        name="Anna Sergeyevna",
         aliases=["Anna Sergeyevna"],
         role="sc",
         first_chapter=2,
@@ -285,7 +302,7 @@ def test_score_duplicate_characters_accepts_numpy_embeddings():
     secondary = Character(
         id=uuid.UUID("00000000-0000-0000-0000-000000000032"),
         book_id=primary.book_id,
-        name="Anna",
+        name="Anna Sergeyevna",
         aliases=["Anna Sergeyevna"],
         role="sc",
         first_chapter=2,
@@ -551,15 +568,14 @@ def test_build_character_review_payload_surfaces_structured_candidate_and_duplic
             "snippets": ["Grete brings food to Gregor."],
         },
     )
-    suggestion = score_duplicate_characters(primary, secondary)
     duplicate = CharacterDuplicateSuggestion(
         id=uuid.UUID("00000000-0000-0000-0000-000000000204"),
         book_id=primary.book_id,
         primary_character_id=primary.id,
         secondary_character_id=secondary.id,
-        confidence=cast(dict, suggestion)["confidence"],
-        reasons=cast(dict, suggestion)["reasons"],
-        shared_evidence=cast(dict, suggestion)["shared_evidence"],
+        confidence=88,
+        reasons=["Shared mention clusters"],
+        shared_evidence={"shared_chapters": [1]},
         status="pending",
     )
     decision_event = CharacterDecisionEvent(

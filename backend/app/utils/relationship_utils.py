@@ -7,7 +7,7 @@ from math import inf
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.character import CharacterRelationshipCandidate
+from app.models.character import Character, CharacterRelationshipCandidate
 from app.models.intelligence import CharacterRelationship
 
 
@@ -342,8 +342,8 @@ async def upsert_relationship_timeline_state(
                 CharacterRelationship.edited_by_author == True,
             ).limit(1)
         )
-        if _existing_curated.scalar_one_or_none() is not None:
-            curated = _existing_curated.scalar_one_or_none()
+        curated = _existing_curated.scalar_one_or_none()
+        if curated is not None:
             return curated, False
         target_relationship = CharacterRelationship(
             book_id=book_id,
@@ -485,4 +485,124 @@ async def repair_relationship_timelines(
         "relationships_deleted": removed_total,
         "relationships_remaining": normalized_rows,
         "relationship_candidates_updated": updated_candidates,
+    }
+
+
+async def reconcile_extracted_relationships(
+    db: AsyncSession,
+    *,
+    book_id: uuid.UUID,
+) -> dict[str, int]:
+    from app.engine.character.deduplicator import resolve_character_match_ids
+    from app.utils.character_utils import (
+        filter_character_identity_aliases,
+        family_role_reference,
+        is_cast_visible_character,
+        is_protected_character,
+        resolve_character_reference_from_roster,
+    )
+
+    characters = (
+        await db.execute(select(Character).where(Character.book_id == book_id))
+    ).scalars().all()
+    sanitized_aliases = 0
+    for character in characters:
+        if is_protected_character(character):
+            continue
+        aliases = filter_character_identity_aliases(character.name, character.aliases or [])
+        if aliases != list(character.aliases or []):
+            character.aliases = aliases
+            sanitized_aliases += 1
+
+    visible_characters = [character for character in characters if is_cast_visible_character(character)]
+    visible_ids = {character.id for character in visible_characters}
+    roster = [(character.id, character.name, character.aliases or []) for character in visible_characters]
+
+    removed_hidden_relationships = 0
+    relationship_rows = (
+        await db.execute(select(CharacterRelationship).where(CharacterRelationship.book_id == book_id))
+    ).scalars().all()
+    for relationship in relationship_rows:
+        if getattr(relationship, "edited_by_author", False):
+            continue
+        if relationship.character_a_id in visible_ids and relationship.character_b_id in visible_ids:
+            continue
+        await db.delete(relationship)
+        removed_hidden_relationships += 1
+
+    def _resolve(raw_name: str, description: str | None) -> list[uuid.UUID]:
+        candidate = clean_relationship_text(raw_name)
+        if not candidate:
+            return []
+        if not family_role_reference(candidate)[1]:
+            matches = resolve_character_match_ids(candidate, [], roster)
+            if matches:
+                return matches
+        context_text = clean_relationship_text(description)
+        resolved = resolve_character_reference_from_roster(
+            visible_characters,
+            candidate,
+            context_text=context_text,
+        )
+        return [resolved.id] if resolved is not None else []
+
+    candidates = (
+        await db.execute(
+            select(CharacterRelationshipCandidate).where(
+                CharacterRelationshipCandidate.book_id == book_id,
+                CharacterRelationshipCandidate.status.in_(("pending", "suppressed", "accepted")),
+            )
+        )
+    ).scalars().all()
+    reconciled_candidates = 0
+    demoted_candidates = 0
+    for candidate in candidates:
+        was_auto_reconciled = (
+            candidate.status == "accepted"
+            and "relationship_auto_reconciled" in set(candidate.reason_codes or [])
+        )
+        if candidate.status == "accepted" and not was_auto_reconciled:
+            continue
+        left_matches = _resolve(candidate.raw_character_a, candidate.description)
+        right_matches = _resolve(candidate.raw_character_b, candidate.description)
+        if len(left_matches) != 1 or len(right_matches) != 1 or left_matches[0] == right_matches[0]:
+            if was_auto_reconciled:
+                candidate.matched_character_a_id = None
+                candidate.matched_character_b_id = None
+                candidate.status = "suppressed"
+                candidate.reason_codes = ["relationship_unresolved"]
+                evidence = dict(candidate.evidence or {})
+                evidence["resolution"] = "unresolved_after_reconcile"
+                evidence["relationship_auto_reconciled"] = False
+                candidate.evidence = evidence
+                demoted_candidates += 1
+            continue
+        relationship, _created = await upsert_relationship_timeline_state(
+            db,
+            book_id=book_id,
+            character_a_id=left_matches[0],
+            character_b_id=right_matches[0],
+            rel_type=candidate.rel_type or "connection",
+            sentiment=candidate.sentiment,
+            description=candidate.description,
+            from_chapter=int(candidate.chapter_number or 1),
+        )
+        candidate.matched_character_a_id = relationship.character_a_id
+        candidate.matched_character_b_id = relationship.character_b_id
+        candidate.status = "accepted"
+        candidate.reason_codes = ["relationship_auto_reconciled"]
+        evidence = dict(candidate.evidence or {})
+        evidence["pair_key"] = [str(relationship.character_a_id), str(relationship.character_b_id)]
+        evidence["resolution"] = "resolved:resolved"
+        evidence["relationship_auto_reconciled"] = True
+        candidate.evidence = evidence
+        reconciled_candidates += 1
+
+    timeline_result = await repair_relationship_timelines(db, book_id=book_id)
+    return {
+        "aliases_sanitized": sanitized_aliases,
+        "hidden_relationships_removed": removed_hidden_relationships,
+        "relationship_candidates_reconciled": reconciled_candidates,
+        "relationship_candidates_demoted": demoted_candidates,
+        "timeline_pairs_repaired": int(timeline_result.get("pairs_repaired") or 0),
     }

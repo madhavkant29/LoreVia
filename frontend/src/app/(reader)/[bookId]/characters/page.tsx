@@ -12,6 +12,7 @@ import { useBookDetail } from "@/lib/hooks/useBookDetail"
 import { asQueryKey, bookCacheKey, readerCacheKey } from "@/lib/query/cacheKeys"
 import { readerApi } from "@/lib/api/reader"
 import { saveContextualVaultNote } from "@/lib/utils/notes"
+import { FirstTimeTooltip } from "@/components/tooltips/FirstTimeTooltip"
 import type { Book } from "@/types/book"
 import type {
   Character,
@@ -2155,6 +2156,12 @@ export default function CharactersPage() {
 
   return (
     <div className={`min-h-screen transition-colors ${atmosphere}`}>
+      <FirstTimeTooltip
+        storageKey="lorevia-character-bible-first-visit"
+        title="💡 Tip: Merge Duplicate Characters"
+        message="You can merge duplicate characters by clicking on the 3 dots menu (⋮) next to a character, then selecting 'Merge with another character' and choosing the second character you want to merge with."
+        isDark={isDark}
+      />
       <div className="mx-auto max-w-[1500px] px-4 pb-8 pt-5 sm:px-6 lg:px-8">
         <button
           onClick={() => router.back()}

@@ -18,13 +18,14 @@ from app.models.character import (
     CharacterDuplicateSuggestion,
     CharacterIdentityAction,
     CharacterIdentityConstraint,
+    CharacterMention,
     CharacterSuppression,
 )
 from app.models.user import User
 from app.schemas.character import CharacterAliasBody
 from app.services.character_identity.classification import CandidateKind, classify_candidate_kind
 from app.services.character_identity.repair import CharacterIdentityRepairJob
-from app.services.character_identity.resolver import resolve_character_mention
+from app.services.character_identity.resolver import reconcile_pending_first_name_alias_candidates, resolve_character_mention
 from app.services.character_identity.scoring import score_identity_evidence
 from app.utils.character_utils import score_duplicate_characters
 
@@ -384,6 +385,13 @@ async def test_identity_resolver_suppresses_noise_and_resolves_aliases(db):
         surface_text="Gregor Samsa",
         evidence={},
     )
+    title_result = await resolve_character_mention(
+        db,
+        book_id=book.id,
+        chapter_number=1,
+        surface_text="Mr. Samsa",
+        evidence={},
+    )
     await db.flush()
 
     assert fragment_result.action == "auto_suppress"
@@ -392,6 +400,8 @@ async def test_identity_resolver_suppresses_noise_and_resolves_aliases(db):
     assert alias_result.target_character_id == full_name.id
     assert exact_result.action == "auto_merge"
     assert exact_result.target_character_id == full_name.id
+    assert title_result.action == "needs_review"
+    assert title_result.target_character_id is None
     assert (
         await db.execute(
             select(CharacterSuppression).where(
@@ -409,3 +419,104 @@ async def test_identity_resolver_suppresses_noise_and_resolves_aliases(db):
             )
         )
     ).scalar_one_or_none() is not None
+
+
+@pytest.mark.asyncio
+async def test_identity_resolver_does_not_merge_into_rejected_hidden_character(db):
+    user = User(email="identity-hidden@example.com", username="identity-hidden", password_hash="hash")
+    db.add(user)
+    await db.flush()
+    book = Book(
+        user_id=user.id,
+        title="Identity Hidden",
+        format="pdf",
+        s3_key="books/identity-hidden.pdf",
+        status="ready",
+        mode="author",
+        total_chapters=1,
+    )
+    db.add(book)
+    await db.flush()
+    db.add(
+        Character(
+            book_id=book.id,
+            name="Samsa",
+            normalized_name="samsa",
+            aliases=[],
+            first_chapter=1,
+            visibility_state="noise",
+            approval_state="rejected",
+        )
+    )
+    await db.flush()
+
+    result = await resolve_character_mention(
+        db,
+        book_id=book.id,
+        chapter_number=1,
+        surface_text="Samsa",
+        evidence={},
+    )
+
+    assert result.action == "needs_review"
+    assert result.target_character_id is None
+
+
+@pytest.mark.asyncio
+async def test_book_scope_alias_reconcile_attaches_pending_candidate_from_another_chapter(db):
+    user = User(email="identity-reconcile@example.com", username="identity-reconcile", password_hash="hash")
+    db.add(user)
+    await db.flush()
+    book = Book(
+        user_id=user.id,
+        title="Identity Reconcile",
+        format="pdf",
+        s3_key="books/identity-reconcile.pdf",
+        status="ready",
+        mode="author",
+        total_chapters=2,
+    )
+    db.add(book)
+    await db.flush()
+
+    full_name = Character(
+        book_id=book.id,
+        name="Gregor Samsa",
+        aliases=[],
+        first_chapter=1,
+        mention_count=4,
+    )
+    db.add(full_name)
+    await db.flush()
+    candidate = CharacterCandidate(
+        book_id=book.id,
+        chapter_number=2,
+        raw_name="Gregor",
+        proposed_name="Gregor",
+        normalized_name="gregor",
+        aliases=[],
+        status="pending",
+        confidence=90,
+        reason_codes=["candidate_dossier_needs_review"],
+        evidence={},
+    )
+    mention = CharacterMention(
+        book_id=book.id,
+        chapter_number=2,
+        raw_name="Gregor",
+        normalized_name="gregor",
+        resolver_status="unresolved",
+        evidence={},
+    )
+    db.add_all([candidate, mention])
+    await db.flush()
+
+    reconciled = await reconcile_pending_first_name_alias_candidates(db, book_id=book.id)
+    await db.flush()
+
+    assert reconciled == 1
+    assert candidate.status == "accepted"
+    assert candidate.matched_character_id == full_name.id
+    assert candidate.reason_codes == ["first_name_alias_reconciled"]
+    assert mention.matched_character_id == full_name.id
+    assert mention.resolver_status == "auto_alias"

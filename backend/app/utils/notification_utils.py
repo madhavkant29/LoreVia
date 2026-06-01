@@ -325,11 +325,11 @@ def build_upload_processing_notification(
     # Estimate processing time based on file size
     size_mb = file_size_bytes / (1024 * 1024)
     if size_mb < 5:
-        estimated_minutes = 5
+        estimated_minutes = 10
     elif size_mb < 20:
-        estimated_minutes = 7
+        estimated_minutes = 20
     else:
-        estimated_minutes = "10-15"
+        estimated_minutes = 30
 
     if mode == "author":
         title = "Your novel is being processed"

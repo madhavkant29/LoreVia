@@ -1113,7 +1113,7 @@ export function UploadModal({
                           <span>Chunk long files</span>
                           <button
                             type="button"
-                            title="Breaks long text into smaller pieces for easier processing."
+                            title="Breaks long text into smaller pieces (3,500 words per chapter) for easier processing. This may create more chapters than your original manuscript."
                             aria-label="What Chunk long files means"
                             className={infoButtonClass}
                           >
@@ -1121,6 +1121,11 @@ export function UploadModal({
                           </button>
                         </span>
                       </label>
+                      {chunkLongDocuments ? (
+                        <p className={`ml-5 mt-1 text-xs ${isDark ? "text-amber-300" : "text-amber-700"}`}>
+                          ⚠️ This will split long chapters at 3,500 words. A 35,000-word manuscript may become 10+ chapters.
+                        </p>
+                      ) : null}
                     </div>
                     <div className={`mt-4 rounded-lg border px-3 py-3 text-sm leading-6 ${isDark ? "border-white/10 bg-white/[0.03] text-slate-300" : "border-stone-200 bg-stone-50 text-stone-600"}`}>
                       <p className="font-semibold">What LoreVia updates</p>

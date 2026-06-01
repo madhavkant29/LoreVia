@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import re
+from collections import defaultdict
+from typing import Any, Iterable
 
 NAME_TITLES = {
     "mr",
@@ -44,3 +46,26 @@ def is_single_token_name(name: str | None) -> bool:
 def first_name_token(name: str | None) -> str:
     tokens = name_tokens(name)
     return tokens[0] if tokens else ""
+
+
+def assign_unique_active_normalized_names(characters: Iterable[Any]) -> None:
+    grouped: dict[str, list[Any]] = defaultdict(list)
+    for character in characters:
+        normalized = normalize_name(getattr(character, "name", None))
+        if normalized:
+            grouped[normalized].append(character)
+        else:
+            character.normalized_name = None
+
+    for normalized, matches in grouped.items():
+        ordered = sorted(
+            matches,
+            key=lambda item: (
+                int(getattr(item, "mention_count", 0) or 0),
+                -int(getattr(item, "first_chapter", 0) or 0),
+                str(getattr(item, "id", "")),
+            ),
+            reverse=True,
+        )
+        for index, character in enumerate(ordered):
+            character.normalized_name = normalized if index == 0 else None

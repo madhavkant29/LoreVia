@@ -49,8 +49,12 @@ from app.models.intelligence import BookChunk, CharacterRelationship
 from app.models.user import User
 from app.parsers.chunker import ChunkingConfig, chunk_text, count_tokens
 from app.services.email_service import send_processing_complete_with_stats
+from app.services.character_identity.classification import CandidateKind, classify_candidate_kind
 from app.services.character_identity.repair import CharacterIdentityRepairJob
-from app.services.character_identity.resolver import resolve_character_mention
+from app.services.character_identity.resolver import (
+    reconcile_pending_first_name_alias_candidates,
+    resolve_character_mention,
+)
 from app.utils.billing_utils import has_paid_reading_access
 from app.utils.book_utils import parse_book_upload_for_ingestion, refresh_screenplay_scene_rows
 from app.utils.character_utils import (
@@ -67,8 +71,10 @@ from app.utils.character_utils import (
     cluster_character_entities,
     decide_character_candidate_disposition,
     decide_relationship_candidate_disposition,
+    family_role_reference,
     build_character_roster_snapshot,
     find_earliest_character_mention_chapters,
+    filter_character_identity_aliases,
     is_cast_visible_character,
     is_role_only_character_name,
     normalize_character_name,
@@ -104,6 +110,7 @@ from app.utils.notification_utils import collect_book_ready_stats, upsert_book_r
 from app.utils.queue_utils import queue_for_user
 from app.utils.relationship_utils import (
     canonical_relationship_pair_key,
+    reconcile_extracted_relationships,
     relationship_state_signature,
     upsert_relationship_timeline_state,
 )
@@ -141,10 +148,12 @@ def _relationship_resolution_candidates(
     candidate = " ".join(str(name or "").split()).strip()
     if not candidate:
         return []
-    matched = _find_character_ids_in_cache(chars, candidate, [], key_cache=key_cache)
-    if matched:
-        return matched
-    resolved = resolve_character_reference_from_roster(chars, candidate, context_text=context_text)
+    visible_characters = [char for char in chars if is_cast_visible_character(char)]
+    if not family_role_reference(candidate)[1]:
+        matched = _find_character_ids_in_cache(visible_characters, candidate, [], key_cache=key_cache)
+        if matched:
+            return matched
+    resolved = resolve_character_reference_from_roster(visible_characters, candidate, context_text=context_text)
     return [resolved.id] if resolved is not None else []
 
 
@@ -267,11 +276,7 @@ async def _persist_relationship_records(
         if not left_name or not right_name:
             continue
 
-        context_text = " ".join(
-            part
-            for part in [left_name, right_name, " ".join(str(rel.get("description") or "").split()).strip()]
-            if part
-        )
+        context_text = " ".join(str(rel.get("description") or "").split()).strip()
         left_matches = _relationship_resolution_candidates(existing_characters, left_name, key_cache=key_cache, context_text=context_text)
         right_matches = _relationship_resolution_candidates(existing_characters, right_name, key_cache=key_cache, context_text=context_text)
         if len(left_matches) == 1 and len(right_matches) == 1 and left_matches[0] != right_matches[0]:
@@ -829,6 +834,7 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
         pending_first_chapter_updates: dict[uuid.UUID, Character] = {}
         saved_character_count = 0
         quarantined_candidate_count = 0
+        reconciled_first_name_alias_count = 0
         ambiguous_entity_count = 0
         strict_hold_count = 0
         relationship_review_candidate_count = 0
@@ -1275,38 +1281,25 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                 excluded_ids=blocked_ids,
             )
             if existing_id:
-                accepted = await _accept_existing_character_match(
+                quarantined_candidate_count += 1
+                status, reasons, _evidence = await _record_character_disposition_candidate(
                     db,
                     book_id=book.id,
                     chapter_number=chapter_number,
                     entity=entity,
-                    existing_id=existing_id,
-                    existing_characters=existing_characters,
-                    character_key_cache=character_key_cache,
-                    pending_first_chapter_candidates=pending_first_chapter_candidates,
-                    pending_first_chapter_updates=pending_first_chapter_updates,
-                    reason_code="embedding_matched_existing_character",
+                    matched_character_id=existing_id,
+                    reason_codes=["embedding_match_requires_review"],
                     source_batch_key=entity_source_batch_key,
                 )
-                if accepted:
-                    saved_character_count += 1
-                    await _record_entity_cluster_mentions(
-                        db,
-                        book_id=book.id,
-                        chapter_number=chapter_number,
-                        entity=entity,
-                        matched_character_id=existing_id,
-                        resolver_status="embedding_matched_existing",
-                        resolver_reasons=["embedding_matched_existing_character"],
-                    )
-                    await _record_cluster_member_candidates(
-                        db,
-                        book_id=book.id,
-                        chapter_number=chapter_number,
-                        entity=entity,
-                        matched_character_id=existing_id,
-                        reason_code="embedding_matched_existing_character",
-                    )
+                await _record_entity_cluster_mentions(
+                    db,
+                    book_id=book.id,
+                    chapter_number=chapter_number,
+                    entity=entity,
+                    matched_character_id=existing_id,
+                    resolver_status="suppressed" if status == CHARACTER_CANDIDATE_SUPPRESSED else "matched_needs_review",
+                    resolver_reasons=reasons,
+                )
                 continue
 
             promoted = await _promote_new_character_from_entity(
@@ -1339,6 +1332,12 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                 matched_character_id=promoted.id,
                 reason_code="matched_cluster_member",
             )
+
+        reconciled_first_name_alias_count = await reconcile_pending_first_name_alias_candidates(
+            db,
+            book_id=book.id,
+            chapter_number=chapter_number,
+        )
 
         dialogue_samples = extract_dialogue_samples_by_character(
             str(ch_data.get("text") or ""),
@@ -1461,7 +1460,7 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
             "relationships_persisted": persisted_relationship_count,
             "duplicate_suggestions": sum(1 for item in duplicate_suggestions if str(item.status or "") == "pending"),
             "identity_auto_merged": repair_result.auto_merged,
-            "identity_auto_aliases": repair_result.auto_aliases,
+            "identity_auto_aliases": repair_result.auto_aliases + reconciled_first_name_alias_count,
             "identity_auto_suppressed": repair_result.auto_suppressed,
             "identity_blocked_suggestions": repair_result.blocked_suggestions,
             "chapter_media_count": chapter_media_count,
@@ -1547,24 +1546,34 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
             queue_wait_ms,
         )
 
-        if await _book_processing_complete(db, book.id):
-            book.status = "ready"
-            book.writer_workspace = update_book_processing_state(
-                book,
-                status="running",
-                stage="extraction",
-                total_chapters=processing_total,
-                completed_chapters=processed_count,
-                started_at=get_processing_started_at(book),
-                queue_wait_ms=queue_wait_ms,
-                chapter_number=chapter_number,
-                chapter_title=chapter.title,
-                parser_diagnostics=extraction_diagnostics,
+        if await _claim_book_completion(db, book.id):
+            final_reconciled_alias_count = await reconcile_pending_first_name_alias_candidates(
+                db,
+                book_id=book.id,
             )
+            if final_reconciled_alias_count:
+                log.info(
+                    "identity_alias_reconcile book_id=%s aliases=%s scope=book_complete",
+                    book.id,
+                    final_reconciled_alias_count,
+                )
+            relationship_reconcile_result = await reconcile_extracted_relationships(
+                db,
+                book_id=book.id,
+            )
+            if any(relationship_reconcile_result.values()):
+                log.info(
+                    "relationship_reconcile book_id=%s result=%s",
+                    book.id,
+                    relationship_reconcile_result,
+                )
             ready_stats = await collect_book_ready_stats(db, book)
             processing_status, processing_stage = processing_state_for_completed_extraction(
                 analysis_complete=ready_stats.analysis_complete,
             )
+            # Set book.status to "ready" only when both extraction AND analysis are complete
+            # This ensures the frontend status dot (blue) matches the actual completion state
+            book.status = "ready" if processing_status == "ready" else "processing"
             book.writer_workspace = update_book_processing_state(
                 book,
                 status=processing_status,
@@ -1746,7 +1755,14 @@ async def _accept_existing_character_match(
     char = _find_character_by_id(existing_characters, existing_id)
     if char is None:
         return False
-    updated = update_profile(char, {**entity, "first_chapter": chapter_number})
+    safe_aliases = filter_character_identity_aliases(
+        char.name,
+        [
+            entity.get("name"),
+            *(entity.get("aliases") if isinstance(entity.get("aliases"), list) else []),
+        ],
+    )
+    updated = update_profile(char, {**entity, "name": char.name, "aliases": safe_aliases, "first_chapter": chapter_number})
     changed = _changed(char.trait_state or {}, updated["trait_state"])
     _apply_character_update(char, updated)
     _refresh_character_key_cache(character_key_cache, char)
@@ -1803,6 +1819,10 @@ async def _promote_new_character_from_entity(
     source_batch_key: str | None,
 ) -> Character:
     dossier_summary = _entity_dossier_summary(entity)
+    entity["aliases"] = filter_character_identity_aliases(
+        entity.get("name"),
+        entity.get("aliases") if isinstance(entity.get("aliases"), list) else [],
+    )
     entity["visibility_state"] = CHARACTER_VISIBILITY_VISIBLE
     entity["approval_state"] = CHARACTER_APPROVAL_APPROVED
     entity["approval_source"] = CHARACTER_APPROVAL_SOURCE_DETERMINISTIC_AUTO
@@ -1949,7 +1969,10 @@ async def _record_cluster_member_candidates(
 def _merge_alias_in_memory(char: Character | None, alias: str | None) -> None:
     if char is None or not is_valid_alias(alias):
         return
-    cleaned_alias = str(alias or "").strip()
+    safe_aliases = filter_character_identity_aliases(char.name, [alias])
+    if not safe_aliases:
+        return
+    cleaned_alias = safe_aliases[0]
     if not cleaned_alias or cleaned_alias.casefold() == str(char.name or "").strip().casefold():
         return
     aliases = list(char.aliases or [])
@@ -2174,6 +2197,8 @@ def _entity_requires_manual_review(entity: dict) -> str | None:
         return "mention_verifier_review"
     if verifier_band == "reject":
         return "mention_verifier_rejected"
+    if classify_candidate_kind(entity.get("name")) == CandidateKind.TITLE_NAME:
+        return "title_name_requires_review"
 
     evidence = _entity_evidence(entity)
     cluster_names = [
@@ -2208,7 +2233,8 @@ def _entity_requires_manual_review(entity: dict) -> str | None:
 
 
 def _can_auto_save_character(entity: dict) -> bool:
-    if _entity_verifier_band(entity) != "accept":
+    verifier_band = str(_entity_verifier_band(entity) or "").casefold()
+    if verifier_band not in {"", "accept"}:
         return False
     if _entity_requires_manual_review(entity):
         return False
@@ -2398,6 +2424,15 @@ async def _book_processing_complete(db, book_id: uuid.UUID) -> bool:
         select(func.count()).select_from(Chapter).where(Chapter.book_id == book_id, Chapter.processed.is_(False))
     )
     return (remaining_count or 0) == 0
+
+
+async def _claim_book_completion(db, book_id: uuid.UUID) -> bool:
+    status = await db.scalar(
+        select(Book.status).where(Book.id == book_id).with_for_update()
+    )
+    if status is None or str(status or "") == "ready":
+        return False
+    return await _book_processing_complete(db, book_id)
 
 
 def _changed(old: dict, new: dict, delta: float = 0.15) -> bool:

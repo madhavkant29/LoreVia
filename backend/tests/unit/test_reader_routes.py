@@ -998,3 +998,91 @@ async def test_reader_events_timeline_and_relationship_evolution_return_cached_p
     assert events["items"][0]["event_title"] == "Key Falls"
     assert timeline["chapters"][0]["title"] == "One"
     assert evolution["pairs"][0]["characters"] == ["Iris", "Milo"]
+
+
+@pytest.mark.asyncio
+async def test_get_chapter_validates_empty_project():
+    """Test that get_chapter returns helpful error for empty projects."""
+    user_id = uuid.uuid4()
+    book = SimpleNamespace(
+        id=uuid.uuid4(),
+        user_id=user_id,
+        title="Empty Project",
+        total_chapters=0,
+        is_editor_project=True,
+        mode="author",
+        format="manual",
+        is_public=False,
+        is_truncated=False,
+        total_tokens=0,
+    )
+    db = _FakeDB(get_values=[book])
+    
+    with pytest.raises(HTTPException) as exc_info:
+        await reader.get_chapter(book.id, 1, db=db, current_user=_user(user_id))
+    
+    assert exc_info.value.status_code == 400
+    assert "no chapters yet" in exc_info.value.detail.lower()
+    assert "create your first chapter" in exc_info.value.detail.lower()
+
+
+@pytest.mark.asyncio
+async def test_get_chapter_validates_chapter_number_range():
+    """Test that get_chapter validates chapter number is within valid range."""
+    user_id = uuid.uuid4()
+    book = _book(user_id=user_id, total_chapters=5)
+    db = _FakeDB(get_values=[book])
+    
+    # Test chapter number too high
+    with pytest.raises(HTTPException) as exc_info:
+        await reader.get_chapter(book.id, 10, db=db, current_user=_user(user_id))
+    
+    assert exc_info.value.status_code == 404
+    assert "does not exist" in exc_info.value.detail.lower()
+    assert "5 chapters" in exc_info.value.detail.lower()
+    
+    # Test chapter number too low
+    with pytest.raises(HTTPException) as exc_info:
+        await reader.get_chapter(book.id, 0, db=db, current_user=_user(user_id))
+    
+    assert exc_info.value.status_code == 400
+    assert "invalid chapter number" in exc_info.value.detail.lower()
+
+
+@pytest.mark.asyncio
+async def test_get_chapter_validates_none_total_chapters():
+    """Test that get_chapter handles books with None total_chapters."""
+    user_id = uuid.uuid4()
+    book = SimpleNamespace(
+        id=uuid.uuid4(),
+        user_id=user_id,
+        title="Processing Book",
+        total_chapters=None,
+        is_editor_project=False,
+        mode="reader",
+        format="epub",
+        is_public=False,
+        is_truncated=False,
+        total_tokens=0,
+    )
+    db = _FakeDB(get_values=[book])
+    
+    with pytest.raises(HTTPException) as exc_info:
+        await reader.get_chapter(book.id, 1, db=db, current_user=_user(user_id))
+    
+    assert exc_info.value.status_code == 400
+    assert "no chapters yet" in exc_info.value.detail.lower()
+
+
+@pytest.mark.asyncio
+async def test_get_summary_validates_chapter_range():
+    """Test that get_summary validates chapter number is within valid range."""
+    user_id = uuid.uuid4()
+    book = _book(user_id=user_id, total_chapters=3)
+    db = _FakeDB(get_values=[book])
+    
+    with pytest.raises(HTTPException) as exc_info:
+        await reader.get_summary(book.id, 10, db=db, current_user=_user(user_id))
+    
+    assert exc_info.value.status_code == 404
+    assert "does not exist" in exc_info.value.detail.lower()

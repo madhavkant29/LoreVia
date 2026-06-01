@@ -21,6 +21,7 @@ from app.utils.character_utils import (
     cluster_character_entities,
     compose_character_description,
     description_similarity,
+    filter_character_identity_aliases,
     merge_characters,
     name_similarity,
     partition_character,
@@ -123,7 +124,7 @@ def test_compose_character_description_prefers_arc_summary_and_relationships_whe
     )
 
 
-def test_cluster_character_entities_merges_family_role_with_named_character_when_grounded_in_same_context():
+def test_cluster_character_entities_keeps_family_role_out_of_identity_cluster():
     entities = [
         {
             "name": "Grete",
@@ -155,10 +156,16 @@ def test_cluster_character_entities_merges_family_role_with_named_character_when
 
     clustered = cluster_character_entities(entities)
 
-    assert len(clustered) == 1
-    assert clustered[0]["name"] == "Grete"
-    assert "Gregor's sister" in clustered[0]["evidence"]["cluster_names"]
-    assert clustered[0]["evidence"]["cluster_size"] == 2
+    assert [item["name"] for item in clustered] == ["Grete", "Gregor's sister"]
+
+
+def test_filter_character_identity_aliases_keeps_only_safe_deterministic_variants():
+    aliases = filter_character_identity_aliases(
+        "Gregor Samsa",
+        ["Gregor", "Samsa", "Samsa Gregor", "Mr. Samsa", "Gregor's sister", "Grete", "Father"],
+    )
+
+    assert aliases == ["Gregor", "Samsa Gregor"]
 
 
 def test_cluster_character_entities_keeps_distinct_nearby_names_separate():
@@ -228,6 +235,35 @@ def test_cluster_character_entities_prefers_full_name_over_repeated_given_name()
     assert "Gregor" in clustered[0]["aliases"]
 
 
+def test_cluster_character_entities_keeps_title_surname_separate_from_canonical_full_name():
+    entities = [
+        {
+            "name": "Mr. Samsa",
+            "aliases": [],
+            "confidence": 0.96,
+            "traits": {},
+            "evidence": {
+                "mention_count": 6,
+                "strong_mention_count": 4,
+            },
+        },
+        {
+            "name": "Gregor Samsa",
+            "aliases": [],
+            "confidence": 0.92,
+            "traits": {},
+            "evidence": {
+                "mention_count": 2,
+                "strong_mention_count": 1,
+            },
+        },
+    ]
+
+    clustered = cluster_character_entities(entities)
+
+    assert [item["name"] for item in clustered] == ["Mr. Samsa", "Gregor Samsa"]
+
+
 def test_dossier_allows_strong_deterministic_fallback_with_full_name_alias():
     summary = build_character_dossier_summary(
         name="Gregor",
@@ -280,6 +316,33 @@ def test_resolve_character_reference_from_roster_uses_context_to_match_family_ro
 
     assert matched is not None
     assert matched.id == grete.id
+
+
+def test_resolve_character_reference_from_roster_does_not_map_unresolved_family_role_to_anchor():
+    gregor = Character(
+        id=uuid.uuid4(),
+        book_id=uuid.uuid4(),
+        name="Gregor Samsa",
+        aliases=["Gregor"],
+        first_chapter=1,
+        mention_count=3,
+    )
+    grete = Character(
+        id=uuid.uuid4(),
+        book_id=gregor.book_id,
+        name="Grete",
+        aliases=[],
+        first_chapter=1,
+        mention_count=3,
+    )
+
+    matched = resolve_character_reference_from_roster(
+        [gregor, grete],
+        "Gregor's mother",
+        context_text="Gregor's mother cares for him but struggles with the changes in their relationship.",
+    )
+
+    assert matched is None
 
 
 @pytest.mark.asyncio

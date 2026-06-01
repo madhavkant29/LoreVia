@@ -11,7 +11,11 @@ from app.models.character import Character, CharacterDuplicateSuggestion, Charac
 from app.services.character_identity.classification import CandidateKind, classify_candidate_kind
 from app.services.character_identity.constraints import add_identity_constraint, has_blocking_identity_constraint
 from app.services.character_identity.merge import add_character_alias, record_identity_action
-from app.services.character_identity.normalization import first_name_token, normalize_name
+from app.services.character_identity.normalization import (
+    assign_unique_active_normalized_names,
+    first_name_token,
+    normalize_name,
+)
 from app.services.character_identity.suppression import suppress_candidate
 from app.utils.character_utils import (
     CHARACTER_APPROVAL_REJECTED,
@@ -103,10 +107,6 @@ class CharacterIdentityRepairJob:
             and character.visibility_state != CHARACTER_VISIBILITY_NOISE
         ]
 
-        if not dry_run:
-            for character in active:
-                character.normalized_name = normalize_name(character.name) or None
-
         await self._handle_exact_duplicates(active, result, dry_run=dry_run)
         characters = await self._load_characters()
         active = [
@@ -116,6 +116,8 @@ class CharacterIdentityRepairJob:
             and character.approval_state != CHARACTER_APPROVAL_REJECTED
             and character.visibility_state != CHARACTER_VISIBILITY_NOISE
         ]
+        if not dry_run:
+            assign_unique_active_normalized_names(active)
         await self._handle_first_name_aliases(active, result, dry_run=dry_run)
         await self._handle_suppressions(active, result, dry_run=dry_run)
         await self._handle_duplicate_suggestions(result, dry_run=dry_run)
