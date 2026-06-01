@@ -602,26 +602,27 @@ def build_character_dossier_summary(
     strict_auto_reason_codes = dedupe_preserve_order(strict_auto_reason_codes)
 
     strict_auto_eligible = False
-    if not strict_auto_reason_codes and clean_name:
+    if clean_name:
         if strong_fallback_support:
             strict_auto_eligible = True
-        elif single_token:
-            strict_auto_eligible = (
-                final_band == "accept"
-                and len(chapter_numbers) >= 2
-                and mention_count >= 3
-                and person_ner_support >= 1
-                and mid_sentence_mentions >= 1
-                and dialogue_attribution_support >= 1
-            )
-        else:
-            strict_auto_eligible = (
-                final_band == "accept"
-                and (
-                    (len(chapter_numbers) >= 2 and person_ner_support >= 1)
-                    or (mention_count >= 2 and person_ner_support >= 1 and (alias_link_support >= 1 or full_name_link_support >= 1 or dialogue_attribution_support >= 1))
+        elif not strict_auto_reason_codes:
+            if single_token:
+                strict_auto_eligible = (
+                    final_band == "accept"
+                    and len(chapter_numbers) >= 2
+                    and mention_count >= 3
+                    and person_ner_support >= 1
+                    and mid_sentence_mentions >= 1
+                    and dialogue_attribution_support >= 1
                 )
-            )
+            else:
+                strict_auto_eligible = (
+                    final_band == "accept"
+                    and (
+                        (len(chapter_numbers) >= 2 and person_ner_support >= 1)
+                        or (mention_count >= 2 and person_ner_support >= 1 and (alias_link_support >= 1 or full_name_link_support >= 1 or dialogue_attribution_support >= 1))
+                    )
+                )
         if not strict_auto_eligible:
             strict_auto_reason_codes.append("insufficient_cross_chapter_support")
 
