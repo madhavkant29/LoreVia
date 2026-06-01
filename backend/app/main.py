@@ -306,7 +306,7 @@ async def ready():
         async with engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
             await assert_core_runtime_schema_compatible(conn)
-            await conn.execute(text("SELECT '[0,0,0]'::vector"))
+            await conn.execute(text("SELECT '[0,0,0]'::extensions.vector"))
         r = await get_redis()
         await r.ping()
     except Exception:
