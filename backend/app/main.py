@@ -96,10 +96,6 @@ def _install_exception_handlers(target_app: FastAPI) -> None:
             ),
         )
         detail = public_error_message(422)
-        if raw_errors:
-            first_msg = raw_errors[0].get("msg", "")
-            if isinstance(first_msg, str) and first_msg.strip():
-                detail = first_msg
         return JSONResponse(status_code=422, content={"detail": detail})
 
     @target_app.exception_handler(Exception)

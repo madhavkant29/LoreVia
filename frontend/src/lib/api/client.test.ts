@@ -70,6 +70,7 @@ describe("api client", () => {
     dispatchDailyCapEventMock.mockReset()
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
+    process.env.VITEST = "true"
     delete process.env.NEXT_PUBLIC_API_URL
   })
 
@@ -101,16 +102,18 @@ describe("api client", () => {
     delete process.env.VITEST
     vi.stubGlobal("window", { location: { hostname: "localhost", origin: "http://localhost:3000" } })
 
-    await loadClientModule()
+    try {
+      await loadClientModule()
 
-    expect(axiosCreateMock).toHaveBeenCalledWith({
-      baseURL: "http://localhost:8000/api/v1",
-      headers: { "Content-Type": "application/json" },
-      withCredentials: true,
-    })
-
-    vi.stubGlobal("window", originalWindow)
-    if (originalVitest) process.env.VITEST = originalVitest
+      expect(axiosCreateMock).toHaveBeenCalledWith({
+        baseURL: "http://127.0.0.1:8000/api/v1",
+        headers: { "Content-Type": "application/json" },
+        withCredentials: true,
+      })
+    } finally {
+      vi.stubGlobal("window", originalWindow)
+      if (originalVitest) process.env.VITEST = originalVitest
+    }
   })
 
   it("removes uppercase content-type headers from FormData requests", async () => {

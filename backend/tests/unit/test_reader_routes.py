@@ -1027,11 +1027,16 @@ async def test_get_chapter_validates_empty_project():
 
 
 @pytest.mark.asyncio
-async def test_get_chapter_validates_chapter_number_range():
+async def test_get_chapter_validates_chapter_number_range(monkeypatch):
     """Test that get_chapter validates chapter number is within valid range."""
     user_id = uuid.uuid4()
     book = _book(user_id=user_id, total_chapters=5)
-    db = _FakeDB(get_values=[book])
+    
+    async def _fake_access(*_args, **_kwargs):
+        return book, None
+
+    monkeypatch.setattr(reader, "get_book_with_collaboration_access", _fake_access)
+    db = _FakeDB()
     
     # Test chapter number too high
     with pytest.raises(HTTPException) as exc_info:
@@ -1075,14 +1080,20 @@ async def test_get_chapter_validates_none_total_chapters():
 
 
 @pytest.mark.asyncio
-async def test_get_summary_validates_chapter_range():
+async def test_get_summary_validates_chapter_range(monkeypatch):
     """Test that get_summary validates chapter number is within valid range."""
     user_id = uuid.uuid4()
     book = _book(user_id=user_id, total_chapters=3)
-    db = _FakeDB(get_values=[book])
+    
+    async def _fake_access(*_args, **_kwargs):
+        return book, None
+
+    monkeypatch.setattr(reader, "get_book_with_collaboration_access", _fake_access)
+    monkeypatch.setattr(reader, "summary_mode_allowed", lambda *a, **kw: True)
+    db = _FakeDB()
     
     with pytest.raises(HTTPException) as exc_info:
-        await reader.get_summary(book.id, 10, db=db, current_user=_user(user_id))
+        await reader.get_summary(book.id, 10, mode="short", db=db, current_user=_user(user_id))
     
     assert exc_info.value.status_code == 404
     assert "does not exist" in exc_info.value.detail.lower()
