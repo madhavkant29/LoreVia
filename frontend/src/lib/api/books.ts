@@ -12,6 +12,8 @@ import { normalizeBookRouteId } from "@/lib/utils/bookRoutes"
 import type { Book, BookCollaborator, BookEvents, BookNote, BookOverviewPayload, BookSeries, BookWorkType, ChapterConsistencyReport, ChapterSceneOrder, ChapterVersion, ChapterVersionDetail, CollaboratorActivity, CollaborationPermissions, CollaborationRole, CollaborationScope, EmotionalArcOverview, ManuscriptAnnotation, ManuscriptWorkspaceTree, NovelScene, ObsidianGraph, ObsidianNoteRelations, ObsidianPreview, ObsidianVaultNote, ObsidianVaultNoteSaveResult, PaginatedSeries, PreWritingCheck, ReadabilityMetrics, RevisionIntelligence, RevisionTagSet, RevisionTagTarget, SavedQuote, SceneMetadata, SceneVersion, SceneVersionDetail, SeriesBible, StoryHealth, UserStats, WorkspaceSearchFilters, WorkspaceSearchResult, WriterWorkspace } from "@/types/book"
 import type {
   Character,
+  CharacterAliasRecord,
+  CharacterIdentityDiagnostics,
   CharacterRepairApplyResult,
   CharacterRepairPreview,
   CharacterReviewResponse,
@@ -284,6 +286,8 @@ export const booksApi = {
     apiClient.get<Character[]>(bookPath(id, "/characters")).then(r => r.data),
   getCharacterReview: (id: string) =>
     apiClient.get<CharacterReviewResponse>(bookPath(id, "/character-review")).then(r => r.data),
+  getCharacterIdentityDiagnostics: (id: string) =>
+    apiClient.get<CharacterIdentityDiagnostics>(bookPath(id, "/characters/identity-diagnostics")).then(r => r.data),
   createCharacter: (
     bookId: string,
     payload: {
@@ -360,6 +364,33 @@ export const booksApi = {
     invalidateReaderCache(bookId)
     return r.data
   }),
+  listCharacterAliases: (bookId: string, characterId: string) =>
+    apiClient.get<CharacterAliasRecord[]>(bookPath(bookId, `/characters/${characterId}/aliases`)).then(r => r.data),
+  addCharacterAlias: (
+    bookId: string,
+    characterId: string,
+    payload: { aliasText: string; aliasKind?: string; confidence?: number },
+  ) => apiClient.post<CharacterAliasRecord>(bookPath(bookId, `/characters/${characterId}/aliases`), {
+    alias_text: payload.aliasText,
+    alias_kind: payload.aliasKind ?? "user_confirmed",
+    confidence: payload.confidence ?? 1,
+  }).then(r => {
+    invalidateBookCache(bookId)
+    invalidateReaderCache(bookId)
+    return r.data
+  }),
+  deleteCharacterAlias: (bookId: string, characterId: string, aliasId: string) =>
+    apiClient.delete<{ deleted: string }>(bookPath(bookId, `/characters/${characterId}/aliases/${aliasId}`)).then(r => {
+      invalidateBookCache(bookId)
+      invalidateReaderCache(bookId)
+      return r.data
+    }),
+  undoCharacterIdentityAction: (bookId: string, actionId: string) =>
+    apiClient.post<{ undone: string; restored_character_id?: string | null }>(bookPath(bookId, `/characters/identity-actions/${actionId}/undo`)).then(r => {
+      invalidateBookCache(bookId)
+      invalidateReaderCache(bookId)
+      return r.data
+    }),
   mergeCharacters: (bookId: string, payload: { primaryId: string; secondaryId: string }) =>
     apiClient.post<{ merged: string }>(bookPath(bookId, "/characters/merge"), {
       primary_id: payload.primaryId,
@@ -816,4 +847,17 @@ export const booksApi = {
     invalidateBookCache(id)
     return r.data
   }),
+  createEmptyProject: (body: { title: string; author?: string | null; genre?: string | null; work_type?: string | null; series_ids?: string[] | null }) =>
+    apiClient.post<{ book_id: string; status: string; mode: string; is_editor_project: boolean }>("/books/empty-project", body).then(r => {
+      void invalidateQueryKeys("books:list:")
+      void invalidateQueryKeys(booksStatsCacheKey())
+      return r.data
+    }),
+  reprocessManuscript: (bookId: string) =>
+    apiClient.post<{ book_id: string; status: string; chapters_queued: number; total_words: number }>(
+      bookPath(bookId, "/manuscript/reprocess")
+    ).then(r => {
+      invalidateBookCache(bookId)
+      return r.data
+    }),
 }

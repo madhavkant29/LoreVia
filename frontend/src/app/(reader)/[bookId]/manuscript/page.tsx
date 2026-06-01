@@ -9,9 +9,9 @@ import dynamic from "next/dynamic"
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 
-import { EditorToolbar, RichTextEditor } from "@/components/editor/SharedRichTextEditor"
 import { Skeleton } from "@/components/ui/Skeleton"
 import { booksApi } from "@/lib/api/books"
+import { deriveEditorProjectCta } from "@/lib/utils/editorProjectCta"
 import { intelligenceApi } from "@/lib/api/intelligence"
 import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
 import { readerApi } from "@/lib/api/reader"
@@ -50,6 +50,14 @@ const WhatsTheWordPanel = dynamic(
   {
     loading: () => <DeferredPanelLoadingState label="Loading word finder..." />,
   }
+)
+
+const EditorToolbar = dynamic(
+  () => import("@/components/editor/SharedRichTextEditor").then((module) => module.EditorToolbar),
+)
+
+const RichTextEditor = dynamic(
+  () => import("@/components/editor/SharedRichTextEditor").then((module) => module.RichTextEditor),
 )
 
 const ManuscriptPagedPreview = dynamic(
@@ -242,6 +250,7 @@ function ManuscriptPageInner() {
   const [bookDrafts, setBookDrafts] = useState<BookDraftMap>({})
   const [contentVersionByChapter, setContentVersionByChapter] = useState<Record<number, number>>({})
   const [exporting, setExporting] = useState<"pdf" | "docx" | "epub" | "obsidian" | null>(null)
+  const [reprocessing, setReprocessing] = useState(false)
   const [jumpTarget, setJumpTarget] = useState<number | null>(null)
   const [activeFindIndex, setActiveFindIndex] = useState(0)
   const [replaceQuery, setReplaceQuery] = useState("")
@@ -385,6 +394,10 @@ function ManuscriptPageInner() {
     )
   }, [editingScene, sceneBodyDraft, sceneChapterDraft, sceneDescriptionDraft, sceneEditorOpen, sceneTitleDraft, selectedChapter])
   const hasPendingEdits = dirtyDrafts.length > 0 || sceneDraftDirty
+  const editorProjectCta = useMemo(
+    () => deriveEditorProjectCta(book, hasPendingEdits),
+    [book, hasPendingEdits],
+  )
 
   const sheetStyle = {
     fontSize: `${fontSize}pt`,
@@ -2264,6 +2277,31 @@ function ManuscriptPageInner() {
                 <button onClick={() => setFocusMode((value) => !value)} className={`rounded-full border px-4 py-2 text-sm font-medium ${focusMode ? isDark ? "border-emerald-300/40 bg-emerald-400/15 text-white" : "border-emerald-300 bg-emerald-50 text-stone-900" : isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
                   {focusMode ? "Exit focus" : "Focus mode"}
                 </button>
+                {book?.is_editor_project ? (
+                  <button
+                    type="button"
+                    disabled={editorProjectCta.disabled || reprocessing}
+                    title={editorProjectCta.disabledReason ?? undefined}
+                    onClick={async () => {
+                      if (reprocessing) return
+                      setReprocessing(true)
+                      try {
+                        await booksApi.reprocessManuscript(book.id)
+                      } catch {
+                        // error shown by global handler
+                      } finally {
+                        setReprocessing(false)
+                      }
+                    }}
+                    className={`rounded-full border px-4 py-2 text-sm font-medium disabled:opacity-40 ${
+                      editorProjectCta.isProcessing
+                        ? isDark ? "border-sky-400/30 bg-sky-500/15 text-sky-200" : "border-sky-300 bg-sky-50 text-sky-700"
+                        : isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-white text-stone-700"
+                    }`}
+                  >
+                    {editorProjectCta.label}
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => setShowEditorSettings((value) => !value)}

@@ -282,6 +282,10 @@ def key_analysis_inflight(chapter_id: str) -> str:
     return f"analysis:inflight:{chapter_id}"
 
 
+def key_analysis_queued(chapter_id: str) -> str:
+    return f"analysis:queued:{chapter_id}"
+
+
 def key_extraction_inflight(book_id: str, chapter_number: int) -> str:
     return f"extraction:inflight:{book_id}:{chapter_number}"
 

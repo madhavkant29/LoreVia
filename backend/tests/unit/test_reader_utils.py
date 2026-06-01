@@ -121,6 +121,7 @@ def test_timeline_plot_thread_span_clamps_to_visible_window():
 async def test_queue_analysis_if_missing_skips_duplicate_inflight(monkeypatch):
     chapter = SimpleNamespace(
         id=uuid.uuid4(),
+        book_id=uuid.uuid4(),
         s3_key="chapters/test/1.txt",
         title="One",
         analysis_state={"status": "queued", "generated_modes": [], "attempt_count": 1},
@@ -141,3 +142,118 @@ async def test_queue_analysis_if_missing_skips_duplicate_inflight(monkeypatch):
     await reader_utils.queue_analysis_if_missing(db, chapter)
 
     assert called["queued"] is False
+
+
+@pytest.mark.asyncio
+async def test_queue_analysis_if_missing_dispatches_without_request_time_db_write(monkeypatch):
+    chapter = SimpleNamespace(
+        id=uuid.uuid4(),
+        book_id=uuid.uuid4(),
+        s3_key="chapters/test/1.txt",
+        title="One",
+        analysis_state={},
+    )
+    db = AsyncMock()
+    dispatched: list[dict] = []
+
+    monkeypatch.setattr(reader_utils, "chapter_has_detailed_summary", AsyncMock(return_value=False))
+    monkeypatch.setattr(reader_utils, "cache_set_if_absent", AsyncMock(return_value=True))
+
+    class _Task:
+        @staticmethod
+        def apply_async(*args, **kwargs):
+            dispatched.append({"args": args, "kwargs": kwargs})
+
+    monkeypatch.setattr("app.workers.tasks.analysis_tasks.analyse_chapter_task", _Task(), raising=False)
+
+    queued = await reader_utils.queue_analysis_if_missing(db, chapter)
+
+    assert queued is True
+    db.commit.assert_not_called()
+    assert chapter.analysis_state == {}
+    assert dispatched == [
+        {
+            "args": (),
+            "kwargs": {
+                "args": [str(chapter.id), str(chapter.book_id)],
+                "kwargs": {"is_reprocessing": False},
+                "queue": "analysis",
+            },
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_queue_analysis_if_missing_clears_queued_key_when_dispatch_fails(monkeypatch):
+    chapter = SimpleNamespace(
+        id=uuid.uuid4(),
+        book_id=uuid.uuid4(),
+        s3_key="chapters/test/1.txt",
+        title="One",
+        analysis_state={},
+    )
+    db = AsyncMock()
+    deleted_keys: list[str] = []
+
+    monkeypatch.setattr(reader_utils, "chapter_has_detailed_summary", AsyncMock(return_value=False))
+    monkeypatch.setattr(reader_utils, "cache_set_if_absent", AsyncMock(return_value=True))
+
+    async def _fake_cache_del(key):
+        deleted_keys.append(key)
+
+    monkeypatch.setattr(reader_utils, "cache_del", _fake_cache_del)
+
+    class _Task:
+        @staticmethod
+        def apply_async(*args, **kwargs):
+            raise RuntimeError("broker unavailable")
+
+    monkeypatch.setattr("app.workers.tasks.analysis_tasks.analyse_chapter_task", _Task(), raising=False)
+
+    queued = await reader_utils.queue_analysis_if_missing(db, chapter)
+
+    assert queued is False
+    db.commit.assert_not_called()
+    assert deleted_keys == [reader_utils.key_analysis_queued(str(chapter.id))]
+
+
+@pytest.mark.asyncio
+async def test_build_summary_collection_reports_newly_scheduled_analysis_as_queued(monkeypatch):
+    book = _build_book("author")
+    current_user = SimpleNamespace(id=book.user_id, tier="pro")
+    chapter = SimpleNamespace(
+        id=uuid.uuid4(),
+        book_id=book.id,
+        number=1,
+        title="One",
+        analysis_state={},
+    )
+    db = AsyncMock()
+    db.execute.side_effect = [
+        SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [chapter])),
+        SimpleNamespace(all=lambda: []),
+    ]
+
+    monkeypatch.setattr(reader_utils, "summary_visible_chapter_set", AsyncMock(return_value={1}))
+    monkeypatch.setattr(reader_utils, "queue_analysis_if_missing", AsyncMock(return_value=True))
+    monkeypatch.setattr(reader_utils, "get_or_generate_summary", AsyncMock(return_value={"status": "pending"}))
+
+    payload = await reader_utils.build_summary_collection_payload(
+        db,
+        book=book,
+        current_user=current_user,
+        progress=SimpleNamespace(current_chapter=0),
+        intelligence_map={1: True},
+    )
+
+    assert payload["summaries"] == [
+        {
+            "chapter_number": 1,
+            "chapter_title": "One",
+            "read": True,
+            "available": False,
+            "status": "queued",
+            "content": None,
+            "key_events": [],
+        }
+    ]

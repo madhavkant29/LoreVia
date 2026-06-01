@@ -12,10 +12,12 @@ import { useBookDetail } from "@/lib/hooks/useBookDetail"
 import { asQueryKey, bookCacheKey, readerCacheKey } from "@/lib/query/cacheKeys"
 import { readerApi } from "@/lib/api/reader"
 import { saveContextualVaultNote } from "@/lib/utils/notes"
+import { FirstTimeTooltip } from "@/components/tooltips/FirstTimeTooltip"
 import type { Book } from "@/types/book"
 import type {
   Character,
   CharacterCandidate,
+  CharacterIdentityDiagnostics,
   CharacterRepairPreview,
   CharacterRelationshipCandidate,
   CharacterReviewResponse,
@@ -891,6 +893,15 @@ export default function CharactersPage() {
         pending_relationship_candidates: 0,
     },
   }), [])
+  const emptyIdentityDiagnostics = useMemo<CharacterIdentityDiagnostics>(() => ({
+    suppressed_count: 0,
+    auto_merged_count: 0,
+    auto_alias_count: 0,
+    blocked_duplicate_count: 0,
+    hidden_candidate_count: 0,
+    suppression_reasons: {},
+    recent_identity_actions: [],
+  }), [])
   const [reviewDataEnabled, setReviewDataEnabled] = useState(false)
   const {
     data: reviewData = emptyReview,
@@ -938,6 +949,7 @@ export default function CharactersPage() {
   const [relationshipDraft, setRelationshipDraft] = useState<RelationshipComposerDraft>(buildRelationshipDraft(1))
   const [createRelationshipBusy, setCreateRelationshipBusy] = useState(false)
   const [graphOverrideBusy, setGraphOverrideBusy] = useState(false)
+  const [identityUndoActionId, setIdentityUndoActionId] = useState<string | null>(null)
   const [evidenceCache, setEvidenceCache] = useState<Record<string, EvidenceCacheEntry>>({})
   const [evidenceLoadingId, setEvidenceLoadingId] = useState<string | null>(null)
   const [evidenceError, setEvidenceError] = useState<string | null>(null)
@@ -989,22 +1001,44 @@ export default function CharactersPage() {
 
   const isDark = theme === "dark"
   const isAuthorMode = book?.mode === "author"
+  const {
+    data: identityDiagnostics = emptyIdentityDiagnostics,
+    refetch: refetchIdentityDiagnostics,
+  } = useQuery<CharacterIdentityDiagnostics>({
+    queryKey: asQueryKey(bookCacheKey(bookId, "character-identity-diagnostics")),
+    queryFn: () => booksApi.getCharacterIdentityDiagnostics(bookId).catch(() => emptyIdentityDiagnostics),
+    enabled: isAuthorMode && workspaceMode === "repair",
+    staleTime: 60_000,
+  })
 
   const emptyRepairPreview = useMemo<CharacterRepairPreview>(() => ({
     book_id: bookId,
     dry_run: true,
     allow_merge_safe_pairs: true,
     allow_demote_obvious_noise: true,
+    auto_merged: 0,
+    auto_aliases: 0,
+    auto_suppressed: 0,
+    blocked_suggestions: 0,
+    remaining_review_items: 0,
     planned_merges: [],
-      planned_demotions: [],
-      skipped_protected_merge_pairs: [],
-      skipped_protected_demotions: [],
-      updated_first_chapters: {},
-      updated_last_seen_chapters: {},
-      character_labels: {},
-      pending_duplicate_suggestions: 0,
-      pending_relationship_candidates: 0,
-      unresolved_relationship_deltas: {},
+    planned_aliases: [],
+    planned_demotions: [],
+    planned_suppressions: [],
+    blocked_duplicate_suggestions: [],
+    skipped_protected_merge_pairs: [],
+    skipped_protected_demotions: [],
+    updated_first_chapters: {},
+    updated_last_seen_chapters: {},
+    character_labels: {},
+    pending_duplicate_suggestions: 0,
+    pending_relationship_candidates: 0,
+    pending_character_candidates_suppressed: 0,
+    pending_character_candidates_kept: 0,
+    pending_relationship_candidates_suppressed: 0,
+    pending_relationship_candidates_kept: 0,
+    protected_manual_records_skipped: 0,
+    unresolved_relationship_deltas: {},
     }), [bookId])
   const {
     data: repairPreview = emptyRepairPreview,
@@ -1078,7 +1112,12 @@ export default function CharactersPage() {
 
   const mergeSuggestions = useMemo(
     () => (reviewData.duplicate_suggestions ?? [])
-      .filter((suggestion) => suggestion.status === "pending" && !dismissedMergeKeys.includes(suggestion.id))
+      .filter((suggestion) => (
+        suggestion.status === "pending"
+        && suggestion.confidence >= 75
+        && !suggestion.auto_dismissed
+        && !dismissedMergeKeys.includes(suggestion.id)
+      ))
       .map((suggestion) => ({
         key: suggestion.id,
         suggestionId: suggestion.id,
@@ -1209,6 +1248,14 @@ export default function CharactersPage() {
       ?? null,
     [charById, chars, filteredChars, selectedId],
   )
+  const selectedAliasGroups = useMemo(() => {
+    const groups = new Map<string, NonNullable<Character["alias_records"]>>()
+    for (const alias of selectedCharacter?.alias_records ?? []) {
+      const key = alias.alias_kind || "unspecified"
+      groups.set(key, [...(groups.get(key) ?? []), alias])
+    }
+    return Array.from(groups.entries()).sort(([left], [right]) => left.localeCompare(right))
+  }, [selectedCharacter?.alias_records])
 
   const filteredMergeSuggestions = useMemo(() => mergeSuggestions.filter((suggestion) => {
     if (!deferredSearch) return true
@@ -1965,12 +2012,31 @@ export default function CharactersPage() {
       await refreshCharacters()
       await refreshGraph()
       await refetchRepairPreview()
+      await refetchIdentityDiagnostics()
       setNoteToast("Character repair applied.")
       window.setTimeout(() => setNoteToast(null), 2200)
     } catch {
       setActionError("Could not apply the repair plan.")
     } finally {
       setReprocessBusy(false)
+    }
+  }
+
+  async function handleUndoIdentityAction(actionId: string) {
+    setIdentityUndoActionId(actionId)
+    setActionError(null)
+    try {
+      await booksApi.undoCharacterIdentityAction(bookId, actionId)
+      await refreshCharacters()
+      await refetchCharacterReview()
+      await refetchRepairPreview()
+      await refetchIdentityDiagnostics()
+      setNoteToast("Identity action undone.")
+      window.setTimeout(() => setNoteToast(null), 2200)
+    } catch {
+      setActionError("Could not undo this identity action.")
+    } finally {
+      setIdentityUndoActionId(null)
     }
   }
 
@@ -2090,6 +2156,12 @@ export default function CharactersPage() {
 
   return (
     <div className={`min-h-screen transition-colors ${atmosphere}`}>
+      <FirstTimeTooltip
+        storageKey="lorevia-character-bible-first-visit"
+        title="💡 Tip: Merge Duplicate Characters"
+        message="You can merge duplicate characters by clicking on the 3 dots menu (⋮) next to a character, then selecting 'Merge with another character' and choosing the second character you want to merge with."
+        isDark={isDark}
+      />
       <div className="mx-auto max-w-[1500px] px-4 pb-8 pt-5 sm:px-6 lg:px-8">
         <button
           onClick={() => router.back()}
@@ -2704,6 +2776,25 @@ export default function CharactersPage() {
                             <div className="grid grid-cols-[120px_minmax(0,1fr)] gap-3">
                               <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Aliases</dt>
                               <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedCharacter.aliases.length > 0 ? selectedCharacter.aliases.join(", ") : "None recorded"}</dd>
+                            </div>
+                            <div className="grid grid-cols-[120px_minmax(0,1fr)] gap-3">
+                              <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Alias records</dt>
+                              <dd className="space-y-2">
+                                {selectedAliasGroups.length > 0 ? selectedAliasGroups.map(([kind, aliases]) => (
+                                  <div key={kind} className={`rounded-xl border px-3 py-2 ${isDark ? "border-white/8 bg-black/20" : "border-stone-200 bg-white"}`}>
+                                    <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{kind.replaceAll("_", " ")}</p>
+                                    <div className="mt-2 flex flex-wrap gap-2">
+                                      {aliases.map((alias) => (
+                                        <span key={alias.id} className={`rounded-full px-3 py-1.5 text-xs ${isDark ? "bg-white/[0.06] text-slate-200" : "bg-stone-100 text-stone-700"}`}>
+                                          {alias.alias_text} · {Math.round((alias.confidence ?? 0) * 100)}% · {alias.source}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )) : (
+                                  <span className={isDark ? "text-slate-400" : "text-stone-500"}>No structured alias records yet.</span>
+                                )}
+                              </dd>
                             </div>
                             <div className="grid grid-cols-[120px_minmax(0,1fr)] gap-3">
                               <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Role</dt>
@@ -3494,6 +3585,70 @@ export default function CharactersPage() {
                           </button>
                         </div>
                       </SurfaceCard>
+
+                      <div className="grid gap-4 xl:grid-cols-2">
+                        <SurfaceCard title="Automatic cleanup summary" isDark={isDark}>
+                          <div className="grid gap-3 sm:grid-cols-4">
+                            {[
+                              ["Merges", repairPreview.auto_merged ?? repairPreview.planned_merges.length],
+                              ["Aliases", repairPreview.auto_aliases ?? repairPreview.planned_aliases?.length ?? 0],
+                              ["Suppressed", repairPreview.auto_suppressed ?? repairPreview.planned_suppressions?.length ?? repairPreview.planned_demotions.length],
+                              ["Blocked", repairPreview.blocked_suggestions ?? repairPreview.blocked_duplicate_suggestions?.length ?? 0],
+                            ].map(([label, value]) => (
+                              <div key={String(label)} className={`rounded-xl border px-3 py-3 ${isDark ? "border-white/8 bg-black/20" : "border-stone-200 bg-white"}`}>
+                                <p className={`text-2xl font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{value}</p>
+                                <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>{label}</p>
+                              </div>
+                            ))}
+                          </div>
+                          <p className={`mt-3 text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>
+                            {repairPreview.remaining_review_items ?? repairPreview.pending_duplicate_suggestions} review items remain after cleanup.
+                          </p>
+                        </SurfaceCard>
+
+                        <SurfaceCard title="Identity diagnostics" isDark={isDark}>
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            <p className={`rounded-xl border px-3 py-3 text-sm ${isDark ? "border-white/8 bg-black/20 text-slate-300" : "border-stone-200 bg-white text-stone-700"}`}>{identityDiagnostics.suppressed_count} suppressed records</p>
+                            <p className={`rounded-xl border px-3 py-3 text-sm ${isDark ? "border-white/8 bg-black/20 text-slate-300" : "border-stone-200 bg-white text-stone-700"}`}>{identityDiagnostics.blocked_duplicate_count} blocked duplicate pairs</p>
+                          </div>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {Object.entries(identityDiagnostics.suppression_reasons).slice(0, 6).map(([reason, count]) => (
+                              <span key={reason} className={`rounded-full px-3 py-1.5 text-xs ${isDark ? "bg-white/[0.06] text-slate-200" : "bg-stone-100 text-stone-700"}`}>
+                                {reason.replaceAll("_", " ")}: {count}
+                              </span>
+                            ))}
+                            {Object.keys(identityDiagnostics.suppression_reasons).length === 0 ? (
+                              <span className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No suppression reasons recorded yet.</span>
+                            ) : null}
+                          </div>
+                          <div className="mt-4 space-y-2">
+                            <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Recent auto-actions</p>
+                            {identityDiagnostics.recent_identity_actions.slice(0, 6).map((action) => (
+                              <div key={action.id} className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border px-3 py-3 text-sm ${isDark ? "border-white/8 bg-black/20 text-slate-300" : "border-stone-200 bg-white text-stone-700"}`}>
+                                <div className="min-w-0">
+                                  <p className={`font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{action.action_type.replaceAll("_", " ")}</p>
+                                  <p className={`mt-1 truncate text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+                                    {[action.surface_text, action.reason, `${Math.round((action.confidence ?? 0) * 100)}%`].filter(Boolean).join(" · ")}
+                                  </p>
+                                </div>
+                                {action.reversible ? (
+                                  <button
+                                    type="button"
+                                    disabled={identityUndoActionId === action.id}
+                                    onClick={() => void handleUndoIdentityAction(action.id)}
+                                    className={actionButtonClasses(isDark)}
+                                  >
+                                    {identityUndoActionId === action.id ? "Undoing..." : "Undo"}
+                                  </button>
+                                ) : null}
+                              </div>
+                            ))}
+                            {identityDiagnostics.recent_identity_actions.length === 0 ? (
+                              <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No identity actions recorded yet.</p>
+                            ) : null}
+                          </div>
+                        </SurfaceCard>
+                      </div>
 
                       <div className="grid gap-4 xl:grid-cols-2">
                         <SurfaceCard title="Planned merges" isDark={isDark}>

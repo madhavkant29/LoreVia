@@ -21,7 +21,7 @@ def _initialize_postgres_session(dbapi_connection) -> None:
     try:
         # Some psycopg async-adapted cursors do not implement the context
         # manager protocol on the DBAPI wrapper, so close explicitly.
-        cursor.execute("SET search_path TO public")
+        cursor.execute("SET search_path TO public, extensions")
     finally:
         close = getattr(cursor, "close", None)
         if callable(close):

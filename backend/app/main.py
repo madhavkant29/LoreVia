@@ -86,15 +86,17 @@ def _install_exception_handlers(target_app: FastAPI) -> None:
 
     @target_app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request: Request, exc: RequestValidationError):
+        raw_errors = cast(list[dict[str, object]], list(exc.errors()))
         log.warning(
             "request_validation_failed",
             extra=request_log_context(
                 request,
                 status_code=422,
-                errors=sanitize_validation_errors(cast(list[dict[str, object]], list(exc.errors()))),
+                errors=sanitize_validation_errors(raw_errors),
             ),
         )
-        return JSONResponse(status_code=422, content={"detail": public_error_message(422)})
+        detail = public_error_message(422)
+        return JSONResponse(status_code=422, content={"detail": detail})
 
     @target_app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception):
@@ -304,6 +306,7 @@ async def ready():
         async with engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
             await assert_core_runtime_schema_compatible(conn)
+            await conn.execute(text("SELECT '[0,0,0]'::vector"))
         r = await get_redis()
         await r.ping()
     except Exception:

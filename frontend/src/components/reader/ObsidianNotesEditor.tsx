@@ -858,7 +858,7 @@ export function ObsidianNotesEditor({
         </div>
       </div>
 
-      <div className="mt-5 grid gap-4 xl:grid-cols-[21rem_minmax(0,1fr)_19rem]">
+      <div className="mt-5 grid gap-4 xl:grid-cols-[minmax(18rem,20rem)_minmax(0,1fr)_minmax(16rem,18rem)]">
         <aside className={`overflow-hidden rounded-lg border ${isDark ? "border-white/8 bg-[#07101d]/90" : "border-stone-200 bg-white/90"}`}>
           <div className={`border-b px-5 py-5 ${isDark ? "border-white/8" : "border-stone-200"}`}>
             <div className="flex items-center gap-3">
@@ -1194,14 +1194,14 @@ export function ObsidianNotesEditor({
                 />
               </label>
               <div className="flex gap-2">
-                <button type="button" onClick={() => void moveCurrent()} disabled={busy || !selectedNote} className="flex-1 rounded-2xl bg-[linear-gradient(135deg,#0f766e,#14b8a6)] px-3 py-2.5 text-sm font-semibold text-white disabled:opacity-60">
+                <button type="button" onClick={() => void moveCurrent()} disabled={busy || !selectedNote} className="min-w-0 flex-1 rounded-2xl bg-[linear-gradient(135deg,#0f766e,#14b8a6)] px-3 py-2.5 text-sm font-semibold text-white disabled:opacity-60">
                   Update path
                 </button>
-                <button type="button" onClick={() => void deleteCurrent()} disabled={busy || !selectedNote} className={`rounded-2xl px-3 py-2.5 text-sm font-medium ${isDark ? "bg-rose-500/12 text-rose-200" : "bg-rose-50 text-rose-700"}`}>
+                <button type="button" onClick={() => void deleteCurrent()} disabled={busy || !selectedNote} className={`shrink-0 rounded-2xl px-3 py-2.5 text-sm font-medium ${isDark ? "bg-rose-500/12 text-rose-200" : "bg-rose-50 text-rose-700"}`}>
                   Delete
                 </button>
               </div>
-              <div className={`rounded-2xl border p-3 ${isDark ? "border-white/8 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
+              <div className={`overflow-hidden rounded-2xl border p-3 ${isDark ? "border-white/8 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
                 <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Send to scenes</p>
                 <div className="mt-3 flex gap-2">
                   <select
@@ -1220,7 +1220,7 @@ export function ObsidianNotesEditor({
                     type="button"
                     onClick={() => void sendToScene()}
                     disabled={!selectedNote || sceneSending}
-                    className="rounded-2xl bg-[linear-gradient(135deg,#2563eb,#1d4ed8)] px-3 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+                    className="shrink-0 rounded-2xl bg-[linear-gradient(135deg,#2563eb,#1d4ed8)] px-3 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
                   >
                     {sceneSending ? "Sending..." : "Send"}
                   </button>
@@ -1502,10 +1502,10 @@ function PanelCard({
   children: ReactNode
 }) {
   return (
-    <section className={`rounded-lg border p-4 ${isDark ? "border-white/8 bg-[#07101d]/88" : "border-stone-200 bg-white/90"}`}>
+    <section className={`overflow-hidden rounded-lg border p-4 ${isDark ? "border-white/8 bg-[#07101d]/88" : "border-stone-200 bg-white/90"}`}>
       <div className="mb-4 flex items-center justify-between gap-3">
         <p className={`text-3xs font-semibold uppercase tracking-[0.28em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{title}</p>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           {typeof count === "number" ? (
             <span className={`inline-flex h-6 min-w-6 items-center justify-center rounded-full px-2 text-xs font-semibold ${isDark ? "bg-white/[0.05] text-slate-300" : "bg-stone-100 text-stone-700"}`}>
               {count}

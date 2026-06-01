@@ -5,20 +5,43 @@ import dynamic from "next/dynamic"
 import React from "react"
 import { useEffect, useRef, useState } from "react"
 import { useNotificationsState } from "@/lib/hooks/useNotifications"
+import { prefetchNotificationsSidebarData } from "@/lib/query/sidebarPrefetch"
+import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 
-const NotificationsPanel = dynamic(
-  () => import("@/components/layout/NotificationsPanel").then((module) => module.NotificationsPanel),
+type NotificationsPanelProps = {
+  mode?: "sidebar" | "page"
+  enabled?: boolean
+}
+
+type PreloadableComponent<Props> = React.ComponentType<Props> & {
+  preload?: () => void
+}
+
+const loadNotificationsPanel = () => import("@/components/layout/NotificationsPanel").then((module) => module.NotificationsPanel)
+
+const NotificationsPanel = dynamic<NotificationsPanelProps>(
+  loadNotificationsPanel,
   {
     ssr: false,
     loading: () => <PanelLoadingState label="Loading notifications..." />,
   }
-)
+) as PreloadableComponent<NotificationsPanelProps>
+
+function preloadNotificationsPanel() {
+  if (NotificationsPanel.preload) {
+    NotificationsPanel.preload()
+    return
+  }
+  void loadNotificationsPanel()
+}
 
 export function NotificationBell({ enabled = true }: { enabled?: boolean }) {
   const [open, setOpen] = useState(false)
+  const [panelMounted, setPanelMounted] = useState(false)
   const toggleButtonRef = useRef<HTMLButtonElement | null>(null)
   const panelRef = useRef<HTMLElement | null>(null)
+  const { user } = useAuthStore()
   const { theme } = usePreferencesStore()
   const { unreadCount } = useNotificationsState(10, {
     enabled: enabled || open,
@@ -33,6 +56,19 @@ export function NotificationBell({ enabled = true }: { enabled?: boolean }) {
     ? "border-rose-400/40 bg-rose-500/10 text-rose-600 hover:bg-rose-500/15"
     : "border-border bg-card text-foreground hover:bg-muted"
   const ariaLabel = hasUnread ? `Open notifications, ${unreadCount} unread` : "Open notifications"
+
+  const preloadPanelAssets = () => {
+    preloadNotificationsPanel()
+    if (user) {
+      void prefetchNotificationsSidebarData()
+    }
+  }
+
+  const togglePanel = () => {
+    preloadPanelAssets()
+    setPanelMounted(true)
+    setOpen((current) => !current)
+  }
 
   useEffect(() => {
     if (!open) {
@@ -83,9 +119,12 @@ export function NotificationBell({ enabled = true }: { enabled?: boolean }) {
       <button
         ref={toggleButtonRef}
         type="button"
-        onClick={() => setOpen((current) => !current)}
+        onMouseEnter={preloadPanelAssets}
+        onFocus={preloadPanelAssets}
+        onClick={togglePanel}
         className={`relative hidden h-10 w-10 items-center justify-center rounded-xl border transition-colors lg:flex ${buttonTone}`}
         aria-label={hasUnread ? `Toggle notifications, ${unreadCount} unread` : "Toggle notifications"}
+        aria-expanded={open}
       >
         <BellIcon hasUnread={hasUnread} />
         {badgeLabel ? (
@@ -95,14 +134,19 @@ export function NotificationBell({ enabled = true }: { enabled?: boolean }) {
         ) : null}
       </button>
 
-      {open ? (
+      {panelMounted ? (
         <>
-          <div className="fixed inset-0 z-40 hidden bg-black/30 lg:block" aria-hidden="true" />
+          <div
+            className={`fixed inset-0 z-40 hidden bg-black/30 transition-opacity lg:block ${open ? "opacity-100" : "pointer-events-none opacity-0"}`}
+            aria-hidden="true"
+          />
           <aside
             ref={panelRef}
-            className={`fixed right-0 top-0 z-50 hidden h-screen w-[26rem] border-l shadow-modal lg:block ${isDark ? "border-white/10 bg-[#050505]" : "border-stone-200 bg-stone-50"}`}
+            inert={open ? undefined : true}
+            aria-hidden={!open}
+            className={`fixed right-0 top-0 z-50 hidden h-screen w-[26rem] border-l shadow-modal transition duration-150 lg:block ${open ? "translate-x-0 opacity-100" : "pointer-events-none translate-x-full opacity-0"} ${isDark ? "border-white/10 bg-[#050505]" : "border-stone-200 bg-stone-50"}`}
           >
-            <NotificationsPanel mode="sidebar" />
+            <NotificationsPanel mode="sidebar" enabled={open} />
           </aside>
         </>
       ) : null}

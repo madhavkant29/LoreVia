@@ -26,13 +26,18 @@ from app.models.book import Book, Chapter
 from app.models.character import Character, CharacterCandidate, CharacterMention, CharacterRelationshipCandidate
 from app.engine.character.extractor import verify_character_candidate_personhood
 from app.utils.character_utils import (
-    CHARACTER_APPROVAL_PENDING_REVIEW,
+    CHARACTER_APPROVAL_REJECTED,
     CHARACTER_APPROVAL_SOURCE_BACKFILL_REVIEW,
+    CHARACTER_CANDIDATE_SUPPRESSED,
     CHARACTER_TRUST_TIER_REPAIRED_NOISE,
     CHARACTER_CANDIDATE_PENDING,
     CHARACTER_DUPLICATE_PENDING,
     CHARACTER_RELATIONSHIP_CANDIDATE_PENDING,
+    CHARACTER_RELATIONSHIP_CANDIDATE_SUPPRESSED,
+    CHARACTER_VISIBILITY_NOISE,
     build_character_review_payload,
+    decide_character_candidate_disposition,
+    decide_relationship_candidate_disposition,
     find_earliest_character_mention_chapters,
     infer_character_trust_tier,
     is_cast_visible_character,
@@ -65,6 +70,11 @@ class RepairPlan:
     character_labels: dict[str, str]
     pending_duplicate_suggestions: int
     pending_relationship_candidates: int
+    pending_character_candidates_suppressed: int
+    pending_character_candidates_kept: int
+    pending_relationship_candidates_suppressed: int
+    pending_relationship_candidates_kept: int
+    protected_manual_records_skipped: int
     unresolved_relationship_deltas: dict[str, int]
 
 
@@ -205,6 +215,39 @@ async def _load_pending_relationship_candidates(db, book_id: uuid.UUID) -> list[
     ).scalars().all()
 
 
+async def _load_pending_character_candidates(db, book_id: uuid.UUID) -> list[CharacterCandidate]:
+    return (
+        await db.execute(
+            select(CharacterCandidate).where(
+                CharacterCandidate.book_id == book_id,
+                CharacterCandidate.status == CHARACTER_CANDIDATE_PENDING,
+            )
+        )
+    ).scalars().all()
+
+
+def _candidate_cleanup_disposition(candidate: CharacterCandidate):
+    return decide_character_candidate_disposition(
+        name=candidate.proposed_name or candidate.raw_name,
+        aliases=candidate.aliases or [],
+        confidence=candidate.confidence,
+        reason_codes=candidate.reason_codes or [],
+        evidence=candidate.evidence or {},
+        matched_character_id=candidate.matched_character_id,
+    )
+
+
+def _relationship_cleanup_disposition(candidate: CharacterRelationshipCandidate):
+    return decide_relationship_candidate_disposition(
+        raw_character_a=candidate.raw_character_a,
+        raw_character_b=candidate.raw_character_b,
+        left_resolved=candidate.matched_character_a_id is not None,
+        right_resolved=candidate.matched_character_b_id is not None,
+        reason_codes=candidate.reason_codes or [],
+        evidence=candidate.evidence or {},
+    )
+
+
 async def _load_character_mentions(db, book_id: uuid.UUID) -> dict[uuid.UUID, list[CharacterMention]]:
     rows = (
         await db.execute(
@@ -318,7 +361,18 @@ async def build_repair_plan(
         initial_character_labels = _character_label_map(characters)
         character_map = {character.id: character for character in characters if character.id is not None}
         suggestions = await refresh_character_duplicate_suggestions(session, book_id=book_id, characters=characters)
+        character_candidates = await _load_pending_character_candidates(session, book_id)
         relationship_candidates = await _load_pending_relationship_candidates(session, book_id)
+        pending_character_candidates_suppressed = sum(
+            1
+            for candidate in character_candidates
+            if _candidate_cleanup_disposition(candidate).status == CHARACTER_CANDIDATE_SUPPRESSED
+        )
+        pending_relationship_candidates_suppressed = sum(
+            1
+            for candidate in relationship_candidates
+            if _relationship_cleanup_disposition(candidate).status == CHARACTER_RELATIONSHIP_CANDIDATE_SUPPRESSED
+        )
         planned_merges: list[tuple[str, str]] = []
         skipped_protected_merge_pairs: list[tuple[str, str]] = []
         for item in suggestions:
@@ -394,9 +448,14 @@ async def build_repair_plan(
             character_labels=initial_character_labels,
             pending_duplicate_suggestions=sum(1 for item in suggestions if item.status == CHARACTER_DUPLICATE_PENDING),
             pending_relationship_candidates=len(relationship_candidates),
+            pending_character_candidates_suppressed=pending_character_candidates_suppressed,
+            pending_character_candidates_kept=len(character_candidates) - pending_character_candidates_suppressed,
+            pending_relationship_candidates_suppressed=pending_relationship_candidates_suppressed,
+            pending_relationship_candidates_kept=len(relationship_candidates) - pending_relationship_candidates_suppressed,
+            protected_manual_records_skipped=len(skipped_protected_demotions) + len(skipped_protected_merge_pairs),
             unresolved_relationship_deltas={
                 "before": len(relationship_candidates),
-                "after_if_apply": len(relationship_candidates),
+                "after_if_apply": len(relationship_candidates) - pending_relationship_candidates_suppressed,
             },
         )
 
@@ -420,7 +479,32 @@ async def apply_repair_plan(
         initial_character_labels = _character_label_map(characters)
         character_map = {character.id: character for character in characters if character.id is not None}
         suggestions = await refresh_character_duplicate_suggestions(session, book_id=book_id, characters=characters)
+        character_candidates_before = await _load_pending_character_candidates(session, book_id)
         relationship_candidates_before = await _load_pending_relationship_candidates(session, book_id)
+        suppressed_character_candidate_ids: list[str] = []
+        kept_character_candidate_ids: list[str] = []
+        for candidate in character_candidates_before:
+            disposition = _candidate_cleanup_disposition(candidate)
+            if disposition.status == CHARACTER_CANDIDATE_SUPPRESSED:
+                candidate.status = CHARACTER_CANDIDATE_SUPPRESSED
+                candidate.reason_codes = list(disposition.reason_codes)
+                candidate.evidence = disposition.evidence
+                suppressed_character_candidate_ids.append(str(candidate.id))
+            else:
+                kept_character_candidate_ids.append(str(candidate.id))
+
+        suppressed_relationship_candidate_ids: list[str] = []
+        kept_relationship_candidate_ids: list[str] = []
+        for candidate in relationship_candidates_before:
+            disposition = _relationship_cleanup_disposition(candidate)
+            if disposition.status == CHARACTER_RELATIONSHIP_CANDIDATE_SUPPRESSED:
+                candidate.status = CHARACTER_RELATIONSHIP_CANDIDATE_SUPPRESSED
+                candidate.reason_codes = list(disposition.reason_codes)
+                candidate.evidence = disposition.evidence
+                suppressed_relationship_candidate_ids.append(str(candidate.id))
+            else:
+                kept_relationship_candidate_ids.append(str(candidate.id))
+
         merged_pairs: list[tuple[str, str]] = []
         skipped_protected_merge_pairs: list[tuple[str, str]] = []
         for suggestion in suggestions:
@@ -460,11 +544,11 @@ async def apply_repair_plan(
                 continue
             set_character_review_state(
                 character,
-                visibility_state="quarantined",
-                approval_state=CHARACTER_APPROVAL_PENDING_REVIEW,
+                visibility_state=CHARACTER_VISIBILITY_NOISE,
+                approval_state=CHARACTER_APPROVAL_REJECTED,
                 approval_source=CHARACTER_APPROVAL_SOURCE_BACKFILL_REVIEW,
                 reason_codes=["repair_demoted_noise", *list(reasons), *list(trust_reasons)],
-                action="character_backfill_quarantined",
+                action="character_backfill_suppressed",
                 details={"repair_verifier_band": verification["overall_band"]},
             )
             await record_character_candidate(
@@ -475,7 +559,7 @@ async def apply_repair_plan(
                 proposed_name=character.name,
                 aliases=character.aliases or [],
                 matched_character_id=character.id,
-                status=CHARACTER_CANDIDATE_PENDING,
+                status=CHARACTER_CANDIDATE_SUPPRESSED,
                 confidence=0,
                 reason_codes=["repair_demoted_noise", *list(reasons), *list(trust_reasons)],
                 evidence={
@@ -569,6 +653,12 @@ async def apply_repair_plan(
             "demoted_character_ids": demoted_character_ids,
             "skipped_protected_merge_pairs": skipped_protected_merge_pairs,
             "skipped_protected_demotions": skipped_protected_demotions,
+            "pending_character_candidates_suppressed": len(suppressed_character_candidate_ids),
+            "pending_character_candidates_kept": len(kept_character_candidate_ids),
+            "pending_relationship_candidates_suppressed": len(suppressed_relationship_candidate_ids),
+            "pending_relationship_candidates_kept": len(kept_relationship_candidate_ids),
+            "suppressed_character_candidate_ids": suppressed_character_candidate_ids,
+            "suppressed_relationship_candidate_ids": suppressed_relationship_candidate_ids,
             "first_chapter_recomputes": first_chapter_recomputes,
             "last_seen_chapter_recomputes": last_seen_recomputes,
             "character_labels": initial_character_labels,

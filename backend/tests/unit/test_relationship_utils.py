@@ -3,11 +3,18 @@ from __future__ import annotations
 import uuid
 from types import SimpleNamespace
 
+import pytest
+from sqlalchemy import select
+
+from app.models.book import Book
+from app.models.character import Character, CharacterRelationshipCandidate
 from app.models.intelligence import CharacterRelationship
+from app.models.user import User
 from app.utils.relationship_utils import (
     canonical_relationship_pair_ids,
     canonicalize_relationship_book_rows,
     canonicalize_relationship_rows,
+    reconcile_extracted_relationships,
 )
 
 
@@ -241,3 +248,132 @@ def test_canonicalize_relationship_book_rows_accepts_sparse_row_objects():
     assert (rel.character_a_id, rel.character_b_id) == canonical_relationship_pair_ids(left_id, right_id)
     assert rel.to_chapter is None
     assert rel.description == "Bonds"
+
+
+@pytest.mark.asyncio
+async def test_reconcile_extracted_relationships_repairs_generated_rows_and_preserves_manual_rows(db):
+    user = User(email="relationship-reconcile@example.com", username="relationship-reconcile", password_hash="hash")
+    db.add(user)
+    await db.flush()
+    book = Book(
+        user_id=user.id,
+        title="Relationship Reconcile",
+        format="pdf",
+        s3_key="books/relationship-reconcile.pdf",
+        status="ready",
+        mode="author",
+        total_chapters=1,
+    )
+    db.add(book)
+    await db.flush()
+    gregor = Character(
+        book_id=book.id,
+        name="Gregor Samsa",
+        aliases=["Gregor", "Grete"],
+        first_chapter=1,
+        visibility_state="visible",
+        approval_state="approved",
+    )
+    grete = Character(
+        book_id=book.id,
+        name="Grete",
+        aliases=[],
+        first_chapter=1,
+        visibility_state="visible",
+        approval_state="approved",
+    )
+    hidden = Character(
+        book_id=book.id,
+        name="Mr. Samsa",
+        aliases=[],
+        first_chapter=1,
+        visibility_state="noise",
+        approval_state="rejected",
+    )
+    db.add_all([gregor, grete, hidden])
+    await db.flush()
+    generated_hidden = _relationship(
+        book_id=book.id,
+        character_a_id=gregor.id,
+        character_b_id=hidden.id,
+        rel_type="family",
+        from_chapter=1,
+        description="Incorrect generated endpoint",
+    )
+    curated_hidden = _relationship(
+        book_id=book.id,
+        character_a_id=gregor.id,
+        character_b_id=hidden.id,
+        rel_type="family",
+        from_chapter=2,
+        description="Author-preserved endpoint",
+    )
+    curated_hidden.edited_by_author = True
+    curated_visible = _relationship(
+        book_id=book.id,
+        character_a_id=gregor.id,
+        character_b_id=grete.id,
+        rel_type="family",
+        from_chapter=1,
+        description="Author-preserved visible endpoint",
+    )
+    curated_visible.edited_by_author = True
+    candidate = CharacterRelationshipCandidate(
+        book_id=book.id,
+        chapter_number=1,
+        raw_character_a="Gregor",
+        raw_character_b="Grete",
+        rel_type="family",
+        sentiment=0.4,
+        description="Gregor cares for his sister.",
+        status="suppressed",
+        reason_codes=["character_b_missing"],
+        evidence={},
+    )
+    invalid_auto_candidate = CharacterRelationshipCandidate(
+        book_id=book.id,
+        chapter_number=1,
+        raw_character_a="Gregor's mother",
+        raw_character_b="Grete",
+        matched_character_a_id=gregor.id,
+        matched_character_b_id=grete.id,
+        rel_type="family",
+        sentiment=-0.3,
+        description="Gregor's mother cares for him but struggles with the changes in their relationship.",
+        status="accepted",
+        reason_codes=["relationship_auto_reconciled"],
+        evidence={"relationship_auto_reconciled": True},
+    )
+    db.add_all([generated_hidden, curated_hidden, curated_visible, candidate, invalid_auto_candidate])
+    await db.flush()
+
+    result = await reconcile_extracted_relationships(db, book_id=book.id)
+    await db.flush()
+
+    relationships = (
+        await db.execute(
+            select(CharacterRelationship).where(CharacterRelationship.book_id == book.id)
+        )
+    ).scalars().all()
+    relationship_ids = {relationship.id for relationship in relationships}
+    visible_pair = canonical_relationship_pair_ids(gregor.id, grete.id)
+
+    assert result["aliases_sanitized"] == 1
+    assert result["hidden_relationships_removed"] == 1
+    assert result["relationship_candidates_reconciled"] == 1
+    assert result["relationship_candidates_demoted"] == 1
+    assert gregor.aliases == ["Gregor"]
+    assert generated_hidden.id not in relationship_ids
+    assert curated_hidden.id in relationship_ids
+    assert curated_visible.id in relationship_ids
+    assert any(
+        (relationship.character_a_id, relationship.character_b_id) == visible_pair
+        for relationship in relationships
+    )
+    assert candidate.status == "accepted"
+    assert (candidate.matched_character_a_id, candidate.matched_character_b_id) == visible_pair
+    assert candidate.reason_codes == ["relationship_auto_reconciled"]
+    assert invalid_auto_candidate.status == "suppressed"
+    assert invalid_auto_candidate.matched_character_a_id is None
+    assert invalid_auto_candidate.matched_character_b_id is None
+    assert invalid_auto_candidate.reason_codes == ["relationship_unresolved"]

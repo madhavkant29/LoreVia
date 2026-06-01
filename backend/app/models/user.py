@@ -11,6 +11,8 @@ from app.core.database import Base
 class User(Base):
     __tablename__ = "users"
     __table_args__ = (
+        Index("ix_users_beta_read_penalty_required_at", "beta_read_penalty_required_at"),
+        Index("ix_users_username", "username", unique=True),
         UniqueConstraint("email", name="uq_users_email"),
         UniqueConstraint("username", name="uq_users_username"),
         UniqueConstraint("supabase_auth_id", name="uq_users_supabase_auth_id"),

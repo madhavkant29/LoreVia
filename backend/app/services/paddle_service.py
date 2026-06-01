@@ -1,5 +1,6 @@
 import hashlib
 import hmac
+import re
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -17,6 +18,7 @@ from app.utils.billing_utils import (
 )
 
 PADDLE_API_BASE = "https://api.paddle.com"
+_PADDLE_CUSTOMER_ID_RE = re.compile(r"\b(ctm_[a-z\d]+)\b", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -54,6 +56,30 @@ def _headers() -> dict[str, str]:
     }
 
 
+def _extract_existing_customer_id(response: httpx.Response) -> str | None:
+    try:
+        payload = response.json()
+    except ValueError:
+        return None
+    detail = str(((payload.get("error") or {}).get("detail")) or "").strip()
+    match = _PADDLE_CUSTOMER_ID_RE.search(detail)
+    return match.group(1) if match else None
+
+
+async def _lookup_customer_id_by_email(client: httpx.AsyncClient, email: str) -> str | None:
+    response = await client.get(
+        f"{PADDLE_API_BASE}/customers",
+        headers=_headers(),
+        params={"email": email},
+    )
+    response.raise_for_status()
+    data = response.json().get("data") or []
+    if not data:
+        return None
+    customer_id = (data[0] or {}).get("id")
+    return str(customer_id).strip() or None
+
+
 async def get_or_create_customer(email: str, existing_customer_id: str | None = None) -> str:
     if existing_customer_id:
         return existing_customer_id
@@ -64,6 +90,13 @@ async def get_or_create_customer(email: str, existing_customer_id: str | None = 
             headers=_headers(),
             json={"email": email},
         )
+        if response.status_code == 409:
+            customer_id = _extract_existing_customer_id(response)
+            if customer_id:
+                return customer_id
+            customer_id = await _lookup_customer_id_by_email(client, email)
+            if customer_id:
+                return customer_id
         response.raise_for_status()
         return response.json()["data"]["id"]
 

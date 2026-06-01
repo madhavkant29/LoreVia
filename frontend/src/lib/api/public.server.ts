@@ -103,7 +103,7 @@ export function getPublicForumPostServer(postId: string): Promise<PublicForumPos
 }
 
 export function listPublicForumCommentsServer(postId: string): Promise<PublicForumComment[]> {
-  return fetchPublicJson<PublicForumComment[]>(`/forum/posts/${encodeURIComponent(postId)}/comments`, 120)
+  return fetchPublicJson<{ items: PublicForumComment[] }>(`/forum/posts/${encodeURIComponent(postId)}/comments`, 120).then((data) => data.items)
 }
 
 export function getPublicUserProfileServer(username: string): Promise<PublicUserProfile> {

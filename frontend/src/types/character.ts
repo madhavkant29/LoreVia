@@ -15,6 +15,7 @@ export interface Character {
   book_id: string
   name: string
   aliases: string[]
+  alias_records?: CharacterAliasRecord[]
   role: "mc" | "sc" | "background" | null
   first_chapter: number
   last_seen_chapter?: number | null
@@ -126,6 +127,18 @@ export interface Character {
   }
 }
 
+export interface CharacterAliasRecord {
+  id: string
+  book_id: string
+  character_id: string
+  alias_text: string
+  normalized_alias: string
+  alias_kind: string
+  source: string
+  confidence: number
+  created_at: string
+}
+
 export interface CharacterShareResponse {
   share_url: string
   expires_in_minutes: number
@@ -147,7 +160,7 @@ export interface CharacterCandidate {
   normalized_name: string
   aliases: string[]
   matched_character_id?: string | null
-  status: "pending" | "accepted" | "rejected" | "promoted" | "merged"
+  status: "pending" | "accepted" | "rejected" | "promoted" | "merged" | "suppressed"
   confidence: number
   reason_codes: string[]
   evidence: Record<string, unknown>
@@ -183,6 +196,8 @@ export interface CharacterDuplicateSuggestion {
   primary_is_curated: boolean
   secondary_is_curated: boolean
   status: "pending" | "accepted" | "dismissed"
+  dismissal_reason?: string | null
+  auto_dismissed?: boolean
   created_at: string
   updated_at: string
 }
@@ -192,8 +207,16 @@ export interface CharacterRepairPreview {
   dry_run: boolean
   allow_merge_safe_pairs: boolean
   allow_demote_obvious_noise: boolean
+  auto_merged?: number
+  auto_aliases?: number
+  auto_suppressed?: number
+  blocked_suggestions?: number
+  remaining_review_items?: number
   planned_merges: Array<[string, string]>
+  planned_aliases?: Array<[string, string]>
   planned_demotions: string[]
+  planned_suppressions?: string[]
+  blocked_duplicate_suggestions?: string[]
   skipped_protected_merge_pairs: Array<[string, string]>
   skipped_protected_demotions: string[]
   updated_first_chapters: Record<string, number>
@@ -201,15 +224,34 @@ export interface CharacterRepairPreview {
   character_labels: Record<string, string>
   pending_duplicate_suggestions: number
   pending_relationship_candidates: number
+  pending_character_candidates_suppressed: number
+  pending_character_candidates_kept: number
+  pending_relationship_candidates_suppressed: number
+  pending_relationship_candidates_kept: number
+  protected_manual_records_skipped: number
   unresolved_relationship_deltas: Record<string, number>
 }
 
 export interface CharacterRepairApplyResult {
   book_id: string
+  auto_merged?: number
+  auto_aliases?: number
+  auto_suppressed?: number
+  blocked_suggestions?: number
+  remaining_review_items?: number
   merged_pairs: Array<[string, string]>
+  planned_aliases?: Array<[string, string]>
   demoted_character_ids: string[]
+  planned_suppressions?: string[]
+  blocked_duplicate_suggestions?: string[]
   skipped_protected_merge_pairs: Array<[string, string]>
   skipped_protected_demotions: string[]
+  pending_character_candidates_suppressed?: number
+  pending_character_candidates_kept?: number
+  pending_relationship_candidates_suppressed?: number
+  pending_relationship_candidates_kept?: number
+  suppressed_character_candidate_ids?: string[]
+  suppressed_relationship_candidate_ids?: string[]
   first_chapter_recomputes: Record<string, number>
   last_seen_chapter_recomputes: Record<string, number>
   character_labels: Record<string, string>
@@ -241,7 +283,7 @@ export interface CharacterRelationshipCandidate {
   rel_type?: string | null
   sentiment?: number | null
   description?: string | null
-  status: "pending" | "accepted" | "rejected" | "resolved" | "merged"
+  status: "pending" | "accepted" | "rejected" | "resolved" | "merged" | "suppressed"
   reason_codes: string[]
   evidence: Record<string, unknown>
   source_batch_key?: string | null
@@ -267,11 +309,32 @@ export interface CharacterReviewResponse {
     evidence: Record<string, unknown>
     created_at: string
   }>
+  auto_actions_summary?: Record<string, number>
   counts: {
     pending_candidates: number
     pending_duplicate_suggestions: number
     pending_relationship_candidates: number
   }
+}
+
+export interface CharacterIdentityDiagnostics {
+  suppressed_count: number
+  auto_merged_count: number
+  auto_alias_count: number
+  blocked_duplicate_count: number
+  hidden_candidate_count: number
+  suppression_reasons: Record<string, number>
+  recent_identity_actions: Array<{
+    id: string
+    action_type: string
+    source_character_id?: string | null
+    target_character_id?: string | null
+    surface_text?: string | null
+    confidence: number
+    reason?: string | null
+    reversible: boolean
+    created_at: string
+  }>
 }
 
 export interface RelationshipGraph {

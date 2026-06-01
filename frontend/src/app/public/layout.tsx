@@ -1,5 +1,6 @@
 import type { Metadata } from "next"
 
+import { QueryProvider } from "@/components/app/QueryProvider"
 import { Navbar } from "@/components/layout/Navbar"
 
 export const metadata: Metadata = {
@@ -11,10 +12,12 @@ export const metadata: Metadata = {
 
 export default function PublicContentLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="app-shell min-h-screen">
-      <div className="app-shell__mesh" />
-      <Navbar />
-      {children}
-    </div>
+    <QueryProvider>
+      <div className="app-shell min-h-screen">
+        <div className="app-shell__mesh" />
+        <Navbar />
+        {children}
+      </div>
+    </QueryProvider>
   )
 }

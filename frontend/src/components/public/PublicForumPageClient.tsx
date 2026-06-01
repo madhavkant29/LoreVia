@@ -42,8 +42,10 @@ export function PublicForumPageClient({
   initialData?: PublicForumPostListResponse
 }) {
   const router = useRouter()
+  const [feedTab, setFeedTab] = useState<"ranked" | "general">("ranked")
   const [query, setQuery] = useState("")
   const [page, setPage] = useState(initialData?.page ?? 1)
+  const [generalPage, setGeneralPage] = useState(1)
   const [ranking, setRanking] = useState(initialData?.ranking_key ?? "most_popular")
   const [timeWindow, setTimeWindow] = useState(initialData?.time_window ?? "monthly")
   const [viewer, setViewer] = useState<User | null>(null)
@@ -70,6 +72,7 @@ export function PublicForumPageClient({
 
   useEffect(() => {
     setPage(1)
+    setGeneralPage(1)
   }, [normalizedQuery, ranking, timeWindow])
 
   useEffect(() => {
@@ -177,8 +180,17 @@ export function PublicForumPageClient({
     ) ? initialData : undefined,
     staleTime: 30_000,
   })
-  const posts = data?.items ?? []
-  const error = isError ? "Could not load the public forum right now." : null
+  const { data: generalData, isLoading: generalLoading, isError: generalIsError } = useQuery<PublicForumPostListResponse>({
+    queryKey: asQueryKey(`public:forum:general:${normalizedQuery || "all"}:${generalPage}`),
+    queryFn: () => publicApi.listForumPosts(normalizedQuery || undefined, generalPage, FORUM_PAGE_SIZE, "general"),
+    enabled: feedTab === "general",
+    staleTime: 30_000,
+  })
+  const posts = feedTab === "general" ? (generalData?.items ?? []) : (data?.items ?? [])
+  const activeData = feedTab === "general" ? generalData : data
+  const error = feedTab === "general"
+    ? (generalIsError ? "Could not load general discussions right now." : null)
+    : (isError ? "Could not load the public forum right now." : null)
 
   const createPost = async () => {
     if (!viewer) {
@@ -191,6 +203,14 @@ export function PublicForumPageClient({
     }
     if (!headline.trim() || !body.trim()) {
       setComposerStatus(composerThreadType === "novel" ? "Choose an eligible manuscript, headline, and discussion brief first." : "Add a headline and body before opening a general discussion.")
+      return
+    }
+    if (headline.trim().length < 3) {
+      setComposerStatus("Headline must be at least 3 characters long.")
+      return
+    }
+    if (body.trim().length < 20) {
+      setComposerStatus("Discussion brief must be at least 20 characters long.")
       return
     }
     if (composerThreadType === "novel" && !canOpenPublicDiscussions) {
@@ -253,67 +273,101 @@ export function PublicForumPageClient({
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2 text-3xs font-semibold uppercase tracking-[0.18em]">
                 <span className={`rounded-full px-2.5 py-1 ${isDark ? "bg-[#1d2631] text-slate-200" : "bg-slate-100 text-slate-700"}`}>LoreVia Forum</span>
-                <span className={isDark ? "text-slate-500" : "text-slate-500"}>Ranked beta novels</span>
+                <span className={isDark ? "text-slate-500" : "text-slate-500"}>{feedTab === "ranked" ? "Ranked beta novels" : "General discussions"}</span>
                 <MetaDivider isDark={isDark} />
                 <span className={isDark ? "text-emerald-300" : "text-emerald-700"}>Live</span>
               </div>
-              <h1 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">Beta novel rankings worth opening.</h1>
+              <h1 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">
+                {feedTab === "ranked" ? "Beta novel rankings worth opening." : "General writing discussions."}
+              </h1>
               <p className={`mt-2 max-w-2xl text-sm leading-6 ${isDark ? "text-slate-400" : "text-slate-600"}`}>
-                A ranking feed for public beta-reading threads, shaped around ratings, craft signals, update cadence, and reader intent.
+                {feedTab === "ranked"
+                  ? "A ranking feed for public beta-reading threads, shaped around ratings, craft signals, update cadence, and reader intent."
+                  : "Community conversations about writing craft, genre advice, workflow tips, and broader author discussions."}
               </p>
             </div>
 
             <div className="grid grid-cols-3 gap-2 text-center text-sm lg:w-[280px]">
-              <StatCard isDark={isDark} value={String(data?.total ?? 0)} label="threads" />
+              <StatCard isDark={isDark} value={String(activeData?.total ?? 0)} label="threads" />
               <StatCard isDark={isDark} value={String(posts.filter((post) => post.allow_contact_requests).length)} label="open notes" />
-              <StatCard isDark={isDark} value={String(page)} label="page" />
+              <StatCard isDark={isDark} value={String(feedTab === "general" ? generalPage : page)} label="page" />
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <div className={`inline-flex rounded-full p-1 ${isDark ? "bg-white/[0.05]" : "bg-slate-100"}`}>
+              <button
+                type="button"
+                onClick={() => setFeedTab("ranked")}
+                className={`rounded-full px-4 py-2 text-sm font-semibold transition ${feedTab === "ranked" ? (isDark ? "bg-amber-400 text-slate-950" : "bg-slate-950 text-white") : (isDark ? "text-slate-300" : "text-slate-700")}`}
+              >
+                Beta Novels
+              </button>
+              <button
+                type="button"
+                onClick={() => setFeedTab("general")}
+                className={`rounded-full px-4 py-2 text-sm font-semibold transition ${feedTab === "general" ? (isDark ? "bg-amber-400 text-slate-950" : "bg-slate-950 text-white") : (isDark ? "text-slate-300" : "text-slate-700")}`}
+              >
+                General
+              </button>
             </div>
           </div>
 
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div className="grid w-full gap-3 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.7fr)_minmax(0,0.7fr)]">
+            <div className={`grid w-full gap-3 ${feedTab === "ranked" ? "lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.7fr)_minmax(0,0.7fr)]" : "lg:grid-cols-[minmax(0,1fr)]"}`}>
               <label className={`flex h-11 w-full items-center gap-3 rounded-2xl border px-4 ${isDark ? "border-white/10 bg-[#151b22]" : "border-slate-200 bg-white"}`}>
                 <SearchIcon className={isDark ? "text-slate-500" : "text-slate-400"} />
                 <input
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Search title, genre, author, headline, or body"
+                  placeholder={feedTab === "ranked" ? "Search title, genre, author, headline, or body" : "Search headline or body"}
                   className={`w-full bg-transparent text-sm outline-none ${isDark ? "placeholder:text-slate-500" : "placeholder:text-slate-400"}`}
                 />
               </label>
 
-              <select
-                value={ranking}
-                onChange={(event) => setRanking(event.target.value)}
-                className={`h-11 rounded-2xl border px-4 text-sm outline-none ${isDark ? "border-white/10 bg-[#151b22] text-slate-100" : "border-slate-200 bg-white text-slate-900"}`}
-              >
-                {rankingOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
+              {feedTab === "ranked" ? (
+                <>
+                  <select
+                    value={ranking}
+                    onChange={(event) => setRanking(event.target.value)}
+                    className={`h-11 rounded-2xl border px-4 text-sm outline-none ${isDark ? "border-white/10 bg-[#151b22] text-slate-100" : "border-slate-200 bg-white text-slate-900"}`}
+                  >
+                    {rankingOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
 
-              <select
-                value={timeWindow}
-                onChange={(event) => setTimeWindow(event.target.value)}
-                className={`h-11 rounded-2xl border px-4 text-sm outline-none ${isDark ? "border-white/10 bg-[#151b22] text-slate-100" : "border-slate-200 bg-white text-slate-900"}`}
-              >
-                {timeWindowOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
+                  <select
+                    value={timeWindow}
+                    onChange={(event) => setTimeWindow(event.target.value)}
+                    className={`h-11 rounded-2xl border px-4 text-sm outline-none ${isDark ? "border-white/10 bg-[#151b22] text-slate-100" : "border-slate-200 bg-white text-slate-900"}`}
+                  >
+                    {timeWindowOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </>
+              ) : null}
             </div>
 
-            <div className="flex flex-wrap items-center gap-2 text-xs">
-              <ShellChip isDark={isDark} active>
-                {posts[0]?.ranking?.label ?? "Ranked beta feed"}
-              </ShellChip>
-              <ShellChip isDark={isDark}>Open novel threads</ShellChip>
-              <ShellChip isDark={isDark}>Ratings and reader notes</ShellChip>
-            </div>
+            {feedTab === "ranked" ? (
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <ShellChip isDark={isDark} active>
+                  {posts[0]?.ranking?.label ?? "Ranked beta feed"}
+                </ShellChip>
+                <ShellChip isDark={isDark}>Open novel threads</ShellChip>
+                <ShellChip isDark={isDark}>Ratings and reader notes</ShellChip>
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <ShellChip isDark={isDark} active>General discussions</ShellChip>
+                <ShellChip isDark={isDark}>Community conversations</ShellChip>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -325,35 +379,37 @@ export function PublicForumPageClient({
           ) : null}
 
           <div className="grid gap-3">
-            {loading ? (
+            {(feedTab === "ranked" ? loading : generalLoading) ? (
               <div className={`rounded-2xl border px-4 py-5 text-sm ${isDark ? "border-white/10 bg-[#121821] text-slate-400" : "border-slate-200 bg-white text-slate-500"}`}>Loading forum posts...</div>
             ) : null}
-            {!loading && posts.length === 0 ? (
-              <div className={`rounded-2xl border px-4 py-5 text-sm ${isDark ? "border-white/10 bg-[#121821] text-slate-400" : "border-slate-200 bg-white text-slate-500"}`}>No public forum posts match this search yet.</div>
+            {!(feedTab === "ranked" ? loading : generalLoading) && posts.length === 0 ? (
+              <div className={`rounded-2xl border px-4 py-5 text-sm ${isDark ? "border-white/10 bg-[#121821] text-slate-400" : "border-slate-200 bg-white text-slate-500"}`}>
+                {feedTab === "ranked" ? "No public forum posts match this search yet." : "No general discussions yet. Be the first to start one!"}
+              </div>
             ) : null}
-            {!loading ? posts.map((post) => (
+            {!(feedTab === "ranked" ? loading : generalLoading) ? posts.map((post) => (
               <ForumFeedCard key={post.id} isDark={isDark} post={post} />
             )) : null}
 
-            {!loading && data && data.total > 0 ? (
+            {!(feedTab === "ranked" ? loading : generalLoading) && activeData && activeData.total > 0 ? (
               <div className="flex flex-col gap-3 pt-2 sm:flex-row sm:items-center sm:justify-between">
                 <p className={`text-sm ${isDark ? "text-slate-400" : "text-slate-600"}`}>
-                  Showing {(data.page - 1) * data.page_size + 1}-{Math.min(data.page * data.page_size, data.total)} of {data.total} threads
+                  Showing {(activeData.page - 1) * activeData.page_size + 1}-{Math.min(activeData.page * activeData.page_size, activeData.total)} of {activeData.total} threads
                 </p>
                 <div className="flex items-center gap-3">
                   <button
                     type="button"
-                    onClick={() => setPage((current) => Math.max(1, current - 1))}
-                    disabled={data.page <= 1}
+                    onClick={() => feedTab === "general" ? setGeneralPage((c) => Math.max(1, c - 1)) : setPage((c) => Math.max(1, c - 1))}
+                    disabled={activeData.page <= 1}
                     className={`inline-flex h-10 items-center justify-center rounded-full px-4 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${isDark ? "border border-white/10 bg-white/5 text-slate-100 hover:bg-white/10" : "border border-slate-200 bg-white text-slate-900 hover:bg-slate-50"}`}
                   >
                     Previous
                   </button>
-                  <span className={`text-sm ${isDark ? "text-slate-300" : "text-slate-700"}`}>Page {data.page}</span>
+                  <span className={`text-sm ${isDark ? "text-slate-300" : "text-slate-700"}`}>Page {activeData.page}</span>
                   <button
                     type="button"
-                    onClick={() => setPage((current) => current + 1)}
-                    disabled={!data.has_more}
+                    onClick={() => feedTab === "general" ? setGeneralPage((c) => c + 1) : setPage((c) => c + 1)}
+                    disabled={!activeData.has_more}
                     className={`inline-flex h-10 items-center justify-center rounded-full px-4 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${isDark ? "border border-white/10 bg-white/5 text-slate-100 hover:bg-white/10" : "border border-slate-200 bg-white text-slate-900 hover:bg-slate-50"}`}
                   >
                     Next

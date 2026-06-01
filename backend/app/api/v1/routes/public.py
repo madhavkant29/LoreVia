@@ -129,6 +129,7 @@ async def list_public_beta_forum_posts(
     q: str | None = None,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=DEFAULT_PUBLIC_FORUM_PAGE_SIZE, ge=1, le=MAX_PUBLIC_FORUM_PAGE_SIZE),
+    thread_type: str | None = Query(default=None, pattern=r"^(general|novel)$"),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_optional_current_user),
 ):
@@ -146,6 +147,7 @@ async def list_public_beta_forum_posts(
         q=normalized_query,
         page=page,
         page_size=page_size,
+        thread_type=thread_type,
         current_user=current_user,
     )
     if current_user is None:

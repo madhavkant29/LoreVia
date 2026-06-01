@@ -3,9 +3,10 @@ import uuid
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.models.book import Book
-from app.models.character import Character, CharacterCandidate, CharacterMention
+from app.models.character import Character, CharacterCandidate, CharacterMention, CharacterRelationshipCandidate
 from app.models.user import User
 from scripts import backfill_character_bible_noise
 from scripts import repair_character_bible_book
@@ -173,14 +174,76 @@ async def test_apply_repair_plan_demotes_characters_rejected_by_repair_verifier(
     ).scalars().all()
 
     assert persisted_character is not None
-    assert persisted_character.visibility_state == "quarantined"
-    assert persisted_character.approval_state == "pending_review"
+    assert persisted_character.visibility_state == "noise"
+    assert persisted_character.approval_state == "rejected"
     assert result["demoted_character_ids"] == [str(character.id)]
     assert result["character_labels"][str(character.id)] == "Help"
     assert len(candidate_rows) == 1
     assert candidate_rows[0].matched_character_id == character.id
+    assert candidate_rows[0].status == "suppressed"
     assert candidate_rows[0].reason_codes[0] == "repair_demoted_noise"
     assert candidate_rows[0].evidence["verifier"]["final"]["confidence_band"] == "reject"
+
+
+@pytest.mark.asyncio
+async def test_apply_repair_plan_suppresses_pending_candidate_noise(db, monkeypatch):
+    user = User(email="repair-candidates@lorevia.app", username="repair-candidates", password_hash="hash")
+    db.add(user)
+    await db.flush()
+
+    book = Book(
+        user_id=user.id,
+        title="Repair Candidates",
+        format="pdf",
+        s3_key="books/repair-candidates.pdf",
+        status="ready",
+        total_chapters=1,
+    )
+    db.add(book)
+    await db.flush()
+
+    character_candidate = CharacterCandidate(
+        book_id=book.id,
+        chapter_number=1,
+        raw_name="Texte",
+        proposed_name="Texte",
+        normalized_name="texte",
+        status="pending",
+        confidence=0,
+        reason_codes=["mention_verifier_review"],
+        evidence={"verifier": {"final": {"confidence_band": "review", "reasons": ["sentence_start_capitalization_only"]}}},
+    )
+    relationship_candidate = CharacterRelationshipCandidate(
+        book_id=book.id,
+        chapter_number=1,
+        raw_character_a="Gregor",
+        raw_character_b="Texte",
+        status="pending",
+        reason_codes=["relationship_unresolved", "character_b_missing"],
+        evidence={},
+    )
+    db.add_all([character_candidate, relationship_candidate])
+    await db.commit()
+
+    async def _empty_chapter_rows(*_args, **_kwargs):
+        return []
+
+    monkeypatch.setattr(repair_character_bible_book, "_load_chapter_rows", _empty_chapter_rows)
+
+    result = await repair_character_bible_book.apply_repair_plan(
+        book.id,
+        allow_merge_safe_pairs=False,
+        allow_demote_obvious_noise=True,
+        db=db,
+    )
+
+    await db.refresh(character_candidate)
+    await db.refresh(relationship_candidate)
+
+    assert character_candidate.status == "suppressed"
+    assert relationship_candidate.status == "suppressed"
+    assert result["pending_character_candidates_suppressed"] == 1
+    assert result["pending_relationship_candidates_suppressed"] == 1
 
 
 def test_backfill_marks_book_state_with_version_and_summary():
@@ -196,3 +259,39 @@ def test_backfill_marks_book_state_with_version_and_summary():
     assert state["version"] == backfill_character_bible_noise.BACKFILL_VERSION
     assert state["status"] == "applied"
     assert state["summary"] == {"demoted_character_ids": ["a"]}
+
+
+@pytest.mark.asyncio
+async def test_backfill_targets_books_with_only_pending_candidate_noise(db, monkeypatch):
+    user = User(email="candidate-only-backfill@lorevia.app", username="candidate-only-backfill", password_hash="hash")
+    db.add(user)
+    await db.flush()
+
+    book = Book(
+        user_id=user.id,
+        title="Candidate Only Backfill",
+        format="pdf",
+        s3_key="books/candidate-only-backfill.pdf",
+        status="ready",
+    )
+    db.add(book)
+    await db.flush()
+    db.add(
+        CharacterCandidate(
+            book_id=book.id,
+            chapter_number=1,
+            raw_name="Chapitre",
+            proposed_name="Chapitre",
+            normalized_name="chapitre",
+            status="pending",
+            confidence=0,
+        )
+    )
+    await db.commit()
+
+    session_factory = async_sessionmaker(db.bind, class_=AsyncSession, expire_on_commit=False)
+    monkeypatch.setattr(backfill_character_bible_noise, "AsyncSessionLocal", session_factory)
+
+    targets = await backfill_character_bible_noise._iter_target_books(book_id=book.id, limit=0, force=True)
+
+    assert [item.id for item in targets] == [book.id]

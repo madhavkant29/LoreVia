@@ -102,6 +102,13 @@ def _app_link(path: str) -> str:
     return f"{_canonical_app_url()}{normalized_path}"
 
 
+def _plan_display_name(plan: str) -> str:
+    normalized = " ".join(
+        part for part in str(plan).replace("-", " ").replace("_", " ").split() if part
+    )
+    return normalized.title() if normalized else "Paid"
+
+
 def _api_link(path: str) -> str:
     normalized_path = path if path.startswith("/") else f"/{path}"
     return f"{_canonical_app_url()}{settings.API_V1_PREFIX}{normalized_path}"
@@ -112,9 +119,9 @@ def _button_html(label: str, url: str) -> str:
     safe_url = escape(url, quote=True)
     return (
         f'<a href="{safe_url}" '
-        "style=\"display:inline-block;border-radius:999px;background:#101828;color:#f8fafc;"
-        "padding:14px 22px;font-size:15px;font-weight:700;line-height:1;text-decoration:none;"
-        "box-shadow:0 12px 30px rgba(16,24,40,0.18);\">"
+        "style=\"display:inline-block;border-radius:999px;background:linear-gradient(135deg,#0f766e 0%,#115e59 100%);"
+        "color:#f8fafc;padding:14px 22px;font-size:15px;font-weight:700;line-height:1;text-decoration:none;"
+        "box-shadow:0 14px 34px rgba(15,118,110,0.24);border:1px solid rgba(255,255,255,0.18);\">"
         f"{safe_label}</a>"
     )
 
@@ -123,11 +130,34 @@ def _paragraph(text: str) -> str:
     return f"<p style=\"margin:0 0 16px;color:#344054;font-size:16px;line-height:1.75;\">{text}</p>"
 
 
+def _list_panel(title: str, items: list[str]) -> str:
+    safe_title = escape(title)
+    rows = "".join(
+        (
+            "<li style=\"margin:0 0 10px;color:#344054;font-size:15px;line-height:1.7;\">"
+            f"{escape(item)}"
+            "</li>"
+        )
+        for item in items
+    )
+    return (
+        "<div style=\"margin:10px 0 22px;padding:18px 20px;border-radius:22px;"
+        "background:linear-gradient(180deg,#f8fafc 0%,#f3f7fb 100%);border:1px solid #e4e7ec;\">"
+        f"<p style=\"margin:0 0 12px;color:#101828;font-size:13px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;\">{safe_title}</p>"
+        f"<ul style=\"margin:0;padding-left:20px;\">{rows}</ul>"
+        "</div>"
+    )
+
+
 def _support_footer() -> str:
     support_email = escape(settings.SUPPORT_EMAIL)
     app_url = escape(_canonical_app_url(), quote=True)
     return (
-        "<div style=\"margin-top:36px;padding-top:24px;border-top:1px solid #e4e7ec;\">"
+        "<div style=\"margin-top:28px;padding:22px 22px 20px;border-radius:22px;"
+        "background:linear-gradient(180deg,#f8fafc 0%,#f2f7fb 100%);border:1px solid #e4e7ec;\">"
+        "<p style=\"margin:0 0 10px;color:#101828;font-size:14px;font-weight:700;line-height:1.7;\">"
+        "Need help?"
+        "</p>"
         "<p style=\"margin:0 0 10px;color:#475467;font-size:14px;line-height:1.7;\">"
         "Need help with your account, uploads, billing, or workspace? "
         f"Reply to this email or reach us at <a href=\"mailto:{support_email}\" "
@@ -153,14 +183,16 @@ def _promotional_footer(
     safe_preferences_url = escape(preferences_url, quote=True)
     mailing_address = escape((settings.BUSINESS_MAILING_ADDRESS or "").strip())
     button_html = (
-        "<div style=\"margin:20px 0 14px;\">"
+        "<div style=\"margin:18px 0 14px;\">"
         f"{_button_html('Unsubscribe', unsubscribe_url)}"
         "</div>"
         if include_unsubscribe_button
         else ""
     )
     return (
-        "<div style=\"margin-top:28px;padding-top:24px;border-top:1px solid #e4e7ec;\">"
+        "<div style=\"margin-top:24px;padding:22px 22px 20px;border-radius:22px;"
+        "background:linear-gradient(180deg,#fffaf0 0%,#fff6e8 100%);border:1px solid #f2e4c2;\">"
+        "<p style=\"margin:0 0 10px;color:#7a2e0e;font-size:13px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;\">Email preferences</p>"
         "<p style=\"margin:0 0 12px;color:#475467;font-size:14px;line-height:1.7;\">"
         "You're receiving this because you signed up for LoreVia."
         "</p>"
@@ -198,31 +230,49 @@ def _render_email(
 
     return f"""
     <html>
-      <body style="margin:0;padding:0;background:#f5f7fb;font-family:Inter,Segoe UI,Helvetica,Arial,sans-serif;">
+      <body style="margin:0;padding:0;background:#eef3f8;font-family:Inter,Segoe UI,Helvetica,Arial,sans-serif;">
         <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">
           {safe_preheader}
         </div>
-        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f5f7fb;padding:24px 12px;">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:linear-gradient(180deg,#eef3f8 0%,#f8fafc 100%);padding:32px 12px;">
           <tr>
             <td align="center">
-              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:640px;background:#ffffff;border:1px solid #eaecf0;border-radius:28px;overflow:hidden;box-shadow:0 24px 60px rgba(16,24,40,0.08);">
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:680px;background:#ffffff;border:1px solid #dfe7ef;border-radius:32px;overflow:hidden;box-shadow:0 28px 70px rgba(16,24,40,0.10);">
                 <tr>
-                  <td style="padding:40px 40px 28px;background:linear-gradient(135deg,#effcf6 0%,#f8fafc 55%,#ecfeff 100%);border-bottom:1px solid #e4e7ec;">
+                  <td style="padding:24px 40px 0;background:#ffffff;">
+                    <div style="display:inline-block;padding:8px 14px;border-radius:999px;background:#ecfdf3;border:1px solid #abefc6;color:#067647;font-size:12px;font-weight:800;letter-spacing:0.16em;text-transform:uppercase;">
+                      LoreVia
+                    </div>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:24px 40px 28px;background:linear-gradient(135deg,#effcf6 0%,#f8fafc 50%,#ecfeff 100%);border-bottom:1px solid #e4e7ec;">
                     <p style="margin:0 0 14px;color:#0f766e;font-size:12px;font-weight:800;letter-spacing:0.18em;">{safe_eyebrow}</p>
                     <h1 style="margin:0;color:#101828;font-size:31px;line-height:1.2;font-weight:800;">{safe_heading}</h1>
+                    <p style="margin:14px 0 0;color:#475467;font-size:15px;line-height:1.7;">
+                      Clear account updates for readers and writers using LoreVia to manage long-form story context.
+                    </p>
                   </td>
                 </tr>
                 <tr>
                   <td style="padding:36px 40px 40px;">
-                    {body_html}
-                    <div style="margin-top:28px;margin-bottom:18px;">
-                      {_button_html(cta_label, cta_url)}
+                    <div style="padding:28px;border-radius:26px;background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%);border:1px solid #edf2f7;">
+                      {body_html}
                     </div>
-                    <p style="margin:0;color:#667085;font-size:13px;line-height:1.7;">
-                      Button not working? Copy and paste this link into your browser:
-                      <a href="{safe_cta_url}" style="color:#0f766e;text-decoration:none;word-break:break-all;">{safe_cta_url}</a>
-                    </p>
+                    <div style="margin-top:24px;padding:20px 22px;border-radius:24px;background:linear-gradient(180deg,#f0fdf9 0%,#ecfeff 100%);border:1px solid #ccfbf1;">
+                      <p style="margin:0 0 14px;color:#0f172a;font-size:14px;font-weight:700;line-height:1.6;">
+                        Ready for the next step?
+                      </p>
+                      <div style="margin:0 0 16px;">
+                        {_button_html(cta_label, cta_url)}
+                      </div>
+                      <p style="margin:0;color:#475467;font-size:13px;line-height:1.7;">
+                        Button not working? Copy and paste this link into your browser:
+                        <a href="{safe_cta_url}" style="color:#0f766e;text-decoration:none;word-break:break-all;">{safe_cta_url}</a>
+                      </p>
+                    </div>
                     {closing_section}
+                    <!-- PROMOTIONAL_FOOTER -->
                     {_support_footer()}
                   </td>
                 </tr>
@@ -233,6 +283,15 @@ def _render_email(
       </body>
     </html>
     """
+
+
+def _inject_promotional_footer(html: str, footer_html: str) -> str:
+    marker = "<!-- PROMOTIONAL_FOOTER -->"
+    if marker in html:
+        return html.replace(marker, footer_html)
+    if "</body>" in html:
+        return html.replace("</body>", footer_html + "</body>")
+    return html + footer_html
 
 
 async def _resolve_promotional_context(
@@ -308,18 +367,20 @@ async def _send_categorized_email(
         unsubscribe_url = str(context["unsubscribe_url"])
         preferences_url = str(context["preferences_url"])
         include_unsubscribe_button = category == EMAIL_CATEGORY_MARKETING
-        payload["html"] = html.replace(
-            "</body>",
+        payload["html"] = _inject_promotional_footer(
+            html,
             _promotional_footer(
                 unsubscribe_url=unsubscribe_url,
                 preferences_url=preferences_url,
                 include_unsubscribe_button=include_unsubscribe_button,
-            ) + "</body>",
+            ),
         )
         payload["headers"] = {
             "List-Unsubscribe": f"<{unsubscribe_url}>",
             "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
         }
+    else:
+        payload["html"] = html.replace("<!-- PROMOTIONAL_FOOTER -->", "")
 
     return _send(payload)
 
@@ -401,12 +462,21 @@ async def send_processing_complete_with_stats(
 
 async def send_subscription_confirmation(email: str, plan: str) -> None:
     library_url = _app_link("/library")
-    plan_name = escape(plan.title())
+    plan_label = _plan_display_name(plan)
+    plan_name = escape(plan_label)
     body_html = "".join(
         [
             _paragraph(f"Your <strong>LoreVia {plan_name}</strong> subscription is now active."),
             _paragraph(
                 "Your account has been updated with the access, capacity, and workspace features included in your plan. You can continue using LoreVia for manuscript analysis, character tracking, continuity review, chapter-level recall, and grounded story questions without interrupting your current workflow."
+            ),
+            _list_panel(
+                "What you can do now",
+                [
+                    "Return to the project you were already reading, drafting, or revising.",
+                    "Use the higher-capacity workspace features tied to your active plan.",
+                    "Keep tracking long-form story context without restarting your workflow.",
+                ],
             ),
             _paragraph(
                 "The best next step is to return to your library and continue with the project you care about most. If you are working on a draft, you can use LoreVia to review character consistency, track relationship changes, and keep long-form story context easier to manage."
@@ -421,15 +491,62 @@ async def send_subscription_confirmation(email: str, plan: str) -> None:
     )
     await _send_categorized_email(
         email=email,
-        subject=f"LoreVia {plan.title()} is now active",
+        subject=f"LoreVia {plan_label} is now active",
         category=EMAIL_CATEGORY_TRANSACTIONAL,
         html=_render_email(
-            preheader=f"Your LoreVia {plan.title()} subscription is active and ready to use.",
+            preheader=f"Your LoreVia {plan_label} subscription is active and ready to use.",
             eyebrow="Plan activated",
-            heading=f"Your LoreVia {plan.title()} plan is live",
+            heading=f"Your LoreVia {plan_label} plan is live",
             body_html=body_html,
             cta_label="Go to your library",
             cta_url=library_url,
+            closing_html=closing_html,
+        ),
+    )
+
+
+async def send_subscription_cancellation(email: str, plan: str) -> None:
+    pricing_url = _app_link("/pricing")
+    plan_label = _plan_display_name(plan)
+    plan_name = escape(plan_label)
+    body_html = "".join(
+        [
+            _paragraph(
+                f"Your <strong>LoreVia {plan_name}</strong> subscription is no longer active."
+            ),
+            _paragraph(
+                "This means the paid plan connected to this subscription has ended, and future billing for this subscription should be stopped unless you start a new paid plan later."
+            ),
+            _list_panel(
+                "What this means now",
+                [
+                    "Your account will follow the access level of your current plan state going forward.",
+                    "If you want paid access again, you can restart from the pricing page at any time.",
+                    "If this cancellation looks unexpected, reply to this email so billing can be reviewed.",
+                ],
+            ),
+            _paragraph(
+                "If you were actively using LoreVia for drafting, revision, continuity review, or long-form reading, you can restart whenever the workspace becomes useful again. Your best next step is to review the available plans and choose one only if it matches how you actually work."
+            ),
+            _paragraph(
+                "If you canceled intentionally, no further action is required right now. If you need help with invoices, account access, or restarting service later, reply to this email and support can help."
+            ),
+        ]
+    )
+    closing_html = _paragraph(
+        "Thanks for having used LoreVia in your reading or writing workflow."
+    )
+    await _send_categorized_email(
+        email=email,
+        subject=f"Your LoreVia {plan_label} subscription has ended",
+        category=EMAIL_CATEGORY_TRANSACTIONAL,
+        html=_render_email(
+            preheader=f"Your LoreVia {plan_label} subscription is no longer active.",
+            eyebrow="Subscription ended",
+            heading="Your paid plan has been canceled",
+            body_html=body_html,
+            cta_label="Review plans",
+            cta_url=pricing_url,
             closing_html=closing_html,
         ),
     )

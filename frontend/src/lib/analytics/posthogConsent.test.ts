@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import {
   ANALYTICS_CONSENT_COOKIE,
+  getAnalyticsConsentValue,
   hasAnalyticsConsent,
   shouldShowAnalyticsConsentBanner,
 } from "./posthogConsent"
@@ -15,6 +16,17 @@ describe("posthog consent helpers", () => {
     expect(hasAnalyticsConsent("true")).toBe(true)
     expect(hasAnalyticsConsent("false")).toBe(false)
     expect(hasAnalyticsConsent(undefined)).toBe(false)
+  })
+
+  it("reads the analytics consent value from a browser cookie string", () => {
+    expect(getAnalyticsConsentValue("other=value; lorevia_analytics_consent=true; theme=dark")).toBe("true")
+    expect(getAnalyticsConsentValue("lorevia_analytics_consent=false")).toBe("false")
+    expect(getAnalyticsConsentValue("other=value")).toBeUndefined()
+  })
+
+  it("falls back to legacy analytics consent and ignores malformed cookies", () => {
+    expect(getAnalyticsConsentValue("lorevia_analytics_consent-legacy=true")).toBe("true")
+    expect(getAnalyticsConsentValue("bad=%E0%A4%A; lorevia_analytics_consent=true")).toBe("true")
   })
 
   it("shows the banner when analytics is configured and consent is missing", () => {

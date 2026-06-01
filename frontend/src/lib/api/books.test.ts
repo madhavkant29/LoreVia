@@ -320,6 +320,30 @@ describe("books api", () => {
     expect(invalidateQueryKeysMock).toHaveBeenCalledWith("reader:book-1:")
   })
 
+  it("manages structured character aliases and identity actions", async () => {
+    await booksApi.getCharacterIdentityDiagnostics("book-1")
+    await booksApi.listCharacterAliases("book-1", "char-1")
+    await booksApi.addCharacterAlias("book-1", "char-1", {
+      aliasText: "Gregor",
+      aliasKind: "first_name",
+      confidence: 0.9,
+    })
+    await booksApi.deleteCharacterAlias("book-1", "char-1", "alias-1")
+    await booksApi.undoCharacterIdentityAction("book-1", "action-1")
+
+    expect(getMock).toHaveBeenNthCalledWith(1, "/books/book-1/characters/identity-diagnostics")
+    expect(getMock).toHaveBeenNthCalledWith(2, "/books/book-1/characters/char-1/aliases")
+    expect(postMock).toHaveBeenNthCalledWith(1, "/books/book-1/characters/char-1/aliases", {
+      alias_text: "Gregor",
+      alias_kind: "first_name",
+      confidence: 0.9,
+    })
+    expect(deleteMock).toHaveBeenCalledWith("/books/book-1/characters/char-1/aliases/alias-1")
+    expect(postMock).toHaveBeenNthCalledWith(2, "/books/book-1/characters/identity-actions/action-1/undo")
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:")
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("reader:book-1:")
+  })
+
   it("attaches the left side of a relationship review candidate", async () => {
     await booksApi.attachRelationshipCandidateA("book-1", "rel-1", "char-1")
 

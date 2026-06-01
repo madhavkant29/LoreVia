@@ -12,7 +12,14 @@ from sqlalchemy import func, select
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
-from app.core.redis import cache_del, cache_set, cache_set_if_absent, key_analysis_inflight, key_chapter_summary
+from app.core.redis import (
+    cache_del,
+    cache_set,
+    cache_set_if_absent,
+    key_analysis_inflight,
+    key_analysis_queued,
+    key_chapter_summary,
+)
 from app.engine.analysis.plot_tracker import extract_plot_threads
 from app.engine.analysis.summariser import derive_summary_modes_from_detailed, generate_summary
 from app.models.book import Book, Chapter
@@ -60,6 +67,12 @@ async def analyse_chapter(
         book = await db.get(Book, chapter.book_id)
         if book is None:
             return {"error": "book not found"}
+        if getattr(book, "is_editor_project", False):
+            from app.services.editor_project_service import get_rebuild_run_id
+
+            if not get_rebuild_run_id(book):
+                log.info("Skipping stale editor-project analysis chapter_id=%s", chapter_id)
+                return {"error": "stale_editor_project_run"}
         log.info(
             "analysis_timing stage=db_load chapter_id=%s elapsed_ms=%s",
             chapter_id,
@@ -286,6 +299,7 @@ async def analyse_chapter(
             raise
         finally:
             await cache_del(inflight_key)
+            await cache_del(key_analysis_queued(chapter_id))
 
 
 async def _upsert_plot_threads(db, book: Book, chapter: Chapter, threads: list[dict[str, Any]]) -> None:
@@ -376,6 +390,9 @@ async def _upsert_plot_threads(db, book: Book, chapter: Chapter, threads: list[d
                     importance=candidate.get("importance", 5),
                 )
             )
+            continue
+
+        if getattr(thread, "edited_by_author", False):
             continue
 
         thread.title = candidate["title"] or thread.title

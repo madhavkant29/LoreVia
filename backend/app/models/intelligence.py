@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import ARRAY, DateTime, Float, ForeignKey, Index, Integer, String, Text, func
+from sqlalchemy import ARRAY, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -51,6 +51,7 @@ class CharacterRelationship(Base):
     description: Mapped[str | None] = mapped_column(String)
     from_chapter: Mapped[int] = mapped_column(Integer, nullable=False)
     to_chapter: Mapped[int | None] = mapped_column(Integer)  # null = still active
+    edited_by_author: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
     book = relationship("Book", back_populates="relationships")
     character_a = relationship("Character", foreign_keys=[character_a_id], back_populates="relationships_as_a")
@@ -77,6 +78,7 @@ class PlotThread(Base):
     note: Mapped[str | None] = mapped_column(Text)
     character_ids: Mapped[list[str] | None] = mapped_column(ARRAY(String))
     importance: Mapped[int] = mapped_column(Integer, default=5)  # 1–10
+    edited_by_author: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     book = relationship("Book", back_populates="plot_threads")

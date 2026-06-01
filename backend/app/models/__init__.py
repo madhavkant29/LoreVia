@@ -26,10 +26,14 @@ from app.models.book import (
 )
 from app.models.character import (
     Character,
+    CharacterAlias,
     CharacterCandidate,
     CharacterDuplicateSuggestion,
+    CharacterIdentityAction,
+    CharacterIdentityConstraint,
     CharacterMention,
     CharacterRelationshipCandidate,
+    CharacterSuppression,
     CharacterState,
 )
 from app.models.intelligence import (

@@ -1,14 +1,20 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
+import { useQueryClient } from "@tanstack/react-query"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 
 import { socialApi } from "@/lib/api/social"
 import { emitChatsChanged } from "@/lib/hooks/useChatUnreadCount"
+import {
+  SOCIAL_CONVERSATIONS_QUERY_KEY,
+  SOCIAL_RELATIONSHIPS_QUERY_KEY,
+} from "@/lib/query/sidebarPrefetch"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import type {
+  DirectConversationListResponse,
   DirectConversationSummary,
   DirectMessage,
   SocialRelationshipListResponse,
@@ -20,20 +26,23 @@ const PAGE_CONVERSATION_POLL_MS = 30_000
 const SIDEBAR_MESSAGE_POLL_MS = 15_000
 const PAGE_MESSAGE_POLL_MS = 8_000
 
-export function ChatsPanel({ mode = "sidebar" }: { mode?: "sidebar" | "page" }) {
+export function ChatsPanel({ mode = "sidebar", enabled = true }: { mode?: "sidebar" | "page"; enabled?: boolean }) {
+  const queryClient = useQueryClient()
+  const cachedConversations = queryClient.getQueryData<DirectConversationListResponse>(SOCIAL_CONVERSATIONS_QUERY_KEY)
+  const cachedRelationships = queryClient.getQueryData<SocialRelationshipListResponse>(SOCIAL_RELATIONSHIPS_QUERY_KEY)
   const { user, hydrated } = useAuthStore()
   const { theme } = usePreferencesStore()
   const searchParams = useSearchParams()
   const isDark = theme === "dark"
   const usernamePrefill = searchParams.get("username")?.trim() || ""
 
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(!cachedConversations)
   const [search, setSearch] = useState(usernamePrefill)
   const [searching, setSearching] = useState(false)
   const [searchResults, setSearchResults] = useState<SocialUserSummary[]>([])
-  const [relationships, setRelationships] = useState<SocialRelationshipListResponse | null>(null)
-  const [conversations, setConversations] = useState<DirectConversationSummary[]>([])
-  const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null)
+  const [relationships, setRelationships] = useState<SocialRelationshipListResponse | null>(cachedRelationships ?? null)
+  const [conversations, setConversations] = useState<DirectConversationSummary[]>(cachedConversations?.items ?? [])
+  const [selectedConversationId, setSelectedConversationId] = useState<string | null>(cachedConversations?.items[0]?.id ?? null)
   const [selectedSearchUser, setSelectedSearchUser] = useState<SocialUserSummary | null>(null)
   const [messages, setMessages] = useState<DirectMessage[]>([])
   const [messageDraft, setMessageDraft] = useState("")
@@ -50,23 +59,37 @@ export function ChatsPanel({ mode = "sidebar" }: { mode?: "sidebar" | "page" }) 
     [conversations, selectedConversationId],
   )
 
-  const loadRelationships = async () => {
+  const loadRelationships = async (options?: { force?: boolean }) => {
     if (!user) return
     try {
-      const relationshipPayload = await socialApi.listRelationships()
+      if (options?.force) {
+        await queryClient.invalidateQueries({ queryKey: SOCIAL_RELATIONSHIPS_QUERY_KEY })
+      }
+      const relationshipPayload = await queryClient.fetchQuery({
+        queryKey: SOCIAL_RELATIONSHIPS_QUERY_KEY,
+        queryFn: socialApi.listRelationships,
+      })
       setRelationships(relationshipPayload)
     } catch {
       // Keep the last known relationship state if the background refresh fails.
     }
   }
 
-  const hydrateConversations = async (options?: { keepSelection?: boolean; silent?: boolean }) => {
+  const hydrateConversations = async (options?: { keepSelection?: boolean; silent?: boolean; force?: boolean }) => {
     if (!user) return
-    if (!options?.silent) {
+    const hasCachedPayload = Boolean(queryClient.getQueryData<DirectConversationListResponse>(SOCIAL_CONVERSATIONS_QUERY_KEY))
+    const showLoading = !options?.silent && !hasCachedPayload
+    if (showLoading) {
       setLoading(true)
     }
     try {
-      const conversationPayload = await socialApi.listConversations()
+      if (options?.force) {
+        await queryClient.invalidateQueries({ queryKey: SOCIAL_CONVERSATIONS_QUERY_KEY })
+      }
+      const conversationPayload = await queryClient.fetchQuery({
+        queryKey: SOCIAL_CONVERSATIONS_QUERY_KEY,
+        queryFn: socialApi.listConversations,
+      })
       setConversations(conversationPayload.items)
       emitChatsChanged()
       if (!options?.keepSelection) {
@@ -76,7 +99,7 @@ export function ChatsPanel({ mode = "sidebar" }: { mode?: "sidebar" | "page" }) 
     } catch {
       setStatus("Could not load chats right now.")
     } finally {
-      if (!options?.silent) {
+      if (showLoading) {
         setLoading(false)
       }
     }
@@ -121,31 +144,33 @@ export function ChatsPanel({ mode = "sidebar" }: { mode?: "sidebar" | "page" }) 
   }
 
   useEffect(() => {
-    if (!user) return
-    void hydrateConversations()
-  }, [user, refreshTick])
+    if (!enabled || !user) return
+    void hydrateConversations({ force: refreshTick > 0 })
+  }, [enabled, user, refreshTick])
 
   useEffect(() => {
-    if (!user) return
-    void loadRelationships()
-  }, [user, refreshTick])
+    if (!enabled || !user) return
+    void loadRelationships({ force: refreshTick > 0 })
+  }, [enabled, user, refreshTick])
 
   useEffect(() => {
+    if (!enabled) return
     if (usernamePrefill) {
       void runSearch(usernamePrefill)
     }
-  }, [usernamePrefill])
+  }, [enabled, usernamePrefill])
 
   useEffect(() => {
+    if (!enabled) return
     if (!selectedConversationId) {
       setMessages([])
       return
     }
-      void loadMessages(selectedConversationId)
-  }, [selectedConversationId])
+    void loadMessages(selectedConversationId)
+  }, [enabled, selectedConversationId])
 
   useEffect(() => {
-    if (!user) return
+    if (!enabled || !user) return
     listIntervalRef.current = window.setInterval(() => {
       if (document.visibilityState !== "visible") return
       void hydrateConversations({ keepSelection: true, silent: true })
@@ -153,10 +178,10 @@ export function ChatsPanel({ mode = "sidebar" }: { mode?: "sidebar" | "page" }) 
     return () => {
       if (listIntervalRef.current) window.clearInterval(listIntervalRef.current)
     }
-  }, [conversationPollMs, user])
+  }, [conversationPollMs, enabled, user])
 
   useEffect(() => {
-    if (!selectedConversationId) return
+    if (!enabled || !selectedConversationId) return
     messageIntervalRef.current = window.setInterval(() => {
       if (document.visibilityState !== "visible") return
       void loadMessages(selectedConversationId, { markRead: (selectedConversation?.unread_count ?? 0) > 0 })
@@ -164,7 +189,7 @@ export function ChatsPanel({ mode = "sidebar" }: { mode?: "sidebar" | "page" }) 
     return () => {
       if (messageIntervalRef.current) window.clearInterval(messageIntervalRef.current)
     }
-  }, [messagePollMs, selectedConversation, selectedConversationId])
+  }, [enabled, messagePollMs, selectedConversation, selectedConversationId])
 
   const handleOpenConversation = async (targetUserId: string) => {
     try {

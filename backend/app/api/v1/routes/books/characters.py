@@ -1,5 +1,5 @@
 import uuid
-from dataclasses import asdict
+from collections import Counter
 from typing import Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -15,8 +15,11 @@ from app.core.security import create_asset_token
 from app.models.book import Book
 from app.models.character import (
     Character,
+    CharacterAlias,
     CharacterCandidate,
     CharacterDuplicateSuggestion,
+    CharacterIdentityAction,
+    CharacterSuppression,
     CharacterRelationshipCandidate,
     CharacterState,
     CharacterVoiceProfile,
@@ -34,7 +37,11 @@ from app.schemas.books import (
     RelationshipCreateBody,
     RelationshipUpdateBody,
 )
-from app.schemas.character import CharacterReviewOut
+from app.schemas.character import CharacterAliasBody, CharacterAliasOut, CharacterReviewOut
+from app.services.character_identity.constraints import add_identity_constraint
+from app.services.character_identity.merge import add_character_alias, record_identity_action
+from app.services.character_identity.normalization import normalize_name
+from app.services.character_identity.repair import CharacterIdentityRepairJob
 from app.utils.billing_utils import require_author_access
 from app.utils.book_utils import (
     collaboration_has_resource,
@@ -87,8 +94,6 @@ from app.utils.tag_utils import (
     get_custom_tags_for_entity,
     list_custom_tags_for_entity_ids,
 )
-from scripts.repair_character_bible_book import apply_repair_plan, build_repair_plan
-
 router = APIRouter()
 
 
@@ -141,7 +146,7 @@ async def get_book_characters(
     result = await db.execute(
         select(Character)
         .where(Character.book_id == book_id)
-        .options(selectinload(Character.voice_profile))
+        .options(selectinload(Character.voice_profile), selectinload(Character.alias_records))
         .order_by(Character.first_chapter, Character.name)
     )
     all_characters = list(result.scalars().all())
@@ -242,6 +247,182 @@ async def get_book_character_review(
     return await list_character_review_data(db, book_id=book.id)
 
 
+@router.get("/{book_id}/characters/identity-diagnostics")
+async def get_character_identity_diagnostics(
+    book_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
+    suppressions = (
+        await db.execute(
+            select(CharacterSuppression).where(CharacterSuppression.book_id == book.id)
+        )
+    ).scalars().all()
+    actions = (
+        await db.execute(
+            select(CharacterIdentityAction)
+            .where(CharacterIdentityAction.book_id == book.id)
+            .order_by(CharacterIdentityAction.created_at.desc())
+            .limit(50)
+        )
+    ).scalars().all()
+    hidden_candidates = (
+        await db.execute(
+            select(CharacterCandidate).where(
+                CharacterCandidate.book_id == book.id,
+                CharacterCandidate.status == "suppressed",
+            )
+        )
+    ).scalars().all()
+    action_counts = Counter(action.action_type for action in actions)
+    return {
+        "suppressed_count": len(suppressions),
+        "auto_merged_count": action_counts.get("auto_merge", 0),
+        "auto_alias_count": action_counts.get("auto_alias", 0),
+        "blocked_duplicate_count": action_counts.get("auto_block_duplicate", 0),
+        "hidden_candidate_count": len(hidden_candidates),
+        "suppression_reasons": dict(Counter(item.reason for item in suppressions)),
+        "recent_identity_actions": [
+            {
+                "id": str(action.id),
+                "action_type": action.action_type,
+                "source_character_id": str(action.source_character_id) if action.source_character_id else None,
+                "target_character_id": str(action.target_character_id) if action.target_character_id else None,
+                "surface_text": action.surface_text,
+                "confidence": action.confidence,
+                "reason": action.reason,
+                "reversible": action.reversible,
+                "created_at": action.created_at,
+            }
+            for action in actions
+        ],
+    }
+
+
+@router.post("/{book_id}/characters/identity-actions/{action_id}/undo")
+async def undo_character_identity_action(
+    book_id: uuid.UUID,
+    action_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
+    action = await db.get(CharacterIdentityAction, action_id)
+    if not action or action.book_id != book.id:
+        raise HTTPException(404, "Identity action not found")
+    if not action.reversible:
+        raise HTTPException(400, "Identity action cannot be undone")
+
+    reversible_data = dict(action.reversible_data or {})
+    restored_character_id: uuid.UUID | None = None
+    if action.action_type == "auto_merge":
+        secondary = await db.get(Character, action.source_character_id) if action.source_character_id else None
+        if secondary is None or secondary.book_id != book.id:
+            raise HTTPException(404, "Merged character record not found")
+        secondary.merged_into_character_id = None
+        secondary.normalized_name = None
+        secondary.is_auto_suppressed = False
+        secondary.suppression_reason = None
+        set_character_review_state(
+            secondary,
+            visibility_state=str(reversible_data.get("secondary_visibility_state") or "quarantined"),
+            approval_state=str(reversible_data.get("secondary_approval_state") or CHARACTER_APPROVAL_PENDING_REVIEW),
+            approval_source=CHARACTER_APPROVAL_SOURCE_MANUAL_REVIEW,
+            reason_codes=["identity_action_undone"],
+            action="identity_auto_merge_undone",
+            details={"identity_action_id": str(action.id), "target_character_id": str(action.target_character_id) if action.target_character_id else None},
+            actor_user_id=current_user.id,
+        )
+        restored_character_id = secondary.id
+        if action.target_character_id is not None:
+            primary = await db.get(Character, action.target_character_id)
+            if primary is not None and primary.book_id == book.id:
+                await add_identity_constraint(
+                    db,
+                    book_id=book.id,
+                    left_character_id=primary.id,
+                    right_character_id=secondary.id,
+                    left_text=primary.name,
+                    right_text=secondary.name,
+                    constraint_type="not_same_character",
+                    reason="identity_action_undo",
+                    source="manual",
+                    confidence=1.0,
+                )
+    elif action.action_type == "auto_alias":
+        target = await db.get(Character, action.target_character_id) if action.target_character_id else None
+        source = await db.get(Character, action.source_character_id) if action.source_character_id else None
+        normalized_alias = normalize_name(action.surface_text)
+        if target is not None and target.book_id == book.id and normalized_alias:
+            target.aliases = [
+                alias
+                for alias in clean_string_list(target.aliases or [])
+                if normalize_name(alias) != normalized_alias
+            ]
+            alias_rows = (
+                await db.execute(
+                    select(CharacterAlias).where(
+                        CharacterAlias.book_id == book.id,
+                        CharacterAlias.character_id == target.id,
+                        CharacterAlias.normalized_alias == normalized_alias,
+                    )
+                )
+            ).scalars().all()
+            for alias in alias_rows:
+                await db.delete(alias)
+        if source is not None and source.book_id == book.id:
+            source.merged_into_character_id = None
+            source.normalized_name = None
+            source.is_auto_suppressed = False
+            source.suppression_reason = None
+            set_character_review_state(
+                source,
+                visibility_state="quarantined",
+                approval_state=CHARACTER_APPROVAL_PENDING_REVIEW,
+                approval_source=CHARACTER_APPROVAL_SOURCE_MANUAL_REVIEW,
+                reason_codes=["identity_action_undone"],
+                action="identity_auto_alias_undone",
+                details={"identity_action_id": str(action.id), "target_character_id": str(action.target_character_id) if action.target_character_id else None},
+                actor_user_id=current_user.id,
+            )
+            restored_character_id = source.id
+            if target is not None and target.book_id == book.id:
+                await add_identity_constraint(
+                    db,
+                    book_id=book.id,
+                    left_character_id=source.id,
+                    right_character_id=target.id,
+                    left_text=source.name,
+                    right_text=target.name,
+                    constraint_type="not_same_character",
+                    reason="identity_action_undo",
+                    source="manual",
+                    confidence=1.0,
+                )
+    else:
+        raise HTTPException(400, "Unsupported undo action type")
+
+    action.reversible = False
+    await record_identity_action(
+        db,
+        book_id=book.id,
+        action_type="undo_merge" if action.action_type == "auto_merge" else "manual_override",
+        source_character_id=action.source_character_id,
+        target_character_id=action.target_character_id,
+        surface_text=action.surface_text,
+        confidence=1.0,
+        reason=f"undo:{action.action_type}",
+        reversible=False,
+    )
+    await refresh_character_duplicate_suggestions(db, book_id=book.id)
+    await db.commit()
+    await mark_book_cache_dirty(str(book.id))
+    return {"undone": str(action.id), "restored_character_id": str(restored_character_id) if restored_character_id else None}
+
+
 @router.get("/{book_id}/character-review/reprocess")
 async def preview_book_character_reprocess(
     book_id: uuid.UUID,
@@ -254,13 +435,12 @@ async def preview_book_character_reprocess(
     require_author_access(current_user)
     if book.mode != "author":
         raise HTTPException(400, "Character reprocessing is only available in author mode")
-    plan = await build_repair_plan(
-        book.id,
-        allow_merge_safe_pairs=allow_merge_safe_pairs,
-        allow_demote_obvious_noise=allow_demote_obvious_noise,
-        db=db,
-    )
-    return asdict(plan)
+    job = CharacterIdentityRepairJob(db, book_id=book.id)
+    plan = await job.preview()
+    payload = plan.to_payload()
+    payload["allow_merge_safe_pairs"] = allow_merge_safe_pairs
+    payload["allow_demote_obvious_noise"] = allow_demote_obvious_noise
+    return payload
 
 
 @router.post("/{book_id}/character-review/reprocess")
@@ -275,12 +455,14 @@ async def apply_book_character_reprocess(
     require_author_access(current_user)
     if book.mode != "author":
         raise HTTPException(400, "Character reprocessing is only available in author mode")
-    return await apply_repair_plan(
-        book.id,
-        allow_merge_safe_pairs=allow_merge_safe_pairs,
-        allow_demote_obvious_noise=allow_demote_obvious_noise,
-        db=db,
-    )
+    job = CharacterIdentityRepairJob(db, book_id=book.id)
+    result = await job.apply()
+    await db.commit()
+    await mark_book_cache_dirty(str(book.id))
+    payload = result.to_payload()
+    payload["allow_merge_safe_pairs"] = allow_merge_safe_pairs
+    payload["allow_demote_obvious_noise"] = allow_demote_obvious_noise
+    return payload
 
 
 # ─── Character CRUD ──────────────────────────────────────────────────────────
@@ -348,6 +530,85 @@ async def create_book_character(
             book_id=book.id,
         ),
     )
+
+
+@router.get("/{book_id}/characters/{character_id}/aliases", response_model=list[CharacterAliasOut])
+async def list_book_character_aliases(
+    book_id: uuid.UUID,
+    character_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
+    character = await db.get(Character, character_id)
+    if not character or character.book_id != book.id:
+        raise HTTPException(404, "Character not found")
+    aliases = (
+        await db.execute(
+            select(CharacterAlias)
+            .where(CharacterAlias.book_id == book.id, CharacterAlias.character_id == character.id)
+            .order_by(CharacterAlias.alias_kind, CharacterAlias.alias_text)
+        )
+    ).scalars().all()
+    return list(aliases)
+
+
+@router.post("/{book_id}/characters/{character_id}/aliases", response_model=CharacterAliasOut, status_code=201)
+async def add_book_character_alias(
+    book_id: uuid.UUID,
+    character_id: uuid.UUID,
+    body: CharacterAliasBody,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
+    character = await db.get(Character, character_id)
+    if not character or character.book_id != book.id:
+        raise HTTPException(404, "Character not found")
+    alias = await add_character_alias(
+        db,
+        character=character,
+        alias_text=body.alias_text,
+        alias_kind=body.alias_kind,
+        source="manual",
+        confidence=body.confidence,
+    )
+    if alias is None:
+        raise HTTPException(400, "Alias is invalid or duplicates the character name")
+    await db.commit()
+    await mark_book_cache_dirty(str(book.id))
+    await db.refresh(alias)
+    return alias
+
+
+@router.delete("/{book_id}/characters/{character_id}/aliases/{alias_id}")
+async def delete_book_character_alias(
+    book_id: uuid.UUID,
+    character_id: uuid.UUID,
+    alias_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
+    character = await db.get(Character, character_id)
+    alias = await db.get(CharacterAlias, alias_id)
+    if not character or character.book_id != book.id:
+        raise HTTPException(404, "Character not found")
+    if not alias or alias.book_id != book.id or alias.character_id != character.id:
+        raise HTTPException(404, "Alias not found")
+    normalized_removed = alias.normalized_alias
+    character.aliases = [
+        value
+        for value in clean_string_list(character.aliases or [])
+        if normalize_name(value) != normalized_removed
+    ]
+    await db.delete(alias)
+    await db.commit()
+    await mark_book_cache_dirty(str(book.id))
+    return {"deleted": str(alias_id)}
 
 
 @router.post("/{book_id}/characters/merge")
@@ -797,6 +1058,7 @@ async def accept_relationship_candidate(
         from_chapter=from_chapter,
         to_chapter=body.to_chapter,
     )
+    relationship.edited_by_author = True
     candidate.matched_character_a_id = relationship_a.id
     candidate.matched_character_b_id = relationship_b.id
     candidate.status = CHARACTER_RELATIONSHIP_CANDIDATE_ACCEPTED
@@ -897,6 +1159,23 @@ async def dismiss_character_duplicate_suggestion(
     if not suggestion or suggestion.book_id != book.id:
         raise HTTPException(404, "Duplicate suggestion not found")
     suggestion.status = "dismissed"
+    suggestion.auto_dismissed = False
+    suggestion.dismissal_reason = "user_keep_separate"
+    primary = await db.get(Character, suggestion.primary_character_id)
+    secondary = await db.get(Character, suggestion.secondary_character_id)
+    if primary and secondary and primary.book_id == book.id and secondary.book_id == book.id:
+        await add_identity_constraint(
+            db,
+            book_id=book.id,
+            left_character_id=primary.id,
+            right_character_id=secondary.id,
+            left_text=primary.name,
+            right_text=secondary.name,
+            constraint_type="not_same_character",
+            reason="user_keep_separate",
+            source="manual",
+            confidence=1.0,
+        )
     await db.commit()
     return {"dismissed": str(suggestion.id)}
 
@@ -938,6 +1217,7 @@ async def create_book_relationship(
         from_chapter=body.from_chapter,
         to_chapter=body.to_chapter,
     )
+    relationship.edited_by_author = True
     await db.commit()
     await mark_book_cache_dirty(str(book.id))
     await db.refresh(relationship)
@@ -977,6 +1257,7 @@ async def update_book_relationship(
         to_chapter=body.to_chapter,
         relationship_id=relationship.id,
     )
+    relationship.edited_by_author = True
     await db.commit()
     await mark_book_cache_dirty(str(book.id))
     await db.refresh(relationship)

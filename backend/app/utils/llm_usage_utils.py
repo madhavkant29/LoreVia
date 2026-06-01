@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import dataclass
 from typing import Any
@@ -12,6 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import AsyncSessionLocal
 from app.models.user import LlmUsageEvent
 from app.utils.request_context import get_request_id, get_request_user_id
+
+log = logging.getLogger("lorevia.llm_usage")
 
 
 @dataclass(frozen=True)
@@ -140,16 +143,19 @@ async def create_tracked_chat_completion(
     **kwargs: Any,
 ) -> ChatCompletion:
     response = await client.chat.completions.create(model=model, **kwargs)
-    await record_llm_usage_event(
-        response=response,
-        feature=feature,
-        operation="chat_completion",
-        model=model,
-        db=db,
-        user_id=user_id,
-        book_id=book_id,
-        metadata=metadata,
-    )
+    try:
+        await record_llm_usage_event(
+            response=response,
+            feature=feature,
+            operation="chat_completion",
+            model=model,
+            db=db,
+            user_id=user_id,
+            book_id=book_id,
+            metadata=metadata,
+        )
+    except Exception:
+        log.warning("llm_usage_record_failed feature=%s operation=chat_completion", feature, exc_info=True)
     return response
 
 
@@ -165,16 +171,19 @@ async def create_tracked_embedding(
     **kwargs: Any,
 ) -> CreateEmbeddingResponse:
     response = await client.embeddings.create(model=model, **kwargs)
-    await record_llm_usage_event(
-        response=response,
-        feature=feature,
-        operation="embedding",
-        model=model,
-        db=db,
-        user_id=user_id,
-        book_id=book_id,
-        metadata=metadata,
-    )
+    try:
+        await record_llm_usage_event(
+            response=response,
+            feature=feature,
+            operation="embedding",
+            model=model,
+            db=db,
+            user_id=user_id,
+            book_id=book_id,
+            metadata=metadata,
+        )
+    except Exception:
+        log.warning("llm_usage_record_failed feature=%s operation=embedding", feature, exc_info=True)
     return response
 
 

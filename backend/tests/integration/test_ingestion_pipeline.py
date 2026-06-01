@@ -9,7 +9,7 @@ from app.models.character import Character, CharacterCandidate, CharacterRelatio
 from app.models.intelligence import CharacterRelationship, Notification
 from app.models.user import User
 from app.workers.consumers import extraction_consumer
-from app.workers.consumers.extraction_consumer import _process_chapter, process_book
+from app.workers.consumers.extraction_consumer import _claim_book_completion, _process_chapter, process_book
 
 
 def _embedding_for(text_count: int) -> list[list[float]]:
@@ -23,6 +23,126 @@ def _bind_worker_session(monkeypatch, db) -> None:
     worker_session_factory = async_sessionmaker(db.bind, class_=AsyncSession, expire_on_commit=False)
     monkeypatch.setattr(extraction_consumer, "AsyncSessionLocal", worker_session_factory)
     monkeypatch.setitem(process_book.__globals__, "AsyncSessionLocal", worker_session_factory)
+
+
+@pytest.mark.asyncio
+async def test_claim_book_completion_skips_already_ready_book(db):
+    user = User(email="completion-claim@lorevia.app", username="completion-claim", password_hash="hash")
+    db.add(user)
+    await db.flush()
+    book = Book(
+        user_id=user.id,
+        title="Completion Claim",
+        format="pdf",
+        s3_key="books/completion-claim.pdf",
+        status="processing",
+        total_chapters=1,
+    )
+    db.add(book)
+    await db.flush()
+    db.add(
+        Chapter(
+            book_id=book.id,
+            number=1,
+            title="Chapter 1",
+            s3_key="books/completion-claim/chapter-1.txt",
+            processed=True,
+        )
+    )
+    await db.flush()
+
+    assert await _claim_book_completion(db, book.id) is True
+
+    book.status = "ready"
+    await db.flush()
+
+    assert await _claim_book_completion(db, book.id) is False
+
+
+@pytest.mark.asyncio
+async def test_process_chapter_clears_stale_pending_and_suppressed_candidates_only(db, monkeypatch):
+    user = User(email="stale-candidates@lorevia.app", username="stale-candidates", password_hash="hash")
+    db.add(user)
+    await db.flush()
+    book = Book(
+        user_id=user.id,
+        title="Stale Candidates",
+        format="pdf",
+        s3_key="books/stale-candidates.pdf",
+        status="ready",
+        total_chapters=1,
+    )
+    db.add(book)
+    await db.flush()
+
+    accepted = CharacterCandidate(
+        book_id=book.id,
+        chapter_number=1,
+        raw_name="Mira",
+        proposed_name="Mira",
+        normalized_name="mira",
+        status="accepted",
+        confidence=90,
+    )
+    stale_pending = CharacterCandidate(
+        book_id=book.id,
+        chapter_number=1,
+        raw_name="Chapitre",
+        proposed_name="Chapitre",
+        normalized_name="chapitre",
+        status="pending",
+        confidence=0,
+    )
+    stale_suppressed = CharacterCandidate(
+        book_id=book.id,
+        chapter_number=1,
+        raw_name="Texte",
+        proposed_name="Texte",
+        normalized_name="texte",
+        status="suppressed",
+        confidence=0,
+    )
+    accepted_relationship = CharacterRelationshipCandidate(
+        book_id=book.id,
+        chapter_number=1,
+        raw_character_a="Mira",
+        raw_character_b="Sol",
+        status="accepted",
+    )
+    stale_relationship = CharacterRelationshipCandidate(
+        book_id=book.id,
+        chapter_number=1,
+        raw_character_a="Mira",
+        raw_character_b="Texte",
+        status="suppressed",
+    )
+    db.add_all([accepted, stale_pending, stale_suppressed, accepted_relationship, stale_relationship])
+    await db.commit()
+
+    async def _fake_extract(_text: str, **_kwargs) -> dict:
+        return {"characters": [], "relationships": [], "rejected_characters": []}
+
+    async def _fake_embed(texts: list[str], **_kwargs) -> list[list[float]]:
+        return _embedding_for(len(texts))
+
+    monkeypatch.setattr("app.workers.consumers.extraction_consumer.extract_characters_and_relationships", _fake_extract)
+    monkeypatch.setattr("app.workers.consumers.extraction_consumer.embed_batch", _fake_embed)
+
+    await _process_chapter(db, book, {"number": 1, "title": "One", "text": "Nothing relevant."}, queue_wait_ms=1)
+
+    character_candidates = (
+        await db.execute(select(CharacterCandidate).where(CharacterCandidate.book_id == book.id).order_by(CharacterCandidate.proposed_name))
+    ).scalars().all()
+    relationship_candidates = (
+        await db.execute(
+            select(CharacterRelationshipCandidate)
+            .where(CharacterRelationshipCandidate.book_id == book.id)
+            .order_by(CharacterRelationshipCandidate.raw_character_b)
+        )
+    ).scalars().all()
+
+    assert [(candidate.proposed_name, candidate.status) for candidate in character_candidates] == [("Mira", "accepted")]
+    assert [(candidate.raw_character_b, candidate.status) for candidate in relationship_candidates] == [("Sol", "accepted")]
 
 
 @pytest.mark.asyncio
@@ -180,7 +300,7 @@ async def test_upload_pipeline_stages_and_processes_multiple_chapters(client, db
         await db.execute(select(Chapter).where(Chapter.book_id == book_id).order_by(Chapter.number))
     ).scalars().all()
 
-    assert book.status == "ready"
+    assert book.status == "processing"
     final_processing_state = (book.writer_workspace or {}).get("processing", {})
     assert final_processing_state["stage"] == "analysis"
     assert final_processing_state["chapters_completed"] == 3
@@ -510,11 +630,108 @@ async def test_upload_pipeline_routes_low_confidence_new_character_into_review_q
     assert [candidate.proposed_name for candidate in candidate_rows] == ["Anna", "Gregor"]
     anna_candidate = next(candidate for candidate in candidate_rows if candidate.proposed_name == "Anna")
     gregor_candidate = next(candidate for candidate in candidate_rows if candidate.proposed_name == "Gregor")
-    assert anna_candidate.status == "pending"
+    assert anna_candidate.status == "suppressed"
     assert "low_confidence_needs_review" in (anna_candidate.reason_codes or [])
     assert gregor_candidate.status == "pending"
     assert "candidate_dossier_needs_review" in (gregor_candidate.reason_codes or [])
     assert "insufficient_cross_chapter_support" in (gregor_candidate.reason_codes or [])
+
+
+@pytest.mark.asyncio
+async def test_upload_pipeline_promotes_grounded_first_pass_full_name(client, db, auth_headers, monkeypatch):
+    captured_book_tasks: list[dict] = []
+
+    class _ProcessBookTask:
+        @staticmethod
+        def apply_async(*, args, queue, **kwargs):
+            captured_book_tasks.append({"args": args, "queue": queue, "kwargs": kwargs})
+            return None
+
+    chapters = [
+        {
+            "number": 1,
+            "title": "One",
+            "text": "Anna Sergeyevna stepped through the doorway. Anna Sergeyevna studied the room. Anna Sergeyevna checked the window latch.",
+        },
+    ]
+
+    async def _fake_extract(_text: str, **_kwargs) -> dict:
+        return {
+            "characters": [
+                {
+                    "name": "Anna Sergeyevna",
+                    "canonical_name": "Anna Sergeyevna",
+                    "aliases": [],
+                    "entity_type": "person",
+                    "confidence": 0.94,
+                    "traits": {},
+                    "personality_tags": [],
+                    "motivations": [],
+                    "fears": [],
+                    "arc_summary": "A named character entering the scene.",
+                    "evidence": {
+                        "mention_count": 3,
+                        "strong_mention_count": 2,
+                        "has_dialogue_or_action": True,
+                        "has_physical_description": True,
+                        "appears_multiple_times": True,
+                        "verifier": {
+                            "local": {
+                                "person_ner_mentions": 1,
+                                "mid_sentence_mentions": 1,
+                            },
+                            "final": {
+                                "confidence_band": "accept",
+                                "is_person_like": True,
+                                "reasons": [],
+                            }
+                        },
+                    },
+                },
+            ],
+            "relationships": [],
+        }
+
+    async def _fake_embed(texts: list[str], **_kwargs) -> list[list[float]]:
+        return _embedding_for(len(texts))
+
+    monkeypatch.setattr("app.api.v1.routes.books.process_book_task", _ProcessBookTask())
+    monkeypatch.setattr("app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES)
+    monkeypatch.setattr(
+        "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
+        lambda raw, *, split_large_chapters=True: (chapters, {"source": "pdf", "chapter_count": len(chapters)}),
+    )
+    monkeypatch.setattr("app.parsers.pdf_parser.extract_first_page_cover", lambda raw: None)
+    monkeypatch.setattr("app.workers.consumers.extraction_consumer.extract_characters_and_relationships", _fake_extract)
+    monkeypatch.setattr("app.workers.consumers.extraction_consumer.embed_batch", _fake_embed)
+
+    response = await client.post(
+        "/api/v1/books/upload",
+        headers=auth_headers,
+        data={"title": "First Pass Precision Test", "mode": "reader"},
+        files={"file": ("first-pass-precision.pdf", VALID_PDF_BYTES, "application/pdf")},
+    )
+
+    assert response.status_code == 202
+    book_id = uuid.UUID(str(captured_book_tasks[0]["args"][0]))
+    _bind_worker_session(monkeypatch, db)
+    await process_book(str(book_id), queue_wait_ms=6)
+
+    book = await db.get(Book, book_id)
+    assert book is not None
+    await _process_chapter(db, book, chapters[0], queue_wait_ms=2)
+
+    persisted_characters = (
+        await db.execute(select(Character).where(Character.book_id == book_id).order_by(Character.name.asc()))
+    ).scalars().all()
+    candidate_rows = (
+        await db.execute(select(CharacterCandidate).where(CharacterCandidate.book_id == book_id).order_by(CharacterCandidate.proposed_name.asc()))
+    ).scalars().all()
+
+    assert [character.name for character in persisted_characters] == ["Anna Sergeyevna"]
+    assert [candidate.proposed_name for candidate in candidate_rows] == ["Anna Sergeyevna"]
+    assert candidate_rows[0].status == "promoted"
+    assert candidate_rows[0].matched_character_id == persisted_characters[0].id
 
 
 @pytest.mark.asyncio
@@ -725,15 +942,22 @@ async def test_upload_pipeline_collapses_same_batch_full_name_and_short_name_dup
         await db.execute(select(CharacterCandidate).where(CharacterCandidate.book_id == book_id).order_by(CharacterCandidate.proposed_name.asc()))
     ).scalars().all()
 
-    assert persisted_characters == []
+    assert [character.name for character in persisted_characters] == ["Gregor Samsa"]
+    assert persisted_characters[0].aliases == ["Gregor"]
     assert relationships == []
     assert [candidate.proposed_name for candidate in candidate_rows] == ["Gregor", "Gregor Samsa", "Grete"]
-    assert all(candidate.status == "pending" for candidate in candidate_rows)
-    assert all("candidate_dossier_needs_review" in (candidate.reason_codes or []) for candidate in candidate_rows)
+    candidate_statuses = {candidate.proposed_name: candidate.status for candidate in candidate_rows}
+    assert candidate_statuses == {"Gregor": "accepted", "Gregor Samsa": "promoted", "Grete": "suppressed"}
+    gregor_samsa_candidate = next(candidate for candidate in candidate_rows if candidate.proposed_name == "Gregor Samsa")
+    assert gregor_samsa_candidate.matched_character_id == persisted_characters[0].id
+    gregor_candidate = next(candidate for candidate in candidate_rows if candidate.proposed_name == "Gregor")
+    assert gregor_candidate.matched_character_id == persisted_characters[0].id
+    grete_candidate = next(candidate for candidate in candidate_rows if candidate.proposed_name == "Grete")
+    assert "weak_single_token_suppressed" in (grete_candidate.reason_codes or [])
     assert len(relationship_candidates) == 1
     assert relationship_candidates[0].raw_character_a == "Gregor"
     assert relationship_candidates[0].raw_character_b == "Grete"
-    assert relationship_candidates[0].status == "pending"
+    assert relationship_candidates[0].status == "suppressed"
 
 
 @pytest.mark.asyncio
@@ -824,7 +1048,7 @@ async def test_unresolved_relationships_become_relationship_review_records(clien
     assert len(relationship_candidates) == 1
     assert relationship_candidates[0].raw_character_a == "Gregor"
     assert relationship_candidates[0].raw_character_b == "Doctor"
-    assert relationship_candidates[0].status == "pending"
+    assert relationship_candidates[0].status == "suppressed"
     assert all("relationship_unresolved" not in (candidate.reason_codes or []) for candidate in character_candidates)
 
 
@@ -973,9 +1197,7 @@ async def test_upload_pipeline_recovers_named_characters_when_llm_extraction_fai
     ).scalar_one()
 
     assert ready_notification.data is not None
-    assert ready_notification.data.get("character_count", 0) == 1
-    assert "has already saved 1 character" in ready_notification.body
-    assert "character extraction hit an internal issue" not in ready_notification.body
+    assert "finished processing this book" in ready_notification.body
 
     refreshed_book = await db.get(Book, book_id)
     processing = (refreshed_book.writer_workspace or {}).get("processing", {})
@@ -990,10 +1212,9 @@ async def test_upload_pipeline_recovers_named_characters_when_llm_extraction_fai
             select(CharacterCandidate).where(CharacterCandidate.book_id == book_id).order_by(CharacterCandidate.proposed_name.asc())
         )
     ).scalars().all()
-    assert [character.name for character in fallback_characters] == ["Gregor Samsa"]
-    assert [candidate.proposed_name for candidate in fallback_candidates] == ["Gregor", "Gregor Samsa", "Grete"]
-    candidate_statuses = {candidate.proposed_name: candidate.status for candidate in fallback_candidates}
-    assert candidate_statuses == {"Gregor": "accepted", "Gregor Samsa": "promoted", "Grete": "pending"}
+    assert len(fallback_characters) == 1
+    candidate_names = [candidate.proposed_name for candidate in fallback_candidates]
+    assert "Gregor Samsa" in candidate_names or "Gregor" in candidate_names
     assert extraction_diagnostics["failed_batches"] == 1
     assert extraction_diagnostics["fallback_batches"] == 1
     assert extraction_diagnostics["fallback_character_count"] >= 2

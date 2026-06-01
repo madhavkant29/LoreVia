@@ -53,6 +53,7 @@ export interface Book {
   public_share_requested_at?: string | null
   public_share_approved_at?: string | null
   copyright_warning?: boolean
+  is_editor_project?: boolean
   archived_at?: string | null
   hidden_at?: string | null
   created_at: string

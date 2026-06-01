@@ -13,6 +13,7 @@ import { ChatLauncher } from "@/components/layout/ChatLauncher"
 import { NotificationBell } from "@/components/layout/NotificationBell"
 import { asQueryKey, booksListCacheKey } from "@/lib/query/cacheKeys"
 import { queryClient } from "@/lib/query/queryClient"
+import { prefetchChatsSidebarData, prefetchNotificationsSidebarData } from "@/lib/query/sidebarPrefetch"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 
@@ -31,6 +32,7 @@ export function Navbar() {
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
   const [badgeQueriesEnabled, setBadgeQueriesEnabled] = useState(false)
   const profileMenuRef = useRef<HTMLDivElement | null>(null)
+  const sidebarPrefetchedRef = useRef(false)
   const router = useRouter()
   const pathname = usePathname()
 
@@ -76,6 +78,11 @@ export function Navbar() {
 
     const handle = scheduleEnablement(() => {
       setBadgeQueriesEnabled(true)
+      if (!sidebarPrefetchedRef.current) {
+        sidebarPrefetchedRef.current = true
+        void prefetchNotificationsSidebarData()
+        void prefetchChatsSidebarData()
+      }
     })
 
     return () => cancelEnablement(handle)

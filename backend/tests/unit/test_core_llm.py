@@ -48,6 +48,33 @@ async def test_complete_with_fallback_tracks_openai_completion_without_duplicate
 
 
 @pytest.mark.asyncio
+async def test_complete_with_fallback_forwards_usage_db(monkeypatch):
+    captured: dict[str, object] = {}
+
+    async def _fake_create_tracked_chat_completion(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="Tracked with current session."))]
+        )
+
+    usage_db = object()
+    monkeypatch.setattr(llm.settings, "OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(llm.settings, "GEMINI_API_KEY", None)
+    monkeypatch.setattr(llm, "create_tracked_chat_completion", _fake_create_tracked_chat_completion)
+
+    result = await llm.complete_with_fallback(
+        system="System prompt",
+        user="User prompt",
+        openai_model="gpt-test",
+        usage_feature="reader_recall",
+        usage_db=usage_db,
+    )
+
+    assert result == "Tracked with current session."
+    assert captured["db"] is usage_db
+
+
+@pytest.mark.asyncio
 async def test_complete_with_fallback_retries_transient_errors(monkeypatch):
     call_count = [0]
 

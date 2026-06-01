@@ -16,17 +16,17 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import exists, select
+from sqlalchemy import exists, or_, select
 
 from app.core.database import AsyncSessionLocal
 from app.models.book import Book
-from app.models.character import Character
+from app.models.character import Character, CharacterCandidate, CharacterRelationshipCandidate
 from app.utils.logging import get_logger
 from scripts.repair_character_bible_book import apply_repair_plan, build_repair_plan
 
 log = get_logger("lorevia.repair.character_bible.backfill")
 CONFIRM_TOKEN = "REPAIR_CHARACTER_BIBLE_BACKFILL"
-BACKFILL_VERSION = 1
+BACKFILL_VERSION = 2
 
 
 def _parse_args() -> argparse.Namespace:
@@ -68,7 +68,21 @@ def _mark_backfill_state(book: Book, *, status: str, payload: dict[str, Any]) ->
 async def _iter_target_books(*, book_id: uuid.UUID | None, limit: int, force: bool) -> list[Book]:
     async with AsyncSessionLocal() as session:
         stmt = select(Book).where(
-            exists(select(Character.id).where(Character.book_id == Book.id))
+            or_(
+                exists(select(Character.id).where(Character.book_id == Book.id)),
+                exists(
+                    select(CharacterCandidate.id).where(
+                        CharacterCandidate.book_id == Book.id,
+                        CharacterCandidate.status == "pending",
+                    )
+                ),
+                exists(
+                    select(CharacterRelationshipCandidate.id).where(
+                        CharacterRelationshipCandidate.book_id == Book.id,
+                        CharacterRelationshipCandidate.status == "pending",
+                    )
+                ),
+            )
         ).order_by(Book.created_at.asc())
         if book_id is not None:
             stmt = stmt.where(Book.id == book_id)
@@ -110,6 +124,12 @@ async def _run_backfill(*, apply: bool, book_id: uuid.UUID | None, limit: int, f
                     payload={
                         "demoted_character_ids": result.get("demoted_character_ids", []),
                         "merged_pairs": result.get("merged_pairs", []),
+                        "pending_character_candidates_suppressed": result.get("pending_character_candidates_suppressed", 0),
+                        "pending_character_candidates_kept": result.get("pending_character_candidates_kept", 0),
+                        "pending_relationship_candidates_suppressed": result.get("pending_relationship_candidates_suppressed", 0),
+                        "pending_relationship_candidates_kept": result.get("pending_relationship_candidates_kept", 0),
+                        "suppressed_character_candidate_ids": result.get("suppressed_character_candidate_ids", []),
+                        "suppressed_relationship_candidate_ids": result.get("suppressed_relationship_candidate_ids", []),
                     },
                 )
                 await session.commit()

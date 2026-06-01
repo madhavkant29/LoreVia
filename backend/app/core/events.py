@@ -5,7 +5,9 @@ log = logging.getLogger("lorevia.startup")
 
 async def on_startup() -> None:
     log.info("LoreVia starting up")
-    log.info("Startup completed without blocking infrastructure checks")
+    from app.main import _lazy_api_app
+    await _lazy_api_app.ensure_app()
+    log.info("Startup completed")
 
 
 async def on_shutdown() -> None:

@@ -136,7 +136,9 @@ async def test_merge_characters_endpoint_merges_duplicate_records(client, db):
     relationships = (await db.execute(select(CharacterRelationship).where(CharacterRelationship.book_id == book_id))).scalars().all()
 
     assert merged is not None
-    assert deleted is None
+    assert deleted is not None
+    assert deleted.is_auto_suppressed is True
+    assert deleted.merged_into_character_id == primary.id
     assert "Mister Oshino" in (merged.aliases or [])
     assert merged.mention_count == 6
     assert len(states) == 1

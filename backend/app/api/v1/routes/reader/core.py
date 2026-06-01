@@ -102,6 +102,19 @@ async def get_chapter(
     book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
     if not collaboration_allows_chapter(collaborator, chapter_num):
         raise HTTPException(403, "This share does not include that chapter.")
+    
+    # Validate book has chapters
+    if book.total_chapters is None or book.total_chapters == 0:
+        if book.is_editor_project:
+            raise HTTPException(400, "This project has no chapters yet. Create your first chapter to get started.")
+        raise HTTPException(400, "This book has no chapters yet. Please wait for processing to complete or import a manuscript.")
+    
+    # Validate chapter number is in valid range
+    if chapter_num < 1:
+        raise HTTPException(400, f"Invalid chapter number: {chapter_num}. Chapter numbers must be 1 or greater.")
+    if chapter_num > book.total_chapters:
+        raise HTTPException(404, f"Chapter {chapter_num} does not exist. This book has {book.total_chapters} chapter{'s' if book.total_chapters != 1 else ''}.")
+    
     chapter = (await db.execute(
         select(Chapter).where(Chapter.book_id == book_id, Chapter.number == chapter_num)
     )).scalar()
@@ -365,6 +378,15 @@ async def get_summary(
         raise HTTPException(400, "Invalid mode")
     if not summary_mode_allowed(current_user, mode):
         raise HTTPException(403, "Upgrade to Author to unlock detailed and key-point summaries.")
+    
+    # Validate book has chapters
+    if book.total_chapters is None or book.total_chapters == 0:
+        raise HTTPException(400, "This book has no chapters yet.")
+    
+    # Validate chapter number is in valid range
+    if chapter_num < 1 or chapter_num > book.total_chapters:
+        raise HTTPException(404, f"Chapter {chapter_num} does not exist.")
+    
     await require_summary_access(db, book, current_user, chapter_num)
 
     read_set = await read_chapter_set(db, current_user.id, book_id)

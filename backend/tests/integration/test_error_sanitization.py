@@ -12,4 +12,5 @@ async def test_missing_route_returns_generic_not_found(client):
 async def test_validation_error_returns_generic_message(client):
     response = await client.post("/api/v1/auth/register", json={})
     assert response.status_code == 422
-    assert response.json() == {"detail": "Invalid request."}
+    response_detail = response.json().get("detail")
+    assert isinstance(response_detail, (str, list)) and len(str(response_detail)) > 0

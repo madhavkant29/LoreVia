@@ -41,6 +41,7 @@ export function UploadModal({
   const [author, setAuthor] = useState("")
   const [authorManuallyEdited, setAuthorManuallyEdited] = useState(false)
   const [mode, setMode] = useState<BookMode>(initialMode)
+  const [startEmpty, setStartEmpty] = useState(false)
   const [selectedTags, setSelectedTags] = useState<string[]>([])
   const [customTag, setCustomTag] = useState("")
   const [selectedSeriesIds, setSelectedSeriesIds] = useState<string[]>([])
@@ -283,7 +284,7 @@ export function UploadModal({
       setError(chapterSource === "paste" ? "Paste a chapter before processing it." : "Please select a chapter file.")
       return
     }
-    if (!isManagingExisting && files.length === 0) {
+    if (!isManagingExisting && !startEmpty && files.length === 0) {
       setError("Please select at least one file")
       return
     }
@@ -338,6 +339,22 @@ export function UploadModal({
         await refetchBooks()
         setProcessingBookId(response.book_id)
         return
+      } else if (startEmpty) {
+        const response = await booksApi.createEmptyProject({
+          title: title.trim(),
+          author: author || null,
+          genre: genre || null,
+          work_type: workType,
+          series_ids: selectedSeriesIds.length > 0 ? selectedSeriesIds : null,
+        })
+        bookId = response.book_id
+        setBookMode(response.book_id, mode)
+        capture("book_uploaded", {
+          mode,
+          kind: "empty_project",
+          work_type: workType,
+          in_series: selectedSeriesIds.length > 0,
+        })
       } else {
         const primaryFile = files[0]
         const filename = (primaryFile?.name || "").toLowerCase()
@@ -441,7 +458,7 @@ export function UploadModal({
   const primaryActionDisabled =
     uploading ||
     needsUsername ||
-    (isManagingExisting ? !canSubmitExistingImport : files.length === 0)
+    (isManagingExisting ? !canSubmitExistingImport : startEmpty ? !title.trim() : files.length === 0)
   const primaryActionLabel = uploading
     ? uploadStage === "uploading"
       ? isManagingExisting && chapterSource === "paste"
@@ -454,7 +471,9 @@ export function UploadModal({
         ? replaceExisting
           ? "Update Chapter & Process"
           : "Add Chapter & Process"
-        : "Upload manuscript"
+        : startEmpty
+          ? "Start empty project"
+          : "Upload manuscript"
   const shellClassName = `flex ${isInline ? "min-h-0" : "max-h-[92vh]"} w-full ${postImportReview || isManagingExisting ? "max-w-5xl" : "max-w-4xl"} flex-col overflow-hidden rounded-lg border shadow-2xl transition-colors ${
     isDark
       ? isInline
@@ -515,7 +534,7 @@ export function UploadModal({
         <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
           <div className="reader-scrollbar min-h-0 flex-1 overflow-y-auto px-6 py-5">
           <div className="flex flex-col gap-4">
-          {!isManagingExisting ? (
+          {!isManagingExisting && !startEmpty ? (
             <div className={`rounded-lg border p-5 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-slate-200 bg-slate-50/80"}`}>
               <div className="mb-3">
                 <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>File upload</p>
@@ -709,6 +728,38 @@ export function UploadModal({
               <p className={`mt-3 text-xs leading-5 ${isDark ? "text-slate-400" : "text-slate-600"}`}>
                 {uploadLimitCopy}
               </p>
+            ) : null}
+            {!isManagingExisting && mode === "author" && canUploadAuthorMode ? (
+              <div className={`mt-4 inline-flex w-full rounded-full p-1 ${isDark ? "border border-white/10 bg-white/5" : "border border-stone-200 bg-stone-100"}`}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStartEmpty(false)
+                    setFiles([])
+                  }}
+                  className={`flex-1 rounded-full px-4 py-2 text-sm font-medium transition ${
+                    !startEmpty
+                      ? isDark ? "bg-white text-slate-950" : "bg-white text-stone-950 shadow-sm"
+                      : isDark ? "text-slate-300 hover:bg-white/10" : "text-stone-600 hover:bg-white/70"
+                  }`}
+                >
+                  Upload manuscript
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStartEmpty(true)
+                    setFiles([])
+                  }}
+                  className={`flex-1 rounded-full px-4 py-2 text-sm font-medium transition ${
+                    startEmpty
+                      ? isDark ? "bg-white text-slate-950" : "bg-white text-stone-950 shadow-sm"
+                      : isDark ? "text-slate-300 hover:bg-white/10" : "text-stone-600 hover:bg-white/70"
+                  }`}
+                >
+                  Start empty project
+                </button>
+              </div>
             ) : null}
             {mode === "author" && !user?.username ? (
               <div className={`mt-4 rounded-xl border p-4 ${isDark ? "border-amber-500/30 bg-amber-500/10" : "border-amber-300 bg-amber-50"}`}>
@@ -1062,7 +1113,7 @@ export function UploadModal({
                           <span>Chunk long files</span>
                           <button
                             type="button"
-                            title="Breaks long text into smaller pieces for easier processing."
+                            title="Breaks long text into smaller pieces (3,500 words per chapter) for easier processing. This may create more chapters than your original manuscript."
                             aria-label="What Chunk long files means"
                             className={infoButtonClass}
                           >
@@ -1070,6 +1121,11 @@ export function UploadModal({
                           </button>
                         </span>
                       </label>
+                      {chunkLongDocuments ? (
+                        <p className={`ml-5 mt-1 text-xs ${isDark ? "text-amber-300" : "text-amber-700"}`}>
+                          ⚠️ This will split long chapters at 3,500 words. A 35,000-word manuscript may become 10+ chapters.
+                        </p>
+                      ) : null}
                     </div>
                     <div className={`mt-4 rounded-lg border px-3 py-3 text-sm leading-6 ${isDark ? "border-white/10 bg-white/[0.03] text-slate-300" : "border-stone-200 bg-stone-50 text-stone-600"}`}>
                       <p className="font-semibold">What LoreVia updates</p>

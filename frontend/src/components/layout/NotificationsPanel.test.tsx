@@ -134,15 +134,59 @@ describe("NotificationsPanel", () => {
     expect(view.textContent).toContain("Gate rule contradiction")
     expect(view.textContent).toContain("Chapter 3 still assumes the original gate rule.")
   })
+
+  it("passes enabled state through to notification fetching", () => {
+    usePreferencesStoreMock.mockReturnValue({ theme: "light" })
+    useNotificationsStateMock.mockReturnValue({
+      items: [],
+      unreadCount: 0,
+      loading: false,
+      error: null,
+      markRead: vi.fn(),
+      markAllRead: vi.fn(),
+      refresh: vi.fn(),
+    })
+
+    renderNotificationsPanel({ enabled: false })
+
+    expect(useNotificationsStateMock).toHaveBeenCalledWith(40, {
+      enabled: false,
+      pollMs: 60_000,
+      refreshOnFocus: true,
+      syncRevisionDigests: false,
+    })
+  })
+
+  it("keeps sidebar notification fetches on the cached-only path", () => {
+    usePreferencesStoreMock.mockReturnValue({ theme: "light" })
+    useNotificationsStateMock.mockReturnValue({
+      items: [],
+      unreadCount: 0,
+      loading: false,
+      error: null,
+      markRead: vi.fn(),
+      markAllRead: vi.fn(),
+      refresh: vi.fn(),
+    })
+
+    renderNotificationsPanel({ enabled: true, mode: "sidebar" })
+
+    expect(useNotificationsStateMock).toHaveBeenCalledWith(40, {
+      enabled: true,
+      pollMs: 60_000,
+      refreshOnFocus: true,
+      syncRevisionDigests: false,
+    })
+  })
 })
 
-function renderNotificationsPanel() {
+function renderNotificationsPanel({ enabled, mode = "page" }: { enabled?: boolean; mode?: "sidebar" | "page" } = {}) {
   container = document.createElement("div")
   document.body.appendChild(container)
   root = createRoot(container)
 
   act(() => {
-    root?.render(<NotificationsPanel mode="page" />)
+    root?.render(<NotificationsPanel mode={mode} enabled={enabled} />)
   })
 
   return container

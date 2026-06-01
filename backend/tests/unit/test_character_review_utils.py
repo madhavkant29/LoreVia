@@ -1,6 +1,4 @@
 import uuid
-from typing import cast
-
 import numpy as np
 import pytest
 from sqlalchemy import select
@@ -10,14 +8,175 @@ from app.models.character import Character, CharacterCandidate, CharacterDecisio
 from app.models.user import User
 from app.utils.character_utils import (
     CHARACTER_CANDIDATE_PENDING,
+    CHARACTER_CANDIDATE_SUPPRESSED,
     CHARACTER_RELATIONSHIP_CANDIDATE_PENDING,
+    CHARACTER_RELATIONSHIP_CANDIDATE_SUPPRESSED,
     build_character_roster_snapshot,
     build_character_review_payload,
+    can_auto_persist_character_candidate,
+    decide_character_candidate_disposition,
+    decide_relationship_candidate_disposition,
     record_character_candidate,
     record_character_mention,
     record_relationship_candidate,
     score_duplicate_characters,
 )
+
+
+def test_disposition_gate_suppresses_weak_verifier_review_candidate():
+    disposition = decide_character_candidate_disposition(
+        name="Chapitre",
+        reason_codes=["mention_verifier_review"],
+        evidence={
+            "mention_count": 1,
+            "verifier": {
+                "final": {
+                    "confidence_band": "review",
+                    "is_person_like": False,
+                    "reasons": ["sentence_start_capitalization_only"],
+                }
+            },
+        },
+    )
+
+    assert disposition.status == CHARACTER_CANDIDATE_SUPPRESSED
+    assert disposition.action == "suppress"
+    assert "mention_verifier_review_suppressed" in disposition.reason_codes
+
+
+def test_disposition_gate_allows_llm_confirmed_person_into_review():
+    disposition = decide_character_candidate_disposition(
+        name="Mira",
+        confidence=0.52,
+        reason_codes=["candidate_dossier_needs_review"],
+        evidence={
+            "mention_count": 1,
+            "strong_mention_count": 1,
+            "has_dialogue_or_action": True,
+            "verifier": {
+                "llm": {"used": True, "is_person_like": True, "confidence": 0.83},
+                "final": {
+                    "confidence_band": "accept",
+                    "is_person_like": True,
+                    "reasons": ["llm_confirmed_person"],
+                },
+            },
+        },
+    )
+
+    assert disposition.status == CHARACTER_CANDIDATE_PENDING
+    assert disposition.visible_review_allowed is True
+
+
+def test_auto_persist_gate_allows_grounded_first_pass_full_name():
+    assert can_auto_persist_character_candidate(
+        name="Anna Sergeyevna",
+        aliases=[],
+        evidence={
+            "mention_count": 3,
+            "strong_mention_count": 2,
+            "has_dialogue_or_action": True,
+            "has_physical_description": True,
+            "verifier": {
+                "local": {
+                    "person_ner_mentions": 1,
+                    "mid_sentence_mentions": 1,
+                },
+                "final": {
+                    "confidence_band": "accept",
+                    "is_person_like": True,
+                    "reasons": [],
+                }
+            },
+        },
+    ) is True
+
+
+def test_auto_persist_gate_allows_grounded_full_name_with_soft_multi_token_ambiguity():
+    assert can_auto_persist_character_candidate(
+        name="Gregor Samsa",
+        aliases=[],
+        evidence={
+            "mention_count": 77,
+            "strong_mention_count": 38,
+            "has_dialogue_or_action": True,
+            "has_physical_description": True,
+            "verifier": {
+                "local": {
+                    "person_ner_mentions": 1,
+                    "non_person_ner_mentions": 0,
+                    "mid_sentence_mentions": 48,
+                },
+                "final": {
+                    "confidence_band": "accept",
+                    "is_person_like": True,
+                    "reasons": ["llm_confirmed_person", "ambiguous_multi_token_mention"],
+                },
+            },
+        },
+    ) is True
+
+
+def test_auto_persist_gate_allows_obvious_fallback_name_with_shared_identity_support():
+    assert can_auto_persist_character_candidate(
+        name="Gregor Samsa",
+        aliases=["Gregor"],
+        evidence={
+            "mention_count": 3,
+            "strong_mention_count": 2,
+            "has_dialogue_or_action": True,
+            "has_physical_description": True,
+            "deterministic_fallback": True,
+            "cluster_names": ["Gregor Samsa", "Gregor"],
+            "entity": {"canonical_name": "Gregor"},
+            "verifier": {
+                "local": {
+                    "person_ner_mentions": 1,
+                    "mid_sentence_mentions": 1,
+                },
+                "final": {
+                    "confidence_band": "accept",
+                    "is_person_like": True,
+                    "reasons": [],
+                }
+            },
+        },
+    ) is True
+
+
+def test_disposition_gate_suppresses_rejected_verifier_candidate():
+    disposition = decide_character_candidate_disposition(
+        name="Mais",
+        reason_codes=["mention_verifier_rejected"],
+        evidence={
+            "mention_count": 1,
+            "verifier": {
+                "final": {
+                    "confidence_band": "reject",
+                    "is_person_like": False,
+                    "reasons": ["interjection_like_usage"],
+                }
+            },
+        },
+    )
+
+    assert disposition.status == CHARACTER_CANDIDATE_SUPPRESSED
+    assert disposition.action == "reject"
+    assert "mention_verifier_rejected" in disposition.reason_codes
+
+
+def test_relationship_disposition_suppresses_noise_endpoint():
+    disposition = decide_relationship_candidate_disposition(
+        raw_character_a="Gregor",
+        raw_character_b="Texte",
+        left_resolved=True,
+        right_resolved=False,
+        reason_codes=["relationship_unresolved", "character_b_missing"],
+        evidence={"relationship": {"description": "Texte appears as a heading."}},
+    )
+
+    assert disposition.status == CHARACTER_RELATIONSHIP_CANDIDATE_SUPPRESSED
+    assert "character_b_suppressed" in disposition.reason_codes
 
 
 def test_build_character_roster_snapshot_marks_manual_anchors():
@@ -43,7 +202,7 @@ def test_build_character_roster_snapshot_marks_manual_anchors():
     assert snapshot[0]["is_manual"] is True
 
 
-def test_score_duplicate_characters_returns_backend_review_signal():
+def test_score_duplicate_characters_hides_first_name_alias_pair_below_review_threshold():
     primary = Character(
         id=uuid.UUID("00000000-0000-0000-0000-000000000001"),
         book_id=uuid.UUID("00000000-0000-0000-0000-000000000010"),
@@ -65,14 +224,10 @@ def test_score_duplicate_characters_returns_backend_review_signal():
 
     suggestion = score_duplicate_characters(primary, secondary)
 
-    assert suggestion is not None
-    assert suggestion["primary"].name == "Tsubasa Hanekawa"
-    assert suggestion["secondary"].name == "Tsubasa"
-    assert suggestion["confidence"] >= 34
-    assert "Primary name appears in alias list" in suggestion["reasons"]
+    assert suggestion is None
 
 
-def test_score_duplicate_characters_boosts_shared_grounded_cluster_evidence():
+def test_score_duplicate_characters_hides_descriptor_pair_below_review_threshold():
     primary = Character(
         id=uuid.UUID("00000000-0000-0000-0000-000000000011"),
         book_id=uuid.UUID("00000000-0000-0000-0000-000000000010"),
@@ -101,9 +256,7 @@ def test_score_duplicate_characters_boosts_shared_grounded_cluster_evidence():
         right_evidence={"cluster_keys": {"grete"}, "chapter_numbers": {1, 2}},
     )
 
-    assert suggestion is not None
-    assert "Shared mention clusters" in suggestion["reasons"]
-    assert suggestion["shared_evidence"]["shared_cluster_keys"] == ["grete"]
+    assert suggestion is None
 
 
 def test_score_duplicate_characters_uses_embedding_similarity_signal():
@@ -120,7 +273,7 @@ def test_score_duplicate_characters_uses_embedding_similarity_signal():
     secondary = Character(
         id=uuid.UUID("00000000-0000-0000-0000-000000000022"),
         book_id=primary.book_id,
-        name="Anna",
+        name="Anna Sergeyevna",
         aliases=["Anna Sergeyevna"],
         role="sc",
         first_chapter=2,
@@ -149,7 +302,7 @@ def test_score_duplicate_characters_accepts_numpy_embeddings():
     secondary = Character(
         id=uuid.UUID("00000000-0000-0000-0000-000000000032"),
         book_id=primary.book_id,
-        name="Anna",
+        name="Anna Sergeyevna",
         aliases=["Anna Sergeyevna"],
         role="sc",
         first_chapter=2,
@@ -345,6 +498,36 @@ def test_build_character_review_payload_includes_relationship_candidates():
     assert payload["relationship_candidates"][0]["raw_character_a"] == "Grete"
 
 
+def test_build_character_review_payload_does_not_count_suppressed_candidates_as_pending():
+    candidate = CharacterCandidate(
+        id=uuid.UUID("00000000-0000-0000-0000-000000000121"),
+        book_id=uuid.UUID("00000000-0000-0000-0000-000000000010"),
+        chapter_number=1,
+        raw_name="Texte",
+        proposed_name="Texte",
+        normalized_name="texte",
+        status=CHARACTER_CANDIDATE_SUPPRESSED,
+        confidence=0,
+        reason_codes=["common_single_token_suppressed"],
+        evidence={},
+    )
+    relationship_candidate = CharacterRelationshipCandidate(
+        id=uuid.UUID("00000000-0000-0000-0000-000000000122"),
+        book_id=candidate.book_id,
+        chapter_number=1,
+        raw_character_a="Gregor",
+        raw_character_b="Texte",
+        status=CHARACTER_RELATIONSHIP_CANDIDATE_SUPPRESSED,
+        reason_codes=["character_b_suppressed"],
+        evidence={},
+    )
+
+    payload = build_character_review_payload([candidate], [], [relationship_candidate])
+
+    assert payload["counts"]["pending_candidates"] == 0
+    assert payload["counts"]["pending_relationship_candidates"] == 0
+
+
 def test_build_character_review_payload_surfaces_structured_candidate_and_duplicate_evidence():
     primary = Character(
         id=uuid.UUID("00000000-0000-0000-0000-000000000201"),
@@ -385,15 +568,14 @@ def test_build_character_review_payload_surfaces_structured_candidate_and_duplic
             "snippets": ["Grete brings food to Gregor."],
         },
     )
-    suggestion = score_duplicate_characters(primary, secondary)
     duplicate = CharacterDuplicateSuggestion(
         id=uuid.UUID("00000000-0000-0000-0000-000000000204"),
         book_id=primary.book_id,
         primary_character_id=primary.id,
         secondary_character_id=secondary.id,
-        confidence=cast(dict, suggestion)["confidence"],
-        reasons=cast(dict, suggestion)["reasons"],
-        shared_evidence=cast(dict, suggestion)["shared_evidence"],
+        confidence=88,
+        reasons=["Shared mention clusters"],
+        shared_evidence={"shared_chapters": [1]},
         status="pending",
     )
     decision_event = CharacterDecisionEvent(

@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic"
 import { AuthBootstrap } from "@/components/auth/AuthBootstrap"
+import { QueryProvider } from "@/components/app/QueryProvider"
 
 const DailyCapPrompt = dynamic(
   () => import("@/components/limits/DailyCapPrompt").then((module) => module.DailyCapPrompt),
@@ -15,11 +16,11 @@ const PWARegister = dynamic(
 
 export function AppRuntime({ children }: { children: React.ReactNode }) {
   return (
-    <>
+    <QueryProvider>
       <AuthBootstrap />
       <DailyCapPrompt />
       <PWARegister />
       {children}
-    </>
+    </QueryProvider>
   )
 }

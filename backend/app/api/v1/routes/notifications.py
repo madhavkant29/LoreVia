@@ -14,11 +14,12 @@ from app.schemas.notifications import NotificationListOut, NotificationOut
 from app.utils.notification_utils import sync_revision_digest_notifications
 
 router = APIRouter()
+DEFAULT_NOTIFICATION_LIMIT = 40
 
 
 @router.get("", response_model=NotificationListOut)
 async def list_notifications(
-    limit: int = Query(40, ge=1, le=100),
+    limit: int = Query(DEFAULT_NOTIFICATION_LIMIT, ge=1, le=100),
     sync_revision_digests: bool = Query(True),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
@@ -99,4 +100,8 @@ async def mark_all_notifications_read(
     for notification in rows:
         notification.read_at = now
     await db.commit()
-    return await list_notifications(db=db, current_user=current_user)
+    return await list_notifications(
+        limit=DEFAULT_NOTIFICATION_LIMIT,
+        db=db,
+        current_user=current_user,
+    )
